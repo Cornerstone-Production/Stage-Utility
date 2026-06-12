@@ -1,0 +1,134 @@
+// Shared types mirroring the backend contract exactly.
+// Used for typed invoke<T>() calls in the renderer.
+
+type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
+
+interface ConfigField {
+  key: string;
+  label: string;
+  type: "text" | "password" | "number" | "select" | "ip-list";
+  options?: { value: string; label: string }[];
+  placeholder?: string;
+}
+
+interface IntegrationDescriptor {
+  id: string;
+  kind: "lineup" | "wireless" | "control";
+  label: string;
+  configSchema: ConfigField[];
+}
+
+interface IntegrationState {
+  id: string;
+  enabled: boolean;
+  connection: ConnectionState;
+  message: string | null;
+  config: Record<string, unknown>;
+}
+
+interface DeviceStatus {
+  channelId: string;
+  name: string | null;
+  deviceType: string;
+  online: boolean;
+  rfBars: number | null;
+  rfLevelDbm: number | null;
+  battery: number | null;
+  charging: boolean | null;
+  frequencyLabel: string | null;
+  audioLevel: number | null;
+  updatedAt: string;
+}
+
+interface ServiceTypeDTO {
+  id: string;
+  name: string;
+}
+
+interface PlanDTO {
+  id: string;
+  title: string;
+  seriesTitle: string | null;
+  sortDate: string | null;
+  dates: string | null;
+}
+
+interface TeamMemberDTO {
+  id: string;
+  name: string;
+  personId: string | null;
+  photoUrl: string | null;
+  teamPositionName: string | null;
+  teamName: string | null;
+  status: string;
+}
+
+type SlotLink =
+  | { kind: "pco"; matchBy: "person"; personId: string }
+  | { kind: "pco"; matchBy: "position"; teamPositionName: string }
+  | { kind: "static"; label: string; color: string }
+  | { kind: "empty" };
+
+interface SlotDevice {
+  status: "none" | "ok" | "warn" | "error";
+  rf: number | null;
+  battery: number | null;
+  freq: string | null;
+  audioLevel: number | null;
+}
+
+interface Slot {
+  id: string;
+  channel: string;
+  order: number;
+  link: SlotLink;
+  deviceBinding?: { providerId: string; channelId: string } | null;
+  displayName?: string | null;
+  photoUrl?: string | null;
+  device: SlotDevice;
+  /** When true, stacks into the same on-screen column as the previous slot. */
+  stackWithPrevious?: boolean;
+}
+
+interface DisplayInfo {
+  id: string;
+  name: string;
+}
+
+interface StageState {
+  serviceTypeId: string | null;
+  serviceTypeName: string | null;
+  planMode: "auto" | "manual";
+  planId: string | null;
+  planTitle: string | null;
+  planSeriesTitle: string | null;
+  slots: Slot[];
+  /** Multi-display: list of configured displays (primary is index 0) */
+  displays: DisplayInfo[];
+  /** Multi-display: slots keyed by display id */
+  slotsByDisplay: Record<string, Slot[]>;
+  pcoConfigured: boolean;
+  lastRefreshedAt: string | null;
+  remoteUrl: string | null;
+  showQr: boolean;
+  /** Allowlist of service type ids that Auto plan-mode follows and manual picker shows.
+   *  Empty array means all types are allowed. */
+  allowedServiceTypeIds: string[];
+}
+
+interface SlotPreset {
+  id: string;
+  name: string;
+  slots: Slot[];
+  createdAt: string;
+}
+
+interface WirelessConnection {
+  id: string;
+  name: string;
+  providerId: string;
+  enabled: boolean;
+  connection: ConnectionState;
+  message: string | null;
+  config: Record<string, unknown>;
+}

@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Stage Monitor — Remote</title>
+<style>
+  :root {
+    --bg: #111;
+    --surface: #1c1c1c;
+    --border: #2a2a2a;
+    --accent: #4a90e2;
+    --text: #e8e8e8;
+    --muted: #777;
+    --ok: #4caf50;
+    --warn: #ff9800;
+    --error: #f44336;
+    --connected: #4caf50;
+    --disconnected: #777;
+    --connecting: #ff9800;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, system-ui, sans-serif; font-size: 14px; }
+  h1 { font-size: 16px; margin: 0; }
+  h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+
+  /* Top bar */
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
+  .topbar-title { font-weight: 700; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; margin-right: 6px; }
+  .status-dot.ok { background: var(--ok); }
+  .status-dot.error { background: var(--error); }
+
+  /* Tabs */
+  .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .tab { flex: 1; padding: 10px 0; text-align: center; cursor: pointer; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; transition: color .15s; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* Content */
+  .content { padding: 16px; max-width: 540px; margin: 0 auto; }
+  .section { background: var(--surface); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; border: 1px solid var(--border); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* Form elements */
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  select, input[type="text"], input[type="number"], input[type="password"] {
+    width: 100%; padding: 8px 10px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; font-size: 14px;
+    outline: none; transition: border-color .15s;
+  }
+  select:focus, input:focus { border-color: var(--accent); }
+  .field + .field { margin-top: 10px; }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: none; border-radius: 7px; font-size: 13px; font-weight: 500; cursor: pointer; transition: opacity .15s; }
+  .btn:active { opacity: .7; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-secondary { background: var(--border); color: var(--text); }
+  .btn-danger { background: #7b2020; color: #fff; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+  /* Mode toggle */
+  .mode-row { display: flex; gap: 8px; }
+  .mode-btn { flex: 1; padding: 7px 0; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 500; transition: background .15s, color .15s; }
+  .mode-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* Slot list */
+  .slot-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; padding: 12px; }
+  .slot-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .slot-ch { font-size: 18px; font-weight: 700; min-width: 28px; }
+  .slot-name { font-weight: 500; }
+  .slot-role { font-size: 11px; color: var(--muted); }
+  .slot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  /* Integration card */
+  .int-card { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+  .int-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--bg); cursor: pointer; }
+  .int-label { font-weight: 600; }
+  .int-conn { font-size: 11px; display: flex; align-items: center; gap: 4px; }
+  .int-conn-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .conn-connected { background: var(--connected); }
+  .conn-disconnected { background: var(--disconnected); }
+  .conn-connecting { background: var(--connecting); }
+  .conn-error { background: var(--error); }
+  .int-body { padding: 12px 14px; border-top: 1px solid var(--border); }
+  .int-toggle-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .toggle { position: relative; width: 42px; height: 24px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-track { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: var(--border); border-radius: 12px; transition: background .2s; }
+  .toggle input:checked + .toggle-track { background: var(--accent); }
+  .toggle-thumb { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; background: #fff; border-radius: 50%; transition: transform .2s; }
+  .toggle input:checked ~ .toggle-thumb { transform: translateX(18px); }
+  .int-msg { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .int-msg.error { color: var(--error); }
+
+  /* Alerts */
+  .alert { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+  .alert-info { background: #1a2d4a; border: 1px solid #2a4a7a; }
+  .alert-error { background: #3a1a1a; border: 1px solid #7a2a2a; }
+  .alert-ok { background: #1a3a1a; border: 1px solid #2a7a2a; }
+
+  /* Plan chip */
+  .plan-chip { display: inline-block; background: var(--accent); color: #fff; border-radius: 5px; padding: 2px 7px; font-size: 12px; font-weight: 600; }
+
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .field-row { display: flex; gap: 8px; align-items: flex-end; }
+  .field-row > *:first-child { flex: 1; }
+
+  .last-updated { font-size: 11px; color: var(--muted); margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="topbar-title">Stage Monitor</span>
+  <span id="conn-status"><span class="status-dot" id="conn-dot"></span><span id="conn-text">Connecting…</span></span>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="now">Now</div>
+  <div class="tab" data-tab="slots">Slots</div>
+  <div class="tab" data-tab="integrations">Integrations</div>
+</div>
+
+<div class="content">
+
+  <!-- ── NOW TAB ─────────────────────────────────────────────────────────── -->
+  <div class="panel active" id="panel-now">
+    <div class="section">
+      <h2>Service Type</h2>
+      <div class="field">
+        <label>Selected Type</label>
+        <select id="svc-select"><option value="">— Loading… —</option></select>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Plan</h2>
+      <div id="plan-mode-row" style="margin-bottom:10px;">
+        <label>Mode</label>
+        <div class="mode-row">
+          <button class="mode-btn active" data-mode="auto" id="mode-auto">Auto (next)</button>
+          <button class="mode-btn" data-mode="manual" id="mode-manual">Manual</button>
+        </div>
+      </div>
+      <div id="plan-manual-row" class="field" style="display:none;">
+        <label>Select Plan</label>
+        <select id="plan-select"><option value="">— pick a plan —</option></select>
+      </div>
+      <div id="plan-info" style="margin-top:8px; font-size:13px; color:var(--muted);">No plan selected</div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-next">Next Plan</button>
+        <button class="btn btn-secondary" id="btn-refresh">Refresh PCO</button>
+      </div>
+      <div class="last-updated" id="last-updated"></div>
+    </div>
+  </div>
+
+  <!-- ── SLOTS TAB ──────────────────────────────────────────────────────── -->
+  <div class="panel" id="panel-slots">
+    <div class="section">
+      <div id="slots-list"><div class="alert alert-info">Loading slots…</div></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-save-slots">Save Slots</button>
+        <button class="btn btn-secondary" id="btn-add-slot">+ Add Slot</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── INTEGRATIONS TAB ──────────────────────────────────────────────── -->
+  <div class="panel" id="panel-integrations">
+    <div id="int-list"><div class="alert alert-info">Loading integrations…</div></div>
+  </div>
+
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let state = null;
+let integrations = { descriptors: [], states: [] };
+let serviceTypes = [];
+let plans = [];
+let editSlots = [];
+
+// ── Tabs ─────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ── Polling ───────────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  return json;
+}
+
+async function pollState() {
+  try {
+    const s = await api('GET', '/api/state');
+    applyState(s);
+    setConnStatus(true);
+  } catch {
+    setConnStatus(false);
+  }
+}
+
+setInterval(pollState, 3000);
+pollState();
+
+// ── Connections status ────────────────────────────────────────────────────────
+function setConnStatus(ok) {
+  document.getElementById('conn-dot').className = 'status-dot ' + (ok ? 'ok' : 'error');
+  document.getElementById('conn-text').textContent = ok ? 'Connected' : 'Disconnected';
+}
+
+// ── Apply state ───────────────────────────────────────────────────────────────
+function applyState(s) {
+  state = s;
+  // Plan mode buttons
+  document.getElementById('mode-auto').classList.toggle('active', s.planMode === 'auto');
+  document.getElementById('mode-manual').classList.toggle('active', s.planMode === 'manual');
+  document.getElementById('plan-manual-row').style.display = s.planMode === 'manual' ? '' : 'none';
+
+  // Plan info
+  const planInfo = document.getElementById('plan-info');
+  if (s.planTitle) {
+    planInfo.innerHTML = '<span class="plan-chip">' + esc(s.planTitle) + '</span>';
+  } else {
+    planInfo.textContent = 'No plan selected';
+  }
+
+  // Last updated
+  const lu = document.getElementById('last-updated');
+  lu.textContent = s.lastRefreshedAt ? 'Last refreshed: ' + new Date(s.lastRefreshedAt).toLocaleTimeString() : '';
+
+  // PCO configured warning
+  if (!s.pcoConfigured) {
+    document.getElementById('panel-now').querySelector('.section')?.insertAdjacentHTML('afterbegin',
+      '<div class="alert alert-error" id="pco-warn">PCO not configured — go to Integrations tab.</div>');
+  } else {
+    document.getElementById('pco-warn')?.remove();
+  }
+}
+
+// ── Service types ─────────────────────────────────────────────────────────────
+async function loadServiceTypes() {
+  try {
+    serviceTypes = await api('GET', '/api/service-types');
+    const sel = document.getElementById('svc-select');
+    sel.innerHTML = '<option value="">— Select service type —</option>';
+    serviceTypes.forEach(st => {
+      const opt = document.createElement('option');
+      opt.value = st.id;
+      opt.textContent = st.name;
+      if (state && st.id === state.serviceTypeId) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch (err) {
+    console.error('loadServiceTypes', err);
+  }
+}
+
+document.getElementById('svc-select').addEventListener('change', async (e) => {
+  const id = e.target.value;
+  if (!id) return;
+  try {
+    const s = await api('POST', '/api/service-type', { id });
+    applyState(s);
+    loadServiceTypes();
+    if (s.planMode === 'manual') loadPlans(id);
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+});
+
+// ── Plans ─────────────────────────────────────────────────────────────────────
+async function loadPlans(serviceTypeId) {
+  try {
+    plans = await api('GET', '/api/plans?serviceTypeId=' + encodeURIComponent(serviceTypeId));
+    const sel = document.getElementById('plan-select');
+    sel.innerHTML = '<option value="">— pick a plan —</option>';
+    plans.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = (p.title || 'Untitled') + (p.dates ? ' — ' + p.dates : '');
+      if (state && p.id === state.planId) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch (err) {
+    console.error('loadPlans', err);
+  }
+}
+
+document.getElementById('plan-select').addEventListener('change', async (e) => {
+  const id = e.target.value;
+  if (!id) return;
+  try {
+    const s = await api('POST', '/api/plan', { id });
+    applyState(s);
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+});
+
+document.getElementById('mode-auto').addEventListener('click', () => setMode('auto'));
+document.getElementById('mode-manual').addEventListener('click', () => setMode('manual'));
+async function setMode(mode) {
+  try {
+    const s = await api('POST', '/api/plan/mode', { mode });
+    applyState(s);
+    if (mode === 'manual' && s.serviceTypeId) loadPlans(s.serviceTypeId);
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+document.getElementById('btn-next').addEventListener('click', async () => {
+  try {
+    const s = await api('POST', '/api/plan/next');
+    applyState(s);
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+});
+
+document.getElementById('btn-refresh').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-refresh');
+  btn.disabled = true;
+  btn.textContent = 'Refreshing…';
+  try {
+    const s = await api('POST', '/api/refresh');
+    applyState(s);
+  } catch (err) {
+    alert('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Refresh PCO';
+  }
+});
+
+// ── Slots tab ─────────────────────────────────────────────────────────────────
+let wirelessChannels = [];
+
+async function loadSlotsTab() {
+  try {
+    wirelessChannels = await api('GET', '/api/integrations/wireless/channels');
+    if (state) {
+      editSlots = JSON.parse(JSON.stringify(state.slots));
+    }
+    renderSlots();
+  } catch (err) {
+    console.error('loadSlotsTab', err);
+  }
+}
+
+function renderSlots() {
+  const container = document.getElementById('slots-list');
+  if (!editSlots.length) {
+    container.innerHTML = '<div class="alert alert-info">No slots configured. Click "+ Add Slot" to create one.</div>';
+    return;
+  }
+
+  container.innerHTML = editSlots.map((slot, i) => `
+    <div class="slot-item">
+      <div class="slot-header">
+        <span class="slot-ch">${esc(slot.channel || String(i + 1).padStart(2, '0'))}</span>
+        <div>
+          <div class="slot-name">${esc(slotDisplayName(slot))}</div>
+          <div class="slot-role">${esc(slotRoleText(slot))}</div>
+        </div>
+      </div>
+      <div class="slot-grid">
+        <div class="field">
+          <label>Channel #</label>
+          <input type="text" value="${esc(slot.channel)}" data-idx="${i}" data-field="channel" placeholder="01" />
+        </div>
+        <div class="field">
+          <label>Link type</label>
+          <select data-idx="${i}" data-field="linkKind">
+            <option value="pco-person" ${slot.link.kind === 'pco' && slot.link.matchBy === 'person' ? 'selected' : ''}>PCO — Person ID</option>
+            <option value="pco-position" ${slot.link.kind === 'pco' && slot.link.matchBy === 'position' ? 'selected' : ''}>PCO — Position</option>
+            <option value="static" ${slot.link.kind === 'static' ? 'selected' : ''}>Static label</option>
+          </select>
+        </div>
+        ${slotLinkFields(slot, i)}
+        <div class="field">
+          <label>Order</label>
+          <input type="number" value="${slot.order}" data-idx="${i}" data-field="order" min="0" />
+        </div>
+        ${wirelessChannels.length ? `
+        <div class="field">
+          <label>Wireless channel</label>
+          <select data-idx="${i}" data-field="wirelessChannel">
+            <option value="">— none —</option>
+            ${wirelessChannels.map(c => `<option value="${esc(c.id)}" ${slot.deviceBinding?.channelId === c.id ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
+          </select>
+        </div>` : ''}
+      </div>
+      <div style="margin-top:8px;">
+        <button class="btn btn-danger btn-sm" data-action="remove-slot" data-idx="${i}">Remove</button>
+      </div>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('input[data-field], select[data-field]').forEach(el => {
+    el.addEventListener('change', onSlotFieldChange);
+    el.addEventListener('input', onSlotFieldChange);
+  });
+  container.querySelectorAll('[data-action="remove-slot"]').forEach(el => {
+    el.addEventListener('click', () => {
+      editSlots.splice(Number(el.dataset.idx), 1);
+      renderSlots();
+    });
+  });
+}
+
+function slotDisplayName(slot) {
+  if (slot.displayName) return slot.displayName;
+  if (slot.link.kind === 'static') return slot.link.label || 'Static';
+  if (slot.link.kind === 'pco' && slot.link.matchBy === 'position') return slot.link.teamPositionName || 'Position';
+  return 'Unmatched';
+}
+
+function slotRoleText(slot) {
+  if (slot.link.kind === 'pco' && slot.link.matchBy === 'position') return 'PCO position';
+  if (slot.link.kind === 'pco') return 'PCO person';
+  return 'static';
+}
+
+function slotLinkFields(slot, i) {
+  if (slot.link.kind === 'pco' && slot.link.matchBy === 'person') {
+    return `<div class="field"><label>Person ID</label><input type="text" value="${esc(slot.link.personId)}" data-idx="${i}" data-field="personId" /></div>`;
+  }
+  if (slot.link.kind === 'pco' && slot.link.matchBy === 'position') {
+    return `<div class="field"><label>Position name</label><input type="text" value="${esc(slot.link.teamPositionName)}" data-idx="${i}" data-field="teamPositionName" /></div>`;
+  }
+  return `
+    <div class="field"><label>Label</label><input type="text" value="${esc(slot.link.label)}" data-idx="${i}" data-field="staticLabel" /></div>
+    <div class="field"><label>Color (hex)</label><input type="text" value="${esc(slot.link.color)}" data-idx="${i}" data-field="staticColor" placeholder="#2244aa" /></div>
+  `;
+}
+
+function onSlotFieldChange(e) {
+  const idx = Number(e.target.dataset.idx);
+  const field = e.target.dataset.field;
+  const val = e.target.value;
+  const slot = editSlots[idx];
+  if (!slot) return;
+
+  if (field === 'channel') slot.channel = val;
+  else if (field === 'order') slot.order = Number(val);
+  else if (field === 'linkKind') {
+    if (val === 'pco-person') slot.link = { kind: 'pco', matchBy: 'person', personId: '' };
+    else if (val === 'pco-position') slot.link = { kind: 'pco', matchBy: 'position', teamPositionName: '' };
+    else slot.link = { kind: 'static', label: '', color: '#334455' };
+    renderSlots();
+  }
+  else if (field === 'personId' && slot.link.kind === 'pco' && slot.link.matchBy === 'person') slot.link.personId = val;
+  else if (field === 'teamPositionName' && slot.link.kind === 'pco' && slot.link.matchBy === 'position') slot.link.teamPositionName = val;
+  else if (field === 'staticLabel' && slot.link.kind === 'static') slot.link.label = val;
+  else if (field === 'staticColor' && slot.link.kind === 'static') slot.link.color = val;
+  else if (field === 'wirelessChannel') {
+    if (val) {
+      const ch = wirelessChannels.find(c => c.id === val);
+      slot.deviceBinding = { providerId: 'wireless', channelId: ch ? ch.id : val };
+    } else {
+      slot.deviceBinding = null;
+    }
+  }
+}
+
+document.getElementById('btn-add-slot').addEventListener('click', () => {
+  const newSlot = {
+    id: 'slot-' + Date.now(),
+    channel: String(editSlots.length + 1).padStart(2, '0'),
+    order: editSlots.length,
+    link: { kind: 'static', label: 'New Slot', color: '#334455' },
+    deviceBinding: null,
+    device: { status: 'none', rf: null, battery: null, freq: null, audioLevel: null }
+  };
+  editSlots.push(newSlot);
+  renderSlots();
+});
+
+document.getElementById('btn-save-slots').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-save-slots');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const s = await api('POST', '/api/slots', { slots: editSlots });
+    applyState(s);
+    alert('Slots saved.');
+  } catch (err) {
+    alert('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save Slots';
+  }
+});
+
+// ── Integrations tab ──────────────────────────────────────────────────────────
+async function loadIntegrations() {
+  try {
+    integrations = await api('GET', '/api/integrations');
+    renderIntegrations();
+  } catch (err) {
+    document.getElementById('int-list').innerHTML = '<div class="alert alert-error">Failed to load integrations: ' + esc(String(err)) + '</div>';
+  }
+}
+
+function renderIntegrations() {
+  const container = document.getElementById('int-list');
+  if (!integrations.descriptors.length) {
+    container.innerHTML = '<div class="alert alert-info">No integrations available.</div>';
+    return;
+  }
+
+  container.innerHTML = integrations.descriptors.map(desc => {
+    const state = integrations.states.find(s => s.id === desc.id);
+    if (!state) return '';
+    return renderIntCard(desc, state);
+  }).join('');
+
+  container.querySelectorAll('[data-int-id]').forEach(card => {
+    const id = card.dataset.intId;
+    const desc = integrations.descriptors.find(d => d.id === id);
+    const st = integrations.states.find(s => s.id === id);
+    if (!desc || !st) return;
+
+    const toggleEl = card.querySelector('.int-toggle-input');
+    if (toggleEl) {
+      toggleEl.addEventListener('change', async () => {
+        const enabled = toggleEl.checked;
+        try {
+          const updated = await api('POST', '/api/integrations/' + id + '/enabled', { enabled });
+          updateIntState(id, updated);
+        } catch (err) {
+          alert('Error: ' + err.message);
+          toggleEl.checked = !enabled;
+        }
+      });
+    }
+
+    const saveBtn = card.querySelector('[data-action="int-save"]');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        const config = {};
+        card.querySelectorAll('[data-cfg-key]').forEach(el => {
+          config[el.dataset.cfgKey] = el.value;
+        });
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+        try {
+          const updated = await api('POST', '/api/integrations/' + id + '/config', { config });
+          updateIntState(id, updated);
+          // Reload descriptors (wireless may update provider-specific fields)
+          await loadIntegrations();
+        } catch (err) {
+          alert('Error saving config: ' + err.message);
+        } finally {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save';
+        }
+      });
+    }
+
+    const testBtn = card.querySelector('[data-action="int-test"]');
+    if (testBtn) {
+      testBtn.addEventListener('click', async () => {
+        testBtn.disabled = true;
+        testBtn.textContent = 'Testing…';
+        try {
+          const result = await api('POST', '/api/integrations/' + id + '/test');
+          const msgEl = card.querySelector('.int-msg');
+          if (msgEl) {
+            msgEl.textContent = result.message || (result.ok ? 'OK' : 'Failed');
+            msgEl.className = 'int-msg' + (result.ok ? '' : ' error');
+          }
+          // Refresh state
+          await loadIntegrations();
+        } catch (err) {
+          alert('Test error: ' + err.message);
+        } finally {
+          testBtn.disabled = false;
+          testBtn.textContent = 'Test';
+        }
+      });
+    }
+  });
+}
+
+function renderIntCard(desc, st) {
+  return `
+    <div class="int-card" data-int-id="${esc(desc.id)}">
+      <div class="int-header">
+        <span class="int-label">${esc(desc.label)}</span>
+        <span class="int-conn">
+          <span class="int-conn-dot conn-${esc(st.connection)}"></span>${esc(st.connection)}
+        </span>
+      </div>
+      <div class="int-body">
+        <div class="int-toggle-row">
+          <label style="margin:0;color:var(--text);">Enabled</label>
+          <label class="toggle">
+            <input type="checkbox" class="int-toggle-input" ${st.enabled ? 'checked' : ''} />
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </label>
+        </div>
+        ${desc.configSchema.map(field => renderConfigField(field, st.config[field.key] ?? '')).join('')}
+        <div class="int-msg ${st.connection === 'error' ? 'error' : ''}">${esc(st.message || '')}</div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="btn btn-primary btn-sm" data-action="int-save">Save</button>
+          <button class="btn btn-secondary btn-sm" data-action="int-test">Test</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderConfigField(field, value) {
+  const val = String(value ?? '');
+  if (field.type === 'select') {
+    const opts = (field.options || []).map(o =>
+      `<option value="${esc(o.value)}" ${val === o.value ? 'selected' : ''}>${esc(o.label)}</option>`
+    ).join('');
+    return `
+      <div class="field">
+        <label>${esc(field.label)}</label>
+        <select data-cfg-key="${esc(field.key)}">${opts}</select>
+      </div>`;
+  }
+  const inputType = field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text';
+  return `
+    <div class="field">
+      <label>${esc(field.label)}</label>
+      <input type="${inputType}" data-cfg-key="${esc(field.key)}" value="${esc(val)}" placeholder="${esc(field.placeholder || '')}" />
+    </div>`;
+}
+
+function updateIntState(id, updated) {
+  const idx = integrations.states.findIndex(s => s.id === id);
+  if (idx >= 0) integrations.states[idx] = updated;
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async function init() {
+  await pollState();
+  await loadServiceTypes();
+  await loadIntegrations();
+  if (state?.serviceTypeId && state?.planMode === 'manual') {
+    await loadPlans(state.serviceTypeId);
+  }
+
+  // Reload slots tab data when switching to it.
+  document.querySelector('[data-tab="slots"]').addEventListener('click', loadSlotsTab);
+})();
+</script>
+</body>
+</html>

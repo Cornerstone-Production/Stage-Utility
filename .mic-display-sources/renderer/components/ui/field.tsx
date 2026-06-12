@@ -1,0 +1,84 @@
+import * as React from "react";
+import { cn } from "../../lib/cn";
+
+// ── FieldSet ──────────────────────────────────────────────────────────────────
+
+interface FieldSetProps extends React.HTMLAttributes<HTMLDivElement> {}
+
+export function FieldSet({ className, children, ...props }: FieldSetProps) {
+  return (
+    <div className={cn("rounded-lg border border-gray-a4 overflow-hidden", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+// ── FieldGroup ────────────────────────────────────────────────────────────────
+
+interface FieldGroupProps extends React.HTMLAttributes<HTMLDivElement> {}
+
+export function FieldGroup({ className, children, ...props }: FieldGroupProps) {
+  return (
+    <div className={cn("divide-y divide-gray-a4", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+// ── Field ─────────────────────────────────────────────────────────────────────
+
+interface FieldProps extends React.HTMLAttributes<HTMLDivElement> {
+  orientation?: "horizontal" | "vertical";
+}
+
+export function Field({ className, orientation = "horizontal", children, ...props }: FieldProps) {
+  return (
+    <div
+      className={cn(
+        "flex px-3 py-2.5 bg-gray-1",
+        orientation === "horizontal" && "items-center gap-3",
+        orientation === "vertical" && "flex-col gap-1.5",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ── FieldContent ──────────────────────────────────────────────────────────────
+
+interface FieldContentProps extends React.HTMLAttributes<HTMLDivElement> {}
+
+export function FieldContent({ className, children, ...props }: FieldContentProps) {
+  return (
+    <div className={cn("flex flex-col flex-1 min-w-0", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+// ── FieldLabel ────────────────────────────────────────────────────────────────
+
+interface FieldLabelProps extends React.HTMLAttributes<HTMLSpanElement> {}
+
+export function FieldLabel({ className, children, ...props }: FieldLabelProps) {
+  return (
+    <span className={cn("text-[13px] font-medium text-gray-12 leading-tight", className)} {...props}>
+      {children}
+    </span>
+  );
+}
+
+// ── FieldDescription ──────────────────────────────────────────────────────────
+
+interface FieldDescriptionProps extends React.HTMLAttributes<HTMLSpanElement> {}
+
+export function FieldDescription({ className, children, ...props }: FieldDescriptionProps) {
+  return (
+    <span className={cn("text-[11px] text-gray-10 leading-tight mt-0.5", className)} {...props}>
+      {children}
+    </span>
+  );
+}

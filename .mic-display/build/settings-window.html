@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Settings</title>
+    <script>
+      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        document.documentElement.classList.add("dark");
+      }
+    </script>
+    <style>
+      :root {
+        --background: hsl(0 0% 100% / 0.9);
+      }
+      .dark {
+        --background: hsl(0 0% 0% / 0.4);
+      }
+      body {
+        background: var(--background);
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/settings-window-hNIG3tcc.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/styles-qlMrWfX5.js">
+    <link rel="stylesheet" crossorigin href="./assets/styles-CL-MBJ1V.css">
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Preload is injected by the native layer via webPreferences.preload -->
+  </body>
+</html>
+
