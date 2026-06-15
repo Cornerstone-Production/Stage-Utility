@@ -32,6 +32,10 @@ const OFFLINE: ProPresenterStatusDTO = {
   slidesRemaining: null,
 };
 
+// Reported to the IntegrationManager so the Integrations card badge reflects
+// reachability (separate from the "propresenter:status" data channel).
+type ProConnState = "connected" | "error" | "disconnected";
+
 function getJson(host: string, port: number, path: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const req = http.get({ host, port, path, timeout: REQUEST_TIMEOUT_MS }, (res) => {
@@ -83,11 +87,25 @@ class ProPresenterService {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private last: ProPresenterStatusDTO = OFFLINE;
+  private onConn: ((state: ProConnState, message: string | null) => void) | null = null;
+  private reported: ProConnState | null = null;
+
+  /** Subscribe to connection-state changes (for the Integrations card badge). */
+  setConnectionListener(cb: (state: ProConnState, message: string | null) => void): void {
+    this.onConn = cb;
+  }
+
+  private report(state: ProConnState, message: string | null): void {
+    if (this.reported === state) return;
+    this.reported = state;
+    this.onConn?.(state, message);
+  }
 
   /** Point at a ProPresenter instance and (re)start polling. */
   configure(host: string, port: number): void {
     this.host = host?.trim() || null;
     this.port = port > 0 ? Math.floor(port) : null;
+    this.reported = null; // force a fresh connected/error report
     this.restart();
   }
 
@@ -115,9 +133,9 @@ class ProPresenterService {
   /** One-shot connectivity check for the Integrations "Test connection" button. */
   async test(host: string, port: number): Promise<{ ok: boolean; message?: string }> {
     try {
-      const version = await getJson(host, port, "/v1/version");
-      const name = asString(pick(version, "name")) ?? "ProPresenter";
-      return { ok: true, message: `Connected to ${name}` };
+      const version = await getJson(host, port, "/version");
+      const desc = asString(pick(version, "host_description")) ?? asString(pick(version, "name"));
+      return { ok: true, message: `Connected to ${desc ?? "ProPresenter"}` };
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
@@ -133,68 +151,67 @@ class ProPresenterService {
     const host = this.host;
     const port = this.port;
     try {
-      // Active presentation (name + current index) and the current/next slide.
-      const [active, slide] = await Promise.all([
+      // Connectivity probe — determines the card badge. Throws (→ error path) if
+      // ProPresenter is unreachable; the data fetches below degrade to null
+      // independently so a missing field never looks like a disconnect.
+      await getJson(host, port, "/version");
+
+      // active = name + groups (→ slide count); slide = current/next text;
+      // slideIndex = current 0-based position. All degrade to null on their own.
+      const [active, slide, slideIndex] = await Promise.all([
         getJson(host, port, "/v1/presentation/active").catch(() => null),
         getJson(host, port, "/v1/status/slide").catch(() => null),
+        getJson(host, port, "/v1/presentation/slide_index").catch(() => null),
       ]);
 
-      // Slide count comes from the full presentation (cue count).
-      const presUuid =
-        asString(pick(active, "presentation", "id", "uuid")) ??
-        asString(pick(active, "id", "uuid"));
-      let presentation: unknown = null;
-      if (presUuid) {
-        presentation = await getJson(host, port, `/v1/presentation/${presUuid}`).catch(() => null);
-      }
-
-      this.emit(this.buildStatus(active, slide, presentation));
+      this.emit(this.buildStatus(active, slide, slideIndex));
+      this.report("connected", `Connected to ${host}:${port}`);
       this.schedule(POLL_INTERVAL_MS);
     } catch (err) {
-      console.error(
-        "[propresenter] poll error:",
-        err instanceof Error ? err.message : err,
-      );
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[propresenter] poll error:", msg);
       if (this.last.connected) this.emit(OFFLINE);
+      this.report("error", `Can't reach ${host}:${port} — ${msg}`);
       this.schedule(ERROR_INTERVAL_MS);
     }
   }
 
-  // Centralised, defensive field extraction. Adjust the paths here if a value
-  // reads blank against your ProPresenter version.
-  private buildStatus(active: unknown, slide: unknown, presentation: unknown): ProPresenterStatusDTO {
-    // Current item = active presentation name.
+  // Centralised field extraction, verified against ProPresenter 21.3 (API v1).
+  //   active      = GET /v1/presentation/active
+  //   slide       = GET /v1/status/slide
+  //   slideIndex  = GET /v1/presentation/slide_index
+  // Defensive (every field degrades to null) so an unexpected shape on another
+  // version shows blanks rather than crashing.
+  private buildStatus(active: unknown, slide: unknown, slideIndex: unknown): ProPresenterStatusDTO {
+    // Current item = active presentation name (lives at presentation.id.name).
     const currentItem =
-      asString(pick(active, "presentation", "name")) ?? asString(pick(active, "name"));
+      asString(pick(active, "presentation", "id", "name")) ??
+      asString(pick(active, "presentation", "name"));
 
-    // Next item = next slide's text (most reliable "what's coming" signal).
-    const nextItem =
-      asString(pick(slide, "next", "text")) ?? asString(pick(slide, "next_slide", "text"));
+    // Next item = next slide's text.
+    const nextItem = asString(pick(slide, "next", "text"));
 
-    // Current 1-based slide index (try a few documented shapes).
-    const idxZero =
-      asNumber(pick(active, "presentation", "index")) ??
-      asNumber(pick(active, "index")) ??
-      asNumber(pick(slide, "current", "index"));
-    const slideIndex = idxZero == null ? null : idxZero + 1;
+    // Current slide index — 0-based at presentation_index.index → make it 1-based.
+    const idxZero = asNumber(pick(slideIndex, "presentation_index", "index"));
+    const idx = idxZero == null ? null : idxZero + 1;
 
-    // Total slides = number of cues/groups in the active presentation.
-    const groups = pick(presentation, "presentation", "groups");
+    // Total slides = sum of slides across all groups in the active presentation.
+    const groups = pick(active, "presentation", "groups");
     const slideCount = Array.isArray(groups)
       ? groups.reduce((sum: number, g: unknown) => {
           const slides = pick(g, "slides");
-          return sum + (Array.isArray(slides) ? slides.length : 1);
+          return sum + (Array.isArray(slides) ? slides.length : 0);
         }, 0)
-      : asNumber(pick(presentation, "presentation", "slide_count"));
+      : null;
 
     const slidesRemaining =
-      slideIndex != null && slideCount != null ? Math.max(0, slideCount - slideIndex) : null;
+      idx != null && slideCount != null ? Math.max(0, slideCount - idx) : null;
 
     return {
       connected: true,
       currentItem,
       nextItem,
-      slideIndex,
+      slideIndex: idx,
       slideCount,
       slidesRemaining,
     };

@@ -375,11 +375,20 @@ class IntegrationManager {
 
   /** Start/stop the ProPresenter poller to match enabled + configured state. */
   private applyPropresenter(): void {
+    // Reflect live reachability on the Integrations card badge. Idempotent —
+    // setting the same listener again just overwrites it.
+    propresenterService.setConnectionListener((state, message) => {
+      this.setConnectionState("propresenter", state, message);
+      this.broadcastStates();
+    });
+
     const enabled = this.states.get("propresenter")?.enabled ?? false;
     const { host, port } = this.getPropresenterTarget();
     if (enabled && host && port) {
-      propresenterService.configure(host, port);
+      // configure() starts polling; the listener flips this to connected/error
+      // on the first tick.
       this.setConnectionState("propresenter", "connecting", `Polling ${host}:${port}`);
+      propresenterService.configure(host, port);
     } else {
       propresenterService.stop();
       this.setConnectionState("propresenter", "disconnected", null);
