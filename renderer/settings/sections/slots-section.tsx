@@ -23,6 +23,7 @@ import {
   Dialog,
 } from "../../components/ui";
 import type { SectionProps, WirelessChannel } from "../types";
+import { PositionPicker } from "./position-picker";
 
 // ---- slot row (sortable) ----------------------------------------------------
 
@@ -32,11 +33,12 @@ interface SlotRowProps {
   /** Position within a stacked column group, or null when not grouped. */
   groupPos: "top" | "middle" | "bottom" | null;
   wirelessChannels: WirelessChannel[];
+  teamPositions: TeamPositionDTO[];
   onChange: (updated: Slot) => void;
   onRemove: () => void;
 }
 
-function SlotRow({ slot, index, groupPos, wirelessChannels, onChange, onRemove }: SlotRowProps) {
+function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onChange, onRemove }: SlotRowProps) {
   const isPco = slot.link.kind === "pco";
   const isStatic = slot.link.kind === "static";
   const isEmpty = slot.link.kind === "empty";
@@ -187,7 +189,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, onChange, onRemove }
 
       {/* PCO-linked fields */}
       {isPco && (
-        <div className="flex flex-col gap-1 pl-9">
+        <div className="flex flex-col gap-1.5 pl-9">
           <div className="flex items-center gap-2">
             <Select
               value={(slot.link as { kind: "pco"; matchBy: string }).matchBy}
@@ -203,20 +205,46 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, onChange, onRemove }
             </Select>
 
             {(slot.link as { kind: "pco"; matchBy: string }).matchBy === "position" ? (
-              <Input
-                value={
-                  (slot.link as { kind: "pco"; matchBy: "position"; teamPositionName: string })
-                    .teamPositionName
-                }
-                onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  onChange({
-                    ...slot,
-                    link: { kind: "pco", matchBy: "position", teamPositionName: e.target.value },
-                  })
-                }
-                placeholder="e.g. Electric Guitar"
-                className="flex-1 min-w-0"
-              />
+              teamPositions.length > 0 ? (
+                <PositionPicker
+                  value={
+                    (slot.link as { kind: "pco"; matchBy: "position"; teamPositionName: string })
+                      .teamPositionName || ""
+                  }
+                  teamPositions={teamPositions}
+                  onChange={(v) =>
+                    onChange({
+                      ...slot,
+                      link: {
+                        kind: "pco",
+                        matchBy: "position",
+                        teamPositionName: v,
+                        notesStartsWith: (slot.link as { kind: "pco"; matchBy: "position"; notesStartsWith?: string }).notesStartsWith,
+                      },
+                    })
+                  }
+                />
+              ) : (
+                <Input
+                  value={
+                    (slot.link as { kind: "pco"; matchBy: "position"; teamPositionName: string })
+                      .teamPositionName
+                  }
+                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                    onChange({
+                      ...slot,
+                      link: {
+                        kind: "pco",
+                        matchBy: "position",
+                        teamPositionName: e.target.value,
+                        notesStartsWith: (slot.link as { kind: "pco"; matchBy: "position"; notesStartsWith?: string }).notesStartsWith,
+                      },
+                    })
+                  }
+                  placeholder="e.g. Electric Guitar"
+                  className="flex-1 min-w-0"
+                />
+              )
             ) : (
               <Input
                 value={(slot.link as { kind: "pco"; matchBy: "person"; personId: string }).personId}
@@ -231,6 +259,31 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, onChange, onRemove }
               />
             )}
           </div>
+          {/* Notes starts-with filter — only shown for "by position" */}
+          {(slot.link as { kind: "pco"; matchBy: string }).matchBy === "position" && (
+            <div className="flex items-center gap-2">
+              <span className="text-caption1 text-gray-9 shrink-0 w-32">Notes starts with:</span>
+              <Input
+                value={
+                  (slot.link as { kind: "pco"; matchBy: "position"; notesStartsWith?: string })
+                    .notesStartsWith ?? ""
+                }
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  onChange({
+                    ...slot,
+                    link: {
+                      kind: "pco",
+                      matchBy: "position",
+                      teamPositionName: (slot.link as { kind: "pco"; matchBy: "position"; teamPositionName: string }).teamPositionName,
+                      notesStartsWith: e.target.value || undefined,
+                    },
+                  })
+                }
+                placeholder="e.g. 1  or  HH"
+                className="w-24"
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -325,6 +378,7 @@ function PresetRow({ preset, onApply, onDelete }: PresetRowProps) {
 export function SlotsSection({
   stageState,
   wirelessChannels,
+  teamPositions,
   presets,
   selectedDisplayId,
   setSelectedDisplayId,
@@ -339,6 +393,7 @@ export function SlotsSection({
   SectionProps,
   | "stageState"
   | "wirelessChannels"
+  | "teamPositions"
   | "presets"
   | "selectedDisplayId"
   | "setSelectedDisplayId"
@@ -411,6 +466,7 @@ export function SlotsSection({
                       index={idx}
                       groupPos={groupPos}
                       wirelessChannels={wirelessChannels}
+                      teamPositions={teamPositions}
                       onChange={(updated) => handlers.updateSlot(idx, updated)}
                       onRemove={() => handlers.removeSlot(idx)}
                     />

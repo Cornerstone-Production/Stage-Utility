@@ -61,11 +61,18 @@ interface TeamMemberDTO {
   teamPositionName: string | null;
   teamName: string | null;
   status: string;
+  notes: string | null;
+}
+
+interface TeamPositionDTO {
+  teamId: string;
+  teamName: string;
+  positionName: string;
 }
 
 type SlotLink =
   | { kind: "pco"; matchBy: "person"; personId: string }
-  | { kind: "pco"; matchBy: "position"; teamPositionName: string }
+  | { kind: "pco"; matchBy: "position"; teamPositionName: string; notesStartsWith?: string }
   | { kind: "static"; label: string; color: string }
   | { kind: "empty" };
 
@@ -114,6 +121,20 @@ interface StageState {
   /** Allowlist of service type ids that Auto plan-mode follows and manual picker shows.
    *  Empty array means all types are allowed. */
   allowedServiceTypeIds: string[];
+  /** Customizable brand name shown in the sidebar header and on the kiosk. */
+  appName: string;
+  /** Customizable brand logo as a data URL (PNG/JPG/SVG/WebP), or null. */
+  appLogo: string | null;
+  /** Recolor a single-color logo to match the theme. */
+  appLogoMonochrome: boolean;
+  /** Image centered in empty slots on the kiosk (recolored to the kiosk gray). */
+  emptySlotLogo: string | null;
+}
+
+/** Editor source for a brand image (original upload + saved crop transform). */
+interface BrandingSource {
+  original: string | null;
+  crop: { scale: number; x: number; y: number } | null;
 }
 
 interface SlotPreset {

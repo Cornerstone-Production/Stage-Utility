@@ -62,6 +62,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return apiFetch<T>(`/api/plans?serviceTypeId=${encodeURIComponent(id)}`);
     }
 
+    case "stage:listTeamPositions":
+      return apiFetch<T>("/api/team-positions");
+
     case "stage:setServiceType":
       return post<T>("/api/service-type", p);
 
@@ -85,6 +88,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "stage:setShowQr":
       return post<T>("/api/show-qr", p);
+
+    case "stage:setBranding":
+      return post<T>("/api/branding", p);
+
+    case "stage:getBrandingSource": {
+      const target = p.target === "empty" ? "empty" : "app";
+      return apiFetch<T>(`/api/branding/source?target=${target}`);
+    }
 
     case "stage:getRemoteUrl": {
       const state = await apiFetch<{ remoteUrl: string | null }>("/api/state");
@@ -185,7 +196,7 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return undefined as unknown as T;
 
     case "app:getInfo":
-      return { version: "standalone", name: "Stage Monitor" } as unknown as T;
+      return { version: "standalone", name: "Stage Utility" } as unknown as T;
 
     default:
       throw new Error(`[api] Unknown IPC channel: "${channel}"`);

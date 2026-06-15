@@ -41,11 +41,25 @@ function matchMember(
   }
 
   if (link.matchBy === "position") {
-    // Case-insensitive position match.
+    // Case-insensitive position name match.
     const pos = link.teamPositionName.toLowerCase();
-    return (
-      members.find((m) => (m.teamPositionName ?? "").toLowerCase() === pos) ?? null
+    const prefix = link.notesStartsWith?.toLowerCase() ?? null;
+
+    const byPosition = members.filter(
+      (m) => (m.teamPositionName ?? "").toLowerCase() === pos,
     );
+
+    if (prefix && byPosition.length > 0) {
+      // Further filter by notes prefix (case-insensitive).
+      // First char = number 1-10 for vocals; first two chars = HH/HS for Teaching Pastor.
+      const withNotes = byPosition.filter(
+        (m) => m.notes != null && m.notes.toLowerCase().startsWith(prefix),
+      );
+      // Fall back to any position match if no notes match (graceful degradation).
+      return (withNotes[0] ?? byPosition[0]) ?? null;
+    }
+
+    return byPosition[0] ?? null;
   }
 
   return null;

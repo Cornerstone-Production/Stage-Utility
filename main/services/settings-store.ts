@@ -19,6 +19,21 @@ export interface SettingsData {
   allowedServiceTypeIds: string[];
   /** Polling/metering interval (ms) applied to all wireless gear. */
   wirelessMeterRateMs: number;
+  /** Customizable brand name shown in the sidebar header and on the kiosk. */
+  appName: string;
+  /** Rendered (cropped) brand logo as a data URL, shown everywhere. */
+  appLogo: string | null;
+  /** Recolor a single-color logo to match the theme (mask with currentColor). */
+  appLogoMonochrome: boolean;
+  /** Original uploaded image (settings-only; used to re-open the crop editor). */
+  appLogoOriginal: string | null;
+  /** Saved crop transform so re-editing retains zoom/position. */
+  appLogoCrop: { scale: number; x: number; y: number } | null;
+  /** Rendered (cropped) image centered in empty slots on the kiosk. */
+  emptySlotLogo: string | null;
+  /** Original upload + crop transform for the empty-slot image (settings-only). */
+  emptySlotLogoOriginal: string | null;
+  emptySlotLogoCrop: { scale: number; x: number; y: number } | null;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -34,6 +49,14 @@ const DEFAULT_SETTINGS: SettingsData = {
   displays: [{ id: "display-1", name: "Display 1" }],
   allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
   wirelessMeterRateMs: 1000,
+  appName: "Mic Utility",
+  appLogo: null,
+  appLogoMonochrome: true,
+  appLogoOriginal: null,
+  appLogoCrop: null,
+  emptySlotLogo: null,
+  emptySlotLogoOriginal: null,
+  emptySlotLogoCrop: null,
 };
 
 const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS);

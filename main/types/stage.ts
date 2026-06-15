@@ -26,11 +26,18 @@ export interface TeamMemberDTO {
   teamPositionName: string | null;
   teamName: string | null;
   status: string;
+  notes: string | null;
+}
+
+export interface TeamPositionDTO {
+  teamId: string;
+  teamName: string;
+  positionName: string;
 }
 
 export type SlotLink =
   | { kind: "pco"; matchBy: "person"; personId: string }
-  | { kind: "pco"; matchBy: "position"; teamPositionName: string }
+  | { kind: "pco"; matchBy: "position"; teamPositionName: string; notesStartsWith?: string }
   | { kind: "static"; label: string; color: string }
   | { kind: "empty" };
 
@@ -83,4 +90,12 @@ export interface StageState {
   showQr: boolean;
   /** Allowlisted service type IDs for auto mode. Empty array = all allowed. */
   allowedServiceTypeIds: string[];
+  /** Customizable brand name shown in the sidebar header and on the kiosk. */
+  appName: string;
+  /** Customizable brand logo as a data URL (PNG/JPG/SVG/WebP), or null. */
+  appLogo: string | null;
+  /** Recolor a single-color logo to match the theme. */
+  appLogoMonochrome: boolean;
+  /** Image centered in empty slots on the kiosk (recolored to the kiosk gray). */
+  emptySlotLogo: string | null;
 }

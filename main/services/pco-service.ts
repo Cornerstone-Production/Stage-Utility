@@ -1,7 +1,7 @@
 // Planning Center Online client (Basic Auth: App ID + Secret).
 // Flattens JSON:API responses to slim DTOs. ~30s in-memory cache.
 
-import type { PlanDTO, ServiceTypeDTO, TeamMemberDTO } from "../types/stage.js";
+import type { PlanDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 const CACHE_TTL_MS = 30_000;
@@ -197,11 +197,50 @@ class PcoService {
             : null,
         teamName,
         status: String(item.attributes.status ?? "U"),
+        notes:
+          item.attributes.notes != null && String(item.attributes.notes) !== ""
+            ? String(item.attributes.notes)
+            : null,
       };
     });
 
     this.cacheSet(cacheKey, result);
     return result;
+  }
+
+  async listTeamPositions(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+  ): Promise<TeamPositionDTO[]> {
+    const cacheKey = `team-positions:${appId}:${serviceTypeId}`;
+    const cached = this.cacheGet<TeamPositionDTO[]>(cacheKey);
+    if (cached) return cached;
+
+    // Fetch all teams for this service type.
+    const teamsUrl = `${PCO_BASE}/service_types/${serviceTypeId}/teams?per_page=100`;
+    const teamsJson = await this.request(teamsUrl, appId, secret);
+    const teams = Array.isArray(teamsJson.data) ? teamsJson.data : [teamsJson.data];
+
+    // Fetch positions for each team in parallel.
+    const allPositions: TeamPositionDTO[] = [];
+    await Promise.all(
+      teams.map(async (team) => {
+        const posUrl = `${PCO_BASE}/service_types/${serviceTypeId}/teams/${team.id}/team_positions?per_page=100`;
+        const posJson = await this.request(posUrl, appId, secret);
+        const positions = Array.isArray(posJson.data) ? posJson.data : [posJson.data];
+        for (const pos of positions) {
+          allPositions.push({
+            teamId: team.id,
+            teamName: String(team.attributes.name ?? "Unknown"),
+            positionName: String(pos.attributes.name ?? "Unknown"),
+          });
+        }
+      }),
+    );
+
+    this.cacheSet(cacheKey, allPositions);
+    return allPositions;
   }
 }
 

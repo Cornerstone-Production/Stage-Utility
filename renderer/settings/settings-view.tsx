@@ -18,6 +18,9 @@ import {
   SlidersHorizontalIcon,
   PlugIcon,
   QrCodeIcon,
+  PaletteIcon,
+  SunIcon,
+  MoonIcon,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SectionItem, WirelessChannel, SectionHandlers } from "./types";
@@ -27,6 +30,8 @@ import { DisplaysSection } from "./sections/displays-section";
 import { SlotsSection } from "./sections/slots-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { ConnectSection } from "./sections/connect-section";
+import { BrandingSection } from "./sections/branding-section";
+import { BrandHeader } from "./brand-header";
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -58,6 +63,35 @@ function useEscapeToClose() {
   }, []);
 }
 
+// ---- light / dark theme -----------------------------------------------------
+//
+// The `.dark` class on <html> drives the Radix color scales. The initial value
+// is set by an inline script in settings-window.html (reading this same
+// localStorage key) so there's no flash on load.
+
+const THEME_STORAGE_KEY = "stage-utility-theme";
+
+function useTheme() {
+  const [isDark, setIsDark] = useState(() =>
+    document.documentElement.classList.contains("dark"),
+  );
+
+  function toggle() {
+    setIsDark((prev) => {
+      const next = !prev;
+      document.documentElement.classList.toggle("dark", next);
+      try {
+        localStorage.setItem(THEME_STORAGE_KEY, next ? "dark" : "light");
+      } catch {
+        // localStorage unavailable (private mode etc.) — theme still applies for this session.
+      }
+      return next;
+    });
+  }
+
+  return { isDark, toggle };
+}
+
 // ---- sidebar section definitions --------------------------------------------
 
 const SECTIONS: SectionItem[] = [
@@ -67,12 +101,14 @@ const SECTIONS: SectionItem[] = [
   { id: "slots", label: "Slots", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
   { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4 text-gray-11" /> },
   { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4 text-gray-11" /> },
+  { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4 text-gray-11" /> },
 ];
 
 // ---- main settings view -----------------------------------------------------
 
 export function SettingsView() {
   useEscapeToClose();
+  const theme = useTheme();
   const queryClient = useQueryClient();
 
   const [activeSection, setActiveSection] = useState<SectionItem>(SECTIONS[0]);
@@ -97,6 +133,13 @@ export function SettingsView() {
         ? ipc<PlanDTO[]>("stage:listPlans", { serviceTypeId: stageState.serviceTypeId })
         : Promise.resolve([]),
     enabled: !!stageState?.serviceTypeId,
+  });
+
+  // Fetch team positions for the position dropdown (depends on service type + PCO configured)
+  const { data: teamPositions = [] } = useQuery({
+    queryKey: ["stage:listTeamPositions", stageState?.serviceTypeId],
+    queryFn: () => ipc<TeamPositionDTO[]>("stage:listTeamPositions"),
+    enabled: !!stageState?.serviceTypeId && !!stageState?.pcoConfigured,
   });
 
   // Fetch wireless channels
@@ -246,6 +289,25 @@ export function SettingsView() {
     }
   }
 
+  async function handleSetBranding(partial: {
+    name?: string;
+    logo?: string | null;
+    monochrome?: boolean;
+    logoOriginal?: string | null;
+    logoCrop?: { scale: number; x: number; y: number } | null;
+    emptyLogo?: string | null;
+    emptyLogoOriginal?: string | null;
+    emptyLogoCrop?: { scale: number; x: number; y: number } | null;
+  }) {
+    try {
+      const next = await ipc<StageState>("stage:setBranding", partial);
+      queryClient.setQueryData(["stage:getState"], next);
+      toast.success("Branding updated.");
+    } catch (err) {
+      toast.error(`Failed to update branding: ${String(err)}`);
+    }
+  }
+
   function updateSlot(idx: number, updated: Slot) {
     setLocalSlots((prev) => {
       const next = [...prev];
@@ -374,6 +436,7 @@ export function SettingsView() {
     handleRefresh,
     handleShowQrChange,
     handleSetAllowedServiceTypes,
+    handleSetBranding,
     updateSlot,
     addSlot,
     removeSlot,
@@ -421,6 +484,7 @@ export function SettingsView() {
           <SlotsSection
             stageState={stageState}
             wirelessChannels={wirelessChannels}
+            teamPositions={teamPositions}
             presets={presets}
             selectedDisplayId={selectedDisplayId}
             setSelectedDisplayId={setSelectedDisplayId}
@@ -437,6 +501,8 @@ export function SettingsView() {
         return <IntegrationsSection />;
       case "connect":
         return <ConnectSection stageState={stageState} handlers={handlers} />;
+      case "branding":
+        return <BrandingSection stageState={stageState} handlers={handlers} />;
     }
   }
 
@@ -446,6 +512,13 @@ export function SettingsView() {
       sidebarSize={{ default: 200, min: 180, max: 240 }}
       sidebar={
         <Sidebar>
+          {/* Brand header — big logo + name auto-fit to the logo's height. */}
+          <BrandHeader
+            name={stageState.appName}
+            logo={stageState.appLogo}
+            monochrome={stageState.appLogoMonochrome}
+          />
+
           <SidebarList
             items={SECTIONS}
             selectedItem={activeSection}
@@ -456,6 +529,21 @@ export function SettingsView() {
               <SidebarListItem key={section.id} item={section} icon={section.icon} title={section.label} />
             ))}
           </SidebarList>
+
+          {/* Light / dark toggle, pinned to the bottom of the sidebar. */}
+          <div className="mt-auto p-2">
+            <SidebarListItem
+              icon={
+                theme.isDark ? (
+                  <SunIcon className="size-4 text-gray-11" />
+                ) : (
+                  <MoonIcon className="size-4 text-gray-11" />
+                )
+              }
+              title={theme.isDark ? "Light mode" : "Dark mode"}
+              onClick={theme.toggle}
+            />
+          </div>
         </Sidebar>
       }
     >

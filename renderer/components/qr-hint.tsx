@@ -28,25 +28,8 @@ export function QrHint({ url, compact = false }: QrHintProps) {
   if (!url) return null;
 
   if (compact) {
-    return (
-      // Liquid Glass pill — static height so backdrop-blur is safe (no height animation)
-      <div
-        className="flex items-center gap-1.5 px-2 py-1 rounded-full"
-        style={{
-          background: "rgba(255,255,255,0.08)",
-          boxShadow: "0 0 0 1px rgba(255,255,255,0.14), inset 0 1px 0 rgba(255,255,255,0.09)",
-          backdropFilter: "blur(10px)",
-        }}
-      >
-        <canvas ref={canvasRef} width={size} height={size} className="rounded shrink-0" />
-        <span
-          className="text-caption2 text-white/50 tabular-nums leading-tight"
-          style={{ maxWidth: 110, wordBreak: "break-all" }}
-        >
-          {url}
-        </span>
-      </div>
-    );
+    // Bare QR (no pill/circle) on the kiosk top bar — matches the plain text.
+    return <canvas ref={canvasRef} width={size} height={size} className="rounded shrink-0 select-none" />;
   }
 
   // Solid dark backdrop (theme-independent) so the white QR modules stay

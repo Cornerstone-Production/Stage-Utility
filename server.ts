@@ -1,16 +1,16 @@
 // server.ts — Server entry point.
 //
-// Runs the Stage Monitor backend: the LAN HTTP/SSE server, device polling, and
+// Runs the Stage Utility backend: the LAN HTTP/SSE server, device polling, and
 // the Planning Center integration. Suitable for a headless host (Proxmox,
 // Docker, Raspberry Pi) or a local machine driving the kiosk display.
 //
 // Usage:
 //   npx tsx server.ts
-//   STAGE_MONITOR_DATA=/custom/path npx tsx server.ts
+//   STAGE_UTILITY_DATA=/custom/path npx tsx server.ts
 //
 // Data directory (persists config, secrets, photo cache, encryption key):
-//   $STAGE_MONITOR_DATA  — if set
-//   ~/.stage-monitor     — default
+//   $STAGE_UTILITY_DATA  — if set
+//   ~/.stage-utility     — default
 
 import * as fs from "fs/promises";
 

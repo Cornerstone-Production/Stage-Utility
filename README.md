@@ -1,9 +1,9 @@
-# Stage Monitor
+# Stage Utility
 
 A kiosk dashboard for a live-production / service tech station. It pulls the band
 lineup (people, roles, photos) from **Planning Center Online** and live wireless
 status (RF, battery, frequency, audio level) from **Shure** wireless systems, and
-shows them on a stage monitor — who's playing, on which channel, and the health of
+shows them on a monitor at the stage — who's playing, on which channel, and the health of
 their mic or in-ear pack. A phone-friendly remote control panel runs on the same
 LAN so a tech can re-assign slots and switch plans from the floor.
 
@@ -88,7 +88,7 @@ sudo ./scripts/install.sh
 ```
 
 This checks Node, builds the UI, sets up the data directory, and installs an
-auto-starting `stage-monitor` systemd service. Re-run after `git pull` to update;
+auto-starting `stage-utility` systemd service. Re-run after `git pull` to update;
 `sudo ./scripts/uninstall.sh` removes the service.
 
 For a manual/production run without systemd:
@@ -246,8 +246,8 @@ All endpoints are under `/api`. State-changing routes return the updated
 
 ## Data, secrets & backups
 
-State persists in a **data directory** — `$STAGE_MONITOR_DATA` if set, otherwise
-`~/.stage-monitor`:
+State persists in a **data directory** — `$STAGE_UTILITY_DATA` if set, otherwise
+`~/.stage-utility`:
 
 - `settings.json` — non-secret config (service type, plan mode, displays, slots, …)
 - `secrets.bin` — integration secrets, **AES-256-GCM encrypted**

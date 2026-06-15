@@ -1,8 +1,11 @@
 import { cn } from "../lib/cn";
 import { StatusStrip } from "./status-strip";
+import { BrandLogo } from "./brand-logo";
 
 interface SlotPanelProps {
   slot: Slot;
+  /** Optional image shown centered in empty slots (recolored to the kiosk gray). */
+  emptySlotLogo?: string | null;
   className?: string;
 }
 
@@ -43,7 +46,7 @@ function ChannelChip({ channel }: { channel: string }) {
   );
 }
 
-export function SlotPanel({ slot, className }: SlotPanelProps) {
+export function SlotPanel({ slot, emptySlotLogo, className }: SlotPanelProps) {
   const isEmpty = slot.link.kind === "empty";
   const isStatic = slot.link.kind === "static";
   const solidColor = isStatic ? (slot.link as { kind: "static"; label: string; color: string }).color : null;
@@ -74,13 +77,26 @@ export function SlotPanel({ slot, className }: SlotPanelProps) {
           className="relative flex flex-col items-center justify-center flex-1 overflow-hidden rounded-3xl glass-card"
           style={{ background: "rgba(255,255,255,0.025)" }}
         >
-          {/* Muted channel number centered */}
-          <ChannelChip channel={slot.channel} />
-          <span
-            className="mt-2 text-callout font-medium text-white/20 select-none"
-          >
-            empty
-          </span>
+          {emptySlotLogo ? (
+            <>
+              {/* Channel chip top-left; custom image centered in the kiosk gray */}
+              <div className="absolute top-0 left-0 p-3">
+                <ChannelChip channel={slot.channel} />
+              </div>
+              <BrandLogo
+                logo={emptySlotLogo}
+                monochrome
+                className="text-white/25"
+                style={{ width: "clamp(3rem,32cqw,11rem)", height: "clamp(3rem,32cqw,11rem)" }}
+              />
+            </>
+          ) : (
+            <>
+              {/* Muted channel number centered */}
+              <ChannelChip channel={slot.channel} />
+              <span className="mt-2 text-callout font-medium text-white/20 select-none">empty</span>
+            </>
+          )}
         </div>
       </div>
     );

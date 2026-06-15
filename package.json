@@ -1,5 +1,5 @@
 {
-  "name": "stage-monitor",
+  "name": "stage-utility",
   "version": "1.0.0",
   "description": "Display band lineup and wireless device status pulled from Planning Center Online and Shure wireless systems.",
   "private": true,

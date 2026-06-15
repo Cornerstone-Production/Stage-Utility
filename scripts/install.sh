@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# install.sh — One-command installer for Stage Monitor on Linux + systemd.
+# install.sh — One-command installer for Stage Utility on Linux + systemd.
 #
 # Run from a checked-out copy of the repo:
 #     sudo ./scripts/install.sh
@@ -9,15 +9,15 @@
 # (re-installs deps, rebuilds the UI, and restarts the service).
 #
 # Environment / flag overrides:
-#     STAGE_MONITOR_DATA=/path   data directory (default: /var/lib/stage-monitor)
-#     --data-dir <path>          same as STAGE_MONITOR_DATA
+#     STAGE_UTILITY_DATA=/path   data directory (default: /var/lib/stage-utility)
+#     --data-dir <path>          same as STAGE_UTILITY_DATA
 #     --user <name>              run the service as this user (default: $SUDO_USER)
 #     --no-service               build only; don't install/enable the systemd unit
 #
 set -euo pipefail
 
 # ── Constants ───────────────────────────────────────────────────────────────
-SERVICE_NAME="stage-monitor"
+SERVICE_NAME="stage-utility"
 UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 PORT=8788
 MIN_NODE_MAJOR=24
@@ -27,7 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ── Defaults (overridable) ────────────────────────────────────────────────────
-DATA_DIR="${STAGE_MONITOR_DATA:-/var/lib/stage-monitor}"
+DATA_DIR="${STAGE_UTILITY_DATA:-/var/lib/stage-utility}"
 SERVICE_USER="${SUDO_USER:-$(id -un)}"
 INSTALL_SERVICE=1
 
@@ -81,13 +81,13 @@ fi
 # ── 4. systemd service ────────────────────────────────────────────────────────
 if [[ "${INSTALL_SERVICE}" -eq 0 ]]; then
   log "Skipping systemd setup (--no-service)."
-  log "Start manually with:  STAGE_MONITOR_DATA=${DATA_DIR} npm start"
+  log "Start manually with:  STAGE_UTILITY_DATA=${DATA_DIR} npm start"
   exit 0
 fi
 
 if ! command -v systemctl >/dev/null 2>&1; then
   warn "systemctl not found — this host doesn't use systemd."
-  warn "Build is done. Start manually with:  STAGE_MONITOR_DATA=${DATA_DIR} npm start"
+  warn "Build is done. Start manually with:  STAGE_UTILITY_DATA=${DATA_DIR} npm start"
   exit 0
 fi
 
@@ -98,7 +98,7 @@ fi
 log "Writing ${UNIT_PATH}..."
 cat > "${UNIT_PATH}" <<UNIT
 [Unit]
-Description=Stage Monitor
+Description=Stage Utility
 After=network-online.target
 Wants=network-online.target
 
@@ -106,7 +106,7 @@ Wants=network-online.target
 Type=simple
 User=${SERVICE_USER}
 WorkingDirectory=${REPO_ROOT}
-Environment=STAGE_MONITOR_DATA=${DATA_DIR}
+Environment=STAGE_UTILITY_DATA=${DATA_DIR}
 Environment=NODE_ENV=production
 ExecStart=${NODE_BIN} --import tsx ${REPO_ROOT}/server.ts
 Restart=on-failure
@@ -126,7 +126,7 @@ systemctl --no-pager --lines=0 status "${SERVICE_NAME}" || true
 # ── 5. Report ─────────────────────────────────────────────────────────────────
 LAN_IP="$(node -e 'const n=require("os").networkInterfaces();for(const k in n)for(const a of n[k])if(a.family==="IPv4"&&!a.internal){console.log(a.address);process.exit(0)}' 2>/dev/null || echo "<server-ip>")"
 echo
-log "Stage Monitor is running."
+log "Stage Utility is running."
 log "  Kiosk display : http://${LAN_IP}:${PORT}/"
 log "  Settings      : http://${LAN_IP}:${PORT}/settings-window.html"
 log "Configure it in the Settings page → Integrations (Planning Center App ID + Secret, Shure gear)."
