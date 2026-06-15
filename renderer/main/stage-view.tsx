@@ -6,6 +6,14 @@ import { BrandLogo } from "../components/brand-logo";
 import { invoke, onNotification } from "../lib/api";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 
+// Resolve which display this kiosk window is showing. Prefers the clean path
+// form (/display-1), falling back to the legacy ?display= query, then default.
+function getDisplayId(): string {
+  const slug = window.location.pathname.replace(/^\/+|\/+$/g, "");
+  if (slug && slug !== "settings") return slug;
+  return new URLSearchParams(window.location.search).get("display") ?? "display-1";
+}
+
 // ---- error boundary ---------------------------------------------------------
 
 interface ErrorBoundaryState {
@@ -123,9 +131,14 @@ function KioskTopBar({
       </div>
 
       {showQr && remoteUrl && (
-        <div className="shrink-0 ml-auto mr-3 relative z-10">
+        <a
+          href="/settings"
+          className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70"
+          title="Open settings"
+          aria-label="Open settings"
+        >
           <QrHint url={remoteUrl} compact />
-        </div>
+        </a>
       )}
     </div>
   );
@@ -209,7 +222,7 @@ export function StageView() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const displayId = new URLSearchParams(window.location.search).get("display") ?? "display-1";
+  const displayId = getDisplayId();
 
   // Hydrate on mount
   useEffect(() => {
