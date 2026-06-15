@@ -17,6 +17,8 @@ import * as fs from "fs/promises";
 import { getUserDataPath } from "./main/services/app-paths.js";
 import { deviceManager } from "./main/services/device-manager.js";
 import { integrationManager } from "./main/services/integration-manager.js";
+import { livePoller } from "./main/services/live-poller.js";
+import { propresenterService } from "./main/services/propresenter-service.js";
 import { remoteServer } from "./main/services/remote-server.js";
 import { stageController } from "./main/services/stage-controller.js";
 
@@ -51,6 +53,10 @@ if (stageController.getState().pcoConfigured) {
 await remoteServer.start();
 await deviceManager.start();
 
+// Start the PCO Services Live poller (dashboard countdown). Self-idles when no
+// plan is selected / PCO isn't configured.
+livePoller.start();
+
 console.log(`[server] ready — control panel at ${remoteServer.getLanUrl()}`);
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
@@ -58,6 +64,8 @@ console.log(`[server] ready — control panel at ${remoteServer.getLanUrl()}`);
 async function shutdown(signal: string): Promise<void> {
   console.log(`\n[server] received ${signal}, shutting down...`);
   stageController.stopAutoRefresh();
+  livePoller.stop();
+  propresenterService.stop();
   await remoteServer.stop();
   await deviceManager.stop();
   console.log("[server] shutdown complete");

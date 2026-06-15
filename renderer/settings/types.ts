@@ -52,6 +52,7 @@ export interface SectionHandlers {
   handleAddDisplay: () => Promise<void>;
   handleRenameDisplay: (id: string, name: string) => Promise<void>;
   handleRemoveDisplay: (id: string) => Promise<void>;
+  handleSetDisplayKind: (id: string, kind: DisplayKind) => Promise<void>;
   handleOpenDisplayWindow: (id: string) => Promise<void>;
   handleDragEnd: (event: DragEndEvent) => void;
   sensors: ReturnType<typeof useSensors>;

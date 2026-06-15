@@ -8,11 +8,12 @@ interface DisplayRowProps {
   isFirst: boolean;
   canRemove: boolean;
   onRename: (name: string) => void;
+  onSetKind: (kind: DisplayKind) => void;
   onOpenWindow: () => void;
   onRemove: () => void;
 }
 
-function DisplayRow({ display, isFirst, canRemove, onRename, onOpenWindow, onRemove }: DisplayRowProps) {
+function DisplayRow({ display, isFirst, canRemove, onRename, onSetKind, onOpenWindow, onRemove }: DisplayRowProps) {
   const [editName, setEditName] = useState(display.name);
 
   useEffect(() => {
@@ -61,15 +62,34 @@ function DisplayRow({ display, isFirst, canRemove, onRename, onOpenWindow, onRem
           <TrashIcon className="size-3.5 text-red-10" />
         </Button>
       </div>
-      {/* URL hint — click to copy */}
-      <button
-        type="button"
-        className="ml-5 text-left text-[11px] text-gray-a9 hover:text-gray-11 font-mono truncate transition-colors"
-        title="Click to copy URL"
-        onClick={() => navigator.clipboard.writeText(displayUrl).then(() => toast.success("URL copied"))}
-      >
-        {displayUrl}
-      </button>
+      {/* Kind toggle + URL hint */}
+      <div className="ml-5 flex items-center gap-2">
+        <div className="inline-flex rounded-md border border-gray-a6 overflow-hidden shrink-0">
+          {(["slots", "dashboard"] as const).map((k) => {
+            const active = (display.kind ?? "slots") === k;
+            return (
+              <button
+                key={k}
+                type="button"
+                onClick={() => !active && onSetKind(k)}
+                className={`px-2 py-0.5 text-[11px] capitalize transition-colors ${
+                  active ? "bg-blue-9 text-white" : "text-gray-10 hover:bg-gray-a3"
+                }`}
+              >
+                {k}
+              </button>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          className="text-left text-[11px] text-gray-a9 hover:text-gray-11 font-mono truncate transition-colors min-w-0"
+          title="Click to copy URL"
+          onClick={() => navigator.clipboard.writeText(displayUrl).then(() => toast.success("URL copied"))}
+        >
+          {displayUrl}
+        </button>
+      </div>
     </div>
   );
 }
@@ -90,6 +110,7 @@ export function DisplaysSection({ stageState, handlers }: Pick<SectionProps, "st
             isFirst={idx === 0}
             canRemove={(stageState.displays?.length ?? 1) > 1}
             onRename={(name) => handlers.handleRenameDisplay(display.id, name)}
+            onSetKind={(kind) => handlers.handleSetDisplayKind(display.id, kind)}
             onOpenWindow={() => handlers.handleOpenDisplayWindow(display.id)}
             onRemove={() => handlers.handleRemoveDisplay(display.id)}
           />

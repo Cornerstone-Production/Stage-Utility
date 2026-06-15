@@ -1,7 +1,7 @@
 // Planning Center Online client (Basic Auth: App ID + Secret).
 // Flattens JSON:API responses to slim DTOs. ~30s in-memory cache.
 
-import type { PlanDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
+import type { PcoLiveDTO, PlanDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 const CACHE_TTL_MS = 30_000;
@@ -241,6 +241,61 @@ class PcoService {
 
     this.cacheSet(cacheKey, allPositions);
     return allPositions;
+  }
+
+  /**
+   * Read the Services Live controller for a plan and resolve the current item's
+   * countdown. One request via `?include=items,current_item_time`. NOT cached —
+   * this is live data polled every ~1.5s by the live poller.
+   *
+   * Returns isLive=false when nobody has started Live (no current_item_time, or
+   * the current ItemTime has no live_start_at).
+   */
+  async getLive(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<PcoLiveDTO> {
+    const serverNow = new Date().toISOString();
+    const url =
+      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/live` +
+      `?include=items,current_item_time`;
+    const json = await this.request(url, appId, secret);
+    const live = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
+    const included = json.included ?? [];
+
+    const currentRef = live?.relationships?.["current_item_time"]?.data;
+    const currentId = currentRef && !Array.isArray(currentRef) ? currentRef.id : null;
+    if (!currentId) {
+      return { isLive: false, itemTitle: null, lengthSec: null, liveStartAt: null, serverNow };
+    }
+
+    // `included` mixes types (ItemTime + Item); match the current ItemTime by id.
+    const it = included.find((n) => n.id === currentId);
+    const liveStartAt = it?.attributes?.live_start_at;
+    if (!it || typeof liveStartAt !== "string" || !liveStartAt) {
+      return { isLive: false, itemTitle: null, lengthSec: null, liveStartAt: null, serverNow };
+    }
+
+    // Length: prefer the ItemTime's own length; fall back to the related Item's
+    // length (the one undocumented spot — verified to live on ItemTime in practice).
+    let lengthSec =
+      typeof it.attributes.length === "number" ? (it.attributes.length as number) : null;
+
+    // Resolve the item title (and length fallback) via the ItemTime's item relationship.
+    const itemRef = it.relationships?.["item"]?.data;
+    const itemId = itemRef && !Array.isArray(itemRef) ? itemRef.id : null;
+    const itemNode = itemId ? included.find((n) => n.id === itemId) : null;
+    const itemTitle =
+      itemNode && typeof itemNode.attributes.title === "string"
+        ? (itemNode.attributes.title as string)
+        : null;
+    if (lengthSec == null && itemNode && typeof itemNode.attributes.length === "number") {
+      lengthSec = itemNode.attributes.length as number;
+    }
+
+    return { isLive: true, itemTitle, lengthSec, liveStartAt, serverNow };
   }
 }
 

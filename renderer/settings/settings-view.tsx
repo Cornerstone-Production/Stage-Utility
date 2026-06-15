@@ -423,6 +423,15 @@ export function SettingsView() {
     }
   }
 
+  async function handleSetDisplayKind(id: string, kind: DisplayKind) {
+    try {
+      const next = await ipc<StageState>("displays:setKind", { id, kind });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to change display type: ${String(err)}`);
+    }
+  }
+
   async function handleOpenDisplayWindow(id: string) {
     const url = `${window.location.origin}/${encodeURIComponent(id)}`;
     window.open(url, `display-${id}`);
@@ -447,6 +456,7 @@ export function SettingsView() {
     handleAddDisplay,
     handleRenameDisplay,
     handleRemoveDisplay,
+    handleSetDisplayKind,
     handleOpenDisplayWindow,
     handleDragEnd,
     sensors,
