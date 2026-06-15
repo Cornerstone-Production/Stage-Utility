@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# uninstall.sh — Remove the Stage Monitor systemd service.
+# uninstall.sh — Remove the Stage Utility systemd service.
 #
 #     sudo ./scripts/uninstall.sh
 #
@@ -9,7 +9,7 @@
 #
 set -euo pipefail
 
-SERVICE_NAME="stage-monitor"
+SERVICE_NAME="stage-utility"
 UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 
 log() { printf '\033[1;36m[uninstall]\033[0m %s\n' "$*"; }
@@ -21,7 +21,7 @@ command -v systemctl >/dev/null 2>&1 || die "systemctl not found; nothing to uni
 # Surface the data dir from the unit before deleting it.
 DATA_DIR=""
 if [[ -f "${UNIT_PATH}" ]]; then
-  DATA_DIR="$(sed -n 's/^Environment=STAGE_MONITOR_DATA=//p' "${UNIT_PATH}" | head -n1)"
+  DATA_DIR="$(sed -n 's/^Environment=STAGE_UTILITY_DATA=//p' "${UNIT_PATH}" | head -n1)"
 fi
 
 if systemctl list-unit-files | grep -q "^${SERVICE_NAME}.service"; then

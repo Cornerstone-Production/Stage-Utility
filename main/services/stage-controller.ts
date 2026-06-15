@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { DisplayInfo, PlanDTO, ServiceTypeDTO, Slot, SlotPreset, StageState, TeamMemberDTO } from "../types/stage.js";
+import type { DisplayInfo, PlanDTO, ServiceTypeDTO, Slot, SlotPreset, StageState, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -30,6 +30,10 @@ export class StageController {
     remoteUrl: null,
     showQr: true,
     allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
+    appName: "Mic Utility",
+    appLogo: null,
+    appLogoMonochrome: true,
+    emptySlotLogo: null,
   };
 
   // Live device statuses keyed by channelId.
@@ -76,6 +80,10 @@ export class StageController {
       displays,
       showQr,
       allowedServiceTypeIds,
+      appName: settings.appName ?? "Mic Utility",
+      appLogo: settings.appLogo ?? null,
+      appLogoMonochrome: settings.appLogoMonochrome ?? true,
+      emptySlotLogo: settings.emptySlotLogo ?? null,
     };
 
     // Load raw slots for every display.
@@ -180,6 +188,12 @@ export class StageController {
   async listPlans(serviceTypeId: string): Promise<PlanDTO[]> {
     this.assertPco();
     return pcoService.listUpcomingPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId);
+  }
+
+  async listTeamPositions(): Promise<TeamPositionDTO[]> {
+    this.assertPco();
+    if (!this.state.serviceTypeId) return [];
+    return pcoService.listTeamPositions(this.pcoAppId!, this.pcoSecret!, this.state.serviceTypeId);
   }
 
   async setPlan(id: string): Promise<StageState> {
@@ -362,6 +376,71 @@ export class StageController {
     await settingsStore.patch({ showQr: show });
     this.broadcast();
     return this.state;
+  }
+
+  // ── Branding (app name + logo) ────────────────────────────────────────
+
+  /** Update branding. Any field may be omitted to leave it unchanged; pass
+   *  `logo: null` to clear the logo. The original image + crop transform are
+   *  persisted to settings only (not broadcast) so the editor can retain zoom. */
+  async setBranding(partial: {
+    name?: string;
+    logo?: string | null;
+    monochrome?: boolean;
+    logoOriginal?: string | null;
+    logoCrop?: { scale: number; x: number; y: number } | null;
+    emptyLogo?: string | null;
+    emptyLogoOriginal?: string | null;
+    emptyLogoCrop?: { scale: number; x: number; y: number } | null;
+  }): Promise<StageState> {
+    // Fields that live in both the broadcast state and settings.
+    const stateNext: Partial<Pick<StageState, "appName" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo">> = {};
+    if (typeof partial.name === "string") stateNext.appName = partial.name.trim() || "Mic Utility";
+    if (partial.logo !== undefined) stateNext.appLogo = partial.logo;
+    if (typeof partial.monochrome === "boolean") stateNext.appLogoMonochrome = partial.monochrome;
+    if (partial.emptyLogo !== undefined) stateNext.emptySlotLogo = partial.emptyLogo;
+
+    // Settings-only fields (originals + crops), never broadcast.
+    const settingsNext: Record<string, unknown> = { ...stateNext };
+    if (partial.logoOriginal !== undefined) settingsNext.appLogoOriginal = partial.logoOriginal;
+    if (partial.logoCrop !== undefined) settingsNext.appLogoCrop = partial.logoCrop;
+    if (partial.emptyLogoOriginal !== undefined) settingsNext.emptySlotLogoOriginal = partial.emptyLogoOriginal;
+    if (partial.emptyLogoCrop !== undefined) settingsNext.emptySlotLogoCrop = partial.emptyLogoCrop;
+    // Clearing an image also clears its editing source.
+    if (partial.logo === null) {
+      settingsNext.appLogoOriginal = null;
+      settingsNext.appLogoCrop = null;
+    }
+    if (partial.emptyLogo === null) {
+      settingsNext.emptySlotLogoOriginal = null;
+      settingsNext.emptySlotLogoCrop = null;
+    }
+
+    console.log(`[stage-controller] setBranding`, {
+      name: stateNext.appName,
+      logo: partial.logo === undefined ? "(unchanged)" : partial.logo ? "(set)" : "(cleared)",
+      monochrome: stateNext.appLogoMonochrome,
+      emptyLogo: partial.emptyLogo === undefined ? "(unchanged)" : partial.emptyLogo ? "(set)" : "(cleared)",
+    });
+    this.state = { ...this.state, ...stateNext };
+    await settingsStore.patch(settingsNext);
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Original upload + saved crop transform for a brand image, for re-editing. */
+  async getBrandingSource(target: "app" | "empty" = "app"): Promise<{
+    original: string | null;
+    crop: { scale: number; x: number; y: number } | null;
+  }> {
+    const settings = await settingsStore.load();
+    if (target === "empty") {
+      return {
+        original: settings.emptySlotLogoOriginal ?? null,
+        crop: settings.emptySlotLogoCrop ?? null,
+      };
+    }
+    return { original: settings.appLogoOriginal ?? null, crop: settings.appLogoCrop ?? null };
   }
 
   // ── Presets ───────────────────────────────────────────────────────────

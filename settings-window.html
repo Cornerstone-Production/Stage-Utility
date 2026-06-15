@@ -4,11 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/app-icon.png" />
-    <title>Stage Monitor — Settings</title>
+    <title>Mic Utility — Settings</title>
     <script>
-      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-        document.documentElement.classList.add("dark");
-      }
+      // Apply the saved theme before paint (no flash). Falls back to the OS
+      // preference when the user hasn't chosen one. Mirrors the key used by
+      // the in-app toggle (THEME_STORAGE_KEY in settings-view.tsx).
+      (function () {
+        var saved = null;
+        try { saved = localStorage.getItem("stage-utility-theme"); } catch (e) {}
+        var dark = saved
+          ? saved === "dark"
+          : window.matchMedia("(prefers-color-scheme: dark)").matches;
+        if (dark) document.documentElement.classList.add("dark");
+      })();
     </script>
     <style>
       :root {
@@ -16,6 +24,13 @@
       }
       .dark {
         --background: hsl(0 0% 0% / 0.4);
+      }
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
       }
       body {
         background: var(--background);

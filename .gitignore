@@ -24,3 +24,6 @@ npm-debug.log*
 # Glaze memory/internal
 .mic-display-memory/
 .mcp.json
+
+# Claude Code local config
+.claude/

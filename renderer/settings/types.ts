@@ -9,7 +9,8 @@ export type SectionId =
   | "displays"
   | "slots"
   | "integrations"
-  | "connect";
+  | "connect"
+  | "branding";
 
 export interface SectionItem {
   id: SectionId;
@@ -31,6 +32,16 @@ export interface SectionHandlers {
   handleRefresh: () => Promise<void>;
   handleShowQrChange: (show: boolean) => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
+  handleSetBranding: (partial: {
+    name?: string;
+    logo?: string | null;
+    monochrome?: boolean;
+    logoOriginal?: string | null;
+    logoCrop?: { scale: number; x: number; y: number } | null;
+    emptyLogo?: string | null;
+    emptyLogoOriginal?: string | null;
+    emptyLogoCrop?: { scale: number; x: number; y: number } | null;
+  }) => Promise<void>;
   updateSlot: (idx: number, updated: Slot) => void;
   addSlot: () => void;
   removeSlot: (idx: number) => void;
@@ -51,6 +62,7 @@ export interface SectionProps {
   serviceTypes: ServiceTypeDTO[];
   plans: PlanDTO[];
   wirelessChannels: WirelessChannel[];
+  teamPositions: TeamPositionDTO[];
   presets: SlotPreset[];
   selectedDisplayId: string;
   setSelectedDisplayId: (id: string) => void;

@@ -2,6 +2,7 @@ import { useState, useEffect, Component } from "react";
 import type { ReactNode, ErrorInfo } from "react";
 import { SlotPanel } from "../components/slot-panel";
 import { QrHint } from "../components/qr-hint";
+import { BrandLogo } from "../components/brand-logo";
 import { invoke, onNotification } from "../lib/api";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 
@@ -46,6 +47,10 @@ interface KioskTopBarProps {
   remoteUrl: string | null;
   /** Name of the current display, shown only when there are multiple displays */
   displayName?: string | null;
+  /** Customizable brand name + logo (data URL). */
+  appName: string;
+  appLogo: string | null;
+  appLogoMonochrome: boolean;
 }
 
 function KioskTopBar({
@@ -55,6 +60,9 @@ function KioskTopBar({
   showQr,
   remoteUrl,
   displayName,
+  appName,
+  appLogo,
+  appLogoMonochrome,
 }: KioskTopBarProps) {
   const service = serviceTypeName ?? "—";
   const event = planTitle ?? "No plan";
@@ -74,16 +82,36 @@ function KioskTopBar({
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 8px rgba(0,0,0,0.40)",
       } as React.CSSProperties}
     >
-      {displayName && (
-        <div className="shrink-0 ml-4 relative z-10">
+      {/* Brand + display name — one centered row so logo, name, divider and
+          display name all share the same vertical center. */}
+      <div className="shrink-0 ml-3 flex items-center gap-2.5 relative z-10">
+        <div className="flex items-center gap-2 text-white/70">
+          {appLogo && (
+            <BrandLogo
+              logo={appLogo}
+              monochrome={appLogoMonochrome}
+              className="size-5 rounded select-none"
+            />
+          )}
           <span
-            className="text-caption1 font-medium text-white/40 select-none truncate"
+            className="text-caption1 font-semibold select-none truncate"
             style={{ letterSpacing: "0.02em" }}
           >
-            {displayName}
+            {appName}
           </span>
         </div>
-      )}
+        {displayName && (
+          <>
+            <span className="w-px h-4 bg-white/15 shrink-0" aria-hidden="true" />
+            <span
+              className="text-caption1 font-medium text-white/40 select-none truncate"
+              style={{ letterSpacing: "0.02em" }}
+            >
+              {displayName}
+            </span>
+          </>
+        )}
+      </div>
 
       <div className="absolute inset-0 flex items-center justify-center px-32 pointer-events-none">
         <span
@@ -124,6 +152,9 @@ function KioskNotConfigured({ state, displayName }: { state: StageState; display
         showQr={state.showQr}
         remoteUrl={state.remoteUrl}
         displayName={displayName}
+        appName={state.appName}
+        appLogo={state.appLogo}
+        appLogoMonochrome={state.appLogoMonochrome}
       />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
         <MonitorIcon className="size-12 text-gray-7" />
@@ -146,6 +177,9 @@ function KioskEmpty({ state, displayName }: { state: StageState; displayName: st
         showQr={state.showQr}
         remoteUrl={state.remoteUrl}
         displayName={displayName}
+        appName={state.appName}
+        appLogo={state.appLogo}
+        appLogoMonochrome={state.appLogoMonochrome}
       />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
         <MonitorIcon className="size-12 text-gray-7" />
@@ -273,12 +307,15 @@ export function StageView() {
           showQr={state.showQr}
           remoteUrl={state.remoteUrl}
           displayName={displayName}
+          appName={state.appName}
+          appLogo={state.appLogo}
+          appLogoMonochrome={state.appLogoMonochrome}
         />
         <div className="flex flex-1 min-h-0">
           {columns.map((column, ci) => (
             <div key={column[0]?.id ?? ci} className="flex flex-1 min-w-0 flex-col">
               {column.map((slot) => (
-                <SlotPanel key={slot.id} slot={slot} />
+                <SlotPanel key={slot.id} slot={slot} emptySlotLogo={state.emptySlotLogo} />
               ))}
             </div>
           ))}
