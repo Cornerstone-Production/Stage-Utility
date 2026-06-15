@@ -415,21 +415,26 @@ export class RemoteServer {
     if (method === "POST" && pathname === "/api/displays") {
       const body = await readBody(req) as Record<string, unknown>;
       const name = typeof body.name === "string" ? body.name : undefined;
-      const state = await stageController.addDisplay(name);
+      const kind = body.kind === "dashboard" ? "dashboard" : "slots";
+      const state = await stageController.addDisplay(name, kind);
       json(res, state, 201);
       return;
     }
 
-    // PATCH /api/displays/:id
+    // PATCH /api/displays/:id — accepts { name? } and/or { kind? }
     const displayPatchMatch = pathname.match(/^\/api\/displays\/([^/]+)$/);
     if (method === "PATCH" && displayPatchMatch) {
       const id = displayPatchMatch[1];
       const body = await readBody(req) as Record<string, unknown>;
-      if (typeof body.name !== "string") {
-        error(res, "body.name (string) required");
+      const hasName = typeof body.name === "string";
+      const hasKind = body.kind === "dashboard" || body.kind === "slots";
+      if (!hasName && !hasKind) {
+        error(res, "body.name (string) or body.kind ('slots'|'dashboard') required");
         return;
       }
-      const state = await stageController.renameDisplay(id, body.name);
+      let state = stageController.getState();
+      if (hasName) state = await stageController.renameDisplay(id, body.name as string);
+      if (hasKind) state = await stageController.setDisplayKind(id, body.kind as "slots" | "dashboard");
       json(res, state);
       return;
     }

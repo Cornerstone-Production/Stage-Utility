@@ -1,8 +1,36 @@
 // Shared stage types — frontend mirrors these shapes exactly.
 
+/** What a display renders: the slot grid (default) or the info dashboard. */
+export type DisplayKind = "slots" | "dashboard";
+
 export interface DisplayInfo {
   id: string;
   name: string;
+  /** Defaults to "slots" when absent (back-compat with older settings). */
+  kind?: DisplayKind;
+}
+
+/** Live PCO Services Live countdown for the current item (pushed on "pco:live"). */
+export interface PcoLiveDTO {
+  isLive: boolean;
+  itemTitle: string | null;
+  /** Planned length of the current item, in seconds. */
+  lengthSec: number | null;
+  /** ISO timestamp the current item went live (countdown anchor). */
+  liveStartAt: string | null;
+  /** Server clock at send time (ISO) so the client can correct for skew. */
+  serverNow: string;
+}
+
+/** Live ProPresenter status (pushed on "propresenter:status"). */
+export interface ProPresenterStatusDTO {
+  connected: boolean;
+  currentItem: string | null;
+  nextItem: string | null;
+  /** 1-based index of the current slide within the active presentation. */
+  slideIndex: number | null;
+  slideCount: number | null;
+  slidesRemaining: number | null;
 }
 
 export interface ServiceTypeDTO {

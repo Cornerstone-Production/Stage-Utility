@@ -4,6 +4,7 @@ import { SlotPanel } from "../components/slot-panel";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useStageState } from "./use-stage-state";
+import { DashboardView } from "./dashboard-view";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
@@ -228,6 +229,15 @@ export function StageView() {
   const multiDisplay = (state.displays?.length ?? 0) > 1;
   const currentDisplay = state.displays?.find((d) => d.id === displayId) ?? null;
   const displayName = multiDisplay ? (currentDisplay?.name ?? displayId) : null;
+
+  // Dashboard-kind displays render an entirely different view.
+  if (currentDisplay?.kind === "dashboard") {
+    return (
+      <StageErrorBoundary>
+        <DashboardView displayId={displayId} />
+      </StageErrorBoundary>
+    );
+  }
 
   if (!state.pcoConfigured) {
     return (

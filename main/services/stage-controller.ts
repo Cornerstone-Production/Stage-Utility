@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { DisplayInfo, PlanDTO, ServiceTypeDTO, Slot, SlotPreset, StageState, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
+import type { DisplayInfo, PcoLiveDTO, PlanDTO, ServiceTypeDTO, Slot, SlotPreset, StageState, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -194,6 +194,22 @@ export class StageController {
     this.assertPco();
     if (!this.state.serviceTypeId) return [];
     return pcoService.listTeamPositions(this.pcoAppId!, this.pcoSecret!, this.state.serviceTypeId);
+  }
+
+  /**
+   * Fetch the PCO Services Live countdown for the active plan. Returns null when
+   * PCO isn't configured or no plan/service-type is selected (nothing to poll).
+   * Used by the live poller; never throws for the not-configured case.
+   */
+  async fetchLive(): Promise<PcoLiveDTO | null> {
+    if (!this.pcoAppId || !this.pcoSecret) return null;
+    if (!this.state.serviceTypeId || !this.state.planId) return null;
+    return pcoService.getLive(
+      this.pcoAppId,
+      this.pcoSecret,
+      this.state.serviceTypeId,
+      this.state.planId,
+    );
   }
 
   async setPlan(id: string): Promise<StageState> {
@@ -496,7 +512,7 @@ export class StageController {
 
   // ── Displays ──────────────────────────────────────────────────────────
 
-  async addDisplay(name?: string): Promise<StageState> {
+  async addDisplay(name?: string, kind: DisplayInfo["kind"] = "slots"): Promise<StageState> {
     // Sequential IDs: display-1, display-2, display-3, ...
     const existingNums = this.state.displays
       .map((d) => parseInt(d.id.replace("display-", ""), 10))
@@ -504,9 +520,9 @@ export class StageController {
     const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 2;
     const id = `display-${nextNum}`;
     const displayName = name?.trim() || `Display ${nextNum}`;
-    const newDisplay: DisplayInfo = { id, name: displayName };
+    const newDisplay: DisplayInfo = { id, name: displayName, kind };
 
-    console.log(`[stage-controller] addDisplay id=${id} name="${displayName}"`);
+    console.log(`[stage-controller] addDisplay id=${id} name="${displayName}" kind=${kind}`);
 
     const displays = [...this.state.displays, newDisplay];
     this.state = { ...this.state, displays };
@@ -530,6 +546,18 @@ export class StageController {
       throw new Error(`displays:rename — display ${id} not found`);
     }
     console.log(`[stage-controller] renameDisplay id=${id} name="${trimmedName}"`);
+    this.state = { ...this.state, displays };
+    await settingsStore.patch({ displays });
+    this.broadcast();
+    return this.state;
+  }
+
+  async setDisplayKind(id: string, kind: DisplayInfo["kind"]): Promise<StageState> {
+    if (!this.state.displays.find((d) => d.id === id)) {
+      throw new Error(`displays:setKind — display ${id} not found`);
+    }
+    const displays = this.state.displays.map((d) => (d.id === id ? { ...d, kind } : d));
+    console.log(`[stage-controller] setDisplayKind id=${id} kind=${kind}`);
     this.state = { ...this.state, displays };
     await settingsStore.patch({ displays });
     this.broadcast();

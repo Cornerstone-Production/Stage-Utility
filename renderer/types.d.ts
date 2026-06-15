@@ -97,9 +97,32 @@ interface Slot {
   stackWithPrevious?: boolean;
 }
 
+type DisplayKind = "slots" | "dashboard";
+
 interface DisplayInfo {
   id: string;
   name: string;
+  /** Defaults to "slots" when absent. */
+  kind?: DisplayKind;
+}
+
+/** Live PCO Services Live countdown for the current item (SSE "pco:live"). */
+interface PcoLiveDTO {
+  isLive: boolean;
+  itemTitle: string | null;
+  lengthSec: number | null;
+  liveStartAt: string | null;
+  serverNow: string;
+}
+
+/** Live ProPresenter status (SSE "propresenter:status"). */
+interface ProPresenterStatusDTO {
+  connected: boolean;
+  currentItem: string | null;
+  nextItem: string | null;
+  slideIndex: number | null;
+  slideCount: number | null;
+  slidesRemaining: number | null;
 }
 
 interface StageState {

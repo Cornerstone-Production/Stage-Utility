@@ -4,6 +4,7 @@
 
 import type { IntegrationDescriptor, IntegrationState } from "../types/integrations.js";
 import { broadcast } from "./broadcaster.js";
+import { propresenterService } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
 import { settingsStore } from "./settings-store.js";
 import { stageController } from "./stage-controller.js";
@@ -73,10 +74,33 @@ const COMPANION_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+// ProPresenter integration — reads live slide/item status from the 7.9+ local
+// HTTP API (LAN, no auth). Powers the dashboard display.
+const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
+  id: "propresenter",
+  kind: "control",
+  label: "ProPresenter",
+  configSchema: [
+    {
+      key: "host",
+      label: "ProPresenter Host",
+      type: "text",
+      placeholder: "192.168.1.100",
+    },
+    {
+      key: "port",
+      label: "API Port",
+      type: "number",
+      placeholder: "1025",
+    },
+  ],
+};
+
 const DESCRIPTORS: IntegrationDescriptor[] = [
   PCO_DESCRIPTOR,
   WIRELESS_DESCRIPTOR,
   COMPANION_DESCRIPTOR,
+  PROPRESENTER_DESCRIPTOR,
 ];
 
 // Keys that are secrets for each integration id.
@@ -84,6 +108,7 @@ const SECRET_KEYS: Record<string, string[]> = {
   "planning-center": ["secret"],
   wireless: [],
   companion: [],
+  propresenter: [],
 };
 
 class IntegrationManager {
@@ -126,6 +151,9 @@ class IntegrationManager {
     await wirelessManager.init();
     // Reflect initial summary state in the master wireless IntegrationState.
     this.refreshWirelessSummary();
+
+    // Start the ProPresenter poller if it's enabled + configured.
+    this.applyPropresenter();
 
     console.log("[integration-manager] init complete", {
       integrations: Array.from(this.states.keys()),
@@ -216,6 +244,10 @@ class IntegrationManager {
       }
     }
 
+    if (id === "propresenter") {
+      this.applyPropresenter();
+    }
+
     this.broadcastStates();
     return this.states.get(id)!;
   }
@@ -240,6 +272,10 @@ class IntegrationManager {
     if (id === "planning-center" && !enabled) {
       stageController.setPcoCredentials(null, null);
       this.setConnectionState("planning-center", "disconnected", null);
+    }
+
+    if (id === "propresenter") {
+      this.applyPropresenter();
     }
 
     this.broadcastStates();
@@ -280,6 +316,21 @@ class IntegrationManager {
         return { ok: true, message: "Companion endpoints available at /api/*" };
       }
 
+      if (id === "propresenter") {
+        const { host, port } = this.getPropresenterTarget();
+        if (!host || !port) {
+          return { ok: false, message: "Host and Port are required" };
+        }
+        const result = await propresenterService.test(host, port);
+        this.setConnectionState(
+          "propresenter",
+          result.ok ? "connected" : "error",
+          result.message ?? null,
+        );
+        this.broadcastStates();
+        return result;
+      }
+
       return { ok: false, message: `No test available for integration: ${id}` };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -307,6 +358,32 @@ class IntegrationManager {
     const raw = state?.config["refreshIntervalMin"];
     const min = typeof raw === "string" ? parseInt(raw, 10) : typeof raw === "number" ? raw : NaN;
     return Number.isFinite(min) && min > 0 ? min * 60 * 1000 : 60 * 60 * 1000;
+  }
+
+  private getPropresenterTarget(): { host: string | null; port: number | null } {
+    const cfg = this.states.get("propresenter")?.config ?? {};
+    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
+    const rawPort = cfg.port;
+    const port =
+      typeof rawPort === "number"
+        ? rawPort
+        : typeof rawPort === "string" && rawPort.trim()
+          ? parseInt(rawPort, 10)
+          : NaN;
+    return { host, port: Number.isFinite(port) && port > 0 ? port : null };
+  }
+
+  /** Start/stop the ProPresenter poller to match enabled + configured state. */
+  private applyPropresenter(): void {
+    const enabled = this.states.get("propresenter")?.enabled ?? false;
+    const { host, port } = this.getPropresenterTarget();
+    if (enabled && host && port) {
+      propresenterService.configure(host, port);
+      this.setConnectionState("propresenter", "connecting", `Polling ${host}:${port}`);
+    } else {
+      propresenterService.stop();
+      this.setConnectionState("propresenter", "disconnected", null);
+    }
   }
 
   private async getPcoAppId(): Promise<string | null> {
