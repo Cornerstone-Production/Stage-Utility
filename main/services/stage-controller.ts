@@ -30,7 +30,7 @@ export class StageController {
     remoteUrl: null,
     showQr: true,
     allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
-    appName: "Mic Utility",
+    appName: "Stage Utility",
     appLogo: null,
     appLogoMonochrome: true,
     emptySlotLogo: null,
@@ -80,7 +80,7 @@ export class StageController {
       displays,
       showQr,
       allowedServiceTypeIds,
-      appName: settings.appName ?? "Mic Utility",
+      appName: settings.appName ?? "Stage Utility",
       appLogo: settings.appLogo ?? null,
       appLogoMonochrome: settings.appLogoMonochrome ?? true,
       emptySlotLogo: settings.emptySlotLogo ?? null,
@@ -395,7 +395,7 @@ export class StageController {
   }): Promise<StageState> {
     // Fields that live in both the broadcast state and settings.
     const stateNext: Partial<Pick<StageState, "appName" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo">> = {};
-    if (typeof partial.name === "string") stateNext.appName = partial.name.trim() || "Mic Utility";
+    if (typeof partial.name === "string") stateNext.appName = partial.name.trim() || "Stage Utility";
     if (partial.logo !== undefined) stateNext.appLogo = partial.logo;
     if (typeof partial.monochrome === "boolean") stateNext.appLogoMonochrome = partial.monochrome;
     if (partial.emptyLogo !== undefined) stateNext.emptySlotLogo = partial.emptyLogo;
