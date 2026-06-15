@@ -47,9 +47,6 @@ if (stageController.getState().pcoConfigured) {
   }
 }
 
-// Keep the plan fresh — re-fetch from PCO every hour.
-stageController.startAutoRefresh();
-
 // Start the LAN HTTP server (also wires SSE broadcast listener internally).
 await remoteServer.start();
 await deviceManager.start();
