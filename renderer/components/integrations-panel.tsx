@@ -21,7 +21,7 @@ import {
   Separator,
   toast,
 } from "../components/ui";
-import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 
 // ---- helpers ----------------------------------------------------------------
@@ -149,6 +149,7 @@ function IntegrationCard({ descriptor, state, onStateChange }: IntegrationCardPr
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isTogglingEnabled, setIsTogglingEnabled] = useState(false);
 
   function setField(key: string, value: unknown) {
@@ -177,6 +178,18 @@ function IntegrationCard({ descriptor, state, onStateChange }: IntegrationCardPr
       toast.error(`Failed to save: ${String(err)}`);
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleRefresh() {
+    setIsRefreshing(true);
+    try {
+      await ipc("stage:refresh");
+      toast.success("Plan refreshed from PCO.");
+    } catch (err) {
+      toast.error(`Refresh failed: ${String(err)}`);
+    } finally {
+      setIsRefreshing(false);
     }
   }
 
@@ -285,6 +298,14 @@ function IntegrationCard({ descriptor, state, onStateChange }: IntegrationCardPr
           {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
           Test connection
         </Button>
+        {descriptor.id === "planning-center" && (
+          <Button variant="transparent" size="small" onClick={handleRefresh} disabled={isRefreshing}>
+            {isRefreshing
+              ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" />
+              : <RefreshCwIcon className="size-3.5 text-gray-9" />}
+            Refresh now
+          </Button>
+        )}
         {testResult !== null && (
           <span
             className={cn(
