@@ -27,6 +27,19 @@ const PCO_DESCRIPTOR: IntegrationDescriptor = {
       type: "password",
       placeholder: "your-secret",
     },
+    {
+      key: "refreshIntervalMin",
+      label: "Refresh interval",
+      type: "select",
+      placeholder: "How often to pull the latest plan from PCO.",
+      options: [
+        { value: "5", label: "5 minutes" },
+        { value: "15", label: "15 minutes" },
+        { value: "30", label: "30 minutes" },
+        { value: "60", label: "1 hour" },
+        { value: "120", label: "2 hours" },
+      ],
+    },
   ],
 };
 
@@ -105,6 +118,9 @@ class IntegrationManager {
     // Apply PCO credentials to stage controller if already configured.
     await this.applyPcoCredentials();
 
+    // Start auto-refresh with the persisted interval (defaults to 60 min).
+    stageController.startAutoRefresh(this.getPcoRefreshIntervalMs());
+
     // Initialize wireless connections manager (loads persisted connections,
     // connects enabled real-driver ones).
     await wirelessManager.init();
@@ -177,6 +193,8 @@ class IntegrationManager {
     // Side-effects for specific integrations.
     if (id === "planning-center") {
       await this.applyPcoCredentials();
+      // Restart auto-refresh with the (possibly updated) interval.
+      stageController.startAutoRefresh(this.getPcoRefreshIntervalMs());
       // Validate the credentials against PCO and load the lineup so the kiosk
       // updates immediately. A failure here reports an error status but never
       // fails the save (the credentials are already persisted).
@@ -282,6 +300,13 @@ class IntegrationManager {
     if (state) {
       this.states.set(id, { ...state, connection, message });
     }
+  }
+
+  private getPcoRefreshIntervalMs(): number {
+    const state = this.states.get("planning-center");
+    const raw = state?.config["refreshIntervalMin"];
+    const min = typeof raw === "string" ? parseInt(raw, 10) : typeof raw === "number" ? raw : NaN;
+    return Number.isFinite(min) && min > 0 ? min * 60 * 1000 : 60 * 60 * 1000;
   }
 
   private async getPcoAppId(): Promise<string | null> {

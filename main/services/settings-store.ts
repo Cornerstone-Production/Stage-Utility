@@ -49,7 +49,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   displays: [{ id: "display-1", name: "Display 1" }],
   allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
   wirelessMeterRateMs: 1000,
-  appName: "Mic Utility",
+  appName: "Stage Utility",
   appLogo: null,
   appLogoMonochrome: true,
   appLogoOriginal: null,

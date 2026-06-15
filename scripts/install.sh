@@ -60,15 +60,28 @@ if [[ "${NODE_MAJOR}" -lt "${MIN_NODE_MAJOR}" ]]; then
 fi
 log "Node $(node -v) at ${NODE_BIN} — OK"
 
-# ── 2. Build ──────────────────────────────────────────────────────────────────
+# ── 2. Stop existing server (free the port before rebuilding) ─────────────────
 log "Repo: ${REPO_ROOT}"
 cd "${REPO_ROOT}"
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
+  log "Stopping ${SERVICE_NAME} service..."
+  systemctl stop "${SERVICE_NAME}"
+fi
+# Also kill any stray process holding the port (e.g. a manual server start).
+STRAY_PID="$(lsof -ti :${PORT} 2>/dev/null || true)"
+if [[ -n "${STRAY_PID}" ]]; then
+  warn "Killing stray process on port ${PORT} (PID ${STRAY_PID})..."
+  kill "${STRAY_PID}" 2>/dev/null || true
+  sleep 1
+fi
+
+# ── 3. Build ──────────────────────────────────────────────────────────────────
 log "Installing dependencies (npm ci)..."
 npm ci
 log "Building the web UI (npm run build)..."
 npm run build
 
-# ── 3. Data directory ─────────────────────────────────────────────────────────
+# ── 4. Data directory ─────────────────────────────────────────────────────────
 log "Data directory: ${DATA_DIR} (owner: ${SERVICE_USER})"
 mkdir -p "${DATA_DIR}"
 if id "${SERVICE_USER}" >/dev/null 2>&1; then
@@ -78,7 +91,7 @@ else
   warn "User '${SERVICE_USER}' does not exist; skipping chown. Pass --user <name> for a real user."
 fi
 
-# ── 4. systemd service ────────────────────────────────────────────────────────
+# ── 5. systemd service ────────────────────────────────────────────────────────
 if [[ "${INSTALL_SERVICE}" -eq 0 ]]; then
   log "Skipping systemd setup (--no-service)."
   log "Start manually with:  STAGE_UTILITY_DATA=${DATA_DIR} npm start"
@@ -116,14 +129,15 @@ RestartSec=5
 WantedBy=multi-user.target
 UNIT
 
-log "Enabling and starting the service..."
+log "Enabling and (re)starting the service..."
 systemctl daemon-reload
-systemctl enable --now "${SERVICE_NAME}"
+systemctl enable "${SERVICE_NAME}"
+systemctl restart "${SERVICE_NAME}"
 
 sleep 1
 systemctl --no-pager --lines=0 status "${SERVICE_NAME}" || true
 
-# ── 5. Report ─────────────────────────────────────────────────────────────────
+# ── 6. Report ─────────────────────────────────────────────────────────────────
 LAN_IP="$(node -e 'const n=require("os").networkInterfaces();for(const k in n)for(const a of n[k])if(a.family==="IPv4"&&!a.internal){console.log(a.address);process.exit(0)}' 2>/dev/null || echo "<server-ip>")"
 echo
 log "Stage Utility is running."

@@ -84,6 +84,20 @@ git pull
 sudo ./scripts/install.sh    # re-installs deps, rebuilds, restarts
 ```
 
+## Updating
+
+```bash
+git pull
+sudo ./scripts/install.sh   # rebuilds and restarts; the data dir is never touched
+```
+
+All configuration lives in the **data directory**, which is outside the repo, so
+updates never overwrite it. If the data dir was ever renamed across releases
+(e.g. an older `stage-monitor` / `stage-display` install), the server copies the
+most-recent legacy dir's contents forward on first start — including
+`encryption.key`, so secrets still decrypt. The old dir is left intact; check the
+startup log (`journalctl -u stage-utility`) for a `recovered config` line.
+
 ## Backups
 
 Back up the **data directory** (`/var/lib/stage-utility` by default). It holds

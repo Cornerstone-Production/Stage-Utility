@@ -424,7 +424,7 @@ export function SettingsView() {
   }
 
   async function handleOpenDisplayWindow(id: string) {
-    const url = `${window.location.origin}/?display=${encodeURIComponent(id)}`;
+    const url = `${window.location.origin}/${encodeURIComponent(id)}`;
     window.open(url, `display-${id}`);
   }
 

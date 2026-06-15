@@ -96,8 +96,18 @@ export class RemoteServer {
 
   /** Try to serve a file from the Vite renderer build. Returns true if handled. */
   private async tryServeStatic(pathname: string, res: http.ServerResponse): Promise<boolean> {
-    // Map URL path to filesystem path inside build/renderer/
-    const urlPath = pathname === "/" ? "/index.html" : pathname;
+    // Clean-URL entry points → built HTML files:
+    //   /                     → kiosk (index.html)
+    //   /settings             → settings panel (settings-window.html)
+    //   /display-1, /foo, …   → fall through to the SPA fallback (kiosk)
+    let urlPath: string;
+    if (pathname === "/" || pathname === "/index.html") {
+      urlPath = "/index.html";
+    } else if (pathname === "/settings" || pathname === "/settings/") {
+      urlPath = "/settings-window.html";
+    } else {
+      urlPath = pathname;
+    }
     const candidate = path.join(RENDERER_BUILD_DIR, urlPath.replace(/^\//, ""));
 
     try {

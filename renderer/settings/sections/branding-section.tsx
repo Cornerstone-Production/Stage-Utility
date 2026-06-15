@@ -140,7 +140,7 @@ export function BrandingSection({
               onKeyDown={(e) => {
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
               }}
-              placeholder="Mic Utility"
+              placeholder="Stage Utility"
               className="w-60"
               aria-label="App name"
             />

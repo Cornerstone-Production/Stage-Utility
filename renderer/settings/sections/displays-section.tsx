@@ -28,7 +28,7 @@ function DisplayRow({ display, isFirst, canRemove, onRename, onOpenWindow, onRem
     }
   }
 
-  const displayUrl = `${window.location.origin}/?display=${encodeURIComponent(display.id)}`;
+  const displayUrl = `${window.location.origin}/${encodeURIComponent(display.id)}`;
 
   return (
     <div className={`flex flex-col gap-1.5 py-2${isFirst ? "" : " border-t border-gray-a3"}`}>
