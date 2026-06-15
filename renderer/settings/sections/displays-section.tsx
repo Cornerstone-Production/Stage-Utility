@@ -65,7 +65,7 @@ function DisplayRow({ display, isFirst, canRemove, onRename, onSetKind, onOpenWi
       {/* Kind toggle + URL hint */}
       <div className="ml-5 flex items-center gap-2">
         <div className="inline-flex rounded-md border border-gray-a6 overflow-hidden shrink-0">
-          {(["slots", "dashboard"] as const).map((k) => {
+          {(["slots", "dashboard", "stage"] as const).map((k) => {
             const active = (display.kind ?? "slots") === k;
             return (
               <button
@@ -76,7 +76,7 @@ function DisplayRow({ display, isFirst, canRemove, onRename, onSetKind, onOpenWi
                   active ? "bg-blue-9 text-white" : "text-gray-10 hover:bg-gray-a3"
                 }`}
               >
-                {k}
+                {k === "stage" ? "Stage" : k}
               </button>
             );
           })}

@@ -278,12 +278,18 @@ class PcoService {
       return { isLive: false, itemTitle: null, lengthSec: null, liveStartAt: null, serverNow };
     }
 
-    // Length: prefer the ItemTime's own length; fall back to the related Item's
-    // length (the one undocumented spot — verified to live on ItemTime in practice).
-    let lengthSec =
-      typeof it.attributes.length === "number" ? (it.attributes.length as number) : null;
+    // Effective length = length + live length_offset (operator's live adjustment).
+    // A length of 0 (or missing) means the item has NO fixed length in the plan —
+    // return null so the client shows elapsed (count-up) instead of a bogus
+    // "0 − elapsed" countdown that runs negative. (Verified: ItemTime.length is the
+    // source; items without a set length come through as 0.)
+    const rawLen = it.attributes.length;
+    const offset = it.attributes.length_offset;
+    const baseLen = typeof rawLen === "number" ? rawLen : 0;
+    const adjLen = baseLen + (typeof offset === "number" ? offset : 0);
+    const lengthSec = adjLen > 0 ? adjLen : null;
 
-    // Resolve the item title (and length fallback) via the ItemTime's item relationship.
+    // Resolve the item title via the ItemTime's item relationship.
     const itemRef = it.relationships?.["item"]?.data;
     const itemId = itemRef && !Array.isArray(itemRef) ? itemRef.id : null;
     const itemNode = itemId ? included.find((n) => n.id === itemId) : null;
@@ -291,9 +297,6 @@ class PcoService {
       itemNode && typeof itemNode.attributes.title === "string"
         ? (itemNode.attributes.title as string)
         : null;
-    if (lengthSec == null && itemNode && typeof itemNode.attributes.length === "number") {
-      lengthSec = itemNode.attributes.length as number;
-    }
 
     return { isLive: true, itemTitle, lengthSec, liveStartAt, serverNow };
   }

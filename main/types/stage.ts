@@ -1,7 +1,22 @@
 // Shared stage types — frontend mirrors these shapes exactly.
 
-/** What a display renders: the slot grid (default) or the info dashboard. */
-export type DisplayKind = "slots" | "dashboard";
+/** What a display renders: slot grid (default), tech dashboard, or stage display. */
+export type DisplayKind = "slots" | "dashboard" | "stage";
+
+/** A ProPresenter slide group/section (e.g. Verse, Chorus) with its color. */
+export interface ProSection {
+  name: string;
+  /** "#rrggbb" derived from ProPresenter's rgba group color. */
+  colorHex: string;
+}
+
+/** A ProPresenter named timer (countdown/clock) currently running. */
+export interface ProTimer {
+  name: string;
+  /** Display string from the API, e.g. "00:03:00". */
+  time: string;
+  state: string;
+}
 
 export interface DisplayInfo {
   id: string;
@@ -25,12 +40,32 @@ export interface PcoLiveDTO {
 /** Live ProPresenter status (pushed on "propresenter:status"). */
 export interface ProPresenterStatusDTO {
   connected: boolean;
+  /** Active presentation name (the simple dashboard's "current item"). */
   currentItem: string | null;
+  /** Next slide's text (the simple dashboard's "next item"). */
   nextItem: string | null;
   /** 1-based index of the current slide within the active presentation. */
   slideIndex: number | null;
   slideCount: number | null;
   slidesRemaining: number | null;
+  // ── Stage-display extras ──
+  /** Current/next slide text content. */
+  currentSlideText: string | null;
+  nextSlideText: string | null;
+  /** Per-slide notes (often chords, e.g. "Gb"). */
+  currentNotes: string | null;
+  nextNotes: string | null;
+  /** Section of the current slide, the next slide, and the next *different* section. */
+  currentSection: ProSection | null;
+  nextSection: ProSection | null;
+  nextArrangementSection: ProSection | null;
+  /** Current + next playlist (service) item names. */
+  currentServiceItem: string | null;
+  nextServiceItem: string | null;
+  /** Running named timers (state ≠ "stopped"). */
+  timers: ProTimer[];
+  /** "<activeUuid>:<index>" — changes on slide change so the preview <img> refetches. */
+  slidePreviewKey: string | null;
 }
 
 export interface ServiceTypeDTO {

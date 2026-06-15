@@ -97,13 +97,24 @@ interface Slot {
   stackWithPrevious?: boolean;
 }
 
-type DisplayKind = "slots" | "dashboard";
+type DisplayKind = "slots" | "dashboard" | "stage";
 
 interface DisplayInfo {
   id: string;
   name: string;
   /** Defaults to "slots" when absent. */
   kind?: DisplayKind;
+}
+
+interface ProSection {
+  name: string;
+  colorHex: string;
+}
+
+interface ProTimer {
+  name: string;
+  time: string;
+  state: string;
 }
 
 /** Live PCO Services Live countdown for the current item (SSE "pco:live"). */
@@ -123,6 +134,17 @@ interface ProPresenterStatusDTO {
   slideIndex: number | null;
   slideCount: number | null;
   slidesRemaining: number | null;
+  currentSlideText: string | null;
+  nextSlideText: string | null;
+  currentNotes: string | null;
+  nextNotes: string | null;
+  currentSection: ProSection | null;
+  nextSection: ProSection | null;
+  nextArrangementSection: ProSection | null;
+  currentServiceItem: string | null;
+  nextServiceItem: string | null;
+  timers: ProTimer[];
+  slidePreviewKey: string | null;
 }
 
 interface StageState {

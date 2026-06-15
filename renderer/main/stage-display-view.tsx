@@ -1,0 +1,249 @@
+import { useState, useEffect } from "react";
+import { QrHint } from "../components/qr-hint";
+import { BrandLogo } from "../components/brand-logo";
+import { useDashboardState } from "./use-dashboard-state";
+import { computePcoTimer, fmtDuration } from "./pco-timer";
+import { Loader2Icon } from "lucide-react";
+
+interface StageDisplayViewProps {
+  displayId: string;
+}
+
+// White vs near-black text for a colored chip, by perceived luminance.
+function chipText(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return "#fff";
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? "#11131a" : "#fff";
+}
+
+function SectionChip({ section, size = "md" }: { section: ProSection | null; size?: "sm" | "md" }) {
+  if (!section) return null;
+  const pad = size === "sm" ? "px-2 py-0.5 text-[clamp(0.7rem,1.6vmin,0.95rem)]" : "px-3 py-1 text-[clamp(0.8rem,2vmin,1.2rem)]";
+  // Black groups (Intro/Instrumental) read as a neutral outline rather than invisible.
+  const isBlack = /^#0{6}$/i.test(section.colorHex);
+  return (
+    <span
+      className={`inline-block rounded-md font-medium shrink-0 ${pad}`}
+      style={
+        isBlack
+          ? { background: "rgba(255,255,255,0.10)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)" }
+          : { background: section.colorHex, color: chipText(section.colorHex) }
+      }
+    >
+      {section.name}
+    </span>
+  );
+}
+
+export function StageDisplayView({ displayId }: StageDisplayViewProps) {
+  const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
+
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const [skewMs, setSkewMs] = useState(0);
+  useEffect(() => {
+    if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
+  }, [pcoLive?.serverNow]);
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-[#080810] gap-3">
+        <Loader2Icon className="size-8 text-gray-7 animate-spin" />
+        <p className="text-headline text-gray-7">Loading…</p>
+      </div>
+    );
+  }
+  if (error || !state) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-[#080810] gap-3 px-12 text-center">
+        <p className="text-title3 text-gray-9 font-semibold">Could not load stage display</p>
+        {error && <p className="text-caption1 text-gray-7">{error}</p>}
+      </div>
+    );
+  }
+
+  const display = state.displays?.find((d) => d.id === displayId) ?? null;
+  const displayName = display?.name ?? null;
+
+  const clock = new Date(now);
+  const hh = clock.getHours();
+  const h12 = ((hh + 11) % 12) + 1;
+  const cmm = String(clock.getMinutes()).padStart(2, "0");
+  const css = String(clock.getSeconds()).padStart(2, "0");
+  const ampm = hh < 12 ? "AM" : "PM";
+
+  const timer = computePcoTimer(pcoLive, now, skewMs);
+  const over = !!timer?.over;
+
+  const pro = propresenter;
+  const connected = !!pro?.connected;
+  const previewSrc =
+    connected && pro?.slidePreviewKey
+      ? `/api/propresenter/thumbnail?k=${encodeURIComponent(pro.slidePreviewKey)}`
+      : null;
+  const runningTimers = pro?.timers ?? [];
+
+  return (
+    <div className="flex flex-col h-screen bg-[#080810] text-white">
+      {/* Brand top bar */}
+      <div
+        className="relative flex items-center h-10 shrink-0"
+        style={
+          {
+            background: "rgba(0,0,0,0.50)",
+            backdropFilter: "blur(20px) saturate(1.6)",
+            borderBottom: "1px solid rgba(255,255,255,0.09)",
+          } as React.CSSProperties
+        }
+      >
+        <div className="shrink-0 ml-3 flex items-center gap-2.5 relative z-10">
+          <div className="flex items-center gap-2 text-white/70">
+            {state.appLogo && (
+              <BrandLogo logo={state.appLogo} monochrome={state.appLogoMonochrome} className="size-5 rounded select-none" />
+            )}
+            <span className="text-caption1 font-semibold select-none truncate" style={{ letterSpacing: "0.02em" }}>
+              {state.appName}
+            </span>
+          </div>
+          {displayName && (
+            <>
+              <span className="w-px h-4 bg-white/15 shrink-0" aria-hidden="true" />
+              <span className="text-caption1 font-medium text-white/40 select-none truncate" style={{ letterSpacing: "0.02em" }}>
+                {displayName}
+              </span>
+            </>
+          )}
+        </div>
+        {state.showQr && state.remoteUrl && (
+          <a href="/settings" className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70" title="Open settings" aria-label="Open settings">
+            <QrHint url={state.remoteUrl} compact />
+          </a>
+        )}
+      </div>
+
+      <div className="flex flex-col flex-1 min-h-0 gap-2.5 p-3">
+        {/* Top strip: remaining slides · clock · PCO live */}
+        <div className="grid grid-cols-3 gap-2.5 h-[16%] min-h-0">
+          <Cell label="Remaining slides">
+            <span className="text-[clamp(1.5rem,7vmin,3.5rem)] font-medium leading-none tabular-nums">
+              {pro?.slidesRemaining ?? "—"}
+            </span>
+          </Cell>
+          <Cell label="Clock">
+            <span className="text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums">
+              {h12}:{cmm}<span className="text-white/45 text-[0.6em]">:{css} {ampm}</span>
+            </span>
+          </Cell>
+          <Cell
+            label={!timer ? "Planning Center Live" : timer.mode === "down" ? "PCO Live · remaining" : "PCO Live · elapsed"}
+            accent={timer ? (over ? "red" : "green") : "none"}
+          >
+            {timer ? (
+              <span className={`text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums ${over ? "text-red-10" : "text-[#7fe3c4]"}`}>
+                {fmtDuration(timer.seconds)}
+              </span>
+            ) : (
+              <span className="text-white/35 text-[clamp(0.8rem,2.4vmin,1.1rem)]">No live service</span>
+            )}
+          </Cell>
+        </div>
+
+        {/* Current slide: section chip + text + preview */}
+        <div className="flex flex-1 min-h-0 gap-2.5">
+          <div className="flex flex-col flex-1 min-w-0 rounded-2xl border border-white/10 bg-white/4 p-3 gap-2">
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-caption2 uppercase tracking-wider text-white/40" style={{ letterSpacing: "0.1em" }}>Now</span>
+              <SectionChip section={pro?.currentSection ?? null} />
+              {pro?.currentNotes && <span className="ml-auto text-[clamp(0.8rem,2vmin,1.1rem)] text-amber-9 font-medium tabular-nums">{pro.currentNotes}</span>}
+            </div>
+            <div className="flex flex-1 items-center min-h-0">
+              <span className="text-[clamp(1.3rem,5vmin,3rem)] font-medium leading-tight line-clamp-4">
+                {connected ? (pro?.currentSlideText ?? "—") : "ProPresenter offline"}
+              </span>
+            </div>
+          </div>
+          {previewSrc && (
+            <div className="w-[34%] shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-black flex items-center justify-center">
+              <img src={previewSrc} alt="" className="w-full h-full object-contain" />
+            </div>
+          )}
+        </div>
+
+        {/* Next slide */}
+        <div className="flex items-center gap-3 rounded-2xl border border-amber-a5 bg-amber-a2 p-2.5 px-3 shrink-0 h-[18%] min-h-0">
+          <span className="text-caption2 uppercase tracking-wider text-white/40 shrink-0" style={{ letterSpacing: "0.1em" }}>Next</span>
+          <SectionChip section={pro?.nextSection ?? null} size="sm" />
+          <span className="text-[clamp(1rem,3.4vmin,1.9rem)] font-medium text-amber-10 leading-tight truncate">
+            {pro?.nextSlideText ?? "—"}
+          </span>
+          {pro?.nextArrangementSection && (
+            <span className="ml-auto flex items-center gap-2 shrink-0">
+              <span className="text-caption2 uppercase tracking-wider text-white/30" style={{ letterSpacing: "0.1em" }}>Then</span>
+              <SectionChip section={pro.nextArrangementSection} size="sm" />
+            </span>
+          )}
+        </div>
+
+        {/* Service items + running timers */}
+        <div className="grid grid-cols-2 gap-2.5 h-[15%] min-h-0 shrink-0">
+          <Cell label="Current service item" align="start">
+            <span className="text-[clamp(1rem,3.2vmin,1.7rem)] font-medium leading-tight truncate w-full">
+              {pro?.currentServiceItem ?? "—"}
+            </span>
+          </Cell>
+          <Cell label="Next service item" align="start" accent="amber">
+            <div className="flex items-center justify-between gap-3 w-full">
+              <span className="text-[clamp(1rem,3.2vmin,1.7rem)] font-medium leading-tight truncate text-amber-10">
+                {pro?.nextServiceItem ?? "—"}
+              </span>
+              {runningTimers.length > 0 && (
+                <span className="flex items-center gap-2 shrink-0">
+                  {runningTimers.slice(0, 2).map((t) => (
+                    <span key={t.name} className="text-caption1 text-white/55 tabular-nums">
+                      {t.name}: <span className="text-white/80">{t.time}</span>
+                    </span>
+                  ))}
+                </span>
+              )}
+            </div>
+          </Cell>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Cell({
+  label,
+  accent = "none",
+  align = "center",
+  children,
+}: {
+  label: string;
+  accent?: "none" | "green" | "red" | "amber";
+  align?: "center" | "start";
+  children: React.ReactNode;
+}) {
+  const border =
+    accent === "green" ? "border-[#2dd49622] bg-[#2dd49614]"
+    : accent === "red" ? "border-red-a6 bg-red-a3"
+    : accent === "amber" ? "border-amber-a5 bg-amber-a2"
+    : "border-white/8 bg-white/4";
+  const labelColor =
+    accent === "green" ? "text-[#5dcaa5]" : accent === "red" ? "text-red-10" : accent === "amber" ? "text-amber-9" : "text-white/40";
+  return (
+    <div className={`flex flex-col justify-center rounded-2xl border p-3 min-h-0 overflow-hidden ${border} ${align === "center" ? "items-center" : "items-start"}`}>
+      <span className={`text-caption2 font-medium uppercase tracking-wider mb-1 ${labelColor}`} style={{ letterSpacing: "0.1em" }}>
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
