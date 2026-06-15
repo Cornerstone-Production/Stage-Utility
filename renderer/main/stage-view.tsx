@@ -1,9 +1,9 @@
-import { useState, useEffect, Component } from "react";
+import { Component } from "react";
 import type { ReactNode, ErrorInfo } from "react";
 import { SlotPanel } from "../components/slot-panel";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
-import { invoke, onNotification } from "../lib/api";
+import { useStageState } from "./use-stage-state";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
@@ -218,60 +218,8 @@ function KioskError({ message }: { message: string }) {
 // ---- main view --------------------------------------------------------------
 
 export function StageView() {
-  const [state, setState] = useState<StageState | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
+  const { state, isLoading, error } = useStageState();
   const displayId = getDisplayId();
-
-  // Hydrate on mount
-  useEffect(() => {
-    let cancelled = false;
-
-    invoke<StageState>("stage:getState")
-      .then((s: StageState) => {
-        if (cancelled) return;
-        console.log("[StageView:hydrate]", {
-          displayId,
-          planId: s.planId,
-          planTitle: s.planTitle,
-          slotCount: s.slots.length,
-          pcoConfigured: s.pcoConfigured,
-          remoteUrl: s.remoteUrl,
-          showQr: s.showQr,
-        });
-        setState(s);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        console.error("[StageView:hydrate] error", err);
-        setError(String(err));
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-
-    return () => { cancelled = true; };
-  // displayId is stable for the lifetime of this window.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Subscribe to live updates
-  useEffect(() => {
-    return onNotification("stage:state-changed", (payload: unknown) => {
-      const s = payload as StageState;
-      console.log("[StageView:notification]", {
-        displayId,
-        planId: s.planId,
-        slotCount: s.slots.length,
-        pcoConfigured: s.pcoConfigured,
-        showQr: s.showQr,
-      });
-      setState(s);
-    });
-  // displayId is stable for the lifetime of this window.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   if (isLoading) return <KioskLoading />;
   if (error) return <KioskError message={error} />;
