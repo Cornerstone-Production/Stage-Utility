@@ -14,6 +14,7 @@ interface CacheEntry<T> {
 // Generic JSON:API node from PCO
 interface PcoNode {
   id: string;
+  type?: string;
   attributes: Record<string, unknown>;
   relationships?: Record<string, { data: { id: string; type: string } | null | { id: string; type: string }[] }>;
 }
@@ -278,6 +279,25 @@ class PcoService {
       return { isLive: false, itemTitle: null, lengthSec: null, liveStartAt: null, serverNow };
     }
 
+    // CRITICAL: PCO Services Live is scoped per *service type*, not per plan —
+    // querying this plan's /live returns whatever session is currently live in the
+    // service type, which may be a DIFFERENT plan's event. Guard against showing
+    // another event's timer: the current item must belong to THIS plan (i.e. its
+    // item resolves against this plan's `items` include). If it doesn't, the live
+    // session is for a different plan → report not-live for our configured plan.
+    const planItemIds = new Set(
+      included.filter((n) => n.type === "Item").map((n) => n.id),
+    );
+    const itemRef = it.relationships?.["item"]?.data;
+    const itemId = itemRef && !Array.isArray(itemRef) ? itemRef.id : null;
+    if (!itemId || !planItemIds.has(itemId)) {
+      console.log(
+        `[pco] live session is not for the configured plan ${planId} ` +
+          `(current item ${itemId ?? "?"} not in this plan) — reporting not-live`,
+      );
+      return { isLive: false, itemTitle: null, lengthSec: null, liveStartAt: null, serverNow };
+    }
+
     // Effective length = length + live length_offset (operator's live adjustment).
     // A length of 0 (or missing) means the item has NO fixed length in the plan —
     // return null so the client shows elapsed (count-up) instead of a bogus
@@ -289,10 +309,7 @@ class PcoService {
     const adjLen = baseLen + (typeof offset === "number" ? offset : 0);
     const lengthSec = adjLen > 0 ? adjLen : null;
 
-    // Resolve the item title via the ItemTime's item relationship.
-    const itemRef = it.relationships?.["item"]?.data;
-    const itemId = itemRef && !Array.isArray(itemRef) ? itemRef.id : null;
-    const itemNode = itemId ? included.find((n) => n.id === itemId) : null;
+    const itemNode = included.find((n) => n.id === itemId);
     const itemTitle =
       itemNode && typeof itemNode.attributes.title === "string"
         ? (itemNode.attributes.title as string)
