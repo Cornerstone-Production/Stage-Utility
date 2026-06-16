@@ -6,10 +6,9 @@ import Foundation
 
 enum Countdown {
     /// Seconds remaining for the given live state at `now` (device clock).
-    /// Positive = time left, negative = overtime, nil = nothing to count.
-    static func remaining(_ live: PcoLiveDTO, now: Date = Date()) -> TimeInterval? {
-        guard let serverNow = parseISO(live.serverNow) else { return nil }
-        let skew = serverNow.timeIntervalSince(now)        // server − device
+    /// `skew` (server − device, captured once when the DTO arrived) maps the
+    /// device clock onto the server's. Positive = time left, negative = overtime.
+    static func remaining(_ live: PcoLiveDTO, now: Date, skew: TimeInterval) -> TimeInterval? {
         let serverTimeNow = now.addingTimeInterval(skew)
 
         switch live.mode {
@@ -36,7 +35,7 @@ enum Countdown {
     }
 
     // ISO8601 with or without fractional seconds (toISOString() includes ms).
-    private static func parseISO(_ string: String?) -> Date? {
+    static func parseISO(_ string: String?) -> Date? {
         guard let string else { return nil }
         return isoFractional.date(from: string) ?? isoPlain.date(from: string)
     }

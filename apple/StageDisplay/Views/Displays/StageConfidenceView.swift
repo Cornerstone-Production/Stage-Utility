@@ -30,7 +30,7 @@ struct StageConfidenceView: View {
 
     private func topStrip(_ now: Date) -> some View {
         let pro = model.propresenter
-        let t = Countdown.display(model.pcoLive, now: now)
+        let t = Countdown.display(model.pcoLive, now: now, skew: model.pcoSkew)
         let c = Calendar.current.dateComponents([.hour, .minute, .second], from: now)
         let h = c.hour ?? 0, h12 = (h % 12 == 0) ? 12 : h % 12
         return HStack(spacing: 10) {
@@ -144,7 +144,7 @@ struct StageConfidenceView: View {
     // MARK: Helpers
 
     private func pcoHeader(_ now: Date) -> String {
-        guard let live = model.pcoLive, let r = Countdown.remaining(live, now: now) else { return "Planning Center Live" }
+        guard let live = model.pcoLive, let r = Countdown.remaining(live, now: now, skew: model.pcoSkew) else { return "Planning Center Live" }
         switch live.mode {
         case .preservice: return "Service starts in"
         case .item: return r < 0 ? "PCO Live · over" : "PCO Live · remaining"

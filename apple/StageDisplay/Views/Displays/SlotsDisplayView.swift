@@ -61,6 +61,8 @@ private struct SlotCard: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)   // fill the aspect-ratio cell
+        .background(Color(hex: "1a1a2e"))
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(.white.opacity(0.08), lineWidth: 1))
     }
@@ -70,12 +72,16 @@ private struct SlotCard: View {
     @ViewBuilder private var background: some View {
         if let url = photoURL {
             AsyncImage(url: url) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
+                image.resizable().scaledToFill()
             } placeholder: {
                 Color(hex: "1a1a2e")
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+        } else if let solid = solidColor {
+            solid
         } else {
-            (solidColor ?? Color(hex: "1a1a2e")!)
+            Color(hex: "1a1a2e")
         }
     }
 

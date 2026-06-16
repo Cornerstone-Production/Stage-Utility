@@ -46,7 +46,7 @@ struct DashboardDisplayView: View {
     }
 
     private func timerCard(_ now: Date) -> some View {
-        let t = Countdown.display(model.pcoLive, now: now)
+        let t = Countdown.display(model.pcoLive, now: now, skew: model.pcoSkew)
         return GlassCard(label: timerHeader(now: now), accent: t == nil ? .neutral : (t!.over ? .red : .green)) {
             if let t {
                 VStack(spacing: 6) {
@@ -97,7 +97,7 @@ struct DashboardDisplayView: View {
     // MARK: Helpers
 
     private func timerHeader(now: Date) -> String {
-        guard let live = model.pcoLive, let r = Countdown.remaining(live, now: now) else { return "Service timer" }
+        guard let live = model.pcoLive, let r = Countdown.remaining(live, now: now, skew: model.pcoSkew) else { return "Service timer" }
         switch live.mode {
         case .preservice: return "Service starts in"
         case .item: return r < 0 ? "Live · item over" : "Live · item remaining"

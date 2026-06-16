@@ -116,8 +116,8 @@ struct SectionChip: View {
 
 extension Countdown {
     /// Label + value + over-flag for the live timer, mirroring the web dashboard.
-    static func display(_ live: PcoLiveDTO?, now: Date) -> (label: String, value: String, over: Bool)? {
-        guard let live, let remaining = remaining(live, now: now) else { return nil }
+    static func display(_ live: PcoLiveDTO?, now: Date, skew: TimeInterval) -> (label: String, value: String, over: Bool)? {
+        guard let live, let remaining = remaining(live, now: now, skew: skew) else { return nil }
         let over = remaining < 0
         let value = format(abs(remaining))
         let label: String
