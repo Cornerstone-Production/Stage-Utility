@@ -34,7 +34,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-[100svh] bg-[#080810] gap-3">
+      <div className="flex flex-col items-center justify-center h-[100dvh] bg-[#080810] gap-3">
         <Loader2Icon className="size-8 text-gray-7 animate-spin" />
         <p className="text-headline text-gray-7">Loading…</p>
       </div>
@@ -42,7 +42,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   }
   if (error || !state) {
     return (
-      <div className="flex flex-col items-center justify-center h-[100svh] bg-[#080810] gap-3 px-12 text-center">
+      <div className="flex flex-col items-center justify-center h-[100dvh] bg-[#080810] gap-3 px-12 text-center">
         <p className="text-title3 text-gray-9 font-semibold">Could not load dashboard</p>
         {error && <p className="text-caption1 text-gray-7">{error}</p>}
       </div>
@@ -68,7 +68,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   const proConnected = !!pro?.connected;
 
   return (
-    <div className="flex flex-col h-[100svh] overscroll-none bg-[#080810] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-[100dvh] overscroll-none bg-[#080810] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Brand top bar — same as kiosk, no plan/context label. */}
       <div
         className="relative flex items-center h-10 shrink-0"

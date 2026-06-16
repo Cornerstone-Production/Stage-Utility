@@ -30,7 +30,7 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
 
   if (isLoading || !state) {
     return (
-      <div className="flex flex-col items-center justify-center h-[100svh] bg-[#080810] gap-3">
+      <div className="flex flex-col items-center justify-center h-[100dvh] bg-[#080810] gap-3">
         <Loader2Icon className="size-8 text-gray-7 animate-spin" />
         <p className="text-headline text-gray-7">Loading…</p>
       </div>
@@ -42,7 +42,7 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
   const showChannelLabels = lines.some((l) => l.channelName || l.channel);
 
   return (
-    <div className="flex flex-col h-[100svh] overscroll-none bg-[#080810] text-white pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-[100dvh] overscroll-none bg-[#080810] text-white pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Brand top bar */}
       <div
         className="relative flex items-center h-10 shrink-0"

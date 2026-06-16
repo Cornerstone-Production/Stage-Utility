@@ -117,9 +117,14 @@ class PcoService {
     const base = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}`;
     const json = await this.request(`${base}/live`, appId, secret);
     const live = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
-    if (!live?.id) throw new Error("No PCO live session for this plan");
+    if (!live) throw new Error("No PCO live session for this plan");
     const action = direction === "next" ? "go_to_next_item" : "go_to_previous_item";
-    await this.postAction(`${base}/live/${live.id}/${action}`, appId, secret);
+    // PCO exposes the action URL in the live resource's `links` — use it. The
+    // Live resource is a singleton, so the path has NO live id (the fallback
+    // `.../live/{action}` matches; an id in the path 404s).
+    const linkUrl = (live as unknown as { links?: Record<string, string> }).links?.[action];
+    const url = typeof linkUrl === "string" && linkUrl ? linkUrl : `${base}/live/${action}`;
+    await this.postAction(url, appId, secret);
   }
 
   async listServiceTypes(appId: string, secret: string): Promise<ServiceTypeDTO[]> {
