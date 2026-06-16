@@ -31,6 +31,21 @@ struct ServerClient: Sendable {
         return (try? dec.decode(Wrapper.self, from: data))?.lines ?? []
     }
 
+    /// Assign (or clear, with nil) a display's NDI source. The server persists it
+    /// and broadcasts stage:state-changed, so all clients update.
+    func setNDISource(displayId: String, source: String?) async throws {
+        let url = baseURL.appendingPathComponent("/api/displays/\(displayId)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = ["ndiSource": source.map { $0 as Any } ?? NSNull()]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+
     // MARK: - Internals
 
     private func rawGet(_ path: String) async throws -> Data {

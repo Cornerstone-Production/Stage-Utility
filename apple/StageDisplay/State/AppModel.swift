@@ -81,6 +81,16 @@ final class AppModel {
         sseTask = nil
     }
 
+    /// Assign or clear a display's NDI source on the server. The resulting
+    /// stage:state-changed broadcast updates our state, so the video appears.
+    func setNDISource(displayId: String, source: String?) {
+        guard let base = baseURL else { return }
+        let trimmed = source?.trimmingCharacters(in: .whitespaces)
+        let value = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        let client = ServerClient(baseURL: base)
+        Task { try? await client.setNDISource(displayId: displayId, source: value) }
+    }
+
     // MARK: SSE handling
 
     private func handle(_ event: SSEClient.Event) {
