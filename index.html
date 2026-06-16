@@ -2,8 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
+    />
+    <!-- Tint the mobile browser chrome dark to match the kiosk UI. -->
+    <meta name="theme-color" content="#080810" />
+    <!-- Add to Home Screen → standalone (no browser bars), edge-to-edge. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Stage Utility" />
     <link rel="icon" type="image/png" href="/app-icon.png" />
+    <link rel="apple-touch-icon" href="/app-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <title>Stage Utility</title>
     <script>
       // Kiosk TV display is always dark, regardless of system appearance.
@@ -18,6 +30,8 @@
         height: 100%;
         margin: 0;
         overflow: hidden;
+        overscroll-behavior: none;
+        touch-action: manipulation;
       }
     </style>
   </head>

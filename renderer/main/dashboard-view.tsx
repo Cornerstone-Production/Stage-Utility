@@ -33,7 +33,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-[#080810] gap-3">
+      <div className="flex flex-col items-center justify-center h-[100svh] bg-[#080810] gap-3">
         <Loader2Icon className="size-8 text-gray-7 animate-spin" />
         <p className="text-headline text-gray-7">Loading…</p>
       </div>
@@ -41,7 +41,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   }
   if (error || !state) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-[#080810] gap-3 px-12 text-center">
+      <div className="flex flex-col items-center justify-center h-[100svh] bg-[#080810] gap-3 px-12 text-center">
         <p className="text-title3 text-gray-9 font-semibold">Could not load dashboard</p>
         {error && <p className="text-caption1 text-gray-7">{error}</p>}
       </div>
@@ -67,7 +67,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   const proConnected = !!pro?.connected;
 
   return (
-    <div className="flex flex-col h-screen bg-[#080810]">
+    <div className="flex flex-col h-[100svh] overscroll-none bg-[#080810] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Brand top bar — same as kiosk, no plan/context label. */}
       <div
         className="relative flex items-center h-10 shrink-0"
@@ -123,7 +123,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
       </div>
 
       {/* Four tiles. */}
-      <div className="grid flex-1 min-h-0 grid-cols-2 grid-rows-2 gap-3 p-4">
+      <div className="grid flex-1 min-h-0 grid-cols-2 grid-rows-2 gap-3 p-4 max-sm:grid-cols-1 max-sm:grid-rows-4 max-sm:gap-2 max-sm:p-2">
         {/* Clock */}
         <Tile label="Current time">
           <div className="flex items-baseline gap-2 tabular-nums">
@@ -249,7 +249,7 @@ function Tile({
         : "border-white/8 bg-white/4";
   const labelColor = accent === "green" ? "text-[#5dcaa5]" : accent === "red" ? "text-red-10" : "text-white/40";
   return (
-    <div className={`flex flex-col items-center justify-center rounded-2xl border p-4 min-h-0 ${border}`}>
+    <div className={`flex flex-col items-center justify-center rounded-2xl border p-4 max-sm:p-3 min-h-0 ${border}`}>
       <span
         className={`text-caption2 font-medium uppercase tracking-wider mb-2 ${labelColor}`}
         style={{ letterSpacing: "0.1em" }}

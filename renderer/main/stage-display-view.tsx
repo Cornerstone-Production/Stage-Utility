@@ -57,7 +57,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-[#080810] gap-3">
+      <div className="flex flex-col items-center justify-center h-[100svh] bg-[#080810] gap-3">
         <Loader2Icon className="size-8 text-gray-7 animate-spin" />
         <p className="text-headline text-gray-7">Loading…</p>
       </div>
@@ -65,7 +65,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   }
   if (error || !state) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-[#080810] gap-3 px-12 text-center">
+      <div className="flex flex-col items-center justify-center h-[100svh] bg-[#080810] gap-3 px-12 text-center">
         <p className="text-title3 text-gray-9 font-semibold">Could not load stage display</p>
         {error && <p className="text-caption1 text-gray-7">{error}</p>}
       </div>
@@ -94,7 +94,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   const runningTimers = pro?.timers ?? [];
 
   return (
-    <div className="flex flex-col h-screen bg-[#080810] text-white">
+    <div className="flex flex-col h-[100svh] overscroll-none bg-[#080810] text-white pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Brand top bar */}
       <div
         className="relative flex items-center h-10 shrink-0"
@@ -136,7 +136,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
         )}
       </div>
 
-      <div className="flex flex-col flex-1 min-h-0 gap-2.5 p-3">
+      <div className="flex flex-col flex-1 min-h-0 gap-2.5 max-sm:gap-2 p-3 max-sm:p-2">
         {/* Top strip: remaining slides · clock · PCO live */}
         <div className="grid grid-cols-3 gap-2.5 h-[16%] min-h-0">
           <Cell label="Remaining slides">
@@ -176,8 +176,8 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
           </Cell>
         </div>
 
-        {/* Current slide: section chip + text + preview */}
-        <div className="flex flex-1 min-h-0 gap-2.5">
+        {/* Current slide: section chip + text + preview (preview stacks below on phone) */}
+        <div className="flex max-sm:flex-col flex-1 min-h-0 gap-2.5 max-sm:gap-2">
           <div className="flex flex-col flex-1 min-w-0 rounded-2xl border border-white/10 bg-white/4 p-3 gap-2">
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-caption2 uppercase tracking-wider text-white/40" style={{ letterSpacing: "0.1em" }}>Now</span>
@@ -191,7 +191,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
             </div>
           </div>
           {previewSrc && (
-            <div className="w-[34%] shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-black flex items-center justify-center">
+            <div className="w-[34%] max-sm:w-full shrink-0 max-sm:h-[26svh] rounded-2xl border border-white/10 overflow-hidden bg-black flex items-center justify-center">
               <img src={previewSrc} alt="" className="w-full h-full object-contain" />
             </div>
           )}
