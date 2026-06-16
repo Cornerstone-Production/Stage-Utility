@@ -13,7 +13,7 @@ export function DisplayPickerView() {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-[#080810] gap-3">
+      <div className="flex flex-col items-center justify-center h-[100svh] bg-[#080810] gap-3">
         <Loader2Icon className="size-8 text-gray-7 animate-spin" />
         <p className="text-headline text-gray-7">Loading…</p>
       </div>
@@ -22,7 +22,7 @@ export function DisplayPickerView() {
 
   if (error || !state) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-[#080810] gap-3 px-12 text-center">
+      <div className="flex flex-col items-center justify-center h-[100svh] bg-[#080810] gap-3 px-12 text-center">
         <MonitorIcon className="size-10 text-gray-7" />
         <p className="text-title3 text-gray-9 font-semibold">Could not load displays</p>
         {error && <p className="text-caption1 text-gray-7">{error}</p>}
@@ -34,7 +34,7 @@ export function DisplayPickerView() {
   const displays = state.displays ?? [];
 
   return (
-    <div className="flex flex-col h-screen bg-[#080810]">
+    <div className="flex flex-col h-[100svh] overscroll-none bg-[#080810] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Brand top bar — same as the kiosk, minus the plan/context label. */}
       <div
         className="relative flex items-center h-10 shrink-0"
@@ -78,7 +78,7 @@ export function DisplayPickerView() {
       </div>
 
       {/* Centered empty-slot image + display list. */}
-      <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-8 px-6 py-8">
+      <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-8 px-6 py-8 overflow-y-auto overscroll-contain">
         {centerLogo && (
           <BrandLogo
             logo={centerLogo}
