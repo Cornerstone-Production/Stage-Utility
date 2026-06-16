@@ -2,22 +2,11 @@ import { useState, useEffect } from "react";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
+import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
 
 interface DashboardViewProps {
   displayId: string;
-}
-
-// mm:ss (or h:mm:ss past an hour); negative = over time, shown with a leading "−".
-function fmtDuration(totalSec: number): string {
-  const neg = totalSec < 0;
-  const s = Math.abs(Math.round(totalSec));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
-  const body = h > 0 ? `${h}:${mm}:${String(sec).padStart(2, "0")}` : `${mm}:${String(sec).padStart(2, "0")}`;
-  return neg ? `−${body}` : body;
 }
 
 export function DashboardView({ displayId }: DashboardViewProps) {
@@ -67,15 +56,9 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   const ss = String(clock.getSeconds()).padStart(2, "0");
   const ampm = hh < 12 ? "AM" : "PM";
 
-  // PCO live countdown.
-  const isLive = !!pcoLive?.isLive && !!pcoLive.liveStartAt && pcoLive.lengthSec != null;
-  let remainingSec: number | null = null;
-  if (isLive && pcoLive) {
-    const serverNow = now + skewMs;
-    const elapsed = (serverNow - Date.parse(pcoLive.liveStartAt as string)) / 1000;
-    remainingSec = (pcoLive.lengthSec as number) - elapsed;
-  }
-  const over = remainingSec != null && remainingSec < 0;
+  // PCO live timer: counts down on fixed-length items, up otherwise.
+  const timer = computePcoTimer(pcoLive, now, skewMs);
+  const over = !!timer?.over;
 
   const pro = propresenter;
   const proConnected = !!pro?.connected;
@@ -142,23 +125,30 @@ export function DashboardView({ displayId }: DashboardViewProps) {
           </div>
         </Tile>
 
-        {/* PCO live countdown */}
+        {/* PCO timer — always counts down (to service start, then per item) */}
         <Tile
-          label={isLive ? "Live · item remaining" : "Service timer"}
-          accent={isLive ? (over ? "red" : "green") : "none"}
+          label={
+            !timer
+              ? "Service timer"
+              : timer.mode === "preservice"
+                ? "Service starts in"
+                : over
+                  ? "Live · item over"
+                  : "Live · item remaining"
+          }
+          accent={timer ? (over ? "red" : "green") : "none"}
         >
-          {isLive && remainingSec != null ? (
+          {timer ? (
             <div className="flex flex-col items-center gap-1.5">
               <span
                 className={`text-[clamp(2rem,9vmin,5rem)] font-medium leading-none tabular-nums ${
                   over ? "text-red-10" : "text-[#7fe3c4]"
                 }`}
               >
-                {fmtDuration(remainingSec)}
+                {fmtDuration(timer.seconds)}
               </span>
               <span className="text-caption1 text-white/45 truncate max-w-full">
-                {pcoLive?.itemTitle ?? "Current item"}
-                {pcoLive?.lengthSec != null && ` · ${fmtDuration(pcoLive.lengthSec)} total`}
+                {timer.label ?? (timer.mode === "preservice" ? "Service start" : "Current item")}
               </span>
             </div>
           ) : (

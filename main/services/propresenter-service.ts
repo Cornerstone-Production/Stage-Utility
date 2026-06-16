@@ -1,27 +1,26 @@
 // propresenter-service.ts — Reads live status from ProPresenter 7.9+ via its
 // official local HTTP API (LAN, no auth) and broadcasts it on "propresenter:status"
-// for the dashboard display.
+// for the dashboard + stage displays.
 //
-// We poll a few REST endpoints once per second while connected (simpler and more
-// robust than the chunked-streaming variant; 1s latency is fine for a stage
-// dashboard, and a LAN poll is cheap). Connect/poll/reconnect lifecycle mirrors
-// the wireless providers.
+// Polls a few REST endpoints once per second while connected (simpler/robust vs
+// chunked streaming; 1s latency is fine and a LAN poll is cheap). Connect/poll/
+// reconnect lifecycle mirrors the wireless providers.
 //
-// IMPORTANT: the exact JSON field spellings of the ProPresenter API can vary
-// slightly by point-release. Extraction is centralised in `buildStatus()` and
-// written defensively (every field degrades to null), so an unexpected shape
-// shows blanks on the dashboard rather than crashing. Tune the field paths there
-// against a live instance if any value reads blank (see /v1 docs on the device:
-// ProPresenter → Settings → Network → "API Documentation").
+// Field paths are verified against ProPresenter 21.3 (API v1) but written
+// defensively (every field degrades to null), so a different point-release shows
+// blanks rather than crashing. Tune in buildStatus()/sectionsFor() if anything
+// reads blank (device shows exact shapes at Settings → Network → API Documentation).
 
 import * as http from "http";
 
-import type { ProPresenterStatusDTO } from "../types/stage.js";
+import type { ProPresenterStatusDTO, ProSection, ProTimer } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 
 const POLL_INTERVAL_MS = 1000;
 const ERROR_INTERVAL_MS = 5000;
 const REQUEST_TIMEOUT_MS = 4000;
+/** Thumbnail width requested from ProPresenter (px). */
+export const THUMBNAIL_QUALITY = 400;
 
 const OFFLINE: ProPresenterStatusDTO = {
   connected: false,
@@ -30,6 +29,17 @@ const OFFLINE: ProPresenterStatusDTO = {
   slideIndex: null,
   slideCount: null,
   slidesRemaining: null,
+  currentSlideText: null,
+  nextSlideText: null,
+  currentNotes: null,
+  nextNotes: null,
+  currentSection: null,
+  nextSection: null,
+  nextArrangementSection: null,
+  currentServiceItem: null,
+  nextServiceItem: null,
+  timers: [],
+  slidePreviewKey: null,
 };
 
 // Reported to the IntegrationManager so the Integrations card badge reflects
@@ -81,6 +91,72 @@ function asNumber(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+// ProPresenter group color is rgba with 0–1 channels → "#rrggbb".
+function colorToHex(color: unknown): string {
+  const c = (n: unknown) => Math.max(0, Math.min(255, Math.round((asNumber(n) ?? 0) * 255)));
+  const r = c(pick(color, "red"));
+  const g = c(pick(color, "green"));
+  const b = c(pick(color, "blue"));
+  const hex = (n: number) => n.toString(16).padStart(2, "0");
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
+
+interface OrderedGroup {
+  name: string;
+  colorHex: string;
+  slideCount: number;
+}
+
+// Build the play-order group sequence from the active presentation, honoring the
+// current arrangement (groups referenced by uuid, in order) when one is set;
+// otherwise the library group order. Returns the flattened sequence + total slides.
+function orderedGroups(active: unknown): { seq: OrderedGroup[]; total: number } {
+  const libGroups = pick(active, "presentation", "groups");
+  if (!Array.isArray(libGroups)) return { seq: [], total: 0 };
+
+  const toOrdered = (g: unknown): OrderedGroup => ({
+    name: asString(pick(g, "name")) ?? "",
+    colorHex: colorToHex(pick(g, "color")),
+    slideCount: Array.isArray(pick(g, "slides")) ? (pick(g, "slides") as unknown[]).length : 0,
+  });
+
+  const arrUuid = asString(pick(active, "presentation", "current_arrangement"));
+  let seq: OrderedGroup[];
+  if (arrUuid) {
+    const arrangements = pick(active, "presentation", "arrangements");
+    const arr = Array.isArray(arrangements)
+      ? arrangements.find((a) => asString(pick(a, "id", "uuid")) === arrUuid)
+      : null;
+    const groupUuids = pick(arr, "groups");
+    const byUuid = new Map<string, unknown>();
+    for (const g of libGroups) {
+      const u = asString(pick(g, "uuid"));
+      if (u) byUuid.set(u, g);
+    }
+    seq = Array.isArray(groupUuids)
+      ? groupUuids.map((u) => byUuid.get(asString(u) ?? "")).filter(Boolean).map(toOrdered)
+      : libGroups.map(toOrdered);
+  } else {
+    seq = libGroups.map(toOrdered);
+  }
+
+  const total = seq.reduce((sum, g) => sum + g.slideCount, 0);
+  return { seq, total };
+}
+
+// Resolve which section a flattened 0-based slide index falls in.
+function sectionAt(seq: OrderedGroup[], index: number): { section: ProSection | null; groupPos: number } {
+  let acc = 0;
+  for (let i = 0; i < seq.length; i++) {
+    const g = seq[i];
+    if (index < acc + g.slideCount) {
+      return { section: g.name ? { name: g.name, colorHex: g.colorHex } : null, groupPos: i };
+    }
+    acc += g.slideCount;
+  }
+  return { section: null, groupPos: -1 };
+}
+
 class ProPresenterService {
   private host: string | null = null;
   private port: number | null = null;
@@ -90,7 +166,14 @@ class ProPresenterService {
   private onConn: ((state: ProConnState, message: string | null) => void) | null = null;
   private reported: ProConnState | null = null;
 
-  /** Subscribe to connection-state changes (for the Integrations card badge). */
+  // Preview target for the /api/propresenter/thumbnail proxy.
+  private activeUuid: string | null = null;
+  private slideIdxZero: number | null = null;
+
+  // Playlist item cache (items change rarely — refetch only when the playlist changes).
+  private playlistUuid: string | null = null;
+  private playlistItems: { name: string; index: number }[] = [];
+
   setConnectionListener(cb: (state: ProConnState, message: string | null) => void): void {
     this.onConn = cb;
   }
@@ -101,11 +184,10 @@ class ProPresenterService {
     this.onConn?.(state, message);
   }
 
-  /** Point at a ProPresenter instance and (re)start polling. */
   configure(host: string, port: number): void {
     this.host = host?.trim() || null;
     this.port = port > 0 ? Math.floor(port) : null;
-    this.reported = null; // force a fresh connected/error report
+    this.reported = null;
     this.restart();
   }
 
@@ -122,12 +204,20 @@ class ProPresenterService {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    this.activeUuid = null;
+    this.slideIdxZero = null;
     if (this.last.connected) this.emit(OFFLINE);
   }
 
   private restart(): void {
     this.stop();
     if (this.host && this.port) this.start();
+  }
+
+  /** Current thumbnail source for the proxy route, or null when unavailable. */
+  getThumbnailTarget(): { host: string; port: number; uuid: string; index: number } | null {
+    if (!this.host || !this.port || !this.activeUuid || this.slideIdxZero == null) return null;
+    return { host: this.host, port: this.port, uuid: this.activeUuid, index: this.slideIdxZero };
   }
 
   /** One-shot connectivity check for the Integrations "Test connection" button. */
@@ -151,20 +241,21 @@ class ProPresenterService {
     const host = this.host;
     const port = this.port;
     try {
-      // Connectivity probe — determines the card badge. Throws (→ error path) if
-      // ProPresenter is unreachable; the data fetches below degrade to null
-      // independently so a missing field never looks like a disconnect.
+      // Connectivity probe — gates the card badge. Data fetches below degrade to
+      // null independently so a missing field never looks like a disconnect.
       await getJson(host, port, "/version");
 
-      // active = name + groups (→ slide count); slide = current/next text;
-      // slideIndex = current 0-based position. All degrade to null on their own.
-      const [active, slide, slideIndex] = await Promise.all([
+      const [active, slide, slideIndex, playlistActive, timers] = await Promise.all([
         getJson(host, port, "/v1/presentation/active").catch(() => null),
         getJson(host, port, "/v1/status/slide").catch(() => null),
         getJson(host, port, "/v1/presentation/slide_index").catch(() => null),
+        getJson(host, port, "/v1/playlist/active").catch(() => null),
+        getJson(host, port, "/v1/timers/current").catch(() => null),
       ]);
 
-      this.emit(this.buildStatus(active, slide, slideIndex));
+      const services = await this.resolveServiceItems(host, port, playlistActive);
+
+      this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
       this.report("connected", `Connected to ${host}:${port}`);
       this.schedule(POLL_INTERVAL_MS);
     } catch (err) {
@@ -176,44 +267,119 @@ class ProPresenterService {
     }
   }
 
-  // Centralised field extraction, verified against ProPresenter 21.3 (API v1).
-  //   active      = GET /v1/presentation/active
-  //   slide       = GET /v1/status/slide
-  //   slideIndex  = GET /v1/presentation/slide_index
-  // Defensive (every field degrades to null) so an unexpected shape on another
-  // version shows blanks rather than crashing.
-  private buildStatus(active: unknown, slide: unknown, slideIndex: unknown): ProPresenterStatusDTO {
-    // Current item = active presentation name (lives at presentation.id.name).
+  // Current + next service (playlist) item names. Caches the items list and only
+  // re-fetches /v1/playlist/{uuid} when the active playlist changes.
+  private async resolveServiceItems(
+    host: string,
+    port: number,
+    playlistActive: unknown,
+  ): Promise<{ current: string | null; next: string | null }> {
+    const pUuid = asString(pick(playlistActive, "presentation", "playlist", "uuid"));
+    const curName = asString(pick(playlistActive, "presentation", "item", "name"));
+    const curIndex = asNumber(pick(playlistActive, "presentation", "item", "index"));
+    if (!pUuid) return { current: curName, next: null };
+
+    if (pUuid !== this.playlistUuid) {
+      try {
+        const pl = await getJson(host, port, `/v1/playlist/${pUuid}`);
+        const items = pick(pl, "items");
+        this.playlistItems = Array.isArray(items)
+          ? items
+              .map((it) => ({
+                name: asString(pick(it, "id", "name")) ?? "",
+                index: asNumber(pick(it, "id", "index")) ?? -1,
+              }))
+              .filter((it) => it.name)
+          : [];
+        this.playlistUuid = pUuid;
+      } catch {
+        this.playlistItems = [];
+      }
+    }
+
+    let next: string | null = null;
+    if (curIndex != null) {
+      next = this.playlistItems.find((it) => it.index === curIndex + 1)?.name ?? null;
+    }
+    return { current: curName, next };
+  }
+
+  private buildStatus(
+    active: unknown,
+    slide: unknown,
+    slideIndex: unknown,
+    services: { current: string | null; next: string | null },
+    timers: unknown,
+  ): ProPresenterStatusDTO {
     const currentItem =
       asString(pick(active, "presentation", "id", "name")) ??
       asString(pick(active, "presentation", "name"));
 
-    // Next item = next slide's text.
-    const nextItem = asString(pick(slide, "next", "text"));
+    const currentSlideText = asString(pick(slide, "current", "text"));
+    const nextSlideText = asString(pick(slide, "next", "text"));
+    const currentNotes = asString(pick(slide, "current", "notes"));
+    const nextNotes = asString(pick(slide, "next", "notes"));
 
-    // Current slide index — 0-based at presentation_index.index → make it 1-based.
     const idxZero = asNumber(pick(slideIndex, "presentation_index", "index"));
     const idx = idxZero == null ? null : idxZero + 1;
 
-    // Total slides = sum of slides across all groups in the active presentation.
-    const groups = pick(active, "presentation", "groups");
-    const slideCount = Array.isArray(groups)
-      ? groups.reduce((sum: number, g: unknown) => {
-          const slides = pick(g, "slides");
-          return sum + (Array.isArray(slides) ? slides.length : 0);
-        }, 0)
-      : null;
+    // Sections via the arrangement-aware play order.
+    const { seq, total } = orderedGroups(active);
+    let currentSection: ProSection | null = null;
+    let nextSection: ProSection | null = null;
+    let nextArrangementSection: ProSection | null = null;
+    if (idxZero != null && seq.length) {
+      const cur = sectionAt(seq, idxZero);
+      currentSection = cur.section;
+      nextSection = sectionAt(seq, idxZero + 1).section;
+      // Next *different* group after the current group's position.
+      for (let i = cur.groupPos + 1; i < seq.length; i++) {
+        if (seq[i].name && seq[i].name !== currentSection?.name) {
+          nextArrangementSection = { name: seq[i].name, colorHex: seq[i].colorHex };
+          break;
+        }
+      }
+    }
 
+    const slideCount = total > 0 ? total : null;
     const slidesRemaining =
       idx != null && slideCount != null ? Math.max(0, slideCount - idx) : null;
+
+    // Running named timers (state ≠ "stopped").
+    const runningTimers: ProTimer[] = Array.isArray(timers)
+      ? timers
+          .map((t) => ({
+            name: asString(pick(t, "id", "name")) ?? "Timer",
+            time: asString(pick(t, "time")) ?? "",
+            state: asString(pick(t, "state")) ?? "",
+          }))
+          .filter((t) => t.state && t.state !== "stopped")
+      : [];
+
+    // Stash preview target + key (thumbnail index is the 0-based slide index).
+    this.activeUuid = asString(pick(active, "presentation", "id", "uuid"));
+    this.slideIdxZero = idxZero;
+    const slidePreviewKey =
+      this.activeUuid && idxZero != null ? `${this.activeUuid}:${idxZero}` : null;
 
     return {
       connected: true,
       currentItem,
-      nextItem,
+      nextItem: nextSlideText,
       slideIndex: idx,
       slideCount,
       slidesRemaining,
+      currentSlideText,
+      nextSlideText,
+      currentNotes,
+      nextNotes,
+      currentSection,
+      nextSection,
+      nextArrangementSection,
+      currentServiceItem: services.current,
+      nextServiceItem: services.next,
+      timers: runningTimers,
+      slidePreviewKey,
     };
   }
 

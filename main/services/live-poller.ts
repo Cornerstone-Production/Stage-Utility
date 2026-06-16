@@ -11,7 +11,9 @@ import { broadcast } from "./broadcaster.js";
 import { stageController } from "./stage-controller.js";
 
 const LIVE_INTERVAL_MS = 1500;
-const IDLE_INTERVAL_MS = 20_000;
+// Preservice/idle: still poll often enough to notice a service going live quickly
+// (the countdown itself ticks client-side, so this is just change detection).
+const IDLE_INTERVAL_MS = 4000;
 
 class LivePoller {
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -53,8 +55,9 @@ class LivePoller {
       broadcast("pco:live", live);
     }
 
-    // Fast cadence only while actually live; otherwise idle.
-    this.schedule(live?.isLive ? LIVE_INTERVAL_MS : IDLE_INTERVAL_MS);
+    // Fast cadence while a live item is running (so item switches reflect quickly);
+    // a calmer cadence for the preservice countdown (it ticks client-side anyway).
+    this.schedule(live?.mode === "item" ? LIVE_INTERVAL_MS : IDLE_INTERVAL_MS);
   }
 }
 

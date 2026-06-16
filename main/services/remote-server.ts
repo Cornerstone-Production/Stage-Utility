@@ -9,10 +9,11 @@ import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
-import type { Slot } from "../types/stage.js";
+import type { DisplayKind, Slot } from "../types/stage.js";
 import { addBroadcastListener } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
 import { integrationManager } from "./integration-manager.js";
+import { propresenterService, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
 import { stageController } from "./stage-controller.js";
 import { wirelessManager } from "./wireless-manager.js";
 
@@ -51,6 +52,10 @@ function json(res: http.ServerResponse, data: unknown, status = 200): void {
 
 function error(res: http.ServerResponse, message: string, status = 400): void {
   json(res, { error: message }, status);
+}
+
+function isDisplayKind(v: unknown): v is DisplayKind {
+  return v === "slots" || v === "dashboard" || v === "stage";
 }
 
 async function readBody(req: http.IncomingMessage): Promise<unknown> {
@@ -314,6 +319,42 @@ export class RemoteServer {
       return;
     }
 
+    // ── ProPresenter slide preview proxy (stage display) ─────────────────────
+    // Pipes the current slide's JPEG thumbnail from ProPresenter so the kiosk can
+    // show it without reaching ProPresenter directly (works in prod; no CORS). The
+    // ?k=<slidePreviewKey> param just cache-busts per slide — the source is the
+    // service's current target. 21.3 returns real image/jpeg, so no decode.
+    if (method === "GET" && pathname === "/api/propresenter/thumbnail") {
+      const target = propresenterService.getThumbnailTarget();
+      if (!target) {
+        res.writeHead(503);
+        res.end("ProPresenter not connected / no active slide");
+        return;
+      }
+      const path = `/v1/presentation/${target.uuid}/thumbnail/${target.index}?quality=${PROPRESENTER_THUMBNAIL_QUALITY}`;
+      const upstream = http.get({ host: target.host, port: target.port, path, timeout: 5000 }, (up) => {
+        if ((up.statusCode ?? 0) >= 400) {
+          up.resume();
+          res.writeHead(502);
+          res.end(`ProPresenter thumbnail HTTP ${up.statusCode}`);
+          return;
+        }
+        res.writeHead(200, {
+          "Content-Type": up.headers["content-type"] ?? "image/jpeg",
+          "Cache-Control": "no-store",
+        });
+        up.pipe(res);
+      });
+      upstream.on("timeout", () => upstream.destroy(new Error("timeout")));
+      upstream.on("error", (e) => {
+        if (!res.headersSent) {
+          res.writeHead(502);
+          res.end(`ProPresenter thumbnail error: ${e.message}`);
+        }
+      });
+      return;
+    }
+
     // ── Health ────────────────────────────────────────────────────────────
     if (method === "GET" && pathname === "/api/health") {
       json(res, { ok: true });
@@ -415,7 +456,7 @@ export class RemoteServer {
     if (method === "POST" && pathname === "/api/displays") {
       const body = await readBody(req) as Record<string, unknown>;
       const name = typeof body.name === "string" ? body.name : undefined;
-      const kind = body.kind === "dashboard" ? "dashboard" : "slots";
+      const kind = isDisplayKind(body.kind) ? body.kind : "slots";
       const state = await stageController.addDisplay(name, kind);
       json(res, state, 201);
       return;
@@ -427,14 +468,14 @@ export class RemoteServer {
       const id = displayPatchMatch[1];
       const body = await readBody(req) as Record<string, unknown>;
       const hasName = typeof body.name === "string";
-      const hasKind = body.kind === "dashboard" || body.kind === "slots";
+      const hasKind = isDisplayKind(body.kind);
       if (!hasName && !hasKind) {
-        error(res, "body.name (string) or body.kind ('slots'|'dashboard') required");
+        error(res, "body.name (string) or body.kind ('slots'|'dashboard'|'stage') required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameDisplay(id, body.name as string);
-      if (hasKind) state = await stageController.setDisplayKind(id, body.kind as "slots" | "dashboard");
+      if (hasKind) state = await stageController.setDisplayKind(id, body.kind as DisplayKind);
       json(res, state);
       return;
     }
