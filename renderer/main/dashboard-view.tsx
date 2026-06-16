@@ -123,8 +123,10 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         )}
       </div>
 
-      {/* Four tiles. */}
-      <div className="grid flex-1 min-h-0 grid-cols-2 grid-rows-2 gap-3 p-4 max-sm:grid-cols-1 max-sm:grid-rows-4 max-sm:gap-2 max-sm:p-2">
+      {/* Content: the tiles, transcript strip, and live controls share ONE
+          padding + gap so every pill lines up to the same width/inset. */}
+      <div className="flex flex-col flex-1 min-h-0 gap-3 max-sm:gap-2 p-4 max-sm:p-2">
+      <div className="grid flex-1 min-h-0 grid-cols-2 grid-rows-2 gap-3 max-sm:grid-cols-1 max-sm:grid-rows-4 max-sm:gap-2">
         {/* Clock */}
         <Tile label="Current time">
           <div className="flex items-baseline gap-2 tabular-nums">
@@ -208,9 +210,10 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         </Tile>
       </div>
 
-      <TranscriptStrip lines={transcript} />
+        <TranscriptStrip lines={transcript} />
 
-      <LiveControls className="mx-4 mb-4 max-sm:mx-2 max-sm:mb-2" />
+        <LiveControls />
+      </div>
     </div>
   );
 }
@@ -221,7 +224,7 @@ function TranscriptStrip({ lines }: { lines: TranscriptLineDTO[] }) {
   const last = lines[lines.length - 1];
   const speaker = channelLabel(last);
   return (
-    <div className="shrink-0 mx-4 mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-2.5 flex items-center gap-3 min-h-0">
+    <div className="shrink-0 rounded-2xl border border-white/8 bg-white/4 px-4 py-3 flex items-center gap-3 min-h-0">
       <span
         className="text-caption2 font-semibold uppercase tracking-wider shrink-0 max-w-[28%] truncate"
         style={{ letterSpacing: "0.1em", color: speaker ? channelColor(last.channel) : "rgba(255,255,255,0.4)" }}
