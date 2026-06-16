@@ -285,10 +285,22 @@ export class RemoteServer {
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no", // disable proxy buffering (nginx etc.)
       });
-      // Send initial state snapshot so the client is immediately in sync.
+      // Send initial snapshots so the client is immediately in sync — these
+      // channels otherwise only broadcast on change, leaving a fresh client blank.
       sseWrite(res, "stage:state-changed", stageController.getState());
+      sseWrite(res, "propresenter:status", propresenterService.getStatus());
       sseClients.add(res);
       req.on("close", () => sseClients.delete(res));
+      return;
+    }
+
+    // Hydrate-on-connect endpoints (the live channels only broadcast on change).
+    if (method === "GET" && pathname === "/api/propresenter/status") {
+      json(res, propresenterService.getStatus());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/pco/live") {
+      json(res, await stageController.fetchLive());
       return;
     }
 
