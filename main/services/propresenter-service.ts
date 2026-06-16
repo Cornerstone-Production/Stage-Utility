@@ -153,6 +153,52 @@ function locateSlide(
   return null;
 }
 
+// Expand the presentation into PLAY order — one entry per slide, in the order
+// ProPresenter actually presents them. ProPresenter's slide_index indexes into
+// THIS sequence (it can exceed the library slide count because an arrangement
+// repeats groups). The arrangement's `groups` is a list of group uuids (with
+// repeats) defining play order. `current_arrangement` is often left blank even
+// when an arrangement is in effect, so fall back to the sole arrangement when
+// there's exactly one, then to library/document order as a last resort.
+function playOrderSections(active: unknown): { name: string; colorHex: string }[] {
+  const groups = pick(active, "presentation", "groups");
+  if (!Array.isArray(groups)) return [];
+
+  const byUuid = new Map<string, unknown>();
+  for (const g of groups) {
+    const u = asString(pick(g, "uuid"));
+    if (u) byUuid.set(u, g);
+  }
+  const expand = (g: unknown): { name: string; colorHex: string }[] => {
+    const name = asString(pick(g, "name")) ?? "";
+    const colorHex = colorToHex(pick(g, "color"));
+    const slides = pick(g, "slides");
+    const n = Array.isArray(slides) ? slides.length : 0;
+    return Array.from({ length: n }, () => ({ name, colorHex }));
+  };
+
+  const arrUuid = asString(pick(active, "presentation", "current_arrangement"));
+  const arrangements = pick(active, "presentation", "arrangements");
+  let arr: unknown = null;
+  if (Array.isArray(arrangements)) {
+    if (arrUuid) arr = arrangements.find((a) => asString(pick(a, "id", "uuid")) === arrUuid) ?? null;
+    if (!arr && arrangements.length === 1) arr = arrangements[0];
+  }
+
+  const refs = pick(arr, "groups");
+  if (Array.isArray(refs)) {
+    const out: { name: string; colorHex: string }[] = [];
+    for (const u of refs) {
+      const g = byUuid.get(asString(u) ?? "");
+      if (g) out.push(...expand(g));
+    }
+    if (out.length) return out;
+  }
+
+  // No usable arrangement — present in library/document order.
+  return groups.flatMap(expand);
+}
+
 class ProPresenterService {
   private host: string | null = null;
   private port: number | null = null;
@@ -317,53 +363,56 @@ class ProPresenterService {
     const currentNotes = asString(pick(slide, "current", "notes"));
     const nextNotes = asString(pick(slide, "next", "notes"));
 
-    // Resolve sections by matching the LIVE slide content against the groups.
-    // The global slide_index can't be trusted for this (it's in a different,
-    // arrangement-expanded space — e.g. index 49 in a 44-slide deck), which is
-    // why the section tag was wrong when jumping around. Content matching is
-    // exact and order-independent.
-    const groups = libraryGroups(active);
-    const total = groups.reduce((n, g) => n + g.slides.length, 0);
+    // Resolve sections from the PLAY-ORDER position. ProPresenter's slide_index
+    // indexes the arrangement-expanded play order, so play[idx] is the live
+    // slide's group — exact for repeated groups AND for text-less Intro/
+    // Instrumental/Outro slides (which can't be matched by content). When there's
+    // no index (rare), fall back to matching the slide text against the groups.
+    const play = playOrderSections(active);
+    const total = play.length;
+    const idxZeroRaw = asNumber(pick(slideIndex, "presentation_index", "index"));
+    const idxZero =
+      idxZeroRaw == null
+        ? null
+        : total > 0
+          ? Math.min(Math.max(idxZeroRaw, 0), total - 1)
+          : Math.max(idxZeroRaw, 0);
 
-    const curLoc = locateSlide(groups, currentSlideText, currentNotes);
-    const nextLoc = locateSlide(groups, nextSlideText, nextNotes);
-
-    const currentSection: ProSection | null = curLoc?.name
-      ? { name: curLoc.name, colorHex: curLoc.colorHex }
-      : null;
-    const nextSection: ProSection | null = nextLoc?.name
-      ? { name: nextLoc.name, colorHex: nextLoc.colorHex }
-      : null;
-
-    // "Then": next differently-named group after the current one (document order).
+    let currentSection: ProSection | null = null;
+    let nextSection: ProSection | null = null;
     let nextArrangementSection: ProSection | null = null;
-    if (curLoc) {
-      for (let i = curLoc.groupPos + 1; i < groups.length; i++) {
-        if (groups[i].name && groups[i].name !== curLoc.name) {
-          nextArrangementSection = { name: groups[i].name, colorHex: groups[i].colorHex };
+
+    if (idxZero != null && total > 0) {
+      const cur = play[idxZero];
+      if (cur?.name) currentSection = { name: cur.name, colorHex: cur.colorHex };
+      const nxt = play[idxZero + 1];
+      if (nxt?.name) nextSection = { name: nxt.name, colorHex: nxt.colorHex };
+      // "Then": next differently-named group later in the play order.
+      for (let i = idxZero + 1; i < total; i++) {
+        if (play[i].name && play[i].name !== currentSection?.name) {
+          nextArrangementSection = { name: play[i].name, colorHex: play[i].colorHex };
           break;
         }
       }
+    } else {
+      const groups = libraryGroups(active);
+      const curLoc = locateSlide(groups, currentSlideText, currentNotes);
+      const nextLoc = locateSlide(groups, nextSlideText, nextNotes);
+      if (curLoc?.name) currentSection = { name: curLoc.name, colorHex: curLoc.colorHex };
+      if (nextLoc?.name) nextSection = { name: nextLoc.name, colorHex: nextLoc.colorHex };
     }
 
-    // Slide counter from the matched content position (always in range); fall
-    // back to the raw slide_index (clamped) only when the slide has no text.
-    const idxZeroRaw = asNumber(pick(slideIndex, "presentation_index", "index"));
-    const cumIndex =
-      curLoc?.cumIndex ??
-      (idxZeroRaw != null && total > 0
-        ? Math.min(Math.max(idxZeroRaw, 0), total - 1)
-        : idxZeroRaw);
-    const idx = cumIndex == null ? null : cumIndex + 1;
+    const idx = idxZero == null ? null : idxZero + 1;
     const slideCount = total > 0 ? total : null;
     const slidesRemaining =
       idx != null && slideCount != null ? Math.max(0, slideCount - idx) : null;
 
     if (process.env.PP_DEBUG) {
       console.log(
-        `[propresenter] curText=${JSON.stringify((currentSlideText ?? "").slice(0, 28))} ` +
-          `notes=${JSON.stringify(currentNotes)} → section=${JSON.stringify(currentSection?.name ?? null)} ` +
-          `cum=${cumIndex}/${total} rawIdx=${idxZeroRaw}`,
+        `[propresenter] rawIdx=${idxZeroRaw}→${idxZero}/${total} ` +
+          `section=${JSON.stringify(currentSection?.name ?? null)} ` +
+          `next=${JSON.stringify(nextSection?.name ?? null)} ` +
+          `curText=${JSON.stringify((currentSlideText ?? "").slice(0, 24))}`,
       );
     }
 
