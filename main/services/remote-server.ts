@@ -442,6 +442,14 @@ export class RemoteServer {
       return;
     }
 
+    // PCO Services Live timer controls (next / previous item).
+    if (method === "POST" && (pathname === "/api/live/next" || pathname === "/api/live/previous")) {
+      const direction = pathname.endsWith("/next") ? "next" : "previous";
+      await stageController.controlLive(direction);
+      json(res, { ok: true });
+      return;
+    }
+
     if (method === "POST" && pathname === "/api/slots") {
       const body = await readBody(req) as Record<string, unknown>;
       if (!Array.isArray(body.slots)) {

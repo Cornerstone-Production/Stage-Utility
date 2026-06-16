@@ -99,6 +99,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "stage:refresh":
       return post<T>("/api/refresh");
 
+    case "pco:liveNext":
+      return post<T>("/api/live/next");
+
+    case "pco:livePrevious":
+      return post<T>("/api/live/previous");
+
     case "stage:setAllowedServiceTypes":
       return post<T>("/api/allowed-service-types", p);
 

@@ -4,6 +4,7 @@ import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
 import { useTranscript } from "./use-transcript";
 import { channelColor, channelLabel } from "./channel-color";
+import { LiveControls } from "./live-controls";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
 
@@ -208,6 +209,8 @@ export function DashboardView({ displayId }: DashboardViewProps) {
       </div>
 
       <TranscriptStrip lines={transcript} />
+
+      <LiveControls className="mx-4 mb-4 max-sm:mx-2 max-sm:mb-2" />
     </div>
   );
 }

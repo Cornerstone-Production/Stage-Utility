@@ -4,6 +4,7 @@ import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
 import { useTranscript } from "./use-transcript";
 import { channelColor, channelLabel } from "./channel-color";
+import { LiveControls } from "./live-controls";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
 
@@ -254,6 +255,8 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
             </div>
           );
         })()}
+
+        <LiveControls />
       </div>
     </div>
   );

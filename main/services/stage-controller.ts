@@ -212,6 +212,23 @@ export class StageController {
     );
   }
 
+  /**
+   * Advance / rewind the PCO Services Live timer (same as PCO's own next/previous
+   * item controls). Throws when PCO isn't configured, no plan is selected, or PCO
+   * rejects the action (e.g. the account isn't a live controller).
+   */
+  async controlLive(direction: "next" | "previous"): Promise<void> {
+    if (!this.pcoAppId || !this.pcoSecret) throw new Error("Planning Center not configured");
+    if (!this.state.serviceTypeId || !this.state.planId) throw new Error("No plan selected");
+    await pcoService.controlLive(
+      this.pcoAppId,
+      this.pcoSecret,
+      this.state.serviceTypeId,
+      this.state.planId,
+      direction,
+    );
+  }
+
   /** Plan id we've already auto-advanced away from, so rollover fires once. */
   private autoAdvancedFromPlanId: string | null = null;
   /** Grace period after a plan's service end before auto-mode rolls to the next. */

@@ -81,6 +81,47 @@ class PcoService {
     return json;
   }
 
+  // POST a Services Live controller action (no JSON body; PCO returns the updated
+  // live object or 204). Surfaces PCO's error text so the UI can toast it.
+  private async postAction(url: string, appId: string, secret: string): Promise<void> {
+    console.log(`[pco] POST ${url}`);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: this.makeAuthHeader(appId, secret),
+        "Content-Type": "application/json",
+      },
+    });
+    if (response.status === 401) {
+      throw new Error("PCO auth failed — check App ID/Secret in Integrations settings");
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`PCO live control error ${response.status}: ${body || response.statusText}`);
+    }
+  }
+
+  /**
+   * Advance / rewind the PCO Services Live controller — the same "go to next /
+   * previous item" actions as PCO's own live timer. Resolves the singleton live
+   * controller id for the plan, then POSTs the action. Requires the connected
+   * account to be a live controller (PCO returns 4xx otherwise — surfaced to the UI).
+   */
+  async controlLive(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+    direction: "next" | "previous",
+  ): Promise<void> {
+    const base = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}`;
+    const json = await this.request(`${base}/live`, appId, secret);
+    const live = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
+    if (!live?.id) throw new Error("No PCO live session for this plan");
+    const action = direction === "next" ? "go_to_next_item" : "go_to_previous_item";
+    await this.postAction(`${base}/live/${live.id}/${action}`, appId, secret);
+  }
+
   async listServiceTypes(appId: string, secret: string): Promise<ServiceTypeDTO[]> {
     const cacheKey = `service-types:${appId}`;
     const cached = this.cacheGet<ServiceTypeDTO[]>(cacheKey);
