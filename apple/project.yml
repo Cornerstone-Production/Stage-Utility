@@ -1,0 +1,40 @@
+# XcodeGen spec — run `xcodegen generate` in apple/ to produce StageDisplay.xcodeproj.
+# (Install: `brew install xcodegen`.) You can also create the project by hand in
+# Xcode instead — see README.md. The .xcodeproj itself is git-ignored.
+name: StageDisplay
+
+options:
+  bundleIdPrefix: com.cornerstonelife
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "26.0"
+    tvOS: "26.0"
+    macOS: "26.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    GENERATE_INFOPLIST_FILE: YES
+    SWIFT_STRICT_CONCURRENCY: complete
+    # Local Network permission copy (iOS/tvOS) — needed for the server connection
+    # and, in Phase 2, NDI mDNS discovery.
+    INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Stage Display connects to your Stage Utility server and NDI video sources on the local network."
+
+targets:
+  StageDisplay:
+    type: application
+    # One multiplatform app target → tvOS appliance, iPad confidence, Mac window.
+    supportedDestinations: [iOS, tvOS, macOS]
+    deploymentTarget:
+      iOS: "26.0"
+      tvOS: "26.0"
+      macOS: "26.0"
+    sources:
+      - path: StageDisplay
+    settings:
+      base:
+        # NDI discovery (Phase 2) — Bonjour service type for the Local Network prompt.
+        INFOPLIST_KEY_NSBonjourServices: "_ndi._tcp"
+        ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: YES

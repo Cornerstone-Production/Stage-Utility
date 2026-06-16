@@ -1,0 +1,20 @@
+# Xcode / Swift build artifacts — keep the apple/ tree clean inside the monorepo.
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+DerivedData/
+build/
+.build/
+*.xcuserstate
+*.moved-aside
+
+# XcodeGen generates this from project.yml — don't commit it.
+StageDisplay.xcodeproj/
+
+# NDI SDK is downloaded/licensed separately (see README) — never vendored here.
+Vendor/NDI/
+*.xcframework
+
+# macOS cruft
+.DS_Store
