@@ -207,22 +207,31 @@ class ProdComService {
     if (line) this.ingest(line);
   }
 
-  // Defensive normalisation — tries several likely field spellings.
+  // Normalisation — verified against ProdCom v2.3.1 (/api/v1/transcript items):
+  //   { id, text, channelId, channelName, inProgress, date, completeDate, source, ... }
+  // `inProgress: true` = interim/partial; the line is final when it's false.
+  // Kept defensive (extra field-name fallbacks) so other versions still parse.
   private normalizeLine(data: unknown): TranscriptLineDTO | null {
-    const at = new Date().toISOString();
     if (typeof data === "string") {
       if (!data.trim()) return null;
-      return { id: `t${++this.seq}`, channel: null, channelName: null, text: data, isFinal: true, at };
+      return { id: `t${++this.seq}`, channel: null, channelName: null, text: data, isFinal: true, at: new Date().toISOString() };
     }
     const text = firstString(data, ["text", "transcript", "content", "line", "value"]);
     if (text == null) return null;
-    const channel = firstString(data, ["channel", "channelId", "channel_id", "channelIndex"]);
+    const channel = firstString(data, ["channelId", "channel", "channel_id", "channelIndex"]);
     const channelName = firstString(data, ["channelName", "channel_name", "name", "label"]);
+
+    // ProdCom's flag is `inProgress` (true = partial). Fall back to other spellings.
+    const inProgress = firstBool(data, ["inProgress", "in_progress", "partial", "interim"]);
     const isFinalRaw = firstBool(data, ["isFinal", "final", "is_final", "completed"]);
-    // ProdCom may instead carry a status like "partial"/"final".
     const status = firstString(data, ["status", "type", "state"]);
-    const isFinal = isFinalRaw ?? (status ? /final|complete|done/i.test(status) : true);
+    const isFinal =
+      inProgress != null
+        ? !inProgress
+        : (isFinalRaw ?? (status ? /final|complete|done/i.test(status) : true));
+
     const id = firstString(data, ["id", "uuid", "lineId"]) ?? `t${++this.seq}`;
+    const at = firstString(data, ["completeDate", "date", "timestamp", "time"]) ?? new Date().toISOString();
     return { id, channel, channelName, text, isFinal, at };
   }
 
