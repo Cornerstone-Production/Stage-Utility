@@ -298,22 +298,24 @@ class PcoService {
       return { isLive: false, itemTitle: null, lengthSec: null, liveStartAt: null, serverNow };
     }
 
-    // Effective length = length + live length_offset (operator's live adjustment).
-    // A length of 0 (or missing) means the item has NO fixed length in the plan —
-    // return null so the client shows elapsed (count-up) instead of a bogus
-    // "0 − elapsed" countdown that runs negative. (Verified: ItemTime.length is the
-    // source; items without a set length come through as 0.)
-    const rawLen = it.attributes.length;
-    const offset = it.attributes.length_offset;
-    const baseLen = typeof rawLen === "number" ? rawLen : 0;
-    const adjLen = baseLen + (typeof offset === "number" ? offset : 0);
-    const lengthSec = adjLen > 0 ? adjLen : null;
-
     const itemNode = included.find((n) => n.id === itemId);
     const itemTitle =
       itemNode && typeof itemNode.attributes.title === "string"
         ? (itemNode.attributes.title as string)
         : null;
+
+    // "Full Item Length" countdown = the *plan item's* planned length, plus any
+    // live length_offset the operator set. The ItemTime's own `length` is often 0
+    // (verified live), so the Item is the authoritative source. A length of 0/none
+    // means the item has no fixed duration → null, and the client shows elapsed
+    // (count-up) instead of a bogus "0 − elapsed" negative.
+    const planLen =
+      itemNode && typeof itemNode.attributes.length === "number"
+        ? (itemNode.attributes.length as number)
+        : 0;
+    const offset = typeof it.attributes.length_offset === "number" ? it.attributes.length_offset : 0;
+    const adjLen = planLen + offset;
+    const lengthSec = adjLen > 0 ? adjLen : null;
 
     return { isLive: true, itemTitle, lengthSec, liveStartAt, serverNow };
   }
