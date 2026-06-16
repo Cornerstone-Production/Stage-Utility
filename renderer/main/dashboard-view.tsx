@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
+import { useTranscript } from "./use-transcript";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
 
@@ -11,6 +12,7 @@ interface DashboardViewProps {
 
 export function DashboardView({ displayId }: DashboardViewProps) {
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
+  const transcript = useTranscript();
 
   // One ticking clock drives both the wall clock and the live countdown.
   const [now, setNow] = useState(() => Date.now());
@@ -196,6 +198,24 @@ export function DashboardView({ displayId }: DashboardViewProps) {
           )}
         </Tile>
       </div>
+
+      <TranscriptStrip lines={transcript} />
+    </div>
+  );
+}
+
+/** Compact live-transcript strip — only renders when ProdCom has lines. */
+function TranscriptStrip({ lines }: { lines: TranscriptLineDTO[] }) {
+  if (lines.length === 0) return null;
+  const last = lines[lines.length - 1];
+  return (
+    <div className="shrink-0 mx-4 mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-2.5 flex items-center gap-3 min-h-0">
+      <span className="text-caption2 font-medium uppercase tracking-wider text-white/40 shrink-0" style={{ letterSpacing: "0.1em" }}>
+        Transcript
+      </span>
+      <span className={`text-[clamp(0.9rem,2.4vmin,1.4rem)] truncate ${last.isFinal ? "text-white/85" : "text-white/50"}`}>
+        {last.text}
+      </span>
     </div>
   );
 }

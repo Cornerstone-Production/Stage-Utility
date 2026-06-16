@@ -54,6 +54,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "stage:getState":
       return apiFetch<T>("/api/state");
 
+    case "prodcom:getTranscript":
+      return apiFetch<T>("/api/prodcom/transcript");
+
     case "stage:listServiceTypes":
       return apiFetch<T>("/api/service-types");
 

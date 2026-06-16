@@ -13,6 +13,7 @@ import type { DisplayKind, Slot } from "../types/stage.js";
 import { addBroadcastListener } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
 import { integrationManager } from "./integration-manager.js";
+import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
 import { stageController } from "./stage-controller.js";
 import { wirelessManager } from "./wireless-manager.js";
@@ -55,7 +56,7 @@ function error(res: http.ServerResponse, message: string, status = 400): void {
 }
 
 function isDisplayKind(v: unknown): v is DisplayKind {
-  return v === "slots" || v === "dashboard" || v === "stage";
+  return v === "slots" || v === "dashboard" || v === "stage" || v === "transcription";
 }
 
 async function readBody(req: http.IncomingMessage): Promise<unknown> {
@@ -352,6 +353,12 @@ export class RemoteServer {
           res.end(`ProPresenter thumbnail error: ${e.message}`);
         }
       });
+      return;
+    }
+
+    // ── ProdCom transcript backfill (recent lines for a freshly-loaded display) ──
+    if (method === "GET" && pathname === "/api/prodcom/transcript") {
+      json(res, prodcomService.getBuffer());
       return;
     }
 

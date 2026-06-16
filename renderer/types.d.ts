@@ -97,7 +97,17 @@ interface Slot {
   stackWithPrevious?: boolean;
 }
 
-type DisplayKind = "slots" | "dashboard" | "stage";
+type DisplayKind = "slots" | "dashboard" | "stage" | "transcription";
+
+/** A live transcript line from ProdCom (SSE "prodcom:transcript"). */
+interface TranscriptLineDTO {
+  id: string;
+  channel: string | null;
+  channelName: string | null;
+  text: string;
+  isFinal: boolean;
+  at: string;
+}
 
 interface DisplayInfo {
   id: string;

@@ -18,6 +18,7 @@ import { getUserDataPath } from "./main/services/app-paths.js";
 import { deviceManager } from "./main/services/device-manager.js";
 import { integrationManager } from "./main/services/integration-manager.js";
 import { livePoller } from "./main/services/live-poller.js";
+import { prodcomService } from "./main/services/prodcom-service.js";
 import { propresenterService } from "./main/services/propresenter-service.js";
 import { remoteServer } from "./main/services/remote-server.js";
 import { stageController } from "./main/services/stage-controller.js";
@@ -66,6 +67,7 @@ async function shutdown(signal: string): Promise<void> {
   stageController.stopAutoRefresh();
   livePoller.stop();
   propresenterService.stop();
+  prodcomService.stop();
   await remoteServer.stop();
   await deviceManager.stop();
   console.log("[server] shutdown complete");
