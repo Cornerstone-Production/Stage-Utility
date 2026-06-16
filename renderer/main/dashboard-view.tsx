@@ -125,14 +125,16 @@ export function DashboardView({ displayId }: DashboardViewProps) {
           </div>
         </Tile>
 
-        {/* PCO live timer (counts down on fixed-length items, up otherwise) */}
+        {/* PCO timer — always counts down (to service start, then per item) */}
         <Tile
           label={
             !timer
               ? "Service timer"
-              : timer.mode === "down"
-                ? "Live · item remaining"
-                : "Live · item elapsed"
+              : timer.mode === "preservice"
+                ? "Service starts in"
+                : over
+                  ? "Live · item over"
+                  : "Live · item remaining"
           }
           accent={timer ? (over ? "red" : "green") : "none"}
         >
@@ -146,8 +148,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
                 {fmtDuration(timer.seconds)}
               </span>
               <span className="text-caption1 text-white/45 truncate max-w-full">
-                {timer.itemTitle ?? "Current item"}
-                {timer.totalSec != null && ` · ${fmtDuration(timer.totalSec)} total`}
+                {timer.label ?? (timer.mode === "preservice" ? "Service start" : "Current item")}
               </span>
             </div>
           ) : (

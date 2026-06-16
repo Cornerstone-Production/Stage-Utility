@@ -117,12 +117,13 @@ interface ProTimer {
   state: string;
 }
 
-/** Live PCO Services Live countdown for the current item (SSE "pco:live"). */
+/** Live PCO countdown (SSE "pco:live") — always counts down (preservice → item). */
 interface PcoLiveDTO {
-  isLive: boolean;
-  itemTitle: string | null;
+  mode: "item" | "preservice" | "none";
+  label: string | null;
   lengthSec: number | null;
   liveStartAt: string | null;
+  targetAt: string | null;
   serverNow: string;
 }
 

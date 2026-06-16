@@ -25,14 +25,21 @@ export interface DisplayInfo {
   kind?: DisplayKind;
 }
 
-/** Live PCO Services Live countdown for the current item (pushed on "pco:live"). */
+/**
+ * Live PCO countdown (pushed on "pco:live"). Mirrors PCO's green timer, which
+ * always counts DOWN: to the service start before service ("preservice"), then
+ * each item's length while live ("item"). "none" = nothing to count down to.
+ */
 export interface PcoLiveDTO {
-  isLive: boolean;
-  itemTitle: string | null;
-  /** Planned length of the current item, in seconds. */
+  mode: "item" | "preservice" | "none";
+  /** Item title ("item") or service label ("preservice"). */
+  label: string | null;
+  /** Item's planned length in seconds ("item" mode). */
   lengthSec: number | null;
-  /** ISO timestamp the current item went live (countdown anchor). */
+  /** ISO timestamp the current item went live — countdown anchor ("item" mode). */
   liveStartAt: string | null;
+  /** ISO timestamp to count down to — the service start ("preservice" mode). */
+  targetAt: string | null;
   /** Server clock at send time (ISO) so the client can correct for skew. */
   serverNow: string;
 }

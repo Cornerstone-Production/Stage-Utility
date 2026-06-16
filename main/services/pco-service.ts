@@ -245,12 +245,11 @@ class PcoService {
   }
 
   /**
-   * Read the Services Live controller for a plan and resolve the current item's
-   * countdown. One request via `?include=items,current_item_time`. NOT cached —
-   * this is live data polled every ~1.5s by the live poller.
-   *
-   * Returns isLive=false when nobody has started Live (no current_item_time, or
-   * the current ItemTime has no live_start_at).
+   * Mirror PCO's green timer, which always counts DOWN. While a plan item is live
+   * → that item's planned length from when it went live ("item" mode). Otherwise
+   * → the time until the service starts ("preservice" mode, e.g. PCO's "6 days").
+   * "none" when neither is available. One /live request (+ a cached plan_times
+   * lookup for the service start). NOT cached for the live part — polled live.
    */
   async getLive(
     appId: string,
@@ -259,65 +258,91 @@ class PcoService {
     planId: string,
   ): Promise<PcoLiveDTO> {
     const serverNow = new Date().toISOString();
-    const url =
-      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/live` +
-      `?include=items,current_item_time`;
-    const json = await this.request(url, appId, secret);
+    const base = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}`;
+    const json = await this.request(`${base}/live?include=items,current_item_time`, appId, secret);
     const live = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
     const included = json.included ?? [];
 
+    // ── "item" mode: a plan item is currently live. ──
+    // (current_item_time must resolve to one of THIS plan's items — its item is in
+    // the `items` include. A session whose item isn't ours, or no session at all,
+    // falls through to the preservice countdown below.)
     const currentRef = live?.relationships?.["current_item_time"]?.data;
     const currentId = currentRef && !Array.isArray(currentRef) ? currentRef.id : null;
-    if (!currentId) {
-      return { isLive: false, itemTitle: null, lengthSec: null, liveStartAt: null, serverNow };
-    }
-
-    // `included` mixes types (ItemTime + Item); match the current ItemTime by id.
-    const it = included.find((n) => n.id === currentId);
+    const it = currentId ? included.find((n) => n.id === currentId) : null;
     const liveStartAt = it?.attributes?.live_start_at;
-    if (!it || typeof liveStartAt !== "string" || !liveStartAt) {
-      return { isLive: false, itemTitle: null, lengthSec: null, liveStartAt: null, serverNow };
-    }
-
-    // CRITICAL: PCO Services Live is scoped per *service type*, not per plan —
-    // querying this plan's /live returns whatever session is currently live in the
-    // service type, which may be a DIFFERENT plan's event. Guard against showing
-    // another event's timer: the current item must belong to THIS plan (i.e. its
-    // item resolves against this plan's `items` include). If it doesn't, the live
-    // session is for a different plan → report not-live for our configured plan.
-    const planItemIds = new Set(
-      included.filter((n) => n.type === "Item").map((n) => n.id),
-    );
-    const itemRef = it.relationships?.["item"]?.data;
+    const itemRef = it?.relationships?.["item"]?.data;
     const itemId = itemRef && !Array.isArray(itemRef) ? itemRef.id : null;
-    if (!itemId || !planItemIds.has(itemId)) {
-      console.log(
-        `[pco] live session is not for the configured plan ${planId} ` +
-          `(current item ${itemId ?? "?"} not in this plan) — reporting not-live`,
-      );
-      return { isLive: false, itemTitle: null, lengthSec: null, liveStartAt: null, serverNow };
+    const itemNode =
+      itemId ? included.find((n) => n.type === "Item" && n.id === itemId) : null;
+
+    if (it && typeof liveStartAt === "string" && liveStartAt && itemNode) {
+      // "Full Item Length" = the *plan item's* length (ItemTime.length is often 0)
+      // plus any live length_offset the operator set.
+      const planLen =
+        typeof itemNode.attributes.length === "number" ? (itemNode.attributes.length as number) : 0;
+      const offset =
+        typeof it.attributes.length_offset === "number" ? it.attributes.length_offset : 0;
+      const adjLen = planLen + offset;
+      return {
+        mode: "item",
+        label: typeof itemNode.attributes.title === "string" ? itemNode.attributes.title : null,
+        lengthSec: adjLen > 0 ? adjLen : null,
+        liveStartAt,
+        targetAt: null,
+        serverNow,
+      };
     }
 
-    const itemNode = included.find((n) => n.id === itemId);
-    const itemTitle =
-      itemNode && typeof itemNode.attributes.title === "string"
-        ? (itemNode.attributes.title as string)
-        : null;
+    // ── "preservice" mode: count down to the service start (PCO's pre-service timer). ──
+    const startAt = await this.getServiceStart(appId, secret, serviceTypeId, planId);
+    if (startAt) {
+      return {
+        mode: "preservice",
+        label: "Service starts",
+        lengthSec: null,
+        liveStartAt: null,
+        targetAt: startAt,
+        serverNow,
+      };
+    }
 
-    // "Full Item Length" countdown = the *plan item's* planned length, plus any
-    // live length_offset the operator set. The ItemTime's own `length` is often 0
-    // (verified live), so the Item is the authoritative source. A length of 0/none
-    // means the item has no fixed duration → null, and the client shows elapsed
-    // (count-up) instead of a bogus "0 − elapsed" negative.
-    const planLen =
-      itemNode && typeof itemNode.attributes.length === "number"
-        ? (itemNode.attributes.length as number)
-        : 0;
-    const offset = typeof it.attributes.length_offset === "number" ? it.attributes.length_offset : 0;
-    const adjLen = planLen + offset;
-    const lengthSec = adjLen > 0 ? adjLen : null;
+    return { mode: "none", label: null, lengthSec: null, liveStartAt: null, targetAt: null, serverNow };
+  }
 
-    return { isLive: true, itemTitle, lengthSec, liveStartAt, serverNow };
+  /**
+   * The plan's service start time (ISO) — the soonest "service" plan_time whose
+   * end is still in the future, else the latest. Cached (~30s) since it's static.
+   */
+  private async getServiceStart(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<string | null> {
+    const cacheKey = `plan-start:${planId}`;
+    const cached = this.cacheGet<string | null>(cacheKey);
+    if (cached !== null) return cached;
+
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times`;
+    const json = await this.request(url, appId, secret).catch(() => null);
+    const times = json && Array.isArray(json.data) ? json.data : [];
+    const services = times
+      .filter((t) => t.attributes.time_type === "service")
+      .map((t) => ({
+        startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
+        endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
+      }))
+      .filter((t): t is { startsAt: string; endsAt: string } => !!t.startsAt);
+
+    const now = Date.now();
+    const upcoming = services
+      .filter((t) => (t.endsAt ? Date.parse(t.endsAt) > now : true))
+      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
+    const chosen = upcoming ?? services.sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt))[0];
+    const result = chosen?.startsAt ?? null;
+    this.cacheSet(cacheKey, result);
+    return result;
   }
 }
 

@@ -142,13 +142,26 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
             </span>
           </Cell>
           <Cell
-            label={!timer ? "Planning Center Live" : timer.mode === "down" ? "PCO Live · remaining" : "PCO Live · elapsed"}
+            label={
+              !timer
+                ? "Planning Center Live"
+                : timer.mode === "preservice"
+                  ? "Service starts in"
+                  : over
+                    ? "PCO Live · over"
+                    : "PCO Live · remaining"
+            }
             accent={timer ? (over ? "red" : "green") : "none"}
           >
             {timer ? (
-              <span className={`text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums ${over ? "text-red-10" : "text-[#7fe3c4]"}`}>
-                {fmtDuration(timer.seconds)}
-              </span>
+              <div className="flex flex-col items-center gap-1">
+                <span className={`text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums ${over ? "text-red-10" : "text-[#7fe3c4]"}`}>
+                  {fmtDuration(timer.seconds)}
+                </span>
+                {timer.label && (
+                  <span className="text-caption2 text-white/40 truncate max-w-full">{timer.label}</span>
+                )}
+              </div>
             ) : (
               <span className="text-white/35 text-[clamp(0.8rem,2.4vmin,1.1rem)]">No live service</span>
             )}
