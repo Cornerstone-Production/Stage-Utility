@@ -18,3 +18,6 @@ Vendor/NDI/
 
 # macOS cruft
 .DS_Store
+
+# XcodeGen-generated Info.plist
+StageDisplay/Info.plist
