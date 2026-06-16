@@ -114,6 +114,8 @@ interface DisplayInfo {
   name: string;
   /** Defaults to "slots" when absent. */
   kind?: DisplayKind;
+  /** NDI source name to show as a video layer (native Apple client only); null/absent = none. */
+  ndiSource?: string | null;
 }
 
 interface ProSection {

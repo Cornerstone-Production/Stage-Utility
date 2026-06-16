@@ -436,6 +436,15 @@ export function SettingsView() {
     }
   }
 
+  async function handleSetDisplayNdiSource(id: string, ndiSource: string | null) {
+    try {
+      const next = await ipc<StageState>("displays:setNdiSource", { id, ndiSource });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to set NDI source: ${String(err)}`);
+    }
+  }
+
   async function handleOpenDisplayWindow(id: string) {
     const url = `${window.location.origin}/${encodeURIComponent(id)}`;
     window.open(url, `display-${id}`);
@@ -461,6 +470,7 @@ export function SettingsView() {
     handleRenameDisplay,
     handleRemoveDisplay,
     handleSetDisplayKind,
+    handleSetDisplayNdiSource,
     handleOpenDisplayWindow,
     handleDragEnd,
     sensors,
