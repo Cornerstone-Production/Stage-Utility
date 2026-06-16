@@ -131,7 +131,13 @@ export class RemoteServer {
         ext === ".woff2" ? "font/woff2" :
         "application/octet-stream";
       const data = await fs.readFile(candidate);
-      res.writeHead(200, { "Content-Type": mime });
+      // Vite fingerprints everything under /assets/, so cache those forever;
+      // everything else (HTML, manifest, icons) must revalidate so a new build is
+      // picked up immediately instead of Safari serving a stale page.
+      const cacheControl = urlPath.startsWith("/assets/")
+        ? "public, max-age=31536000, immutable"
+        : "no-cache";
+      res.writeHead(200, { "Content-Type": mime, "Cache-Control": cacheControl });
       res.end(data);
       return true;
     } catch {
@@ -143,7 +149,7 @@ export class RemoteServer {
       const fallback = path.join(RENDERER_BUILD_DIR, "index.html");
       try {
         const html = await fs.readFile(fallback, "utf-8");
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
         res.end(html);
         return true;
       } catch {
