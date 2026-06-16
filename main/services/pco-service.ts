@@ -344,6 +344,41 @@ class PcoService {
     this.cacheSet(cacheKey, result);
     return result;
   }
+
+  /**
+   * The current plan's service END time (ISO), choosing the same "service"
+   * plan_time getServiceStart would — used by auto-mode rollover. Cached (~30s).
+   */
+  async getServiceEnd(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<string | null> {
+    const cacheKey = `plan-end:${planId}`;
+    const cached = this.cacheGet<string | null>(cacheKey);
+    if (cached !== null) return cached;
+
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times`;
+    const json = await this.request(url, appId, secret).catch(() => null);
+    const times = json && Array.isArray(json.data) ? json.data : [];
+    const services = times
+      .filter((t) => t.attributes.time_type === "service")
+      .map((t) => ({
+        startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
+        endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
+      }))
+      .filter((t): t is { startsAt: string; endsAt: string } => !!t.startsAt);
+
+    const now = Date.now();
+    const upcoming = services
+      .filter((t) => (t.endsAt ? Date.parse(t.endsAt) > now : true))
+      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
+    const chosen = upcoming ?? services.sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt))[0];
+    const result = chosen?.endsAt ?? null;
+    this.cacheSet(cacheKey, result);
+    return result;
+  }
 }
 
 export const pcoService = new PcoService();

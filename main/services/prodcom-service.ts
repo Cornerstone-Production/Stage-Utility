@@ -159,6 +159,7 @@ class ProdComService {
           return;
         }
         this.report("connected", `Streaming from ${host}:${port}`);
+        this.backfill(host, port);
         res.setEncoding("utf8");
 
         // Parse text/event-stream: accumulate until a blank line ends an event.
@@ -239,12 +240,61 @@ class ProdComService {
     const ch = line.channel ?? "_";
     if (line.isFinal) {
       this.partials.delete(ch);
-      this.finals.push(line);
-      if (this.finals.length > MAX_LINES) this.finals.splice(0, this.finals.length - MAX_LINES);
+      this.addFinal(line);
     } else {
       this.partials.set(ch, line);
     }
     broadcast("prodcom:transcript", this.getBuffer());
+  }
+
+  // Append a finalised line, replacing any existing one with the same id (so a
+  // backfilled line and a streamed update of it don't both appear).
+  private addFinal(line: TranscriptLineDTO): void {
+    const at = this.finals.findIndex((l) => l.id === line.id);
+    if (at !== -1) this.finals[at] = line;
+    else this.finals.push(line);
+    if (this.finals.length > MAX_LINES) this.finals.splice(0, this.finals.length - MAX_LINES);
+  }
+
+  // Prime the buffer from the REST snapshot so a display opened mid-service shows
+  // prior lines immediately (the SSE stream only carries lines from now on).
+  private backfill(host: string, port: number): void {
+    const req = http.get(
+      { host, port, path: "/api/v1/transcript", headers: this.authHeaders(this.apiKey), timeout: 4000 },
+      (res) => {
+        if ((res.statusCode ?? 0) < 200 || (res.statusCode ?? 0) >= 300) {
+          res.destroy();
+          return;
+        }
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c: string) => (body += c));
+        res.on("end", () => {
+          try {
+            const parsed: unknown = JSON.parse(body);
+            const rows = Array.isArray(parsed)
+              ? parsed
+              : (pick(parsed, "transcripts") ?? pick(parsed, "items") ?? pick(parsed, "data"));
+            if (!Array.isArray(rows)) return;
+            let added = false;
+            for (const row of rows) {
+              const line = this.normalizeLine(row);
+              if (line?.isFinal) {
+                this.addFinal(line);
+                added = true;
+              }
+            }
+            if (added) broadcast("prodcom:transcript", this.getBuffer());
+          } catch {
+            /* snapshot not JSON / unavailable — ignore, stream still works */
+          }
+        });
+      },
+    );
+    req.on("timeout", () => req.destroy());
+    req.on("error", () => {
+      /* backfill is best-effort */
+    });
   }
 }
 

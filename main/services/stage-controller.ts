@@ -212,6 +212,39 @@ export class StageController {
     );
   }
 
+  /** Plan id we've already auto-advanced away from, so rollover fires once. */
+  private autoAdvancedFromPlanId: string | null = null;
+  /** Grace period after a plan's service end before auto-mode rolls to the next. */
+  private static readonly ROLLOVER_GRACE_MS = 60 * 60 * 1000;
+
+  /**
+   * Auto mode only: once the current plan's service has ended (+1h grace), roll
+   * to the globally-nearest upcoming plan. Called from the live poller. No-op in
+   * manual mode, when unconfigured, or when already advanced from this plan.
+   */
+  async maybeAutoAdvance(): Promise<void> {
+    if (this.state.planMode !== "auto") return;
+    if (!this.pcoAppId || !this.pcoSecret) return;
+    if (!this.state.serviceTypeId || !this.state.planId) return;
+    if (this.autoAdvancedFromPlanId === this.state.planId) return;
+
+    const endIso = await pcoService
+      .getServiceEnd(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId, this.state.planId)
+      .catch(() => null);
+    if (!endIso) return;
+    const end = Date.parse(endIso);
+    if (!Number.isFinite(end)) return;
+    if (Date.now() < end + StageController.ROLLOVER_GRACE_MS) return;
+
+    console.log(
+      `[stage-controller] auto rollover — plan ${this.state.planId} ended >1h ago, selecting next`,
+    );
+    this.autoAdvancedFromPlanId = this.state.planId;
+    await this.selectGlobalNextPlan().catch((err) =>
+      console.error("[stage-controller] auto rollover error:", err),
+    );
+  }
+
   async setPlan(id: string): Promise<StageState> {
     this.assertPco();
     if (!this.state.serviceTypeId) throw new Error("No service type selected");

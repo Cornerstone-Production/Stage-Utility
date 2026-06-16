@@ -16,7 +16,7 @@ import * as http from "http";
 import type { ProPresenterStatusDTO, ProSection, ProTimer } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 
-const POLL_INTERVAL_MS = 1000;
+const POLL_INTERVAL_MS = 500;
 const ERROR_INTERVAL_MS = 5000;
 const REQUEST_TIMEOUT_MS = 4000;
 /** Thumbnail width requested from ProPresenter (px). */
@@ -163,6 +163,7 @@ class ProPresenterService {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private last: ProPresenterStatusDTO = OFFLINE;
+  private lastJson = "";
   private onConn: ((state: ProConnState, message: string | null) => void) | null = null;
   private reported: ProConnState | null = null;
 
@@ -320,11 +321,23 @@ class ProPresenterService {
     const currentNotes = asString(pick(slide, "current", "notes"));
     const nextNotes = asString(pick(slide, "next", "notes"));
 
-    const idxZero = asNumber(pick(slideIndex, "presentation_index", "index"));
-    const idx = idxZero == null ? null : idxZero + 1;
+    const idxZeroRaw = asNumber(pick(slideIndex, "presentation_index", "index"));
 
     // Sections via the arrangement-aware play order.
     const { seq, total } = orderedGroups(active);
+
+    // Clamp the index into the known slide range. A live arrangement change (or a
+    // non-sequential jump observed a poll before slide_index catches up) can leave
+    // the index momentarily out of range; clamping keeps the section/preview/count
+    // coherent instead of showing a null section or "Slide 105 of 100".
+    const idxZero =
+      idxZeroRaw == null
+        ? null
+        : total > 0
+          ? Math.min(Math.max(idxZeroRaw, 0), total - 1)
+          : Math.max(idxZeroRaw, 0);
+    const idx = idxZero == null ? null : idxZero + 1;
+
     let currentSection: ProSection | null = null;
     let nextSection: ProSection | null = null;
     let nextArrangementSection: ProSection | null = null;
@@ -339,6 +352,14 @@ class ProPresenterService {
           break;
         }
       }
+    }
+
+    if (process.env.PP_DEBUG) {
+      console.log(
+        `[propresenter] idx=${idxZeroRaw}→${idxZero} total=${total} ` +
+          `seq=[${seq.map((g) => `${g.name || "·"}×${g.slideCount}`).join(",")}] ` +
+          `cur="${currentSection?.name ?? ""}" curText="${(currentSlideText ?? "").slice(0, 24)}"`,
+      );
     }
 
     const slideCount = total > 0 ? total : null;
@@ -357,10 +378,16 @@ class ProPresenterService {
       : [];
 
     // Stash preview target + key (thumbnail index is the 0-based slide index).
+    // The key includes the current arrangement so that reordering a song (same
+    // presentation uuid + same index, but a different slide there) still busts the
+    // <img> cache and refetches the live thumbnail.
+    const arrUuid = asString(pick(active, "presentation", "current_arrangement"));
     this.activeUuid = asString(pick(active, "presentation", "id", "uuid"));
     this.slideIdxZero = idxZero;
     const slidePreviewKey =
-      this.activeUuid && idxZero != null ? `${this.activeUuid}:${idxZero}` : null;
+      this.activeUuid && idxZero != null
+        ? `${this.activeUuid}:${arrUuid ?? ""}:${idxZero}`
+        : null;
 
     return {
       connected: true,
@@ -385,6 +412,11 @@ class ProPresenterService {
 
   private emit(status: ProPresenterStatusDTO): void {
     this.last = status;
+    // Only push when something actually changed — at 2 Hz an unchanged broadcast
+    // would re-render every dashboard for nothing.
+    const json = JSON.stringify(status);
+    if (json === this.lastJson) return;
+    this.lastJson = json;
     broadcast("propresenter:status", status);
   }
 }

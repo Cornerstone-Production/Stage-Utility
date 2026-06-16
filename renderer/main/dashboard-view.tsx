@@ -3,6 +3,7 @@ import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
 import { useTranscript } from "./use-transcript";
+import { channelColor, channelLabel } from "./channel-color";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
 
@@ -88,7 +89,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
                 className="size-5 rounded select-none"
               />
             )}
-            <span className="text-caption1 font-semibold select-none truncate" style={{ letterSpacing: "0.02em" }}>
+            <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
               {state.appName}
             </span>
           </div>
@@ -105,6 +106,8 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         {state.showQr && state.remoteUrl && (
           <a
             href="/settings"
+            target="_blank"
+            rel="noopener noreferrer"
             className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70"
             title="Open settings"
             aria-label="Open settings"
@@ -208,10 +211,14 @@ export function DashboardView({ displayId }: DashboardViewProps) {
 function TranscriptStrip({ lines }: { lines: TranscriptLineDTO[] }) {
   if (lines.length === 0) return null;
   const last = lines[lines.length - 1];
+  const speaker = channelLabel(last);
   return (
     <div className="shrink-0 mx-4 mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-2.5 flex items-center gap-3 min-h-0">
-      <span className="text-caption2 font-medium uppercase tracking-wider text-white/40 shrink-0" style={{ letterSpacing: "0.1em" }}>
-        Transcript
+      <span
+        className="text-caption2 font-semibold uppercase tracking-wider shrink-0 max-w-[28%] truncate"
+        style={{ letterSpacing: "0.1em", color: speaker ? channelColor(last.channel) : "rgba(255,255,255,0.4)" }}
+      >
+        {speaker ?? "Transcript"}
       </span>
       <span className={`text-[clamp(0.9rem,2.4vmin,1.4rem)] truncate ${last.isFinal ? "text-white/85" : "text-white/50"}`}>
         {last.text}

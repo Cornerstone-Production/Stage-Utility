@@ -61,7 +61,7 @@ export function BrandHeader({
       >
         <span
           ref={textRef}
-          className="block font-semibold text-gray-12 break-words"
+          className="block font-title text-gray-12 break-words"
           style={{ fontSize, lineHeight: 1.1 }}
         >
           {name}

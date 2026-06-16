@@ -124,8 +124,19 @@
   --color-orange-12: var(--orange-12);
 }
 
+/* ── Brand title face (self-hosted, no CDN — kiosks run on a closed LAN) ── */
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/Outfit-Regular.woff2") format("woff2");
+}
+
 /* ── Apple-inspired typography utilities ── */
 @layer utilities {
+  .font-title { font-family: "Outfit", ui-sans-serif, system-ui, sans-serif; }
+
   .text-large-title  { font-size: 34px; line-height: 41px; }
   .text-title1       { font-size: 28px; line-height: 34px; }
   .text-title2       { font-size: 22px; line-height: 28px; }

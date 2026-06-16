@@ -3,29 +3,29 @@ import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useStageState } from "./use-stage-state";
 import { useTranscript } from "./use-transcript";
+import { channelColor } from "./channel-color";
 import { Loader2Icon } from "lucide-react";
 
 interface TranscriptionViewProps {
   displayId: string;
 }
 
-// Stable-ish color per channel so multi-channel transcripts are distinguishable.
-const CHANNEL_COLORS = ["#e6e6ea", "#7fe3c4", "#f0c060", "#9db8ff", "#f0a0c0", "#b9e08a"];
-function channelColor(channel: string | null): string {
-  if (!channel) return CHANNEL_COLORS[0];
-  let h = 0;
-  for (let i = 0; i < channel.length; i++) h = (h * 31 + channel.charCodeAt(i)) >>> 0;
-  return CHANNEL_COLORS[h % CHANNEL_COLORS.length];
-}
-
 export function TranscriptionView({ displayId }: TranscriptionViewProps) {
   const { state, isLoading } = useStageState();
   const lines = useTranscript();
 
-  // Auto-scroll to newest.
+  // Follow newest line ONLY while the viewer is already at the bottom; if they
+  // scroll up to read history, leave them there until they return to the bottom.
+  const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const atBottomRef = useRef(true);
+  function onScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  }
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
+    if (atBottomRef.current) endRef.current?.scrollIntoView({ block: "end" });
   }, [lines]);
 
   if (isLoading || !state) {
@@ -59,7 +59,7 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
             {state.appLogo && (
               <BrandLogo logo={state.appLogo} monochrome={state.appLogoMonochrome} className="size-5 rounded select-none" />
             )}
-            <span className="text-caption1 font-semibold select-none truncate" style={{ letterSpacing: "0.02em" }}>
+            <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
               {state.appName}
             </span>
           </div>
@@ -73,14 +73,18 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
           )}
         </div>
         {state.showQr && state.remoteUrl && (
-          <a href="/settings" className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70" title="Open settings" aria-label="Open settings">
+          <a href="/settings" target="_blank" rel="noopener noreferrer" className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70" title="Open settings" aria-label="Open settings">
             <QrHint url={state.remoteUrl} compact />
           </a>
         )}
       </div>
 
-      {/* Captions — newest at bottom, auto-scrolling */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-[6vw] py-6 flex flex-col justify-end gap-3">
+      {/* Captions — newest at bottom; auto-scrolls only when already at bottom */}
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        className="flex-1 min-h-0 overflow-y-auto px-[6vw] py-6 flex flex-col justify-end gap-3"
+      >
         {lines.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
             <span className="text-title3 text-white/30">Waiting for transcript…</span>

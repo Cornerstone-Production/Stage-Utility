@@ -56,7 +56,7 @@ export function DisplayPickerView() {
             />
           )}
           <span
-            className="text-caption1 font-semibold select-none truncate"
+            className="text-caption1 font-title select-none truncate"
             style={{ letterSpacing: "0.02em" }}
           >
             {state.appName}
@@ -66,6 +66,8 @@ export function DisplayPickerView() {
         {state.showQr && state.remoteUrl && (
           <a
             href="/settings"
+            target="_blank"
+            rel="noopener noreferrer"
             className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70"
             title="Open settings"
             aria-label="Open settings"

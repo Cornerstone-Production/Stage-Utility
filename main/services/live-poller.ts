@@ -10,7 +10,7 @@ import type { PcoLiveDTO } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { stageController } from "./stage-controller.js";
 
-const LIVE_INTERVAL_MS = 1500;
+const LIVE_INTERVAL_MS = 1000;
 // Preservice/idle: still poll often enough to notice a service going live quickly
 // (the countdown itself ticks client-side, so this is just change detection).
 const IDLE_INTERVAL_MS = 4000;
@@ -54,6 +54,9 @@ class LivePoller {
     if (live) {
       broadcast("pco:live", live);
     }
+
+    // Auto mode: roll to the next event once the current one ended (+1h grace).
+    void stageController.maybeAutoAdvance();
 
     // Fast cadence while a live item is running (so item switches reflect quickly);
     // a calmer cadence for the preservice countdown (it ticks client-side anyway).

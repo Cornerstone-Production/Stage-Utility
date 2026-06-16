@@ -405,10 +405,26 @@ export function SlotsSection({
   | "isSavingPreset"
   | "handlers"
 >) {
+  // Slots only apply to "slots"-kind displays — Dashboard/Stage/Captions render
+  // their own fixed layouts and ignore slots, so don't let them be edited here.
+  const slotDisplays = (stageState.displays ?? []).filter((d) => (d.kind ?? "slots") === "slots");
+
+  if (slotDisplays.length === 0) {
+    return (
+      <div className="px-5 flex flex-col gap-2 py-5">
+        <span className="text-headline font-semibold text-gray-12">Slots</span>
+        <p className="text-caption1 text-gray-9">
+          No slot-based displays. Set a display to <span className="font-medium text-gray-11">Slots</span> in
+          the Displays section to assign microphone/team content.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="px-5 flex flex-col gap-6 py-5">
-      {/* Display picker */}
-      {(stageState.displays?.length ?? 0) > 1 && (
+      {/* Display picker — slots-kind displays only */}
+      {slotDisplays.length > 1 && (
         <div className="flex items-center gap-2">
           <span className="text-caption1 text-gray-9 shrink-0">Editing:</span>
           <Select value={selectedDisplayId} onValueChange={setSelectedDisplayId}>
@@ -416,7 +432,7 @@ export function SlotsSection({
               <SelectValue placeholder="Select display…" />
             </SelectTrigger>
             <SelectContent>
-              {(stageState.displays ?? []).map((d) => (
+              {slotDisplays.map((d) => (
                 <SelectItem key={d.id} value={d.id}>
                   {d.name}
                 </SelectItem>

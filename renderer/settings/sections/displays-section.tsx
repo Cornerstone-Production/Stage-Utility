@@ -1,7 +1,24 @@
 import { useState, useEffect, type ChangeEvent } from "react";
 import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon } from "lucide-react";
-import { Button, Input, toast } from "../../components/ui";
+import {
+  Button,
+  Input,
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+  toast,
+} from "../../components/ui";
 import type { SectionProps } from "../types";
+
+const KIND_LABELS: Record<DisplayKind, string> = {
+  slots: "Slots",
+  dashboard: "Dashboard",
+  stage: "Stage",
+  transcription: "Captions",
+};
+const KIND_ORDER: DisplayKind[] = ["slots", "dashboard", "stage", "transcription"];
 
 interface DisplayRowProps {
   display: DisplayInfo;
@@ -62,31 +79,25 @@ function DisplayRow({ display, isFirst, canRemove, onRename, onSetKind, onOpenWi
           <TrashIcon className="size-3.5 text-red-10" />
         </Button>
       </div>
-      {/* Kind toggle + URL hint */}
+      {/* Kind picker + URL hint */}
       <div className="ml-5 flex items-center gap-2">
-        <div className="inline-flex rounded-md border border-gray-a6 overflow-hidden shrink-0">
-          {(["slots", "dashboard", "stage", "transcription"] as const).map((k) => {
-            const active = (display.kind ?? "slots") === k;
-            const labels: Record<typeof k, string> = {
-              slots: "Slots",
-              dashboard: "Dashboard",
-              stage: "Stage",
-              transcription: "Captions",
-            };
-            return (
-              <button
-                key={k}
-                type="button"
-                onClick={() => !active && onSetKind(k)}
-                className={`px-2 py-0.5 text-[11px] transition-colors ${
-                  active ? "bg-blue-9 text-white" : "text-gray-10 hover:bg-gray-a3"
-                }`}
-              >
-                {labels[k]}
-              </button>
-            );
-          })}
-        </div>
+        <Select
+          value={display.kind ?? "slots"}
+          onValueChange={(v: string) => {
+            if (v !== (display.kind ?? "slots")) onSetKind(v as DisplayKind);
+          }}
+        >
+          <SelectTrigger className="w-36 shrink-0">
+            <SelectValue placeholder="Display type…" />
+          </SelectTrigger>
+          <SelectContent>
+            {KIND_ORDER.map((k) => (
+              <SelectItem key={k} value={k}>
+                {KIND_LABELS[k]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <button
           type="button"
           className="text-left text-[11px] text-gray-a9 hover:text-gray-11 font-mono truncate transition-colors min-w-0"

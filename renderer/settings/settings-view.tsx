@@ -159,10 +159,14 @@ export function SettingsView() {
 
   useEffect(() => {
     if (!stageState) return;
-    const displays = stageState.displays ?? [];
-    if (displays.length === 0) return;
-    if (!selectedDisplayId || !displays.find((d) => d.id === selectedDisplayId)) {
-      setSelectedDisplayId(displays[0].id);
+    // Slots only apply to "slots"-kind displays; keep the editor pointed at one.
+    const slotDisplays = (stageState.displays ?? []).filter((d) => (d.kind ?? "slots") === "slots");
+    if (slotDisplays.length === 0) {
+      if (selectedDisplayId) setSelectedDisplayId("");
+      return;
+    }
+    if (!selectedDisplayId || !slotDisplays.find((d) => d.id === selectedDisplayId)) {
+      setSelectedDisplayId(slotDisplays[0].id);
     }
   }, [stageState, selectedDisplayId]);
 
