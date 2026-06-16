@@ -177,8 +177,10 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
           </Cell>
         </div>
 
-        {/* Current slide: section chip + text + preview (preview stacks below on phone) */}
-        <div className="flex max-sm:flex-col flex-1 min-h-0 gap-2.5 max-sm:gap-2">
+        {/* Current slide: section chip + text + preview. The preview is hidden on
+            phones (max-sm) — the slide text is already shown here, so it's just
+            clutter on a small screen; it stays on the wall/desktop display. */}
+        <div className="flex flex-1 min-h-0 gap-2.5">
           <div className="flex flex-col flex-1 min-w-0 rounded-2xl border border-white/10 bg-white/4 p-3 gap-2">
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-caption2 uppercase tracking-wider text-white/40" style={{ letterSpacing: "0.1em" }}>Now</span>
@@ -192,7 +194,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
             </div>
           </div>
           {previewSrc && (
-            <div className="w-[34%] max-sm:w-full shrink-0 max-sm:h-[26svh] rounded-2xl border border-white/10 overflow-hidden bg-black flex items-center justify-center">
+            <div className="w-[34%] max-sm:hidden shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-black flex items-center justify-center">
               <img src={previewSrc} alt="" className="w-full h-full object-contain" />
             </div>
           )}
