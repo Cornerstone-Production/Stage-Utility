@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
+import { useTranscript } from "./use-transcript";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
 
@@ -40,6 +41,7 @@ function SectionChip({ section, size = "md" }: { section: ProSection | null; siz
 
 export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
+  const transcript = useTranscript();
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -228,6 +230,21 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
             </div>
           </Cell>
         </div>
+
+        {transcript.length > 0 && (
+          <div className="shrink-0 rounded-2xl border border-white/8 bg-white/4 px-3 py-2 flex items-center gap-3 min-h-0">
+            <span className="text-caption2 font-medium uppercase tracking-wider text-white/40 shrink-0" style={{ letterSpacing: "0.1em" }}>
+              Transcript
+            </span>
+            <span
+              className={`text-[clamp(0.9rem,2.6vmin,1.5rem)] truncate ${
+                transcript[transcript.length - 1].isFinal ? "text-white/85" : "text-white/50"
+              }`}
+            >
+              {transcript[transcript.length - 1].text}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

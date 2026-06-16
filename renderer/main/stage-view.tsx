@@ -6,6 +6,7 @@ import { BrandLogo } from "../components/brand-logo";
 import { useStageState } from "./use-stage-state";
 import { DashboardView } from "./dashboard-view";
 import { StageDisplayView } from "./stage-display-view";
+import { TranscriptionView } from "./transcription-view";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
@@ -243,6 +244,13 @@ export function StageView() {
     return (
       <StageErrorBoundary>
         <StageDisplayView displayId={displayId} />
+      </StageErrorBoundary>
+    );
+  }
+  if (currentDisplay?.kind === "transcription") {
+    return (
+      <StageErrorBoundary>
+        <TranscriptionView displayId={displayId} />
       </StageErrorBoundary>
     );
   }

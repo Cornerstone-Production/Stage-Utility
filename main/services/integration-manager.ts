@@ -4,6 +4,7 @@
 
 import type { IntegrationDescriptor, IntegrationState } from "../types/integrations.js";
 import { broadcast } from "./broadcaster.js";
+import { prodcomService } from "./prodcom-service.js";
 import { propresenterService } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
 import { settingsStore } from "./settings-store.js";
@@ -96,11 +97,40 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+// ProdCom integration — subscribes to the live transcription feed from ProdCom's
+// HTTP Application API (default port 24480). Powers the transcription display.
+const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
+  id: "prodcom",
+  kind: "lineup",
+  label: "ProdCom",
+  configSchema: [
+    {
+      key: "host",
+      label: "ProdCom Host",
+      type: "text",
+      placeholder: "192.168.1.201",
+    },
+    {
+      key: "port",
+      label: "API Port",
+      type: "number",
+      placeholder: "24480",
+    },
+    {
+      key: "apiKey",
+      label: "API Key",
+      type: "password",
+      placeholder: "(only if Require Authentication is on)",
+    },
+  ],
+};
+
 const DESCRIPTORS: IntegrationDescriptor[] = [
   PCO_DESCRIPTOR,
   WIRELESS_DESCRIPTOR,
   COMPANION_DESCRIPTOR,
   PROPRESENTER_DESCRIPTOR,
+  PRODCOM_DESCRIPTOR,
 ];
 
 // Keys that are secrets for each integration id.
@@ -109,6 +139,7 @@ const SECRET_KEYS: Record<string, string[]> = {
   wireless: [],
   companion: [],
   propresenter: [],
+  prodcom: ["apiKey"],
 };
 
 class IntegrationManager {
@@ -154,6 +185,8 @@ class IntegrationManager {
 
     // Start the ProPresenter poller if it's enabled + configured.
     this.applyPropresenter();
+    // Start the ProdCom transcript stream if enabled + configured.
+    void this.applyProdcom();
 
     console.log("[integration-manager] init complete", {
       integrations: Array.from(this.states.keys()),
@@ -248,6 +281,10 @@ class IntegrationManager {
       this.applyPropresenter();
     }
 
+    if (id === "prodcom") {
+      await this.applyProdcom();
+    }
+
     this.broadcastStates();
     return this.states.get(id)!;
   }
@@ -276,6 +313,10 @@ class IntegrationManager {
 
     if (id === "propresenter") {
       this.applyPropresenter();
+    }
+
+    if (id === "prodcom") {
+      await this.applyProdcom();
     }
 
     this.broadcastStates();
@@ -327,6 +368,18 @@ class IntegrationManager {
           result.ok ? "connected" : "error",
           result.message ?? null,
         );
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "prodcom") {
+        const { host, port } = this.getProdcomTarget();
+        if (!host || !port) {
+          return { ok: false, message: "Host and Port are required" };
+        }
+        const secrets = await secretsStore.getSecrets("prodcom");
+        const result = await prodcomService.test(host, port, secrets.apiKey ?? null);
+        this.setConnectionState("prodcom", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
         return result;
       }
@@ -392,6 +445,38 @@ class IntegrationManager {
     } else {
       propresenterService.stop();
       this.setConnectionState("propresenter", "disconnected", null);
+    }
+  }
+
+  private getProdcomTarget(): { host: string | null; port: number | null } {
+    const cfg = this.states.get("prodcom")?.config ?? {};
+    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
+    const rawPort = cfg.port;
+    const port =
+      typeof rawPort === "number"
+        ? rawPort
+        : typeof rawPort === "string" && rawPort.trim()
+          ? parseInt(rawPort, 10)
+          : NaN;
+    return { host, port: Number.isFinite(port) && port > 0 ? port : null };
+  }
+
+  /** Start/stop the ProdCom transcript stream to match enabled + configured state. */
+  private async applyProdcom(): Promise<void> {
+    prodcomService.setConnectionListener((state, message) => {
+      this.setConnectionState("prodcom", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("prodcom")?.enabled ?? false;
+    const { host, port } = this.getProdcomTarget();
+    if (enabled && host && port) {
+      const secrets = await secretsStore.getSecrets("prodcom");
+      this.setConnectionState("prodcom", "connecting", `Connecting ${host}:${port}`);
+      prodcomService.configure(host, port, secrets.apiKey ?? null);
+    } else {
+      prodcomService.stop();
+      this.setConnectionState("prodcom", "disconnected", null);
     }
   }
 

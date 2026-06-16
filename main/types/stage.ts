@@ -1,7 +1,22 @@
 // Shared stage types — frontend mirrors these shapes exactly.
 
-/** What a display renders: slot grid (default), tech dashboard, or stage display. */
-export type DisplayKind = "slots" | "dashboard" | "stage";
+/** What a display renders: slot grid (default), dashboard, stage, or transcription. */
+export type DisplayKind = "slots" | "dashboard" | "stage" | "transcription";
+
+/** A live transcript line from ProdCom (pushed on "prodcom:transcript"). */
+export interface TranscriptLineDTO {
+  /** Stable id for keying/dedupe (falls back to a synthesized one). */
+  id: string;
+  /** Channel id/index from ProdCom, if provided. */
+  channel: string | null;
+  /** Human channel label, if provided. */
+  channelName: string | null;
+  text: string;
+  /** False = interim/partial hypothesis still being revised; true = finalized. */
+  isFinal: boolean;
+  /** ISO timestamp the line was received. */
+  at: string;
+}
 
 /** A ProPresenter slide group/section (e.g. Verse, Chorus) with its color. */
 export interface ProSection {
