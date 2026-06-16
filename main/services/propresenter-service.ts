@@ -101,60 +101,56 @@ function colorToHex(color: unknown): string {
   return `#${hex(r)}${hex(g)}${hex(b)}`;
 }
 
-interface OrderedGroup {
+interface MatchGroup {
   name: string;
   colorHex: string;
-  slideCount: number;
+  slides: { text: string; notes: string }[];
 }
 
-// Build the play-order group sequence from the active presentation, honoring the
-// current arrangement (groups referenced by uuid, in order) when one is set;
-// otherwise the library group order. Returns the flattened sequence + total slides.
-function orderedGroups(active: unknown): { seq: OrderedGroup[]; total: number } {
-  const libGroups = pick(active, "presentation", "groups");
-  if (!Array.isArray(libGroups)) return { seq: [], total: 0 };
-
-  const toOrdered = (g: unknown): OrderedGroup => ({
+// Flatten the active presentation's groups in document order, keeping each
+// slide's text + chord (notes). ProPresenter slides carry no stable uuid, but
+// text(+notes) is enough to find which group (= section) the live slide is in —
+// and matching by CONTENT is immune to arrangement reordering and non-sequential
+// jumps, unlike the global slide_index (which lives in a different/expanded
+// space: e.g. it reports index 49 for a 44-slide deck).
+function libraryGroups(active: unknown): MatchGroup[] {
+  const gs = pick(active, "presentation", "groups");
+  if (!Array.isArray(gs)) return [];
+  return gs.map((g) => ({
     name: asString(pick(g, "name")) ?? "",
     colorHex: colorToHex(pick(g, "color")),
-    slideCount: Array.isArray(pick(g, "slides")) ? (pick(g, "slides") as unknown[]).length : 0,
-  });
-
-  const arrUuid = asString(pick(active, "presentation", "current_arrangement"));
-  let seq: OrderedGroup[];
-  if (arrUuid) {
-    const arrangements = pick(active, "presentation", "arrangements");
-    const arr = Array.isArray(arrangements)
-      ? arrangements.find((a) => asString(pick(a, "id", "uuid")) === arrUuid)
-      : null;
-    const groupUuids = pick(arr, "groups");
-    const byUuid = new Map<string, unknown>();
-    for (const g of libGroups) {
-      const u = asString(pick(g, "uuid"));
-      if (u) byUuid.set(u, g);
-    }
-    seq = Array.isArray(groupUuids)
-      ? groupUuids.map((u) => byUuid.get(asString(u) ?? "")).filter(Boolean).map(toOrdered)
-      : libGroups.map(toOrdered);
-  } else {
-    seq = libGroups.map(toOrdered);
-  }
-
-  const total = seq.reduce((sum, g) => sum + g.slideCount, 0);
-  return { seq, total };
+    slides: Array.isArray(pick(g, "slides"))
+      ? (pick(g, "slides") as unknown[]).map((s) => ({
+          text: asString(pick(s, "text")) ?? "",
+          notes: asString(pick(s, "notes")) ?? "",
+        }))
+      : [],
+  }));
 }
 
-// Resolve which section a flattened 0-based slide index falls in.
-function sectionAt(seq: OrderedGroup[], index: number): { section: ProSection | null; groupPos: number } {
-  let acc = 0;
-  for (let i = 0; i < seq.length; i++) {
-    const g = seq[i];
-    if (index < acc + g.slideCount) {
-      return { section: g.name ? { name: g.name, colorHex: g.colorHex } : null, groupPos: i };
+// Locate the group + cumulative slide index whose content matches `text`
+// (preferring an exact text+notes match, then text-only). Returns null when the
+// text is empty (e.g. a media slide) or nothing matches.
+function locateSlide(
+  groups: MatchGroup[],
+  text: string | null,
+  notes: string | null,
+): { name: string; colorHex: string; groupPos: number; cumIndex: number } | null {
+  if (!text) return null;
+  for (const requireNotes of [true, false]) {
+    let cum = 0;
+    for (let gi = 0; gi < groups.length; gi++) {
+      const g = groups[gi];
+      for (let si = 0; si < g.slides.length; si++) {
+        const s = g.slides[si];
+        if (s.text === text && (!requireNotes || !notes || s.notes === notes)) {
+          return { name: g.name, colorHex: g.colorHex, groupPos: gi, cumIndex: cum + si };
+        }
+      }
+      cum += g.slides.length;
     }
-    acc += g.slideCount;
   }
-  return { section: null, groupPos: -1 };
+  return null;
 }
 
 class ProPresenterService {
@@ -321,50 +317,55 @@ class ProPresenterService {
     const currentNotes = asString(pick(slide, "current", "notes"));
     const nextNotes = asString(pick(slide, "next", "notes"));
 
-    const idxZeroRaw = asNumber(pick(slideIndex, "presentation_index", "index"));
+    // Resolve sections by matching the LIVE slide content against the groups.
+    // The global slide_index can't be trusted for this (it's in a different,
+    // arrangement-expanded space — e.g. index 49 in a 44-slide deck), which is
+    // why the section tag was wrong when jumping around. Content matching is
+    // exact and order-independent.
+    const groups = libraryGroups(active);
+    const total = groups.reduce((n, g) => n + g.slides.length, 0);
 
-    // Sections via the arrangement-aware play order.
-    const { seq, total } = orderedGroups(active);
+    const curLoc = locateSlide(groups, currentSlideText, currentNotes);
+    const nextLoc = locateSlide(groups, nextSlideText, nextNotes);
 
-    // Clamp the index into the known slide range. A live arrangement change (or a
-    // non-sequential jump observed a poll before slide_index catches up) can leave
-    // the index momentarily out of range; clamping keeps the section/preview/count
-    // coherent instead of showing a null section or "Slide 105 of 100".
-    const idxZero =
-      idxZeroRaw == null
-        ? null
-        : total > 0
-          ? Math.min(Math.max(idxZeroRaw, 0), total - 1)
-          : Math.max(idxZeroRaw, 0);
-    const idx = idxZero == null ? null : idxZero + 1;
+    const currentSection: ProSection | null = curLoc?.name
+      ? { name: curLoc.name, colorHex: curLoc.colorHex }
+      : null;
+    const nextSection: ProSection | null = nextLoc?.name
+      ? { name: nextLoc.name, colorHex: nextLoc.colorHex }
+      : null;
 
-    let currentSection: ProSection | null = null;
-    let nextSection: ProSection | null = null;
+    // "Then": next differently-named group after the current one (document order).
     let nextArrangementSection: ProSection | null = null;
-    if (idxZero != null && seq.length) {
-      const cur = sectionAt(seq, idxZero);
-      currentSection = cur.section;
-      nextSection = sectionAt(seq, idxZero + 1).section;
-      // Next *different* group after the current group's position.
-      for (let i = cur.groupPos + 1; i < seq.length; i++) {
-        if (seq[i].name && seq[i].name !== currentSection?.name) {
-          nextArrangementSection = { name: seq[i].name, colorHex: seq[i].colorHex };
+    if (curLoc) {
+      for (let i = curLoc.groupPos + 1; i < groups.length; i++) {
+        if (groups[i].name && groups[i].name !== curLoc.name) {
+          nextArrangementSection = { name: groups[i].name, colorHex: groups[i].colorHex };
           break;
         }
       }
     }
 
-    if (process.env.PP_DEBUG) {
-      console.log(
-        `[propresenter] idx=${idxZeroRaw}→${idxZero} total=${total} ` +
-          `seq=[${seq.map((g) => `${g.name || "·"}×${g.slideCount}`).join(",")}] ` +
-          `cur="${currentSection?.name ?? ""}" curText="${(currentSlideText ?? "").slice(0, 24)}"`,
-      );
-    }
-
+    // Slide counter from the matched content position (always in range); fall
+    // back to the raw slide_index (clamped) only when the slide has no text.
+    const idxZeroRaw = asNumber(pick(slideIndex, "presentation_index", "index"));
+    const cumIndex =
+      curLoc?.cumIndex ??
+      (idxZeroRaw != null && total > 0
+        ? Math.min(Math.max(idxZeroRaw, 0), total - 1)
+        : idxZeroRaw);
+    const idx = cumIndex == null ? null : cumIndex + 1;
     const slideCount = total > 0 ? total : null;
     const slidesRemaining =
       idx != null && slideCount != null ? Math.max(0, slideCount - idx) : null;
+
+    if (process.env.PP_DEBUG) {
+      console.log(
+        `[propresenter] curText=${JSON.stringify((currentSlideText ?? "").slice(0, 28))} ` +
+          `notes=${JSON.stringify(currentNotes)} → section=${JSON.stringify(currentSection?.name ?? null)} ` +
+          `cum=${cumIndex}/${total} rawIdx=${idxZeroRaw}`,
+      );
+    }
 
     // Running named timers (state ≠ "stopped").
     const runningTimers: ProTimer[] = Array.isArray(timers)
@@ -381,12 +382,15 @@ class ProPresenterService {
     // The key includes the current arrangement so that reordering a song (same
     // presentation uuid + same index, but a different slide there) still busts the
     // <img> cache and refetches the live thumbnail.
+    // The thumbnail proxy fetches by ProPresenter's own slide index, so keep the
+    // RAW index here (not the content-matched counter). The key also includes the
+    // arrangement so a live reorder busts the <img> cache.
     const arrUuid = asString(pick(active, "presentation", "current_arrangement"));
     this.activeUuid = asString(pick(active, "presentation", "id", "uuid"));
-    this.slideIdxZero = idxZero;
+    this.slideIdxZero = idxZeroRaw;
     const slidePreviewKey =
-      this.activeUuid && idxZero != null
-        ? `${this.activeUuid}:${arrUuid ?? ""}:${idxZero}`
+      this.activeUuid && idxZeroRaw != null
+        ? `${this.activeUuid}:${arrUuid ?? ""}:${idxZeroRaw}`
         : null;
 
     return {

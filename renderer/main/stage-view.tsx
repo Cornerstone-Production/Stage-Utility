@@ -96,7 +96,12 @@ function KioskTopBar({
       {/* Brand + display name — one centered row so logo, name, divider and
           display name all share the same vertical center. */}
       <div className="shrink-0 ml-3 flex items-center gap-2.5 relative z-10">
-        <div className="flex items-center gap-2 text-white/70">
+        <a
+          href="/"
+          className="flex items-center gap-2 text-white/70 rounded hover:opacity-80 transition-opacity"
+          title="Back to home"
+          aria-label="Back to home"
+        >
           {appLogo && (
             <BrandLogo
               logo={appLogo}
@@ -110,7 +115,7 @@ function KioskTopBar({
           >
             {appName}
           </span>
-        </div>
+        </a>
         {displayName && (
           <>
             <span className="w-px h-4 bg-white/15 shrink-0" aria-hidden="true" />

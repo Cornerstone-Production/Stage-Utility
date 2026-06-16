@@ -107,14 +107,19 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
         }
       >
         <div className="shrink-0 ml-3 flex items-center gap-2.5 relative z-10">
-          <div className="flex items-center gap-2 text-white/70">
+          <a
+            href="/"
+            className="flex items-center gap-2 text-white/70 rounded hover:opacity-80 transition-opacity"
+            title="Back to home"
+            aria-label="Back to home"
+          >
             {state.appLogo && (
               <BrandLogo logo={state.appLogo} monochrome={state.appLogoMonochrome} className="size-5 rounded select-none" />
             )}
             <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
               {state.appName}
             </span>
-          </div>
+          </a>
           {displayName && (
             <>
               <span className="w-px h-4 bg-white/15 shrink-0" aria-hidden="true" />
