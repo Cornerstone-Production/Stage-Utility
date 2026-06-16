@@ -13,13 +13,14 @@ options:
 
 settings:
   base:
-    SWIFT_VERSION: "6.0"
+    # Swift 5 language mode: keeps the AVFoundation/NDI C-interop bridging free of
+    # Swift 6 strict-concurrency friction on first build. Migrate to 6.0 later.
+    SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     GENERATE_INFOPLIST_FILE: YES
-    SWIFT_STRICT_CONCURRENCY: complete
     # Local Network permission copy (iOS/tvOS) — needed for the server connection
-    # and, in Phase 2, NDI mDNS discovery.
+    # and NDI mDNS discovery.
     INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Stage Display connects to your Stage Utility server and NDI video sources on the local network."
 
 targets:

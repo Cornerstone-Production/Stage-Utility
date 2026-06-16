@@ -1,0 +1,18 @@
+// Makes the NDI C SDK importable from Swift as `import NDI`, which flips
+// `#if canImport(NDI)` on and compiles the real receive pipeline.
+//
+// Wiring (see apple/README.md → "Phase 2"):
+//   1. Drop the NDI SDK's headers + libraries under apple/Vendor/NDI/
+//      (git-ignored; never commit the licensed SDK).
+//   2. In the StageDisplay target build settings add:
+//        SWIFT_INCLUDE_PATHS        = $(SRCROOT)/NDISupport
+//        HEADER_SEARCH_PATHS        = $(SRCROOT)/Vendor/NDI/include
+//        LIBRARY_SEARCH_PATHS       = $(SRCROOT)/Vendor/NDI/lib
+//      and link the NDI library (libndi) / add the XCFramework to the target.
+//   3. Adjust the header name below if your SDK's umbrella differs.
+
+module NDI {
+    header "../Vendor/NDI/include/Processing.NDI.Lib.h"
+    export *
+    link "ndi"
+}

@@ -1,33 +1,53 @@
-// DisplayPickerView.swift — choose which configured display to show on this
-// device. (Phase 3 lets a tvOS appliance auto-open a pinned display instead.)
+// DisplayPickerView.swift — choose which configured display to show. Long-press /
+// context menu pins one as the appliance default (auto-opens on next launch).
 
 import SwiftUI
 
 struct DisplayPickerView: View {
     let model: AppModel
+    @Binding var pinnedDisplayId: String
+    @State private var showAbout = false
 
     var body: some View {
         List(model.displays) { display in
             NavigationLink(value: display.id) {
-                HStack(spacing: 12) {
-                    Image(systemName: icon(for: display.resolvedKind))
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 32)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(display.name)
-                        Text(subtitle(display))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                row(display)
+            }
+            .contextMenu {
+                Button {
+                    pinnedDisplayId = display.id
+                } label: {
+                    Label("Pin as appliance", systemImage: "pin")
                 }
-                .padding(.vertical, 4)
             }
         }
         .navigationTitle(model.stage?.appName ?? "Displays")
         .navigationDestination(for: String.self) { id in
-            DisplayContainerView(model: model, displayId: id)
+            DisplayContainerView(model: model, displayId: id, pinnedDisplayId: $pinnedDisplayId)
         }
+        .toolbar {
+            Button { showAbout = true } label: {
+                Image(systemName: "info.circle")
+            }
+        }
+        .sheet(isPresented: $showAbout) { AboutView() }
+    }
+
+    @ViewBuilder
+    private func row(_ display: DisplayInfo) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon(for: display.resolvedKind))
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .frame(width: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(display.name)
+                Text(subtitle(display))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private func subtitle(_ display: DisplayInfo) -> String {
