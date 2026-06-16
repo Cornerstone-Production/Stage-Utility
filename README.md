@@ -222,6 +222,8 @@ All endpoints are under `/api`. State-changing routes return the updated
 | POST | `/api/plan/next` | Jump to the next plan (auto mode) |
 | POST | `/api/plan/mode` | Set `auto` / `manual` |
 | POST | `/api/refresh` | Re-fetch from Planning Center |
+| POST | `/api/live/next` | PCO Services Live: go to the next item (like PCO's timer) |
+| POST | `/api/live/previous` | PCO Services Live: go to the previous item |
 | POST | `/api/allowed-service-types` | Set the allowlist |
 | POST | `/api/show-qr` | Toggle the connect QR on the display |
 

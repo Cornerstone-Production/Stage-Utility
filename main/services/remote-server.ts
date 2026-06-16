@@ -131,7 +131,13 @@ export class RemoteServer {
         ext === ".woff2" ? "font/woff2" :
         "application/octet-stream";
       const data = await fs.readFile(candidate);
-      res.writeHead(200, { "Content-Type": mime });
+      // Vite fingerprints everything under /assets/, so cache those forever;
+      // everything else (HTML, manifest, icons) must revalidate so a new build is
+      // picked up immediately instead of Safari serving a stale page.
+      const cacheControl = urlPath.startsWith("/assets/")
+        ? "public, max-age=31536000, immutable"
+        : "no-cache";
+      res.writeHead(200, { "Content-Type": mime, "Cache-Control": cacheControl });
       res.end(data);
       return true;
     } catch {
@@ -143,7 +149,7 @@ export class RemoteServer {
       const fallback = path.join(RENDERER_BUILD_DIR, "index.html");
       try {
         const html = await fs.readFile(fallback, "utf-8");
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
         res.end(html);
         return true;
       } catch {
@@ -362,6 +368,17 @@ export class RemoteServer {
       return;
     }
 
+    // ── Hydration for freshly-loaded dashboards (we broadcast these on change,
+    //    so a new client needs the current value without waiting for the next one) ──
+    if (method === "GET" && pathname === "/api/propresenter/status") {
+      json(res, propresenterService.getStatus());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/pco/live") {
+      json(res, await stageController.fetchLive());
+      return;
+    }
+
     // ── Health ────────────────────────────────────────────────────────────
     if (method === "GET" && pathname === "/api/health") {
       json(res, { ok: true });
@@ -439,6 +456,14 @@ export class RemoteServer {
     if (method === "POST" && pathname === "/api/refresh") {
       const state = await stageController.refresh();
       json(res, state);
+      return;
+    }
+
+    // PCO Services Live timer controls (next / previous item).
+    if (method === "POST" && (pathname === "/api/live/next" || pathname === "/api/live/previous")) {
+      const direction = pathname.endsWith("/next") ? "next" : "previous";
+      await stageController.controlLive(direction);
+      json(res, { ok: true });
       return;
     }
 

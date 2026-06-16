@@ -221,6 +221,12 @@ class ProPresenterService {
     this.onConn = cb;
   }
 
+  /** Latest polled status — lets a freshly-loaded dashboard hydrate immediately
+   *  (we only broadcast on change, so otherwise it'd wait for the next slide). */
+  getStatus(): ProPresenterStatusDTO {
+    return this.last;
+  }
+
   private report(state: ProConnState, message: string | null): void {
     if (this.reported === state) return;
     this.reported = state;

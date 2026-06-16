@@ -37,7 +37,7 @@ class StageErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundar
   render() {
     if (this.state.error) {
       return (
-        <div className="flex flex-col items-center justify-center h-screen bg-[#080810] gap-4">
+        <div className="flex flex-col items-center justify-center h-[100dvh] bg-[#080810] gap-4">
           <AlertCircleIcon className="size-8 text-red-10" />
           <p className="text-headline text-gray-9">Display error — please reload</p>
           <p className="text-caption1 text-gray-7">{this.state.error.message}</p>
@@ -129,7 +129,7 @@ function KioskTopBar({
         )}
       </div>
 
-      <div className="absolute inset-0 flex items-center justify-center px-32 pointer-events-none">
+      <div className="absolute inset-0 flex items-center justify-center px-32 pointer-events-none max-sm:hidden">
         <span
           className="text-caption1 font-medium text-white/55 truncate select-none tracking-wide"
           style={{ letterSpacing: "0.02em" }}
@@ -158,7 +158,7 @@ function KioskTopBar({
 
 function KioskLoading() {
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-[#080810] gap-3">
+    <div className="flex flex-col items-center justify-center h-[100dvh] bg-[#080810] gap-3">
       <Loader2Icon className="size-8 text-gray-7 animate-spin" />
       <p className="text-headline text-gray-7">Loading stage…</p>
     </div>
@@ -167,7 +167,7 @@ function KioskLoading() {
 
 function KioskNotConfigured({ state, displayName }: { state: StageState; displayName: string | null }) {
   return (
-    <div className="flex flex-col h-screen bg-[#080810]">
+    <div className="flex flex-col h-[100dvh] bg-[#080810]">
       <KioskTopBar
         serviceTypeName={state.serviceTypeName}
         planSeriesTitle={state.planSeriesTitle}
@@ -192,7 +192,7 @@ function KioskNotConfigured({ state, displayName }: { state: StageState; display
 
 function KioskEmpty({ state, displayName }: { state: StageState; displayName: string | null }) {
   return (
-    <div className="flex flex-col h-screen bg-[#080810]">
+    <div className="flex flex-col h-[100dvh] bg-[#080810]">
       <KioskTopBar
         serviceTypeName={state.serviceTypeName}
         planSeriesTitle={state.planSeriesTitle}
@@ -217,7 +217,7 @@ function KioskEmpty({ state, displayName }: { state: StageState; displayName: st
 
 function KioskError({ message }: { message: string }) {
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-[#080810] gap-4 px-12 text-center">
+    <div className="flex flex-col items-center justify-center h-[100dvh] bg-[#080810] gap-4 px-12 text-center">
       <AlertCircleIcon className="size-10 text-red-10" />
       <p className="text-title3 text-gray-9 font-semibold">Could not load stage state</p>
       <p className="text-caption1 text-gray-7">{message}</p>
@@ -303,7 +303,7 @@ export function StageView() {
 
   return (
     <StageErrorBoundary>
-      <div className="flex flex-col h-screen overflow-hidden bg-transparent">
+      <div className="flex flex-col h-[100dvh] overscroll-none overflow-hidden bg-transparent pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
         <KioskTopBar
           serviceTypeName={state.serviceTypeName}
           planSeriesTitle={state.planSeriesTitle}
@@ -315,12 +315,23 @@ export function StageView() {
           appLogo={state.appLogo}
           appLogoMonochrome={state.appLogoMonochrome}
         />
-        <div className="flex flex-1 min-h-0">
+        {/* Desktop / kiosk: fill-height columns (stacked slots share a column). */}
+        <div className="flex flex-1 min-h-0 max-sm:hidden">
           {columns.map((column, ci) => (
             <div key={column[0]?.id ?? ci} className="flex flex-1 min-w-0 flex-col">
               {column.map((slot) => (
                 <SlotPanel key={slot.id} slot={slot} emptySlotLogo={state.emptySlotLogo} />
               ))}
+            </div>
+          ))}
+        </div>
+
+        {/* Phone: 2-up card grid, scrolls when it overflows (weekly-setup check).
+            container-type makes the card's cqw-based sizing scale to the card. */}
+        <div className="hidden max-sm:grid grid-cols-2 auto-rows-max content-start gap-2 p-2 flex-1 min-h-0 overflow-y-auto overscroll-contain">
+          {sortedSlots.map((slot) => (
+            <div key={slot.id} className="aspect-[3/4] flex [container-type:inline-size]">
+              <SlotPanel slot={slot} emptySlotLogo={state.emptySlotLogo} />
             </div>
           ))}
         </div>
