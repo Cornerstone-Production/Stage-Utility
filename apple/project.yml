@@ -34,6 +34,20 @@ targets:
       macOS: "26.0"
     sources:
       - path: StageDisplay
+    postBuildScripts:
+      # The macOS NDI lib is a dylib with install name @rpath/libndi.dylib, so it
+      # must live inside the app bundle at runtime. Copy + ad-hoc sign it into
+      # Contents/Frameworks (where LD_RUNPATH_SEARCH_PATHS points). macOS only —
+      # iOS/tvOS link the static .a, which needs no embedding.
+      - name: Embed NDI dylib (macOS)
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$PLATFORM_NAME" = "macosx" ]; then
+            FRAMEWORKS="$CODESIGNING_FOLDER_PATH/Contents/Frameworks"
+            mkdir -p "$FRAMEWORKS"
+            cp -f "$SRCROOT/Vendor/NDI/lib/macOS/libndi.dylib" "$FRAMEWORKS/"
+            codesign --force --sign - "$FRAMEWORKS/libndi.dylib" || true
+          fi
     settings:
       base:
         # NDI discovery — Bonjour service type for the Local Network prompt.
