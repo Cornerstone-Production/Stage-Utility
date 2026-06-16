@@ -1,14 +1,24 @@
 # Stage Utility
 
-A kiosk dashboard for a live-production / service tech station. It pulls the band
-lineup (people, roles, photos) from **Planning Center Online** and live wireless
-status (RF, battery, frequency, audio level) from **Shure** wireless systems, and
-shows them on a monitor at the stage — who's playing, on which channel, and the health of
-their mic or in-ear pack. A phone-friendly remote control panel runs on the same
-LAN so a tech can re-assign slots and switch plans from the floor.
+A kiosk dashboard for a live-production / service tech station. It pulls together
+several live sources and shows them on monitors around the stage:
+
+- **Planning Center Online** — the band lineup (people, roles, photos), the active
+  plan, and a live service countdown.
+- **Shure** wireless systems — RF, battery, frequency, and audio level for each mic
+  or in-ear pack.
+- **ProPresenter** — the live slide: current/next text, the song **section**
+  (Verse/Chorus/Bridge/Intro/Outro…), chords, running timers, and a slide thumbnail.
+- **ProdCom** — live audio **transcription** (captions), shown full-screen or as a
+  strip on the dashboards.
+
+Each monitor is a **display** that can be one of several types — a slot grid, a
+tech dashboard, a stage/confidence view, or full-screen captions. A phone-friendly
+remote runs on the same LAN so a tech can re-assign slots and switch plans from the
+floor.
 
 It's a self-contained **web/server app**: a small Node backend serves the kiosk
-display, the settings UI, the phone remote, and a REST + SSE API — all on one port.
+displays, the settings UI, the phone remote, and a REST + SSE API — all on one port.
 There is no Electron/desktop runtime.
 
 ---
@@ -34,20 +44,25 @@ There is no Electron/desktop runtime.
 ## How it works
 
 ```
- Planning Center  ─┐                          ┌─ Kiosk display   (build/renderer, React)
-   (lineup, REST)  │     ┌──────────────┐     │
-                   ├────▶│  Node server │────▶├─ Settings UI     (settings-window.html)
- Shure wireless   ─┘     │  (server.ts) │     │
-   (TCP, RF/batt)        │  :8788       │     ├─ Phone remote    (public/control.html)
-                         └──────┬───────┘     │
-                                └─────────────┴─ REST  /api/*
-                                                 SSE   /api/events  (live push)
+ Planning Center ─┐                          ┌─ Displays        (build/renderer, React)
+  (lineup, REST)  │                          │    /            picker
+ Shure wireless  ─┤    ┌──────────────┐      │    /display-N   slots │ dashboard │
+  (TCP, RF/batt)  ├───▶│  Node server │─────▶│                 stage │ captions
+ ProPresenter    ─┤    │  (server.ts) │      ├─ Settings UI     (/settings)
+  (HTTP, slides)  │    │  :8788       │      ├─ Phone remote    (public/control.html)
+ ProdCom         ─┘    └──────┬───────┘      │
+  (HTTP/SSE, text)            └──────────────┴─ REST  /api/*
+                                               SSE   /api/events  (live push)
 ```
 
-The backend (`server.ts` + `main/`) polls Planning Center on a schedule and Shure
-gear continuously, resolves the current plan into the configured **slots**, and
-broadcasts state to every connected client over Server-Sent Events. The frontend
-is a React app served as static files; the phone remote is a standalone HTML page.
+The backend (`server.ts` + `main/`) polls Planning Center on a schedule, Shure gear
+and ProPresenter continuously, and holds a long-lived SSE connection to ProdCom. It
+resolves the current plan into the configured **slots** and broadcasts state to every
+connected client over Server-Sent Events. High-frequency data rides its own SSE
+channels — `pco:live` (countdown), `propresenter:status` (slide), and
+`prodcom:transcript` (captions) — so each can update and fail independently. The
+frontend is a React app served as static files; the phone remote is a standalone
+HTML page.
 
 ## Tech stack
 
@@ -73,10 +88,11 @@ npm run dev
 
 Then open:
 
-- **Kiosk display** → http://localhost:3000/
-- **Settings UI** → http://localhost:3000/settings-window.html
+- **Display picker** → http://localhost:3000/ (then pick a display, e.g. `/display-1`)
+- **Settings UI** → http://localhost:3000/settings
 
-The Vite dev server proxies `/api` and `/photos` to the backend on `:8788`.
+The Vite dev server proxies `/api` and `/photos` to the backend on `:8788`. If
+`localhost:3000` won't connect, see [Development notes](#development-notes).
 
 ## Deployment
 
@@ -106,38 +122,56 @@ in the repo. Open `…/settings-window.html` and work through the sidebar:
 
 1. **Integrations → Planning Center** — enter your **App ID** + **Secret** (from a
    [PCO Personal Access Token](https://api.planningcenteronline.com) → Developers →
-   Personal Access Tokens).
+   Personal Access Tokens). Set the **refresh interval** (5 min – 2 h) or hit
+   **Refresh now**; the card shows when it last synced.
 2. **Integrations → Wireless Gear** *(optional)* — add Shure devices by IP, TCP
    port (usually `2202`), and channel count.
-3. **Service Types** — choose which PCO service types are in play.
-4. **Plan** — **Auto** (follow the next upcoming event) or **Manual** (pick a plan).
-5. **Slots** — build the channel layout: link each slot to a PCO person/position,
+3. **Integrations → ProPresenter** *(optional)* — host + API port (default `1025`,
+   the Network port in ProPresenter → Settings → Network). Drives the stage view's
+   slide text, section, chords, timers, and thumbnail.
+4. **Integrations → ProdCom** *(optional)* — host + API port (default `24480`), plus
+   an API key only if ProdCom's "Require Authentication" is on. Drives the captions.
+5. **Service Types** — choose which PCO service types are in play.
+6. **Plan** — **Auto** (follow the next upcoming event; rolls to the next one ~1 h
+   after the current service ends) or **Manual** (pick a plan).
+7. **Slots** — build the channel layout: link each slot to a PCO person/position,
    a static label, or leave it empty; optionally bind it to a wireless channel;
-   drag to reorder; stack slots that share a charger into one column.
-6. **Displays** — run multiple kiosk displays, each with its own slot set.
-7. **Connect** — toggle the on-screen QR code for the phone remote.
+   drag to reorder; stack slots that share a charger into one column. *(Only
+   **Slots**-type displays use this.)*
+8. **Displays** — run multiple monitors, each set to a **type**: **Slots** (the
+   channel grid), **Dashboard** (clock + PCO countdown + ProPresenter summary),
+   **Stage** (confidence view: slide text, section, chords, preview, timers), or
+   **Captions** (full-screen transcription). Each display can be renamed and opened
+   in its own window.
+9. **Connect** — toggle the on-screen QR code for the phone remote.
 
 ## URLs & ports
 
 | Surface | Dev (`npm run dev`) | Production (`npm start`) |
 |---------|----------------------|--------------------------|
-| Kiosk display | `http://localhost:3000/` | `http://<host>:8788/` |
-| Settings UI | `http://localhost:3000/settings-window.html` | `http://<host>:8788/settings-window.html` |
+| Display picker | `http://localhost:3000/` | `http://<host>:8788/` |
+| A specific display | `http://localhost:3000/display-1` | `http://<host>:8788/display-1` |
+| Settings UI | `http://localhost:3000/settings` | `http://<host>:8788/settings` |
 | Phone remote | — (use `:8788`) | `http://<host>:8788/` when no built UI is present¹ |
 | API / SSE | proxied to `:8788` | `http://<host>:8788/api/*` |
 
 The server binds `0.0.0.0:8788` (LAN-accessible). The port is currently fixed.
+Clean URLs (`/settings`, `/display-N`) are served directly in production and mapped
+by a small Vite middleware in dev. The display picker at `/` lists every configured
+display; clicking the brand/logo in any display returns there.
 
 ¹ The standalone phone control page (`public/control.html`) is served at `/` only
 when there is no `build/renderer/` directory; once the UI is built, `/` serves the
-React kiosk app instead.
+React app instead.
 
 ## Integrations
 
 | Integration | Kind | Config | Notes |
 |-------------|------|--------|-------|
-| **Planning Center** | lineup | App ID, Secret | Fetches service types, plans, and team members; auto-refreshes hourly. |
+| **Planning Center** | lineup | App ID, Secret, refresh interval | Fetches service types, plans, and team members; auto-refreshes on the chosen interval (default 1 h) plus on demand. Also drives the live service countdown (`pco:live`). |
 | **Wireless Gear** | wireless | per-device host / port / channels | Shure **ULX-D**, **Axient Digital**, and **PSM (in-ear)** drivers over TCP; reports RF, battery, charging, frequency, audio level. |
+| **ProPresenter** | control | host, API port (`1025`) | Talks directly to ProPresenter 7.9+'s local HTTP API (LAN, no auth). Polls the active presentation, slide status, arrangement, timers, and a thumbnail; broadcasts `propresenter:status`. Section is resolved from the arrangement **play order** (works through repeats, jumps, and text-less Intro/Instrumental/Outro slides). |
+| **ProdCom** | lineup | host, API port (`24480`), API key | Holds an SSE connection to ProdCom's transcript stream and re-broadcasts `prodcom:transcript`; backfills recent lines on connect. Powers the Captions display + dashboard transcript strips. |
 | **Bitfocus Companion** | control | host, port | Descriptor present; control endpoints exist. Reserved for future use. |
 
 ## Data model & concepts
@@ -154,10 +188,21 @@ A slot can optionally carry a **device binding** to a wireless channel, so the
 display shows that pack's RF/battery next to the person. Slots can **stack** into a
 shared on-screen column (mirrors two people sharing a dual-bay charger).
 
-**Displays** let you drive multiple monitors, each with its own slot set, all
-sharing one plan and PCO dataset. **Presets** snapshot a slot arrangement by name so
-you can restore it later. The full live state is the `StageState` object pushed over
-SSE.
+**Displays** let you drive multiple monitors, all sharing one plan and PCO dataset.
+Each display has a **kind**:
+
+- **Slots** — the channel grid (its own slot set). Only this kind uses Slots config.
+- **Dashboard** — clock, the PCO live countdown, and a ProPresenter now/next summary.
+- **Stage** — a confidence view: current/next slide text, song section + chords, a
+  live slide thumbnail, running timers, and the countdown.
+- **Captions** — full-screen, auto-scrolling transcription from ProdCom.
+
+**Presets** snapshot a slot arrangement by name so you can restore it later. The full
+base state is the `StageState` object pushed over SSE; high-frequency data (the PCO
+countdown, ProPresenter slide, and transcript) rides separate SSE channels so a
+display can render and recover from each independently. The countdown matches PCO's
+own behavior — it always counts **down** (to the service start, then per item), going
+red/negative when an item runs over.
 
 ## API reference
 
@@ -167,8 +212,10 @@ All endpoints are under `/api`. State-changing routes return the updated
 **Stage & plan**
 | Method | Path | Purpose |
 |--------|------|---------|
+| GET  | `/api/health` | Liveness check |
 | GET  | `/api/state` | Current `StageState` |
 | GET  | `/api/service-types` | PCO service types |
+| GET  | `/api/team-positions` | Team positions for the active plan |
 | GET  | `/api/plans?serviceTypeId=…` | Plans for a service type |
 | POST | `/api/service-type` | Set active service type |
 | POST | `/api/plan` | Set active plan |
@@ -186,7 +233,7 @@ All endpoints are under `/api`. State-changing routes return the updated
 | POST | `/api/presets/:id/apply` | Apply a preset to a display |
 | DELETE | `/api/presets/:id` | Delete a preset |
 | POST | `/api/displays` | Add a display |
-| PATCH / DELETE | `/api/displays/:id` | Rename / remove a display |
+| PATCH / DELETE | `/api/displays/:id` | Update (name and/or kind) / remove a display |
 
 **Integrations & wireless**
 | Method | Path | Purpose |
@@ -202,10 +249,18 @@ All endpoints are under `/api`. State-changing routes return the updated
 | GET | `/api/integrations/wireless/channels` | Bindable channels |
 | GET / POST | `/api/wireless/meter-rate` | Get / set the polling interval |
 
-**Other**
+**ProPresenter & ProdCom**
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/events` | Server-Sent Events stream (live state) |
+| GET | `/api/propresenter/thumbnail?k=…` | Live slide thumbnail (JPEG proxy; `k` cache-busts per slide) |
+| GET | `/api/prodcom/transcript` | Recent transcript buffer (backfill for a freshly-loaded Captions display) |
+
+**Branding & other**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/branding/source?target=app\|empty` | Original (un-cropped) brand/empty logo source |
+| POST | `/api/branding` | Update app name + logos |
+| GET | `/api/events` | Server-Sent Events stream (`stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `integrations:state-changed`, `wireless:connections-changed`) |
 | GET | `/photos?u=…` | Cached Planning Center photo proxy |
 
 ## Project structure
@@ -218,14 +273,18 @@ All endpoints are under `/api`. State-changing routes return the updated
 ├── vite.config.ts             # Multi-page build + dev proxy + React Compiler
 ├── main/                      # Backend
 │   ├── services/              # stage-controller, remote-server, pco-service,
-│   │                          #   wireless/device managers, stores, encryption,
-│   │                          #   broadcaster, app-paths, …
+│   │                          #   live-poller, propresenter-service, prodcom-service,
+│   │                          #   wireless/device managers, integration-manager,
+│   │                          #   stores, encryption, broadcaster, app-paths, …
 │   ├── providers/wireless/    # Shure ULX-D / Axient / PSM drivers + registry
 │   └── types/                 # Backend type contracts
 ├── renderer/                  # Frontend (React)
-│   ├── main/                  # Kiosk app (router, stage view)
+│   ├── main/                  # Displays: stage-view (router/picker) → slot grid,
+│   │                          #   dashboard-view, stage-display-view, transcription-view;
+│   │                          #   use-dashboard-state, use-transcript, pco-timer
 │   ├── settings/              # Settings app (settings-view + sections/)
 │   ├── components/            # Shared components + ui/ primitives
+│   ├── fonts/                 # Self-hosted Outfit (brand title)
 │   └── lib/api.ts             # REST + SSE client
 ├── public/control.html        # Standalone phone remote
 ├── scripts/                   # install.sh / uninstall.sh
@@ -265,5 +324,14 @@ unrecoverable and you'll need to re-enter every credential.
   the Rolldown Babel plugin is used instead.)
 - The backend is run directly as TypeScript via `tsx`; there is no separate compile
   step. `tsx` is a runtime dependency for this reason.
+- **Multiple displays in dev:** the Vite proxy mishandles several concurrent SSE
+  streams, so only the most-recently-loaded display updates. Test multi-display
+  against the built app on `:8788`, not the `:3000` dev server.
+- **`localhost:3000` won't load?** Plain `vite` binds IPv6-only; if your browser
+  resolves `localhost` to IPv4 it can't connect. Use `http://127.0.0.1:3000`
+  (or run `npm run dev -- --host`), or just use the built app on `:8788`.
+- **`PP_DEBUG=1`** before `npm run server` logs the ProPresenter slide→section
+  resolution each poll (`rawIdx → section / next / text`) — handy when verifying the
+  stage view against a live service.
 - `npm run type-check`, `npm run lint`, and `npm run build` are all expected to pass
   cleanly before merging.

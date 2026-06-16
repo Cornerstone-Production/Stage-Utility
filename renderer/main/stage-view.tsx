@@ -1,4 +1,4 @@
-import { Component } from "react";
+import { Component, useEffect } from "react";
 import type { ReactNode, ErrorInfo } from "react";
 import { SlotPanel } from "../components/slot-panel";
 import { QrHint } from "../components/qr-hint";
@@ -96,7 +96,12 @@ function KioskTopBar({
       {/* Brand + display name — one centered row so logo, name, divider and
           display name all share the same vertical center. */}
       <div className="shrink-0 ml-3 flex items-center gap-2.5 relative z-10">
-        <div className="flex items-center gap-2 text-white/70">
+        <a
+          href="/"
+          className="flex items-center gap-2 text-white/70 rounded hover:opacity-80 transition-opacity"
+          title="Back to home"
+          aria-label="Back to home"
+        >
           {appLogo && (
             <BrandLogo
               logo={appLogo}
@@ -105,12 +110,12 @@ function KioskTopBar({
             />
           )}
           <span
-            className="text-caption1 font-semibold select-none truncate"
+            className="text-caption1 font-title select-none truncate"
             style={{ letterSpacing: "0.02em" }}
           >
             {appName}
           </span>
-        </div>
+        </a>
         {displayName && (
           <>
             <span className="w-px h-4 bg-white/15 shrink-0" aria-hidden="true" />
@@ -136,6 +141,8 @@ function KioskTopBar({
       {showQr && remoteUrl && (
         <a
           href="/settings"
+          target="_blank"
+          rel="noopener noreferrer"
           className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70"
           title="Open settings"
           aria-label="Open settings"
@@ -223,6 +230,16 @@ function KioskError({ message }: { message: string }) {
 export function StageView() {
   const { state, isLoading, error } = useStageState();
   const displayId = getDisplayId();
+
+  // Keep the browser tab title in sync with the brand + this display's name, so
+  // renaming a display (Settings) updates its kiosk tab too.
+  const titleDisplay = (state?.displays?.length ?? 0) > 1
+    ? (state?.displays?.find((d) => d.id === displayId)?.name ?? displayId)
+    : null;
+  useEffect(() => {
+    const appName = state?.appName?.trim() || "Stage Utility";
+    document.title = titleDisplay ? `${appName} — ${titleDisplay}` : appName;
+  }, [state?.appName, titleDisplay]);
 
   if (isLoading) return <KioskLoading />;
   if (error) return <KioskError message={error} />;

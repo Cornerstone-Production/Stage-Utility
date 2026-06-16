@@ -16,7 +16,7 @@ import * as http from "http";
 import type { ProPresenterStatusDTO, ProSection, ProTimer } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 
-const POLL_INTERVAL_MS = 1000;
+const POLL_INTERVAL_MS = 500;
 const ERROR_INTERVAL_MS = 5000;
 const REQUEST_TIMEOUT_MS = 4000;
 /** Thumbnail width requested from ProPresenter (px). */
@@ -101,60 +101,102 @@ function colorToHex(color: unknown): string {
   return `#${hex(r)}${hex(g)}${hex(b)}`;
 }
 
-interface OrderedGroup {
+interface MatchGroup {
   name: string;
   colorHex: string;
-  slideCount: number;
+  slides: { text: string; notes: string }[];
 }
 
-// Build the play-order group sequence from the active presentation, honoring the
-// current arrangement (groups referenced by uuid, in order) when one is set;
-// otherwise the library group order. Returns the flattened sequence + total slides.
-function orderedGroups(active: unknown): { seq: OrderedGroup[]; total: number } {
-  const libGroups = pick(active, "presentation", "groups");
-  if (!Array.isArray(libGroups)) return { seq: [], total: 0 };
-
-  const toOrdered = (g: unknown): OrderedGroup => ({
+// Flatten the active presentation's groups in document order, keeping each
+// slide's text + chord (notes). ProPresenter slides carry no stable uuid, but
+// text(+notes) is enough to find which group (= section) the live slide is in —
+// and matching by CONTENT is immune to arrangement reordering and non-sequential
+// jumps, unlike the global slide_index (which lives in a different/expanded
+// space: e.g. it reports index 49 for a 44-slide deck).
+function libraryGroups(active: unknown): MatchGroup[] {
+  const gs = pick(active, "presentation", "groups");
+  if (!Array.isArray(gs)) return [];
+  return gs.map((g) => ({
     name: asString(pick(g, "name")) ?? "",
     colorHex: colorToHex(pick(g, "color")),
-    slideCount: Array.isArray(pick(g, "slides")) ? (pick(g, "slides") as unknown[]).length : 0,
-  });
-
-  const arrUuid = asString(pick(active, "presentation", "current_arrangement"));
-  let seq: OrderedGroup[];
-  if (arrUuid) {
-    const arrangements = pick(active, "presentation", "arrangements");
-    const arr = Array.isArray(arrangements)
-      ? arrangements.find((a) => asString(pick(a, "id", "uuid")) === arrUuid)
-      : null;
-    const groupUuids = pick(arr, "groups");
-    const byUuid = new Map<string, unknown>();
-    for (const g of libGroups) {
-      const u = asString(pick(g, "uuid"));
-      if (u) byUuid.set(u, g);
-    }
-    seq = Array.isArray(groupUuids)
-      ? groupUuids.map((u) => byUuid.get(asString(u) ?? "")).filter(Boolean).map(toOrdered)
-      : libGroups.map(toOrdered);
-  } else {
-    seq = libGroups.map(toOrdered);
-  }
-
-  const total = seq.reduce((sum, g) => sum + g.slideCount, 0);
-  return { seq, total };
+    slides: Array.isArray(pick(g, "slides"))
+      ? (pick(g, "slides") as unknown[]).map((s) => ({
+          text: asString(pick(s, "text")) ?? "",
+          notes: asString(pick(s, "notes")) ?? "",
+        }))
+      : [],
+  }));
 }
 
-// Resolve which section a flattened 0-based slide index falls in.
-function sectionAt(seq: OrderedGroup[], index: number): { section: ProSection | null; groupPos: number } {
-  let acc = 0;
-  for (let i = 0; i < seq.length; i++) {
-    const g = seq[i];
-    if (index < acc + g.slideCount) {
-      return { section: g.name ? { name: g.name, colorHex: g.colorHex } : null, groupPos: i };
+// Locate the group + cumulative slide index whose content matches `text`
+// (preferring an exact text+notes match, then text-only). Returns null when the
+// text is empty (e.g. a media slide) or nothing matches.
+function locateSlide(
+  groups: MatchGroup[],
+  text: string | null,
+  notes: string | null,
+): { name: string; colorHex: string; groupPos: number; cumIndex: number } | null {
+  if (!text) return null;
+  for (const requireNotes of [true, false]) {
+    let cum = 0;
+    for (let gi = 0; gi < groups.length; gi++) {
+      const g = groups[gi];
+      for (let si = 0; si < g.slides.length; si++) {
+        const s = g.slides[si];
+        if (s.text === text && (!requireNotes || !notes || s.notes === notes)) {
+          return { name: g.name, colorHex: g.colorHex, groupPos: gi, cumIndex: cum + si };
+        }
+      }
+      cum += g.slides.length;
     }
-    acc += g.slideCount;
   }
-  return { section: null, groupPos: -1 };
+  return null;
+}
+
+// Expand the presentation into PLAY order — one entry per slide, in the order
+// ProPresenter actually presents them. ProPresenter's slide_index indexes into
+// THIS sequence (it can exceed the library slide count because an arrangement
+// repeats groups). The arrangement's `groups` is a list of group uuids (with
+// repeats) defining play order. `current_arrangement` is often left blank even
+// when an arrangement is in effect, so fall back to the sole arrangement when
+// there's exactly one, then to library/document order as a last resort.
+function playOrderSections(active: unknown): { name: string; colorHex: string }[] {
+  const groups = pick(active, "presentation", "groups");
+  if (!Array.isArray(groups)) return [];
+
+  const byUuid = new Map<string, unknown>();
+  for (const g of groups) {
+    const u = asString(pick(g, "uuid"));
+    if (u) byUuid.set(u, g);
+  }
+  const expand = (g: unknown): { name: string; colorHex: string }[] => {
+    const name = asString(pick(g, "name")) ?? "";
+    const colorHex = colorToHex(pick(g, "color"));
+    const slides = pick(g, "slides");
+    const n = Array.isArray(slides) ? slides.length : 0;
+    return Array.from({ length: n }, () => ({ name, colorHex }));
+  };
+
+  const arrUuid = asString(pick(active, "presentation", "current_arrangement"));
+  const arrangements = pick(active, "presentation", "arrangements");
+  let arr: unknown = null;
+  if (Array.isArray(arrangements)) {
+    if (arrUuid) arr = arrangements.find((a) => asString(pick(a, "id", "uuid")) === arrUuid) ?? null;
+    if (!arr && arrangements.length === 1) arr = arrangements[0];
+  }
+
+  const refs = pick(arr, "groups");
+  if (Array.isArray(refs)) {
+    const out: { name: string; colorHex: string }[] = [];
+    for (const u of refs) {
+      const g = byUuid.get(asString(u) ?? "");
+      if (g) out.push(...expand(g));
+    }
+    if (out.length) return out;
+  }
+
+  // No usable arrangement — present in library/document order.
+  return groups.flatMap(expand);
 }
 
 class ProPresenterService {
@@ -163,6 +205,7 @@ class ProPresenterService {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private last: ProPresenterStatusDTO = OFFLINE;
+  private lastJson = "";
   private onConn: ((state: ProConnState, message: string | null) => void) | null = null;
   private reported: ProConnState | null = null;
 
@@ -320,30 +363,58 @@ class ProPresenterService {
     const currentNotes = asString(pick(slide, "current", "notes"));
     const nextNotes = asString(pick(slide, "next", "notes"));
 
-    const idxZero = asNumber(pick(slideIndex, "presentation_index", "index"));
-    const idx = idxZero == null ? null : idxZero + 1;
+    // Resolve sections from the PLAY-ORDER position. ProPresenter's slide_index
+    // indexes the arrangement-expanded play order, so play[idx] is the live
+    // slide's group — exact for repeated groups AND for text-less Intro/
+    // Instrumental/Outro slides (which can't be matched by content). When there's
+    // no index (rare), fall back to matching the slide text against the groups.
+    const play = playOrderSections(active);
+    const total = play.length;
+    const idxZeroRaw = asNumber(pick(slideIndex, "presentation_index", "index"));
+    const idxZero =
+      idxZeroRaw == null
+        ? null
+        : total > 0
+          ? Math.min(Math.max(idxZeroRaw, 0), total - 1)
+          : Math.max(idxZeroRaw, 0);
 
-    // Sections via the arrangement-aware play order.
-    const { seq, total } = orderedGroups(active);
     let currentSection: ProSection | null = null;
     let nextSection: ProSection | null = null;
     let nextArrangementSection: ProSection | null = null;
-    if (idxZero != null && seq.length) {
-      const cur = sectionAt(seq, idxZero);
-      currentSection = cur.section;
-      nextSection = sectionAt(seq, idxZero + 1).section;
-      // Next *different* group after the current group's position.
-      for (let i = cur.groupPos + 1; i < seq.length; i++) {
-        if (seq[i].name && seq[i].name !== currentSection?.name) {
-          nextArrangementSection = { name: seq[i].name, colorHex: seq[i].colorHex };
+
+    if (idxZero != null && total > 0) {
+      const cur = play[idxZero];
+      if (cur?.name) currentSection = { name: cur.name, colorHex: cur.colorHex };
+      const nxt = play[idxZero + 1];
+      if (nxt?.name) nextSection = { name: nxt.name, colorHex: nxt.colorHex };
+      // "Then": next differently-named group later in the play order.
+      for (let i = idxZero + 1; i < total; i++) {
+        if (play[i].name && play[i].name !== currentSection?.name) {
+          nextArrangementSection = { name: play[i].name, colorHex: play[i].colorHex };
           break;
         }
       }
+    } else {
+      const groups = libraryGroups(active);
+      const curLoc = locateSlide(groups, currentSlideText, currentNotes);
+      const nextLoc = locateSlide(groups, nextSlideText, nextNotes);
+      if (curLoc?.name) currentSection = { name: curLoc.name, colorHex: curLoc.colorHex };
+      if (nextLoc?.name) nextSection = { name: nextLoc.name, colorHex: nextLoc.colorHex };
     }
 
+    const idx = idxZero == null ? null : idxZero + 1;
     const slideCount = total > 0 ? total : null;
     const slidesRemaining =
       idx != null && slideCount != null ? Math.max(0, slideCount - idx) : null;
+
+    if (process.env.PP_DEBUG) {
+      console.log(
+        `[propresenter] rawIdx=${idxZeroRaw}→${idxZero}/${total} ` +
+          `section=${JSON.stringify(currentSection?.name ?? null)} ` +
+          `next=${JSON.stringify(nextSection?.name ?? null)} ` +
+          `curText=${JSON.stringify((currentSlideText ?? "").slice(0, 24))}`,
+      );
+    }
 
     // Running named timers (state ≠ "stopped").
     const runningTimers: ProTimer[] = Array.isArray(timers)
@@ -357,10 +428,19 @@ class ProPresenterService {
       : [];
 
     // Stash preview target + key (thumbnail index is the 0-based slide index).
+    // The key includes the current arrangement so that reordering a song (same
+    // presentation uuid + same index, but a different slide there) still busts the
+    // <img> cache and refetches the live thumbnail.
+    // The thumbnail proxy fetches by ProPresenter's own slide index, so keep the
+    // RAW index here (not the content-matched counter). The key also includes the
+    // arrangement so a live reorder busts the <img> cache.
+    const arrUuid = asString(pick(active, "presentation", "current_arrangement"));
     this.activeUuid = asString(pick(active, "presentation", "id", "uuid"));
-    this.slideIdxZero = idxZero;
+    this.slideIdxZero = idxZeroRaw;
     const slidePreviewKey =
-      this.activeUuid && idxZero != null ? `${this.activeUuid}:${idxZero}` : null;
+      this.activeUuid && idxZeroRaw != null
+        ? `${this.activeUuid}:${arrUuid ?? ""}:${idxZeroRaw}`
+        : null;
 
     return {
       connected: true,
@@ -385,6 +465,11 @@ class ProPresenterService {
 
   private emit(status: ProPresenterStatusDTO): void {
     this.last = status;
+    // Only push when something actually changed — at 2 Hz an unchanged broadcast
+    // would re-render every dashboard for nothing.
+    const json = JSON.stringify(status);
+    if (json === this.lastJson) return;
+    this.lastJson = json;
     broadcast("propresenter:status", status);
   }
 }

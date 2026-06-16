@@ -474,17 +474,25 @@ interface WirelessConnectionsPanelProps {
 export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanelProps) {
   const queryClient = useQueryClient();
 
-  const { data: providers = [], isLoading: providersLoading } = useQuery({
+  const providersQuery = useQuery({
     queryKey: ["wireless:listProviders"],
     queryFn: () => ipc<IntegrationDescriptor[]>("wireless:listProviders"),
+    retry: 1,
   });
-
-  const { data: connections = [], isLoading: connectionsLoading } = useQuery({
+  const connectionsQuery = useQuery({
     queryKey: ["wireless:listConnections"],
     queryFn: () => ipc<WirelessConnection[]>("wireless:listConnections"),
+    retry: 1,
   });
 
-  const isLoading = providersLoading || connectionsLoading;
+  const providers = providersQuery.data ?? [];
+  const connections = connectionsQuery.data ?? [];
+  const isLoading = providersQuery.isLoading || connectionsQuery.isLoading;
+  const loadError = providersQuery.error ?? connectionsQuery.error;
+  function retryLoad() {
+    void providersQuery.refetch();
+    void connectionsQuery.refetch();
+  }
 
   // Global polling/metering interval (ms), applied to all wireless gear.
   const { data: meterData } = useQuery({
@@ -563,7 +571,22 @@ export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanel
   );
 
   let body: ReactNode;
-  if (isLoading) {
+  if (loadError && !isLoading) {
+    body = (
+      <div className="flex flex-col items-start gap-2 py-3">
+        <span className="flex items-center gap-1.5 text-body text-red-10">
+          <XCircleIcon className="size-4 shrink-0" />
+          Couldn’t load wireless connections.
+        </span>
+        <span className="text-caption1 text-gray-9">
+          {loadError instanceof Error ? loadError.message : String(loadError)}
+        </span>
+        <Button variant="filled" size="small" onClick={retryLoad} className="mt-1">
+          Retry
+        </Button>
+      </div>
+    );
+  } else if (isLoading) {
     body = (
       <div className="flex items-center justify-center py-6">
         <Loader2Icon className="size-5 text-gray-9 animate-spin" />

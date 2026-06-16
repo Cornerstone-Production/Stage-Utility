@@ -1,4 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
+import { useStageState } from "../main/use-stage-state";
 import { useState, useEffect, useCallback, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
@@ -128,9 +129,19 @@ interface IntegrationCardProps {
   descriptor: IntegrationDescriptor;
   state: IntegrationState;
   onStateChange: (s: IntegrationState) => void;
+  /** ISO timestamp of the last successful PCO sync (planning-center card only). */
+  lastRefreshedAt?: string | null;
 }
 
-function IntegrationCard({ descriptor, state, onStateChange }: IntegrationCardProps) {
+// "Synced 12:52 PM" for the PCO Refresh-now row; "Never synced" when null/invalid.
+function fmtSynced(iso: string | null | undefined): string {
+  if (!iso) return "Never synced";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "Never synced";
+  return `Synced ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+}
+
+function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: IntegrationCardProps) {
   // Local config mirrors state.config but tracks in-progress edits
   const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(() => {
     // Mask password fields coming from backend
@@ -299,12 +310,15 @@ function IntegrationCard({ descriptor, state, onStateChange }: IntegrationCardPr
           Test connection
         </Button>
         {descriptor.id === "planning-center" && (
-          <Button variant="transparent" size="small" onClick={handleRefresh} disabled={isRefreshing}>
-            {isRefreshing
-              ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" />
-              : <RefreshCwIcon className="size-3.5 text-gray-9" />}
-            Refresh now
-          </Button>
+          <>
+            <Button variant="transparent" size="small" onClick={handleRefresh} disabled={isRefreshing}>
+              {isRefreshing
+                ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" />
+                : <RefreshCwIcon className="size-3.5 text-gray-9" />}
+              Refresh now
+            </Button>
+            <span className="text-caption1 text-gray-9 tabular-nums">{fmtSynced(lastRefreshedAt)}</span>
+          </>
         )}
         {testResult !== null && (
           <span
@@ -334,6 +348,7 @@ interface IntegrationsPanelProps {
 
 export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   const queryClient = useQueryClient();
+  const { state: stageState } = useStageState();
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["integrations:list"],
@@ -414,6 +429,7 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
                 descriptor={descriptor}
                 state={state}
                 onStateChange={handleStateChange}
+                lastRefreshedAt={stageState?.lastRefreshedAt ?? null}
               />
             )}
           </div>

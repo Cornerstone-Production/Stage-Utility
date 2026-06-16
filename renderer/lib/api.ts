@@ -10,11 +10,24 @@ type Params = Record<string, unknown> | undefined;
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
+// Hard ceiling so a request that never settles (e.g. a stalled backend route)
+// surfaces as an error instead of hanging a query in its loading state forever.
+const REQUEST_TIMEOUT_MS = 15000;
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
-    ...init,
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...init?.headers },
+      signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      throw new Error(`Request to ${path} timed out`);
+    }
+    throw err;
+  }
   if (!res.ok) {
     let msg = res.statusText;
     try {
