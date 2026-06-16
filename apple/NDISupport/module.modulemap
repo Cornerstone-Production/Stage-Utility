@@ -11,8 +11,9 @@
 //      and link the NDI library (libndi) / add the XCFramework to the target.
 //   3. Adjust the header name below if your SDK's umbrella differs.
 
+// Header-only module; the actual library is linked per-platform via OTHER_LDFLAGS
+// in project.yml (the lib name differs: libndi.dylib / libndi_ios.a / libndi_tvos.a).
 module NDI {
     header "../Vendor/NDI/include/Processing.NDI.Lib.h"
     export *
-    link "ndi"
 }

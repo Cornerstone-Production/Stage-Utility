@@ -73,13 +73,13 @@ final class NDISDKReceiver: NDIReceiving {
                 }
             }
         }
-        guard running, var src = source else { return }
+        guard running, let src = source else { return }
 
-        // 2) Connect a receiver. Let NDI pick the fastest color format; we handle
-        //    the common UYVY/BGRA layouts below.
+        // 2) Connect a receiver. Request UYVY for opaque sources and BGRA for
+        //    sources with alpha — both are handled in makeSampleBuffer below.
         var settings = NDIlib_recv_create_v3_t()
         settings.source_to_connect_to = src
-        settings.color_format = NDIlib_recv_color_format_fastest
+        settings.color_format = NDIlib_recv_color_format_UYVY_BGRA
         settings.bandwidth = NDIlib_recv_bandwidth_highest
         settings.allow_video_fields = false
         guard let recv = NDIlib_recv_create_v3(&settings) else { return }
@@ -109,13 +109,14 @@ final class NDISDKReceiver: NDIReceiving {
         guard width > 0, height > 0, let data = frame.p_data else { return nil }
         let srcStride = Int(frame.line_stride_in_bytes)
 
+        // frame.FourCC is NDIlib_FourCC_video_type_e.
         let pixelFormat: OSType
         switch frame.FourCC {
-        case NDIlib_FourCC_type_UYVY:
+        case NDIlib_FourCC_video_type_UYVY:
             pixelFormat = kCVPixelFormatType_422YpCbCr8           // '2vuy'
-        case NDIlib_FourCC_type_BGRA, NDIlib_FourCC_type_BGRX:
+        case NDIlib_FourCC_video_type_BGRA, NDIlib_FourCC_video_type_BGRX:
             pixelFormat = kCVPixelFormatType_32BGRA
-        case NDIlib_FourCC_type_RGBA, NDIlib_FourCC_type_RGBX:
+        case NDIlib_FourCC_video_type_RGBA, NDIlib_FourCC_video_type_RGBX:
             pixelFormat = kCVPixelFormatType_32RGBA
         default:
             return nil // planar/compressed formats need a dedicated path

@@ -36,6 +36,27 @@ targets:
       - path: StageDisplay
     settings:
       base:
-        # NDI discovery (Phase 2) — Bonjour service type for the Local Network prompt.
+        # NDI discovery — Bonjour service type for the Local Network prompt.
         INFOPLIST_KEY_NSBonjourServices: "_ndi._tcp"
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: YES
+
+        # ── NDI SDK wiring ──────────────────────────────────────────────────
+        # Drop the SDK under apple/Vendor/NDI/ (git-ignored). `import NDI`
+        # resolves via NDISupport/module.modulemap, which flips on the real
+        # receive pipeline (#if canImport(NDI)).
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/NDISupport"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/Vendor/NDI/include"
+        # Embed @rpath libs (macOS dylib) so the app finds libndi at runtime.
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks @loader_path/Frameworks"
+
+        # The link library name differs per platform, so link conditionally.
+        "LIBRARY_SEARCH_PATHS[sdk=macosx*]": "$(SRCROOT)/Vendor/NDI/lib/macOS"
+        "OTHER_LDFLAGS[sdk=macosx*]": "-lndi"
+        "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]": "$(SRCROOT)/Vendor/NDI/lib/iOS"
+        "OTHER_LDFLAGS[sdk=iphoneos*]": "-lndi_ios"
+        "LIBRARY_SEARCH_PATHS[sdk=appletvos*]": "$(SRCROOT)/Vendor/NDI/lib/tvOS"
+        "OTHER_LDFLAGS[sdk=appletvos*]": "-lndi_tvos"
+        # NOTE: the iOS/tvOS .a are device-only (no simulator slice); build for a
+        # device, or stub NDI on the simulator. macOS runs in the simulator-free
+        # path. Embed Vendor/NDI/lib/macOS/libndi.dylib via a Copy Files (Frameworks)
+        # phase for a distributable macOS build.
