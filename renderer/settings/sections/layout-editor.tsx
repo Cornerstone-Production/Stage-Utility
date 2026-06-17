@@ -656,6 +656,9 @@ function Inspector({
             </ButtonGroup>
           </Row>
           <Row label="Seconds"><Switch checked={c.showSeconds ?? true} onCheckedChange={(v) => onConfig({ ...c, showSeconds: v })} /></Row>
+          {c.format !== "24h" && (
+            <Row label="AM / PM"><Switch checked={c.showMeridiem ?? true} onCheckedChange={(v) => onConfig({ ...c, showMeridiem: v })} /></Row>
+          )}
         </>
       )}
       {c.type === "section-chip" && (
@@ -749,15 +752,27 @@ function Inspector({
       <Row label="Border">
         <input
           type="color"
-          value={s.borderColor ?? "#3b82f6"}
-          onChange={(e) => onStyle({ borderColor: e.target.value })}
+          value={s.borderColor ?? "#ffffff"}
+          onChange={(e) => onStyle({ borderColor: e.target.value, borderWidth: s.borderWidth ?? 0 })}
           className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent"
           aria-label="Border color"
         />
-        <NumberInput value={s.borderWidth ?? 0} step={0.002} min={0} max={0.05} onChange={(v) => onStyle({ borderWidth: v, borderColor: s.borderColor ?? "#3b82f6" })} />
-        {(s.borderWidth ?? 0) > 0 && (
-          <Button variant="transparent" size="small" onClick={() => onStyle({ borderWidth: 0 })}>Off</Button>
-        )}
+        <div className="relative flex-1 min-w-0">
+          <Input
+            type="number"
+            value={Math.round((s.borderWidth ?? 0) * canvas.height)}
+            step={1}
+            min={0}
+            max={40}
+            onChange={(e) => {
+              const px = Math.max(0, Math.min(40, parseFloat(e.target.value) || 0));
+              onStyle({ borderWidth: px / canvas.height, borderColor: s.borderColor ?? "#ffffff" });
+            }}
+            className={`text-gray-12 tabular-nums pr-6 ${NO_SPINNER}`}
+            aria-label="Border width (px)"
+          />
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-caption2 text-gray-8 pointer-events-none">px</span>
+        </div>
       </Row>
 
       <Separator />

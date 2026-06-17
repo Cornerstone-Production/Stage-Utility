@@ -143,7 +143,7 @@ interface LayoutStyle {
 
 type LayoutObjectConfig =
   | { type: "text"; text: string }
-  | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h" }
+  | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h"; showMeridiem?: boolean }
   | { type: "countdown-timer" }
   | { type: "current-slide-text" }
   | { type: "next-slide-text" }

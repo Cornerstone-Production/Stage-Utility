@@ -125,7 +125,7 @@ export interface LayoutStyle {
 /** Per-type configuration. The discriminant is `type`. */
 export type LayoutObjectConfig =
   | { type: "text"; text: string }
-  | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h" }
+  | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h"; showMeridiem?: boolean }
   | { type: "countdown-timer" } // PCO Live
   | { type: "current-slide-text" }
   | { type: "next-slide-text" }

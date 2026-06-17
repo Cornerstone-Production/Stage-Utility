@@ -35,12 +35,15 @@ export function boxStyle(o: LayoutObject, H: number): CSSProperties {
     alignItems:
       s.textAlign === "left" ? "flex-start" : s.textAlign === "right" ? "flex-end" : "center",
     overflow: "hidden",
+    // Border draws inside the box so it never changes the object's footprint.
+    boxSizing: "border-box",
   };
   if (s.background) css.background = s.background;
   if (s.opacity != null) css.opacity = s.opacity;
   if (s.padding != null) css.padding = `${s.padding * H}px`;
   if (s.cornerRadius != null) css.borderRadius = `${s.cornerRadius * H}px`;
-  if (s.borderColor && s.borderWidth) css.border = `${s.borderWidth * H}px solid ${s.borderColor}`;
+  // Clamp so a stray/legacy width can't swell into a solid fill.
+  if (s.borderColor && s.borderWidth) css.border = `${Math.min(s.borderWidth, 0.04) * H}px solid ${s.borderColor}`;
   if (o.config.type === "shape" && o.config.shape === "ellipse") css.borderRadius = "50%";
   return css;
 }
@@ -72,7 +75,7 @@ function textStyle(o: LayoutObject, H: number): CSSProperties {
   return css;
 }
 
-function clockText(now: number, showSeconds: boolean, format: "12h" | "24h"): string {
+function clockText(now: number, showSeconds: boolean, format: "12h" | "24h", showMeridiem: boolean): string {
   const d = new Date(now);
   let h = d.getHours();
   const m = pad(d.getMinutes());
@@ -80,7 +83,7 @@ function clockText(now: number, showSeconds: boolean, format: "12h" | "24h"): st
   if (format === "12h") {
     const ampm = h < 12 ? "AM" : "PM";
     h = ((h + 11) % 12) + 1;
-    return `${h}:${m}${showSeconds ? `:${s}` : ""} ${ampm}`;
+    return `${h}:${m}${showSeconds ? `:${s}` : ""}${showMeridiem ? ` ${ampm}` : ""}`;
   }
   return `${pad(h)}:${m}${showSeconds ? `:${s}` : ""}`;
 }
@@ -95,7 +98,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "text":
       return span(c.text);
     case "clock":
-      return span(clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h"));
+      return span(clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h", c.showMeridiem ?? true));
     case "countdown-timer": {
       const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
       return span(t ? fmtDuration(t.seconds) : "—");
