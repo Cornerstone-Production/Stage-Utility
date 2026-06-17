@@ -38,6 +38,13 @@ export interface DisplayInfo {
   name: string;
   /** Defaults to "slots" when absent (back-compat with older settings). */
   kind?: DisplayKind;
+  /**
+   * NDI source name this display should show as a video layer, or null/absent
+   * for none. Stored as the source *name* only — video never flows through the
+   * server. The native Apple client discovers the source on the LAN (mDNS) and
+   * receives it peer-to-peer; web clients can't render NDI and ignore this.
+   */
+  ndiSource?: string | null;
 }
 
 /**

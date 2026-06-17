@@ -161,6 +161,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return patch<T>(`/api/displays/${encodeURIComponent(id)}`, { kind: p.kind });
     }
 
+    case "displays:setNdiSource": {
+      const id = p.id as string;
+      return patch<T>(`/api/displays/${encodeURIComponent(id)}`, { ndiSource: p.ndiSource });
+    }
+
     case "displays:remove": {
       const id = p.id as string;
       return del<T>(`/api/displays/${encodeURIComponent(id)}`);

@@ -614,6 +614,20 @@ export class StageController {
     return this.state;
   }
 
+  /** Assign (or clear) the NDI source a display should show. Empty → null. */
+  async setDisplayNdiSource(id: string, source: string | null): Promise<StageState> {
+    if (!this.state.displays.find((d) => d.id === id)) {
+      throw new Error(`displays:setNdiSource — display ${id} not found`);
+    }
+    const ndiSource = source?.trim() ? source.trim() : null;
+    const displays = this.state.displays.map((d) => (d.id === id ? { ...d, ndiSource } : d));
+    console.log(`[stage-controller] setDisplayNdiSource id=${id} source=${ndiSource ?? "(none)"}`);
+    this.state = { ...this.state, displays };
+    await settingsStore.patch({ displays });
+    this.broadcast();
+    return this.state;
+  }
+
   async removeDisplay(id: string): Promise<StageState> {
     if (this.state.displays.length <= 1) {
       throw new Error("displays:remove — cannot remove the last display");

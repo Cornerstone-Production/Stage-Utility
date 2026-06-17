@@ -291,10 +291,22 @@ export class RemoteServer {
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no", // disable proxy buffering (nginx etc.)
       });
-      // Send initial state snapshot so the client is immediately in sync.
+      // Send initial snapshots so the client is immediately in sync — these
+      // channels otherwise only broadcast on change, leaving a fresh client blank.
       sseWrite(res, "stage:state-changed", stageController.getState());
+      sseWrite(res, "propresenter:status", propresenterService.getStatus());
       sseClients.add(res);
       req.on("close", () => sseClients.delete(res));
+      return;
+    }
+
+    // Hydrate-on-connect endpoints (the live channels only broadcast on change).
+    if (method === "GET" && pathname === "/api/propresenter/status") {
+      json(res, propresenterService.getStatus());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/pco/live") {
+      json(res, await stageController.fetchLive());
       return;
     }
 
@@ -494,20 +506,24 @@ export class RemoteServer {
       return;
     }
 
-    // PATCH /api/displays/:id — accepts { name? } and/or { kind? }
+    // PATCH /api/displays/:id — accepts { name? } and/or { kind? } and/or { ndiSource? }
     const displayPatchMatch = pathname.match(/^\/api\/displays\/([^/]+)$/);
     if (method === "PATCH" && displayPatchMatch) {
       const id = displayPatchMatch[1];
       const body = await readBody(req) as Record<string, unknown>;
       const hasName = typeof body.name === "string";
       const hasKind = isDisplayKind(body.kind);
-      if (!hasName && !hasKind) {
-        error(res, "body.name (string) or body.kind ('slots'|'dashboard'|'stage') required");
+      // ndiSource accepts a string (assign) or null (clear); absent = no change.
+      const hasNdiSource = "ndiSource" in body
+        && (typeof body.ndiSource === "string" || body.ndiSource === null);
+      if (!hasName && !hasKind && !hasNdiSource) {
+        error(res, "body.name (string), body.kind ('slots'|'dashboard'|'stage'|'transcription'), or body.ndiSource (string|null) required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameDisplay(id, body.name as string);
       if (hasKind) state = await stageController.setDisplayKind(id, body.kind as DisplayKind);
+      if (hasNdiSource) state = await stageController.setDisplayNdiSource(id, body.ndiSource as string | null);
       json(res, state);
       return;
     }

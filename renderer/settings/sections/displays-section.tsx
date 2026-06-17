@@ -1,5 +1,5 @@
 import { useState, useEffect, type ChangeEvent } from "react";
-import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, VideoIcon } from "lucide-react";
 import {
   Button,
   Input,
@@ -26,16 +26,22 @@ interface DisplayRowProps {
   canRemove: boolean;
   onRename: (name: string) => void;
   onSetKind: (kind: DisplayKind) => void;
+  onSetNdiSource: (ndiSource: string | null) => void;
   onOpenWindow: () => void;
   onRemove: () => void;
 }
 
-function DisplayRow({ display, isFirst, canRemove, onRename, onSetKind, onOpenWindow, onRemove }: DisplayRowProps) {
+function DisplayRow({ display, isFirst, canRemove, onRename, onSetKind, onSetNdiSource, onOpenWindow, onRemove }: DisplayRowProps) {
   const [editName, setEditName] = useState(display.name);
+  const [editNdi, setEditNdi] = useState(display.ndiSource ?? "");
 
   useEffect(() => {
     setEditName(display.name);
   }, [display.name]);
+
+  useEffect(() => {
+    setEditNdi(display.ndiSource ?? "");
+  }, [display.ndiSource]);
 
   function handleBlur() {
     const trimmed = editName.trim();
@@ -43,6 +49,14 @@ function DisplayRow({ display, isFirst, canRemove, onRename, onSetKind, onOpenWi
       onRename(trimmed);
     } else {
       setEditName(display.name);
+    }
+  }
+
+  function handleNdiBlur() {
+    const trimmed = editNdi.trim();
+    const current = display.ndiSource ?? "";
+    if (trimmed !== current) {
+      onSetNdiSource(trimmed || null);
     }
   }
 
@@ -107,6 +121,18 @@ function DisplayRow({ display, isFirst, canRemove, onRename, onSetKind, onOpenWi
           {displayUrl}
         </button>
       </div>
+      {/* NDI source (native Apple client only) */}
+      <div className="ml-5 flex items-center gap-2">
+        <VideoIcon className="size-3.5 text-gray-9 shrink-0" />
+        <Input
+          value={editNdi}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setEditNdi(e.target.value)}
+          onBlur={handleNdiBlur}
+          placeholder="NDI source name (optional)"
+          className="flex-1 min-w-0"
+          aria-label="NDI source name"
+        />
+      </div>
     </div>
   );
 }
@@ -116,7 +142,9 @@ export function DisplaysSection({ stageState, handlers }: Pick<SectionProps, "st
     <div className="px-5 flex flex-col gap-4 py-5">
       <p className="text-caption1 text-gray-9">
         Each display runs in its own kiosk window with its own slot set. All displays share the same
-        plan and PCO data.
+        plan and PCO data. Set an <span className="font-medium">NDI source name</span> to show a live
+        video feed behind that display — only the native Apple app renders NDI; web/browser displays
+        ignore it.
       </p>
 
       <div className="flex flex-col">
@@ -128,6 +156,7 @@ export function DisplaysSection({ stageState, handlers }: Pick<SectionProps, "st
             canRemove={(stageState.displays?.length ?? 1) > 1}
             onRename={(name) => handlers.handleRenameDisplay(display.id, name)}
             onSetKind={(kind) => handlers.handleSetDisplayKind(display.id, kind)}
+            onSetNdiSource={(ndiSource) => handlers.handleSetDisplayNdiSource(display.id, ndiSource)}
             onOpenWindow={() => handlers.handleOpenDisplayWindow(display.id)}
             onRemove={() => handlers.handleRemoveDisplay(display.id)}
           />
