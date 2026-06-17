@@ -368,12 +368,18 @@ function recolorBackground(src: HTMLCanvasElement, mode: "black" | "transparent"
  * the renderer object and the editor's "Fit box to file" action. Returns the
  * output pixel size so callers can match an object box to the content aspect.
  * Resolves to `"empty"` when nothing matches on the current plan.
+ *
+ * `cacheBust` (the active plan id) is appended to the URL so a plan change forces
+ * a fresh fetch instead of serving the previous plan's file from the 5-min HTTP
+ * cache. The server ignores it — it always resolves against the active plan.
  */
 export async function loadProcessedAttachment(
   match: string,
   opts: AttachmentProcessOpts,
+  cacheBust?: string | null,
 ): Promise<{ dataUrl: string; width: number; height: number } | "empty" | null> {
-  const resp = await fetch(`/api/pco/attachment?match=${encodeURIComponent(match)}`);
+  const bust = cacheBust ? `&plan=${encodeURIComponent(cacheBust)}` : "";
+  const resp = await fetch(`/api/pco/attachment?match=${encodeURIComponent(match)}${bust}`);
   if (resp.status === 404) return "empty";
   if (!resp.ok) return null;
   const ct = resp.headers.get("content-type") ?? "";
@@ -405,7 +411,7 @@ function PlanAttachment({
     setStatus("loading");
     void (async () => {
       try {
-        const result = await loadProcessedAttachment(match, JSON.parse(optsKey) as AttachmentProcessOpts);
+        const result = await loadProcessedAttachment(match, JSON.parse(optsKey) as AttachmentProcessOpts, planId);
         if (cancelled) return;
         if (result === "empty") {
           setStatus("empty");
