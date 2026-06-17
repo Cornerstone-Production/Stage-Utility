@@ -9,13 +9,6 @@ interface SlotPanelProps {
   className?: string;
 }
 
-function channelLabel(channel: string): string {
-  // Pad channel to 2 digits with leading zero if numeric
-  const num = parseInt(channel, 10);
-  if (!isNaN(num)) return String(num).padStart(2, "0");
-  return channel;
-}
-
 function initials(name: string): string {
   return name
     .split(/\s+/)
@@ -23,27 +16,6 @@ function initials(name: string): string {
     .slice(0, 2)
     .map((w) => w[0].toUpperCase())
     .join("");
-}
-
-// Small Liquid Glass chip for the channel number
-function ChannelChip({ channel }: { channel: string }) {
-  return (
-    <div
-      className="inline-flex items-center justify-center px-2 py-0.5 rounded-full select-none"
-      style={{
-        background: "rgba(255,255,255,0.12)",
-        boxShadow: "0 0 0 1px rgba(255,255,255,0.18), inset 0 1px 0 rgba(255,255,255,0.10)",
-        backdropFilter: "blur(8px)",
-      }}
-    >
-      <span
-        className="text-callout tabular-nums font-semibold text-white/90 leading-none"
-        style={{ textShadow: "0 1px 3px rgba(0,0,0,0.7)" }}
-      >
-        {channelLabel(channel)}
-      </span>
-    </div>
-  );
 }
 
 export function SlotPanel({ slot, emptySlotLogo, className }: SlotPanelProps) {
@@ -78,24 +50,14 @@ export function SlotPanel({ slot, emptySlotLogo, className }: SlotPanelProps) {
           style={{ background: "rgba(255,255,255,0.025)" }}
         >
           {emptySlotLogo ? (
-            <>
-              {/* Channel chip top-left; custom image centered in the kiosk gray */}
-              <div className="absolute top-0 left-0 p-3">
-                <ChannelChip channel={slot.channel} />
-              </div>
-              <BrandLogo
-                logo={emptySlotLogo}
-                monochrome
-                className="text-white/25"
-                style={{ width: "clamp(3rem,32cqw,11rem)", height: "clamp(3rem,32cqw,11rem)" }}
-              />
-            </>
+            <BrandLogo
+              logo={emptySlotLogo}
+              monochrome
+              className="text-white/25"
+              style={{ width: "clamp(3rem,32cqw,11rem)", height: "clamp(3rem,32cqw,11rem)" }}
+            />
           ) : (
-            <>
-              {/* Muted channel number centered */}
-              <ChannelChip channel={slot.channel} />
-              <span className="mt-2 text-callout font-medium text-white/20 select-none">empty</span>
-            </>
+            <span className="text-callout font-medium text-white/20 select-none">empty</span>
           )}
         </div>
       </div>
@@ -162,11 +124,6 @@ export function SlotPanel({ slot, emptySlotLogo, className }: SlotPanelProps) {
               "linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.60) 40%, rgba(0,0,0,0.20) 70%, transparent 100%)",
           }}
         />
-
-        {/* Channel chip — top left, inside card */}
-        <div className="relative z-10 p-3">
-          <ChannelChip channel={slot.channel} />
-        </div>
 
         {/* Spacer pushes name and strip to bottom */}
         <div className="flex-1" />
