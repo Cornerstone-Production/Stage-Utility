@@ -29,6 +29,13 @@ function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
   };
 }
 
+// Normalize a PCO team-position name so sub-variants group with their base:
+// a trailing parenthetical is dropped, e.g. "Vocals (BGVs)" → "vocals". This
+// lets a BGV (or any "Vocals (…)" role) fill the shared "Vocals" note slots.
+function normalizePosition(name: string | null | undefined): string {
+  return (name ?? "").replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase();
+}
+
 function matchMember(
   slot: Slot,
   members: TeamMemberDTO[],
@@ -41,12 +48,13 @@ function matchMember(
   }
 
   if (link.matchBy === "position") {
-    // Case-insensitive position name match.
-    const pos = link.teamPositionName.toLowerCase();
+    // Match on the normalized position so sub-variants group with their base
+    // (e.g. "Vocals (BGVs)" → "Vocals"), disambiguated by notes.
+    const pos = normalizePosition(link.teamPositionName);
     const prefix = link.notesStartsWith?.trim().toLowerCase() ?? null;
 
     const byPosition = members.filter(
-      (m) => (m.teamPositionName ?? "").toLowerCase() === pos,
+      (m) => normalizePosition(m.teamPositionName) === pos,
     );
 
     if (prefix) {

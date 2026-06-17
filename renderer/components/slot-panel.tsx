@@ -35,7 +35,11 @@ export function SlotPanel({ slot, emptySlotLogo, className }: SlotPanelProps) {
   // Initials avatar: PCO/position slots with a display name but no photo
   const showInitials = !isStatic && !isEmpty && !hasPhoto && !!displayName;
 
-  if (isEmpty) {
+  // A PCO slot that resolved to nobody (no person scheduled, or no matching
+  // note) shows the same blank/logo view as a configured empty slot.
+  const isUnfilled = isEmpty || (slot.link.kind === "pco" && !slot.displayName);
+
+  if (isUnfilled) {
     return (
       // Outer wrapper provides the gap spacing — p-1.5 all sides, last child no right padding handled by gap
       <div
