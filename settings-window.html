@@ -19,11 +19,13 @@
       })();
     </script>
     <style>
+      /* Opaque backgrounds: this panel is a normal browser page (no window
+         vibrancy behind it), so a translucent bg washes out text contrast. */
       :root {
-        --background: hsl(0 0% 100% / 0.9);
+        --background: #fcfcfd;
       }
       .dark {
-        --background: hsl(0 0% 0% / 0.4);
+        --background: #0e0e11;
       }
       html,
       body,

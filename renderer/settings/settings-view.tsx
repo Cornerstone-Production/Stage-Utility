@@ -561,7 +561,7 @@ export function SettingsView() {
         </Sidebar>
       }
     >
-      <ScrollArea title={activeSection.label}>{renderSection()}</ScrollArea>
+      <ScrollArea className="h-full" title={activeSection.label}>{renderSection()}</ScrollArea>
     </SplitView>
   );
 }

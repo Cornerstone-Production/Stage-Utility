@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Button } from "../../components/ui";
 
-// On-screen crop square and the exported (square) resolution.
+// On-screen crop square. The exported PNG matches the cropped region's native
+// resolution (so a high-res upload stays crisp on the kiosk/wall), capped to
+// keep the stored data URL reasonable.
 const VIEWPORT = 224;
-const OUTPUT = 256;
+const MAX_OUTPUT = 1024;
+const MIN_OUTPUT = 256;
 const MAX_ZOOM = 4; // relative to the "cover" scale
 
 interface LogoCropperProps {
@@ -104,14 +107,19 @@ export function LogoCropper({ src, initial, onCancel, onSave }: LogoCropperProps
   function save() {
     const img = imgRef.current;
     if (!img) return;
+    // The viewport maps onto a square source region `sSize` source-pixels wide.
+    // Export at that native resolution (no upscaling beyond the source), clamped
+    // to [MIN_OUTPUT, MAX_OUTPUT], so high-res uploads stay sharp.
+    const sSize = VIEWPORT / scale;
+    const output = Math.round(Math.min(MAX_OUTPUT, Math.max(MIN_OUTPUT, sSize)));
     const canvas = document.createElement("canvas");
-    canvas.width = OUTPUT;
-    canvas.height = OUTPUT;
+    canvas.width = output;
+    canvas.height = output;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    // The viewport maps onto a square source region of the image.
-    const sSize = VIEWPORT / scale;
-    ctx.drawImage(img, -offset.x / scale, -offset.y / scale, sSize, sSize, 0, 0, OUTPUT, OUTPUT);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, -offset.x / scale, -offset.y / scale, sSize, sSize, 0, 0, output, output);
     onSave({
       logo: canvas.toDataURL("image/png"),
       original: src,
