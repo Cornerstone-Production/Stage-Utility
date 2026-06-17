@@ -798,10 +798,8 @@ export class StageController {
       kind: src.kind,
       ndiSource: src.ndiSource ?? null,
       createdAt: new Date().toISOString(),
-      // Deep-clone the layout with fresh object ids so the copy is independent.
-      layout: src.layout
-        ? { ...src.layout, objects: src.layout.objects.map((o) => ({ ...o, id: randomUUID() })) }
-        : null,
+      // Deep-clone via helper so nested object props (e.g. style/config) aren't shared.
+      layout: src.layout ? cloneLayout(src.layout) : null,
     };
     console.log(`[stage-controller] duplicateView ${id} → ${newId} "${copy.name}"`);
     const views = [...this.state.views, copy];
@@ -1125,6 +1123,9 @@ export class StageController {
     const nums = this.state.outputs
       .map((o) => parseInt(o.id.replace("display-", ""), 10))
       .filter((n) => !Number.isNaN(n));
+    // display-1 is reserved as the primary/default output (PRIMARY_DISPLAY_ID), so
+    // dynamically-created outputs start at display-2 when none exist yet. (Views,
+    // which have no reserved id, start at view-1.)
     const next = nums.length > 0 ? Math.max(...nums) + 1 : 2;
     return `display-${next}`;
   }

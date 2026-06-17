@@ -241,7 +241,7 @@ export function useLayoutData() {
  * Renders a custom-layout View: a fixed design canvas scaled to fit the viewport,
  * with absolutely-positioned, live-data-bound objects.
  */
-export function LayoutRenderer({ layout, ndiSource }: { layout: LayoutDTO; ndiSource?: string | null }) {
+export function LayoutRenderer({ layout, ndiSource }: { layout: LayoutDTO; ndiSource: string | null }) {
   const { state, isLoading, error, pcoLive, propresenter, transcript, now, skewMs } = useLayoutData();
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
@@ -277,7 +277,7 @@ export function LayoutRenderer({ layout, ndiSource }: { layout: LayoutDTO; ndiSo
   }
 
   const { canvas } = layout;
-  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, transcript, now, skewMs, ndiSource: ndiSource ?? null, H: canvas.height };
+  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, transcript, now, skewMs, ndiSource, H: canvas.height };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

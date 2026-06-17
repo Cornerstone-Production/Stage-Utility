@@ -380,17 +380,6 @@ export class RemoteServer {
       return;
     }
 
-    // ── Hydration for freshly-loaded dashboards (we broadcast these on change,
-    //    so a new client needs the current value without waiting for the next one) ──
-    if (method === "GET" && pathname === "/api/propresenter/status") {
-      json(res, propresenterService.getStatus());
-      return;
-    }
-    if (method === "GET" && pathname === "/api/pco/live") {
-      json(res, await stageController.fetchLive());
-      return;
-    }
-
     // ── Health ────────────────────────────────────────────────────────────
     if (method === "GET" && pathname === "/api/health") {
       json(res, { ok: true });
