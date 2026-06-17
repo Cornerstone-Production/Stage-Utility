@@ -269,12 +269,6 @@ class ProPresenterService {
     return { host: this.host, port: this.port, uuid: this.activeUuid, index: this.slideIdxZero };
   }
 
-  /** Last known status — for hydrate-on-connect (REST + SSE snapshot), since the
-   *  "propresenter:status" channel only broadcasts on change. */
-  getStatus(): ProPresenterStatusDTO {
-    return this.last;
-  }
-
   /** One-shot connectivity check for the Integrations "Test connection" button. */
   async test(host: string, port: number): Promise<{ ok: boolean; message?: string }> {
     try {
