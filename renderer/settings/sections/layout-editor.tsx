@@ -10,6 +10,12 @@ import {
   Grid3x3Icon,
   SaveIcon,
   DownloadIcon,
+  AlignStartVertical,
+  AlignCenterVertical,
+  AlignEndVertical,
+  AlignStartHorizontal,
+  AlignCenterHorizontal,
+  AlignEndHorizontal,
 } from "lucide-react";
 import {
   Button,
@@ -310,22 +316,22 @@ function NumberInput({ value, onChange, step = 0.01, min, max }: { value: number
   );
 }
 
-/** X/Y/W/H field shown as a whole-number percentage of the canvas. */
-function PercentField({ label, value, onChange }: { label: string; value: number; onChange: (frac: number) => void }) {
+/** X/Y/W/H field shown as whole design-canvas pixels (stored as a 0..1 fraction). */
+function PixelField({ label, value, dim, onChange }: { label: string; value: number; dim: number; onChange: (frac: number) => void }) {
   return (
     <label className="flex items-center gap-2">
       <span className="text-caption2 text-gray-9 w-3.5 shrink-0">{label}</span>
       <div className="relative flex-1 min-w-0">
         <Input
           type="number"
-          value={Math.round((Number.isFinite(value) ? value : 0) * 100)}
+          value={Math.round((Number.isFinite(value) ? value : 0) * dim)}
           step={1}
           min={0}
-          max={100}
-          onChange={(e) => onChange((parseFloat(e.target.value) || 0) / 100)}
-          className={`text-gray-12 tabular-nums pr-5 ${NO_SPINNER}`}
+          max={dim}
+          onChange={(e) => onChange((parseFloat(e.target.value) || 0) / dim)}
+          className={`text-gray-12 tabular-nums pr-6 ${NO_SPINNER}`}
         />
-        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-caption2 text-gray-8 pointer-events-none">%</span>
+        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-caption2 text-gray-8 pointer-events-none">px</span>
       </div>
     </label>
   );
@@ -565,6 +571,7 @@ export function LayoutEditor({
               <Inspector
                 key={selected.id}
                 o={selected}
+                canvas={canvas}
                 slotsViews={slotsViews}
                 onGeom={(g) => { /* numeric position edits */ pushHistory(); update(selected.id, g); }}
                 onStyle={withHistory((patch: Partial<LayoutStyle>) => updateStyle(selected.id, patch))}
@@ -610,9 +617,10 @@ export function LayoutEditor({
 const WEIGHTS = [300, 400, 500, 600, 700, 800];
 
 function Inspector({
-  o, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove,
+  o, canvas, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove,
 }: {
   o: LayoutObject;
+  canvas: LayoutCanvas;
   slotsViews: View[];
   onGeom: (g: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h">>) => void;
   onStyle: (patch: Partial<LayoutStyle>) => void;
@@ -754,13 +762,27 @@ function Inspector({
 
       <Separator />
 
-      {/* Position (percent of canvas) */}
-      <span className="text-caption2 text-gray-9">Position &amp; size (% of screen)</span>
+      {/* Align to canvas */}
+      <Row label="Align">
+        <ButtonGroup>
+          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ x: 0 })} aria-label="Align left" title="Align left"><AlignStartVertical className="size-3.5" /></Button>
+          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ x: (1 - o.w) / 2 })} aria-label="Center horizontally" title="Center horizontally"><AlignCenterVertical className="size-3.5" /></Button>
+          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ x: 1 - o.w })} aria-label="Align right" title="Align right"><AlignEndVertical className="size-3.5" /></Button>
+        </ButtonGroup>
+        <ButtonGroup>
+          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ y: 0 })} aria-label="Align top" title="Align top"><AlignStartHorizontal className="size-3.5" /></Button>
+          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ y: (1 - o.h) / 2 })} aria-label="Center vertically" title="Center vertically"><AlignCenterHorizontal className="size-3.5" /></Button>
+          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ y: 1 - o.h })} aria-label="Align bottom" title="Align bottom"><AlignEndHorizontal className="size-3.5" /></Button>
+        </ButtonGroup>
+      </Row>
+
+      {/* Position & size in design-canvas pixels */}
+      <span className="text-caption2 text-gray-9">Position &amp; size ({canvas.width}×{canvas.height})</span>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-        <PercentField label="X" value={o.x} onChange={(v) => onGeom({ x: clamp(v, 0, 1 - o.w) })} />
-        <PercentField label="Y" value={o.y} onChange={(v) => onGeom({ y: clamp(v, 0, 1 - o.h) })} />
-        <PercentField label="W" value={o.w} onChange={(v) => onGeom({ w: clamp(v, MIN, 1 - o.x) })} />
-        <PercentField label="H" value={o.h} onChange={(v) => onGeom({ h: clamp(v, MIN, 1 - o.y) })} />
+        <PixelField label="X" value={o.x} dim={canvas.width} onChange={(v) => onGeom({ x: clamp(v, 0, 1 - o.w) })} />
+        <PixelField label="Y" value={o.y} dim={canvas.height} onChange={(v) => onGeom({ y: clamp(v, 0, 1 - o.h) })} />
+        <PixelField label="W" value={o.w} dim={canvas.width} onChange={(v) => onGeom({ w: clamp(v, MIN, 1 - o.x) })} />
+        <PixelField label="H" value={o.h} dim={canvas.height} onChange={(v) => onGeom({ h: clamp(v, MIN, 1 - o.y) })} />
       </div>
     </div>
   );
