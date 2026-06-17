@@ -314,6 +314,53 @@ export class RemoteServer {
       return;
     }
 
+    // List the current plan's attachments (powers the layout editor's file picker).
+    if (method === "GET" && pathname === "/api/pco/attachments") {
+      json(res, await stageController.listPlanAttachments());
+      return;
+    }
+
+    // ── PCO plan-attachment proxy (e.g. the stage plot) ──────────────────────
+    // Streams the current plan's attachment matching ?match=<filename substring>,
+    // proxied + cached so kiosk displays get a stable URL that always tracks the
+    // CURRENT plan. Resolving by filename (not id) means the same layout object
+    // shows the right file every week without re-pointing.
+    if (method === "GET" && pathname === "/api/pco/attachment") {
+      const match = _url.searchParams.get("match") ?? "";
+      try {
+        const att = await stageController.findPlanAttachment(match);
+        if (!att) {
+          res.writeHead(404, { "Content-Type": "text/plain" });
+          res.end("No matching attachment on the current plan");
+          return;
+        }
+        const { getAttachmentFile, mimeForExt } = await import("./pco-attachment-cache.js");
+        const file = await getAttachmentFile(
+          att.id,
+          att.contentType,
+          att.filename,
+          async () => (await stageController.openPlanAttachment(att.id)).url,
+        );
+        if (!file) {
+          res.writeHead(502, { "Content-Type": "text/plain" });
+          res.end("Could not download attachment from Planning Center");
+          return;
+        }
+        const data = await fs.readFile(file.path);
+        res.writeHead(200, {
+          "Content-Type": mimeForExt(file.ext),
+          // Bytes are immutable per attachment id; cache briefly so a fresh plan
+          // (new id, new URL) is picked up within a few minutes on the displays.
+          "Cache-Control": "private, max-age=300",
+        });
+        res.end(data);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        error(res, `Attachment error: ${msg}`, 500);
+      }
+      return;
+    }
+
     // ── PCO photo proxy (replaces stage-photo:// in standalone mode) ──────
     if (method === "GET" && pathname === "/photos") {
       const photoUrl = _url.searchParams.get("u");

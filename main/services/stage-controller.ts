@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { DisplayInfo, LayoutDTO, LayoutTemplate, Output, PcoLiveDTO, PlanDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { DisplayInfo, LayoutDTO, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -315,6 +315,66 @@ export class StageController {
       this.state.serviceTypeId,
       this.state.planId,
       direction,
+    );
+  }
+
+  // ── Plan attachments (e.g. stage plot) ──────────────────────────────────
+
+  /** Files attached to the active plan. Empty when unconfigured / no plan. */
+  async listPlanAttachments(): Promise<PcoAttachmentDTO[]> {
+    if (!this.pcoAppId || !this.pcoSecret) return [];
+    if (!this.state.serviceTypeId || !this.state.planId) return [];
+    return pcoService.listPlanAttachments(
+      this.pcoAppId,
+      this.pcoSecret,
+      this.state.serviceTypeId,
+      this.state.planId,
+    );
+  }
+
+  /**
+   * Pick the active plan's attachment matching `match` (case-insensitive filename
+   * substring). An empty match falls back to the first PDF, then the first file.
+   * Matching by NAME (not id) is what lets a layout object track the stage plot
+   * week to week — each plan gets fresh attachment ids.
+   */
+  async findPlanAttachment(match: string): Promise<PcoAttachmentDTO | null> {
+    const list = await this.listPlanAttachments();
+    if (list.length === 0) return null;
+    const q = match.trim().toLowerCase();
+    if (q) {
+      // Match the filename OR the item it's attached to (e.g. a generically-named
+      // file under an item titled "Stage Plot").
+      return (
+        list.find(
+          (a) =>
+            a.filename.toLowerCase().includes(q) || (a.sourceLabel ?? "").toLowerCase().includes(q),
+        ) ?? null
+      );
+    }
+    // Empty match → best guess: first PDF, then any image, then any non-audio file.
+    const notAudio = (a: PcoAttachmentDTO) => {
+      const ct = (a.contentType ?? "").toLowerCase();
+      return !ct.startsWith("audio") && ct !== "application/octet-stream";
+    };
+    return (
+      list.find((a) => (a.contentType ?? "").toLowerCase().includes("pdf")) ??
+      list.find((a) => (a.contentType ?? "").toLowerCase().startsWith("image")) ??
+      list.find(notAudio) ??
+      null
+    );
+  }
+
+  /** Temporary download link for one of the active plan's attachments. */
+  async openPlanAttachment(attachmentId: string): Promise<{ url: string; contentType: string | null }> {
+    if (!this.pcoAppId || !this.pcoSecret) throw new Error("Planning Center not configured");
+    if (!this.state.serviceTypeId || !this.state.planId) throw new Error("No plan selected");
+    return pcoService.openAttachment(
+      this.pcoAppId,
+      this.pcoSecret,
+      this.state.serviceTypeId,
+      this.state.planId,
+      attachmentId,
     );
   }
 

@@ -30,7 +30,7 @@ import {
   Separator,
   Dialog,
 } from "../../components/ui";
-import { ObjectContent, boxStyle, useLayoutData, type LayoutRenderCtx } from "../../main/layout-renderer";
+import { ObjectContent, boxStyle, useLayoutData, loadProcessedAttachment, type LayoutRenderCtx } from "../../main/layout-renderer";
 
 // ── object metadata ──────────────────────────────────────────────────────────
 
@@ -48,12 +48,13 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "brand-logo": "Logo",
   "ndi-video": "NDI video",
   image: "Image",
+  "plan-attachment": "Plan file",
   shape: "Shape",
 };
 const PALETTE: LayoutObjectType[] = [
   "text", "clock", "countdown-timer", "current-slide-text", "next-slide-text",
   "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
-  "transcript-strip", "brand-logo", "ndi-video", "image", "shape",
+  "transcript-strip", "brand-logo", "ndi-video", "image", "plan-attachment", "shape",
 ];
 
 function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
@@ -65,6 +66,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "transcript-strip": return { type: "transcript-strip", mode: "latest", maxLines: 3 };
     case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
     case "image": return { type: "image", src: "" };
+    case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
     case "shape": return { type: "shape", shape: "rect" };
     default: return { type } as LayoutObjectConfig;
   }
@@ -72,7 +74,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
 
 function defaultStyle(type: LayoutObjectType): LayoutStyle {
   if (type === "shape") return { background: "#3b82f6", opacity: 1 };
-  if (type === "ndi-video" || type === "slide-thumbnail" || type === "image" || type === "brand-logo") return {};
+  if (type === "ndi-video" || type === "slide-thumbnail" || type === "image" || type === "plan-attachment" || type === "brand-logo") return {};
   return { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 }
 
@@ -671,6 +673,140 @@ export function LayoutEditor({
 
 const WEIGHTS = [300, 400, 500, 600, 700, 800];
 
+/**
+ * Binding + framing controls for a plan-attachment object: a filename match (so it
+ * tracks the stage plot week to week), a picker of the current plan's files, the
+ * PDF page, plus crop / trim / background recolor of the rendered image and a
+ * "fit box to file" action. All framing acts on the rendered image, not the source
+ * file in Planning Center.
+ */
+function PlanAttachmentConfig({
+  c,
+  onConfig,
+  o,
+  canvas,
+  onGeom,
+}: {
+  c: Extract<LayoutObjectConfig, { type: "plan-attachment" }>;
+  onConfig: (config: LayoutObjectConfig) => void;
+  o: LayoutObject;
+  canvas: LayoutCanvas;
+  onGeom: (g: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h">>) => void;
+}) {
+  const [files, setFiles] = useState<PcoAttachmentDTO[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [fitting, setFitting] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/pco/attachments")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: PcoAttachmentDTO[]) => {
+        if (!cancelled) {
+          setFiles(Array.isArray(list) ? list : []);
+          setLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Hide audio stems / raw media — a stage plot is a document (PDF/image).
+  const pickable = files.filter((f) => {
+    const ct = (f.contentType ?? "").toLowerCase();
+    return !ct.startsWith("audio") && ct !== "application/octet-stream";
+  });
+
+  const crop = c.crop ?? { top: 0, right: 0, bottom: 0, left: 0 };
+  const setCrop = (side: "top" | "right" | "bottom" | "left", pct: number) =>
+    onConfig({ ...c, crop: { ...crop, [side]: Math.max(0, Math.min(95, pct)) / 100 } });
+
+  // Resize the object box to match the rendered (cropped/trimmed) content aspect,
+  // keeping the top-left anchor so there's no letterboxing.
+  async function fitBoxToFile() {
+    setFitting(true);
+    try {
+      const r = await loadProcessedAttachment(c.match ?? "stage plot", {
+        page: c.page ?? 1,
+        crop: c.crop,
+        trim: c.trim,
+        background: c.background,
+      });
+      if (r && r !== "empty" && r.height > 0) {
+        const aspect = r.width / r.height; // w:h of the image in px
+        const newH = (o.w * canvas.width) / aspect / canvas.height;
+        onGeom({ h: Math.max(0.03, Math.min(1 - o.y, newH)) });
+      }
+    } finally {
+      setFitting(false);
+    }
+  }
+
+  return (
+    <>
+      <Row label="Match">
+        <Input
+          value={c.match ?? "stage plot"}
+          onChange={(e) => onConfig({ ...c, match: e.target.value })}
+          placeholder="filename contains…"
+          className="text-gray-12"
+        />
+      </Row>
+      {pickable.length > 0 && (
+        <Row label="Current plan">
+          <Select value="" onValueChange={(v: string) => onConfig({ ...c, match: v })}>
+            <SelectTrigger><SelectValue placeholder="Pick a file…" /></SelectTrigger>
+            <SelectContent>
+              {pickable.map((f) => (
+                <SelectItem key={f.id} value={f.filename}>
+                  {f.filename}{f.sourceLabel ? ` — ${f.sourceLabel}` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Row>
+      )}
+      {loaded && pickable.length === 0 && (
+        <p className="text-caption2 text-gray-9 leading-snug">
+          No documents on the current plan (or PCO isn’t connected). The match still
+          applies whenever a plan with a matching file goes live.
+        </p>
+      )}
+      <Row label="PDF page">
+        <NumberInput value={c.page ?? 1} step={1} min={1} max={99} onChange={(v) => onConfig({ ...c, page: Math.round(v) })} />
+      </Row>
+
+      <Separator />
+
+      <Row label="Trim white">
+        <Switch checked={c.trim ?? false} onCheckedChange={(v) => onConfig({ ...c, trim: v })} />
+      </Row>
+      <Row label="Background">
+        <ButtonGroup>
+          <Button variant={(c.background ?? "keep") === "keep" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, background: "keep" })}>Keep</Button>
+          <Button variant={c.background === "black" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, background: "black" })}>Black</Button>
+          <Button variant={c.background === "transparent" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, background: "transparent" })}>Clear</Button>
+        </ButtonGroup>
+      </Row>
+      <Row label="Crop %">
+        <div className="grid grid-cols-2 gap-1 flex-1">
+          <NumberInput value={Math.round((crop.top ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("top", v)} />
+          <NumberInput value={Math.round((crop.bottom ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("bottom", v)} />
+          <NumberInput value={Math.round((crop.left ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("left", v)} />
+          <NumberInput value={Math.round((crop.right ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("right", v)} />
+        </div>
+      </Row>
+      <p className="text-caption2 text-gray-9 -mt-1">Top · Bottom · Left · Right</p>
+      <Button variant="filled" size="small" onClick={fitBoxToFile} disabled={fitting}>
+        {fitting ? "Fitting…" : "Fit box to file"}
+      </Button>
+    </>
+  );
+}
+
 function Inspector({
   o, canvas, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove,
 }: {
@@ -686,7 +822,7 @@ function Inspector({
 }) {
   const s = o.style ?? {};
   const c = o.config;
-  const isText = !["shape", "ndi-video", "slide-thumbnail", "image", "brand-logo", "slots-grid"].includes(c.type);
+  const isText = !["shape", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -753,6 +889,9 @@ function Inspector({
       )}
       {c.type === "image" && (
         <Row label="URL"><Input value={c.src} onChange={(e) => onConfig({ type: "image", src: e.target.value })} placeholder="https://… or data:" className="text-gray-12" /></Row>
+      )}
+      {c.type === "plan-attachment" && (
+        <PlanAttachmentConfig c={c} onConfig={onConfig} o={o} canvas={canvas} onGeom={onGeom} />
       )}
       {c.type === "shape" && (
         <Row label="Shape">
