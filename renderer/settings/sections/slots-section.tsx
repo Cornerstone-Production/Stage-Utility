@@ -7,7 +7,6 @@ import {
   TrashIcon,
   Loader2Icon,
   GripVerticalIcon,
-  BookmarkIcon,
   Rows2Icon,
 } from "lucide-react";
 import {
@@ -20,9 +19,8 @@ import {
   SelectValue,
   ButtonGroup,
   Separator,
-  Dialog,
 } from "../../components/ui";
-import type { SectionProps, WirelessChannel } from "../types";
+import type { SectionHandlers, WirelessChannel } from "../types";
 import { PositionPicker } from "./position-picker";
 
 // ---- slot row (sortable) ----------------------------------------------------
@@ -347,205 +345,84 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
   );
 }
 
-// ---- preset row -------------------------------------------------------------
+// ---- Slot editor (embedded in the Views tab) --------------------------------
 
-interface PresetRowProps {
-  preset: SlotPreset;
-  onApply: () => void;
-  onDelete: () => void;
+interface SlotEditorProps {
+  wirelessChannels: WirelessChannel[];
+  teamPositions: TeamPositionDTO[];
+  localSlots: Slot[];
+  slotsDirty: boolean;
+  isSavingSlots: boolean;
+  handlers: Pick<
+    SectionHandlers,
+    "updateSlot" | "addSlot" | "removeSlot" | "saveSlots" | "handleDragEnd" | "sensors"
+  >;
 }
 
-function PresetRow({ preset, onApply, onDelete }: PresetRowProps) {
-  return (
-    <div className="flex items-center gap-2 py-2">
-      <BookmarkIcon className="size-3.5 text-gray-7 shrink-0" />
-      <span className="text-body text-gray-12 flex-1 min-w-0 truncate">{preset.name}</span>
-      <span className="text-caption1 text-gray-8 shrink-0">
-        {preset.slots.length} slot{preset.slots.length !== 1 ? "s" : ""}
-      </span>
-      <Button variant="filled" size="small" onClick={onApply}>
-        Apply
-      </Button>
-      <Button variant="transparent" size="small" iconOnly onClick={onDelete} aria-label="Delete preset">
-        <TrashIcon className="size-3.5 text-red-10" />
-      </Button>
-    </div>
-  );
-}
-
-// ---- Slots section ----------------------------------------------------------
-
-export function SlotsSection({
-  stageState,
+/** The drag-sortable slot list + Add/Save controls, reused by the Views editor. */
+export function SlotEditor({
   wirelessChannels,
   teamPositions,
-  presets,
-  selectedDisplayId,
-  setSelectedDisplayId,
   localSlots,
   slotsDirty,
   isSavingSlots,
-  presetName,
-  setPresetName,
-  isSavingPreset,
   handlers,
-}: Pick<
-  SectionProps,
-  | "stageState"
-  | "wirelessChannels"
-  | "teamPositions"
-  | "presets"
-  | "selectedDisplayId"
-  | "setSelectedDisplayId"
-  | "localSlots"
-  | "slotsDirty"
-  | "isSavingSlots"
-  | "presetName"
-  | "setPresetName"
-  | "isSavingPreset"
-  | "handlers"
->) {
-  // Slots only apply to "slots"-kind displays — Dashboard/Stage/Captions render
-  // their own fixed layouts and ignore slots, so don't let them be edited here.
-  const slotDisplays = (stageState.displays ?? []).filter((d) => (d.kind ?? "slots") === "slots");
-
-  if (slotDisplays.length === 0) {
-    return (
-      <div className="px-5 flex flex-col gap-2 py-5">
-        <span className="text-headline font-semibold text-gray-12">Slots</span>
-        <p className="text-caption1 text-gray-9">
-          No slot-based displays. Set a display to <span className="font-medium text-gray-11">Slots</span> in
-          the Displays section to assign microphone/team content.
-        </p>
-      </div>
-    );
-  }
-
+}: SlotEditorProps) {
   return (
-    <div className="px-5 flex flex-col gap-6 py-5">
-      {/* Display picker — slots-kind displays only */}
-      {slotDisplays.length > 1 && (
-        <div className="flex items-center gap-2">
-          <span className="text-caption1 text-gray-9 shrink-0">Editing:</span>
-          <Select value={selectedDisplayId} onValueChange={setSelectedDisplayId}>
-            <SelectTrigger className="w-48">
-              <SelectValue placeholder="Select display…" />
-            </SelectTrigger>
-            <SelectContent>
-              {slotDisplays.map((d) => (
-                <SelectItem key={d.id} value={d.id}>
-                  {d.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      {/* Slot editor */}
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-headline font-semibold text-gray-12 flex-1">Slots</span>
-          {slotsDirty && (
-            <Button variant="accent" size="small" onClick={handlers.saveSlots} disabled={isSavingSlots}>
-              {isSavingSlots ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
-              Save slots
-            </Button>
-          )}
-        </div>
-
-        <DndContext
-          sensors={handlers.sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handlers.handleDragEnd}
-        >
-          <SortableContext items={localSlots.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-            <div className="flex flex-col">
-              {localSlots.map((slot, idx) => {
-                // Determine this slot's position within a stacked column group.
-                const stacksPrev = idx > 0 && !!slot.stackWithPrevious;
-                const nextStacks = !!localSlots[idx + 1]?.stackWithPrevious;
-                const grouped = stacksPrev || nextStacks;
-                const groupPos: "top" | "middle" | "bottom" | null = !grouped
-                  ? null
-                  : !stacksPrev
-                    ? "top"
-                    : !nextStacks
-                      ? "bottom"
-                      : "middle";
-                return (
-                  <div key={slot.id}>
-                    {/* Separator between rows, but not within a stacked group */}
-                    {idx > 0 && !stacksPrev && <Separator />}
-                    <SlotRow
-                      slot={slot}
-                      index={idx}
-                      groupPos={groupPos}
-                      wirelessChannels={wirelessChannels}
-                      teamPositions={teamPositions}
-                      onChange={(updated) => handlers.updateSlot(idx, updated)}
-                      onRemove={() => handlers.removeSlot(idx)}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          </SortableContext>
-        </DndContext>
-
-        <Button variant="filled" size="small" onClick={handlers.addSlot} className="self-start">
-          <PlusIcon className="size-3.5 text-gray-9" />
-          Add slot
-        </Button>
-      </div>
-
-      <Separator />
-
-      {/* Presets */}
-      <div className="flex flex-col gap-3">
-        <span className="text-headline font-semibold text-gray-12">Presets</span>
-        <p className="text-caption1 text-gray-9">
-          Slots are saved automatically per service type. Presets let you snapshot and restore any
-          slot arrangement by name.
-        </p>
-
-        <Dialog
-          trigger={
-            <Button variant="filled" size="small" className="self-start">
-              Save current as preset
-            </Button>
-          }
-          title="Save preset"
-          description="Give this slot arrangement a name so you can restore it later."
-          confirmLabel="Save"
-          confirmDisabled={presetName.trim().length === 0 || isSavingPreset}
-          onConfirm={handlers.handleSavePreset}
-        >
-          <Input
-            value={presetName}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setPresetName(e.target.value)}
-            placeholder="e.g. Sunday Morning"
-            autoFocus
-          />
-        </Dialog>
-
-        {presets.length > 0 ? (
-          <div className="flex flex-col">
-            {presets.map((preset, idx) => (
-              <div key={preset.id}>
-                {idx > 0 && <Separator />}
-                <PresetRow
-                  preset={preset}
-                  onApply={() => handlers.handleApplyPreset(preset.id)}
-                  onDelete={() => handlers.handleDeletePreset(preset.id)}
-                />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-caption1 text-gray-7">No presets saved yet.</p>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <span className="text-headline font-semibold text-gray-12 flex-1">Slots</span>
+        {slotsDirty && (
+          <Button variant="accent" size="small" onClick={handlers.saveSlots} disabled={isSavingSlots}>
+            {isSavingSlots ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
+            Save slots
+          </Button>
         )}
       </div>
+
+      <DndContext
+        sensors={handlers.sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handlers.handleDragEnd}
+      >
+        <SortableContext items={localSlots.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+          <div className="flex flex-col">
+            {localSlots.map((slot, idx) => {
+              // Determine this slot's position within a stacked column group.
+              const stacksPrev = idx > 0 && !!slot.stackWithPrevious;
+              const nextStacks = !!localSlots[idx + 1]?.stackWithPrevious;
+              const grouped = stacksPrev || nextStacks;
+              const groupPos: "top" | "middle" | "bottom" | null = !grouped
+                ? null
+                : !stacksPrev
+                  ? "top"
+                  : !nextStacks
+                    ? "bottom"
+                    : "middle";
+              return (
+                <div key={slot.id}>
+                  {/* Separator between rows, but not within a stacked group */}
+                  {idx > 0 && !stacksPrev && <Separator />}
+                  <SlotRow
+                    slot={slot}
+                    index={idx}
+                    groupPos={groupPos}
+                    wirelessChannels={wirelessChannels}
+                    teamPositions={teamPositions}
+                    onChange={(updated) => handlers.updateSlot(idx, updated)}
+                    onRemove={() => handlers.removeSlot(idx)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </SortableContext>
+      </DndContext>
+
+      <Button variant="filled" size="small" onClick={handlers.addSlot} className="self-start">
+        <PlusIcon className="size-3.5 text-gray-9" />
+        Add slot
+      </Button>
     </div>
   );
 }

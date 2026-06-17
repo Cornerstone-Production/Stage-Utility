@@ -147,7 +147,75 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return del<T>(`/api/presets/${encodeURIComponent(id)}`);
     }
 
-    // ── Displays ───────────────────────────────────────────────────────
+    // ── Views (content) ──────────────────────────────────────────────────
+    case "views:add":
+      return post<T>("/api/views", p);
+
+    case "views:rename": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { name: p.name });
+    }
+
+    case "views:setKind": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { kind: p.kind });
+    }
+
+    case "views:setNdiSource": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { ndiSource: p.ndiSource });
+    }
+
+    case "views:setSlots": {
+      const id = p.id as string;
+      return post<T>(`/api/views/${encodeURIComponent(id)}/slots`, { slots: p.slots });
+    }
+
+    case "views:duplicate": {
+      const id = p.id as string;
+      return post<T>(`/api/views/${encodeURIComponent(id)}/duplicate`, { name: p.name });
+    }
+
+    case "views:reorder":
+      return post<T>("/api/views/reorder", { ids: p.ids });
+
+    case "views:copySlots": {
+      const id = p.id as string;
+      return post<T>(`/api/views/${encodeURIComponent(id)}/copy-slots`, { fromViewId: p.fromViewId });
+    }
+
+    case "views:remove": {
+      const id = p.id as string;
+      return del<T>(`/api/views/${encodeURIComponent(id)}`);
+    }
+
+    // ── Outputs (physical screens + routing) ──────────────────────────────
+    case "outputs:add":
+      return post<T>("/api/outputs", p);
+
+    case "outputs:rename": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { name: p.name });
+    }
+
+    case "outputs:setView": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { viewId: p.viewId });
+    }
+
+    case "outputs:remove": {
+      const id = p.id as string;
+      return del<T>(`/api/outputs/${encodeURIComponent(id)}`);
+    }
+
+    case "outputs:reorder":
+      return post<T>("/api/outputs/reorder", { ids: p.ids });
+
+    case "outputs:openWindow":
+      // No native windows in standalone mode — no-op.
+      return { ok: true } as unknown as T;
+
+    // ── Displays (legacy aliases — retained during transition) ────────────
     case "displays:add":
       return post<T>("/api/displays", p);
 

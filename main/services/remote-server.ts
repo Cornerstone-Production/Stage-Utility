@@ -537,6 +537,152 @@ export class RemoteServer {
       return;
     }
 
+    // ── Views (content definitions) ───────────────────────────────────────
+    if (method === "GET" && pathname === "/api/views") {
+      json(res, stageController.getViews());
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/views") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const name = typeof body.name === "string" ? body.name : undefined;
+      const kind = isDisplayKind(body.kind) ? body.kind : "slots";
+      const state = await stageController.createView(name ?? "", kind);
+      json(res, state, 201);
+      return;
+    }
+
+    // POST /api/views/reorder — { ids: string[] }
+    if (method === "POST" && pathname === "/api/views/reorder") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.ids)) {
+        error(res, "body.ids (string[]) required");
+        return;
+      }
+      const state = await stageController.reorderViews(body.ids as string[]);
+      json(res, state);
+      return;
+    }
+
+    // POST /api/views/:id/slots — { slots }
+    const viewSlotsMatch = pathname.match(/^\/api\/views\/([^/]+)\/slots$/);
+    if (method === "POST" && viewSlotsMatch) {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.slots)) {
+        error(res, "body.slots (array) required");
+        return;
+      }
+      const state = await stageController.setViewSlots(viewSlotsMatch[1], body.slots as Slot[]);
+      json(res, state);
+      return;
+    }
+
+    // POST /api/views/:id/duplicate — { name? }
+    const viewDuplicateMatch = pathname.match(/^\/api\/views\/([^/]+)\/duplicate$/);
+    if (method === "POST" && viewDuplicateMatch) {
+      const body = await readBody(req) as Record<string, unknown>;
+      const name = typeof body.name === "string" ? body.name : undefined;
+      const state = await stageController.duplicateView(viewDuplicateMatch[1], name);
+      json(res, state, 201);
+      return;
+    }
+
+    // POST /api/views/:id/copy-slots — { fromViewId }
+    const viewCopySlotsMatch = pathname.match(/^\/api\/views\/([^/]+)\/copy-slots$/);
+    if (method === "POST" && viewCopySlotsMatch) {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.fromViewId !== "string") {
+        error(res, "body.fromViewId (string) required");
+        return;
+      }
+      const state = await stageController.copyViewSlots(viewCopySlotsMatch[1], body.fromViewId);
+      json(res, state);
+      return;
+    }
+
+    // PATCH /api/views/:id — { name? } and/or { kind? } and/or { ndiSource? }
+    const viewPatchMatch = pathname.match(/^\/api\/views\/([^/]+)$/);
+    if (method === "PATCH" && viewPatchMatch) {
+      const id = viewPatchMatch[1];
+      const body = await readBody(req) as Record<string, unknown>;
+      const hasName = typeof body.name === "string";
+      const hasKind = isDisplayKind(body.kind);
+      const hasNdiSource = "ndiSource" in body
+        && (typeof body.ndiSource === "string" || body.ndiSource === null);
+      if (!hasName && !hasKind && !hasNdiSource) {
+        error(res, "body.name (string), body.kind, or body.ndiSource (string|null) required");
+        return;
+      }
+      let state = stageController.getState();
+      if (hasName) state = await stageController.renameView(id, body.name as string);
+      if (hasKind) state = await stageController.setViewKind(id, body.kind as DisplayKind);
+      if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
+      json(res, state);
+      return;
+    }
+
+    // DELETE /api/views/:id
+    const viewDeleteMatch = pathname.match(/^\/api\/views\/([^/]+)$/);
+    if (method === "DELETE" && viewDeleteMatch) {
+      const state = await stageController.deleteView(viewDeleteMatch[1]);
+      json(res, state);
+      return;
+    }
+
+    // ── Outputs (physical screens + routing) ──────────────────────────────
+    if (method === "GET" && pathname === "/api/outputs") {
+      json(res, stageController.getOutputs());
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/outputs") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const name = typeof body.name === "string" ? body.name : undefined;
+      const viewId = typeof body.viewId === "string" ? body.viewId : null;
+      const state = await stageController.addOutput(name, viewId);
+      json(res, state, 201);
+      return;
+    }
+
+    // POST /api/outputs/reorder — { ids: string[] }
+    if (method === "POST" && pathname === "/api/outputs/reorder") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.ids)) {
+        error(res, "body.ids (string[]) required");
+        return;
+      }
+      const state = await stageController.reorderOutputs(body.ids as string[]);
+      json(res, state);
+      return;
+    }
+
+    // PATCH /api/outputs/:id — { name? } and/or { viewId? } (viewId: string|null = routing)
+    const outputPatchMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
+    if (method === "PATCH" && outputPatchMatch) {
+      const id = outputPatchMatch[1];
+      const body = await readBody(req) as Record<string, unknown>;
+      const hasName = typeof body.name === "string";
+      const hasViewId = "viewId" in body
+        && (typeof body.viewId === "string" || body.viewId === null);
+      if (!hasName && !hasViewId) {
+        error(res, "body.name (string) or body.viewId (string|null) required");
+        return;
+      }
+      let state = stageController.getState();
+      if (hasName) state = await stageController.renameOutput(id, body.name as string);
+      if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null);
+      json(res, state);
+      return;
+    }
+
+    // DELETE /api/outputs/:id
+    const outputDeleteMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
+    if (method === "DELETE" && outputDeleteMatch) {
+      const state = await stageController.removeOutput(outputDeleteMatch[1]);
+      json(res, state);
+      return;
+    }
+
     if (method === "POST" && pathname === "/api/allowed-service-types") {
       const body = await readBody(req) as Record<string, unknown>;
       if (!Array.isArray(body.ids)) {

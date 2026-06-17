@@ -1,7 +1,10 @@
 // Shared stage types — frontend mirrors these shapes exactly.
 
-/** What a display renders: slot grid (default), dashboard, stage, or transcription. */
-export type DisplayKind = "slots" | "dashboard" | "stage" | "transcription";
+/** What a View renders: slot grid (default), dashboard, stage, or transcription. */
+export type ViewKind = "slots" | "dashboard" | "stage" | "transcription";
+
+/** @deprecated Back-compat alias retained for the legacy display model. Use ViewKind. */
+export type DisplayKind = ViewKind;
 
 /** A live transcript line from ProdCom (pushed on "prodcom:transcript"). */
 export interface TranscriptLineDTO {
@@ -33,18 +36,61 @@ export interface ProTimer {
   state: string;
 }
 
+/**
+ * @deprecated The display model has been split into {@link View} (content) and
+ * {@link Output} (a physical screen). DisplayInfo is retained only as a computed
+ * compatibility shim in {@link StageState} so older clients (the native Apple app,
+ * the legacy phone control page) keep working. Each shim entry is one Output joined
+ * with the kind/ndiSource of the View it's routed to.
+ */
 export interface DisplayInfo {
   id: string;
   name: string;
   /** Defaults to "slots" when absent (back-compat with older settings). */
   kind?: DisplayKind;
+  /** NDI source name (mirrors the routed View's ndiSource). */
+  ndiSource?: string | null;
+}
+
+/**
+ * A named, reusable content definition — what to show, decoupled from any screen.
+ * Many Views can exist; an {@link Output} is routed to exactly one View, and one
+ * View can drive many Outputs.
+ *
+ * For slots-kind Views the actual slot configuration lives in the slots store
+ * (slots.json), keyed by this View's `id` + the active service type — exactly the
+ * storage the legacy per-display model used, so migrated Views reuse it untouched.
+ * Resolved slots are surfaced on `StageState.slotsByView[id]`.
+ */
+export interface View {
+  id: string;
+  name: string;
+  kind: ViewKind;
   /**
-   * NDI source name this display should show as a video layer, or null/absent
-   * for none. Stored as the source *name* only — video never flows through the
-   * server. The native Apple client discovers the source on the LAN (mDNS) and
-   * receives it peer-to-peer; web clients can't render NDI and ignore this.
+   * NDI source name this View should show as a video layer, or null for none.
+   * Stored as the source *name* only — video never flows through the server. The
+   * native Apple client discovers the source on the LAN (mDNS) and receives it
+   * peer-to-peer; web clients can't render NDI and ignore this.
    */
   ndiSource?: string | null;
+  /** ISO creation timestamp (for stable ordering). */
+  createdAt: string;
+}
+
+/** A physical screen at a URL slug, routed to exactly one View (or none). */
+export interface Output {
+  id: string;
+  name: string;
+  /** The View this screen currently shows, or null when unrouted (renders a placeholder). */
+  viewId: string | null;
+}
+
+/** Per-output render descriptor so the kiosk needs no client-side joins. */
+export interface ResolvedOutput {
+  viewId: string | null;
+  kind: ViewKind;
+  ndiSource: string | null;
+  viewName: string | null;
 }
 
 /**
@@ -170,12 +216,26 @@ export interface StageState {
   planId: string | null;
   planTitle: string | null;
   planSeriesTitle: string | null;
-  /** Primary display's resolved slots (backward-compat for phone control page). */
+
+  // ── Views/Outputs model (canonical) ──────────────────────────────────
+  /** All content definitions. */
+  views: View[];
+  /** All physical screens and their routing. */
+  outputs: Output[];
+  /** Resolved slots keyed by View id (for slots-kind Views). Drives both the
+   *  kiosk (via the output's routed view) and the settings editor/preview. */
+  slotsByView: Record<string, Slot[]>;
+  /** Per-output render descriptor (output id → routed view's kind/ndi/name). */
+  resolvedByOutput: Record<string, ResolvedOutput>;
+
+  // ── Compat shim (computed from outputs + views) ──────────────────────
+  /** @deprecated Primary output's resolved slots (legacy phone control page). */
   slots: Slot[];
-  /** Resolved slots keyed by displayId. */
+  /** @deprecated Resolved slots keyed by OUTPUT id (== slotsByView of its routed view). */
   slotsByDisplay: Record<string, Slot[]>;
-  /** All configured displays. */
+  /** @deprecated Each output joined with its routed view's kind/ndiSource. */
   displays: DisplayInfo[];
+
   pcoConfigured: boolean;
   lastRefreshedAt: string | null;
   remoteUrl: string | null;

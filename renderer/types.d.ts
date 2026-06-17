@@ -97,7 +97,33 @@ interface Slot {
   stackWithPrevious?: boolean;
 }
 
-type DisplayKind = "slots" | "dashboard" | "stage" | "transcription";
+type ViewKind = "slots" | "dashboard" | "stage" | "transcription";
+/** @deprecated alias for ViewKind. */
+type DisplayKind = ViewKind;
+
+/** A named, reusable content definition (decoupled from any screen). */
+interface View {
+  id: string;
+  name: string;
+  kind: ViewKind;
+  ndiSource?: string | null;
+  createdAt: string;
+}
+
+/** A physical screen at a URL slug, routed to exactly one View (or none). */
+interface Output {
+  id: string;
+  name: string;
+  viewId: string | null;
+}
+
+/** Per-output render descriptor (output id → routed view's kind/ndi/name). */
+interface ResolvedOutput {
+  viewId: string | null;
+  kind: ViewKind;
+  ndiSource: string | null;
+  viewName: string | null;
+}
 
 /** A live transcript line from ProdCom (SSE "prodcom:transcript"). */
 interface TranscriptLineDTO {
@@ -167,10 +193,23 @@ interface StageState {
   planId: string | null;
   planTitle: string | null;
   planSeriesTitle: string | null;
+
+  // ── Views/Outputs model (canonical) ──
+  /** All content definitions. */
+  views: View[];
+  /** All physical screens and their routing. */
+  outputs: Output[];
+  /** Resolved slots keyed by View id (slots-kind Views). */
+  slotsByView: Record<string, Slot[]>;
+  /** Per-output render descriptor (output id → routed view's kind/ndi/name). */
+  resolvedByOutput: Record<string, ResolvedOutput>;
+
+  // ── Compat shim (computed from outputs + views) ──
+  /** @deprecated primary output's resolved slots. */
   slots: Slot[];
-  /** Multi-display: list of configured displays (primary is index 0) */
+  /** @deprecated each output joined with its routed view's kind/ndiSource. */
   displays: DisplayInfo[];
-  /** Multi-display: slots keyed by display id */
+  /** @deprecated resolved slots keyed by OUTPUT id. */
   slotsByDisplay: Record<string, Slot[]>;
   pcoConfigured: boolean;
   lastRefreshedAt: string | null;

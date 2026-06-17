@@ -6,8 +6,8 @@ import type { useSensors } from "@dnd-kit/core";
 export type SectionId =
   | "plan"
   | "service-types"
+  | "views"
   | "displays"
-  | "slots"
   | "integrations"
   | "connect"
   | "branding";
@@ -42,19 +42,27 @@ export interface SectionHandlers {
     emptyLogoOriginal?: string | null;
     emptyLogoCrop?: { scale: number; x: number; y: number } | null;
   }) => Promise<void>;
+  // Slot editor (operates on the currently-selected View)
   updateSlot: (idx: number, updated: Slot) => void;
   addSlot: () => void;
   removeSlot: (idx: number) => void;
   saveSlots: () => Promise<void>;
-  handleSavePreset: () => Promise<void>;
-  handleApplyPreset: (id: string) => Promise<void>;
-  handleDeletePreset: (id: string) => Promise<void>;
-  handleAddDisplay: () => Promise<void>;
-  handleRenameDisplay: (id: string, name: string) => Promise<void>;
-  handleRemoveDisplay: (id: string) => Promise<void>;
-  handleSetDisplayKind: (id: string, kind: DisplayKind) => Promise<void>;
-  handleSetDisplayNdiSource: (id: string, ndiSource: string | null) => Promise<void>;
-  handleOpenDisplayWindow: (id: string) => Promise<void>;
+  // Views (content)
+  handleAddView: (name: string, kind: ViewKind) => Promise<void>;
+  handleRenameView: (id: string, name: string) => Promise<void>;
+  handleDuplicateView: (id: string) => Promise<void>;
+  handleRemoveView: (id: string) => Promise<void>;
+  handleSetViewKind: (id: string, kind: ViewKind) => Promise<void>;
+  handleSetViewNdiSource: (id: string, ndiSource: string | null) => Promise<void>;
+  handleCopySlots: (targetViewId: string, fromViewId: string) => Promise<void>;
+  handleReorderViews: (ids: string[]) => Promise<void>;
+  // Outputs (physical screens + routing)
+  handleAddOutput: () => Promise<void>;
+  handleRenameOutput: (id: string, name: string) => Promise<void>;
+  handleSetOutputView: (id: string, viewId: string | null) => Promise<void>;
+  handleRemoveOutput: (id: string) => Promise<void>;
+  handleReorderOutputs: (ids: string[]) => Promise<void>;
+  handleOpenOutputWindow: (id: string) => Promise<void>;
   handleDragEnd: (event: DragEndEvent) => void;
   sensors: ReturnType<typeof useSensors>;
 }
@@ -65,15 +73,11 @@ export interface SectionProps {
   plans: PlanDTO[];
   wirelessChannels: WirelessChannel[];
   teamPositions: TeamPositionDTO[];
-  presets: SlotPreset[];
-  selectedDisplayId: string;
-  setSelectedDisplayId: (id: string) => void;
+  selectedViewId: string;
+  setSelectedViewId: (id: string) => void;
   localSlots: Slot[];
   slotsDirty: boolean;
   isSavingSlots: boolean;
   isRefreshing: boolean;
-  presetName: string;
-  setPresetName: (name: string) => void;
-  isSavingPreset: boolean;
   handlers: SectionHandlers;
 }

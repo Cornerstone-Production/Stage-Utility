@@ -209,7 +209,33 @@ function KioskEmpty({ state, displayName }: { state: StageState; displayName: st
         <p className="text-title3 text-gray-9 font-semibold">
           {state.planTitle ? state.planTitle : "No plan selected"}
         </p>
-        <p className="text-body text-gray-7">No slots configured yet. Add slots in Settings.</p>
+        <p className="text-body text-gray-7">No mic slots assigned yet. Add slots in Settings.</p>
+      </div>
+    </div>
+  );
+}
+
+// Shown when an output exists but has no View routed to it.
+function KioskUnrouted({ state, displayName }: { state: StageState; displayName: string | null }) {
+  return (
+    <div className="flex flex-col h-[100dvh] bg-[#080810]">
+      <KioskTopBar
+        serviceTypeName={state.serviceTypeName}
+        planSeriesTitle={state.planSeriesTitle}
+        planTitle={state.planTitle}
+        showQr={state.showQr}
+        remoteUrl={state.remoteUrl}
+        displayName={displayName}
+        appName={state.appName}
+        appLogo={state.appLogo}
+        appLogoMonochrome={state.appLogoMonochrome}
+      />
+      <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
+        <MonitorIcon className="size-12 text-gray-7" />
+        <p className="text-title3 text-gray-9 font-semibold">Display not configured</p>
+        <p className="text-body text-gray-7">
+          No view is assigned to this display. Assign one under Settings → Displays.
+        </p>
       </div>
     </div>
   );
@@ -245,26 +271,48 @@ export function StageView() {
   if (error) return <KioskError message={error} />;
   if (!state) return <KioskError message="State is unavailable." />;
 
-  const multiDisplay = (state.displays?.length ?? 0) > 1;
-  const currentDisplay = state.displays?.find((d) => d.id === displayId) ?? null;
-  const displayName = multiDisplay ? (currentDisplay?.name ?? displayId) : null;
+  // Preview mode: a "/preview-<viewId>" slug renders a View's content directly,
+  // regardless of any output routing (used by the settings live preview).
+  const previewViewId = displayId.startsWith("preview-")
+    ? displayId.slice("preview-".length)
+    : null;
+  const previewView = previewViewId
+    ? (state.views?.find((v) => v.id === previewViewId) ?? null)
+    : null;
+
+  const multiDisplay = (state.outputs?.length ?? 0) > 1;
+  const currentDisplay = previewViewId ? null : (state.displays?.find((d) => d.id === displayId) ?? null);
+  const kind: ViewKind = previewView?.kind ?? currentDisplay?.kind ?? "slots";
+  const displayName = previewView ? null : (multiDisplay ? (currentDisplay?.name ?? displayId) : null);
+
+  // A real output (not a preview) with no View routed to it is unconfigured —
+  // show a clear "no view assigned" screen rather than an empty slot grid.
+  const resolved = previewViewId ? null : state.resolvedByOutput?.[displayId];
+  const isUnrouted = !previewViewId && (!resolved || resolved.viewId === null);
+  if (isUnrouted) {
+    return (
+      <StageErrorBoundary>
+        <KioskUnrouted state={state} displayName={displayName} />
+      </StageErrorBoundary>
+    );
+  }
 
   // Dashboard- and stage-kind displays render entirely different views.
-  if (currentDisplay?.kind === "dashboard") {
+  if (kind === "dashboard") {
     return (
       <StageErrorBoundary>
         <DashboardView displayId={displayId} />
       </StageErrorBoundary>
     );
   }
-  if (currentDisplay?.kind === "stage") {
+  if (kind === "stage") {
     return (
       <StageErrorBoundary>
         <StageDisplayView displayId={displayId} />
       </StageErrorBoundary>
     );
   }
-  if (currentDisplay?.kind === "transcription") {
+  if (kind === "transcription") {
     return (
       <StageErrorBoundary>
         <TranscriptionView displayId={displayId} />
@@ -280,8 +328,11 @@ export function StageView() {
     );
   }
 
-  // Use this display's own slots only — no fallback to primary display.
-  const displaySlots = state.slotsByDisplay?.[displayId] ?? [];
+  // Slots-kind: a preview reads the View's slots directly; a real output reads
+  // its own routed slots (no fallback to the primary display).
+  const displaySlots = previewViewId
+    ? (state.slotsByView?.[previewViewId] ?? [])
+    : (state.slotsByDisplay?.[displayId] ?? []);
   const sortedSlots = [...displaySlots].sort((a, b) => a.order - b.order);
 
   const columns: Slot[][] = [];

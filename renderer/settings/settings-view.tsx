@@ -15,7 +15,7 @@ import {
   MonitorIcon,
   CalendarIcon,
   LayersIcon,
-  SlidersHorizontalIcon,
+  LayoutTemplateIcon,
   PlugIcon,
   QrCodeIcon,
   PaletteIcon,
@@ -26,8 +26,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SectionItem, WirelessChannel, SectionHandlers } from "./types";
 import { PlanSection } from "./sections/plan-section";
 import { ServiceTypesSection } from "./sections/service-types-section";
-import { DisplaysSection } from "./sections/displays-section";
-import { SlotsSection } from "./sections/slots-section";
+import { ViewsSection } from "./sections/views-section";
+import { OutputsSection } from "./sections/outputs-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
@@ -97,8 +97,8 @@ function useTheme() {
 const SECTIONS: SectionItem[] = [
   { id: "plan", label: "Plan", icon: <CalendarIcon className="size-4 text-gray-11" /> },
   { id: "service-types", label: "Service Types", icon: <LayersIcon className="size-4 text-gray-11" /> },
+  { id: "views", label: "Views", icon: <LayoutTemplateIcon className="size-4 text-gray-11" /> },
   { id: "displays", label: "Displays", icon: <MonitorIcon className="size-4 text-gray-11" /> },
-  { id: "slots", label: "Slots", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
   { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4 text-gray-11" /> },
   { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4 text-gray-11" /> },
   { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4 text-gray-11" /> },
@@ -148,27 +148,20 @@ export function SettingsView() {
     queryFn: () => ipc<WirelessChannel[]>("wireless:listChannels"),
   });
 
-  // Fetch presets
-  const { data: presets = [] } = useQuery({
-    queryKey: ["presets:list"],
-    queryFn: () => ipc<SlotPreset[]>("presets:list"),
-  });
-
-  // Selected display for the slot editor (default to first display id)
-  const [selectedDisplayId, setSelectedDisplayId] = useState<string>("");
+  // Selected View for the Views tab master-detail (default to the first view).
+  const [selectedViewId, setSelectedViewId] = useState<string>("");
 
   useEffect(() => {
     if (!stageState) return;
-    // Slots only apply to "slots"-kind displays; keep the editor pointed at one.
-    const slotDisplays = (stageState.displays ?? []).filter((d) => (d.kind ?? "slots") === "slots");
-    if (slotDisplays.length === 0) {
-      if (selectedDisplayId) setSelectedDisplayId("");
+    const views = stageState.views ?? [];
+    if (views.length === 0) {
+      if (selectedViewId) setSelectedViewId("");
       return;
     }
-    if (!selectedDisplayId || !slotDisplays.find((d) => d.id === selectedDisplayId)) {
-      setSelectedDisplayId(slotDisplays[0].id);
+    if (!selectedViewId || !views.find((v) => v.id === selectedViewId)) {
+      setSelectedViewId(views[0].id);
     }
-  }, [stageState, selectedDisplayId]);
+  }, [stageState, selectedViewId]);
 
   // Local slot editor state
   const [localSlots, setLocalSlots] = useState<Slot[]>([]);
@@ -176,17 +169,12 @@ export function SettingsView() {
   const [isSavingSlots, setIsSavingSlots] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Preset save dialog state
-  const [presetName, setPresetName] = useState("");
-  const [isSavingPreset, setIsSavingPreset] = useState(false);
-
+  // Mirror the selected View's resolved slots into the editor (unless dirty).
   useEffect(() => {
     if (!stageState || slotsDirty) return;
-    const displaySlots =
-      stageState.slotsByDisplay?.[selectedDisplayId] ??
-      (selectedDisplayId === (stageState.displays?.[0]?.id ?? "") ? stageState.slots : []);
-    setLocalSlots([...displaySlots].sort((a, b) => a.order - b.order));
-  }, [stageState, selectedDisplayId, slotsDirty]);
+    const viewSlots = stageState.slotsByView?.[selectedViewId] ?? [];
+    setLocalSlots([...viewSlots].sort((a, b) => a.order - b.order));
+  }, [stageState, selectedViewId, slotsDirty]);
 
   // Subscribe to live state changes from backend
   useEffect(() => {
@@ -345,7 +333,7 @@ export function SettingsView() {
     setIsSavingSlots(true);
     try {
       const slots = localSlots.map((s, i) => ({ ...s, order: i }));
-      const next = await ipc<StageState>("stage:setSlots", { displayId: selectedDisplayId, slots });
+      const next = await ipc<StageState>("views:setSlots", { id: selectedViewId, slots });
       queryClient.setQueryData(["stage:getState"], next);
       setSlotsDirty(false);
       toast.success("Slots saved.");
@@ -356,96 +344,153 @@ export function SettingsView() {
     }
   }
 
-  async function handleSavePreset() {
-    const name = presetName.trim();
-    if (!name) return;
-    setIsSavingPreset(true);
+  // ── Views (content) ──────────────────────────────────────────────────
+  async function handleAddView(name: string, kind: ViewKind) {
     try {
-      const updated = await ipc<SlotPreset[]>("presets:save", {
-        displayId: selectedDisplayId,
-        name,
-      });
-      queryClient.setQueryData(["presets:list"], updated);
-      setPresetName("");
-      toast.success(`Preset "${name}" saved.`);
-    } catch (err) {
-      toast.error(`Failed to save preset: ${String(err)}`);
-      throw err;
-    } finally {
-      setIsSavingPreset(false);
-    }
-  }
-
-  async function handleApplyPreset(id: string) {
-    try {
-      const next = await ipc<StageState>("presets:apply", { displayId: selectedDisplayId, id });
+      const next = await ipc<StageState>("views:add", { name, kind });
       queryClient.setQueryData(["stage:getState"], next);
-      const displaySlots =
-        next.slotsByDisplay?.[selectedDisplayId] ??
-        (selectedDisplayId === (next.displays?.[0]?.id ?? "") ? next.slots : []);
-      setLocalSlots([...displaySlots].sort((a, b) => a.order - b.order));
-      setSlotsDirty(false);
-      toast.success("Preset applied.");
+      // Select the newly-created view (last in the list).
+      const created = next.views?.[next.views.length - 1];
+      if (created) setSelectedViewId(created.id);
     } catch (err) {
-      toast.error(`Failed to apply preset: ${String(err)}`);
+      toast.error(`Failed to add view: ${String(err)}`);
     }
   }
 
-  async function handleDeletePreset(id: string) {
+  async function handleRenameView(id: string, name: string) {
     try {
-      const updated = await ipc<SlotPreset[]>("presets:delete", { id });
-      queryClient.setQueryData(["presets:list"], updated);
-    } catch (err) {
-      toast.error(`Failed to delete preset: ${String(err)}`);
-    }
-  }
-
-  async function handleAddDisplay() {
-    try {
-      const next = await ipc<StageState>("displays:add", {});
+      const next = await ipc<StageState>("views:rename", { id, name });
       queryClient.setQueryData(["stage:getState"], next);
     } catch (err) {
-      toast.error(`Failed to add display: ${String(err)}`);
+      toast.error(`Failed to rename view: ${String(err)}`);
     }
   }
 
-  async function handleRenameDisplay(id: string, name: string) {
+  async function handleDuplicateView(id: string) {
     try {
-      const next = await ipc<StageState>("displays:rename", { id, name });
+      const next = await ipc<StageState>("views:duplicate", { id });
+      queryClient.setQueryData(["stage:getState"], next);
+      const created = next.views?.[next.views.length - 1];
+      if (created) setSelectedViewId(created.id);
+      toast.success("View duplicated.");
+    } catch (err) {
+      toast.error(`Failed to duplicate view: ${String(err)}`);
+    }
+  }
+
+  async function handleRemoveView(id: string) {
+    try {
+      const next = await ipc<StageState>("views:remove", { id });
       queryClient.setQueryData(["stage:getState"], next);
     } catch (err) {
-      toast.error(`Failed to rename display: ${String(err)}`);
+      toast.error(`Failed to remove view: ${String(err)}`);
     }
   }
 
-  async function handleRemoveDisplay(id: string) {
+  async function handleSetViewKind(id: string, kind: ViewKind) {
     try {
-      const next = await ipc<StageState>("displays:remove", { id });
+      const next = await ipc<StageState>("views:setKind", { id, kind });
       queryClient.setQueryData(["stage:getState"], next);
     } catch (err) {
-      toast.error(`Failed to remove display: ${String(err)}`);
+      toast.error(`Failed to change view type: ${String(err)}`);
     }
   }
 
-  async function handleSetDisplayKind(id: string, kind: DisplayKind) {
+  async function handleSetViewNdiSource(id: string, ndiSource: string | null) {
     try {
-      const next = await ipc<StageState>("displays:setKind", { id, kind });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to change display type: ${String(err)}`);
-    }
-  }
-
-  async function handleSetDisplayNdiSource(id: string, ndiSource: string | null) {
-    try {
-      const next = await ipc<StageState>("displays:setNdiSource", { id, ndiSource });
+      const next = await ipc<StageState>("views:setNdiSource", { id, ndiSource });
       queryClient.setQueryData(["stage:getState"], next);
     } catch (err) {
       toast.error(`Failed to set NDI source: ${String(err)}`);
     }
   }
 
-  async function handleOpenDisplayWindow(id: string) {
+  async function handleReorderViews(ids: string[]) {
+    // Optimistic: reorder the cached state immediately so the drag feels instant.
+    const prev = queryClient.getQueryData<StageState>(["stage:getState"]);
+    if (prev) {
+      const byId = new Map(prev.views.map((v) => [v.id, v]));
+      const reordered = ids.map((id) => byId.get(id)).filter(Boolean) as View[];
+      for (const v of prev.views) if (!ids.includes(v.id)) reordered.push(v);
+      queryClient.setQueryData(["stage:getState"], { ...prev, views: reordered });
+    }
+    try {
+      const next = await ipc<StageState>("views:reorder", { ids });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      if (prev) queryClient.setQueryData(["stage:getState"], prev);
+      toast.error(`Failed to reorder views: ${String(err)}`);
+    }
+  }
+
+  async function handleCopySlots(targetViewId: string, fromViewId: string) {
+    try {
+      const next = await ipc<StageState>("views:copySlots", { id: targetViewId, fromViewId });
+      queryClient.setQueryData(["stage:getState"], next);
+      const viewSlots = next.slotsByView?.[targetViewId] ?? [];
+      setLocalSlots([...viewSlots].sort((a, b) => a.order - b.order));
+      setSlotsDirty(false);
+      toast.success("Slots copied.");
+    } catch (err) {
+      toast.error(`Failed to copy slots: ${String(err)}`);
+    }
+  }
+
+  // ── Outputs (physical screens + routing) ─────────────────────────────
+  async function handleAddOutput() {
+    try {
+      const next = await ipc<StageState>("outputs:add", {});
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to add display: ${String(err)}`);
+    }
+  }
+
+  async function handleRenameOutput(id: string, name: string) {
+    try {
+      const next = await ipc<StageState>("outputs:rename", { id, name });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to rename display: ${String(err)}`);
+    }
+  }
+
+  async function handleSetOutputView(id: string, viewId: string | null) {
+    try {
+      const next = await ipc<StageState>("outputs:setView", { id, viewId });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to route display: ${String(err)}`);
+    }
+  }
+
+  async function handleRemoveOutput(id: string) {
+    try {
+      const next = await ipc<StageState>("outputs:remove", { id });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to remove display: ${String(err)}`);
+    }
+  }
+
+  async function handleReorderOutputs(ids: string[]) {
+    const prev = queryClient.getQueryData<StageState>(["stage:getState"]);
+    if (prev) {
+      const byId = new Map(prev.outputs.map((o) => [o.id, o]));
+      const reordered = ids.map((id) => byId.get(id)).filter(Boolean) as Output[];
+      for (const o of prev.outputs) if (!ids.includes(o.id)) reordered.push(o);
+      queryClient.setQueryData(["stage:getState"], { ...prev, outputs: reordered });
+    }
+    try {
+      const next = await ipc<StageState>("outputs:reorder", { ids });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      if (prev) queryClient.setQueryData(["stage:getState"], prev);
+      toast.error(`Failed to reorder displays: ${String(err)}`);
+    }
+  }
+
+  async function handleOpenOutputWindow(id: string) {
     const url = `${window.location.origin}/${encodeURIComponent(id)}`;
     window.open(url, `display-${id}`);
   }
@@ -463,15 +508,20 @@ export function SettingsView() {
     addSlot,
     removeSlot,
     saveSlots,
-    handleSavePreset,
-    handleApplyPreset,
-    handleDeletePreset,
-    handleAddDisplay,
-    handleRenameDisplay,
-    handleRemoveDisplay,
-    handleSetDisplayKind,
-    handleSetDisplayNdiSource,
-    handleOpenDisplayWindow,
+    handleAddView,
+    handleRenameView,
+    handleDuplicateView,
+    handleRemoveView,
+    handleSetViewKind,
+    handleSetViewNdiSource,
+    handleCopySlots,
+    handleReorderViews,
+    handleAddOutput,
+    handleRenameOutput,
+    handleSetOutputView,
+    handleRemoveOutput,
+    handleReorderOutputs,
+    handleOpenOutputWindow,
     handleDragEnd,
     sensors,
   };
@@ -501,26 +551,22 @@ export function SettingsView() {
         return (
           <ServiceTypesSection stageState={stageState} serviceTypes={serviceTypes} handlers={handlers} />
         );
-      case "displays":
-        return <DisplaysSection stageState={stageState} handlers={handlers} />;
-      case "slots":
+      case "views":
         return (
-          <SlotsSection
+          <ViewsSection
             stageState={stageState}
             wirelessChannels={wirelessChannels}
             teamPositions={teamPositions}
-            presets={presets}
-            selectedDisplayId={selectedDisplayId}
-            setSelectedDisplayId={setSelectedDisplayId}
+            selectedViewId={selectedViewId}
+            setSelectedViewId={setSelectedViewId}
             localSlots={localSlots}
             slotsDirty={slotsDirty}
             isSavingSlots={isSavingSlots}
-            presetName={presetName}
-            setPresetName={setPresetName}
-            isSavingPreset={isSavingPreset}
             handlers={handlers}
           />
         );
+      case "displays":
+        return <OutputsSection stageState={stageState} handlers={handlers} />;
       case "integrations":
         return <IntegrationsSection />;
       case "connect":

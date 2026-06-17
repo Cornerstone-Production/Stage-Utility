@@ -1,7 +1,7 @@
 // Persists non-secret settings: service type/plan selection, planMode,
 // integration configs (non-secret fields), display options.
 
-import type { DisplayInfo } from "../types/stage.js";
+import type { DisplayInfo, Output } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
 
 export interface SettingsData {
@@ -14,7 +14,11 @@ export interface SettingsData {
   integrationConfigs: Record<string, Record<string, unknown>>;
   integrationEnabled: Record<string, boolean>;
   showQr: boolean;
+  /** @deprecated Legacy per-display config. Read once during migration to seed
+   *  `outputs` + views.json, then no longer the source of truth. */
   displays: DisplayInfo[];
+  /** Physical screens + their View routing (canonical once migrated). */
+  outputs?: Output[];
   /** Allowlisted service type IDs for auto mode. Empty = all allowed. */
   allowedServiceTypeIds: string[];
   /** Polling/metering interval (ms) applied to all wireless gear. */

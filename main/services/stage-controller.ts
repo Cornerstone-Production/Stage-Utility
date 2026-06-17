@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { DisplayInfo, PcoLiveDTO, PlanDTO, ServiceTypeDTO, Slot, SlotPreset, StageState, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
+import type { DisplayInfo, Output, PcoLiveDTO, PlanDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -11,8 +11,18 @@ import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
 import { settingsStore } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
+import { viewsStore } from "./views-store.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
+
+function defaultViewName(kind: ViewKind): string {
+  switch (kind) {
+    case "dashboard": return "Dashboard";
+    case "stage": return "Stage";
+    case "transcription": return "Captions";
+    default: return "Slots";
+  }
+}
 
 export class StageController {
   private state: StageState = {
@@ -22,9 +32,13 @@ export class StageController {
     planId: null,
     planTitle: null,
     planSeriesTitle: null,
+    views: [{ id: PRIMARY_DISPLAY_ID, name: "Slots", kind: "slots", ndiSource: null, createdAt: "" }],
+    outputs: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", viewId: PRIMARY_DISPLAY_ID }],
+    slotsByView: {},
+    resolvedByOutput: {},
     slots: [],
     slotsByDisplay: {},
-    displays: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1" }],
+    displays: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots", ndiSource: null }],
     pcoConfigured: false,
     lastRefreshedAt: null,
     remoteUrl: null,
@@ -40,8 +54,8 @@ export class StageController {
   private deviceStatuses = new Map<string, DeviceStatus>();
   // Cached team members for the active plan.
   private teamMembers: TeamMemberDTO[] = [];
-  // Raw (un-resolved) slot configs per displayId for the ACTIVE service type.
-  private rawSlotsByDisplay = new Map<string, Slot[]>();
+  // Raw (un-resolved) slot configs per VIEW id for the ACTIVE service type.
+  private rawSlotsByView = new Map<string, Slot[]>();
 
   // PCO credentials (set by IntegrationManager after config saves).
   private pcoAppId: string | null = null;
@@ -58,11 +72,8 @@ export class StageController {
     const settings = await settingsStore.load();
 
     const showQr = settings.showQr ?? true;
-    // Ensure at least one display is always present.
-    const displays: DisplayInfo[] =
-      settings.displays && settings.displays.length > 0
-        ? settings.displays
-        : [{ id: PRIMARY_DISPLAY_ID, name: "Display 1" }];
+
+    const { views, outputs } = await this.loadOrMigrateViewsAndOutputs(settings);
 
     const allowedServiceTypeIds: string[] =
       Array.isArray(settings.allowedServiceTypeIds) && settings.allowedServiceTypeIds.length > 0
@@ -77,7 +88,8 @@ export class StageController {
       planId: settings.planId,
       planTitle: settings.planTitle,
       planSeriesTitle: settings.planSeriesTitle ?? null,
-      displays,
+      views,
+      outputs,
       showQr,
       allowedServiceTypeIds,
       appName: settings.appName ?? "Stage Utility",
@@ -86,30 +98,65 @@ export class StageController {
       emptySlotLogo: settings.emptySlotLogo ?? null,
     };
 
-    // Load raw slots for every display.
-    this.rawSlotsByDisplay.clear();
-    for (const display of displays) {
-      if (settings.serviceTypeId) {
-        const slots =
-          display.id === PRIMARY_DISPLAY_ID
-            ? await slotsStore.adoptDefaultInto(display.id, settings.serviceTypeId)
-            : await slotsStore.getSlots(display.id, settings.serviceTypeId);
-        this.rawSlotsByDisplay.set(display.id, slots);
-      } else {
-        this.rawSlotsByDisplay.set(display.id, []);
-      }
-    }
-
-    await this.reResolveAll();
+    await this.loadAllViewRawSlots(settings.serviceTypeId);
+    this.recomputeResolved();
 
     console.log("[stage-controller] loaded settings", {
       serviceTypeId: this.state.serviceTypeId,
       planId: this.state.planId,
       planMode: this.state.planMode,
       showQr: this.state.showQr,
-      displays: displays.length,
+      views: views.length,
+      outputs: outputs.length,
       allowedServiceTypeIds: this.state.allowedServiceTypeIds,
     });
+  }
+
+  /**
+   * Load Views + Outputs, migrating the legacy per-display model on first run.
+   * Idempotent: once `settings.outputs` exists, the migration is skipped.
+   *
+   * Migration maps each legacy DisplayInfo 1:1 to a View (id = display.id, so the
+   * View reuses the display's existing slots.json bucket with no rewrite) and an
+   * Output (id = display.id, so every existing kiosk URL keeps resolving), routed
+   * to that View. Nothing on the wall changes.
+   */
+  private async loadOrMigrateViewsAndOutputs(
+    settings: Awaited<ReturnType<typeof settingsStore.load>>,
+  ): Promise<{ views: View[]; outputs: Output[] }> {
+    const storedViews = await viewsStore.load();
+    const storedOutputs = settings.outputs;
+
+    if (storedOutputs && storedOutputs.length > 0 && storedViews.length > 0) {
+      return { views: storedViews, outputs: storedOutputs };
+    }
+
+    // First run: migrate from the legacy `displays` array (or the default).
+    const legacy: DisplayInfo[] =
+      settings.displays && settings.displays.length > 0
+        ? settings.displays
+        : [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots" }];
+
+    const now = new Date().toISOString();
+    const views: View[] = legacy.map((d) => ({
+      id: d.id,
+      name: d.name,
+      kind: (d.kind ?? "slots") as ViewKind,
+      ndiSource: d.ndiSource ?? null,
+      createdAt: now,
+    }));
+    const outputs: Output[] = legacy.map((d) => ({
+      id: d.id,
+      name: d.name,
+      viewId: d.id,
+    }));
+
+    await viewsStore.save(views);
+    await settingsStore.patch({ outputs });
+    console.log(
+      `[stage-controller] migrated ${legacy.length} legacy display(s) → ${views.length} view(s) + ${outputs.length} output(s)`,
+    );
+    return { views, outputs };
   }
 
   // ── PCO credentials ───────────────────────────────────────────────────
@@ -162,8 +209,8 @@ export class StageController {
     };
     this.teamMembers = [];
 
-    // Reload raw slots for every display with the new service type.
-    await this.loadAllDisplayRawSlots(id);
+    // Reload raw slots for every view with the new service type.
+    await this.loadAllViewRawSlots(id);
 
     await settingsStore.patch({
       serviceTypeId: id,
@@ -378,7 +425,7 @@ export class StageController {
         planSeriesTitle: null,
       };
       this.teamMembers = [];
-      await this.loadAllDisplayRawSlots(best.type.id);
+      await this.loadAllViewRawSlots(best.type.id);
       await settingsStore.patch({
         serviceTypeId: best.type.id,
         serviceTypeName: best.type.name,
@@ -420,16 +467,23 @@ export class StageController {
 
   // ── Slots ─────────────────────────────────────────────────────────────
 
-  async setSlots(displayId: string, slots: Slot[]): Promise<StageState> {
-    const effectiveDisplayId = displayId || this.primaryDisplayId();
+  /** Legacy alias — `target` is an output id (or empty for primary); routes to
+   *  that output's View. Kept for the /api/slots endpoint + phone control page. */
+  async setSlots(target: string, slots: Slot[]): Promise<StageState> {
+    return this.setViewSlots(this.viewIdForTarget(target), slots);
+  }
+
+  /** Persist + apply a slots-kind View's slot configuration for the active
+   *  service type, then re-resolve and broadcast. */
+  async setViewSlots(viewId: string, slots: Slot[]): Promise<StageState> {
     if (!this.state.serviceTypeId) {
-      console.log("[stage-controller] setSlots: no active service type — slots not persisted");
+      console.log("[stage-controller] setViewSlots: no active service type — slots not persisted");
     } else {
-      console.log(`[stage-controller] setSlots (${slots.length} slots) for display=${effectiveDisplayId} serviceType=${this.state.serviceTypeId}`);
-      await slotsStore.setSlots(effectiveDisplayId, this.state.serviceTypeId, slots);
+      console.log(`[stage-controller] setViewSlots (${slots.length} slots) for view=${viewId} serviceType=${this.state.serviceTypeId}`);
+      await slotsStore.setSlots(viewId, this.state.serviceTypeId, slots);
     }
-    this.rawSlotsByDisplay.set(effectiveDisplayId, slots);
-    await this.reResolveAll();
+    this.rawSlotsByView.set(viewId, slots);
+    this.recomputeResolved();
     this.broadcast();
     return this.state;
   }
@@ -515,11 +569,11 @@ export class StageController {
     return presetsStore.load();
   }
 
-  async savePreset(displayId: string, name: string): Promise<SlotPreset[]> {
-    const effectiveDisplayId = displayId || this.primaryDisplayId();
-    console.log(`[stage-controller] savePreset "${name}" for display=${effectiveDisplayId}`);
+  async savePreset(target: string, name: string): Promise<SlotPreset[]> {
+    const viewId = this.viewIdForTarget(target);
+    console.log(`[stage-controller] savePreset "${name}" for view=${viewId}`);
     const presets = await presetsStore.load();
-    const rawSlots = this.rawSlotsByDisplay.get(effectiveDisplayId) ?? [];
+    const rawSlots = this.rawSlotsByView.get(viewId) ?? [];
     const newPreset: SlotPreset = {
       id: randomUUID(),
       name,
@@ -532,24 +586,17 @@ export class StageController {
     return updated;
   }
 
-  async applyPreset(displayId: string, id: string): Promise<StageState> {
-    const effectiveDisplayId = displayId || this.primaryDisplayId();
+  async applyPreset(target: string, id: string): Promise<StageState> {
+    const viewId = this.viewIdForTarget(target);
     const presets = await presetsStore.load();
     const preset = presets.find((p) => p.id === id);
     if (!preset) throw new Error(`Preset ${id} not found`);
 
-    console.log(`[stage-controller] applyPreset "${preset.name}" (${id}) for display=${effectiveDisplayId}`);
+    console.log(`[stage-controller] applyPreset "${preset.name}" (${id}) for view=${viewId}`);
 
     // Deep-clone with fresh slot ids so applied slots are independent of the preset.
     const slots: Slot[] = preset.slots.map((s) => ({ ...s, id: randomUUID() }));
-
-    if (this.state.serviceTypeId) {
-      await slotsStore.setSlots(effectiveDisplayId, this.state.serviceTypeId, slots);
-    }
-    this.rawSlotsByDisplay.set(effectiveDisplayId, slots);
-    await this.reResolveAll();
-    this.broadcast();
-    return this.state;
+    return this.setViewSlots(viewId, slots);
   }
 
   async deletePreset(id: string): Promise<SlotPreset[]> {
@@ -560,93 +607,310 @@ export class StageController {
     return updated;
   }
 
-  // ── Displays ──────────────────────────────────────────────────────────
+  // ── Views (content) ─────────────────────────────────────────────────
 
-  async addDisplay(name?: string, kind: DisplayInfo["kind"] = "slots"): Promise<StageState> {
-    // Sequential IDs: display-1, display-2, display-3, ...
-    const existingNums = this.state.displays
-      .map((d) => parseInt(d.id.replace("display-", ""), 10))
-      .filter((n) => !isNaN(n));
-    const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 2;
-    const id = `display-${nextNum}`;
-    const displayName = name?.trim() || `Display ${nextNum}`;
-    const newDisplay: DisplayInfo = { id, name: displayName, kind };
+  getViews(): View[] {
+    return [...this.state.views];
+  }
 
-    console.log(`[stage-controller] addDisplay id=${id} name="${displayName}" kind=${kind}`);
-
-    const displays = [...this.state.displays, newDisplay];
-    this.state = { ...this.state, displays };
-    await settingsStore.patch({ displays });
-
-    // Init empty raw slots for the new display.
-    this.rawSlotsByDisplay.set(id, []);
-
-    await this.reResolveAll();
+  async createView(name: string, kind: ViewKind = "slots"): Promise<StageState> {
+    const id = this.nextViewId();
+    const view: View = {
+      id,
+      name: name?.trim() || defaultViewName(kind),
+      kind,
+      ndiSource: null,
+      createdAt: new Date().toISOString(),
+    };
+    console.log(`[stage-controller] createView id=${id} name="${view.name}" kind=${kind}`);
+    const views = [...this.state.views, view];
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    if (kind === "slots") this.rawSlotsByView.set(id, []);
+    this.recomputeResolved();
     this.broadcast();
     return this.state;
   }
 
-  async renameDisplay(id: string, name: string): Promise<StageState> {
-    const trimmedName = name.trim();
-    if (!trimmedName) throw new Error("displays:rename — name must be non-empty");
-    const displays = this.state.displays.map((d) =>
-      d.id === id ? { ...d, name: trimmedName } : d,
-    );
-    if (!displays.find((d) => d.id === id)) {
-      throw new Error(`displays:rename — display ${id} not found`);
+  async renameView(id: string, name: string): Promise<StageState> {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("views:rename — name must be non-empty");
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:rename — view ${id} not found`);
     }
-    console.log(`[stage-controller] renameDisplay id=${id} name="${trimmedName}"`);
-    this.state = { ...this.state, displays };
-    await settingsStore.patch({ displays });
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, name: trimmed } : v));
+    console.log(`[stage-controller] renameView id=${id} name="${trimmed}"`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
     this.broadcast();
     return this.state;
   }
 
-  async setDisplayKind(id: string, kind: DisplayInfo["kind"]): Promise<StageState> {
-    if (!this.state.displays.find((d) => d.id === id)) {
-      throw new Error(`displays:setKind — display ${id} not found`);
+  /** Change a View's kind (used by the legacy /api/displays kind alias). */
+  async setViewKind(id: string, kind: ViewKind): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:setKind — view ${id} not found`);
     }
-    const displays = this.state.displays.map((d) => (d.id === id ? { ...d, kind } : d));
-    console.log(`[stage-controller] setDisplayKind id=${id} kind=${kind}`);
-    this.state = { ...this.state, displays };
-    await settingsStore.patch({ displays });
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, kind } : v));
+    console.log(`[stage-controller] setViewKind id=${id} kind=${kind}`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    if (kind === "slots" && !this.rawSlotsByView.has(id)) {
+      const raw = this.state.serviceTypeId
+        ? await slotsStore.getSlots(id, this.state.serviceTypeId)
+        : [];
+      this.rawSlotsByView.set(id, raw);
+    }
+    this.recomputeResolved();
     this.broadcast();
     return this.state;
   }
 
-  /** Assign (or clear) the NDI source a display should show. Empty → null. */
-  async setDisplayNdiSource(id: string, source: string | null): Promise<StageState> {
-    if (!this.state.displays.find((d) => d.id === id)) {
-      throw new Error(`displays:setNdiSource — display ${id} not found`);
+  /** Assign (or clear) the NDI source a View should show. Empty → null. */
+  async setViewNdiSource(id: string, source: string | null): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:setNdiSource — view ${id} not found`);
     }
     const ndiSource = source?.trim() ? source.trim() : null;
-    const displays = this.state.displays.map((d) => (d.id === id ? { ...d, ndiSource } : d));
-    console.log(`[stage-controller] setDisplayNdiSource id=${id} source=${ndiSource ?? "(none)"}`);
-    this.state = { ...this.state, displays };
-    await settingsStore.patch({ displays });
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, ndiSource } : v));
+    console.log(`[stage-controller] setViewNdiSource id=${id} source=${ndiSource ?? "(none)"}`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
     this.broadcast();
     return this.state;
   }
 
-  async removeDisplay(id: string): Promise<StageState> {
-    if (this.state.displays.length <= 1) {
-      throw new Error("displays:remove — cannot remove the last display");
+  async duplicateView(id: string, name?: string): Promise<StageState> {
+    const src = this.state.views.find((v) => v.id === id);
+    if (!src) throw new Error(`views:duplicate — view ${id} not found`);
+    const newId = this.nextViewId();
+    const copy: View = {
+      id: newId,
+      name: name?.trim() || `${src.name} copy`,
+      kind: src.kind,
+      ndiSource: src.ndiSource ?? null,
+      createdAt: new Date().toISOString(),
+    };
+    console.log(`[stage-controller] duplicateView ${id} → ${newId} "${copy.name}"`);
+    const views = [...this.state.views, copy];
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+
+    // Deep-copy slot config (active service type) with fresh slot ids.
+    if (src.kind === "slots") {
+      const srcSlots = this.rawSlotsByView.get(id) ?? [];
+      const slots = srcSlots.map((s) => ({ ...s, id: randomUUID() }));
+      this.rawSlotsByView.set(newId, slots);
+      if (this.state.serviceTypeId) {
+        await slotsStore.setSlots(newId, this.state.serviceTypeId, slots);
+      }
     }
-    if (!this.state.displays.find((d) => d.id === id)) {
-      throw new Error(`displays:remove — display ${id} not found`);
-    }
-    console.log(`[stage-controller] removeDisplay id=${id}`);
-
-    const displays = this.state.displays.filter((d) => d.id !== id);
-    this.state = { ...this.state, displays };
-    await settingsStore.patch({ displays });
-
-    // Remove slots from disk and memory.
-    await slotsStore.removeDisplay(id);
-    this.rawSlotsByDisplay.delete(id);
-
-    await this.reResolveAll();
+    this.recomputeResolved();
     this.broadcast();
+    return this.state;
+  }
+
+  /** Copy another View's slot config into this one (the "recall a saved
+   *  arrangement" workflow, replacing presets). */
+  async copyViewSlots(targetViewId: string, fromViewId: string): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === targetViewId)) {
+      throw new Error(`views:copySlots — view ${targetViewId} not found`);
+    }
+    const src = this.rawSlotsByView.get(fromViewId) ?? [];
+    const slots = src.map((s) => ({ ...s, id: randomUUID() }));
+    return this.setViewSlots(targetViewId, slots);
+  }
+
+  async deleteView(id: string): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:delete — view ${id} not found`);
+    }
+    if (this.state.views.length <= 1) {
+      throw new Error("views:delete — cannot remove the last view");
+    }
+    console.log(`[stage-controller] deleteView id=${id}`);
+    const views = this.state.views.filter((v) => v.id !== id);
+    // Unroute any outputs pointing at this view (render placeholder, never fail).
+    const outputs = this.state.outputs.map((o) =>
+      o.viewId === id ? { ...o, viewId: null } : o,
+    );
+    this.state = { ...this.state, views, outputs };
+    await viewsStore.save(views);
+    await settingsStore.patch({ outputs });
+    await slotsStore.removeDisplay(id);
+    this.rawSlotsByView.delete(id);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Reorder views to match the given id order (drag-and-drop). Ids not present
+   *  are appended in their existing order; unknown ids are ignored. */
+  async reorderViews(orderedIds: string[]): Promise<StageState> {
+    const byId = new Map(this.state.views.map((v) => [v.id, v]));
+    const reordered: View[] = [];
+    for (const id of orderedIds) {
+      const v = byId.get(id);
+      if (v) {
+        reordered.push(v);
+        byId.delete(id);
+      }
+    }
+    for (const v of byId.values()) reordered.push(v);
+    console.log(`[stage-controller] reorderViews → ${reordered.map((v) => v.id).join(", ")}`);
+    this.state = { ...this.state, views: reordered };
+    await viewsStore.save(reordered);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  // ── Outputs (physical screens + routing) ─────────────────────────────
+
+  getOutputs(): Output[] {
+    return [...this.state.outputs];
+  }
+
+  async addOutput(name?: string, viewId?: string | null): Promise<StageState> {
+    const id = this.nextOutputId();
+    const num = parseInt(id.replace("display-", ""), 10);
+    const output: Output = {
+      id,
+      name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
+      viewId: viewId ?? null,
+    };
+    console.log(`[stage-controller] addOutput id=${id} name="${output.name}" viewId=${output.viewId ?? "(none)"}`);
+    const outputs = [...this.state.outputs, output];
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  async renameOutput(id: string, name: string): Promise<StageState> {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("outputs:rename — name must be non-empty");
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:rename — output ${id} not found`);
+    }
+    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, name: trimmed } : o));
+    console.log(`[stage-controller] renameOutput id=${id} name="${trimmed}"`);
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Route an output to a View (or null to unroute). The recall operation. */
+  async setOutputView(id: string, viewId: string | null): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:setView — output ${id} not found`);
+    }
+    if (viewId !== null && !this.state.views.find((v) => v.id === viewId)) {
+      throw new Error(`outputs:setView — view ${viewId} not found`);
+    }
+    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, viewId } : o));
+    console.log(`[stage-controller] setOutputView output=${id} → view=${viewId ?? "(none)"}`);
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Reorder outputs to match the given id order (drag-and-drop). */
+  async reorderOutputs(orderedIds: string[]): Promise<StageState> {
+    const byId = new Map(this.state.outputs.map((o) => [o.id, o]));
+    const reordered: Output[] = [];
+    for (const id of orderedIds) {
+      const o = byId.get(id);
+      if (o) {
+        reordered.push(o);
+        byId.delete(id);
+      }
+    }
+    for (const o of byId.values()) reordered.push(o);
+    console.log(`[stage-controller] reorderOutputs → ${reordered.map((o) => o.id).join(", ")}`);
+    this.state = { ...this.state, outputs: reordered };
+    await settingsStore.patch({ outputs: reordered });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  async removeOutput(id: string): Promise<StageState> {
+    if (this.state.outputs.length <= 1) {
+      throw new Error("outputs:remove — cannot remove the last output");
+    }
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:remove — output ${id} not found`);
+    }
+    console.log(`[stage-controller] removeOutput id=${id}`);
+    const outputs = this.state.outputs.filter((o) => o.id !== id);
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  // ── Legacy display aliases (back-compat for /api/displays + Apple app) ──
+  // The old model conflated a screen and its content. Each alias maps onto the
+  // new View/Output verbs so older clients keep working unchanged.
+
+  /** @deprecated Use createView + addOutput. Creates a View of `kind` and an
+   *  Output routed to it, mirroring the old "add a display" behavior. */
+  async addDisplay(name?: string, kind: DisplayInfo["kind"] = "slots"): Promise<StageState> {
+    const viewId = this.nextViewId();
+    const outputId = this.nextOutputId();
+    const num = parseInt(outputId.replace("display-", ""), 10);
+    const displayName = name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`;
+    const k = (kind ?? "slots") as ViewKind;
+    const view: View = { id: viewId, name: displayName, kind: k, ndiSource: null, createdAt: new Date().toISOString() };
+    const output: Output = { id: outputId, name: displayName, viewId };
+    console.log(`[stage-controller] addDisplay (alias) output=${outputId} view=${viewId} kind=${k}`);
+    const views = [...this.state.views, view];
+    const outputs = [...this.state.outputs, output];
+    this.state = { ...this.state, views, outputs };
+    await viewsStore.save(views);
+    await settingsStore.patch({ outputs });
+    if (k === "slots") this.rawSlotsByView.set(viewId, []);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /** @deprecated Renames the output (the screen). */
+  async renameDisplay(id: string, name: string): Promise<StageState> {
+    return this.renameOutput(id, name);
+  }
+
+  /** @deprecated Sets the kind of the View routed to this output. */
+  async setDisplayKind(id: string, kind: DisplayInfo["kind"]): Promise<StageState> {
+    const viewId = this.outputRoutedViewId(id);
+    if (!viewId) throw new Error(`displays:setKind — output ${id} has no routed view`);
+    return this.setViewKind(viewId, (kind ?? "slots") as ViewKind);
+  }
+
+  /** @deprecated Sets the NDI source of the View routed to this output. */
+  async setDisplayNdiSource(id: string, source: string | null): Promise<StageState> {
+    const viewId = this.outputRoutedViewId(id);
+    if (!viewId) throw new Error(`displays:setNdiSource — output ${id} has no routed view`);
+    return this.setViewNdiSource(viewId, source);
+  }
+
+  /** @deprecated Removes the output, and its 1:1 routed View if nothing else uses it. */
+  async removeDisplay(id: string): Promise<StageState> {
+    const viewId = this.outputRoutedViewId(id);
+    await this.removeOutput(id);
+    // Clean up the routed View if it's now orphaned (migrated 1:1 case).
+    if (viewId && !this.state.outputs.some((o) => o.viewId === viewId) && this.state.views.length > 1) {
+      await this.deleteView(viewId);
+    }
     return this.state;
   }
 
@@ -706,25 +970,53 @@ export class StageController {
 
   applyDeviceStatus(channelId: string, status: DeviceStatus): void {
     this.deviceStatuses.set(channelId, status);
-    // Re-resolve all displays without clearing PCO data.
-    const slotsByDisplay: Record<string, Slot[]> = {};
-    for (const display of this.state.displays) {
-      const raw = this.rawSlotsByDisplay.get(display.id) ?? [];
-      slotsByDisplay[display.id] = resolveSlots(raw, this.teamMembers, this.deviceStatuses);
-    }
-    const primarySlots = slotsByDisplay[this.primaryDisplayId()] ?? [];
-    this.state = {
-      ...this.state,
-      slotsByDisplay,
-      slots: primarySlots,
-    };
+    // Re-resolve without clearing PCO data.
+    this.recomputeResolved();
     this.broadcast();
   }
 
   // ── Internals ─────────────────────────────────────────────────────────
 
-  private primaryDisplayId(): string {
-    return this.state.displays[0]?.id ?? PRIMARY_DISPLAY_ID;
+  private primaryOutputId(): string {
+    return this.state.outputs[0]?.id ?? PRIMARY_DISPLAY_ID;
+  }
+
+  /** The View id routed to the primary output, falling back to the first slots
+   *  View (or the primary id) so legacy slot writes always land somewhere. */
+  private primaryViewId(): string {
+    const primary = this.state.outputs[0];
+    if (primary?.viewId) return primary.viewId;
+    const firstSlots = this.state.views.find((v) => v.kind === "slots");
+    return firstSlots?.id ?? PRIMARY_DISPLAY_ID;
+  }
+
+  /** Resolve a legacy target (output id, empty for primary, or a raw view id)
+   *  to a View id for slot writes. */
+  private viewIdForTarget(target: string): string {
+    if (!target) return this.primaryViewId();
+    const output = this.state.outputs.find((o) => o.id === target);
+    if (output) return output.viewId ?? this.primaryViewId();
+    return target; // already a view id
+  }
+
+  private outputRoutedViewId(outputId: string): string | null {
+    return this.state.outputs.find((o) => o.id === outputId)?.viewId ?? null;
+  }
+
+  private nextViewId(): string {
+    const nums = this.state.views
+      .map((v) => parseInt(v.id.replace("view-", ""), 10))
+      .filter((n) => !Number.isNaN(n));
+    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+    return `view-${next}`;
+  }
+
+  private nextOutputId(): string {
+    const nums = this.state.outputs
+      .map((o) => parseInt(o.id.replace("display-", ""), 10))
+      .filter((n) => !Number.isNaN(n));
+    const next = nums.length > 0 ? Math.max(...nums) + 1 : 2;
+    return `display-${next}`;
   }
 
   private assertPco(): void {
@@ -770,26 +1062,66 @@ export class StageController {
     }
   }
 
-  /** Load raw slots for every display for the given service type. */
-  private async loadAllDisplayRawSlots(serviceTypeId: string): Promise<void> {
-    for (const display of this.state.displays) {
-      const slots = await slotsStore.getSlots(display.id, serviceTypeId);
-      this.rawSlotsByDisplay.set(display.id, slots);
+  /** Load raw slots for every slots-kind View for the given service type. The
+   *  primary View additionally adopts the legacy "default" bucket if present. */
+  private async loadAllViewRawSlots(serviceTypeId: string | null): Promise<void> {
+    this.rawSlotsByView.clear();
+    const primaryViewId = this.primaryViewId();
+    for (const view of this.state.views) {
+      if (view.kind !== "slots") continue;
+      if (!serviceTypeId) {
+        this.rawSlotsByView.set(view.id, []);
+        continue;
+      }
+      const slots =
+        view.id === primaryViewId
+          ? await slotsStore.adoptDefaultInto(view.id, serviceTypeId)
+          : await slotsStore.getSlots(view.id, serviceTypeId);
+      this.rawSlotsByView.set(view.id, slots);
     }
   }
 
-  /** Re-resolve all displays and update state.slotsByDisplay + state.slots. */
+  /** @deprecated Async shim kept for the many `await this.reResolveAll()` call
+   *  sites; the actual work is synchronous (no I/O). */
   private async reResolveAll(): Promise<void> {
-    const slotsByDisplay: Record<string, Slot[]> = {};
-    for (const display of this.state.displays) {
-      const raw = this.rawSlotsByDisplay.get(display.id) ?? [];
-      slotsByDisplay[display.id] = resolveSlots(raw, this.teamMembers, this.deviceStatuses);
+    this.recomputeResolved();
+  }
+
+  /** Resolve every slots-View, then derive the per-output descriptors and the
+   *  legacy compat shim (displays/slotsByDisplay/slots) from outputs + views. */
+  private recomputeResolved(): void {
+    const slotsByView: Record<string, Slot[]> = {};
+    for (const view of this.state.views) {
+      if (view.kind !== "slots") continue;
+      const raw = this.rawSlotsByView.get(view.id) ?? [];
+      slotsByView[view.id] = resolveSlots(raw, this.teamMembers, this.deviceStatuses);
     }
-    const primarySlots = slotsByDisplay[this.primaryDisplayId()] ?? [];
+
+    const resolvedByOutput: Record<string, ResolvedOutput> = {};
+    const slotsByDisplay: Record<string, Slot[]> = {};
+    const displays: DisplayInfo[] = [];
+    for (const output of this.state.outputs) {
+      const view = output.viewId ? this.state.views.find((v) => v.id === output.viewId) ?? null : null;
+      const kind = view?.kind ?? "slots";
+      const ndiSource = view?.ndiSource ?? null;
+      resolvedByOutput[output.id] = {
+        viewId: view?.id ?? null,
+        kind,
+        ndiSource,
+        viewName: view?.name ?? null,
+      };
+      slotsByDisplay[output.id] = view && view.kind === "slots" ? (slotsByView[view.id] ?? []) : [];
+      displays.push({ id: output.id, name: output.name, kind, ndiSource });
+    }
+    const slots = slotsByDisplay[this.primaryOutputId()] ?? [];
+
     this.state = {
       ...this.state,
+      slotsByView,
+      resolvedByOutput,
       slotsByDisplay,
-      slots: primarySlots,
+      displays,
+      slots,
     };
   }
 

@@ -6,8 +6,9 @@ import { resolve } from "path";
 
 // Dev-only: map clean URLs to their entry HTML so the dev server matches what
 // the production Node server serves (see remote-server.ts tryServeStatic).
-//   /settings     → settings-window.html
-//   /display-1, … → index.html (kiosk; the slug is read client-side)
+//   /settings        → settings-window.html
+//   /display-1, …    → index.html (kiosk; the slug is read client-side)
+//   /preview-<view>  → index.html (settings live preview of a View)
 function cleanUrls(): PluginOption {
   return {
     name: "clean-urls",
@@ -16,7 +17,7 @@ function cleanUrls(): PluginOption {
         const pathname = (req.url ?? "").split("?")[0];
         if (pathname === "/settings" || pathname === "/settings/") {
           req.url = "/settings-window.html";
-        } else if (/^\/display-[^/]+\/?$/.test(pathname)) {
+        } else if (/^\/(display|preview)-[^/]+\/?$/.test(pathname)) {
           req.url = "/index.html";
         }
         next();
