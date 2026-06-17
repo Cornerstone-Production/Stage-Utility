@@ -43,20 +43,25 @@ function matchMember(
   if (link.matchBy === "position") {
     // Case-insensitive position name match.
     const pos = link.teamPositionName.toLowerCase();
-    const prefix = link.notesStartsWith?.toLowerCase() ?? null;
+    const prefix = link.notesStartsWith?.trim().toLowerCase() ?? null;
 
     const byPosition = members.filter(
       (m) => (m.teamPositionName ?? "").toLowerCase() === pos,
     );
 
-    if (prefix && byPosition.length > 0) {
-      // Further filter by notes prefix (case-insensitive).
-      // First char = number 1-10 for vocals; first two chars = HH/HS for Teaching Pastor.
-      const withNotes = byPosition.filter(
-        (m) => m.notes != null && m.notes.toLowerCase().startsWith(prefix),
+    if (prefix) {
+      // A notes prefix pins this slot to a specific person within the position
+      // (e.g. "1".."10" for vocals, "HS"/"HH" for Teaching Pastor). Require an
+      // actual notes match — do NOT fall back to an arbitrary person in the
+      // position, or every unmatched slot would duplicate the first member and
+      // appear to ignore the note (e.g. the HH slot showing the HS pastor).
+      const matches = byPosition.filter(
+        (m) => m.notes != null && m.notes.trim().toLowerCase().startsWith(prefix),
       );
-      // Fall back to any position match if no notes match (graceful degradation).
-      return (withNotes[0] ?? byPosition[0]) ?? null;
+      // Prefer an exact note match so "1" doesn't grab "10"; else the first
+      // prefix match (handles notes like "1 - lead vocal").
+      const exact = matches.find((m) => m.notes!.trim().toLowerCase() === prefix);
+      return exact ?? matches[0] ?? null;
     }
 
     return byPosition[0] ?? null;
