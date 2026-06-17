@@ -17,14 +17,16 @@ import {
 import type { SectionProps } from "../types";
 import { SlotEditor } from "./slots-section";
 import { ViewPreview } from "./view-preview";
+import { LayoutEditor } from "./layout-editor";
 
 const KIND_LABELS: Record<ViewKind, string> = {
   slots: "Mic Slots",
   dashboard: "Dashboard",
   stage: "Stage",
   transcription: "Captions",
+  custom: "Custom Layout",
 };
-const KIND_ORDER: ViewKind[] = ["slots", "dashboard", "stage", "transcription"];
+const KIND_ORDER: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "custom"];
 
 // ---- sortable master-list item ----------------------------------------------
 
@@ -85,11 +87,12 @@ function ViewDetail({
   localSlots,
   slotsDirty,
   isSavingSlots,
+  layoutTemplates,
   canDelete,
   handlers,
 }: Pick<
   SectionProps,
-  "stageState" | "wirelessChannels" | "teamPositions" | "localSlots" | "slotsDirty" | "isSavingSlots" | "handlers"
+  "stageState" | "wirelessChannels" | "teamPositions" | "localSlots" | "slotsDirty" | "isSavingSlots" | "layoutTemplates" | "handlers"
 > & { view: View; canDelete: boolean }) {
   // Parent remounts this component on view change (key={view.id}), so local
   // field state initializes fresh per view.
@@ -148,8 +151,22 @@ function ViewDetail({
         </Button>
       </div>
 
-      {/* Live preview */}
-      <ViewPreview viewId={view.id} />
+      {/* Custom views get the visual editor (its canvas doubles as the preview);
+          all other kinds get the read-only live preview. */}
+      {view.kind === "custom" ? (
+        <LayoutEditor
+          key={view.id}
+          view={view}
+          slotsViews={(stageState.views ?? []).filter((v) => v.kind === "slots")}
+          templates={layoutTemplates}
+          onSave={(layout) => handlers.handleSetViewLayout(view.id, layout)}
+          onSaveTemplate={handlers.handleSaveLayoutTemplate}
+          onUpdateTemplate={handlers.handleUpdateLayoutTemplate}
+          onDeleteTemplate={handlers.handleDeleteLayoutTemplate}
+        />
+      ) : (
+        <ViewPreview viewId={view.id} />
+      )}
 
       {/* NDI source (native Apple client only) */}
       <div className="flex items-center gap-2">
@@ -199,7 +216,7 @@ function ViewDetail({
             handlers={handlers}
           />
         </>
-      ) : (
+      ) : view.kind === "custom" ? null : (
         <p className="text-caption1 text-gray-9">
           {KIND_LABELS[view.kind]} views render a fixed layout from live Planning Center / ProPresenter
           data — there's nothing to configure here yet besides the name and NDI source.
@@ -215,6 +232,7 @@ export function ViewsSection({
   stageState,
   wirelessChannels,
   teamPositions,
+  layoutTemplates,
   selectedViewId,
   setSelectedViewId,
   localSlots,
@@ -226,6 +244,7 @@ export function ViewsSection({
   | "stageState"
   | "wirelessChannels"
   | "teamPositions"
+  | "layoutTemplates"
   | "selectedViewId"
   | "setSelectedViewId"
   | "localSlots"
@@ -320,6 +339,7 @@ export function ViewsSection({
             localSlots={localSlots}
             slotsDirty={slotsDirty}
             isSavingSlots={isSavingSlots}
+            layoutTemplates={layoutTemplates}
             canDelete={views.length > 1}
             handlers={handlers}
           />

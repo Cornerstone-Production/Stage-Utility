@@ -9,7 +9,7 @@ import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
-import type { DisplayKind, Slot } from "../types/stage.js";
+import type { DisplayKind, LayoutDTO, Slot } from "../types/stage.js";
 import { addBroadcastListener } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
 import { integrationManager } from "./integration-manager.js";
@@ -56,7 +56,7 @@ function error(res: http.ServerResponse, message: string, status = 400): void {
 }
 
 function isDisplayKind(v: unknown): v is DisplayKind {
-  return v === "slots" || v === "dashboard" || v === "stage" || v === "transcription";
+  return v === "slots" || v === "dashboard" || v === "stage" || v === "transcription" || v === "custom";
 }
 
 async function readBody(req: http.IncomingMessage): Promise<unknown> {
@@ -600,7 +600,7 @@ export class RemoteServer {
       return;
     }
 
-    // PATCH /api/views/:id — { name? } and/or { kind? } and/or { ndiSource? }
+    // PATCH /api/views/:id — { name? } and/or { kind? } and/or { ndiSource? } and/or { layout? }
     const viewPatchMatch = pathname.match(/^\/api\/views\/([^/]+)$/);
     if (method === "PATCH" && viewPatchMatch) {
       const id = viewPatchMatch[1];
@@ -609,14 +609,16 @@ export class RemoteServer {
       const hasKind = isDisplayKind(body.kind);
       const hasNdiSource = "ndiSource" in body
         && (typeof body.ndiSource === "string" || body.ndiSource === null);
-      if (!hasName && !hasKind && !hasNdiSource) {
-        error(res, "body.name (string), body.kind, or body.ndiSource (string|null) required");
+      const hasLayout = "layout" in body && body.layout != null && typeof body.layout === "object";
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), or body.layout (object) required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameView(id, body.name as string);
       if (hasKind) state = await stageController.setViewKind(id, body.kind as DisplayKind);
       if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
+      if (hasLayout) state = await stageController.setViewLayout(id, body.layout as LayoutDTO);
       json(res, state);
       return;
     }
@@ -626,6 +628,45 @@ export class RemoteServer {
     if (method === "DELETE" && viewDeleteMatch) {
       const state = await stageController.deleteView(viewDeleteMatch[1]);
       json(res, state);
+      return;
+    }
+
+    // ── Layout templates (reusable custom layouts) ────────────────────────
+    if (method === "GET" && pathname === "/api/layout-templates") {
+      json(res, await stageController.listLayoutTemplates());
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/layout-templates") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.name !== "string" || body.layout == null || typeof body.layout !== "object") {
+        error(res, "body.name (string) and body.layout (object) required");
+        return;
+      }
+      const list = await stageController.saveLayoutTemplate(body.name, body.layout as LayoutDTO);
+      json(res, list, 201);
+      return;
+    }
+
+    const tplPatchMatch = pathname.match(/^\/api\/layout-templates\/([^/]+)$/);
+    if (method === "PATCH" && tplPatchMatch) {
+      const body = await readBody(req) as Record<string, unknown>;
+      const patch: { name?: string; layout?: LayoutDTO } = {};
+      if (typeof body.name === "string") patch.name = body.name;
+      if (body.layout != null && typeof body.layout === "object") patch.layout = body.layout as LayoutDTO;
+      if (patch.name === undefined && patch.layout === undefined) {
+        error(res, "body.name (string) or body.layout (object) required");
+        return;
+      }
+      const list = await stageController.updateLayoutTemplate(tplPatchMatch[1], patch);
+      json(res, list);
+      return;
+    }
+
+    const tplDeleteMatch = pathname.match(/^\/api\/layout-templates\/([^/]+)$/);
+    if (method === "DELETE" && tplDeleteMatch) {
+      const list = await stageController.deleteLayoutTemplate(tplDeleteMatch[1]);
+      json(res, list);
       return;
     }
 

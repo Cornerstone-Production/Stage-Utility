@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { DisplayInfo, Output, PcoLiveDTO, PlanDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { DisplayInfo, LayoutDTO, LayoutTemplate, Output, PcoLiveDTO, PlanDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -12,16 +12,58 @@ import { resolveSlots } from "./slot-resolver.js";
 import { settingsStore } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
+import { layoutTemplatesStore } from "./layout-templates-store.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
+
+/** Deep-clone a layout, minting fresh object ids so copies stay independent. */
+function cloneLayout(l: LayoutDTO): LayoutDTO {
+  return {
+    version: 1,
+    canvas: { ...l.canvas },
+    objects: l.objects.map((o) => ({
+      ...o,
+      id: randomUUID(),
+      style: o.style ? { ...o.style } : undefined,
+      config: { ...o.config },
+    })),
+  };
+}
 
 function defaultViewName(kind: ViewKind): string {
   switch (kind) {
     case "dashboard": return "Dashboard";
     case "stage": return "Stage";
     case "transcription": return "Captions";
+    case "custom": return "Custom";
     default: return "Slots";
   }
+}
+
+/** A sensible starting layout for a new custom View — proves the schema and
+ *  gives the editor something to manipulate (clock, countdown, slide text). */
+function defaultCustomLayout(): LayoutDTO {
+  const obj = (
+    config: LayoutDTO["objects"][number]["config"],
+    x: number, y: number, w: number, h: number,
+    style: LayoutDTO["objects"][number]["style"],
+  ): LayoutDTO["objects"][number] => ({ id: randomUUID(), x, y, w, h, z: 1, config, style });
+  return {
+    version: 1,
+    canvas: { width: 1920, height: 1080, background: "#080810" },
+    objects: [
+      obj({ type: "clock", showSeconds: true, format: "12h" }, 0.04, 0.05, 0.34, 0.13,
+        { fontSize: 0.11, fontWeight: 600, color: "#ffffff", textAlign: "left", vAlign: "middle" }),
+      obj({ type: "countdown-timer" }, 0.62, 0.05, 0.34, 0.13,
+        { fontSize: 0.11, fontWeight: 600, color: "#7fe3c4", textAlign: "right", vAlign: "middle" }),
+      obj({ type: "current-slide-text" }, 0.08, 0.34, 0.84, 0.34,
+        { fontSize: 0.11, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", textShadow: 0.6, lineClamp: 4 }),
+      obj({ type: "next-slide-text" }, 0.08, 0.72, 0.84, 0.10,
+        { fontSize: 0.05, color: "rgba(255,255,255,0.6)", textAlign: "center", vAlign: "middle", lineClamp: 2 }),
+      obj({ type: "transcript-strip", mode: "latest" }, 0.08, 0.86, 0.84, 0.09,
+        { fontSize: 0.038, color: "rgba(255,255,255,0.85)", textAlign: "center", vAlign: "middle" }),
+    ],
+  };
 }
 
 export class StageController {
@@ -607,6 +649,51 @@ export class StageController {
     return updated;
   }
 
+  // ── Layout templates (reusable custom layouts) ───────────────────────
+
+  async listLayoutTemplates(): Promise<LayoutTemplate[]> {
+    return layoutTemplatesStore.load();
+  }
+
+  async saveLayoutTemplate(name: string, layout: LayoutDTO): Promise<LayoutTemplate[]> {
+    const list = await layoutTemplatesStore.load();
+    const tpl: LayoutTemplate = {
+      id: randomUUID(),
+      name: name.trim() || "Layout",
+      layout: cloneLayout(layout),
+      createdAt: new Date().toISOString(),
+    };
+    console.log(`[stage-controller] saveLayoutTemplate "${tpl.name}" (${tpl.layout.objects.length} objects)`);
+    const updated = [...list, tpl];
+    await layoutTemplatesStore.save(updated);
+    return updated;
+  }
+
+  async updateLayoutTemplate(id: string, patch: { name?: string; layout?: LayoutDTO }): Promise<LayoutTemplate[]> {
+    const list = await layoutTemplatesStore.load();
+    if (!list.find((t) => t.id === id)) throw new Error(`layout template ${id} not found`);
+    const updated = list.map((t) =>
+      t.id === id
+        ? {
+            ...t,
+            name: patch.name !== undefined ? (patch.name.trim() || t.name) : t.name,
+            layout: patch.layout ? cloneLayout(patch.layout) : t.layout,
+          }
+        : t,
+    );
+    console.log(`[stage-controller] updateLayoutTemplate ${id}`);
+    await layoutTemplatesStore.save(updated);
+    return updated;
+  }
+
+  async deleteLayoutTemplate(id: string): Promise<LayoutTemplate[]> {
+    console.log(`[stage-controller] deleteLayoutTemplate ${id}`);
+    const list = await layoutTemplatesStore.load();
+    const updated = list.filter((t) => t.id !== id);
+    await layoutTemplatesStore.save(updated);
+    return updated;
+  }
+
   // ── Views (content) ─────────────────────────────────────────────────
 
   getViews(): View[] {
@@ -621,6 +708,7 @@ export class StageController {
       kind,
       ndiSource: null,
       createdAt: new Date().toISOString(),
+      layout: kind === "custom" ? defaultCustomLayout() : null,
     };
     console.log(`[stage-controller] createView id=${id} name="${view.name}" kind=${kind}`);
     const views = [...this.state.views, view];
@@ -652,7 +740,11 @@ export class StageController {
     if (!this.state.views.find((v) => v.id === id)) {
       throw new Error(`views:setKind — view ${id} not found`);
     }
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, kind } : v));
+    const views = this.state.views.map((v) =>
+      v.id === id
+        ? { ...v, kind, layout: kind === "custom" ? (v.layout ?? defaultCustomLayout()) : v.layout }
+        : v,
+    );
     console.log(`[stage-controller] setViewKind id=${id} kind=${kind}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
@@ -682,6 +774,20 @@ export class StageController {
     return this.state;
   }
 
+  /** Replace a custom View's layout (visual editor save). */
+  async setViewLayout(id: string, layout: LayoutDTO): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:setLayout — view ${id} not found`);
+    }
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, layout } : v));
+    console.log(`[stage-controller] setViewLayout id=${id} (${layout.objects.length} objects)`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
   async duplicateView(id: string, name?: string): Promise<StageState> {
     const src = this.state.views.find((v) => v.id === id);
     if (!src) throw new Error(`views:duplicate — view ${id} not found`);
@@ -692,6 +798,10 @@ export class StageController {
       kind: src.kind,
       ndiSource: src.ndiSource ?? null,
       createdAt: new Date().toISOString(),
+      // Deep-clone the layout with fresh object ids so the copy is independent.
+      layout: src.layout
+        ? { ...src.layout, objects: src.layout.objects.map((o) => ({ ...o, id: randomUUID() })) }
+        : null,
     };
     console.log(`[stage-controller] duplicateView ${id} → ${newId} "${copy.name}"`);
     const views = [...this.state.views, copy];

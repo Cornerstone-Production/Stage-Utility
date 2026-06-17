@@ -148,6 +148,12 @@ export function SettingsView() {
     queryFn: () => ipc<WirelessChannel[]>("wireless:listChannels"),
   });
 
+  // Fetch reusable custom-layout templates
+  const { data: layoutTemplates = [] } = useQuery({
+    queryKey: ["layoutTemplates:list"],
+    queryFn: () => ipc<LayoutTemplate[]>("layoutTemplates:list"),
+  });
+
   // Selected View for the Views tab master-detail (default to the first view).
   const [selectedViewId, setSelectedViewId] = useState<string>("");
 
@@ -423,6 +429,45 @@ export function SettingsView() {
     }
   }
 
+  async function handleSetViewLayout(id: string, layout: LayoutDTO) {
+    try {
+      const next = await ipc<StageState>("views:setLayout", { id, layout });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to save layout: ${String(err)}`);
+      throw err;
+    }
+  }
+
+  async function handleSaveLayoutTemplate(name: string, layout: LayoutDTO) {
+    try {
+      const list = await ipc<LayoutTemplate[]>("layoutTemplates:save", { name, layout });
+      queryClient.setQueryData(["layoutTemplates:list"], list);
+      toast.success(`Saved layout "${name}".`);
+    } catch (err) {
+      toast.error(`Failed to save layout: ${String(err)}`);
+    }
+  }
+
+  async function handleUpdateLayoutTemplate(id: string, patch: { name?: string; layout?: LayoutDTO }) {
+    try {
+      const list = await ipc<LayoutTemplate[]>("layoutTemplates:update", { id, ...patch });
+      queryClient.setQueryData(["layoutTemplates:list"], list);
+      toast.success("Layout updated.");
+    } catch (err) {
+      toast.error(`Failed to update layout: ${String(err)}`);
+    }
+  }
+
+  async function handleDeleteLayoutTemplate(id: string) {
+    try {
+      const list = await ipc<LayoutTemplate[]>("layoutTemplates:delete", { id });
+      queryClient.setQueryData(["layoutTemplates:list"], list);
+    } catch (err) {
+      toast.error(`Failed to delete layout: ${String(err)}`);
+    }
+  }
+
   async function handleCopySlots(targetViewId: string, fromViewId: string) {
     try {
       const next = await ipc<StageState>("views:copySlots", { id: targetViewId, fromViewId });
@@ -514,6 +559,10 @@ export function SettingsView() {
     handleRemoveView,
     handleSetViewKind,
     handleSetViewNdiSource,
+    handleSetViewLayout,
+    handleSaveLayoutTemplate,
+    handleUpdateLayoutTemplate,
+    handleDeleteLayoutTemplate,
     handleCopySlots,
     handleReorderViews,
     handleAddOutput,
@@ -557,6 +606,7 @@ export function SettingsView() {
             stageState={stageState}
             wirelessChannels={wirelessChannels}
             teamPositions={teamPositions}
+            layoutTemplates={layoutTemplates}
             selectedViewId={selectedViewId}
             setSelectedViewId={setSelectedViewId}
             localSlots={localSlots}

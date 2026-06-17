@@ -20,6 +20,7 @@ const KIND_LABELS: Record<ViewKind, string> = {
   dashboard: "Dashboard",
   stage: "Stage",
   transcription: "Captions",
+  custom: "Custom Layout",
 };
 
 const UNROUTED = "__none__";

@@ -12,10 +12,12 @@ several live sources and shows them on monitors around the stage:
 - **ProdCom** — live audio **transcription** (captions), shown full-screen or as a
   strip on the dashboards.
 
-Each monitor is a **display** that can be one of several types — a slot grid, a
-tech dashboard, a stage/confidence view, or full-screen captions. A phone-friendly
-remote runs on the same LAN so a tech can re-assign slots and switch plans from the
-floor.
+Each monitor is a **display** (a screen at its own URL) pointed at a **view** —
+reusable content you build once and can route to any number of displays. A view is one
+of several types: a slot grid, a tech dashboard, a stage/confidence view, full-screen
+captions, or a **custom** layout you design visually (drag clocks, timers, slide text,
+mic-slot grids, logos, etc. onto a canvas). A phone-friendly remote runs on the same
+LAN so a tech can re-assign slots and switch plans from the floor.
 
 It's a self-contained **web/server app**: a small Node backend serves the kiosk
 displays, the settings UI, the phone remote, and a REST + SSE API — all on one port.
@@ -134,15 +136,20 @@ in the repo. Open `…/settings-window.html` and work through the sidebar:
 5. **Service Types** — choose which PCO service types are in play.
 6. **Plan** — **Auto** (follow the next upcoming event; rolls to the next one ~1 h
    after the current service ends) or **Manual** (pick a plan).
-7. **Slots** — build the channel layout: link each slot to a PCO person/position,
-   a static label, or leave it empty; optionally bind it to a wireless channel;
-   drag to reorder; stack slots that share a charger into one column. *(Only
-   **Slots**-type displays use this.)*
-8. **Displays** — run multiple monitors, each set to a **type**: **Slots** (the
-   channel grid), **Dashboard** (clock + PCO countdown + ProPresenter summary),
-   **Stage** (confidence view: slide text, section, chords, preview, timers), or
-   **Captions** (full-screen transcription). Each display can be renamed and opened
-   in its own window.
+7. **Views** — build reusable content (drag to reorder, duplicate, live preview).
+   Pick a **type** when you create one:
+   - **Slots** — the channel grid: link each slot to a PCO person/position, a static
+     label, or leave it empty; optionally bind it to a wireless channel; drag to
+     reorder; stack slots that share a charger into one column.
+   - **Dashboard** — clock + PCO countdown + ProPresenter now/next summary.
+   - **Stage** — confidence view: slide text, section, chords, preview, timers.
+   - **Captions** — full-screen transcription.
+   - **Custom** — a visual editor: drag/resize objects (clocks, countdowns, slide
+     text, mic-slot grids, captions, logos, images, shapes, …) onto a canvas, style
+     them, and **save designs to a reusable layout library** to reuse on other views.
+8. **Displays** — your physical screens. Each has its own URL and is **routed to a
+   view** (one view can drive many screens). Rename, drag to reorder, or open in its
+   own window.
 9. **Connect** — toggle the on-screen QR code for the phone remote.
 
 ## URLs & ports
@@ -188,21 +195,37 @@ A slot can optionally carry a **device binding** to a wireless channel, so the
 display shows that pack's RF/battery next to the person. Slots can **stack** into a
 shared on-screen column (mirrors two people sharing a dual-bay charger).
 
-**Displays** let you drive multiple monitors, all sharing one plan and PCO dataset.
-Each display has a **kind**:
+**Views & displays.** A **view** is a reusable content definition; a **display**
+(output) is a physical screen at its own URL, routed to exactly one view. One view can
+drive many displays, so you change content in one place. Both can be reordered. View
+**kinds**:
 
-- **Slots** — the channel grid (its own slot set). Only this kind uses Slots config.
+- **Slots** — the channel grid (its own slot set, per service type). Only this kind uses the slot editor.
 - **Dashboard** — clock, the PCO live countdown, and a ProPresenter now/next summary.
 - **Stage** — a confidence view: current/next slide text, song section + chords, a
   live slide thumbnail, running timers, and the countdown.
 - **Captions** — full-screen, auto-scrolling transcription from ProdCom.
+- **Custom** — a free-form layout authored in the **visual editor**: a fixed design
+  canvas (default 1920×1080) of positioned **objects** — clock, countdown, current/next
+  slide text + notes, slide thumbnail, section chip, mic-slots grid, transcript, brand
+  logo, NDI placeholder, image, shape, text — each bound to the same live data. Positions
+  and sizes are stored as fractions of the canvas, so a layout renders identically at any
+  resolution.
 
-**Presets** snapshot a slot arrangement by name so you can restore it later. The full
-base state is the `StageState` object pushed over SSE; high-frequency data (the PCO
-countdown, ProPresenter slide, and transcript) rides separate SSE channels so a
-display can render and recover from each independently. The countdown matches PCO's
-own behavior — it always counts **down** (to the service start, then per item), going
+**Layout templates** are named custom layouts saved to a reusable library (save / load /
+overwrite / delete from the editor). **Slot presets** similarly snapshot a slot
+arrangement by name.
+
+The full base state is the `StageState` object pushed over SSE; high-frequency data (the
+PCO countdown, ProPresenter slide, and transcript) rides separate SSE channels so a
+display can render and recover from each independently. The countdown matches PCO's own
+behavior — it always counts **down** (to the service start, then per item), going
 red/negative when an item runs over.
+
+**Backward compatibility.** The older "a display *is* its content" model is preserved as
+a computed compat shim in `StageState` (`displays` / `slots` / `slotsByDisplay`) so
+existing clients keep working; on first run, existing displays auto-migrate to
+views + outputs with their URLs and slot data intact.
 
 ## API reference
 
@@ -227,15 +250,28 @@ All endpoints are under `/api`. State-changing routes return the updated
 | POST | `/api/allowed-service-types` | Set the allowlist |
 | POST | `/api/show-qr` | Toggle the connect QR on the display |
 
-**Slots, presets & displays**
+**Views, displays & layouts**
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/api/slots` | Save slots for a display |
-| GET / POST | `/api/presets` | List / save a preset |
-| POST | `/api/presets/:id/apply` | Apply a preset to a display |
-| DELETE | `/api/presets/:id` | Delete a preset |
-| POST | `/api/displays` | Add a display |
-| PATCH / DELETE | `/api/displays/:id` | Update (name and/or kind) / remove a display |
+| GET | `/api/views` | List views |
+| POST | `/api/views` | Create a view (`{name, kind}`) |
+| PATCH | `/api/views/:id` | Update name / kind / `ndiSource` / `layout` |
+| POST | `/api/views/:id/slots` | Save a slots-view's slots |
+| POST | `/api/views/:id/duplicate` | Duplicate a view |
+| POST | `/api/views/:id/copy-slots` | Copy slots from another view |
+| POST | `/api/views/reorder` | Reorder views |
+| DELETE | `/api/views/:id` | Delete a view |
+| GET | `/api/outputs` | List physical displays |
+| POST | `/api/outputs` | Add a display |
+| PATCH | `/api/outputs/:id` | Rename / route to a view (`{viewId}`) |
+| POST | `/api/outputs/reorder` | Reorder displays |
+| DELETE | `/api/outputs/:id` | Remove a display |
+| GET / POST | `/api/layout-templates` | List / save a custom-layout template |
+| PATCH / DELETE | `/api/layout-templates/:id` | Update / delete a template |
+
+Legacy aliases (retained for older clients; they map onto views/outputs):
+`POST /api/slots`, `GET/POST /api/presets` + `/api/presets/:id/apply` + `DELETE /api/presets/:id`,
+and `POST /api/displays` + `PATCH/DELETE /api/displays/:id`.
 
 **Integrations & wireless**
 | Method | Path | Purpose |
@@ -277,14 +313,16 @@ All endpoints are under `/api`. State-changing routes return the updated
 │   ├── services/              # stage-controller, remote-server, pco-service,
 │   │                          #   live-poller, propresenter-service, prodcom-service,
 │   │                          #   wireless/device managers, integration-manager,
-│   │                          #   stores, encryption, broadcaster, app-paths, …
+│   │                          #   stores (settings/slots/views/presets/layout-templates),
+│   │                          #   slot-resolver, encryption, broadcaster, app-paths, …
 │   ├── providers/wireless/    # Shure ULX-D / Axient / PSM drivers + registry
-│   └── types/                 # Backend type contracts
+│   └── types/                 # Backend type contracts (stage.ts: View/Output/LayoutDTO…)
 ├── renderer/                  # Frontend (React)
 │   ├── main/                  # Displays: stage-view (router/picker) → slot grid,
-│   │                          #   dashboard-view, stage-display-view, transcription-view;
-│   │                          #   use-dashboard-state, use-transcript, pco-timer
-│   ├── settings/              # Settings app (settings-view + sections/)
+│   │                          #   dashboard-view, stage-display-view, transcription-view,
+│   │                          #   layout-renderer (custom layouts); hooks + pco-timer
+│   ├── settings/              # Settings app (settings-view + sections/: views-section,
+│   │                          #   outputs-section, slots-section, layout-editor, …)
 │   ├── components/            # Shared components + ui/ primitives
 │   ├── fonts/                 # Self-hosted Outfit (brand title)
 │   └── lib/api.ts             # REST + SSE client
@@ -310,7 +348,10 @@ All endpoints are under `/api`. State-changing routes return the updated
 State persists in a **data directory** — `$STAGE_UTILITY_DATA` if set, otherwise
 `~/.stage-utility`:
 
-- `settings.json` — non-secret config (service type, plan mode, displays, slots, …)
+- `settings.json` — non-secret config (service type, plan mode, outputs/displays, branding, …)
+- `views.json` — view definitions (kind + config; custom views carry their layout)
+- `slots.json` — slot sets, keyed by view + service type
+- `layout-templates.json` — saved custom-layout library; `presets.json` — slot presets
 - `secrets.bin` — integration secrets, **AES-256-GCM encrypted**
 - `encryption.key` — 32-byte key, auto-generated on first run (mode `600`)
 - `photo-cache/` — cached PCO photos

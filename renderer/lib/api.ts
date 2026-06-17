@@ -166,6 +166,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { ndiSource: p.ndiSource });
     }
 
+    case "views:setLayout": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { layout: p.layout });
+    }
+
     case "views:setSlots": {
       const id = p.id as string;
       return post<T>(`/api/views/${encodeURIComponent(id)}/slots`, { slots: p.slots });
@@ -187,6 +192,26 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "views:remove": {
       const id = p.id as string;
       return del<T>(`/api/views/${encodeURIComponent(id)}`);
+    }
+
+    // ── Layout templates ──────────────────────────────────────────────────
+    case "layoutTemplates:list":
+      return apiFetch<T>("/api/layout-templates");
+
+    case "layoutTemplates:save":
+      return post<T>("/api/layout-templates", { name: p.name, layout: p.layout });
+
+    case "layoutTemplates:update": {
+      const id = p.id as string;
+      const bodyPatch: Record<string, unknown> = {};
+      if (p.name !== undefined) bodyPatch.name = p.name;
+      if (p.layout !== undefined) bodyPatch.layout = p.layout;
+      return patch<T>(`/api/layout-templates/${encodeURIComponent(id)}`, bodyPatch);
+    }
+
+    case "layoutTemplates:delete": {
+      const id = p.id as string;
+      return del<T>(`/api/layout-templates/${encodeURIComponent(id)}`);
     }
 
     // ── Outputs (physical screens + routing) ──────────────────────────────
