@@ -78,9 +78,22 @@ function defaultStyle(type: LayoutObjectType): LayoutStyle {
   return { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 }
 
+// crypto.randomUUID() only exists in a SECURE context (https / localhost). Kiosk
+// servers run over plain HTTP on a LAN address, where it's undefined — calling it
+// throws and silently aborts the click (the dropdown closes, nothing is added).
+// getRandomValues is available everywhere; fall back further just in case.
+function uid(): string {
+  const c = globalThis.crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  if (c?.getRandomValues) {
+    return Array.from(c.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function makeObject(type: LayoutObjectType, zTop: number): LayoutObject {
   return {
-    id: crypto.randomUUID(),
+    id: uid(),
     x: 0.35, y: 0.42, w: 0.3, h: 0.16,
     z: zTop + 1,
     config: defaultConfig(type),
@@ -412,7 +425,7 @@ export function LayoutEditor({
   const currentLayout = (): LayoutDTO => ({ version: 1, canvas, objects });
   function loadTemplate(t: LayoutTemplate) {
     pushHistory();
-    setObjects(t.layout.objects.map((o) => ({ ...o, id: crypto.randomUUID() })));
+    setObjects(t.layout.objects.map((o) => ({ ...o, id: uid() })));
     setSelectedId(null);
     setDirty(true);
   }
@@ -455,7 +468,7 @@ export function LayoutEditor({
     const src = objects.find((o) => o.id === id);
     if (!src) return;
     pushHistory();
-    const copy: LayoutObject = { ...src, id: crypto.randomUUID(), x: clamp(src.x + 0.03, 0, 1 - src.w), y: clamp(src.y + 0.03, 0, 1 - src.h), z: zTop + 1 };
+    const copy: LayoutObject = { ...src, id: uid(), x: clamp(src.x + 0.03, 0, 1 - src.w), y: clamp(src.y + 0.03, 0, 1 - src.h), z: zTop + 1 };
     setObjects((prev) => [...prev, copy]);
     setSelectedId(copy.id);
   }
