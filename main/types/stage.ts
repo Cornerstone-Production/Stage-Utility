@@ -1,7 +1,10 @@
 // Shared stage types — frontend mirrors these shapes exactly.
 
-/** What a View renders: slot grid (default), dashboard, stage, or transcription. */
-export type ViewKind = "slots" | "dashboard" | "stage" | "transcription";
+/**
+ * What a View renders: slot grid (default), dashboard, stage, transcription, or
+ * a "custom" free-form layout authored with the visual editor (see {@link LayoutDTO}).
+ */
+export type ViewKind = "slots" | "dashboard" | "stage" | "transcription" | "custom";
 
 /** @deprecated Back-compat alias retained for the legacy display model. Use ViewKind. */
 export type DisplayKind = ViewKind;
@@ -74,6 +77,96 @@ export interface View {
    */
   ndiSource?: string | null;
   /** ISO creation timestamp (for stable ordering). */
+  createdAt: string;
+  /** Free-form layout for kind === "custom"; null/absent for the built-in kinds. */
+  layout?: LayoutDTO | null;
+}
+
+// ── Visual layout schema (kind === "custom") ─────────────────────────────────
+// A custom View is a fixed DESIGN canvas with absolutely-positioned objects.
+// All positions/sizes are FRACTIONS of the canvas (0..1) so the same layout
+// renders identically at any rendered size. Font/radius/padding sizes are
+// fractions of canvas HEIGHT. Bound objects read the same live data the built-in
+// kinds use (no new live data is introduced).
+
+export interface LayoutCanvas {
+  /** Design-space dimensions; define aspect ratio + the basis for font scaling. */
+  width: number;
+  height: number;
+  /** Solid background behind all objects (under NDI). "#rrggbb[aa]" or null. */
+  background?: string | null;
+}
+
+export type LayoutHAlign = "left" | "center" | "right";
+export type LayoutVAlign = "top" | "middle" | "bottom";
+
+/** Generic visual styling. Every field optional; the renderer applies defaults. */
+export interface LayoutStyle {
+  /** Fraction of canvas HEIGHT (e.g. 0.06 ≈ 64px on a 1080-tall canvas). */
+  fontSize?: number;
+  fontWeight?: number;
+  italic?: boolean;
+  uppercase?: boolean;
+  letterSpacing?: number; // em
+  color?: string;
+  textAlign?: LayoutHAlign;
+  vAlign?: LayoutVAlign;
+  background?: string | null;
+  opacity?: number; // 0..1
+  cornerRadius?: number; // fraction of canvas height
+  padding?: number; // fraction of canvas height
+  borderColor?: string | null;
+  borderWidth?: number; // fraction of canvas height
+  /** Drop-shadow strength 0..1 for legibility over video/photos. */
+  textShadow?: number;
+  lineClamp?: number | null;
+}
+
+/** Per-type configuration. The discriminant is `type`. */
+export type LayoutObjectConfig =
+  | { type: "text"; text: string }
+  | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h" }
+  | { type: "countdown-timer" } // PCO Live
+  | { type: "current-slide-text" }
+  | { type: "next-slide-text" }
+  | { type: "current-slide-notes" }
+  | { type: "slide-thumbnail" }
+  | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }
+  | { type: "slots-grid"; sourceViewId?: string | null } // embed a slots-View's grid
+  | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
+  | { type: "brand-logo"; useEmptySlotLogo?: boolean }
+  | { type: "ndi-video" } // background; web shows a placeholder, Apple shows video
+  | { type: "image"; src: string }
+  | { type: "shape"; shape: "rect" | "ellipse" };
+
+export type LayoutObjectType = LayoutObjectConfig["type"];
+
+export interface LayoutObject {
+  id: string;
+  /** Position/size as fractions of the canvas (0..1). */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Paint order; higher = front. */
+  z: number;
+  hidden?: boolean;
+  style?: LayoutStyle;
+  config: LayoutObjectConfig;
+}
+
+export interface LayoutDTO {
+  /** Schema version — bump when the shape changes so old layouts can migrate. */
+  version: 1;
+  canvas: LayoutCanvas;
+  objects: LayoutObject[];
+}
+
+/** A named, reusable custom layout — saved to a library, applied to any custom View. */
+export interface LayoutTemplate {
+  id: string;
+  name: string;
+  layout: LayoutDTO;
   createdAt: string;
 }
 

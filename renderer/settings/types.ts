@@ -54,6 +54,10 @@ export interface SectionHandlers {
   handleRemoveView: (id: string) => Promise<void>;
   handleSetViewKind: (id: string, kind: ViewKind) => Promise<void>;
   handleSetViewNdiSource: (id: string, ndiSource: string | null) => Promise<void>;
+  handleSetViewLayout: (id: string, layout: LayoutDTO) => Promise<void>;
+  handleSaveLayoutTemplate: (name: string, layout: LayoutDTO) => Promise<void>;
+  handleUpdateLayoutTemplate: (id: string, patch: { name?: string; layout?: LayoutDTO }) => Promise<void>;
+  handleDeleteLayoutTemplate: (id: string) => Promise<void>;
   handleCopySlots: (targetViewId: string, fromViewId: string) => Promise<void>;
   handleReorderViews: (ids: string[]) => Promise<void>;
   // Outputs (physical screens + routing)
@@ -73,6 +77,7 @@ export interface SectionProps {
   plans: PlanDTO[];
   wirelessChannels: WirelessChannel[];
   teamPositions: TeamPositionDTO[];
+  layoutTemplates: LayoutTemplate[];
   selectedViewId: string;
   setSelectedViewId: (id: string) => void;
   localSlots: Slot[];

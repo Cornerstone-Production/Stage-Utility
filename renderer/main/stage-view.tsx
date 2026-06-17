@@ -7,6 +7,7 @@ import { useStageState } from "./use-stage-state";
 import { DashboardView } from "./dashboard-view";
 import { StageDisplayView } from "./stage-display-view";
 import { TranscriptionView } from "./transcription-view";
+import { LayoutRenderer } from "./layout-renderer";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
@@ -293,6 +294,23 @@ export function StageView() {
     return (
       <StageErrorBoundary>
         <KioskUnrouted state={state} displayName={displayName} />
+      </StageErrorBoundary>
+    );
+  }
+
+  // Custom-layout views render the visual-editor layout full-screen.
+  if (kind === "custom") {
+    const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
+    if (activeView?.layout) {
+      return (
+        <StageErrorBoundary>
+          <LayoutRenderer layout={activeView.layout} ndiSource={activeView.ndiSource ?? null} />
+        </StageErrorBoundary>
+      );
+    }
+    return (
+      <StageErrorBoundary>
+        <KioskEmpty state={state} displayName={displayName} />
       </StageErrorBoundary>
     );
   }

@@ -97,7 +97,7 @@ interface Slot {
   stackWithPrevious?: boolean;
 }
 
-type ViewKind = "slots" | "dashboard" | "stage" | "transcription";
+type ViewKind = "slots" | "dashboard" | "stage" | "transcription" | "custom";
 /** @deprecated alias for ViewKind. */
 type DisplayKind = ViewKind;
 
@@ -107,6 +107,81 @@ interface View {
   name: string;
   kind: ViewKind;
   ndiSource?: string | null;
+  createdAt: string;
+  /** Free-form layout for kind === "custom". */
+  layout?: LayoutDTO | null;
+}
+
+// ── Visual layout schema (kind === "custom") ──
+interface LayoutCanvas {
+  width: number;
+  height: number;
+  background?: string | null;
+}
+
+type LayoutHAlign = "left" | "center" | "right";
+type LayoutVAlign = "top" | "middle" | "bottom";
+
+interface LayoutStyle {
+  fontSize?: number; // fraction of canvas height
+  fontWeight?: number;
+  italic?: boolean;
+  uppercase?: boolean;
+  letterSpacing?: number; // em
+  color?: string;
+  textAlign?: LayoutHAlign;
+  vAlign?: LayoutVAlign;
+  background?: string | null;
+  opacity?: number;
+  cornerRadius?: number; // fraction of canvas height
+  padding?: number; // fraction of canvas height
+  borderColor?: string | null;
+  borderWidth?: number; // fraction of canvas height
+  textShadow?: number; // 0..1
+  lineClamp?: number | null;
+}
+
+type LayoutObjectConfig =
+  | { type: "text"; text: string }
+  | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h" }
+  | { type: "countdown-timer" }
+  | { type: "current-slide-text" }
+  | { type: "next-slide-text" }
+  | { type: "current-slide-notes" }
+  | { type: "slide-thumbnail" }
+  | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }
+  | { type: "slots-grid"; sourceViewId?: string | null }
+  | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
+  | { type: "brand-logo"; useEmptySlotLogo?: boolean }
+  | { type: "ndi-video" }
+  | { type: "image"; src: string }
+  | { type: "shape"; shape: "rect" | "ellipse" };
+
+type LayoutObjectType = LayoutObjectConfig["type"];
+
+interface LayoutObject {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  z: number;
+  hidden?: boolean;
+  style?: LayoutStyle;
+  config: LayoutObjectConfig;
+}
+
+interface LayoutDTO {
+  version: 1;
+  canvas: LayoutCanvas;
+  objects: LayoutObject[];
+}
+
+/** A named, reusable custom layout (library). */
+interface LayoutTemplate {
+  id: string;
+  name: string;
+  layout: LayoutDTO;
   createdAt: string;
 }
 
