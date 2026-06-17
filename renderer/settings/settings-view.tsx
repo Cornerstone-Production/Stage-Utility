@@ -316,9 +316,15 @@ export function SettingsView() {
   }
 
   function addSlot() {
+    // Next channel = highest existing numeric channel + 1, so deleting/reordering
+    // slots doesn't produce duplicate or skipped channel numbers.
+    const maxChannel = localSlots.reduce((max, s) => {
+      const n = Number.parseInt(s.channel, 10);
+      return Number.isFinite(n) ? Math.max(max, n) : max;
+    }, 0);
     const newSlot: Slot = {
       id: `slot-${Date.now()}`,
-      channel: String(localSlots.length + 1).padStart(2, "0"),
+      channel: String(maxChannel + 1).padStart(2, "0"),
       order: localSlots.length,
       link: { kind: "pco", matchBy: "position", teamPositionName: "" },
       deviceBinding: null,

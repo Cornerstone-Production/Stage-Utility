@@ -260,8 +260,8 @@ export function StageView() {
 
   // Keep the browser tab title in sync with the brand + this display's name, so
   // renaming a display (Settings) updates its kiosk tab too.
-  const titleDisplay = (state?.displays?.length ?? 0) > 1
-    ? (state?.displays?.find((d) => d.id === displayId)?.name ?? displayId)
+  const titleDisplay = (state?.outputs?.length ?? 0) > 1
+    ? (state?.outputs?.find((o) => o.id === displayId)?.name ?? displayId)
     : null;
   useEffect(() => {
     const appName = state?.appName?.trim() || "Stage Utility";
