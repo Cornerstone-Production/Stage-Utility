@@ -137,6 +137,21 @@ export type LayoutObjectConfig =
   | { type: "brand-logo"; useEmptySlotLogo?: boolean }
   | { type: "ndi-video" } // background; web shows a placeholder, Apple shows video
   | { type: "image"; src: string }
+  // A file attached to the CURRENT PCO plan, matched by filename each week so the
+  // object auto-tracks the live plan (e.g. the Sunday stage plot). PDFs render
+  // client-side; images render directly. `match` is a case-insensitive filename
+  // substring (default "stage plot"); `page` is the 1-based PDF page. The rendered
+  // image (not the source file) is post-processed: optional manual `crop` (edge
+  // insets 0..1), `trim` of surrounding whitespace, and `background` recolor of the
+  // near-white page (keep / fill black / knock out to transparent).
+  | {
+      type: "plan-attachment";
+      match?: string;
+      page?: number;
+      crop?: { top: number; right: number; bottom: number; left: number };
+      trim?: boolean;
+      background?: "keep" | "black" | "transparent";
+    }
   | { type: "shape"; shape: "rect" | "ellipse" };
 
 export type LayoutObjectType = LayoutObjectConfig["type"];
@@ -247,6 +262,22 @@ export interface PlanDTO {
   seriesTitle: string | null;
   sortDate: string | null;
   dates: string | null;
+}
+
+/** A file attached to a PCO plan (e.g. a stage plot, chart, or rundown PDF). */
+export interface PcoAttachmentDTO {
+  id: string;
+  filename: string;
+  /** MIME type reported by PCO (e.g. "application/pdf"), or null. */
+  contentType: string | null;
+  fileSizeBytes: number | null;
+  /** PCO-generated preview image URL, when available. */
+  thumbnailUrl: string | null;
+  /** PCO display ordering, when present. */
+  pageOrder: number | null;
+  /** Where the file is attached — "Plan file", "Service type", "Song chart", etc.
+   *  (from the attachment's attachable type), for disambiguation in the picker. */
+  sourceLabel: string | null;
 }
 
 export interface TeamMemberDTO {

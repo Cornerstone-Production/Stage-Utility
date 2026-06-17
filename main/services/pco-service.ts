@@ -1,7 +1,7 @@
 // Planning Center Online client (Basic Auth: App ID + Secret).
 // Flattens JSON:API responses to slim DTOs. ~30s in-memory cache.
 
-import type { PcoLiveDTO, PlanDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
+import type { PcoAttachmentDTO, PcoLiveDTO, PlanDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 const CACHE_TTL_MS = 30_000;
@@ -125,6 +125,131 @@ class PcoService {
     const linkUrl = (live as unknown as { links?: Record<string, string> }).links?.[action];
     const url = typeof linkUrl === "string" && linkUrl ? linkUrl : `${base}/live/${action}`;
     await this.postAction(url, appId, secret);
+  }
+
+  // POST that parses + returns the JSON body (the Live controls' postAction
+  // discards it). Used by attachment `open`, which returns a temporary link.
+  private async postJson<T extends PcoNode = PcoNode>(
+    url: string,
+    appId: string,
+    secret: string,
+  ): Promise<PcoResponse<T>> {
+    console.log(`[pco] POST ${url}`);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: this.makeAuthHeader(appId, secret),
+        "Content-Type": "application/json",
+      },
+    });
+    if (response.status === 401) {
+      throw new Error("PCO auth failed — check App ID/Secret in Integrations settings");
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`PCO API error ${response.status}: ${body || response.statusText}`);
+    }
+    return (await response.json()) as PcoResponse<T>;
+  }
+
+  /** Human label for where a file is attached (so the picker can disambiguate). */
+  private attachableLabel(item: PcoNode): string | null {
+    const rel = item.relationships?.attachable?.data;
+    const t = rel && !Array.isArray(rel) ? rel.type : null;
+    switch (t) {
+      case "Plan": return "Plan file";
+      case "ServiceType": return "Service type";
+      case "Arrangement": return "Song chart";
+      case "Song": return "Song";
+      case "Item": return "Item";
+      case "Media": return "Media";
+      default: return t ?? null;
+    }
+  }
+
+  private mapAttachment(item: PcoNode): PcoAttachmentDTO {
+    const a = item.attributes;
+    const pageOrderRaw = a.page_order;
+    return {
+      id: item.id,
+      filename: String(a.filename ?? a.name ?? "file"),
+      contentType: a.content_type != null && String(a.content_type) !== "" ? String(a.content_type) : null,
+      fileSizeBytes: typeof a.file_size === "number" ? a.file_size : null,
+      thumbnailUrl: a.thumbnail_url != null && String(a.thumbnail_url) !== "" ? String(a.thumbnail_url) : null,
+      pageOrder:
+        typeof pageOrderRaw === "number"
+          ? pageOrderRaw
+          : pageOrderRaw != null && Number.isFinite(Number(pageOrderRaw))
+            ? Number(pageOrderRaw)
+            : null,
+      sourceLabel: this.attachableLabel(item),
+    };
+  }
+
+  /**
+   * Every file associated with a plan via the `all_attachments` endpoint — plan
+   * Files (e.g. the stage plot), service-type files, and item/song/arrangement
+   * charts in a single paginated call. (The plain `/attachments` endpoint only
+   * returns directly-attached plan files and can report 0 even when the plan has
+   * a stage plot, so `all_attachments` is the correct source.) Cached ~30s.
+   */
+  async listPlanAttachments(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<PcoAttachmentDTO[]> {
+    const cacheKey = `attachments:${appId}:${planId}`;
+    const cached = this.cacheGet<PcoAttachmentDTO[]>(cacheKey);
+    if (cached) return cached;
+
+    const out: PcoAttachmentDTO[] = [];
+    const seen = new Set<string>();
+    let url: string | null =
+      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/all_attachments?per_page=100`;
+
+    // Follow pagination (bounded) so big plans don't truncate, without runaway loops.
+    for (let page = 0; url && page < 6; page++) {
+      const json: PcoResponse & { links?: { next?: string } } = await this.request(url, appId, secret);
+      for (const n of Array.isArray(json.data) ? json.data : [json.data]) {
+        if (!seen.has(n.id)) {
+          seen.add(n.id);
+          out.push(this.mapAttachment(n));
+        }
+      }
+      const next = json.links?.next;
+      url = typeof next === "string" && next ? next : null;
+    }
+
+    this.cacheSet(cacheKey, out);
+    return out;
+  }
+
+  /**
+   * Request a temporary download link for a plan attachment. PCO only hands out
+   * short-lived (≈1h) S3 URLs via the `open` action, so callers should download
+   * promptly (we cache the bytes by attachment id, which is immutable). Not cached
+   * here since the link expires.
+   */
+  async openAttachment(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+    attachmentId: string,
+  ): Promise<{ url: string; contentType: string | null }> {
+    // `all_attachments/{id}/open` is the uniform open action for every attachable
+    // type (plan file, service-type file, item/arrangement chart).
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/all_attachments/${attachmentId}/open`;
+    const json = await this.postJson(url, appId, secret);
+    const node = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
+    const a = node?.attributes ?? {};
+    const dl = a.attachment_url ?? a.url;
+    if (typeof dl !== "string" || !dl) {
+      throw new Error("PCO did not return a download URL for this attachment");
+    }
+    const ct = a.content_type;
+    return { url: dl, contentType: typeof ct === "string" && ct ? ct : null };
   }
 
   async listServiceTypes(appId: string, secret: string): Promise<ServiceTypeDTO[]> {

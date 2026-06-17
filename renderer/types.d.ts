@@ -53,6 +53,16 @@ interface PlanDTO {
   dates: string | null;
 }
 
+interface PcoAttachmentDTO {
+  id: string;
+  filename: string;
+  contentType: string | null;
+  fileSizeBytes: number | null;
+  thumbnailUrl: string | null;
+  pageOrder: number | null;
+  sourceLabel: string | null;
+}
+
 interface TeamMemberDTO {
   id: string;
   name: string;
@@ -155,6 +165,14 @@ type LayoutObjectConfig =
   | { type: "brand-logo"; useEmptySlotLogo?: boolean }
   | { type: "ndi-video" }
   | { type: "image"; src: string }
+  | {
+      type: "plan-attachment";
+      match?: string;
+      page?: number;
+      crop?: { top: number; right: number; bottom: number; left: number };
+      trim?: boolean;
+      background?: "keep" | "black" | "transparent";
+    }
   | { type: "shape"; shape: "rect" | "ellipse" };
 
 type LayoutObjectType = LayoutObjectConfig["type"];

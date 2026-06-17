@@ -182,6 +182,18 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       ) : (
         <span style={{ ...ts, color: "rgba(255,255,255,0.3)" }}>Image</span>
       );
+    case "plan-attachment":
+      return (
+        <PlanAttachment
+          match={c.match ?? "stage plot"}
+          page={c.page ?? 1}
+          crop={c.crop}
+          trim={c.trim}
+          background={c.background}
+          planId={ctx.state.planId}
+          H={ctx.H}
+        />
+      );
     case "shape":
       return null; // the box background is the shape
     case "ndi-video":
@@ -217,6 +229,226 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     default:
       return null;
   }
+}
+
+// ── Plan-attachment object (e.g. the PCO stage plot) ─────────────────────────
+// pdf.js is lazy-loaded (code-split) so only displays that actually use a
+// plan-attachment object pull it in. Vite resolves the worker via ?url.
+
+let pdfjsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
+async function loadPdfjs(): Promise<typeof import("pdfjs-dist")> {
+  if (!pdfjsPromise) {
+    pdfjsPromise = (async () => {
+      const pdfjs = await import("pdfjs-dist");
+      const worker = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
+      pdfjs.GlobalWorkerOptions.workerSrc = (worker as { default: string }).default;
+      return pdfjs;
+    })();
+  }
+  return pdfjsPromise;
+}
+
+/** Post-processing applied to the rasterized file (NOT the source PDF). */
+export interface AttachmentProcessOpts {
+  page: number;
+  crop?: { top: number; right: number; bottom: number; left: number } | null;
+  trim?: boolean;
+  background?: "keep" | "black" | "transparent";
+}
+
+const NEAR_WHITE = 244; // r,g,b all above this counts as "page white"
+
+// Rasterize a PDF page (~1600px wide, capped) to a fresh canvas.
+async function rasterizePdf(data: ArrayBuffer, pageNum: number): Promise<HTMLCanvasElement> {
+  const pdfjs = await loadPdfjs();
+  const doc = await pdfjs.getDocument({ data }).promise;
+  try {
+    const n = Math.min(Math.max(Math.round(pageNum) || 1, 1), doc.numPages);
+    const page = await doc.getPage(n);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(3, 1600 / base.width);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const c2d = canvas.getContext("2d");
+    if (!c2d) throw new Error("no 2d context");
+    await page.render({ canvasContext: c2d, viewport }).promise;
+    return canvas;
+  } finally {
+    void doc.destroy();
+  }
+}
+
+// Draw an image blob to a fresh canvas (~1600px wide, capped).
+async function rasterizeImage(buf: ArrayBuffer, contentType: string): Promise<HTMLCanvasElement> {
+  const url = URL.createObjectURL(new Blob([buf], { type: contentType || "image/*" }));
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error("image decode failed"));
+      i.src = url;
+    });
+    const scale = Math.min(1, 1600 / Math.max(1, img.naturalWidth));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function cropCanvas(src: HTMLCanvasElement, crop: { top: number; right: number; bottom: number; left: number }): HTMLCanvasElement {
+  const left = Math.max(0, Math.min(0.95, crop.left || 0));
+  const right = Math.max(0, Math.min(0.95, crop.right || 0));
+  const top = Math.max(0, Math.min(0.95, crop.top || 0));
+  const bottom = Math.max(0, Math.min(0.95, crop.bottom || 0));
+  const x = Math.round(left * src.width);
+  const y = Math.round(top * src.height);
+  const w = Math.max(1, Math.round((1 - left - right) * src.width));
+  const h = Math.max(1, Math.round((1 - top - bottom) * src.height));
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  out.getContext("2d")?.drawImage(src, x, y, w, h, 0, 0, w, h);
+  return out;
+}
+
+// Crop away the near-white border, returning the tight content box.
+function trimCanvas(src: HTMLCanvasElement): HTMLCanvasElement {
+  const ctx = src.getContext("2d");
+  if (!ctx) return src;
+  const { width: w, height: h } = src;
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const isContent = (x: number, y: number) => {
+    const i = (y * w + x) * 4;
+    if (data[i + 3] < 16) return false; // transparent
+    return !(data[i] > NEAR_WHITE && data[i + 1] > NEAR_WHITE && data[i + 2] > NEAR_WHITE);
+  };
+  let top = 0, bottom = h - 1, left = 0, right = w - 1;
+  const rowHas = (y: number) => { for (let x = 0; x < w; x++) if (isContent(x, y)) return true; return false; };
+  const colHas = (x: number) => { for (let y = top; y <= bottom; y++) if (isContent(x, y)) return true; return false; };
+  while (top < bottom && !rowHas(top)) top++;
+  while (bottom > top && !rowHas(bottom)) bottom--;
+  while (left < right && !colHas(left)) left++;
+  while (right > left && !colHas(right)) right--;
+  const cw = right - left + 1;
+  const ch = bottom - top + 1;
+  if (cw <= 1 || ch <= 1 || (cw === w && ch === h)) return src;
+  const out = document.createElement("canvas");
+  out.width = cw;
+  out.height = ch;
+  out.getContext("2d")?.drawImage(src, left, top, cw, ch, 0, 0, cw, ch);
+  return out;
+}
+
+// Recolor near-white pixels: fill black or knock out to transparent.
+function recolorBackground(src: HTMLCanvasElement, mode: "black" | "transparent"): void {
+  const ctx = src.getContext("2d");
+  if (!ctx) return;
+  const img = ctx.getImageData(0, 0, src.width, src.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i] > NEAR_WHITE && d[i + 1] > NEAR_WHITE && d[i + 2] > NEAR_WHITE) {
+      if (mode === "transparent") {
+        d[i + 3] = 0;
+      } else {
+        d[i] = d[i + 1] = d[i + 2] = 0;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/**
+ * Fetch + rasterize + process a plan attachment into a PNG data URL. Shared by
+ * the renderer object and the editor's "Fit box to file" action. Returns the
+ * output pixel size so callers can match an object box to the content aspect.
+ * Resolves to `"empty"` when nothing matches on the current plan.
+ *
+ * `cacheBust` (the active plan id) is appended to the URL so a plan change forces
+ * a fresh fetch instead of serving the previous plan's file from the 5-min HTTP
+ * cache. The server ignores it — it always resolves against the active plan.
+ */
+export async function loadProcessedAttachment(
+  match: string,
+  opts: AttachmentProcessOpts,
+  cacheBust?: string | null,
+): Promise<{ dataUrl: string; width: number; height: number } | "empty" | null> {
+  const bust = cacheBust ? `&plan=${encodeURIComponent(cacheBust)}` : "";
+  const resp = await fetch(`/api/pco/attachment?match=${encodeURIComponent(match)}${bust}`);
+  if (resp.status === 404) return "empty";
+  if (!resp.ok) return null;
+  const ct = resp.headers.get("content-type") ?? "";
+  const buf = await resp.arrayBuffer();
+  let canvas = ct.includes("pdf") ? await rasterizePdf(buf, opts.page) : await rasterizeImage(buf, ct);
+  if (opts.crop && (opts.crop.top || opts.crop.right || opts.crop.bottom || opts.crop.left)) {
+    canvas = cropCanvas(canvas, opts.crop);
+  }
+  if (opts.trim) canvas = trimCanvas(canvas);
+  if (opts.background && opts.background !== "keep") recolorBackground(canvas, opts.background);
+  return { dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height };
+}
+
+function PlanAttachment({
+  match,
+  planId,
+  H,
+  ...opts
+}: AttachmentProcessOpts & { match: string; planId: string | null; H: number }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "empty" | "error">("loading");
+
+  // Stable dep for the options object (crop is nested).
+  const optsKey = JSON.stringify(opts);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSrc(null);
+    setStatus("loading");
+    void (async () => {
+      try {
+        const result = await loadProcessedAttachment(match, JSON.parse(optsKey) as AttachmentProcessOpts, planId);
+        if (cancelled) return;
+        if (result === "empty") {
+          setStatus("empty");
+        } else if (result) {
+          setSrc(result.dataUrl);
+          setStatus("ready");
+        } else {
+          setStatus("error");
+        }
+      } catch {
+        if (!cancelled) setStatus("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Re-fetch when the plan changes — the matched file rolls over week to week.
+  }, [match, optsKey, planId]);
+
+  if (status === "ready" && src) {
+    return <img src={src} alt="" className="w-full h-full object-contain" draggable={false} />;
+  }
+  const note =
+    status === "loading" ? "Loading…" : status === "empty" ? `No "${match}" on this plan` : "Couldn't load file";
+  return (
+    <span
+      style={{
+        fontSize: `${0.022 * H}px`,
+        color: "rgba(255,255,255,0.4)",
+        textAlign: "center",
+        width: "100%",
+        padding: `${0.01 * H}px`,
+      }}
+    >
+      {note}
+    </span>
+  );
 }
 
 /** Live data + tickers shared by the kiosk renderer and the settings editor. */

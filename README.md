@@ -208,9 +208,20 @@ drive many displays, so you change content in one place. Both can be reordered. 
 - **Custom** — a free-form layout authored in the **visual editor**: a fixed design
   canvas (default 1920×1080) of positioned **objects** — clock, countdown, current/next
   slide text + notes, slide thumbnail, section chip, mic-slots grid, transcript, brand
-  logo, NDI placeholder, image, shape, text — each bound to the same live data. Positions
-  and sizes are stored as fractions of the canvas, so a layout renders identically at any
-  resolution.
+  logo, NDI placeholder, image, **plan file**, shape, text — each bound to the same live
+  data. Positions and sizes are stored as fractions of the canvas, so a layout renders
+  identically at any resolution.
+
+  The **plan-file** object shows a file attached to the *current Planning Center plan* —
+  e.g. the stage plot. It matches by filename (case-insensitive substring, default
+  `"stage plot"`) across everything on the plan (plan Files, service-type files, item/song
+  charts — via PCO's `all_attachments`), so it auto-tracks the live plan week to week
+  without re-pointing. PDFs render client-side (pdf.js, lazy-loaded); images render
+  directly. The server resolves + proxies the file (PCO only issues short-lived links) and
+  caches it on disk by attachment id. The *rendered image* (not the source file) can be
+  framed in the inspector: **crop** (edge insets), **trim** (auto-remove the white page
+  margin), **background** (keep / fill black / knock white out to transparent), and a
+  **fit box to file** button that matches the object box to the content's aspect ratio.
 
 **Layout templates** are named custom layouts saved to a reusable library (save / load /
 overwrite / delete from the editor). **Slot presets** similarly snapshot a slot
@@ -240,6 +251,8 @@ All endpoints are under `/api`. State-changing routes return the updated
 | GET  | `/api/service-types` | PCO service types |
 | GET  | `/api/team-positions` | Team positions for the active plan |
 | GET  | `/api/plans?serviceTypeId=…` | Plans for a service type |
+| GET  | `/api/pco/attachments` | Files on the active plan (plan + item level) |
+| GET  | `/api/pco/attachment?match=…` | Stream the active plan's file matching a filename substring (proxied + cached) |
 | POST | `/api/service-type` | Set active service type |
 | POST | `/api/plan` | Set active plan |
 | POST | `/api/plan/next` | Jump to the next plan (auto mode) |
@@ -355,6 +368,7 @@ State persists in a **data directory** — `$STAGE_UTILITY_DATA` if set, otherwi
 - `secrets.bin` — integration secrets, **AES-256-GCM encrypted**
 - `encryption.key` — 32-byte key, auto-generated on first run (mode `600`)
 - `photo-cache/` — cached PCO photos
+- `cache/attachments/` — cached PCO plan files (stage plots etc.), keyed by attachment id
 
 **Back up this directory.** If you lose `encryption.key`, the encrypted secrets are
 unrecoverable and you'll need to re-enter every credential.
