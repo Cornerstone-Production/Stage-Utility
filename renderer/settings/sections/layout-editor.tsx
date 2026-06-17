@@ -88,6 +88,15 @@ function makeObject(type: LayoutObjectType, zTop: number): LayoutObject {
 
 const GRID = 48; // snap steps across the canvas
 const MIN = 0.03;
+
+// Canvas aspect presets. Resolution is irrelevant (the renderer scales the design
+// canvas to fit any screen, incl. 4K) — only the aspect/orientation matters.
+const CANVAS_PRESETS: { id: string; label: string; w: number; h: number }[] = [
+  { id: "16:9", label: "Landscape · 16:9", w: 1920, h: 1080 },
+  { id: "9:16", label: "Portrait · 9:16", w: 1080, h: 1920 },
+  { id: "4:3", label: "Standard · 4:3", w: 1440, h: 1080 },
+  { id: "21:9", label: "Ultrawide · 21:9", w: 2560, h: 1080 },
+];
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const snap = (v: number, on: boolean) => (on ? Math.round(v * GRID) / GRID : v);
 
@@ -302,18 +311,53 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 const NO_SPINNER =
   "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-inner-spin-button]:m-0";
 
-function NumberInput({ value, onChange, step = 0.01, min, max }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number }) {
-  return (
+/**
+ * Number input you can actually edit: selects-all on focus (so typing replaces
+ * rather than producing "05"), and may be cleared while typing instead of being
+ * stuck at "0". Commits valid, clamped numbers live; reverts an empty field on blur.
+ */
+function NumberField({ value, onChange, step = 1, min, max, suffix }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number; suffix?: string }) {
+  const [text, setText] = useState(() => String(value));
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!editing) setText(String(value));
+  }, [value, editing]);
+
+  function handleChange(raw: string) {
+    setText(raw);
+    if (raw.trim() === "") return; // allow an empty field mid-edit; don't commit
+    let n = parseFloat(raw);
+    if (!Number.isFinite(n)) return;
+    if (min != null) n = Math.max(min, n);
+    if (max != null) n = Math.min(max, n);
+    onChange(n);
+  }
+
+  const el = (
     <Input
       type="number"
-      value={Number.isFinite(value) ? value : 0}
+      value={text}
       step={step}
       min={min}
       max={max}
-      onChange={(e) => onChange(parseFloat(e.target.value))}
-      className={`text-gray-12 tabular-nums ${NO_SPINNER}`}
+      onFocus={(e) => { setEditing(true); e.currentTarget.select(); }}
+      onBlur={() => { setEditing(false); if (text.trim() === "") setText(String(value)); }}
+      onChange={(e) => handleChange(e.target.value)}
+      className={`text-gray-12 tabular-nums ${suffix ? "pr-6" : ""} ${NO_SPINNER}`}
     />
   );
+  if (!suffix) return el;
+  return (
+    <div className="relative flex-1 min-w-0">
+      {el}
+      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-caption2 text-gray-8 pointer-events-none">{suffix}</span>
+    </div>
+  );
+}
+
+/** Style-row number (fraction value). */
+function NumberInput({ value, onChange, step = 0.01, min, max }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number }) {
+  return <NumberField value={Number.isFinite(value) ? value : 0} onChange={onChange} step={step} min={min} max={max} />;
 }
 
 /** X/Y/W/H field shown as whole design-canvas pixels (stored as a 0..1 fraction). */
@@ -321,18 +365,14 @@ function PixelField({ label, value, dim, onChange }: { label: string; value: num
   return (
     <label className="flex items-center gap-2">
       <span className="text-caption2 text-gray-9 w-3.5 shrink-0">{label}</span>
-      <div className="relative flex-1 min-w-0">
-        <Input
-          type="number"
-          value={Math.round((Number.isFinite(value) ? value : 0) * dim)}
-          step={1}
-          min={0}
-          max={dim}
-          onChange={(e) => onChange((parseFloat(e.target.value) || 0) / dim)}
-          className={`text-gray-12 tabular-nums pr-6 ${NO_SPINNER}`}
-        />
-        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-caption2 text-gray-8 pointer-events-none">px</span>
-      </div>
+      <NumberField
+        value={Math.round((Number.isFinite(value) ? value : 0) * dim)}
+        step={1}
+        min={0}
+        max={dim}
+        suffix="px"
+        onChange={(v) => onChange(v / dim)}
+      />
     </label>
   );
 }
@@ -358,7 +398,7 @@ export function LayoutEditor({
 }) {
   const data = useLayoutData();
   const initial = view.layout ?? { version: 1 as const, canvas: { width: 1920, height: 1080, background: "#080810" }, objects: [] };
-  const [canvas] = useState<LayoutCanvas>(initial.canvas);
+  const [canvas, setCanvas] = useState<LayoutCanvas>(initial.canvas);
   const [objects, setObjects] = useState<LayoutObject[]>(initial.objects);
   const [selectedId, setSelectedId] = useState<string | null>(initial.objects[0]?.id ?? null);
   const [history, setHistory] = useState<LayoutObject[][]>([]);
@@ -473,6 +513,21 @@ export function LayoutEditor({
         <Button variant={gridOn ? "accent" : "filled"} size="small" onClick={() => setGridOn((v) => !v)} aria-label="Toggle snap grid">
           <Grid3x3Icon className="size-3.5" /> Grid
         </Button>
+        <Select
+          value={CANVAS_PRESETS.find((p) => p.w === canvas.width && p.h === canvas.height)?.id ?? "custom"}
+          onValueChange={(id: string) => {
+            const p = CANVAS_PRESETS.find((x) => x.id === id);
+            if (p) { setCanvas({ ...canvas, width: p.w, height: p.h }); setDirty(true); }
+          }}
+        >
+          <SelectTrigger className="w-40" aria-label="Canvas shape"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {CANVAS_PRESETS.map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
+            {!CANVAS_PRESETS.some((p) => p.w === canvas.width && p.h === canvas.height) && (
+              <SelectItem value="custom" disabled>Custom · {canvas.width}×{canvas.height}</SelectItem>
+            )}
+          </SelectContent>
+        </Select>
         <Button variant="filled" size="small" onClick={undo} disabled={history.length === 0}>
           <UndoIcon className="size-3.5" /> Undo
         </Button>
@@ -757,22 +812,14 @@ function Inspector({
           className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent"
           aria-label="Border color"
         />
-        <div className="relative flex-1 min-w-0">
-          <Input
-            type="number"
-            value={Math.round((s.borderWidth ?? 0) * canvas.height)}
-            step={1}
-            min={0}
-            max={40}
-            onChange={(e) => {
-              const px = Math.max(0, Math.min(40, parseFloat(e.target.value) || 0));
-              onStyle({ borderWidth: px / canvas.height, borderColor: s.borderColor ?? "#ffffff" });
-            }}
-            className={`text-gray-12 tabular-nums pr-6 ${NO_SPINNER}`}
-            aria-label="Border width (px)"
-          />
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-caption2 text-gray-8 pointer-events-none">px</span>
-        </div>
+        <NumberField
+          value={Math.round((s.borderWidth ?? 0) * canvas.height)}
+          step={1}
+          min={0}
+          max={40}
+          suffix="px"
+          onChange={(px) => onStyle({ borderWidth: px / canvas.height, borderColor: s.borderColor ?? "#ffffff" })}
+        />
       </Row>
 
       <Separator />
