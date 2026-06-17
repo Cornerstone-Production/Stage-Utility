@@ -501,9 +501,9 @@ export function LayoutEditor({
   const layersDesc = [...objects].sort((a, b) => b.z - a.z);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 @container">
       {/* Toolbar */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Select value="" onValueChange={(t: string) => addObject(t as LayoutObjectType)}>
           <SelectTrigger className="w-40"><SelectValue placeholder="+ Add object" /></SelectTrigger>
           <SelectContent>
@@ -570,7 +570,7 @@ export function LayoutEditor({
         )}
       </div>
 
-      <div className="flex gap-3 max-lg:flex-col">
+      <div className="flex gap-3 @max-4xl:flex-col">
         {/* Canvas */}
         <div className="flex-1 min-w-0">
           {data.state ? (
@@ -596,7 +596,7 @@ export function LayoutEditor({
         </div>
 
         {/* Side panel: layers + inspector */}
-        <div className="w-64 shrink-0 flex flex-col gap-3">
+        <div className="w-64 shrink-0 flex flex-col gap-3 @max-4xl:w-full @max-4xl:shrink">
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Layers</span>
