@@ -129,6 +129,10 @@ export class RemoteServer {
         ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" :
         ext === ".ico"  ? "image/x-icon" :
         ext === ".woff2" ? "font/woff2" :
+        // Browsers ignore a web app manifest served as octet-stream, which drops
+        // the Add-to-Home-Screen icon on Android/Chrome.
+        ext === ".webmanifest" ? "application/manifest+json" :
+        ext === ".json" ? "application/json" :
         "application/octet-stream";
       const data = await fs.readFile(candidate);
       // Vite fingerprints everything under /assets/, so cache those forever;
