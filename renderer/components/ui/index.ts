@@ -3,6 +3,7 @@
 export { Button, type ButtonProps } from "./button";
 export { ButtonGroup } from "./button-group";
 export { Input, type InputProps } from "./input";
+export { NumberInput, type NumberInputProps } from "./number-input";
 export {
   Select,
   SelectGroup,

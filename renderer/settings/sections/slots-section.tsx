@@ -12,6 +12,7 @@ import {
 import {
   Button,
   Input,
+  NumberInput,
   Select,
   SelectTrigger,
   SelectContent,
@@ -114,20 +115,15 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
         <span className="text-callout text-gray-9 flex-1 italic">Spacer</span>
         <label className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0">
           Width
-          <Input
-            type="number"
-            step="0.1"
-            min="0"
-            key={`sp-${slot.id}-${slot.widthIn ?? 2}`}
-            defaultValue={slot.widthIn ?? 2}
-            onBlur={(e: ChangeEvent<HTMLInputElement>) => {
-              const n = Number.parseFloat(e.target.value);
-              onChange({ ...slot, widthIn: Number.isFinite(n) && n > 0 ? n : 0.1 });
-            }}
-            className="w-20"
+          <NumberInput
+            value={slot.widthIn ?? 2}
+            step={0.5}
+            min={0.1}
+            suffix="in"
+            className="w-24"
             aria-label="Spacer width (inches)"
+            onChange={(n) => onChange({ ...slot, widthIn: n })}
           />
-          in
         </label>
         <Button variant="transparent" size="small" iconOnly onClick={onRemove} aria-label="Remove spacer">
           <TrashIcon className="size-3.5 text-red-10" />
@@ -526,37 +522,27 @@ function AlignmentPanel({
           <div className="flex flex-wrap gap-x-4 gap-y-2">
             <label className="flex items-center gap-1.5 text-caption1 text-gray-11">
               Display width
-              <Input
-                type="number"
-                step="0.1"
-                min="1"
-                key={`dw-${layout.displayWidthIn}`}
-                defaultValue={layout.displayWidthIn}
-                onBlur={(e: ChangeEvent<HTMLInputElement>) => {
-                  const n = Number.parseFloat(e.target.value);
-                  if (Number.isFinite(n) && n > 0) onChange({ ...layout, displayWidthIn: n });
-                }}
-                className="w-20"
+              <NumberInput
+                value={layout.displayWidthIn}
+                step={0.25}
+                min={1}
+                suffix="in"
+                className="w-28"
                 aria-label="Display active width (inches)"
+                onChange={(n) => onChange({ ...layout, displayWidthIn: n })}
               />
-              in
             </label>
             <label className="flex items-center gap-1.5 text-caption1 text-gray-11">
               Charger width
-              <Input
-                type="number"
-                step="0.01"
-                min="0.1"
-                key={`cw-${layout.columnWidthIn}`}
-                defaultValue={layout.columnWidthIn}
-                onBlur={(e: ChangeEvent<HTMLInputElement>) => {
-                  const n = Number.parseFloat(e.target.value);
-                  if (Number.isFinite(n) && n > 0) onChange({ ...layout, columnWidthIn: n });
-                }}
-                className="w-20"
+              <NumberInput
+                value={layout.columnWidthIn}
+                step={0.1}
+                min={0.1}
+                suffix="in"
+                className="w-28"
                 aria-label="Charger column width (inches)"
+                onChange={(n) => onChange({ ...layout, columnWidthIn: n })}
               />
-              in
             </label>
           </div>
           <p className={`text-caption2 ${over ? "text-red-10" : "text-gray-9"}`}>
