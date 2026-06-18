@@ -627,6 +627,45 @@ export function SettingsView() {
     }
   }
 
+  async function handleReorderPresets(ids: string[]) {
+    // Optimistic: reorder the cached list immediately so the drag feels instant.
+    const prev = queryClient.getQueryData<SlotPreset[]>(["presets:list"]);
+    if (prev) {
+      const byId = new Map(prev.map((p) => [p.id, p]));
+      const reordered = ids.map((id) => byId.get(id)).filter(Boolean) as SlotPreset[];
+      for (const p of prev) if (!ids.includes(p.id)) reordered.push(p);
+      queryClient.setQueryData(["presets:list"], reordered);
+    }
+    try {
+      const presets = await ipc<SlotPreset[]>("presets:reorder", { ids });
+      queryClient.setQueryData(["presets:list"], presets);
+    } catch (err) {
+      if (prev) queryClient.setQueryData(["presets:list"], prev);
+      toast.error(`Failed to reorder arrangements: ${String(err)}`);
+    }
+  }
+
+  async function handleRenamePreset(id: string, name: string) {
+    try {
+      const presets = await ipc<SlotPreset[]>("presets:rename", { id, name });
+      queryClient.setQueryData(["presets:list"], presets);
+    } catch (err) {
+      toast.error(`Failed to rename arrangement: ${String(err)}`);
+    }
+  }
+
+  async function handleOverwritePreset(id: string) {
+    try {
+      // Persist any pending editor edits first so the preset captures what's on screen.
+      if (slotsDirty) await saveSlots();
+      const presets = await ipc<SlotPreset[]>("presets:overwrite", { id, displayId: selectedViewId });
+      queryClient.setQueryData(["presets:list"], presets);
+      toast.success("Arrangement overwritten with current slots.");
+    } catch (err) {
+      toast.error(`Failed to overwrite arrangement: ${String(err)}`);
+    }
+  }
+
   // ── Outputs (physical screens + routing) ─────────────────────────────
   async function handleAddOutput() {
     try {
@@ -728,6 +767,9 @@ export function SettingsView() {
     handleApplyPreset,
     handleDeletePreset,
     handleImportPreset,
+    handleReorderPresets,
+    handleRenamePreset,
+    handleOverwritePreset,
     handleAddOutput,
     handleRenameOutput,
     handleSetOutputView,

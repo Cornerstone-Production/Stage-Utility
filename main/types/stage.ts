@@ -144,6 +144,8 @@ export type LayoutObjectConfig =
   | { type: "countdown-timer" } // PCO Live
   | { type: "current-slide-text" }
   | { type: "next-slide-text" }
+  | { type: "current-service-item" }
+  | { type: "next-service-item" }
   | { type: "current-slide-notes" }
   | { type: "slide-thumbnail" }
   | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }

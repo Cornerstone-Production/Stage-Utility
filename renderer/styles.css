@@ -183,3 +183,11 @@
 [data-radix-scroll-area-viewport] > div {
   display: block !important;
 }
+
+/* The kiosk backdrop (mirrors index.html's body). Applied behind the embedded
+   "Mic slots" object in custom layouts so its translucent slot cards read the
+   same grey as the standalone slots view instead of navy over a flat canvas. */
+.kiosk-surface {
+  background-color: #080810;
+  background-image: radial-gradient(ellipse 120% 80% at 50% 0%, #0f0f1a 0%, #080810 55%, #040408 100%);
+}

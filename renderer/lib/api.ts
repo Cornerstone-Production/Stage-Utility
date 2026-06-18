@@ -159,6 +159,19 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "presets:import":
       return post<T>("/api/presets/import", p);
 
+    case "presets:reorder":
+      return post<T>("/api/presets/reorder", { ids: p.ids });
+
+    case "presets:rename": {
+      const id = p.id as string;
+      return patch<T>(`/api/presets/${encodeURIComponent(id)}`, { name: p.name });
+    }
+
+    case "presets:overwrite": {
+      const id = p.id as string;
+      return patch<T>(`/api/presets/${encodeURIComponent(id)}`, { overwriteFromDisplayId: p.displayId });
+    }
+
     // ── Views (content) ──────────────────────────────────────────────────
     case "views:add":
       return post<T>("/api/views", p);

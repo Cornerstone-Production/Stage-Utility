@@ -2,6 +2,7 @@ import { Component, useEffect } from "react";
 import type { ReactNode, ErrorInfo } from "react";
 import { onNotification } from "../lib/api";
 import { SlotPanel } from "../components/slot-panel";
+import { SlotsColumns } from "../components/slots-columns";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useStageState } from "./use-stage-state";
@@ -381,28 +382,10 @@ export function StageView() {
     : (state.slotsByDisplay?.[displayId] ?? []);
   const sortedSlots = [...displaySlots].sort((a, b) => a.order - b.order);
 
-  const columns: Slot[][] = [];
-  for (const slot of sortedSlots) {
-    if (slot.stackWithPrevious && columns.length > 0) {
-      columns[columns.length - 1].push(slot);
-    } else {
-      columns.push([slot]);
-    }
-  }
-
-  // Physical alignment: when the View has a slotsLayout, size columns in inches
-  // (against the monitor's active width) so they line up with the chargers.
+  // Physical alignment: when the View has a slotsLayout, columns are sized in
+  // inches (against the monitor's active width) so they line up with the chargers.
   const slotsView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
   const slotsLayout = slotsView?.slotsLayout ?? null;
-  const columnFlex = (col: Slot[]): string | undefined => {
-    if (!slotsLayout || slotsLayout.displayWidthIn <= 0) return undefined;
-    const inches = col[0]?.widthIn ?? slotsLayout.columnWidthIn;
-    return `0 0 ${(inches / slotsLayout.displayWidthIn) * 100}%`;
-  };
-  const isSpacerColumn = (col: Slot[]) => col.every((s) => s.link.kind === "spacer");
-  // A spacer can opt to show the empty-slot image centered in its gap.
-  const spacerShowsImage = (col: Slot[]) =>
-    col.some((s) => s.link.kind === "spacer" && (s.link as { showEmptyImage?: boolean }).showEmptyImage);
 
   if (sortedSlots.length === 0) {
     return (
@@ -429,35 +412,12 @@ export function StageView() {
         {/* Desktop / kiosk: fill-height columns (stacked slots share a column).
             With a slotsLayout, columns are inch-sized and centered so they line up
             with the chargers; otherwise they share width equally. */}
-        <div className={`flex flex-1 min-h-0 max-sm:hidden${slotsLayout ? " justify-center" : ""}`}>
-          {columns.map((column, ci) => {
-            const flex = columnFlex(column);
-            return (
-              <div
-                key={column[0]?.id ?? ci}
-                className={`flex min-w-0 flex-col${flex ? "" : " flex-1"}`}
-                style={flex ? { flex } : undefined}
-              >
-                {isSpacerColumn(column)
-                  ? spacerShowsImage(column) && state.emptySlotLogo
-                    ? (
-                        <div className="flex flex-1 items-center justify-center [container-type:inline-size]">
-                          <BrandLogo
-                            logo={state.emptySlotLogo}
-                            monochrome
-                            className="text-white/25"
-                            style={{ width: "clamp(2rem,32cqw,9rem)", height: "clamp(2rem,32cqw,9rem)" }}
-                          />
-                        </div>
-                      )
-                    : null
-                  : column.map((slot) => (
-                      <SlotPanel key={slot.id} slot={slot} emptySlotLogo={state.emptySlotLogo} />
-                    ))}
-              </div>
-            );
-          })}
-        </div>
+        <SlotsColumns
+          slots={sortedSlots}
+          slotsLayout={slotsLayout}
+          emptySlotLogo={state.emptySlotLogo}
+          className="flex-1 max-sm:hidden"
+        />
 
         {/* Phone: 2-up card grid, scrolls when it overflows (weekly-setup check).
             container-type makes the card's cqw-based sizing scale to the card. */}
