@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { DisplayInfo, LayoutDTO, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { DisplayInfo, LayoutDTO, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -827,6 +827,20 @@ export class StageController {
     const ndiSource = source?.trim() ? source.trim() : null;
     const views = this.state.views.map((v) => (v.id === id ? { ...v, ndiSource } : v));
     console.log(`[stage-controller] setViewNdiSource id=${id} source=${ndiSource ?? "(none)"}`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Set (or clear) a slots-View's physical-alignment config. */
+  async setViewSlotsLayout(id: string, slotsLayout: SlotsLayout | null): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:setSlotsLayout — view ${id} not found`);
+    }
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, slotsLayout } : v));
+    console.log(`[stage-controller] setViewSlotsLayout id=${id} ${slotsLayout ? `${slotsLayout.displayWidthIn}in` : "(off)"}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();

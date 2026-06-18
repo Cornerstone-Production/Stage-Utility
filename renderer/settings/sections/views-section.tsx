@@ -30,6 +30,15 @@ const KIND_LABELS: Record<ViewKind, string> = {
 };
 const KIND_ORDER: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "custom"];
 
+// Preview thumbnail shapes (width ÷ height) so the preview can mirror the target
+// monitor's orientation. 16:9 matches a 37″ 4K panel.
+const PREVIEW_ASPECTS = [
+  { id: "16:9", label: "16:9 · landscape", ratio: 16 / 9 },
+  { id: "9:16", label: "9:16 · portrait", ratio: 9 / 16 },
+  { id: "4:3", label: "4:3", ratio: 4 / 3 },
+  { id: "21:9", label: "21:9 · ultrawide", ratio: 21 / 9 },
+];
+
 // ---- sortable master-list item ----------------------------------------------
 
 function SortableViewItem({
@@ -100,6 +109,9 @@ function ViewDetail({
   // field state initializes fresh per view.
   const [editName, setEditName] = useState(view.name);
   const [editNdi, setEditNdi] = useState(view.ndiSource ?? "");
+  // Preview aspect ratio — shapes the thumbnail to match the target monitor
+  // (default 16:9, e.g. a 37″ 4K panel). Editor-only; doesn't affect the kiosk.
+  const [previewAspect, setPreviewAspect] = useState<number>(16 / 9);
 
   function handleNameBlur() {
     const trimmed = editName.trim();
@@ -171,7 +183,20 @@ function ViewDetail({
           />
         </div>
       ) : (
-        <ViewPreview viewId={view.id} />
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-caption1 text-gray-9">Preview shape</span>
+            <Select value={String(previewAspect)} onValueChange={(v: string) => setPreviewAspect(Number(v))}>
+              <SelectTrigger className="w-full sm:w-48"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PREVIEW_ASPECTS.map((a) => (
+                  <SelectItem key={a.id} value={String(a.ratio)}>{a.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <ViewPreview viewId={view.id} aspect={previewAspect} />
+        </div>
       )}
 
       {/* NDI source (native Apple client only) */}
@@ -214,6 +239,7 @@ function ViewDetail({
             </div>
           )}
           <SlotEditor
+            view={view}
             wirelessChannels={wirelessChannels}
             teamPositions={teamPositions}
             localSlots={localSlots}
@@ -281,7 +307,14 @@ export function ViewsSection({
   }
 
   return (
-    <div className="px-5 max-sm:px-3 flex gap-5 max-sm:gap-0 py-5 max-sm:py-4 h-full min-h-0">
+    <div
+      className={cn(
+        "px-5 max-sm:px-3 flex gap-5 max-sm:gap-0 pt-5 max-sm:pt-4",
+        // Custom views fill the viewport (editor fits, no page scroll); other kinds
+        // grow naturally and get extra bottom room so the last item can scroll up.
+        selected?.kind === "custom" ? "h-full min-h-0 pb-5 max-sm:pb-4" : "pb-[50vh]",
+      )}
+    >
       {/* Master list */}
       <div
         className={cn(

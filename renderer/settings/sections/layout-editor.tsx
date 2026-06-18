@@ -23,6 +23,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import {
   Button,
   Input,
+  NumberInput as UiNumberInput,
   Select,
   SelectTrigger,
   SelectContent,
@@ -340,51 +341,10 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-const NO_SPINNER =
-  "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-inner-spin-button]:m-0";
-
-/**
- * Number input you can actually edit: selects-all on focus (so typing replaces
- * rather than producing "05"), and may be cleared while typing instead of being
- * stuck at "0". Commits valid, clamped numbers live; reverts an empty field on blur.
- */
+/** Thin wrappers over the shared themed NumberInput (kept so existing call sites
+ *  and PixelField don't change). */
 function NumberField({ value, onChange, step = 1, min, max, suffix }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number; suffix?: string }) {
-  const [text, setText] = useState(() => String(value));
-  const [editing, setEditing] = useState(false);
-  useEffect(() => {
-    if (!editing) setText(String(value));
-  }, [value, editing]);
-
-  function handleChange(raw: string) {
-    setText(raw);
-    if (raw.trim() === "") return; // allow an empty field mid-edit; don't commit
-    let n = parseFloat(raw);
-    if (!Number.isFinite(n)) return;
-    if (min != null) n = Math.max(min, n);
-    if (max != null) n = Math.min(max, n);
-    onChange(n);
-  }
-
-  const el = (
-    <Input
-      type="number"
-      value={text}
-      step={step}
-      min={min}
-      max={max}
-      onFocus={(e) => { setEditing(true); e.currentTarget.select(); }}
-      onBlur={() => { setEditing(false); if (text.trim() === "") setText(String(value)); }}
-      onChange={(e) => handleChange(e.target.value)}
-      className={`text-gray-12 tabular-nums ${suffix ? "pr-6" : ""} ${NO_SPINNER}`}
-    />
-  );
-  if (!suffix) return el;
-  return (
-    <div className="relative flex-1 min-w-0">
-      {el}
-      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-caption2 text-gray-8 pointer-events-none">{suffix}</span>
-    </div>
-  );
+  return <UiNumberInput value={Number.isFinite(value) ? value : 0} onChange={onChange} step={step} min={min} max={max} suffix={suffix} />;
 }
 
 /** Style-row number (fraction value). */

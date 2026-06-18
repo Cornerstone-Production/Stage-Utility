@@ -218,9 +218,11 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         <div className="flex w-full h-full">
           {columns.map((col, ci) => (
             <div key={col[0]?.id ?? ci} className="flex flex-1 min-w-0 flex-col [container-type:inline-size]">
-              {col.map((slot) => (
-                <SlotPanel key={slot.id} slot={slot} emptySlotLogo={ctx.state.emptySlotLogo} />
-              ))}
+              {col.every((s) => s.link.kind === "spacer")
+                ? null
+                : col.map((slot) => (
+                    <SlotPanel key={slot.id} slot={slot} emptySlotLogo={ctx.state.emptySlotLogo} />
+                  ))}
             </div>
           ))}
         </div>

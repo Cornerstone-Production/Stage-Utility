@@ -84,7 +84,8 @@ type SlotLink =
   | { kind: "pco"; matchBy: "person"; personId: string }
   | { kind: "pco"; matchBy: "position"; teamPositionName: string; notesStartsWith?: string }
   | { kind: "static"; label: string; color: string }
-  | { kind: "empty" };
+  | { kind: "empty" }
+  | { kind: "spacer" };
 
 interface SlotDevice {
   status: "none" | "ok" | "warn" | "error";
@@ -105,6 +106,8 @@ interface Slot {
   device: SlotDevice;
   /** When true, stacks into the same on-screen column as the previous slot. */
   stackWithPrevious?: boolean;
+  /** Column width in inches (used only when the View has a slotsLayout). */
+  widthIn?: number;
 }
 
 type ViewKind = "slots" | "dashboard" | "stage" | "transcription" | "custom";
@@ -120,6 +123,13 @@ interface View {
   createdAt: string;
   /** Free-form layout for kind === "custom". */
   layout?: LayoutDTO | null;
+  /** Physical-alignment config for a slots-View (inches); absent → equal widths. */
+  slotsLayout?: SlotsLayout | null;
+}
+
+interface SlotsLayout {
+  displayWidthIn: number;
+  columnWidthIn: number;
 }
 
 // ── Visual layout schema (kind === "custom") ──
