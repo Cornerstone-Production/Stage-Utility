@@ -112,7 +112,7 @@ export function BrandingSection({
   }
 
   return (
-    <div className="px-5 max-sm:px-3 flex flex-col gap-6 py-5 max-sm:py-4">
+    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
       {/* Shared hidden file input (target chosen by whichever Upload was clicked). */}
       <input
         ref={fileRef}
