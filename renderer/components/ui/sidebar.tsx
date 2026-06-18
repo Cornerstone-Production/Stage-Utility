@@ -1,5 +1,33 @@
 import * as React from "react";
+import { Tooltip as TooltipPrimitive } from "radix-ui";
 import { cn } from "../../lib/cn";
+
+// ── Chrome context ────────────────────────────────────────────────────────────
+// Carries the responsive shell state down to items: whether the sidebar is a
+// collapsed icon rail, whether we're on a mobile drawer, and how to close the
+// drawer after a selection. Provided by SplitView (which owns the responsive
+// layout) so items render icon-only + tooltip when railed.
+
+interface SidebarChromeValue {
+  collapsed: boolean;
+  isMobile: boolean;
+  closeDrawer?: () => void;
+}
+
+const SidebarChromeContext = React.createContext<SidebarChromeValue>({
+  collapsed: false,
+  isMobile: false,
+});
+
+export function SidebarChromeProvider({
+  value,
+  children,
+}: {
+  value: SidebarChromeValue;
+  children: React.ReactNode;
+}) {
+  return <SidebarChromeContext value={value}>{children}</SidebarChromeContext>;
+}
 
 // ── Context ───────────────────────────────────────────────────────────────────
 
@@ -103,6 +131,8 @@ export function SidebarListItem({
   ...props
 }: SidebarListItemProps) {
   const ctx = React.use(SidebarListContext);
+  const chrome = React.use(SidebarChromeContext);
+  const railed = chrome.collapsed && !chrome.isMobile;
 
   const isActive = isActiveProp ?? (() => {
     if (!ctx || item === undefined) return false;
@@ -121,22 +151,25 @@ export function SidebarListItem({
       ctx.onSelectedItemChange(item);
     }
     onClick?.(e);
+    chrome.closeDrawer?.();
   }
 
   const displayLabel = title ?? label;
 
-  return (
+  const button = (
     <button
       type="button"
       className={cn(
         "flex items-center gap-2 w-full rounded-md px-2.5 py-1.5 text-left",
         "text-[13px] font-medium transition-colors",
+        railed && "justify-center px-0",
         isActive
           ? "bg-blue-9 text-white"
           : "text-gray-11 hover:bg-gray-a3 hover:text-gray-12",
         className,
       )}
       aria-current={isActive ? "page" : undefined}
+      aria-label={railed ? displayLabel : undefined}
       onClick={handleClick}
       {...props}
     >
@@ -145,8 +178,28 @@ export function SidebarListItem({
           {icon}
         </span>
       )}
-      {displayLabel && <span className="truncate">{displayLabel}</span>}
+      {displayLabel && <span className={cn("truncate", railed && "sr-only")}>{displayLabel}</span>}
       {children}
     </button>
   );
+
+  // In the collapsed rail, show the label as a hover tooltip instead.
+  if (railed && displayLabel) {
+    return (
+      <TooltipPrimitive.Root>
+        <TooltipPrimitive.Trigger asChild>{button}</TooltipPrimitive.Trigger>
+        <TooltipPrimitive.Portal>
+          <TooltipPrimitive.Content
+            side="right"
+            sideOffset={8}
+            className="z-50 select-none rounded-md bg-gray-12 px-2 py-1 text-[12px] font-medium text-gray-1 shadow-md"
+          >
+            {displayLabel}
+          </TooltipPrimitive.Content>
+        </TooltipPrimitive.Portal>
+      </TooltipPrimitive.Root>
+    );
+  }
+
+  return button;
 }

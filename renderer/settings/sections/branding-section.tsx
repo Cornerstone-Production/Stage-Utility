@@ -112,7 +112,7 @@ export function BrandingSection({
   }
 
   return (
-    <div className="px-5 flex flex-col gap-6 py-5">
+    <div className="px-5 max-sm:px-3 flex flex-col gap-6 py-5 max-sm:py-4">
       {/* Shared hidden file input (target chosen by whichever Upload was clicked). */}
       <input
         ref={fileRef}
@@ -141,7 +141,7 @@ export function BrandingSection({
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
               }}
               placeholder="Stage Utility"
-              className="w-60"
+              className="w-full sm:w-60"
               aria-label="App name"
             />
           </Field>
@@ -154,7 +154,7 @@ export function BrandingSection({
                 PNG, JPG, SVG, or WebP, up to 1.5 MB. Appears next to the name.
               </FieldDescription>
             </FieldContent>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center justify-center size-12 rounded-md border border-gray-a4 bg-gray-a2 overflow-hidden shrink-0 text-gray-12">
                 {stageState.appLogo ? (
                   <BrandLogo

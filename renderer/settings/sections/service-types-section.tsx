@@ -48,7 +48,7 @@ export function ServiceTypesSection({
   }
 
   return (
-    <div className="px-5 flex flex-col gap-6 py-5">
+    <div className="px-5 max-sm:px-3 flex flex-col gap-6 py-5 max-sm:py-4">
       <FieldSet title="Allowed Service Types">
         <FieldGroup>
           {serviceTypes.map((st) => {

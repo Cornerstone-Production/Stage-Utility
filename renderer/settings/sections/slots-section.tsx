@@ -113,7 +113,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
           <span className="absolute left-1.5 top-1/2 -translate-y-1/2 w-2 h-[2px] rounded-full bg-gray-a7 pointer-events-none" />
         </>
       )}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {/* Drag handle */}
         <button
           {...attributes}
@@ -187,13 +187,13 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
 
       {/* PCO-linked fields */}
       {isPco && (
-        <div className="flex flex-col gap-1.5 pl-9">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-1.5 pl-4 sm:pl-9">
+          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
             <Select
               value={(slot.link as { kind: "pco"; matchBy: string }).matchBy}
               onValueChange={(v: string) => setPcoMatchBy(v as "person" | "position")}
             >
-              <SelectTrigger className="w-32">
+              <SelectTrigger className="w-full sm:w-32">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -259,8 +259,8 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
           </div>
           {/* Notes starts-with filter — only shown for "by position" */}
           {(slot.link as { kind: "pco"; matchBy: string }).matchBy === "position" && (
-            <div className="flex items-center gap-2">
-              <span className="text-caption1 text-gray-9 shrink-0 w-32">Notes starts with:</span>
+            <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+              <span className="text-caption1 text-gray-9 shrink-0 sm:w-32">Notes starts with:</span>
               <Input
                 value={
                   (slot.link as { kind: "pco"; matchBy: "position"; notesStartsWith?: string })
@@ -278,7 +278,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
                   })
                 }
                 placeholder="e.g. 1  or  HH"
-                className="w-24"
+                className="w-full sm:w-24"
               />
             </div>
           )}
@@ -287,7 +287,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
 
       {/* Static label + color */}
       {isStatic && (
-        <div className="flex items-center gap-2 pl-9">
+        <div className="flex items-center gap-2 pl-4 sm:pl-9">
           <Input
             value={(slot.link as { kind: "static"; label: string; color: string }).label}
             onChange={(e: ChangeEvent<HTMLInputElement>) =>
@@ -324,10 +324,10 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
 
       {/* Device binding (optional, not shown for empty slots) */}
       {!isEmpty && wirelessChannels.length > 0 && (
-        <div className="flex items-center gap-2 pl-9">
+        <div className="flex flex-col items-stretch gap-1.5 pl-4 sm:pl-9 sm:flex-row sm:items-center sm:gap-2">
           <span className="text-caption1 text-gray-9 shrink-0">Device channel:</span>
           <Select value={slot.deviceBinding?.channelId ?? ""} onValueChange={setDeviceBinding}>
-            <SelectTrigger className="w-40">
+            <SelectTrigger className="w-full sm:w-40">
               <SelectValue placeholder="None" />
             </SelectTrigger>
             <SelectContent>

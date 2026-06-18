@@ -8,6 +8,7 @@ import {
   SidebarList,
   SidebarListItem,
   ScrollArea,
+  Button,
   toast,
 } from "../components/ui";
 import {
@@ -21,7 +22,10 @@ import {
   PaletteIcon,
   SunIcon,
   MoonIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
 } from "lucide-react";
+import { useIsMobile } from "../lib/use-media-query";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SectionItem, WirelessChannel, SectionHandlers } from "./types";
 import { PlanSection } from "./sections/plan-section";
@@ -92,6 +96,32 @@ function useTheme() {
   return { isDark, toggle };
 }
 
+// ---- sidebar collapse (desktop icon rail) -----------------------------------
+
+const SIDEBAR_COLLAPSED_KEY = "settings-sidebar-collapsed";
+
+function useSidebarCollapsed() {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  function toggle() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // localStorage unavailable — collapse still applies for this session.
+      }
+      return next;
+    });
+  }
+  return { collapsed, toggle };
+}
+
 // ---- sidebar section definitions --------------------------------------------
 
 const SECTIONS: SectionItem[] = [
@@ -109,6 +139,9 @@ const SECTIONS: SectionItem[] = [
 export function SettingsView() {
   useEscapeToClose();
   const theme = useTheme();
+  const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed();
+  const isMobile = useIsMobile();
+  const railed = collapsed && !isMobile;
   const queryClient = useQueryClient();
 
   const [activeSection, setActiveSection] = useState<SectionItem>(SECTIONS[0]);
@@ -634,16 +667,40 @@ export function SettingsView() {
 
   return (
     <SplitView
-      storageKey="settings-view"
-      sidebarSize={{ default: 200, min: 180, max: 240 }}
+      collapsed={collapsed}
+      mobileTitle={activeSection.label}
       sidebar={
         <Sidebar>
-          {/* Brand header — big logo + name auto-fit to the logo's height. */}
-          <BrandHeader
-            name={stageState.appName}
-            logo={stageState.appLogo}
-            monochrome={stageState.appLogoMonochrome}
-          />
+          {/* Header row: brand (expanded) or just the expand toggle (rail). The
+              desktop collapse toggle is hidden on mobile (the drawer is always
+              shown expanded). */}
+          {railed ? (
+            <div className="flex justify-center pt-2">
+              <Button variant="transparent" size="small" iconOnly aria-label="Expand sidebar" onClick={toggleCollapsed}>
+                <PanelLeftOpenIcon className="size-4 text-gray-11" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-start">
+              <div className="flex-1 min-w-0">
+                <BrandHeader
+                  name={stageState.appName}
+                  logo={stageState.appLogo}
+                  monochrome={stageState.appLogoMonochrome}
+                />
+              </div>
+              <Button
+                variant="transparent"
+                size="small"
+                iconOnly
+                aria-label="Collapse sidebar"
+                onClick={toggleCollapsed}
+                className="max-sm:hidden mt-2.5 mr-1.5 shrink-0"
+              >
+                <PanelLeftCloseIcon className="size-4 text-gray-11" />
+              </Button>
+            </div>
+          )}
 
           <SidebarList
             items={SECTIONS}
