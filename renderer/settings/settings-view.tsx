@@ -36,6 +36,7 @@ import { IntegrationsSection } from "./sections/integrations-section";
 import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
 import { BrandHeader } from "./brand-header";
+import { BrandLogo } from "../components/brand-logo";
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -675,7 +676,14 @@ export function SettingsView() {
               desktop collapse toggle is hidden on mobile (the drawer is always
               shown expanded). */}
           {railed ? (
-            <div className="flex justify-center pt-2">
+            <div className="flex flex-col items-center gap-1.5 pt-2">
+              {stageState.appLogo && (
+                <BrandLogo
+                  logo={stageState.appLogo}
+                  monochrome={stageState.appLogoMonochrome}
+                  className="size-8 rounded-md text-gray-12"
+                />
+              )}
               <Button variant="transparent" size="small" iconOnly aria-label="Expand sidebar" onClick={toggleCollapsed}>
                 <PanelLeftOpenIcon className="size-4 text-gray-11" />
               </Button>
