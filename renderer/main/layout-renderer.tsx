@@ -219,7 +219,19 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
           {columns.map((col, ci) => (
             <div key={col[0]?.id ?? ci} className="flex flex-1 min-w-0 flex-col [container-type:inline-size]">
               {col.every((s) => s.link.kind === "spacer")
-                ? null
+                ? col.some((s) => s.link.kind === "spacer" && (s.link as { showEmptyImage?: boolean }).showEmptyImage) &&
+                  ctx.state.emptySlotLogo
+                  ? (
+                      <div className="flex flex-1 items-center justify-center">
+                        <BrandLogo
+                          logo={ctx.state.emptySlotLogo}
+                          monochrome
+                          className="text-white/25"
+                          style={{ width: "clamp(1rem,32cqw,9rem)", height: "clamp(1rem,32cqw,9rem)" }}
+                        />
+                      </div>
+                    )
+                  : null
                 : col.map((slot) => (
                     <SlotPanel key={slot.id} slot={slot} emptySlotLogo={ctx.state.emptySlotLogo} />
                   ))}

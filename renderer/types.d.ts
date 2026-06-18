@@ -85,7 +85,7 @@ type SlotLink =
   | { kind: "pco"; matchBy: "position"; teamPositionName: string; notesStartsWith?: string }
   | { kind: "static"; label: string; color: string }
   | { kind: "empty" }
-  | { kind: "spacer" };
+  | { kind: "spacer"; showEmptyImage?: boolean };
 
 interface SlotDevice {
   status: "none" | "ok" | "warn" | "error";
@@ -329,6 +329,8 @@ interface StageState {
   appLogoMonochrome: boolean;
   /** Image centered in empty slots on the kiosk (recolored to the kiosk gray). */
   emptySlotLogo: string | null;
+  /** Show NDI-related controls in settings (off by default; native client only). */
+  ndiEnabled: boolean;
 }
 
 /** Editor source for a brand image (original upload + saved crop transform). */

@@ -20,6 +20,7 @@ import {
   PlugIcon,
   QrCodeIcon,
   PaletteIcon,
+  SlidersHorizontalIcon,
   SunIcon,
   MoonIcon,
   PanelLeftCloseIcon,
@@ -35,6 +36,7 @@ import { OutputsSection } from "./sections/outputs-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
+import { AdvancedSection } from "./sections/advanced-section";
 import { BrandHeader } from "./brand-header";
 import { BrandLogo } from "../components/brand-logo";
 
@@ -133,6 +135,7 @@ const SECTIONS: SectionItem[] = [
   { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4 text-gray-11" /> },
   { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4 text-gray-11" /> },
   { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4 text-gray-11" /> },
+  { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
 ];
 
 // ---- main settings view -----------------------------------------------------
@@ -186,6 +189,12 @@ export function SettingsView() {
   const { data: layoutTemplates = [] } = useQuery({
     queryKey: ["layoutTemplates:list"],
     queryFn: () => ipc<LayoutTemplate[]>("layoutTemplates:list"),
+  });
+
+  // Fetch saved slot arrangements (presets — global, recall into any view)
+  const { data: slotPresets = [] } = useQuery({
+    queryKey: ["presets:list"],
+    queryFn: () => ipc<SlotPreset[]>("presets:list"),
   });
 
   // Selected View for the Views tab master-detail (default to the first view).
@@ -317,6 +326,15 @@ export function SettingsView() {
       queryClient.setQueryData(["stage:getState"], next);
     } catch (err) {
       toast.error(`Failed to update QR setting: ${String(err)}`);
+    }
+  }
+
+  async function handleSetNdiEnabled(enabled: boolean) {
+    try {
+      const next = await ipc<StageState>("stage:setNdiEnabled", { enabled });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to update NDI setting: ${String(err)}`);
     }
   }
 
@@ -554,6 +572,51 @@ export function SettingsView() {
     }
   }
 
+  // ── Presets (saved slot arrangements) ────────────────────────────────
+  async function handleSavePreset(name: string) {
+    try {
+      // Persist any pending editor edits first so the preset captures what's on screen.
+      if (slotsDirty) await saveSlots();
+      const presets = await ipc<SlotPreset[]>("presets:save", { name, displayId: selectedViewId });
+      queryClient.setQueryData(["presets:list"], presets);
+      toast.success(`Saved arrangement "${name}".`);
+    } catch (err) {
+      toast.error(`Failed to save arrangement: ${String(err)}`);
+    }
+  }
+
+  async function handleApplyPreset(id: string) {
+    try {
+      const next = await ipc<StageState>("presets:apply", { id, displayId: selectedViewId });
+      queryClient.setQueryData(["stage:getState"], next);
+      const viewSlots = next.slotsByView?.[selectedViewId] ?? [];
+      setLocalSlots([...viewSlots].sort((a, b) => a.order - b.order));
+      setSlotsDirty(false);
+      toast.success("Arrangement applied.");
+    } catch (err) {
+      toast.error(`Failed to apply arrangement: ${String(err)}`);
+    }
+  }
+
+  async function handleDeletePreset(id: string) {
+    try {
+      const presets = await ipc<SlotPreset[]>("presets:delete", { id });
+      queryClient.setQueryData(["presets:list"], presets);
+    } catch (err) {
+      toast.error(`Failed to delete arrangement: ${String(err)}`);
+    }
+  }
+
+  async function handleImportPreset(name: string, slots: Slot[]) {
+    try {
+      const presets = await ipc<SlotPreset[]>("presets:import", { name, slots });
+      queryClient.setQueryData(["presets:list"], presets);
+      toast.success(`Imported arrangement "${name}".`);
+    } catch (err) {
+      toast.error(`Failed to import arrangement: ${String(err)}`);
+    }
+  }
+
   // ── Outputs (physical screens + routing) ─────────────────────────────
   async function handleAddOutput() {
     try {
@@ -613,6 +676,15 @@ export function SettingsView() {
     window.open(url, `display-${id}`);
   }
 
+  async function handleRefreshDisplay(id: string | null) {
+    try {
+      await ipc("displays:refresh", { id: id ?? "" });
+      toast.success(id ? "Refresh sent to display." : "Refresh sent to all displays.");
+    } catch (err) {
+      toast.error(`Failed to refresh display: ${String(err)}`);
+    }
+  }
+
   const handlers: SectionHandlers = {
     handleServiceTypeChange,
     handlePlanModeChange,
@@ -620,6 +692,7 @@ export function SettingsView() {
     handleNextPlan,
     handleRefresh,
     handleShowQrChange,
+    handleSetNdiEnabled,
     handleSetAllowedServiceTypes,
     handleSetBranding,
     updateSlot,
@@ -640,12 +713,17 @@ export function SettingsView() {
     handleDeleteLayoutTemplate,
     handleCopySlots,
     handleReorderViews,
+    handleSavePreset,
+    handleApplyPreset,
+    handleDeletePreset,
+    handleImportPreset,
     handleAddOutput,
     handleRenameOutput,
     handleSetOutputView,
     handleRemoveOutput,
     handleReorderOutputs,
     handleOpenOutputWindow,
+    handleRefreshDisplay,
     handleDragEnd,
     sensors,
   };
@@ -687,6 +765,7 @@ export function SettingsView() {
             localSlots={localSlots}
             slotsDirty={slotsDirty}
             isSavingSlots={isSavingSlots}
+            slotPresets={slotPresets}
             handlers={handlers}
           />
         );
@@ -698,6 +777,8 @@ export function SettingsView() {
         return <ConnectSection stageState={stageState} handlers={handlers} />;
       case "branding":
         return <BrandingSection stageState={stageState} handlers={handlers} />;
+      case "advanced":
+        return <AdvancedSection stageState={stageState} handlers={handlers} />;
     }
   }
 

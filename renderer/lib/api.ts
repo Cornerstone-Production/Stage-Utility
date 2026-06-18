@@ -117,6 +117,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "stage:setShowQr":
       return post<T>("/api/show-qr", p);
 
+    case "stage:setNdiEnabled":
+      return post<T>("/api/ndi-enabled", p);
+
+    case "displays:refresh":
+      return post<T>("/api/displays/refresh", p);
+
     case "stage:setBranding":
       return post<T>("/api/branding", p);
 
@@ -146,6 +152,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       const id = p.id as string;
       return del<T>(`/api/presets/${encodeURIComponent(id)}`);
     }
+
+    case "presets:import":
+      return post<T>("/api/presets/import", p);
 
     // ── Views (content) ──────────────────────────────────────────────────
     case "views:add":

@@ -373,6 +373,7 @@ function PixelField({ label, value, dim, onChange }: { label: string; value: num
 
 export function LayoutEditor({
   view,
+  ndiEnabled,
   slotsViews,
   templates,
   onSave,
@@ -381,6 +382,7 @@ export function LayoutEditor({
   onDeleteTemplate,
 }: {
   view: View;
+  ndiEnabled: boolean;
   slotsViews: View[];
   templates: LayoutTemplate[];
   onSave: (layout: LayoutDTO) => Promise<void>;
@@ -526,7 +528,7 @@ export function LayoutEditor({
         <Select value="" onValueChange={(t: string) => addObject(t as LayoutObjectType)}>
           <SelectTrigger className="w-40"><SelectValue placeholder="+ Add object" /></SelectTrigger>
           <SelectContent>
-            {PALETTE.map((t) => (
+            {PALETTE.filter((t) => ndiEnabled || t !== "ndi-video").map((t) => (
               <SelectItem key={t} value={t}>{TYPE_LABELS[t]}</SelectItem>
             ))}
           </SelectContent>

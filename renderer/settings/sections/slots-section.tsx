@@ -1,4 +1,4 @@
-import { type ChangeEvent, type CSSProperties } from "react";
+import { useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 import { DndContext, closestCenter, type DraggableAttributes, type DraggableSyntheticListeners } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -8,6 +8,11 @@ import {
   Loader2Icon,
   GripVerticalIcon,
   Rows2Icon,
+  ImageIcon,
+  BookmarkIcon,
+  RotateCcwIcon,
+  DownloadIcon,
+  UploadIcon,
 } from "lucide-react";
 import {
   Button,
@@ -21,6 +26,7 @@ import {
   ButtonGroup,
   Separator,
   Switch,
+  toast,
 } from "../../components/ui";
 import type { SectionHandlers, WirelessChannel } from "../types";
 import { PositionPicker } from "./position-picker";
@@ -93,10 +99,12 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
 
   const currentMode: "pco" | "static" | "empty" = isPco ? "pco" : isStatic ? "static" : "empty";
 
-  // Spacers are a horizontal gap for charger alignment — just a width + remove.
+  // Spacers are a horizontal gap for charger alignment — width + remove, plus an
+  // optional empty-slot image centered in the gap.
   if (isSpacer) {
+    const showImage = (slot.link as { kind: "spacer"; showEmptyImage?: boolean }).showEmptyImage ?? false;
     return (
-      <div className="relative flex items-center gap-2 py-3 pl-4">
+      <div className="relative flex flex-wrap items-center gap-2 py-3 pl-4">
         <button
           {...dragAttributes}
           {...dragListeners}
@@ -107,6 +115,20 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
           <GripVerticalIcon className="size-4 text-gray-7" />
         </button>
         <span className="text-callout text-gray-9 flex-1 italic">Spacer</span>
+        <label
+          className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0"
+          title="Center the empty-slot image (from Branding) in this spacer"
+        >
+          <ImageIcon className="size-3.5 text-gray-9" />
+          Image
+          <Switch
+            checked={showImage}
+            onCheckedChange={(v: boolean) =>
+              onChange({ ...slot, link: { kind: "spacer", showEmptyImage: v } })
+            }
+            aria-label="Show empty-slot image in spacer"
+          />
+        </label>
         <label className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0">
           Width
           <NumberInput
@@ -443,9 +465,21 @@ interface SlotEditorProps {
   localSlots: Slot[];
   slotsDirty: boolean;
   isSavingSlots: boolean;
+  slotPresets: SlotPreset[];
   handlers: Pick<
     SectionHandlers,
-    "updateSlot" | "addSlot" | "addSpacer" | "removeSlot" | "saveSlots" | "handleSetViewSlotsLayout" | "handleDragEnd" | "sensors"
+    | "updateSlot"
+    | "addSlot"
+    | "addSpacer"
+    | "removeSlot"
+    | "saveSlots"
+    | "handleSetViewSlotsLayout"
+    | "handleSavePreset"
+    | "handleApplyPreset"
+    | "handleDeletePreset"
+    | "handleImportPreset"
+    | "handleDragEnd"
+    | "sensors"
   >;
 }
 
@@ -457,6 +491,7 @@ export function SlotEditor({
   localSlots,
   slotsDirty,
   isSavingSlots,
+  slotPresets,
   handlers,
 }: SlotEditorProps) {
   const layout = view.slotsLayout ?? null;
@@ -473,12 +508,16 @@ export function SlotEditor({
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <span className="text-headline font-semibold text-gray-12 flex-1">Slots</span>
-        {slotsDirty && (
-          <Button variant="accent" size="small" onClick={handlers.saveSlots} disabled={isSavingSlots}>
-            {isSavingSlots ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
-            Save slots
-          </Button>
-        )}
+        {slotsDirty && <span className="text-caption2 text-amber-10">Unsaved changes</span>}
+        <Button
+          variant="accent"
+          size="small"
+          onClick={handlers.saveSlots}
+          disabled={isSavingSlots || !slotsDirty}
+        >
+          {isSavingSlots ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
+          Save slots
+        </Button>
       </div>
 
       <AlignmentPanel
@@ -521,6 +560,172 @@ export function SlotEditor({
           <PlusIcon className="size-3.5 text-gray-9" />
           Add spacer
         </Button>
+      </div>
+
+      <PresetsPanel presets={slotPresets} localSlots={localSlots} handlers={handlers} />
+    </div>
+  );
+}
+
+// ---- Presets (saved slot arrangements) --------------------------------------
+
+/** A slug safe for a download filename. */
+function fileSlug(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "arrangement";
+}
+
+/** Trigger a client-side JSON file download. */
+function downloadJson(filename: string, data: unknown) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Save / recall / export / import named slot arrangements. Presets are global —
+ * saving captures the current view's slots; recall applies a preset to this view.
+ */
+function PresetsPanel({
+  presets,
+  localSlots,
+  handlers,
+}: {
+  presets: SlotPreset[];
+  localSlots: Slot[];
+  handlers: Pick<SectionHandlers, "handleSavePreset" | "handleApplyPreset" | "handleDeletePreset" | "handleImportPreset">;
+}) {
+  const [name, setName] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function save() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    handlers.handleSavePreset(trimmed);
+    setName("");
+  }
+
+  function exportCurrent() {
+    downloadJson("current.slots.json", { name: "Current slots", slots: localSlots });
+  }
+
+  async function onImportFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-importing the same file
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as { name?: string; slots?: Slot[] } | Slot[];
+      const slots = Array.isArray(parsed) ? parsed : parsed.slots;
+      if (!Array.isArray(slots)) {
+        toast.error("That file doesn't contain slots.");
+        return;
+      }
+      const importedName =
+        (!Array.isArray(parsed) && parsed.name) || file.name.replace(/\.slots\.json$|\.json$/i, "") || "Imported";
+      await handlers.handleImportPreset(importedName, slots);
+    } catch (err) {
+      toast.error(`Couldn't read that file: ${String(err)}`);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-a4 p-3 flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <BookmarkIcon className="size-3.5 text-gray-9" />
+        <span className="text-callout font-medium text-gray-12 flex-1">Saved arrangements</span>
+      </div>
+
+      {/* Save current slots as a new named preset */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          value={name}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              save();
+            }
+          }}
+          placeholder="Name this arrangement…"
+          className="flex-1 min-w-40"
+          aria-label="New arrangement name"
+        />
+        <Button variant="accent" size="small" onClick={save} disabled={!name.trim()}>
+          <BookmarkIcon className="size-3.5" />
+          Save current
+        </Button>
+      </div>
+
+      {/* Saved presets list */}
+      {presets.length > 0 ? (
+        <div className="flex flex-col">
+          {presets.map((preset, i) => (
+            <div
+              key={preset.id}
+              className={`flex flex-wrap items-center gap-2 py-2${i === 0 ? "" : " border-t border-gray-a3"}`}
+            >
+              <span className="text-callout text-gray-12 flex-1 min-w-0 truncate">{preset.name}</span>
+              <span className="text-caption2 text-gray-9 shrink-0">{preset.slots.length} slots</span>
+              <Button
+                variant="filled"
+                size="small"
+                onClick={() => handlers.handleApplyPreset(preset.id)}
+                aria-label={`Recall ${preset.name}`}
+              >
+                <RotateCcwIcon className="size-3.5 text-gray-9" />
+                Recall
+              </Button>
+              <Button
+                variant="transparent"
+                size="small"
+                iconOnly
+                onClick={() => downloadJson(`${fileSlug(preset.name)}.slots.json`, { name: preset.name, slots: preset.slots })}
+                aria-label={`Export ${preset.name}`}
+              >
+                <DownloadIcon className="size-3.5 text-gray-9" />
+              </Button>
+              <Button
+                variant="transparent"
+                size="small"
+                iconOnly
+                onClick={() => handlers.handleDeletePreset(preset.id)}
+                aria-label={`Delete ${preset.name}`}
+              >
+                <TrashIcon className="size-3.5 text-red-10" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-caption2 text-gray-9">
+          No saved arrangements yet. Save the current slots above, then recall them into any view later.
+        </p>
+      )}
+
+      {/* Export current / import from file */}
+      <div className="flex flex-wrap gap-2 pt-1">
+        <Button variant="transparent" size="small" onClick={exportCurrent}>
+          <DownloadIcon className="size-3.5 text-gray-9" />
+          Export current
+        </Button>
+        <Button variant="transparent" size="small" onClick={() => fileRef.current?.click()}>
+          <UploadIcon className="size-3.5 text-gray-9" />
+          Import…
+        </Button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={onImportFile}
+          aria-hidden
+        />
       </div>
     </div>
   );
