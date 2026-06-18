@@ -29,7 +29,10 @@ export function BrandHeader({
     const fit = () => {
       let size = MAX_FONT;
       el.style.fontSize = `${size}px`;
-      while (size > MIN_FONT && el.scrollHeight > box.clientHeight) {
+      // Shrink until the name fits the box BOTH ways: height (so it doesn't clip)
+      // and width (so the longest word — e.g. "Cornerstone" — fits on its own line
+      // and wraps at the space instead of breaking mid-word).
+      while (size > MIN_FONT && (el.scrollHeight > box.clientHeight || el.scrollWidth > box.clientWidth)) {
         size -= 1;
         el.style.fontSize = `${size}px`;
       }
@@ -61,7 +64,7 @@ export function BrandHeader({
       >
         <span
           ref={textRef}
-          className="block font-title text-gray-12 break-words"
+          className="block font-title text-gray-12 [overflow-wrap:normal] [word-break:normal] hyphens-none"
           style={{ fontSize, lineHeight: 1.1 }}
         >
           {name}
