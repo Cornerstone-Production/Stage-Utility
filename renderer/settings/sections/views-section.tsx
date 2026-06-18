@@ -214,6 +214,7 @@ function ViewDetail({
             </div>
           )}
           <SlotEditor
+            view={view}
             wirelessChannels={wirelessChannels}
             teamPositions={teamPositions}
             localSlots={localSlots}

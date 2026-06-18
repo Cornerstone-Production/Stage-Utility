@@ -369,6 +369,22 @@ export function SettingsView() {
     setSlotsDirty(true);
   }
 
+  function addSpacer() {
+    const newSlot: Slot = {
+      id: `slot-${Date.now()}`,
+      channel: "",
+      order: localSlots.length,
+      link: { kind: "spacer" },
+      widthIn: 2,
+      deviceBinding: null,
+      displayName: null,
+      photoUrl: null,
+      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null },
+    };
+    setLocalSlots((prev) => [...prev, newSlot]);
+    setSlotsDirty(true);
+  }
+
   function removeSlot(idx: number) {
     setLocalSlots((prev) => prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, order: i })));
     setSlotsDirty(true);
@@ -447,6 +463,15 @@ export function SettingsView() {
       queryClient.setQueryData(["stage:getState"], next);
     } catch (err) {
       toast.error(`Failed to set NDI source: ${String(err)}`);
+    }
+  }
+
+  async function handleSetViewSlotsLayout(id: string, slotsLayout: SlotsLayout | null) {
+    try {
+      const next = await ipc<StageState>("views:setSlotsLayout", { id, slotsLayout });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to update alignment: ${String(err)}`);
     }
   }
 
@@ -590,8 +615,10 @@ export function SettingsView() {
     handleSetBranding,
     updateSlot,
     addSlot,
+    addSpacer,
     removeSlot,
     saveSlots,
+    handleSetViewSlotsLayout,
     handleAddView,
     handleRenameView,
     handleDuplicateView,

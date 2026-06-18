@@ -45,8 +45,10 @@ export interface SectionHandlers {
   // Slot editor (operates on the currently-selected View)
   updateSlot: (idx: number, updated: Slot) => void;
   addSlot: () => void;
+  addSpacer: () => void;
   removeSlot: (idx: number) => void;
   saveSlots: () => Promise<void>;
+  handleSetViewSlotsLayout: (id: string, slotsLayout: SlotsLayout | null) => Promise<void>;
   // Views (content)
   handleAddView: (name: string, kind: ViewKind) => Promise<void>;
   handleRenameView: (id: string, name: string) => Promise<void>;

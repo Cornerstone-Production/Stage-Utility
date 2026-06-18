@@ -84,8 +84,8 @@ export function resolveSlots(
   deviceStatuses: Map<string, DeviceStatus>,
 ): Slot[] {
   return slots.map((slot): Slot => {
-    // Empty slots: no display name, no photo, no PCO lookup.
-    if (slot.link.kind === "empty") {
+    // Spacers + empty slots: no display name, no photo, no PCO lookup.
+    if (slot.link.kind === "spacer" || slot.link.kind === "empty") {
       return { ...slot, displayName: null, photoUrl: null, device: EMPTY_DEVICE };
     }
 

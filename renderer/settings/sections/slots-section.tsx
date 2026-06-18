@@ -19,6 +19,7 @@ import {
   SelectValue,
   ButtonGroup,
   Separator,
+  Switch,
 } from "../../components/ui";
 import type { SectionHandlers, WirelessChannel } from "../types";
 import { PositionPicker } from "./position-picker";
@@ -40,6 +41,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
   const isPco = slot.link.kind === "pco";
   const isStatic = slot.link.kind === "static";
   const isEmpty = slot.link.kind === "empty";
+  const isSpacer = slot.link.kind === "spacer";
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: slot.id,
@@ -95,6 +97,44 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
   }
 
   const currentMode: "pco" | "static" | "empty" = isPco ? "pco" : isStatic ? "static" : "empty";
+
+  // Spacers are a horizontal gap for charger alignment — just a width + remove.
+  if (isSpacer) {
+    return (
+      <div ref={setNodeRef} style={style} className="relative flex items-center gap-2 py-3 pl-4">
+        <button
+          {...attributes}
+          {...listeners}
+          className="cursor-grab active:cursor-grabbing touch-none p-0.5 shrink-0"
+          aria-label="Drag to reorder"
+          tabIndex={-1}
+        >
+          <GripVerticalIcon className="size-4 text-gray-7" />
+        </button>
+        <span className="text-callout text-gray-9 flex-1 italic">Spacer</span>
+        <label className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0">
+          Width
+          <Input
+            type="number"
+            step="0.1"
+            min="0"
+            key={`sp-${slot.id}-${slot.widthIn ?? 2}`}
+            defaultValue={slot.widthIn ?? 2}
+            onBlur={(e: ChangeEvent<HTMLInputElement>) => {
+              const n = Number.parseFloat(e.target.value);
+              onChange({ ...slot, widthIn: Number.isFinite(n) && n > 0 ? n : 0.1 });
+            }}
+            className="w-20"
+            aria-label="Spacer width (inches)"
+          />
+          in
+        </label>
+        <Button variant="transparent" size="small" iconOnly onClick={onRemove} aria-label="Remove spacer">
+          <TrashIcon className="size-3.5 text-red-10" />
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div ref={setNodeRef} style={style} className="relative flex flex-col gap-2 py-3 pl-4">
@@ -348,6 +388,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
 // ---- Slot editor (embedded in the Views tab) --------------------------------
 
 interface SlotEditorProps {
+  view: View;
   wirelessChannels: WirelessChannel[];
   teamPositions: TeamPositionDTO[];
   localSlots: Slot[];
@@ -355,12 +396,13 @@ interface SlotEditorProps {
   isSavingSlots: boolean;
   handlers: Pick<
     SectionHandlers,
-    "updateSlot" | "addSlot" | "removeSlot" | "saveSlots" | "handleDragEnd" | "sensors"
+    "updateSlot" | "addSlot" | "addSpacer" | "removeSlot" | "saveSlots" | "handleSetViewSlotsLayout" | "handleDragEnd" | "sensors"
   >;
 }
 
 /** The drag-sortable slot list + Add/Save controls, reused by the Views editor. */
 export function SlotEditor({
+  view,
   wirelessChannels,
   teamPositions,
   localSlots,
@@ -368,6 +410,7 @@ export function SlotEditor({
   isSavingSlots,
   handlers,
 }: SlotEditorProps) {
+  const layout = view.slotsLayout ?? null;
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
@@ -379,6 +422,12 @@ export function SlotEditor({
           </Button>
         )}
       </div>
+
+      <AlignmentPanel
+        layout={layout}
+        slots={localSlots}
+        onChange={(next) => handlers.handleSetViewSlotsLayout(view.id, next)}
+      />
 
       <DndContext
         sensors={handlers.sensors}
@@ -419,10 +468,103 @@ export function SlotEditor({
         </SortableContext>
       </DndContext>
 
-      <Button variant="filled" size="small" onClick={handlers.addSlot} className="self-start">
-        <PlusIcon className="size-3.5 text-gray-9" />
-        Add slot
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="filled" size="small" onClick={handlers.addSlot}>
+          <PlusIcon className="size-3.5 text-gray-9" />
+          Add slot
+        </Button>
+        <Button variant="filled" size="small" onClick={handlers.addSpacer}>
+          <PlusIcon className="size-3.5 text-gray-9" />
+          Add spacer
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Physical-alignment controls for a slots-View: a toggle plus the monitor's active
+ * width and default charger-column width (inches). When on, the kiosk sizes columns
+ * in inches so they line up with the chargers; spacers fill the gaps/margins.
+ */
+function AlignmentPanel({
+  layout,
+  slots,
+  onChange,
+}: {
+  layout: SlotsLayout | null;
+  slots: Slot[];
+  onChange: (next: SlotsLayout | null) => void;
+}) {
+  const DEFAULT: SlotsLayout = { displayWidthIn: 32.25, columnWidthIn: 3.49 };
+  const enabled = !!layout;
+
+  // Sum of column widths in inches (chargers use their override or the default;
+  // spacers use their own width) — to warn when the row exceeds the display.
+  let usedIn = 0;
+  if (layout) {
+    const sorted = [...slots].sort((a, b) => a.order - b.order);
+    for (const s of sorted) {
+      if (s.stackWithPrevious) continue; // only the lead slot of a column counts
+      usedIn += s.widthIn ?? layout.columnWidthIn;
+    }
+  }
+  const over = layout ? usedIn > layout.displayWidthIn + 0.01 : false;
+
+  return (
+    <div className="rounded-lg border border-gray-a4 p-3 flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <span className="text-callout font-medium text-gray-12 flex-1">Align to physical chargers</span>
+        <Switch checked={enabled} onCheckedChange={(v: boolean) => onChange(v ? DEFAULT : null)} />
+      </div>
+      {layout && (
+        <>
+          <p className="text-caption2 text-gray-9 leading-snug">
+            Columns are sized in inches against the monitor's active width, so slots line up with the
+            chargers below. Add spacers for the gaps between charger banks and the side margins.
+          </p>
+          <div className="flex flex-wrap gap-x-4 gap-y-2">
+            <label className="flex items-center gap-1.5 text-caption1 text-gray-11">
+              Display width
+              <Input
+                type="number"
+                step="0.1"
+                min="1"
+                key={`dw-${layout.displayWidthIn}`}
+                defaultValue={layout.displayWidthIn}
+                onBlur={(e: ChangeEvent<HTMLInputElement>) => {
+                  const n = Number.parseFloat(e.target.value);
+                  if (Number.isFinite(n) && n > 0) onChange({ ...layout, displayWidthIn: n });
+                }}
+                className="w-20"
+                aria-label="Display active width (inches)"
+              />
+              in
+            </label>
+            <label className="flex items-center gap-1.5 text-caption1 text-gray-11">
+              Charger width
+              <Input
+                type="number"
+                step="0.01"
+                min="0.1"
+                key={`cw-${layout.columnWidthIn}`}
+                defaultValue={layout.columnWidthIn}
+                onBlur={(e: ChangeEvent<HTMLInputElement>) => {
+                  const n = Number.parseFloat(e.target.value);
+                  if (Number.isFinite(n) && n > 0) onChange({ ...layout, columnWidthIn: n });
+                }}
+                className="w-20"
+                aria-label="Charger column width (inches)"
+              />
+              in
+            </label>
+          </div>
+          <p className={`text-caption2 ${over ? "text-red-10" : "text-gray-9"}`}>
+            Using {usedIn.toFixed(2)}″ of {layout.displayWidthIn.toFixed(2)}″
+            {over ? " — over the display width; reduce widths or spacers." : ""}
+          </p>
+        </>
+      )}
     </div>
   );
 }

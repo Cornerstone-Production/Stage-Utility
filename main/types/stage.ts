@@ -80,6 +80,21 @@ export interface View {
   createdAt: string;
   /** Free-form layout for kind === "custom"; null/absent for the built-in kinds. */
   layout?: LayoutDTO | null;
+  /**
+   * Physical-alignment config for a slots-View (so on-screen columns line up with
+   * the chargers below the monitor). Absent/null → columns share width equally
+   * (default). When set, columns are sized in inches against `displayWidthIn`
+   * (the monitor's active width), so widths render at true physical inches.
+   */
+  slotsLayout?: SlotsLayout | null;
+}
+
+/** Physical layout config for a slots-View. All measurements in inches. */
+export interface SlotsLayout {
+  /** The monitor's active-area width (e.g. ~32.25 for a 37″ 16:9 panel). */
+  displayWidthIn: number;
+  /** Default width of one charger column (e.g. 3.49 for a Shure SBC220). */
+  columnWidthIn: number;
 }
 
 // ── Visual layout schema (kind === "custom") ─────────────────────────────────
@@ -301,7 +316,10 @@ export type SlotLink =
   | { kind: "pco"; matchBy: "person"; personId: string }
   | { kind: "pco"; matchBy: "position"; teamPositionName: string; notesStartsWith?: string }
   | { kind: "static"; label: string; color: string }
-  | { kind: "empty" };
+  | { kind: "empty" }
+  // A horizontal gap used to align slot columns with physical chargers. Renders
+  // nothing; only occupies width (see Slot.widthIn).
+  | { kind: "spacer" };
 
 export interface SlotDevice {
   status: "none" | "ok" | "warn" | "error";
@@ -324,6 +342,10 @@ export interface Slot {
    *  slot (in order), forming a multi-row column. Used to mirror dual-bay
    *  chargers where two people share one charger footprint. */
   stackWithPrevious?: boolean;
+  /** Width in inches for this column, used only when the View has a `slotsLayout`
+   *  (physical alignment). Required for a "spacer" slot; an optional per-column
+   *  override on a column's lead slot (defaults to slotsLayout.columnWidthIn). */
+  widthIn?: number;
 }
 
 export interface SlotPreset {

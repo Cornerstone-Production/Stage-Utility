@@ -362,6 +362,17 @@ export function StageView() {
     }
   }
 
+  // Physical alignment: when the View has a slotsLayout, size columns in inches
+  // (against the monitor's active width) so they line up with the chargers.
+  const slotsView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
+  const slotsLayout = slotsView?.slotsLayout ?? null;
+  const columnFlex = (col: Slot[]): string | undefined => {
+    if (!slotsLayout || slotsLayout.displayWidthIn <= 0) return undefined;
+    const inches = col[0]?.widthIn ?? slotsLayout.columnWidthIn;
+    return `0 0 ${(inches / slotsLayout.displayWidthIn) * 100}%`;
+  };
+  const isSpacerColumn = (col: Slot[]) => col.every((s) => s.link.kind === "spacer");
+
   if (sortedSlots.length === 0) {
     return (
       <StageErrorBoundary>
@@ -384,21 +395,32 @@ export function StageView() {
           appLogo={state.appLogo}
           appLogoMonochrome={state.appLogoMonochrome}
         />
-        {/* Desktop / kiosk: fill-height columns (stacked slots share a column). */}
-        <div className="flex flex-1 min-h-0 max-sm:hidden">
-          {columns.map((column, ci) => (
-            <div key={column[0]?.id ?? ci} className="flex flex-1 min-w-0 flex-col">
-              {column.map((slot) => (
-                <SlotPanel key={slot.id} slot={slot} emptySlotLogo={state.emptySlotLogo} />
-              ))}
-            </div>
-          ))}
+        {/* Desktop / kiosk: fill-height columns (stacked slots share a column).
+            With a slotsLayout, columns are inch-sized and centered so they line up
+            with the chargers; otherwise they share width equally. */}
+        <div className={`flex flex-1 min-h-0 max-sm:hidden${slotsLayout ? " justify-center" : ""}`}>
+          {columns.map((column, ci) => {
+            const flex = columnFlex(column);
+            return (
+              <div
+                key={column[0]?.id ?? ci}
+                className={`flex min-w-0 flex-col${flex ? "" : " flex-1"}`}
+                style={flex ? { flex } : undefined}
+              >
+                {isSpacerColumn(column)
+                  ? null
+                  : column.map((slot) => (
+                      <SlotPanel key={slot.id} slot={slot} emptySlotLogo={state.emptySlotLogo} />
+                    ))}
+              </div>
+            );
+          })}
         </div>
 
         {/* Phone: 2-up card grid, scrolls when it overflows (weekly-setup check).
             container-type makes the card's cqw-based sizing scale to the card. */}
         <div className="hidden max-sm:grid grid-cols-2 auto-rows-max content-start gap-2 p-2 flex-1 min-h-0 overflow-y-auto overscroll-contain">
-          {sortedSlots.map((slot) => (
+          {sortedSlots.filter((slot) => slot.link.kind !== "spacer").map((slot) => (
             <div key={slot.id} className="aspect-[3/4] flex [container-type:inline-size]">
               <SlotPanel slot={slot} emptySlotLogo={state.emptySlotLogo} />
             </div>

@@ -9,7 +9,7 @@ import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
-import type { DisplayKind, LayoutDTO, Slot } from "../types/stage.js";
+import type { DisplayKind, LayoutDTO, Slot, SlotsLayout } from "../types/stage.js";
 import { addBroadcastListener } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
 import { integrationManager } from "./integration-manager.js";
@@ -650,8 +650,10 @@ export class RemoteServer {
       const hasNdiSource = "ndiSource" in body
         && (typeof body.ndiSource === "string" || body.ndiSource === null);
       const hasLayout = "layout" in body && body.layout != null && typeof body.layout === "object";
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout) {
-        error(res, "body.name (string), body.kind, body.ndiSource (string|null), or body.layout (object) required");
+      const hasSlotsLayout = "slotsLayout" in body
+        && (body.slotsLayout === null || typeof body.slotsLayout === "object");
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), or body.slotsLayout (object|null) required");
         return;
       }
       let state = stageController.getState();
@@ -659,6 +661,7 @@ export class RemoteServer {
       if (hasKind) state = await stageController.setViewKind(id, body.kind as DisplayKind);
       if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
       if (hasLayout) state = await stageController.setViewLayout(id, body.layout as LayoutDTO);
+      if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
       json(res, state);
       return;
     }
