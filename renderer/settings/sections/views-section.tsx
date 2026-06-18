@@ -2,7 +2,7 @@ import { useState, type ChangeEvent, type CSSProperties } from "react";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { PlusIcon, TrashIcon, CopyIcon, VideoIcon, GripVerticalIcon, ChevronLeftIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, CopyIcon, VideoIcon, GripVerticalIcon, ChevronLeftIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { useIsMobile } from "../../lib/use-media-query";
 import {
@@ -29,6 +29,32 @@ const KIND_LABELS: Record<ViewKind, string> = {
   custom: "Custom Layout",
 };
 const KIND_ORDER: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "custom"];
+
+const VIEWS_LIST_COLLAPSED_KEY = "stage-utility:views-list-collapsed";
+
+/** Persisted collapse state for the Views master list (desktop only), so a
+ *  cramped laptop + browser sidebar can reclaim width for the editor/preview. */
+function useViewsListCollapsed() {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(VIEWS_LIST_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  function toggle() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(VIEWS_LIST_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // localStorage unavailable — collapse still applies for this session.
+      }
+      return next;
+    });
+  }
+  return { collapsed, toggle };
+}
 
 // Preview thumbnail shapes (width ÷ height) so the preview can mirror the target
 // monitor's orientation. 16:9 matches a 37″ 4K panel.
@@ -299,6 +325,11 @@ export function ViewsSection({
   const isMobile = useIsMobile();
   const [mobileShowDetail, setMobileShowDetail] = useState(false);
 
+  // Desktop: the views list can be collapsed to reclaim width for the editor and
+  // preview (handy on a laptop with the browser sidebar also open).
+  const { collapsed: listCollapsed, toggle: toggleList } = useViewsListCollapsed();
+  const listHidden = isMobile ? mobileShowDetail : listCollapsed;
+
   // Create-view dialog state
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState<ViewKind>("slots");
@@ -326,9 +357,16 @@ export function ViewsSection({
       <div
         className={cn(
           "flex flex-col gap-1 w-52 shrink-0 max-sm:w-full",
-          isMobile && mobileShowDetail && "hidden",
+          listHidden && "hidden",
         )}
       >
+        {/* Collapse the list (desktop only) to give the editor/preview more room. */}
+        <div className="hidden sm:flex items-center justify-between pl-1">
+          <span className="text-caption2 font-medium uppercase tracking-wide text-gray-9">Views</span>
+          <Button variant="transparent" size="small" iconOnly aria-label="Collapse views list" onClick={toggleList}>
+            <PanelLeftCloseIcon className="size-4 text-gray-11" />
+          </Button>
+        </div>
         <DndContext sensors={handlers.sensors} collisionDetection={closestCenter} onDragEnd={handleViewDragEnd}>
           <SortableContext items={views.map((v) => v.id)} strategy={verticalListSortingStrategy}>
             {views.map((v) => (
@@ -397,6 +435,17 @@ export function ViewsSection({
           <ChevronLeftIcon className="size-4" />
           Views
         </button>
+        {/* Desktop: re-open the collapsed views list. */}
+        {listCollapsed && (
+          <button
+            type="button"
+            className="hidden sm:flex mb-3 items-center gap-1 text-[13px] font-medium text-gray-11 hover:text-gray-12 self-start"
+            onClick={toggleList}
+          >
+            <PanelLeftOpenIcon className="size-4" />
+            Views
+          </button>
+        )}
         {selected ? (
           <ViewDetail
             key={selected.id}
