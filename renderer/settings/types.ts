@@ -70,6 +70,9 @@ export interface SectionHandlers {
   handleApplyPreset: (id: string) => Promise<void>;
   handleDeletePreset: (id: string) => Promise<void>;
   handleImportPreset: (name: string, slots: Slot[]) => Promise<void>;
+  handleReorderPresets: (ids: string[]) => Promise<void>;
+  handleRenamePreset: (id: string, name: string) => Promise<void>;
+  handleOverwritePreset: (id: string) => Promise<void>;
   // Outputs (physical screens + routing)
   handleAddOutput: () => Promise<void>;
   handleRenameOutput: (id: string, name: string) => Promise<void>;

@@ -784,6 +784,50 @@ export class StageController {
     return updated;
   }
 
+  /** Reorder the preset bank to match `orderedIds` (unknown ids ignored, missing
+   *  ones appended) — mirrors reorderViews. */
+  async reorderPresets(orderedIds: string[]): Promise<SlotPreset[]> {
+    const presets = await presetsStore.load();
+    const byId = new Map(presets.map((p) => [p.id, p]));
+    const reordered: SlotPreset[] = [];
+    for (const id of orderedIds) {
+      const p = byId.get(id);
+      if (p) {
+        reordered.push(p);
+        byId.delete(id);
+      }
+    }
+    for (const p of byId.values()) reordered.push(p);
+    console.log(`[stage-controller] reorderPresets → ${reordered.map((p) => p.id).join(", ")}`);
+    await presetsStore.save(reordered);
+    return reordered;
+  }
+
+  async renamePreset(id: string, name: string): Promise<SlotPreset[]> {
+    const presets = await presetsStore.load();
+    const trimmed = name.trim();
+    if (!trimmed) return presets;
+    console.log(`[stage-controller] renamePreset ${id} → "${trimmed}"`);
+    const updated = presets.map((p) => (p.id === id ? { ...p, name: trimmed } : p));
+    await presetsStore.save(updated);
+    return updated;
+  }
+
+  /** Replace a preset's slots with the target view's current slots (a "save over"
+   *  this preset). Reuses the savePreset snapshot logic. */
+  async overwritePreset(id: string, target: string): Promise<SlotPreset[]> {
+    const viewId = this.viewIdForTarget(target);
+    const presets = await presetsStore.load();
+    if (!presets.find((p) => p.id === id)) throw new Error(`Preset ${id} not found`);
+    const rawSlots = this.rawSlotsByView.get(viewId) ?? [];
+    console.log(`[stage-controller] overwritePreset ${id} from view=${viewId} (${rawSlots.length} slots)`);
+    const updated = presets.map((p) =>
+      p.id === id ? { ...p, slots: rawSlots.map((s) => ({ ...s, id: randomUUID() })) } : p,
+    );
+    await presetsStore.save(updated);
+    return updated;
+  }
+
   // ── Layout templates (reusable custom layouts) ───────────────────────
 
   async listLayoutTemplates(): Promise<LayoutTemplate[]> {

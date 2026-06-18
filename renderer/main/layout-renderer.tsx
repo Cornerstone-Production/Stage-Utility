@@ -1,6 +1,6 @@
 import { useState, useEffect, type CSSProperties } from "react";
-import { SlotPanel } from "../components/slot-panel";
 import { BrandLogo } from "../components/brand-logo";
+import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState } from "./use-dashboard-state";
 import { useTranscript } from "./use-transcript";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
@@ -107,6 +107,10 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       return span(ctx.propresenter?.currentSlideText ?? ctx.propresenter?.currentItem ?? "");
     case "next-slide-text":
       return span(ctx.propresenter?.nextSlideText ?? ctx.propresenter?.nextItem ?? "");
+    case "current-service-item":
+      return span(ctx.propresenter?.currentServiceItem ?? "");
+    case "next-service-item":
+      return span(ctx.propresenter?.nextServiceItem ?? "");
     case "current-slide-notes":
       return span(ctx.propresenter?.currentNotes ?? "");
     case "section-chip": {
@@ -208,36 +212,17 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       if (slots.length === 0) {
         return <span style={{ ...ts, color: "rgba(255,255,255,0.3)" }}>Mic slots</span>;
       }
-      const sorted = [...slots].sort((a, b) => a.order - b.order);
-      const columns: Slot[][] = [];
-      for (const slot of sorted) {
-        if (slot.stackWithPrevious && columns.length > 0) columns[columns.length - 1].push(slot);
-        else columns.push([slot]);
-      }
+      // Render via the same component the standalone slots view uses, honoring the
+      // source View's physical-inch alignment, over the kiosk backdrop so it looks
+      // identical (grey, not navy). `.kiosk-surface` paints the kiosk gradient.
+      const srcView = c.sourceViewId ? (ctx.state.views?.find((v) => v.id === c.sourceViewId) ?? null) : null;
       return (
-        <div className="flex w-full h-full">
-          {columns.map((col, ci) => (
-            <div key={col[0]?.id ?? ci} className="flex flex-1 min-w-0 flex-col [container-type:inline-size]">
-              {col.every((s) => s.link.kind === "spacer")
-                ? col.some((s) => s.link.kind === "spacer" && (s.link as { showEmptyImage?: boolean }).showEmptyImage) &&
-                  ctx.state.emptySlotLogo
-                  ? (
-                      <div className="flex flex-1 items-center justify-center">
-                        <BrandLogo
-                          logo={ctx.state.emptySlotLogo}
-                          monochrome
-                          className="text-white/25"
-                          style={{ width: "clamp(1rem,32cqw,9rem)", height: "clamp(1rem,32cqw,9rem)" }}
-                        />
-                      </div>
-                    )
-                  : null
-                : col.map((slot) => (
-                    <SlotPanel key={slot.id} slot={slot} emptySlotLogo={ctx.state.emptySlotLogo} />
-                  ))}
-            </div>
-          ))}
-        </div>
+        <SlotsColumns
+          slots={slots}
+          slotsLayout={srcView?.slotsLayout ?? null}
+          emptySlotLogo={ctx.state.emptySlotLogo}
+          className="w-full h-full kiosk-surface"
+        />
       );
     }
     default:

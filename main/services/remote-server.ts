@@ -1046,6 +1046,18 @@ export class RemoteServer {
       return;
     }
 
+    // POST /api/presets/reorder — { ids: string[] } (checked before :id routes)
+    if (method === "POST" && pathname === "/api/presets/reorder") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.ids)) {
+        error(res, "body.ids (array) required");
+        return;
+      }
+      const presets = await stageController.reorderPresets(body.ids as string[]);
+      json(res, presets);
+      return;
+    }
+
     // POST /api/presets/:id/apply
     const presetApplyMatch = pathname.match(/^\/api\/presets\/([^/]+)\/apply$/);
     if (method === "POST" && presetApplyMatch) {
@@ -1054,6 +1066,20 @@ export class RemoteServer {
       const displayIdForApply = typeof body.displayId === "string" ? body.displayId : "";
       const state = await stageController.applyPreset(displayIdForApply, id);
       json(res, state);
+      return;
+    }
+
+    // PATCH /api/presets/:id — rename ({ name }) and/or overwrite ({ overwriteFromDisplayId })
+    const presetPatchMatch = pathname.match(/^\/api\/presets\/([^/]+)$/);
+    if (method === "PATCH" && presetPatchMatch) {
+      const id = presetPatchMatch[1];
+      const body = await readBody(req) as Record<string, unknown>;
+      let presets = await stageController.listPresets();
+      if (typeof body.name === "string") presets = await stageController.renamePreset(id, body.name);
+      if (typeof body.overwriteFromDisplayId === "string") {
+        presets = await stageController.overwritePreset(id, body.overwriteFromDisplayId);
+      }
+      json(res, presets);
       return;
     }
 

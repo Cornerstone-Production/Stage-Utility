@@ -1,6 +1,6 @@
 import { useRef, useState, type ChangeEvent, type CSSProperties } from "react";
-import { DndContext, closestCenter, type DraggableAttributes, type DraggableSyntheticListeners } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { DndContext, closestCenter, type DragEndEvent, type DraggableAttributes, type DraggableSyntheticListeners } from "@dnd-kit/core";
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
   PlusIcon,
@@ -13,6 +13,7 @@ import {
   RotateCcwIcon,
   DownloadIcon,
   UploadIcon,
+  SaveIcon,
 } from "lucide-react";
 import {
   Button,
@@ -478,6 +479,9 @@ interface SlotEditorProps {
     | "handleApplyPreset"
     | "handleDeletePreset"
     | "handleImportPreset"
+    | "handleReorderPresets"
+    | "handleRenamePreset"
+    | "handleOverwritePreset"
     | "handleDragEnd"
     | "sensors"
   >;
@@ -591,6 +595,89 @@ function downloadJson(filename: string, data: unknown) {
  * Save / recall / export / import named slot arrangements. Presets are global —
  * saving captures the current view's slots; recall applies a preset to this view.
  */
+type PresetHandlers = Pick<
+  SectionHandlers,
+  | "handleSavePreset"
+  | "handleApplyPreset"
+  | "handleDeletePreset"
+  | "handleImportPreset"
+  | "handleReorderPresets"
+  | "handleRenamePreset"
+  | "handleOverwritePreset"
+  | "sensors"
+>;
+
+/** One draggable preset row: grip + inline-rename + slots count + recall / overwrite / export / delete. */
+function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers: PresetHandlers }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: preset.id });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  const [editName, setEditName] = useState(preset.name);
+
+  function commitName() {
+    const trimmed = editName.trim();
+    if (trimmed && trimmed !== preset.name) handlers.handleRenamePreset(preset.id, trimmed);
+    else setEditName(preset.name);
+  }
+
+  return (
+    <div ref={setNodeRef} style={style} className="flex flex-wrap items-center gap-2 py-2 border-t border-gray-a3 first:border-t-0">
+      <button
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing touch-none p-0.5 shrink-0"
+        aria-label="Drag to reorder"
+        tabIndex={-1}
+      >
+        <GripVerticalIcon className="size-4 text-gray-7" />
+      </button>
+      <Input
+        value={editName}
+        data-preset-id={preset.id}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
+        onBlur={commitName}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+        className="flex-1 min-w-32 text-gray-12"
+        aria-label={`Rename ${preset.name}`}
+      />
+      <span className="text-caption2 text-gray-9 shrink-0">{preset.slots.length} slots</span>
+      <Button variant="filled" size="small" onClick={() => handlers.handleApplyPreset(preset.id)} aria-label={`Recall ${preset.name}`}>
+        <RotateCcwIcon className="size-3.5 text-gray-9" />
+        Recall
+      </Button>
+      <Button
+        variant="transparent"
+        size="small"
+        iconOnly
+        onClick={() => {
+          if (window.confirm(`Overwrite "${preset.name}" with the current slots?`)) handlers.handleOverwritePreset(preset.id);
+        }}
+        aria-label={`Overwrite ${preset.name} with current slots`}
+        title="Overwrite with current slots"
+      >
+        <SaveIcon className="size-3.5 text-gray-9" />
+      </Button>
+      <Button
+        variant="transparent"
+        size="small"
+        iconOnly
+        onClick={() => downloadJson(`${fileSlug(preset.name)}.slots.json`, { name: preset.name, slots: preset.slots })}
+        aria-label={`Export ${preset.name}`}
+      >
+        <DownloadIcon className="size-3.5 text-gray-9" />
+      </Button>
+      <Button variant="transparent" size="small" iconOnly onClick={() => handlers.handleDeletePreset(preset.id)} aria-label={`Delete ${preset.name}`}>
+        <TrashIcon className="size-3.5 text-red-10" />
+      </Button>
+    </div>
+  );
+}
+
 function PresetsPanel({
   presets,
   localSlots,
@@ -598,7 +685,7 @@ function PresetsPanel({
 }: {
   presets: SlotPreset[];
   localSlots: Slot[];
-  handlers: Pick<SectionHandlers, "handleSavePreset" | "handleApplyPreset" | "handleDeletePreset" | "handleImportPreset">;
+  handlers: PresetHandlers;
 }) {
   const [name, setName] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -608,6 +695,16 @@ function PresetsPanel({
     if (!trimmed) return;
     handlers.handleSavePreset(trimmed);
     setName("");
+  }
+
+  function onPresetDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const ids = presets.map((p) => p.id);
+    const oldIndex = ids.indexOf(active.id as string);
+    const newIndex = ids.indexOf(over.id as string);
+    if (oldIndex === -1 || newIndex === -1) return;
+    handlers.handleReorderPresets(arrayMove(ids, oldIndex, newIndex));
   }
 
   function exportCurrent() {
@@ -662,46 +759,17 @@ function PresetsPanel({
         </Button>
       </div>
 
-      {/* Saved presets list */}
+      {/* Saved presets list — drag to reorder, rename inline, overwrite/export/delete */}
       {presets.length > 0 ? (
-        <div className="flex flex-col">
-          {presets.map((preset, i) => (
-            <div
-              key={preset.id}
-              className={`flex flex-wrap items-center gap-2 py-2${i === 0 ? "" : " border-t border-gray-a3"}`}
-            >
-              <span className="text-callout text-gray-12 flex-1 min-w-0 truncate">{preset.name}</span>
-              <span className="text-caption2 text-gray-9 shrink-0">{preset.slots.length} slots</span>
-              <Button
-                variant="filled"
-                size="small"
-                onClick={() => handlers.handleApplyPreset(preset.id)}
-                aria-label={`Recall ${preset.name}`}
-              >
-                <RotateCcwIcon className="size-3.5 text-gray-9" />
-                Recall
-              </Button>
-              <Button
-                variant="transparent"
-                size="small"
-                iconOnly
-                onClick={() => downloadJson(`${fileSlug(preset.name)}.slots.json`, { name: preset.name, slots: preset.slots })}
-                aria-label={`Export ${preset.name}`}
-              >
-                <DownloadIcon className="size-3.5 text-gray-9" />
-              </Button>
-              <Button
-                variant="transparent"
-                size="small"
-                iconOnly
-                onClick={() => handlers.handleDeletePreset(preset.id)}
-                aria-label={`Delete ${preset.name}`}
-              >
-                <TrashIcon className="size-3.5 text-red-10" />
-              </Button>
+        <DndContext sensors={handlers.sensors} collisionDetection={closestCenter} onDragEnd={onPresetDragEnd}>
+          <SortableContext items={presets.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+            <div className="flex flex-col">
+              {presets.map((preset) => (
+                <SortablePresetRow key={preset.id} preset={preset} handlers={handlers} />
+              ))}
             </div>
-          ))}
-        </div>
+          </SortableContext>
+        </DndContext>
       ) : (
         <p className="text-caption2 text-gray-9">
           No saved arrangements yet. Save the current slots above, then recall them into any view later.

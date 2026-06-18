@@ -49,6 +49,8 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "countdown-timer": "Countdown timer",
   "current-slide-text": "Current slide",
   "next-slide-text": "Next slide",
+  "current-service-item": "Current item",
+  "next-service-item": "Next item",
   "current-slide-notes": "Slide notes",
   "slide-thumbnail": "Slide image",
   "section-chip": "Section chip",
@@ -62,6 +64,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
 };
 const PALETTE: LayoutObjectType[] = [
   "text", "clock", "countdown-timer", "current-slide-text", "next-slide-text",
+  "current-service-item", "next-service-item",
   "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
   "transcript-strip", "brand-logo", "ndi-video", "image", "plan-attachment", "shape",
 ];
