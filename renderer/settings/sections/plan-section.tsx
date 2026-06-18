@@ -28,7 +28,7 @@ export function PlanSection({
     allowed.length === 0 ? serviceTypes : serviceTypes.filter((st) => allowed.includes(st.id));
 
   return (
-    <div className="px-5 flex flex-col gap-6 py-5">
+    <div className="px-5 max-sm:px-3 flex flex-col gap-6 py-5 max-sm:py-4">
       <FieldSet title="Plan Mode">
         <FieldGroup>
           <Field orientation="horizontal">
@@ -69,7 +69,7 @@ export function PlanSection({
                 onValueChange={handlers.handleServiceTypeChange}
                 disabled={visibleServiceTypes.length === 0}
               >
-                <SelectTrigger className="w-52">
+                <SelectTrigger className="w-full sm:w-52">
                   <SelectValue
                     placeholder={visibleServiceTypes.length === 0 ? "No types found" : "Select…"}
                   />
@@ -96,7 +96,7 @@ export function PlanSection({
                 onValueChange={handlers.handlePlanChange}
                 disabled={plans.length === 0}
               >
-                <SelectTrigger className="w-52">
+                <SelectTrigger className="w-full sm:w-52">
                   <SelectValue placeholder={plans.length === 0 ? "No plans found" : "Select plan…"} />
                 </SelectTrigger>
                 <SelectContent>

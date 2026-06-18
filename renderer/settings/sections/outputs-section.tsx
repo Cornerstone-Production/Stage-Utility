@@ -64,7 +64,7 @@ function OutputRow({ output, views, isFirst, canRemove, onRename, onSetView, onO
 
   return (
     <div ref={setNodeRef} style={style} className={`flex flex-col gap-1.5 py-2${isFirst ? "" : " border-t border-gray-a3"}`}>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           {...attributes}
           {...listeners}
@@ -98,13 +98,13 @@ function OutputRow({ output, views, isFirst, canRemove, onRename, onSetView, onO
         </Button>
       </div>
       {/* View routing + URL hint */}
-      <div className="ml-5 flex items-center gap-2">
+      <div className="ml-5 flex flex-col items-start gap-1.5 sm:flex-row sm:items-center sm:gap-2">
         <span className="text-caption1 text-gray-9 shrink-0">Shows view:</span>
         <Select
           value={output.viewId ?? UNROUTED}
           onValueChange={(v: string) => onSetView(v === UNROUTED ? null : v)}
         >
-          <SelectTrigger className="w-48 shrink-0">
+          <SelectTrigger className="w-full sm:w-48 sm:shrink-0">
             <SelectValue placeholder="Pick a view…" />
           </SelectTrigger>
           <SelectContent>
@@ -144,7 +144,7 @@ export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "sta
   }
 
   return (
-    <div className="px-5 flex flex-col gap-4 py-5">
+    <div className="px-5 max-sm:px-3 flex flex-col gap-4 py-5 max-sm:py-4">
       <p className="text-caption1 text-gray-9">
         Each display is a physical screen at its own URL. Point it at a <span className="font-medium">View</span>{" "}
         (built under the Views tab) to choose what it shows — and many screens can share one View, so you

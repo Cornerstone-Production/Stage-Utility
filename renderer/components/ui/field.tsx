@@ -36,7 +36,8 @@ export function Field({ className, orientation = "horizontal", children, ...prop
     <div
       className={cn(
         "flex px-3 py-2.5 bg-gray-1",
-        orientation === "horizontal" && "items-center gap-3",
+        // Horizontal fields stack (label above control) on phones, go side-by-side at ≥sm.
+        orientation === "horizontal" && "flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-3",
         orientation === "vertical" && "flex-col gap-1.5",
         className,
       )}

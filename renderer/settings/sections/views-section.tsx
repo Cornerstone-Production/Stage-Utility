@@ -2,7 +2,9 @@ import { useState, type ChangeEvent, type CSSProperties } from "react";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { PlusIcon, TrashIcon, CopyIcon, VideoIcon, GripVerticalIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, CopyIcon, VideoIcon, GripVerticalIcon, ChevronLeftIcon } from "lucide-react";
+import { cn } from "../../lib/cn";
+import { useIsMobile } from "../../lib/use-media-query";
 import {
   Button,
   Input,
@@ -115,12 +117,12 @@ function ViewDetail({
   return (
     <div className="flex flex-col gap-5">
       {/* Header: name + kind dropdown + actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Input
           value={editName}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
           onBlur={handleNameBlur}
-          className="flex-1 min-w-0 text-headline font-semibold text-gray-12"
+          className="flex-1 min-w-0 max-sm:basis-full text-headline font-semibold text-gray-12"
           aria-label="View name"
         />
         <Select value={view.kind} onValueChange={(k: string) => handlers.handleSetViewKind(view.id, k as ViewKind)}>
@@ -186,7 +188,7 @@ function ViewDetail({
         <>
           <Separator />
           {slotViews.length > 0 && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col items-start gap-1.5 sm:flex-row sm:items-center sm:gap-2">
               <span className="text-caption1 text-gray-9 shrink-0">Copy slots from:</span>
               <Select
                 value=""
@@ -194,7 +196,7 @@ function ViewDetail({
                   if (fromId) handlers.handleCopySlots(view.id, fromId);
                 }}
               >
-                <SelectTrigger className="w-48">
+                <SelectTrigger className="w-full sm:w-48">
                   <SelectValue placeholder="Another view…" />
                 </SelectTrigger>
                 <SelectContent>
@@ -255,6 +257,11 @@ export function ViewsSection({
   const views = stageState.views ?? [];
   const selected = views.find((v) => v.id === selectedViewId) ?? views[0] ?? null;
 
+  // On phones the master list and detail can't sit side-by-side, so show one at a
+  // time: tap a view to drill into its detail, "Back" returns to the list.
+  const isMobile = useIsMobile();
+  const [mobileShowDetail, setMobileShowDetail] = useState(false);
+
   // Create-view dialog state
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState<ViewKind>("slots");
@@ -270,9 +277,14 @@ export function ViewsSection({
   }
 
   return (
-    <div className="px-5 flex gap-5 py-5 h-full min-h-0">
+    <div className="px-5 max-sm:px-3 flex gap-5 max-sm:gap-0 py-5 max-sm:py-4 h-full min-h-0">
       {/* Master list */}
-      <div className="flex flex-col gap-1 w-52 shrink-0">
+      <div
+        className={cn(
+          "flex flex-col gap-1 w-52 shrink-0 max-sm:w-full",
+          isMobile && mobileShowDetail && "hidden",
+        )}
+      >
         <DndContext sensors={handlers.sensors} collisionDetection={closestCenter} onDragEnd={handleViewDragEnd}>
           <SortableContext items={views.map((v) => v.id)} strategy={verticalListSortingStrategy}>
             {views.map((v) => (
@@ -280,7 +292,10 @@ export function ViewsSection({
                 key={v.id}
                 view={v}
                 selected={v.id === selected?.id}
-                onSelect={() => setSelectedViewId(v.id)}
+                onSelect={() => {
+                  setSelectedViewId(v.id);
+                  if (isMobile) setMobileShowDetail(true);
+                }}
               />
             ))}
           </SortableContext>
@@ -328,7 +343,16 @@ export function ViewsSection({
       </div>
 
       {/* Detail */}
-      <div className="flex-1 min-w-0">
+      <div className={cn("flex-1 min-w-0", isMobile && !mobileShowDetail && "hidden")}>
+        {/* Mobile-only back affordance to the view list. */}
+        <button
+          type="button"
+          className="sm:hidden mb-3 flex items-center gap-1 text-[13px] font-medium text-gray-11"
+          onClick={() => setMobileShowDetail(false)}
+        >
+          <ChevronLeftIcon className="size-4" />
+          Views
+        </button>
         {selected ? (
           <ViewDetail
             key={selected.id}
