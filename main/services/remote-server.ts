@@ -22,7 +22,7 @@ import { wirelessManager } from "./wireless-manager.js";
 // In standalone mode the renderer is built to build/renderer/ relative to cwd.
 const RENDERER_BUILD_DIR = path.join(process.cwd(), "build", "renderer");
 
-const PORT = 8788;
+const PORT = Number(process.env.STAGE_UTILITY_PORT) || 8788;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -923,6 +923,29 @@ export class RemoteServer {
       return;
     }
 
+    // ── Remote display refresh ──────────────────────────────────────────────
+    // POST /api/displays/refresh — reload kiosk pages. Optional body.id targets
+    // a single output; omitted/empty reloads all connected displays.
+    if (method === "POST" && pathname === "/api/displays/refresh") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const target = typeof body.id === "string" ? body.id : "";
+      stageController.refreshDisplays(target);
+      json(res, { ok: true, target: target || "all" });
+      return;
+    }
+
+    // ── NDI visibility ──────────────────────────────────────────────────────
+    if (method === "POST" && pathname === "/api/ndi-enabled") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.enabled !== "boolean") {
+        error(res, "body.enabled (boolean) required");
+        return;
+      }
+      const state = await stageController.setNdiEnabled(body.enabled);
+      json(res, state);
+      return;
+    }
+
     // ── Branding (app name + logos) ─────────────────────────────────────────
     if (method === "GET" && pathname === "/api/branding/source") {
       const target = _url.searchParams.get("target") === "empty" ? "empty" : "app";
@@ -994,6 +1017,22 @@ export class RemoteServer {
       // Optional displayId — defaults to primary display if omitted.
       const displayIdForPreset = typeof body.displayId === "string" ? body.displayId : "";
       const presets = await stageController.savePreset(displayIdForPreset, (body.name as string).trim());
+      json(res, presets);
+      return;
+    }
+
+    // POST /api/presets/import — add a preset from imported data (name + slots).
+    if (method === "POST" && pathname === "/api/presets/import") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.name !== "string" || !(body.name as string).trim()) {
+        error(res, "body.name (non-empty string) required");
+        return;
+      }
+      if (!Array.isArray(body.slots)) {
+        error(res, "body.slots (array) required");
+        return;
+      }
+      const presets = await stageController.importPreset((body.name as string).trim(), body.slots as never[]);
       json(res, presets);
       return;
     }

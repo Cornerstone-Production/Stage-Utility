@@ -317,9 +317,10 @@ export type SlotLink =
   | { kind: "pco"; matchBy: "position"; teamPositionName: string; notesStartsWith?: string }
   | { kind: "static"; label: string; color: string }
   | { kind: "empty" }
-  // A horizontal gap used to align slot columns with physical chargers. Renders
-  // nothing; only occupies width (see Slot.widthIn).
-  | { kind: "spacer" };
+  // A horizontal gap used to align slot columns with physical chargers. Occupies
+  // width (see Slot.widthIn). Renders nothing unless `showEmptyImage` is set, in
+  // which case the empty-slot logo is centered in the gap.
+  | { kind: "spacer"; showEmptyImage?: boolean };
 
 export interface SlotDevice {
   status: "none" | "ok" | "warn" | "error";
@@ -396,4 +397,6 @@ export interface StageState {
   appLogoMonochrome: boolean;
   /** Image centered in empty slots on the kiosk (recolored to the kiosk gray). */
   emptySlotLogo: string | null;
+  /** Show NDI-related controls in settings (off by default; native client only). */
+  ndiEnabled: boolean;
 }

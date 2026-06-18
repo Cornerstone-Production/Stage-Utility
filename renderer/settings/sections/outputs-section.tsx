@@ -2,7 +2,7 @@ import { useState, useEffect, type ChangeEvent, type CSSProperties } from "react
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, GripVerticalIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, GripVerticalIcon, RefreshCwIcon } from "lucide-react";
 import {
   Button,
   Input,
@@ -33,10 +33,11 @@ interface OutputRowProps {
   onRename: (name: string) => void;
   onSetView: (viewId: string | null) => void;
   onOpenWindow: () => void;
+  onRefresh: () => void;
   onRemove: () => void;
 }
 
-function OutputRow({ output, views, isFirst, canRemove, onRename, onSetView, onOpenWindow, onRemove }: OutputRowProps) {
+function OutputRow({ output, views, isFirst, canRemove, onRename, onSetView, onOpenWindow, onRefresh, onRemove }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: output.id,
@@ -85,6 +86,16 @@ function OutputRow({ output, views, isFirst, canRemove, onRename, onSetView, onO
         <Button variant="filled" size="small" onClick={onOpenWindow} aria-label={`Open window for ${output.name}`}>
           <ExternalLinkIcon className="size-3.5 text-gray-9" />
           Open window
+        </Button>
+        <Button
+          variant="transparent"
+          size="small"
+          iconOnly
+          onClick={onRefresh}
+          aria-label={`Refresh display ${output.name}`}
+          title="Reload this display remotely"
+        >
+          <RefreshCwIcon className="size-3.5 text-gray-9" />
         </Button>
         <Button
           variant="transparent"
@@ -164,6 +175,7 @@ export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "sta
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 onOpenWindow={() => handlers.handleOpenOutputWindow(output.id)}
+                onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}
               />
             ))}
@@ -171,10 +183,23 @@ export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "sta
         </SortableContext>
       </DndContext>
 
-      <Button variant="filled" size="small" onClick={handlers.handleAddOutput} className="self-start">
-        <PlusIcon className="size-3.5 text-gray-9" />
-        Add display
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="filled" size="small" onClick={handlers.handleAddOutput}>
+          <PlusIcon className="size-3.5 text-gray-9" />
+          Add display
+        </Button>
+        {outputs.length > 0 && (
+          <Button
+            variant="transparent"
+            size="small"
+            onClick={() => handlers.handleRefreshDisplay(null)}
+            title="Reload every connected display remotely"
+          >
+            <RefreshCwIcon className="size-3.5 text-gray-9" />
+            Refresh all
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

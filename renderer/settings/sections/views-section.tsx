@@ -98,12 +98,13 @@ function ViewDetail({
   localSlots,
   slotsDirty,
   isSavingSlots,
+  slotPresets,
   layoutTemplates,
   canDelete,
   handlers,
 }: Pick<
   SectionProps,
-  "stageState" | "wirelessChannels" | "teamPositions" | "localSlots" | "slotsDirty" | "isSavingSlots" | "layoutTemplates" | "handlers"
+  "stageState" | "wirelessChannels" | "teamPositions" | "localSlots" | "slotsDirty" | "isSavingSlots" | "slotPresets" | "layoutTemplates" | "handlers"
 > & { view: View; canDelete: boolean }) {
   // Parent remounts this component on view change (key={view.id}), so local
   // field state initializes fresh per view.
@@ -174,6 +175,7 @@ function ViewDetail({
           <LayoutEditor
             key={view.id}
             view={view}
+            ndiEnabled={stageState.ndiEnabled ?? false}
             slotsViews={(stageState.views ?? []).filter((v) => v.kind === "slots")}
             templates={layoutTemplates}
             onSave={(layout) => handlers.handleSetViewLayout(view.id, layout)}
@@ -199,18 +201,20 @@ function ViewDetail({
         </div>
       )}
 
-      {/* NDI source (native Apple client only) */}
-      <div className="flex items-center gap-2">
-        <VideoIcon className="size-3.5 text-gray-9 shrink-0" />
-        <Input
-          value={editNdi}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setEditNdi(e.target.value)}
-          onBlur={handleNdiBlur}
-          placeholder="NDI source name (optional, native app only)"
-          className="flex-1 min-w-0 text-gray-12"
-          aria-label="NDI source name"
-        />
-      </div>
+      {/* NDI source (native Apple client only) — hidden unless NDI is enabled in Advanced */}
+      {stageState.ndiEnabled && (
+        <div className="flex items-center gap-2">
+          <VideoIcon className="size-3.5 text-gray-9 shrink-0" />
+          <Input
+            value={editNdi}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setEditNdi(e.target.value)}
+            onBlur={handleNdiBlur}
+            placeholder="NDI source name (optional, native app only)"
+            className="flex-1 min-w-0 text-gray-12"
+            aria-label="NDI source name"
+          />
+        </div>
+      )}
 
       {/* Slots-kind content editor */}
       {view.kind === "slots" ? (
@@ -245,6 +249,7 @@ function ViewDetail({
             localSlots={localSlots}
             slotsDirty={slotsDirty}
             isSavingSlots={isSavingSlots}
+            slotPresets={slotPresets}
             handlers={handlers}
           />
         </>
@@ -270,6 +275,7 @@ export function ViewsSection({
   localSlots,
   slotsDirty,
   isSavingSlots,
+  slotPresets,
   handlers,
 }: Pick<
   SectionProps,
@@ -282,6 +288,7 @@ export function ViewsSection({
   | "localSlots"
   | "slotsDirty"
   | "isSavingSlots"
+  | "slotPresets"
   | "handlers"
 >) {
   const views = stageState.views ?? [];
@@ -400,6 +407,7 @@ export function ViewsSection({
             localSlots={localSlots}
             slotsDirty={slotsDirty}
             isSavingSlots={isSavingSlots}
+            slotPresets={slotPresets}
             layoutTemplates={layoutTemplates}
             canDelete={views.length > 1}
             handlers={handlers}

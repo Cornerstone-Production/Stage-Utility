@@ -90,6 +90,7 @@ export class StageController {
     appLogo: null,
     appLogoMonochrome: true,
     emptySlotLogo: null,
+    ndiEnabled: false,
   };
 
   // Live device statuses keyed by channelId.
@@ -138,6 +139,7 @@ export class StageController {
       appLogo: settings.appLogo ?? null,
       appLogoMonochrome: settings.appLogoMonochrome ?? true,
       emptySlotLogo: settings.emptySlotLogo ?? null,
+      ndiEnabled: settings.ndiEnabled ?? false,
     };
 
     await this.loadAllViewRawSlots(settings.serviceTypeId);
@@ -600,6 +602,27 @@ export class StageController {
     return this.state;
   }
 
+  // ── NDI visibility ────────────────────────────────────────────────────
+
+  async setNdiEnabled(enabled: boolean): Promise<StageState> {
+    console.log(`[stage-controller] setNdiEnabled → ${enabled}`);
+    this.state = { ...this.state, ndiEnabled: enabled };
+    await settingsStore.patch({ ndiEnabled: enabled });
+    this.broadcast();
+    return this.state;
+  }
+
+  // ── Remote refresh ────────────────────────────────────────────────────
+
+  /** Tell kiosk pages to reload so they pick up new content. `target` is an
+   *  output id, or "all" (empty) to reload every connected display. Pushes a
+   *  one-off SSE event — no state change. */
+  refreshDisplays(target: string): void {
+    const t = target || "all";
+    console.log(`[stage-controller] refreshDisplays → ${t}`);
+    broadcast("display:refresh", { target: t });
+  }
+
   // ── Branding (app name + logo) ────────────────────────────────────────
 
   /** Update branding. Any field may be omitted to leave it unchanged; pass
@@ -705,6 +728,21 @@ export class StageController {
     console.log(`[stage-controller] deletePreset ${id}`);
     const presets = await presetsStore.load();
     const updated = presets.filter((p) => p.id !== id);
+    await presetsStore.save(updated);
+    return updated;
+  }
+
+  /** Add a preset from imported data (e.g. an exported .json), with fresh ids. */
+  async importPreset(name: string, slots: Slot[]): Promise<SlotPreset[]> {
+    const presets = await presetsStore.load();
+    const newPreset: SlotPreset = {
+      id: randomUUID(),
+      name: name.trim() || "Imported",
+      slots: slots.map((s, i) => ({ ...s, id: randomUUID(), order: i })),
+      createdAt: new Date().toISOString(),
+    };
+    console.log(`[stage-controller] importPreset "${newPreset.name}" (${newPreset.slots.length} slots)`);
+    const updated = [...presets, newPreset];
     await presetsStore.save(updated);
     return updated;
   }

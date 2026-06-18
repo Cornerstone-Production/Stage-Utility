@@ -10,7 +10,8 @@ export type SectionId =
   | "displays"
   | "integrations"
   | "connect"
-  | "branding";
+  | "branding"
+  | "advanced";
 
 export interface SectionItem {
   id: SectionId;
@@ -31,6 +32,7 @@ export interface SectionHandlers {
   handleNextPlan: () => Promise<void>;
   handleRefresh: () => Promise<void>;
   handleShowQrChange: (show: boolean) => Promise<void>;
+  handleSetNdiEnabled: (enabled: boolean) => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {
     name?: string;
@@ -62,6 +64,11 @@ export interface SectionHandlers {
   handleDeleteLayoutTemplate: (id: string) => Promise<void>;
   handleCopySlots: (targetViewId: string, fromViewId: string) => Promise<void>;
   handleReorderViews: (ids: string[]) => Promise<void>;
+  // Presets (saved slot arrangements — global, recall into any view)
+  handleSavePreset: (name: string) => Promise<void>;
+  handleApplyPreset: (id: string) => Promise<void>;
+  handleDeletePreset: (id: string) => Promise<void>;
+  handleImportPreset: (name: string, slots: Slot[]) => Promise<void>;
   // Outputs (physical screens + routing)
   handleAddOutput: () => Promise<void>;
   handleRenameOutput: (id: string, name: string) => Promise<void>;
@@ -69,6 +76,8 @@ export interface SectionHandlers {
   handleRemoveOutput: (id: string) => Promise<void>;
   handleReorderOutputs: (ids: string[]) => Promise<void>;
   handleOpenOutputWindow: (id: string) => Promise<void>;
+  /** Remotely reload kiosk pages. Pass an output id, or null for all displays. */
+  handleRefreshDisplay: (id: string | null) => Promise<void>;
   handleDragEnd: (event: DragEndEvent) => void;
   sensors: ReturnType<typeof useSensors>;
 }
@@ -86,5 +95,6 @@ export interface SectionProps {
   slotsDirty: boolean;
   isSavingSlots: boolean;
   isRefreshing: boolean;
+  slotPresets: SlotPreset[];
   handlers: SectionHandlers;
 }

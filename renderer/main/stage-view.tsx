@@ -1,5 +1,6 @@
 import { Component, useEffect } from "react";
 import type { ReactNode, ErrorInfo } from "react";
+import { onNotification } from "../lib/api";
 import { SlotPanel } from "../components/slot-panel";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
@@ -268,6 +269,17 @@ export function StageView() {
     document.title = titleDisplay ? `${appName} — ${titleDisplay}` : appName;
   }, [state?.appName, titleDisplay]);
 
+  // Remote refresh: reload this kiosk page when the server broadcasts a refresh
+  // targeting this display (or "all"). Lets the operator push new content from
+  // Settings without walking to the screen. Preview iframes are never reloaded.
+  useEffect(() => {
+    if (displayId.startsWith("preview-")) return;
+    return onNotification("display:refresh", (payload: unknown) => {
+      const target = (payload as { target?: string } | null)?.target ?? "all";
+      if (target === "all" || target === displayId) window.location.reload();
+    });
+  }, [displayId]);
+
   if (isLoading) return <KioskLoading />;
   if (error) return <KioskError message={error} />;
   if (!state) return <KioskError message="State is unavailable." />;
@@ -372,6 +384,9 @@ export function StageView() {
     return `0 0 ${(inches / slotsLayout.displayWidthIn) * 100}%`;
   };
   const isSpacerColumn = (col: Slot[]) => col.every((s) => s.link.kind === "spacer");
+  // A spacer can opt to show the empty-slot image centered in its gap.
+  const spacerShowsImage = (col: Slot[]) =>
+    col.some((s) => s.link.kind === "spacer" && (s.link as { showEmptyImage?: boolean }).showEmptyImage);
 
   if (sortedSlots.length === 0) {
     return (
@@ -408,7 +423,18 @@ export function StageView() {
                 style={flex ? { flex } : undefined}
               >
                 {isSpacerColumn(column)
-                  ? null
+                  ? spacerShowsImage(column) && state.emptySlotLogo
+                    ? (
+                        <div className="flex flex-1 items-center justify-center [container-type:inline-size]">
+                          <BrandLogo
+                            logo={state.emptySlotLogo}
+                            monochrome
+                            className="text-white/25"
+                            style={{ width: "clamp(2rem,32cqw,9rem)", height: "clamp(2rem,32cqw,9rem)" }}
+                          />
+                        </div>
+                      )
+                    : null
                   : column.map((slot) => (
                       <SlotPanel key={slot.id} slot={slot} emptySlotLogo={state.emptySlotLogo} />
                     ))}

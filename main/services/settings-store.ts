@@ -38,6 +38,9 @@ export interface SettingsData {
   /** Original upload + crop transform for the empty-slot image (settings-only). */
   emptySlotLogoOriginal: string | null;
   emptySlotLogoCrop: { scale: number; x: number; y: number } | null;
+  /** Show NDI-related controls (source field, NDI video object). Off by default —
+   *  NDI is only used by the native Apple client. */
+  ndiEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -61,6 +64,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   emptySlotLogo: null,
   emptySlotLogoOriginal: null,
   emptySlotLogoCrop: null,
+  ndiEnabled: false,
 };
 
 const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS);
