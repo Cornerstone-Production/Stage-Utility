@@ -310,13 +310,29 @@ export function StageView() {
     );
   }
 
-  // Custom-layout views render the visual-editor layout full-screen.
+  // Custom-layout views render the visual-editor layout below the same kiosk top
+  // bar (brand + plan context + connect QR) the other views show.
   if (kind === "custom") {
     const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
     if (activeView?.layout) {
       return (
         <StageErrorBoundary>
-          <LayoutRenderer layout={activeView.layout} ndiSource={activeView.ndiSource ?? null} />
+          <div className="flex flex-col h-[100dvh] overflow-hidden bg-black pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+            <KioskTopBar
+              serviceTypeName={state.serviceTypeName}
+              planSeriesTitle={state.planSeriesTitle}
+              planTitle={state.planTitle}
+              showQr={state.showQr}
+              remoteUrl={state.remoteUrl}
+              displayName={displayName}
+              appName={state.appName}
+              appLogo={state.appLogo}
+              appLogoMonochrome={state.appLogoMonochrome}
+            />
+            <div className="flex-1 min-h-0">
+              <LayoutRenderer layout={activeView.layout} ndiSource={activeView.ndiSource ?? null} />
+            </div>
+          </div>
         </StageErrorBoundary>
       );
     }

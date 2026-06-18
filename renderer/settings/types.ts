@@ -33,6 +33,7 @@ export interface SectionHandlers {
   handleRefresh: () => Promise<void>;
   handleShowQrChange: (show: boolean) => Promise<void>;
   handleSetNdiEnabled: (enabled: boolean) => Promise<void>;
+  handleSetPublicUrl: (url: string | null) => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {
     name?: string;

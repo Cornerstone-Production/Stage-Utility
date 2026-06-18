@@ -946,6 +946,15 @@ export class RemoteServer {
       return;
     }
 
+    // ── Public URL (DNS) ────────────────────────────────────────────────────
+    if (method === "POST" && pathname === "/api/public-url") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const url = typeof body.url === "string" ? body.url : null;
+      const state = await stageController.setPublicUrl(url);
+      json(res, state);
+      return;
+    }
+
     // ── Branding (app name + logos) ─────────────────────────────────────────
     if (method === "GET" && pathname === "/api/branding/source") {
       const target = _url.searchParams.get("target") === "empty" ? "empty" : "app";

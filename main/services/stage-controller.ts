@@ -17,6 +17,16 @@ import { layoutTemplatesStore } from "./layout-templates-store.js";
 const PRIMARY_DISPLAY_ID = "display-1";
 
 /** Deep-clone a layout, minting fresh object ids so copies stay independent. */
+/** Normalize a user-entered base URL: trim, default to http:// if no scheme,
+ *  strip a trailing slash. Returns null for blank input. */
+function normalizeBaseUrl(url: string | null): string | null {
+  if (!url) return null;
+  let s = url.trim();
+  if (!s) return null;
+  if (!/^https?:\/\//i.test(s)) s = `http://${s}`;
+  return s.replace(/\/+$/, "");
+}
+
 function cloneLayout(l: LayoutDTO): LayoutDTO {
   return {
     version: 1,
@@ -91,6 +101,7 @@ export class StageController {
     appLogoMonochrome: true,
     emptySlotLogo: null,
     ndiEnabled: false,
+    publicUrl: null,
   };
 
   // Live device statuses keyed by channelId.
@@ -140,7 +151,10 @@ export class StageController {
       appLogoMonochrome: settings.appLogoMonochrome ?? true,
       emptySlotLogo: settings.emptySlotLogo ?? null,
       ndiEnabled: settings.ndiEnabled ?? false,
+      publicUrl: settings.publicUrl ?? null,
     };
+    this.publicUrl = settings.publicUrl ?? null;
+    this.applyRemoteUrl();
 
     await this.loadAllViewRawSlots(settings.serviceTypeId);
     this.recomputeResolved();
@@ -213,9 +227,32 @@ export class StageController {
   }
 
   // ── Remote URL ────────────────────────────────────────────────────────
+  // The connect QR + display links use `remoteUrl`. It's the configured public
+  // URL (DNS) when set, otherwise the auto-detected LAN address.
 
+  private lanUrl: string | null = null;
+  private publicUrl: string | null = null;
+
+  /** Called by the server at startup with the auto-detected LAN address. */
   setRemoteUrl(url: string | null): void {
-    this.state = { ...this.state, remoteUrl: url };
+    this.lanUrl = url;
+    this.applyRemoteUrl();
+  }
+
+  /** Set (or clear with null) the public base URL — persisted + broadcast. */
+  async setPublicUrl(url: string | null): Promise<StageState> {
+    const normalized = normalizeBaseUrl(url);
+    console.log(`[stage-controller] setPublicUrl → ${normalized ?? "(cleared)"}`);
+    this.publicUrl = normalized;
+    this.state = { ...this.state, publicUrl: normalized };
+    await settingsStore.patch({ publicUrl: normalized });
+    this.applyRemoteUrl();
+    this.broadcast();
+    return this.state;
+  }
+
+  private applyRemoteUrl(): void {
+    this.state = { ...this.state, remoteUrl: this.publicUrl || this.lanUrl };
   }
 
   // ── Public state ──────────────────────────────────────────────────────

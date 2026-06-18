@@ -509,14 +509,14 @@ export function LayoutRenderer({ layout, ndiSource }: { layout: LayoutDTO; ndiSo
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-[100dvh] bg-black">
+      <div className="flex items-center justify-center h-full bg-black">
         <Loader2Icon className="size-8 text-gray-7 animate-spin" />
       </div>
     );
   }
   if (error || !state) {
     return (
-      <div className="flex items-center justify-center h-[100dvh] bg-black text-gray-7">
+      <div className="flex items-center justify-center h-full bg-black text-gray-7">
         Could not load layout
       </div>
     );
@@ -527,7 +527,7 @@ export function LayoutRenderer({ layout, ndiSource }: { layout: LayoutDTO; ndiSo
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (
-    <div ref={setBox} className="relative w-full h-[100dvh] bg-black overflow-hidden flex items-center justify-center">
+    <div ref={setBox} className="relative w-full h-full bg-black overflow-hidden flex items-center justify-center">
       <div
         style={{
           width: canvas.width,
