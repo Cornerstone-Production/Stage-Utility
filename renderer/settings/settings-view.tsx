@@ -338,6 +338,16 @@ export function SettingsView() {
     }
   }
 
+  async function handleSetPublicUrl(url: string | null) {
+    try {
+      const next = await ipc<StageState>("stage:setPublicUrl", { url });
+      queryClient.setQueryData(["stage:getState"], next);
+      toast.success(url ? "Public URL updated." : "Public URL cleared.");
+    } catch (err) {
+      toast.error(`Failed to update public URL: ${String(err)}`);
+    }
+  }
+
   async function handleSetAllowedServiceTypes(ids: string[]) {
     try {
       const next = await ipc<StageState>("stage:setAllowedServiceTypes", { ids });
@@ -693,6 +703,7 @@ export function SettingsView() {
     handleRefresh,
     handleShowQrChange,
     handleSetNdiEnabled,
+    handleSetPublicUrl,
     handleSetAllowedServiceTypes,
     handleSetBranding,
     updateSlot,

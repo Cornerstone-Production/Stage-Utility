@@ -120,6 +120,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "stage:setNdiEnabled":
       return post<T>("/api/ndi-enabled", p);
 
+    case "stage:setPublicUrl":
+      return post<T>("/api/public-url", p);
+
     case "displays:refresh":
       return post<T>("/api/displays/refresh", p);
 

@@ -28,6 +28,8 @@ const UNROUTED = "__none__";
 interface OutputRowProps {
   output: Output;
   views: View[];
+  /** Base origin for this display's URL — the configured public URL or the current origin. */
+  baseUrl: string;
   isFirst: boolean;
   canRemove: boolean;
   onRename: (name: string) => void;
@@ -37,7 +39,7 @@ interface OutputRowProps {
   onRemove: () => void;
 }
 
-function OutputRow({ output, views, isFirst, canRemove, onRename, onSetView, onOpenWindow, onRefresh, onRemove }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, isFirst, canRemove, onRename, onSetView, onOpenWindow, onRefresh, onRemove }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: output.id,
@@ -61,7 +63,7 @@ function OutputRow({ output, views, isFirst, canRemove, onRename, onSetView, onO
     }
   }
 
-  const outputUrl = `${window.location.origin}/${encodeURIComponent(output.id)}`;
+  const outputUrl = `${baseUrl}/${encodeURIComponent(output.id)}`;
 
   return (
     <div ref={setNodeRef} style={style} className={`flex flex-col gap-1.5 py-2${isFirst ? "" : " border-t border-gray-a3"}`}>
@@ -143,6 +145,9 @@ function OutputRow({ output, views, isFirst, canRemove, onRename, onSetView, onO
 export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "stageState" | "handlers">) {
   const outputs = stageState.outputs ?? [];
   const views = stageState.views ?? [];
+  // Prefer the configured public URL (DNS) so display links match what operators
+  // actually browse to; fall back to the current origin.
+  const baseUrl = stageState.publicUrl || window.location.origin;
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -170,6 +175,7 @@ export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "sta
                 key={output.id}
                 output={output}
                 views={views}
+                baseUrl={baseUrl}
                 isFirst={idx === 0}
                 canRemove={outputs.length > 1}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}

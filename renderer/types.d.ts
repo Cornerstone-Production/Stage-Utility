@@ -331,6 +331,8 @@ interface StageState {
   emptySlotLogo: string | null;
   /** Show NDI-related controls in settings (off by default; native client only). */
   ndiEnabled: boolean;
+  /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */
+  publicUrl: string | null;
 }
 
 /** Editor source for a brand image (original upload + saved crop transform). */

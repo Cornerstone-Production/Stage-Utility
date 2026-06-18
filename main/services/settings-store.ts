@@ -41,6 +41,9 @@ export interface SettingsData {
   /** Show NDI-related controls (source field, NDI video object). Off by default —
    *  NDI is only used by the native Apple client. */
   ndiEnabled: boolean;
+  /** Public base URL (e.g. a DNS name behind a reverse proxy) used for the connect
+   *  QR code and display links instead of the LAN IP. Null = use the LAN IP. */
+  publicUrl: string | null;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -65,6 +68,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   emptySlotLogoOriginal: null,
   emptySlotLogoCrop: null,
   ndiEnabled: false,
+  publicUrl: null,
 };
 
 const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS);
