@@ -16,7 +16,10 @@ import {
   AlignStartHorizontal,
   AlignCenterHorizontal,
   AlignEndHorizontal,
+  PencilIcon,
+  CheckIcon,
 } from "lucide-react";
+import { Dialog as DialogPrimitive } from "radix-ui";
 import {
   Button,
   Input,
@@ -29,6 +32,11 @@ import {
   Switch,
   Separator,
   Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from "../../components/ui";
 import { ObjectContent, boxStyle, useLayoutData, loadProcessedAttachment, type LayoutRenderCtx } from "../../main/layout-renderer";
 
@@ -151,7 +159,7 @@ interface DragState {
 }
 
 function EditorCanvas({
-  canvas, objects, selectedId, gridOn, ctx, ndiSource,
+  canvas, objects, selectedId, gridOn, ctx, ndiSource, interactive,
   onSelect, onGeom, onCommitStart,
 }: {
   canvas: LayoutCanvas;
@@ -160,30 +168,36 @@ function EditorCanvas({
   gridOn: boolean;
   ctx: Omit<LayoutRenderCtx, "H" | "ndiSource">;
   ndiSource: string | null;
+  /** When false the canvas is a read-only preview (no overlay, handles, or drag). */
+  interactive: boolean;
   onSelect: (id: string | null) => void;
   onGeom: (id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => void;
   onCommitStart: () => void;
 }) {
-  const [box, setBox] = useState<HTMLDivElement | null>(null);
-  const [size, setSize] = useState({ w: 0, h: 0 });
+  // Measure the available area (this wrapper), then letterbox the design canvas to
+  // fit BOTH axes so it never overflows on ultrawide/portrait/short screens.
+  const [wrap, setWrap] = useState<HTMLDivElement | null>(null);
+  const [avail, setAvail] = useState({ w: 0, h: 0 });
   useEffect(() => {
-    if (!box) return;
-    const m = () => setSize({ w: box.clientWidth, h: box.clientHeight });
+    if (!wrap) return;
+    const m = () => setAvail({ w: wrap.clientWidth, h: wrap.clientHeight });
     m();
     const ro = new ResizeObserver(m);
-    ro.observe(box);
+    ro.observe(wrap);
     return () => ro.disconnect();
-  }, [box]);
+  }, [wrap]);
 
-  const scale = size.w ? size.w / canvas.width : 0;
+  const scale = avail.w > 0 && avail.h > 0 ? Math.min(avail.w / canvas.width, avail.h / canvas.height) : 0;
+  const boxW = canvas.width * scale;
+  const boxH = canvas.height * scale;
   const [drag, setDrag] = useState<DragState | null>(null);
 
   // Window-level move/up while dragging.
   useEffect(() => {
-    if (!drag || !box) return;
+    if (!drag || boxW <= 0) return;
     const onMove = (e: globalThis.PointerEvent) => {
-      const dx = (e.clientX - drag.px) / box.clientWidth;
-      const dy = (e.clientY - drag.py) / box.clientHeight;
+      const dx = (e.clientX - drag.px) / boxW;
+      const dy = (e.clientY - drag.py) / boxH;
       if (drag.mode === "move") {
         const x = clamp(snap(drag.start.x + dx, gridOn), 0, 1 - drag.start.w);
         const y = clamp(snap(drag.start.y + dy, gridOn), 0, 1 - drag.start.h);
@@ -203,7 +217,7 @@ function EditorCanvas({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [drag, box, gridOn, onGeom]);
+  }, [drag, boxW, boxH, gridOn, onGeom]);
 
   function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle) {
     e.stopPropagation();
@@ -225,89 +239,92 @@ function EditorCanvas({
     : {};
 
   return (
-    <div
-      ref={setBox}
-      className="relative w-full overflow-hidden rounded-xl border border-gray-a4 select-none"
-      style={{ aspectRatio: `${canvas.width} / ${canvas.height}`, background: canvas.background ?? "#000", ...gridBg }}
-      onPointerDown={() => onSelect(null)}
-    >
-      {/* Scaled content layer (visual only) */}
+    <div ref={setWrap} className="relative w-full h-full flex items-center justify-center select-none">
       {scale > 0 && (
         <div
-          style={{
-            width: canvas.width, height: canvas.height,
-            transform: `scale(${scale})`, transformOrigin: "top left",
-            position: "absolute", top: 0, left: 0, pointerEvents: "none",
-          }}
+          className="relative overflow-hidden rounded-xl border border-gray-a4"
+          style={{ width: boxW, height: boxH, background: canvas.background ?? "#000", ...gridBg }}
+          onPointerDown={interactive ? () => onSelect(null) : undefined}
         >
-          {sorted.map((o) => (
-            <div
-              key={o.id}
-              style={{
-                position: "absolute",
-                left: o.x * canvas.width, top: o.y * canvas.height,
-                width: o.w * canvas.width, height: o.h * canvas.height,
-                opacity: o.hidden ? 0.25 : 1,
-                ...boxStyle(o, canvas.height),
-              }}
-            >
-              <ObjectContent o={o} ctx={fullCtx} />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Interaction overlay (rendered px) */}
-      <div className="absolute inset-0">
-        {sorted.map((o) => {
-          const sel = o.id === selectedId;
-          return (
-            <div
-              key={o.id}
-              onPointerDown={(e) => startDrag(e, o, "move")}
-              className="absolute"
-              style={{
-                left: `${o.x * 100}%`, top: `${o.y * 100}%`,
-                width: `${o.w * 100}%`, height: `${o.h * 100}%`,
-                cursor: "move",
-                outline: sel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
-                outlineOffset: 0,
-                boxShadow: sel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
-              }}
-            >
-              {/* Name tag so objects are easy to tell apart */}
-              <span
+          {/* Scaled content layer (visual only) */}
+          <div
+            style={{
+              width: canvas.width, height: canvas.height,
+              transform: `scale(${scale})`, transformOrigin: "top left",
+              position: "absolute", top: 0, left: 0, pointerEvents: "none",
+            }}
+          >
+            {sorted.map((o) => (
+              <div
+                key={o.id}
                 style={{
-                  position: "absolute", top: 0, left: 0, transform: "translateY(-100%)",
-                  fontSize: 10, lineHeight: "14px", padding: "0 5px", maxWidth: "100%",
-                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                  background: sel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
-                  borderRadius: "4px 4px 0 0", pointerEvents: "none",
+                  position: "absolute",
+                  left: o.x * canvas.width, top: o.y * canvas.height,
+                  width: o.w * canvas.width, height: o.h * canvas.height,
+                  opacity: o.hidden ? 0.25 : 1,
+                  ...boxStyle(o, canvas.height),
                 }}
               >
-                {TYPE_LABELS[o.config.type]}
-              </span>
-              {sel &&
-                HANDLES.map((h) => {
-                  const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2 };
-                  if (h.includes("n")) pos.top = -5;
-                  if (h.includes("s")) pos.bottom = -5;
-                  if (h.includes("w")) pos.left = -5;
-                  if (h.includes("e")) pos.right = -5;
-                  if (h === "n" || h === "s") { pos.left = "calc(50% - 4.5px)"; }
-                  if (h === "e" || h === "w") { pos.top = "calc(50% - 4.5px)"; }
-                  return (
-                    <div
-                      key={h}
-                      onPointerDown={(e) => startDrag(e, o, h)}
-                      style={{ ...pos, cursor: handleCursor(h) }}
-                    />
-                  );
-                })}
+                <ObjectContent o={o} ctx={fullCtx} />
+              </div>
+            ))}
+          </div>
+
+          {/* Interaction overlay (rendered px) — edit mode only */}
+          {interactive && (
+            <div className="absolute inset-0">
+              {sorted.map((o) => {
+                const sel = o.id === selectedId;
+                return (
+                  <div
+                    key={o.id}
+                    onPointerDown={(e) => startDrag(e, o, "move")}
+                    className="absolute"
+                    style={{
+                      left: `${o.x * 100}%`, top: `${o.y * 100}%`,
+                      width: `${o.w * 100}%`, height: `${o.h * 100}%`,
+                      cursor: "move",
+                      outline: sel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
+                      outlineOffset: 0,
+                      boxShadow: sel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
+                    }}
+                  >
+                    {/* Name tag so objects are easy to tell apart */}
+                    <span
+                      style={{
+                        position: "absolute", top: 0, left: 0, transform: "translateY(-100%)",
+                        fontSize: 10, lineHeight: "14px", padding: "0 5px", maxWidth: "100%",
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                        background: sel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
+                        borderRadius: "4px 4px 0 0", pointerEvents: "none",
+                      }}
+                    >
+                      {TYPE_LABELS[o.config.type]}
+                    </span>
+                    {sel &&
+                      HANDLES.map((h) => {
+                        const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2 };
+                        if (h.includes("n")) pos.top = -5;
+                        if (h.includes("s")) pos.bottom = -5;
+                        if (h.includes("w")) pos.left = -5;
+                        if (h.includes("e")) pos.right = -5;
+                        if (h === "n" || h === "s") { pos.left = "calc(50% - 4.5px)"; }
+                        if (h === "e" || h === "w") { pos.top = "calc(50% - 4.5px)"; }
+                        return (
+                          <div
+                            key={h}
+                            onPointerDown={(e) => startDrag(e, o, h)}
+                            style={{ ...pos, cursor: handleCursor(h) }}
+                          />
+                        );
+                      })}
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -421,8 +438,26 @@ export function LayoutEditor({
   const [gridOn, setGridOn] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tplName, setTplName] = useState("");
+  // View-only by default: a custom view opens as a clean preview until "Edit" is
+  // clicked, so a stray drag on a live display's layout can't mutate it.
+  const [isEditing, setIsEditing] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
 
   const currentLayout = (): LayoutDTO => ({ version: 1, canvas, objects });
+
+  function discardChanges() {
+    setObjects(initial.objects);
+    setCanvas(initial.canvas);
+    setSelectedId(initial.objects[0]?.id ?? null);
+    setHistory([]);
+    setDirty(false);
+  }
+
+  // Leaving edit mode: confirm if there are unsaved changes, else just exit.
+  function leaveEditMode() {
+    if (dirty) setConfirmLeave(true);
+    else setIsEditing(false);
+  }
   function loadTemplate(t: LayoutTemplate) {
     pushHistory();
     setObjects(t.layout.objects.map((o) => ({ ...o, id: uid() })));
@@ -514,8 +549,19 @@ export function LayoutEditor({
   const layersDesc = [...objects].sort((a, b) => b.z - a.z);
 
   return (
-    <div className="flex flex-col gap-3 @container">
-      {/* Toolbar */}
+    <div className="flex flex-col gap-3 @container h-full min-h-0">
+      {/* View-only bar — a custom view opens as a clean preview until "Edit". */}
+      {!isEditing && (
+        <div className="flex items-center gap-2">
+          <div className="flex-1" />
+          <Button variant="accent" size="small" onClick={() => setIsEditing(true)}>
+            <PencilIcon className="size-3.5" /> Edit layout
+          </Button>
+        </div>
+      )}
+
+      {/* Toolbar (edit mode) */}
+      {isEditing && (
       <div className="flex flex-wrap items-center gap-2">
         <Select value="" onValueChange={(t: string) => addObject(t as LayoutObjectType)}>
           <SelectTrigger className="w-40"><SelectValue placeholder="+ Add object" /></SelectTrigger>
@@ -581,17 +627,22 @@ export function LayoutEditor({
             {saving ? "Saving…" : "Save layout"}
           </Button>
         )}
+        <Button variant="filled" size="small" onClick={leaveEditMode}>
+          <CheckIcon className="size-3.5" /> Done
+        </Button>
       </div>
+      )}
 
-      <div className="flex gap-3 @max-4xl:flex-col">
+      <div className="flex gap-3 @max-4xl:flex-col flex-1 min-h-0">
         {/* Canvas */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 min-h-0">
           {data.state ? (
             <EditorCanvas
               canvas={canvas}
               objects={objects}
               selectedId={selectedId}
-              gridOn={gridOn}
+              gridOn={gridOn && isEditing}
+              interactive={isEditing}
               ctx={{ ...data, state: data.state }}
               ndiSource={view.ndiSource ?? null}
               onSelect={setSelectedId}
@@ -599,17 +650,15 @@ export function LayoutEditor({
               onCommitStart={pushHistory}
             />
           ) : (
-            <div
-              className="w-full rounded-xl border border-gray-a4 flex items-center justify-center text-gray-7"
-              style={{ aspectRatio: `${canvas.width} / ${canvas.height}` }}
-            >
+            <div className="w-full h-full rounded-xl border border-gray-a4 flex items-center justify-center text-gray-7">
               Loading…
             </div>
           )}
         </div>
 
-        {/* Side panel: layers + inspector */}
-        <div className="w-64 shrink-0 flex flex-col gap-3 @max-4xl:w-full @max-4xl:shrink">
+        {/* Side panel: layers + inspector (edit mode only) */}
+        {isEditing && (
+        <div className="w-64 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full @max-4xl:shrink">
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Layers</span>
@@ -677,7 +726,37 @@ export function LayoutEditor({
             </>
           )}
         </div>
+        )}
       </div>
+
+      {/* Leaving edit mode with unsaved changes. */}
+      <DialogPrimitive.Root open={confirmLeave} onOpenChange={setConfirmLeave}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Unsaved changes</DialogTitle>
+            <DialogDescription>
+              This layout has unsaved changes. Save them before leaving edit mode?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="transparent"
+              size="small"
+              onClick={() => { discardChanges(); setConfirmLeave(false); setIsEditing(false); }}
+            >
+              Discard
+            </Button>
+            <Button
+              variant="accent"
+              size="small"
+              disabled={saving}
+              onClick={async () => { await save(); setConfirmLeave(false); setIsEditing(false); }}
+            >
+              {saving ? "Saving…" : "Save & close"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </DialogPrimitive.Root>
     </div>
   );
 }

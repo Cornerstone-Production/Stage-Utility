@@ -115,7 +115,9 @@ function ViewDetail({
   const slotViews = (stageState.views ?? []).filter((v) => v.kind === "slots" && v.id !== view.id);
 
   return (
-    <div className="flex flex-col gap-5">
+    // Custom views fill the available height so the editor fits without page scroll;
+    // other kinds keep their natural height and let the page scroll (long slot lists).
+    <div className={cn("flex flex-col gap-5", view.kind === "custom" && "flex-1 min-h-0")}>
       {/* Header: name + kind dropdown + actions */}
       <div className="flex flex-wrap items-center gap-2">
         <Input
@@ -156,16 +158,18 @@ function ViewDetail({
       {/* Custom views get the visual editor (its canvas doubles as the preview);
           all other kinds get the read-only live preview. */}
       {view.kind === "custom" ? (
-        <LayoutEditor
-          key={view.id}
-          view={view}
-          slotsViews={(stageState.views ?? []).filter((v) => v.kind === "slots")}
-          templates={layoutTemplates}
-          onSave={(layout) => handlers.handleSetViewLayout(view.id, layout)}
-          onSaveTemplate={handlers.handleSaveLayoutTemplate}
-          onUpdateTemplate={handlers.handleUpdateLayoutTemplate}
-          onDeleteTemplate={handlers.handleDeleteLayoutTemplate}
-        />
+        <div className="flex-1 min-h-0">
+          <LayoutEditor
+            key={view.id}
+            view={view}
+            slotsViews={(stageState.views ?? []).filter((v) => v.kind === "slots")}
+            templates={layoutTemplates}
+            onSave={(layout) => handlers.handleSetViewLayout(view.id, layout)}
+            onSaveTemplate={handlers.handleSaveLayoutTemplate}
+            onUpdateTemplate={handlers.handleUpdateLayoutTemplate}
+            onDeleteTemplate={handlers.handleDeleteLayoutTemplate}
+          />
+        </div>
       ) : (
         <ViewPreview viewId={view.id} />
       )}
@@ -343,7 +347,7 @@ export function ViewsSection({
       </div>
 
       {/* Detail */}
-      <div className={cn("flex-1 min-w-0", isMobile && !mobileShowDetail && "hidden")}>
+      <div className={cn("flex-1 min-w-0 flex flex-col min-h-0", isMobile && !mobileShowDetail && "hidden")}>
         {/* Mobile-only back affordance to the view list. */}
         <button
           type="button"
