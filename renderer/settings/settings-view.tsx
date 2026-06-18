@@ -246,9 +246,17 @@ export function SettingsView() {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     setLocalSlots((prev) => {
-      const oldIndex = prev.findIndex((s) => s.id === active.id);
-      const newIndex = prev.findIndex((s) => s.id === over.id);
-      return arrayMove(prev, oldIndex, newIndex).map((s, i) => ({ ...s, order: i }));
+      // Reorder by stacked GROUP (lead + `stackWithPrevious` followers) keyed by
+      // the lead slot's id, so a stacked column moves as one and never splits.
+      const groups: Slot[][] = [];
+      for (const s of prev) {
+        if (s.stackWithPrevious && groups.length > 0) groups[groups.length - 1].push(s);
+        else groups.push([s]);
+      }
+      const oldIndex = groups.findIndex((g) => g[0].id === active.id);
+      const newIndex = groups.findIndex((g) => g[0].id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      return arrayMove(groups, oldIndex, newIndex).flat().map((s, i) => ({ ...s, order: i }));
     });
     setSlotsDirty(true);
   }
