@@ -175,3 +175,11 @@
   background: linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 0px, transparent 1px);
   pointer-events: none;
 }
+
+/* Radix ScrollArea wraps content in a `display:table; min-width:100%` element,
+   which sizes to the content's max-width and defeats `min-w-0` flex shrinking —
+   so wide settings sections overflow horizontally and get clipped instead of
+   fitting the panel. Force it back to a block so children shrink to the width. */
+[data-radix-scroll-area-viewport] > div {
+  display: block !important;
+}
