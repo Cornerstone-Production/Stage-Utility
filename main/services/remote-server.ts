@@ -2,6 +2,9 @@
 // Serves public/control.html at GET / and the /api/* endpoints.
 // Permissive CORS on /api/*. Tracks sockets for clean shutdown.
 
+import { execFileSync } from "node:child_process";
+import * as crypto from "node:crypto";
+import { readFileSync } from "node:fs";
 import * as fs from "fs/promises";
 import * as http from "http";
 import * as net from "net";
@@ -27,6 +30,37 @@ const PORT = Number(process.env.STAGE_UTILITY_PORT) || 8788;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
+
+/**
+ * A stable id for the currently-running code, advertised to kiosks on every SSE
+ * connect (the "server:hello" event). A display that reconnects after a restart
+ * and sees a *different* version reloads itself, so updates roll out to screens
+ * automatically. Git short SHA when available (changes only on a real update,
+ * not a plain crash-restart); else a hash of the built index.html (changes when
+ * the frontend bundle changes). "unknown" disables the auto-reload (never false).
+ */
+function computeServerVersion(): string {
+  try {
+    const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+    if (sha) return sha;
+  } catch {
+    // not a git checkout — fall through
+  }
+  try {
+    const html = readFileSync(path.join(RENDERER_BUILD_DIR, "index.html"));
+    return "b" + crypto.createHash("sha1").update(html).digest("hex").slice(0, 8);
+  } catch {
+    // no build present
+  }
+  return "unknown";
+}
+const SERVER_VERSION = computeServerVersion();
 
 function getLanIp(): string {
   const interfaces = os.networkInterfaces();
@@ -296,6 +330,9 @@ export class RemoteServer {
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no", // disable proxy buffering (nginx etc.)
       });
+      // Advertise the running code version so a kiosk that reconnects after an
+      // update/restart and sees a new version reloads itself (see useStageState).
+      sseWrite(res, "server:hello", { version: SERVER_VERSION });
       // Send initial snapshots so the client is immediately in sync — these
       // channels otherwise only broadcast on change, leaving a fresh client blank.
       sseWrite(res, "stage:state-changed", stageController.getState());

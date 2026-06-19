@@ -47,5 +47,22 @@ export function useStageState(): UseStageStateResult {
     });
   }, []);
 
+  // Auto-reload after an update: the server sends "server:hello" with its code
+  // version on every (re)connect. The browser's EventSource auto-reconnects when
+  // the server restarts (install.sh or the in-app updater), so a display that
+  // reconnects to a *newer* version reloads itself to pick up the new assets — no
+  // manual refresh needed. A plain crash-restart keeps the same version (no
+  // reload). Skipped for the settings preview iframe.
+  useEffect(() => {
+    if (window.location.pathname.startsWith("/preview-")) return;
+    let seen: string | null = null;
+    return onNotification("server:hello", (payload: unknown) => {
+      const version = (payload as { version?: string } | null)?.version ?? null;
+      if (!version || version === "unknown") return;
+      if (seen === null) seen = version;
+      else if (version !== seen) window.location.reload();
+    });
+  }, []);
+
   return { state, isLoading, error };
 }
