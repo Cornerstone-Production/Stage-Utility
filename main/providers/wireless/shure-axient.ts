@@ -1,14 +1,12 @@
 // shure-axient.ts — DeviceProvider for Shure Axient Digital (AD) wireless receivers.
 // Protocol: ASCII-over-TCP on port 2202 (Shure control protocol, AD family).
 // Init: GET 0 ALL, then SET 0 METER_RATE 1000 (1 s metering intervals).
-// SLOT-level messages (REP/SAMPLE {ch} SLOT {n} ...) carry per-transmitter
-// telemetry — a handheld/bodypack reports its battery/RF/frequency here, addressed
-// by receiver slot. We model one transmitter per channel, so we fold the slot's
-// telemetry onto its channel {ch} (see handleReport / handleSample below).
-//
-// NOTE: the exact SLOT token layout below follows the documented Shure AD protocol
-// but has NOT been verified against a physical handheld in this environment. Debug
-// logs print raw SLOT messages so the mapping can be confirmed on real hardware.
+// Verified against a physical AD4Q-A (4-ch receiver, FW 1.4.9): the linked
+// transmitter's telemetry arrives as channel-level REP fields prefixed `TX_`
+// (e.g. TX_BATT_CHARGE_PERCENT, TX_BATT_BARS, TX_AVAILABLE), the frequency is a
+// kHz integer that may be 7 digits (e.g. "0543125" = 543.125 MHz), and RF/audio
+// come from the per-channel SAMPLE. The `SLOT_`-prefixed fields are the docked
+// charging-bay batteries and are intentionally ignored.
 
 import type { ConfigField } from "../../types/integrations.js";
 import {
@@ -147,7 +145,53 @@ export class ShureAxient extends ShureBaseProvider {
         if (value === "UNKNOWN" || value === "UNKN") {
           state.online = false;
           console.log(`[shure:${this.id}] ch${channel} TX absent (${token}=${value})`);
+        } else {
+          // A real transmitter model means a TX is linked on this channel.
+          state.online = true;
         }
+        break;
+      }
+
+      // ── AD4Q transmitter telemetry ────────────────────────────────────────
+      // The AD4Q reports the LINKED transmitter's status with a `TX_` prefix
+      // (and the docked/charging-bay battery with a `SLOT_` prefix, which we
+      // ignore). These arrive whenever a handheld/bodypack links or its state
+      // changes, so they're also our presence signal.
+      case "TX_AVAILABLE": {
+        // STANDARD/ENHANCED/HIGH/etc = a TX is linked; UNKNOWN/NONE = none.
+        const v = value.toUpperCase();
+        state.online = v !== "UNKNOWN" && v !== "NONE" && v !== "";
+        console.debug(`[shure:${this.id}] ch${channel} TX_AVAILABLE: ${value}`);
+        break;
+      }
+
+      case "TX_BATT_CHARGE_PERCENT": {
+        const charge = safeInt(value);
+        if (!Number.isNaN(charge)) {
+          if (charge === 255 || charge < 0 || charge > 100) {
+            state.battery = null; // unknown / no TX
+          } else {
+            state.battery = clamp(charge, 0, 100);
+            state.online = true;
+          }
+        }
+        console.debug(`[shure:${this.id}] ch${channel} TX_BATT_CHARGE_PERCENT: ${value}`);
+        break;
+      }
+
+      case "TX_BATT_BARS": {
+        const bars = safeInt(value);
+        if (!Number.isNaN(bars)) {
+          if (bars === 255) {
+            state.battery = null;
+            state.online = false; // 255 = no transmitter linked
+          } else {
+            // Only a fallback if a precise percent hasn't arrived.
+            if (state.battery === null) state.battery = clamp(bars, 0, 5) * 20;
+            state.online = true;
+          }
+        }
+        console.debug(`[shure:${this.id}] ch${channel} TX_BATT_BARS: ${value}`);
         break;
       }
 
