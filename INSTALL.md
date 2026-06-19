@@ -333,6 +333,26 @@ network, scan the QR code shown on the display (enable it under **Connect**).
 To point a kiosk/Pi browser straight at one screen, use
 `http://<server-ip>:8788/display-1` (etc.).
 
+## Updating from within the app
+
+Once installed, you can update without a terminal: open **Settings → Advanced →
+Updates**, where you can **Check now**, **Update now**, or enable **Automatic
+updates** on a weekly schedule (it skips while a Planning Center service is
+live). "Update now" pulls the latest, rebuilds, and restarts the service — the
+displays go blank and reload for a few seconds.
+
+This works because the service manager restarts the process when the updater
+exits after rebuilding:
+
+- **Linux:** the installer's systemd unit uses `Restart=always`. If you set up an
+  older version, re-run `sudo ./scripts/install.sh` once to pick up the new unit.
+- **macOS / Windows:** the `launchd` `KeepAlive` and NSSM `AppExit … Restart`
+  settings in this guide already restart on exit — no change needed.
+
+In-app updates require a **git checkout** (the normal install). A tarball/non-git
+copy shows "update from the command line" instead — use the per-platform Update
+steps above.
+
 ## Backups
 
 Back up the **data directory** — it holds all configuration, the **encrypted
