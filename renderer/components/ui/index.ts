@@ -40,4 +40,4 @@ export {
 } from "./field";
 export { Status } from "./status";
 export { TooltipProvider } from "./tooltip-provider";
-export { ErrorBoundaryView } from "./error-boundary-view";
+export { ErrorBoundaryView, ErrorBoundary } from "./error-boundary-view";
