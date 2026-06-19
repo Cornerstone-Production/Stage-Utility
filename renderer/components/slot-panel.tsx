@@ -46,7 +46,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: Slo
             ring (its crisp 1px border bands visibly on the Pi panels against the
             dark fill); just a soft fill so it reads without an outlined rectangle. */}
         <div
-          className="relative flex flex-col items-center justify-center flex-1 overflow-hidden rounded-3xl"
+          className="relative flex flex-col items-center justify-center flex-1 overflow-hidden rounded-3xl [container-type:inline-size]"
           style={{ background: "rgba(255,255,255,0.02)" }}
         >
           {emptySlotLogo ? (
@@ -54,7 +54,9 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: Slo
               logo={emptySlotLogo}
               monochrome
               className="text-white/25"
-              style={{ width: "clamp(3rem,32cqw,11rem)", height: "clamp(3rem,32cqw,11rem)" }}
+              // Size to the slot itself (the card is the container), capped so it
+              // never exceeds the column width and gets clipped on narrow displays.
+              style={{ width: "clamp(2.5rem,55cqw,11rem)", height: "clamp(2.5rem,55cqw,11rem)", maxWidth: "80%" }}
             />
           ) : (
             <span className="text-callout font-medium text-white/20 select-none">empty</span>
