@@ -98,24 +98,30 @@ The Vite dev server proxies `/api` and `/photos` to the backend on `:8788`. If
 
 ## Deployment
 
-For installing on a server (Linux + systemd), see **[INSTALL.md](INSTALL.md)**. In
-short, from a checked-out copy:
+It's pure Node + a static build, so it **runs on Linux, macOS, and Windows** (Node
+≥ 24). The only platform-specific piece is how you make it auto-start on boot and
+restart on crash. See **[INSTALL.md](INSTALL.md)** for step-by-step guides:
 
-```bash
-sudo ./scripts/install.sh
-```
+| Platform | Auto-start mechanism | Install |
+|----------|----------------------|---------|
+| **Linux** (Pi/server) | **systemd** (`Restart=on-failure`, enabled on boot) | one command: `sudo ./scripts/install.sh` |
+| **macOS** | **launchd** LaunchDaemon (`RunAtLoad` + `KeepAlive`) | manual build + a plist |
+| **Windows** | **NSSM** service (auto-start + crash-restart), or Task Scheduler | manual build + service |
 
-This checks Node, builds the UI, sets up the data directory, and installs an
-auto-starting `stage-utility` systemd service. Re-run after `git pull` to update;
-`sudo ./scripts/uninstall.sh` removes the service.
+On Linux the installer checks Node, builds the UI, sets up the data directory, and
+installs the auto-starting `stage-utility` service. Re-run after `git pull` to
+update; `sudo ./scripts/uninstall.sh` removes it.
 
-For a manual/production run without systemd:
+For a manual/production run on any OS (no auto-start):
 
 ```bash
 npm ci
 npm run build
-npm start          # node --import tsx server.ts
+npm start          # node --import tsx server.ts  → http://localhost:8788/
 ```
+
+The listen port (`8788`) can be overridden with the `STAGE_UTILITY_PORT`
+environment variable.
 
 ## Configuration
 
@@ -162,7 +168,8 @@ in the repo. Open `…/settings-window.html` and work through the sidebar:
 | Phone remote | — (use `:8788`) | `http://<host>:8788/` when no built UI is present¹ |
 | API / SSE | proxied to `:8788` | `http://<host>:8788/api/*` |
 
-The server binds `0.0.0.0:8788` (LAN-accessible). The port is currently fixed.
+The server binds `0.0.0.0:8788` (LAN-accessible). Override the port with the
+`STAGE_UTILITY_PORT` environment variable.
 Clean URLs (`/settings`, `/display-N`) are served directly in production and mapped
 by a small Vite middleware in dev. The display picker at `/` lists every configured
 display; clicking the brand/logo in any display returns there.
