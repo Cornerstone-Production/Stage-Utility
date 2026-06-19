@@ -29,6 +29,7 @@ There is no Electron/desktop runtime.
 
 - [How it works](#how-it-works)
 - [Tech stack](#tech-stack)
+- [Get the code](#get-the-code)
 - [Quick start (development)](#quick-start-development)
 - [Deployment](#deployment)
 - [Configuration](#configuration)
@@ -75,9 +76,20 @@ HTML page.
 | Transport| REST over HTTP + Server-Sent Events for live updates |
 | Storage  | JSON files + an AES-256-GCM encrypted secrets blob, in a local data directory |
 
+## Get the code
+
+```bash
+git clone https://github.com/Cornerstone-Production/mic-display.git
+cd mic-display
+```
+
+For installing on the actual display devices (Pi / Mac / Windows), the per-device
+clone + setup steps are in **[INSTALL.md](INSTALL.md)**.
+
 ## Quick start (development)
 
-Requires Node ≥ 24. From the repo root, run **two terminals**:
+Requires Node ≥ 24. From the repo root (see [Get the code](#get-the-code) above),
+run **two terminals**:
 
 ```bash
 # Terminal 1 — backend (API + SSE) on :8788
