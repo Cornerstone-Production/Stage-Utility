@@ -281,6 +281,13 @@ export abstract class ShureBaseProvider implements DeviceProvider {
       // Strip leading `<` and any surrounding whitespace.
       const cleaned = segment.replace(/^[\s<]+/, "").trim();
       if (!cleaned) continue;
+      // Diagnostic: with SHURE_DEBUG set, log every raw frame exactly as the
+      // device sent it. This is the ground truth for aligning the parser to a
+      // specific transmitter (e.g. an Axient handheld) when stats don't appear.
+      // Enable with `SHURE_DEBUG=1` in the service environment.
+      if (process.env.SHURE_DEBUG) {
+        console.log(`[shure:${this.id}] RAW < ${cleaned} >`);
+      }
       this.parseMessage(cleaned);
     }
   }
