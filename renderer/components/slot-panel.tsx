@@ -42,10 +42,12 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: Slo
           className,
         )}
       >
-        {/* Floating glass card */}
+        {/* Empty slot: a barely-there panel. We deliberately skip the .glass-card
+            ring (its crisp 1px border bands visibly on the Pi panels against the
+            dark fill); just a soft fill so it reads without an outlined rectangle. */}
         <div
-          className="relative flex flex-col items-center justify-center flex-1 overflow-hidden rounded-3xl glass-card"
-          style={{ background: "rgba(255,255,255,0.025)" }}
+          className="relative flex flex-col items-center justify-center flex-1 overflow-hidden rounded-3xl"
+          style={{ background: "rgba(255,255,255,0.02)" }}
         >
           {emptySlotLogo ? (
             <BrandLogo

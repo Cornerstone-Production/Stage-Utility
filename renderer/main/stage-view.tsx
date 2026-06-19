@@ -88,8 +88,13 @@ function KioskTopBar({
 
   return (
     <div
-      className="relative flex items-center h-10 shrink-0"
+      className="relative flex items-center shrink-0"
       style={{
+        // The whole bar scales with the display: `font-size` is the single knob,
+        // children are sized in `em`, and the height tracks it. ~40px tall on a
+        // 1080p screen, ~2× on a 4K (37") panel, scaling smoothly in between.
+        fontSize: "clamp(0.78rem, 1.16vh, 1.5rem)",
+        height: "3.3em",
         background: "rgba(0,0,0,0.50)",
         backdropFilter: "blur(20px) saturate(1.6)",
         borderBottom: "1px solid rgba(255,255,255,0.09)",
@@ -98,10 +103,11 @@ function KioskTopBar({
     >
       {/* Brand + display name — one centered row so logo, name, divider and
           display name all share the same vertical center. */}
-      <div className="shrink-0 ml-3 flex items-center gap-2.5 relative z-10">
+      <div className="shrink-0 flex items-center relative z-10" style={{ marginLeft: "1em", gap: "0.7em" }}>
         <a
           href="/"
-          className="flex items-center gap-2 text-white/70 rounded hover:opacity-80 transition-opacity"
+          className="flex items-center text-white/70 rounded hover:opacity-80 transition-opacity"
+          style={{ gap: "0.55em" }}
           title="Back to home"
           aria-label="Back to home"
         >
@@ -109,22 +115,23 @@ function KioskTopBar({
             <BrandLogo
               logo={appLogo}
               monochrome={appLogoMonochrome}
-              className="size-5 rounded select-none"
+              className="rounded select-none shrink-0"
+              style={{ width: "1.55em", height: "1.55em" }}
             />
           )}
           <span
-            className="text-caption1 font-title select-none truncate"
-            style={{ letterSpacing: "0.02em" }}
+            className="font-title select-none truncate"
+            style={{ fontSize: "1em", letterSpacing: "0.02em" }}
           >
             {appName}
           </span>
         </a>
         {displayName && (
           <>
-            <span className="w-px h-4 bg-white/15 shrink-0" aria-hidden="true" />
+            <span className="w-px bg-white/15 shrink-0" style={{ height: "1.3em" }} aria-hidden="true" />
             <span
-              className="text-caption1 font-medium text-white/40 select-none truncate"
-              style={{ letterSpacing: "0.02em" }}
+              className="font-medium text-white/40 select-none truncate"
+              style={{ fontSize: "0.92em", letterSpacing: "0.02em" }}
             >
               {displayName}
             </span>
@@ -134,8 +141,8 @@ function KioskTopBar({
 
       <div className="absolute inset-0 flex items-center justify-center px-32 pointer-events-none max-sm:hidden">
         <span
-          className="text-caption1 font-medium text-white/55 truncate select-none tracking-wide"
-          style={{ letterSpacing: "0.02em" }}
+          className="font-medium text-white/55 truncate select-none tracking-wide"
+          style={{ fontSize: "1em", letterSpacing: "0.02em" }}
         >
           {contextLabel}
         </span>
@@ -146,11 +153,12 @@ function KioskTopBar({
           href="/settings"
           target="_blank"
           rel="noopener noreferrer"
-          className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70"
+          className="shrink-0 ml-auto relative z-10 rounded transition-opacity hover:opacity-70"
+          style={{ marginRight: "1em" }}
           title="Open settings"
           aria-label="Open settings"
         >
-          <QrHint url={remoteUrl} compact />
+          <QrHint url={remoteUrl} compact sizeCss="clamp(1.75rem, 2.6vh, 3.5rem)" />
         </a>
       )}
     </div>
