@@ -2,7 +2,7 @@
 
 Stage Utility is a web/server-only app: a small Node backend serves the kiosk
 display, the settings UI, and a phone control panel — all on one port (**8788**).
-There is no desktop/Electron runtime, so it runs anywhere Node runs.
+It runs anywhere Node runs.
 
 **It installs on Linux, macOS, and Windows.** The app itself is identical on each;
 only the way you make it **auto-start on boot and restart if it crashes** differs.

@@ -21,7 +21,6 @@ LAN so a tech can re-assign slots and switch plans from the floor.
 
 It's a self-contained **web/server app**: a small Node backend serves the kiosk
 displays, the settings UI, the phone remote, and a REST + SSE API — all on one port.
-There is no Electron/desktop runtime.
 
 ---
 
