@@ -29,8 +29,12 @@ export interface ShureConfig {
   meterRateMs: number;
 }
 
-// Reconnect back-off delay in ms.
-const RECONNECT_DELAY_MS = 3_000;
+// Reconnect back-off: start at 3s, double on each failed attempt, cap at 30s, so
+// an unreachable device doesn't hammer the network / churn the event loop.
+const RECONNECT_BASE_MS = 3_000;
+const RECONNECT_MAX_MS = 30_000;
+// Connect-phase inactivity timeout (ms) — fail fast on a wrong/unreachable IP.
+const CONNECT_TIMEOUT_MS = 10_000;
 // Heartbeat interval in ms.
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -49,6 +53,8 @@ export abstract class ShureBaseProvider implements DeviceProvider {
   private statusCallback: ((s: DeviceStatus) => void) | null = null;
   private stateChangeCallback: ((state: ConnectionState) => void) | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Consecutive failed connect attempts, for exponential reconnect back-off.
+  private reconnectAttempts = 0;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private enabled = false;
   private cfg: ShureConfig = { host: "", port: 2202, channels: 1, meterRateMs: 1000 };
@@ -84,6 +90,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
 
   async disconnect(): Promise<void> {
     this.enabled = false;
+    this.reconnectAttempts = 0;
     this.clearTimers();
     this.destroySocket();
     this.setConnectionState("disconnected");
@@ -219,11 +226,12 @@ export abstract class ShureBaseProvider implements DeviceProvider {
 
     socket.setEncoding("utf8");
     socket.setKeepAlive(true, 10_000);
-    socket.setTimeout(15_000);
+    socket.setTimeout(CONNECT_TIMEOUT_MS);
 
     socket.on("connect", () => {
       console.log(`[shure:${this.id}] connected to ${this.cfg.host}:${this.cfg.port}`);
       socket.setTimeout(0); // disable connect timeout after connected
+      this.reconnectAttempts = 0; // reset back-off on a successful connect
       this.setConnectionState("connected");
       this.startHeartbeat();
       this.onConnected();
@@ -241,6 +249,9 @@ export abstract class ShureBaseProvider implements DeviceProvider {
     socket.on("error", (err) => {
       console.error(`[shure:${this.id}] socket error:`, err.message);
       this.setConnectionState("error");
+      // Tear down so 'close' fires and we reconnect with back-off, rather than
+      // leaving a half-open socket lingering.
+      socket.destroy();
     });
 
     socket.on("close", () => {
@@ -326,14 +337,16 @@ export abstract class ShureBaseProvider implements DeviceProvider {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer !== null) return;
-    console.log(`[shure:${this.id}] will reconnect in ${RECONNECT_DELAY_MS}ms`);
+    const delay = Math.min(RECONNECT_BASE_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_MS);
+    this.reconnectAttempts++;
+    console.log(`[shure:${this.id}] will reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.enabled) {
         this.initChannelStates(this.cfg.channels);
         void this.openSocket();
       }
-    }, RECONNECT_DELAY_MS);
+    }, delay);
   }
 
   private startHeartbeat(): void {
