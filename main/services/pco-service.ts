@@ -6,6 +6,13 @@ import type { PcoAttachmentDTO, PcoLiveDTO, PlanDTO, ServiceTypeDTO, TeamMemberD
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 const CACHE_TTL_MS = 30_000;
 
+/** True for PCO's auto-generated "initials" placeholder avatar (served at
+ *  …/uploads/initials/AB.png when a person has no uploaded photo). Real photos
+ *  live under …/uploads/person/…, so this reliably flags "no real photo". */
+function isInitialsAvatar(url: string): boolean {
+  return /\/uploads\/initials\//i.test(url);
+}
+
 interface CacheEntry<T> {
   value: T;
   expiresAt: number;
@@ -349,6 +356,10 @@ class PcoService {
             (a.photo_thumbnail != null && String(a.photo_thumbnail)) ||
             null;
         }
+        // PCO returns an auto-generated gray "initials" avatar for people with no
+        // real photo (…/uploads/initials/AB.png). Treat those as no photo so the
+        // kiosk shows our themed default avatar instead of PCO's gray initials.
+        if (photoUrl && isInitialsAvatar(photoUrl)) photoUrl = null;
       }
 
       if (teamRel && !Array.isArray(teamRel)) {
