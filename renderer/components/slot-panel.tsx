@@ -73,15 +73,22 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: Slo
         className,
       )}
     >
-      {/* Floating glass card — a vertical stack: photo region on top, a solid
-          info band below. [container-type:inline-size] makes every cqi/cqw unit
-          inside resolve against THIS card's width, so names/avatar/RF bar stay
-          proportional whether the slot is a sliver (preview) or a 4K column. */}
+      {/* Floating glass card — a contained headshot on top of a macOS-style
+          "liquid glass" info panel. [container-type:inline-size] makes every
+          cqi/cqw unit inside resolve against THIS card's width, so names/avatar/
+          RF bar stay proportional whether the slot is a sliver (preview) or a
+          4K column. The card fills the column, but the photo is a fixed square
+          at the top (not flex-1), so the face keeps a natural crop instead of
+          being vertically stretched; the glass band fills the space below. */}
       <div className="relative flex flex-col flex-1 overflow-hidden rounded-3xl glass-card [container-type:inline-size]">
-        {/* ── Photo region (top) — the face lives here only; it never sits
-            behind the name/RF bar. A shorter-and-wider region means object-cover
-            crops top/bottom instead of the sides, so faces aren't pinched. ── */}
-        <div className="relative flex-1 min-h-0 overflow-hidden">
+        {/* ── Photo (top) — a contained, squared headshot. It owns its own box
+            (a fixed square, not flex-1 filling the whole tall column), so faces
+            keep a natural crop instead of being stretched. The band sits BELOW
+            it, never over it. flex-shrink lets it give way on very short cards. ── */}
+        <div
+          className="relative w-full overflow-hidden"
+          style={{ aspectRatio: "1 / 1", flex: "0 1 auto", minHeight: 0 }}
+        >
           {photoSrc ? (
             <img
               src={photoSrc}
@@ -128,25 +135,23 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: Slo
               </div>
             </div>
           )}
-
-          {/* Soft fade where the photo meets the info band, so the cut reads
-              as a deliberate transition rather than a hard seam. */}
-          <div
-            className="absolute inset-x-0 bottom-0 pointer-events-none"
-            style={{
-              height: "28%",
-              background:
-                "linear-gradient(to top, rgba(8,8,12,0.85) 0%, rgba(8,8,12,0.30) 60%, transparent 100%)",
-            }}
-          />
         </div>
 
-        {/* ── Info band (bottom) — opaque panel; name + position + RF bar. ── */}
+        {/* ── Info band (bottom) — macOS-26/Tahoe "liquid glass": a translucent,
+            heavily-blurred + saturated panel with a bright top hairline and a
+            soft inner top highlight. Sits beneath the photo (no overlap). ── */}
         <div
-          className="relative z-10 flex flex-col"
-          style={{ background: "rgba(8,8,12,0.88)" }}
+          className="relative z-10 flex flex-col justify-start gap-1 px-3 pt-2.5 pb-2"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(40,40,52,0.55) 0%, rgba(14,14,20,0.72) 100%)",
+            backdropFilter: "blur(28px) saturate(1.7)",
+            WebkitBackdropFilter: "blur(28px) saturate(1.7)",
+            borderTop: "1px solid rgba(255,255,255,0.12)",
+            boxShadow: "inset 0 1px 0 0 rgba(255,255,255,0.14)",
+          }}
         >
-          <div className="px-3 pt-2 pb-1">
+          <div>
             <span
               className="font-semibold text-white leading-tight line-clamp-2 block"
               style={{ fontSize: "clamp(1rem, 14cqi, 3.4rem)" }}
