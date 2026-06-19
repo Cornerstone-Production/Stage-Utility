@@ -87,9 +87,9 @@ export const settingsStore = {
   },
 
   async patch(partial: Partial<SettingsData>): Promise<SettingsData> {
-    const current = await store.load();
-    const updated = { ...current, ...partial };
-    await store.save(updated);
-    return updated;
+    // Serialized atomic read-modify-write — prevents a concurrent patch (e.g. the
+    // live poller advancing the plan while the operator changes display routing)
+    // from clobbering this one's fields.
+    return store.update((current) => ({ ...current, ...partial }));
   },
 };
