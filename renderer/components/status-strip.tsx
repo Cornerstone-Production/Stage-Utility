@@ -1,5 +1,5 @@
 import { cn } from "../lib/cn";
-import { SignalIcon, BatteryFullIcon, BatteryLowIcon, BatteryMediumIcon, RadioIcon } from "lucide-react";
+import { BatteryFullIcon, BatteryLowIcon, BatteryMediumIcon, RadioIcon } from "lucide-react";
 
 interface StatusStripProps {
   device: SlotDevice;
@@ -107,13 +107,11 @@ export function StatusStrip({ device, className }: StatusStripProps) {
         padding: "calc(var(--rf) * 0.55) calc(var(--rf) * 0.6)",
       }}
     >
-      {/* ── RF segment ── */}
+      {/* ── RF segment — always the same 5-bar cluster so a connected and a
+          disconnected/offline device render at identical size (no bars active
+          = all grey). Keeps every status pill the same height. ── */}
       <div className="flex items-center justify-center shrink-0">
-        {device.rf !== null ? (
-          <RfBars bars={Math.max(0, Math.min(5, Math.round(device.rf)))} />
-        ) : (
-          <SignalIcon className={cn("shrink-0", statusColor)} style={{ width: "calc(var(--rf) * 1.2)", height: "calc(var(--rf) * 1.2)" }} />
-        )}
+        <RfBars bars={device.rf === null ? 0 : Math.max(0, Math.min(5, Math.round(device.rf)))} />
       </div>
 
       <Divider />

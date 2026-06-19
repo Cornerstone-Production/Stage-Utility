@@ -146,7 +146,11 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: Slo
           <div>
             <span
               className="font-semibold text-white leading-tight line-clamp-2 block"
-              style={{ fontSize: "clamp(1rem, 14cqi, 3.4rem)" }}
+              // Always reserve two lines (2 × the 1.25 leading-tight line-height)
+              // so a one-line name and a wrapped two-line name produce the SAME
+              // card height — keeping the photo bottom, position and RF bar
+              // aligned across every slot in the row.
+              style={{ fontSize: "clamp(1rem, 14cqi, 3.4rem)", minHeight: "2.5em" }}
             >
               {displayName ?? "—"}
             </span>
