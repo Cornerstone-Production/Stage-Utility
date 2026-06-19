@@ -66,6 +66,7 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`\n[server] received ${signal}, shutting down...`);
   stageController.stopAutoRefresh();
   stageController.stopUpdateChecks();
+  stageController.stopDeviceStatusUpdates();
   livePoller.stop();
   propresenterService.stop();
   prodcomService.stop();

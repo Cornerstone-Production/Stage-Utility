@@ -73,101 +73,99 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: Slo
         className,
       )}
     >
-      {/* Floating glass card — overflow-hidden for photo crop, rounded corners */}
-      <div className="relative flex flex-col flex-1 overflow-hidden rounded-3xl glass-card">
-        {/* Photo or solid color background */}
-        {photoSrc ? (
-          <img
-            src={photoSrc}
-            alt={displayName ?? undefined}
-            className="absolute inset-0 w-full h-full object-cover object-top"
-            draggable={false}
-          />
-        ) : (
-          <div
-            className="absolute inset-0"
-            style={{ backgroundColor: solidColor ?? "#1a1a2e" }}
-          />
-        )}
-
-        {/* No-photo avatar centered: a custom default avatar if set, else a
-            built-in silhouette — both recolored to sit in the theme. */}
-        {showAvatar && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            {/* Frosted glass bubble */}
+      {/* Floating glass card — a vertical stack: photo region on top, a solid
+          info band below. [container-type:inline-size] makes every cqi/cqw unit
+          inside resolve against THIS card's width, so names/avatar/RF bar stay
+          proportional whether the slot is a sliver (preview) or a 4K column. */}
+      <div className="relative flex flex-col flex-1 overflow-hidden rounded-3xl glass-card [container-type:inline-size]">
+        {/* ── Photo region (top) — the face lives here only; it never sits
+            behind the name/RF bar. A shorter-and-wider region means object-cover
+            crops top/bottom instead of the sides, so faces aren't pinched. ── */}
+        <div className="relative flex-1 min-h-0 overflow-hidden">
+          {photoSrc ? (
+            <img
+              src={photoSrc}
+              alt={displayName ?? undefined}
+              className="absolute inset-0 w-full h-full object-cover object-top"
+              draggable={false}
+            />
+          ) : (
             <div
-              className="flex items-center justify-center rounded-full overflow-hidden"
-              style={{
-                width: "clamp(3rem,14cqw,8rem)",
-                height: "clamp(3rem,14cqw,8rem)",
-                background: "rgba(255,255,255,0.10)",
-                boxShadow: "0 0 0 1px rgba(255,255,255,0.15), 0 8px 32px rgba(0,0,0,0.5)",
-                backdropFilter: "blur(10px)",
-              }}
-            >
-              {defaultAvatar ? (
-                <BrandLogo
-                  logo={defaultAvatar}
-                  monochrome
-                  className="text-white/80"
-                  style={{ width: "70%", height: "70%" }}
-                />
-              ) : (
-                <UserRoundIcon
-                  className="text-white/70"
-                  style={{ width: "55%", height: "55%" }}
-                  strokeWidth={1.75}
-                />
-              )}
+              className="absolute inset-0"
+              style={{ backgroundColor: solidColor ?? "#1a1a2e" }}
+            />
+          )}
+
+          {/* No-photo avatar centered: a custom default avatar if set, else a
+              built-in silhouette — both recolored to sit in the theme. */}
+          {showAvatar && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              {/* Frosted glass bubble — sized to the slot width via cqi */}
+              <div
+                className="flex items-center justify-center rounded-full overflow-hidden"
+                style={{
+                  width: "clamp(2.5rem,34cqi,7rem)",
+                  height: "clamp(2.5rem,34cqi,7rem)",
+                  background: "rgba(255,255,255,0.10)",
+                  boxShadow: "0 0 0 1px rgba(255,255,255,0.15), 0 8px 32px rgba(0,0,0,0.5)",
+                  backdropFilter: "blur(10px)",
+                }}
+              >
+                {defaultAvatar ? (
+                  <BrandLogo
+                    logo={defaultAvatar}
+                    monochrome
+                    className="text-white/80"
+                    style={{ width: "70%", height: "70%" }}
+                  />
+                ) : (
+                  <UserRoundIcon
+                    className="text-white/70"
+                    style={{ width: "55%", height: "55%" }}
+                    strokeWidth={1.75}
+                  />
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Deep gradient scrim at the bottom — smoother 3-stop fade */}
-        <div
-          className="absolute inset-x-0 bottom-0 pointer-events-none"
-          style={{
-            height: "55%",
-            background:
-              "linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.60) 40%, rgba(0,0,0,0.20) 70%, transparent 100%)",
-          }}
-        />
-
-        {/* Spacer pushes name and strip to bottom */}
-        <div className="flex-1" />
-
-        {/* Name + position — on top of the scrim */}
-        <div className="relative z-10 px-3 pb-2">
-          {/* Very subtle frosted name plate for extra contrast on busy photos */}
+          {/* Soft fade where the photo meets the info band, so the cut reads
+              as a deliberate transition rather than a hard seam. */}
           <div
-            className="inline-block"
+            className="absolute inset-x-0 bottom-0 pointer-events-none"
             style={{
-              // Subtle text shadow is the primary contrast mechanism; no bg plate needed
+              height: "28%",
+              background:
+                "linear-gradient(to top, rgba(8,8,12,0.85) 0%, rgba(8,8,12,0.30) 60%, transparent 100%)",
             }}
-          >
+          />
+        </div>
+
+        {/* ── Info band (bottom) — opaque panel; name + position + RF bar. ── */}
+        <div
+          className="relative z-10 flex flex-col"
+          style={{ background: "rgba(8,8,12,0.88)" }}
+        >
+          <div className="px-3 pt-2 pb-1">
             <span
-              className="text-title1 font-semibold text-white leading-tight line-clamp-2 block"
-              style={{ textShadow: "0 1px 8px rgba(0,0,0,0.95), 0 2px 20px rgba(0,0,0,0.70)" }}
+              className="font-semibold text-white leading-tight line-clamp-2 block"
+              style={{ fontSize: "clamp(1rem, 14cqi, 3.4rem)" }}
             >
               {displayName ?? "—"}
             </span>
             {!isStatic && slot.link.kind === "pco" && slot.link.matchBy === "position" && (
               <span
-                className="text-[15px] text-white/70 block leading-tight truncate mt-0.5"
-                style={{ textShadow: "0 1px 4px rgba(0,0,0,0.85)" }}
+                className="text-white/65 block leading-tight truncate mt-0.5"
+                style={{ fontSize: "clamp(0.72rem, 8.5cqi, 1.75rem)" }}
               >
                 {slot.link.teamPositionName}
               </span>
             )}
           </div>
-        </div>
 
-        {/* Status strip — floated at very bottom as a glass pill, only when a device is bound */}
-        {slot.device.status !== "none" && (
-          <div className="relative z-10">
-            <StatusStrip device={slot.device} />
-          </div>
-        )}
+          {/* Status strip — only when a device is bound */}
+          {slot.device.status !== "none" && <StatusStrip device={slot.device} />}
+        </div>
       </div>
     </div>
   );
