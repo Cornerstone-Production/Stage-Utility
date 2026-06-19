@@ -4,123 +4,163 @@ Stage Utility is a web/server-only app: a small Node backend serves the kiosk
 display, the settings UI, and a phone control panel — all on one port (**8788**).
 There is no desktop/Electron runtime, so it runs anywhere Node runs.
 
-**It installs on Linux, macOS, and Windows.** The only platform-specific part is
-how you make it **auto-start on boot and restart if it crashes** — this guide
-covers all three:
+**It installs on Linux, macOS, and Windows.** The app itself is identical on each;
+only the way you make it **auto-start on boot and restart if it crashes** differs.
+Pick your platform and follow it top to bottom:
 
-- [Linux (systemd)](#linux-systemd) — one-command installer; recommended for Raspberry Pi / servers.
-- [macOS (launchd)](#macos-launchd)
-- [Windows (NSSM service or Task Scheduler)](#windows)
+- [Linux (Raspberry Pi / Ubuntu / Debian)](#linux-raspberry-pi--ubuntu--debian) — one-command installer.
+- [macOS](#macos)
+- [Windows](#windows)
 
-On every platform the app itself is identical; only the auto-start wrapper differs.
-
-## Prerequisites (all platforms)
-
-- **Node.js ≥ 24** (bundles `npm`). Check with `node -v`. None of the install
-  steps install Node for you.
-  - Linux: [nodesource](https://github.com/nodesource/distributions) or `nvm`.
-  - macOS: [nodejs.org](https://nodejs.org) installer or `brew install node`.
-  - Windows: [nodejs.org](https://nodejs.org) installer (includes npm).
-- **git**, and the repo cloned onto the machine.
-
-The server stores all config in a **data directory** outside the repo
-(`$STAGE_UTILITY_DATA` if set, otherwise `~/.stage-utility` —
-`C:\Users\<you>\.stage-utility` on Windows), so updates never touch your config.
-
-> **Port:** the server listens on `8788` by default. Override with the
-> `STAGE_UTILITY_PORT` environment variable if needed (e.g. behind a reverse
-> proxy). Make sure your firewall allows inbound TCP on that port from the LAN.
+What you'll do on every platform: **install Node + git → get the code → build →
+set it to auto-start → configure in the browser.**
 
 ---
 
-## Linux (systemd)
+## Before you start (all platforms)
 
-The one-command installer targets Linux with systemd (Proxmox VM/LXC,
-Ubuntu/Debian, Raspberry Pi, …). From the repo root:
+- **Node.js ≥ 24** and **git** — the steps below install these per-OS.
+- **Access to the repo.** It's a private repository
+  (`github.com/Cornerstone-Production/mic-display`), so cloning will ask you to
+  authenticate. Use either:
+  - **HTTPS + token:** when git prompts for a password, paste a GitHub
+    [Personal Access Token](https://github.com/settings/tokens) (your account
+    password won't work), **or**
+  - **SSH:** if you've added an SSH key to your GitHub account, clone with
+    `git@github.com:Cornerstone-Production/mic-display.git` instead of the HTTPS URL.
+- **Port 8788** must be reachable on your LAN (open it in the firewall — shown per
+  platform). Override the port with the `STAGE_UTILITY_PORT` environment variable
+  if needed.
+- **Where config lives:** a *data directory* outside the repo (paths noted per
+  platform). Updates never touch it. Back it up — see [Backups](#backups).
+
+---
+
+## Linux (Raspberry Pi / Ubuntu / Debian)
+
+The fastest path: a one-command installer handles the build **and** the
+auto-start service.
+
+### 1. Install Node ≥ 24 and git
+
+```bash
+# Node 24 from NodeSource (Debian/Ubuntu/Raspberry Pi OS):
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt-get install -y nodejs git
+
+node -v    # should print v24.x or newer
+```
+
+### 2. Get the code
+
+Clone into a stable location (e.g. `/opt`):
+
+```bash
+sudo mkdir -p /opt/stage-utility
+sudo chown "$USER" /opt/stage-utility
+cd /opt/stage-utility
+git clone https://github.com/Cornerstone-Production/mic-display.git
+cd mic-display
+```
+
+*(Authenticate with a GitHub token when prompted — see [Before you start](#before-you-start-all-platforms).)*
+
+### 3. Install + set to auto-start (one command)
 
 ```bash
 sudo ./scripts/install.sh
 ```
 
-That single command:
+This verifies Node, installs dependencies (`npm ci`), builds the UI
+(`npm run build`), creates the data directory (default `/var/lib/stage-utility`),
+and writes + enables a `stage-utility` **systemd** service that **starts on boot
+and restarts on crash** (`Restart=on-failure`, `RestartSec=5`). It prints the
+access URLs at the end.
 
-1. Verifies Node ≥ 24.
-2. Installs dependencies (`npm ci`) and builds the UI (`npm run build`).
-3. Creates the data directory (default `/var/lib/stage-utility`) owned by the service user.
-4. Writes and enables a `stage-utility` **systemd** service that **starts on boot
-   and restarts on crash** (`Restart=on-failure`, `RestartSec=5`).
-5. Prints the access URLs.
-
-### Options
+Useful options:
 
 ```bash
 sudo ./scripts/install.sh --data-dir /srv/stage-utility   # custom data dir
 sudo ./scripts/install.sh --user stagemon                 # run as a specific user
-sudo ./scripts/install.sh --no-service                    # build only, no systemd
+sudo ./scripts/install.sh --no-service                    # build only, no service
 ```
 
-`STAGE_UTILITY_DATA=/path` works as an alternative to `--data-dir`. The service
-runs as `$SUDO_USER` by default (the human who ran `sudo`).
-
-### Operating
-
-```bash
-systemctl status stage-utility        # is it running?
-journalctl -u stage-utility -f        # tail logs
-sudo systemctl restart stage-utility  # restart
-```
-
-Open the port to your LAN if needed:
+### 4. Open the firewall (if enabled)
 
 ```bash
 sudo ufw allow from 192.168.0.0/16 to any port 8788 proto tcp
 ```
 
-> To restart even on a *clean* exit (not just crashes), edit the unit at
+### 5. Configure
+
+Open `http://<server-ip>:8788/settings` in a browser and follow
+[First-time configuration](#first-time-configuration-all-platforms).
+
+### Operating & updating (Linux)
+
+```bash
+systemctl status stage-utility        # running?
+journalctl -u stage-utility -f        # live logs
+sudo systemctl restart stage-utility  # restart
+
+# Update to the latest:
+cd /opt/stage-utility/mic-display && git pull && sudo ./scripts/install.sh
+```
+
+> To restart even on a *clean* exit (not only crashes), edit
 > `/etc/systemd/system/stage-utility.service`, change `Restart=on-failure` to
 > `Restart=always`, then `sudo systemctl daemon-reload && sudo systemctl restart stage-utility`.
 
-### Updating
-
-```bash
-cd /opt/stage-utility/mic-display
-git pull
-sudo ./scripts/install.sh   # re-installs deps, rebuilds, restarts; data dir untouched
-```
-
 ---
 
-## macOS (launchd)
+## macOS
 
-There's no one-command installer for macOS; build once, then install a `launchd`
-daemon for boot + auto-restart.
+No one-command installer here — you build once, then install a `launchd` daemon
+for boot + auto-restart.
 
-### 1. Build
+### 1. Install Node ≥ 24 and git
+
+Install [Homebrew](https://brew.sh) if you don't have it, then:
 
 ```bash
-cd /path/to/mic-display
+brew install node git
+node -v    # v24.x or newer
+```
+
+*(Alternatively: the Node installer from [nodejs.org](https://nodejs.org), and
+`xcode-select --install` for git.)*
+
+### 2. Get the code
+
+```bash
+cd ~/Apps            # or wherever you keep apps; create it if needed: mkdir -p ~/Apps
+git clone https://github.com/Cornerstone-Production/mic-display.git
+cd mic-display
+```
+
+### 3. Build and test-run
+
+```bash
 npm ci
 npm run build
+npm start            # → http://localhost:8788/   (Ctrl-C to stop)
 ```
 
-Confirm it runs (Ctrl-C to stop):
+The first run may prompt to **allow incoming network connections** — allow it.
+Confirm `http://localhost:8788/settings` loads, then stop it with Ctrl-C.
+
+### 4. Set it to auto-start (launchd)
+
+Get your absolute Node path and note your repo path / username:
 
 ```bash
-npm start          # node --import tsx server.ts → http://localhost:8788/
-```
-
-The first time, macOS may prompt to **allow incoming network connections** — allow it.
-
-### 2. Install a LaunchDaemon (starts on boot, restarts on crash)
-
-Find your absolute Node path — launchd needs it:
-
-```bash
-which node          # e.g. /opt/homebrew/bin/node  (Apple Silicon)  or  /usr/local/bin/node
+which node           # e.g. /opt/homebrew/bin/node (Apple Silicon) or /usr/local/bin/node
+pwd                  # the mic-display path
+whoami               # your username
 ```
 
 Create `/Library/LaunchDaemons/com.cornerstone.stageutility.plist` (a system
-daemon → runs at boot before login). Replace **`/ABS/PATH/TO/node`**,
+daemon → starts at boot before login). Replace **`/ABS/PATH/TO/node`**,
 **`/ABS/PATH/TO/mic-display`**, and **`youruser`**:
 
 ```xml
@@ -146,7 +186,7 @@ daemon → runs at boot before login). Replace **`/ABS/PATH/TO/node`**,
   </dict>
   <key>RunAtLoad</key>  <true/>   <!-- start on boot -->
   <key>KeepAlive</key>  <true/>   <!-- restart if it ever exits (crash or kill) -->
-  <key>StandardOutPath</key> <string>/tmp/stage-utility.log</string>
+  <key>StandardOutPath</key>   <string>/tmp/stage-utility.log</string>
   <key>StandardErrorPath</key> <string>/tmp/stage-utility.err.log</string>
 </dict>
 </plist>
@@ -162,18 +202,20 @@ sudo launchctl enable system/com.cornerstone.stageutility
 `RunAtLoad` starts it on every boot; `KeepAlive` relaunches it within seconds if
 it crashes or is killed.
 
-### Operating
+### 5. Configure
+
+Open `http://<this-mac-ip>:8788/settings` and follow
+[First-time configuration](#first-time-configuration-all-platforms).
+
+### Operating & updating (macOS)
 
 ```bash
 sudo launchctl kickstart -k system/com.cornerstone.stageutility   # restart
 tail -f /tmp/stage-utility.log                                    # logs
 sudo launchctl bootout system/com.cornerstone.stageutility        # stop & unload
-```
 
-### Updating
-
-```bash
-cd /path/to/mic-display && git pull && npm ci && npm run build
+# Update:
+cd /ABS/PATH/TO/mic-display && git pull && npm ci && npm run build
 sudo launchctl kickstart -k system/com.cornerstone.stageutility
 ```
 
@@ -181,65 +223,91 @@ sudo launchctl kickstart -k system/com.cornerstone.stageutility
 
 ## Windows
 
-Build once, then run it as a service. **NSSM** is the simplest way to get a true
-Windows service with boot-start + automatic crash-restart; Task Scheduler is the
+Build once, then run it as a service. **NSSM** gives a true Windows service with
+boot-start + automatic crash-restart (recommended); Task Scheduler is the
 no-extra-software fallback.
 
-### 1. Build
+### 1. Install Node ≥ 24 and git
 
-In PowerShell, from the repo:
+Easiest, in an **Administrator PowerShell**:
 
 ```powershell
-cd C:\path\to\mic-display
-npm ci
-npm run build
-npm start          # verify: http://localhost:8788/  (Ctrl-C to stop)
+winget install OpenJS.NodeJS
+winget install Git.Git
+# close & reopen PowerShell so PATH updates, then:
+node -v    # v24.x or newer
 ```
 
-Allow the app through **Windows Defender Firewall** when prompted (Private networks).
+*(Or download the installers from [nodejs.org](https://nodejs.org) and
+[git-scm.com](https://git-scm.com).)*
 
-### 2a. Recommended — NSSM service (boot-start + auto-restart)
+### 2. Get the code
 
-Install [NSSM](https://nssm.cc/) (`choco install nssm`, or download the exe), then
-in an **Administrator** PowerShell. Use `where.exe node` to get Node's full path:
+```powershell
+mkdir C:\StageUtility; cd C:\StageUtility
+git clone https://github.com/Cornerstone-Production/mic-display.git
+cd mic-display
+```
+
+### 3. Build and test-run
+
+```powershell
+npm ci
+npm run build
+npm start            # → http://localhost:8788/   (Ctrl-C to stop)
+```
+
+Allow the app through **Windows Defender Firewall** when prompted (at least for
+Private networks). Confirm `http://localhost:8788/settings` loads, then stop it.
+
+### 4a. Set it to auto-start — NSSM (recommended)
+
+Install [NSSM](https://nssm.cc/) (`choco install nssm`, or download the exe). Find
+Node's full path with `where.exe node`. Then, in an **Administrator PowerShell**:
 
 ```powershell
 nssm install StageUtility "C:\Program Files\nodejs\node.exe" "--import tsx server.ts"
-nssm set StageUtility AppDirectory "C:\path\to\mic-display"
+nssm set StageUtility AppDirectory "C:\StageUtility\mic-display"
 nssm set StageUtility AppEnvironmentExtra NODE_ENV=production STAGE_UTILITY_DATA=C:\ProgramData\stage-utility
 nssm set StageUtility Start SERVICE_AUTO_START          # start on boot
-nssm set StageUtility AppExit Default Restart           # restart on crash (NSSM's default)
+nssm set StageUtility AppExit Default Restart           # restart on crash (NSSM default)
+nssm set StageUtility AppStdout C:\ProgramData\stage-utility\out.log
+nssm set StageUtility AppStderr C:\ProgramData\stage-utility\err.log
 nssm start StageUtility
 ```
 
-NSSM auto-restarts the process if it exits and starts the service on boot.
+NSSM starts the service on boot and relaunches the process if it exits.
 
-Operating: `nssm restart StageUtility`, `nssm stop StageUtility`,
-`nssm remove StageUtility confirm` (uninstall). Logs: add
-`nssm set StageUtility AppStdout C:\ProgramData\stage-utility\out.log` and
-`AppStderr …\err.log`.
+### 4b. Alternative — Task Scheduler (no extra software)
 
-### 2b. Alternative — Task Scheduler (no extra software)
-
-1. Open **Task Scheduler → Create Task** (not "Basic").
-2. **General:** "Run whether user is logged on or not", "Run with highest privileges".
+1. **Task Scheduler → Create Task** (not "Basic Task").
+2. **General:** "Run whether user is logged on or not" + "Run with highest privileges".
 3. **Triggers:** New → *At startup*.
 4. **Actions:** New → Start a program:
-   - Program: `C:\Program Files\nodejs\node.exe`
-   - Arguments: `--import tsx server.ts`
-   - Start in: `C:\path\to\mic-display`
-5. **Settings:** enable "If the task fails, restart every: 1 minute" (up to 3×) so
-   it recovers from a crash.
+   - Program/script: `C:\Program Files\nodejs\node.exe`
+   - Add arguments: `--import tsx server.ts`
+   - Start in: `C:\StageUtility\mic-display`
+5. **Settings:** enable "If the task fails, restart every 1 minute" (up to 3 times).
 
-Set the data dir by adding a system environment variable
+Set the data dir via a **system** environment variable
 `STAGE_UTILITY_DATA=C:\ProgramData\stage-utility` (System Properties → Environment
-Variables), since Task Scheduler actions can't set per-task env vars easily.
+Variables), since scheduled-task actions can't easily set per-task env vars.
 
-### Updating
+### 5. Configure
+
+Open `http://<this-pc-ip>:8788/settings` and follow
+[First-time configuration](#first-time-configuration-all-platforms).
+
+### Operating & updating (Windows)
 
 ```powershell
-cd C:\path\to\mic-display; git pull; npm ci; npm run build
-nssm restart StageUtility      # or: restart the scheduled task
+nssm restart StageUtility           # restart   (or restart the scheduled task)
+nssm stop StageUtility              # stop
+nssm remove StageUtility confirm    # uninstall the service
+
+# Update:
+cd C:\StageUtility\mic-display; git pull; npm ci; npm run build
+nssm restart StageUtility
 ```
 
 ---
@@ -252,7 +320,7 @@ Open the **Settings** page in a browser:
 http://<server-ip>:8788/settings
 ```
 
-Then:
+Then work through the sidebar:
 
 1. **Integrations → Planning Center** — enter your **App ID** and **Secret**
    (from a PCO Personal Access Token at
@@ -270,23 +338,29 @@ Then:
 The kiosk display is at `http://<server-ip>:8788/`. On a phone on the same
 network, scan the QR code shown on the display (enable it under **Connect**).
 
+To point a kiosk/Pi browser straight at one screen, use
+`http://<server-ip>:8788/display-1` (etc.).
+
 ## Backups
 
-Back up the **data directory** (`/var/lib/stage-utility` on Linux,
-`~/.stage-utility` on macOS, `C:\ProgramData\stage-utility` or
-`%USERPROFILE%\.stage-utility` on Windows). It holds all configuration, the
-**encrypted secrets**, and `encryption.key`. If you lose `encryption.key`, you'll
-have to re-enter every credential.
+Back up the **data directory** — it holds all configuration, the **encrypted
+secrets**, and `encryption.key`:
 
-If the data dir was renamed across releases (older `stage-monitor` /
-`stage-display` installs), the server copies the most-recent legacy dir's
-contents forward on first start — including `encryption.key`. Check the startup
-log for a `recovered config` line.
+| Platform | Default data directory |
+|----------|------------------------|
+| Linux    | `/var/lib/stage-utility` |
+| macOS    | `~/.stage-utility` (or whatever `STAGE_UTILITY_DATA` is set to) |
+| Windows  | `C:\ProgramData\stage-utility` (per the service config above) |
+
+If you lose `encryption.key`, the encrypted secrets are unrecoverable and you'll
+have to re-enter every credential. (Across older releases named `stage-monitor` /
+`stage-display`, the server copies the most-recent legacy dir forward on first
+start — look for a `recovered config` line in the logs.)
 
 ## Uninstall
 
-- **Linux:** `sudo ./scripts/uninstall.sh` (stops + removes the service; leaves the data dir intact).
-- **macOS:** `sudo launchctl bootout system/com.cornerstone.stageutility` then delete the plist.
+- **Linux:** `sudo ./scripts/uninstall.sh` (stops + removes the service).
+- **macOS:** `sudo launchctl bootout system/com.cornerstone.stageutility`, then delete the plist.
 - **Windows:** `nssm remove StageUtility confirm` (or delete the scheduled task).
 
 The data directory is never removed automatically — back it up or delete it deliberately.
