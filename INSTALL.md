@@ -20,14 +20,8 @@ set it to auto-start → configure in the browser.**
 ## Before you start (all platforms)
 
 - **Node.js ≥ 24** and **git** — the steps below install these per-OS.
-- **Access to the repo.** It's a private repository
-  (`github.com/Cornerstone-Production/mic-display`), so cloning will ask you to
-  authenticate. Use either:
-  - **HTTPS + token:** when git prompts for a password, paste a GitHub
-    [Personal Access Token](https://github.com/settings/tokens) (your account
-    password won't work), **or**
-  - **SSH:** if you've added an SSH key to your GitHub account, clone with
-    `git@github.com:Cornerstone-Production/mic-display.git` instead of the HTTPS URL.
+- **The repo URL:** `https://github.com/Cornerstone-Production/mic-display.git`.
+  It's a public repo, so cloning needs no authentication.
 - **Port 8788** must be reachable on your LAN (open it in the firewall — shown per
   platform). Override the port with the `STAGE_UTILITY_PORT` environment variable
   if needed.
@@ -62,8 +56,6 @@ cd /opt/stage-utility
 git clone https://github.com/Cornerstone-Production/mic-display.git
 cd mic-display
 ```
-
-*(Authenticate with a GitHub token when prompted — see [Before you start](#before-you-start-all-platforms).)*
 
 ### 3. Install + set to auto-start (one command)
 

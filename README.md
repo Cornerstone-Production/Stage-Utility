@@ -78,17 +78,8 @@ HTML page.
 
 ## Get the code
 
-It's a private repo, so cloning prompts for authentication — use a GitHub
-[Personal Access Token](https://github.com/settings/tokens) when asked for a
-password (HTTPS), or clone via SSH if you have a key on your account:
-
 ```bash
-# HTTPS (paste a token when prompted for a password):
 git clone https://github.com/Cornerstone-Production/mic-display.git
-
-# or SSH:
-git clone git@github.com:Cornerstone-Production/mic-display.git
-
 cd mic-display
 ```
 
