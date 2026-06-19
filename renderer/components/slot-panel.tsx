@@ -1,3 +1,4 @@
+import { UserRoundIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { StatusStrip } from "./status-strip";
 import { BrandLogo } from "./brand-logo";
@@ -6,19 +7,12 @@ interface SlotPanelProps {
   slot: Slot;
   /** Optional image shown centered in empty slots (recolored to the kiosk gray). */
   emptySlotLogo?: string | null;
+  /** Optional avatar for matched people with no PCO photo; null = built-in silhouette. */
+  defaultAvatar?: string | null;
   className?: string;
 }
 
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0].toUpperCase())
-    .join("");
-}
-
-export function SlotPanel({ slot, emptySlotLogo, className }: SlotPanelProps) {
+export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: SlotPanelProps) {
   const isEmpty = slot.link.kind === "empty";
   const isStatic = slot.link.kind === "static";
   const solidColor = isStatic ? (slot.link as { kind: "static"; label: string; color: string }).color : null;
@@ -32,8 +26,8 @@ export function SlotPanel({ slot, emptySlotLogo, className }: SlotPanelProps) {
     ? `/photos?u=${encodeURIComponent(slot.photoUrl!)}`
     : null;
 
-  // Initials avatar: PCO/position slots with a display name but no photo
-  const showInitials = !isStatic && !isEmpty && !hasPhoto && !!displayName;
+  // No-photo avatar: PCO/position slots matched to a person but with no photo.
+  const showAvatar = !isStatic && !isEmpty && !hasPhoto && !!displayName;
 
   // A PCO slot that resolved to nobody (no person scheduled, or no matching
   // note) shows the same blank/logo view as a configured empty slot.
@@ -92,12 +86,13 @@ export function SlotPanel({ slot, emptySlotLogo, className }: SlotPanelProps) {
           />
         )}
 
-        {/* Initials avatar centered when no photo */}
-        {showInitials && displayName && (
+        {/* No-photo avatar centered: a custom default avatar if set, else a
+            built-in silhouette — both recolored to sit in the theme. */}
+        {showAvatar && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            {/* Frosted glass initials bubble */}
+            {/* Frosted glass bubble */}
             <div
-              className="flex items-center justify-center rounded-full"
+              className="flex items-center justify-center rounded-full overflow-hidden"
               style={{
                 width: "clamp(3rem,14cqw,8rem)",
                 height: "clamp(3rem,14cqw,8rem)",
@@ -106,15 +101,20 @@ export function SlotPanel({ slot, emptySlotLogo, className }: SlotPanelProps) {
                 backdropFilter: "blur(10px)",
               }}
             >
-              <span
-                className="font-bold text-white/80 leading-none select-none"
-                style={{
-                  fontSize: "clamp(1.25rem,5cqw,3.5rem)",
-                  textShadow: "0 2px 8px rgba(0,0,0,0.9)",
-                }}
-              >
-                {initials(displayName)}
-              </span>
+              {defaultAvatar ? (
+                <BrandLogo
+                  logo={defaultAvatar}
+                  monochrome
+                  className="text-white/80"
+                  style={{ width: "70%", height: "70%" }}
+                />
+              ) : (
+                <UserRoundIcon
+                  className="text-white/70"
+                  style={{ width: "55%", height: "55%" }}
+                  strokeWidth={1.75}
+                />
+              )}
             </div>
           </div>
         )}

@@ -416,6 +416,7 @@ export function StageView() {
           slots={sortedSlots}
           slotsLayout={slotsLayout}
           emptySlotLogo={state.emptySlotLogo}
+          defaultAvatar={state.defaultAvatar}
           className="flex-1 max-sm:hidden"
         />
 
@@ -424,7 +425,7 @@ export function StageView() {
         <div className="hidden max-sm:grid grid-cols-2 auto-rows-max content-start gap-2 p-2 flex-1 min-h-0 overflow-y-auto overscroll-contain">
           {sortedSlots.filter((slot) => slot.link.kind !== "spacer").map((slot) => (
             <div key={slot.id} className="aspect-[3/4] flex [container-type:inline-size]">
-              <SlotPanel slot={slot} emptySlotLogo={state.emptySlotLogo} />
+              <SlotPanel slot={slot} emptySlotLogo={state.emptySlotLogo} defaultAvatar={state.defaultAvatar} />
             </div>
           ))}
         </div>

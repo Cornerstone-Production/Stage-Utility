@@ -47,6 +47,9 @@ export interface SectionHandlers {
     emptyLogo?: string | null;
     emptyLogoOriginal?: string | null;
     emptyLogoCrop?: { scale: number; x: number; y: number } | null;
+    avatar?: string | null;
+    avatarOriginal?: string | null;
+    avatarCrop?: { scale: number; x: number; y: number } | null;
   }) => Promise<void>;
   // Slot editor (operates on the currently-selected View)
   updateSlot: (idx: number, updated: Slot) => void;

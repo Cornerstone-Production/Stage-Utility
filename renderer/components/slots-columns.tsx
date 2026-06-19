@@ -14,11 +14,13 @@ export function SlotsColumns({
   slots,
   slotsLayout,
   emptySlotLogo,
+  defaultAvatar,
   className,
 }: {
   slots: Slot[];
   slotsLayout: SlotsLayout | null;
   emptySlotLogo: string | null;
+  defaultAvatar?: string | null;
   className?: string;
 }) {
   const sorted = [...slots].sort((a, b) => a.order - b.order);
@@ -62,7 +64,7 @@ export function SlotsColumns({
                   )
                 : null
               : column.map((slot) => (
-                  <SlotPanel key={slot.id} slot={slot} emptySlotLogo={emptySlotLogo} />
+                  <SlotPanel key={slot.id} slot={slot} emptySlotLogo={emptySlotLogo} defaultAvatar={defaultAvatar} />
                 ))}
           </div>
         );

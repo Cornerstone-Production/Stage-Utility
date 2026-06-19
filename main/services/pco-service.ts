@@ -6,6 +6,27 @@ import type { PcoAttachmentDTO, PcoLiveDTO, PlanDTO, ServiceTypeDTO, TeamMemberD
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 const CACHE_TTL_MS = 30_000;
 
+/** True for PCO's auto-generated "initials" placeholder avatar (served at
+ *  …/uploads/initials/AB.png when a person has no uploaded photo). Real photos
+ *  live under …/uploads/person/…, so this reliably flags "no real photo". */
+function isInitialsAvatar(url: string): boolean {
+  return /\/uploads\/initials\//i.test(url);
+}
+
+/** Near-native size to request from PCO. Source originals are ~1000px square, so
+ *  this is the practical ceiling — bigger just upscales. PCO returns a 224×224
+ *  thumbnail by default, far too small for the large kiosk cards. */
+const AVATAR_PX = 1000;
+
+/** Upgrade a PCO avatar URL to high resolution. PCO's `?g=WxH#` param controls
+ *  geometry (# = centered crop); rewrite an existing geometry or append one. */
+function highResAvatar(url: string): string {
+  if (/[?&]g=\d+x\d+(%23|#)?/.test(url)) {
+    return url.replace(/([?&]g=)\d+x\d+(%23|#)?/, `$1${AVATAR_PX}x${AVATAR_PX}%23`);
+  }
+  return url + (url.includes("?") ? "&" : "?") + `g=${AVATAR_PX}x${AVATAR_PX}%23`;
+}
+
 interface CacheEntry<T> {
   value: T;
   expiresAt: number;
@@ -348,6 +369,14 @@ class PcoService {
             (a.avatar != null && String(a.avatar)) ||
             (a.photo_thumbnail != null && String(a.photo_thumbnail)) ||
             null;
+        }
+        // PCO returns an auto-generated gray "initials" avatar for people with no
+        // real photo (…/uploads/initials/AB.png). Treat those as no photo so the
+        // kiosk shows our themed default avatar; otherwise upgrade the real photo
+        // from PCO's 224px default to a near-native high-res crop.
+        if (photoUrl) {
+          if (isInitialsAvatar(photoUrl)) photoUrl = null;
+          else photoUrl = highResAvatar(photoUrl);
         }
       }
 

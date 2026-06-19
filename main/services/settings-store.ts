@@ -38,6 +38,11 @@ export interface SettingsData {
   /** Original upload + crop transform for the empty-slot image (settings-only). */
   emptySlotLogoOriginal: string | null;
   emptySlotLogoCrop: { scale: number; x: number; y: number } | null;
+  /** Rendered (cropped) avatar shown for matched people with no PCO photo. */
+  defaultAvatar: string | null;
+  /** Original upload + crop transform for the default avatar (settings-only). */
+  defaultAvatarOriginal: string | null;
+  defaultAvatarCrop: { scale: number; x: number; y: number } | null;
   /** Show NDI-related controls (source field, NDI video object). Off by default —
    *  NDI is only used by the native Apple client. */
   ndiEnabled: boolean;
@@ -69,6 +74,9 @@ const DEFAULT_SETTINGS: SettingsData = {
   emptySlotLogo: null,
   emptySlotLogoOriginal: null,
   emptySlotLogoCrop: null,
+  defaultAvatar: null,
+  defaultAvatarOriginal: null,
+  defaultAvatarCrop: null,
   ndiEnabled: false,
   publicUrl: null,
   autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },

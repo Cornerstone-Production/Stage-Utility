@@ -101,6 +101,7 @@ export class StageController {
     appLogo: null,
     appLogoMonochrome: true,
     emptySlotLogo: null,
+    defaultAvatar: null,
     ndiEnabled: false,
     publicUrl: null,
     autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
@@ -157,6 +158,7 @@ export class StageController {
       appLogo: settings.appLogo ?? null,
       appLogoMonochrome: settings.appLogoMonochrome ?? true,
       emptySlotLogo: settings.emptySlotLogo ?? null,
+      defaultAvatar: settings.defaultAvatar ?? null,
       ndiEnabled: settings.ndiEnabled ?? false,
       publicUrl: settings.publicUrl ?? null,
       autoUpdate: settings.autoUpdate ?? { enabled: false, dayOfWeek: null, hour: 3 },
@@ -750,13 +752,17 @@ export class StageController {
     emptyLogo?: string | null;
     emptyLogoOriginal?: string | null;
     emptyLogoCrop?: { scale: number; x: number; y: number } | null;
+    avatar?: string | null;
+    avatarOriginal?: string | null;
+    avatarCrop?: { scale: number; x: number; y: number } | null;
   }): Promise<StageState> {
     // Fields that live in both the broadcast state and settings.
-    const stateNext: Partial<Pick<StageState, "appName" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo">> = {};
+    const stateNext: Partial<Pick<StageState, "appName" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar">> = {};
     if (typeof partial.name === "string") stateNext.appName = partial.name.trim() || "Stage Utility";
     if (partial.logo !== undefined) stateNext.appLogo = partial.logo;
     if (typeof partial.monochrome === "boolean") stateNext.appLogoMonochrome = partial.monochrome;
     if (partial.emptyLogo !== undefined) stateNext.emptySlotLogo = partial.emptyLogo;
+    if (partial.avatar !== undefined) stateNext.defaultAvatar = partial.avatar;
 
     // Settings-only fields (originals + crops), never broadcast.
     const settingsNext: Record<string, unknown> = { ...stateNext };
@@ -764,6 +770,8 @@ export class StageController {
     if (partial.logoCrop !== undefined) settingsNext.appLogoCrop = partial.logoCrop;
     if (partial.emptyLogoOriginal !== undefined) settingsNext.emptySlotLogoOriginal = partial.emptyLogoOriginal;
     if (partial.emptyLogoCrop !== undefined) settingsNext.emptySlotLogoCrop = partial.emptyLogoCrop;
+    if (partial.avatarOriginal !== undefined) settingsNext.defaultAvatarOriginal = partial.avatarOriginal;
+    if (partial.avatarCrop !== undefined) settingsNext.defaultAvatarCrop = partial.avatarCrop;
     // Clearing an image also clears its editing source.
     if (partial.logo === null) {
       settingsNext.appLogoOriginal = null;
@@ -773,12 +781,17 @@ export class StageController {
       settingsNext.emptySlotLogoOriginal = null;
       settingsNext.emptySlotLogoCrop = null;
     }
+    if (partial.avatar === null) {
+      settingsNext.defaultAvatarOriginal = null;
+      settingsNext.defaultAvatarCrop = null;
+    }
 
     console.log(`[stage-controller] setBranding`, {
       name: stateNext.appName,
       logo: partial.logo === undefined ? "(unchanged)" : partial.logo ? "(set)" : "(cleared)",
       monochrome: stateNext.appLogoMonochrome,
       emptyLogo: partial.emptyLogo === undefined ? "(unchanged)" : partial.emptyLogo ? "(set)" : "(cleared)",
+      avatar: partial.avatar === undefined ? "(unchanged)" : partial.avatar ? "(set)" : "(cleared)",
     });
     this.state = { ...this.state, ...stateNext };
     await settingsStore.patch(settingsNext);
@@ -787,7 +800,7 @@ export class StageController {
   }
 
   /** Original upload + saved crop transform for a brand image, for re-editing. */
-  async getBrandingSource(target: "app" | "empty" = "app"): Promise<{
+  async getBrandingSource(target: "app" | "empty" | "avatar" = "app"): Promise<{
     original: string | null;
     crop: { scale: number; x: number; y: number } | null;
   }> {
@@ -796,6 +809,12 @@ export class StageController {
       return {
         original: settings.emptySlotLogoOriginal ?? null,
         crop: settings.emptySlotLogoCrop ?? null,
+      };
+    }
+    if (target === "avatar") {
+      return {
+        original: settings.defaultAvatarOriginal ?? null,
+        crop: settings.defaultAvatarCrop ?? null,
       };
     }
     return { original: settings.appLogoOriginal ?? null, crop: settings.appLogoCrop ?? null };
