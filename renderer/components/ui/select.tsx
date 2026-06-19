@@ -65,9 +65,19 @@ SelectContent.displayName = SelectPrimitive.Content.displayName;
 export const SelectItem = React.forwardRef<
   React.ComponentRef<typeof SelectPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, value, ...props }, ref) => {
+  // Radix throws ("must have a value prop that is not an empty string") and
+  // crashes the whole settings tree if any item's value is empty/undefined.
+  // Such an item is invalid anyway (an empty value clears the selection), so
+  // skip it defensively rather than let one stray data value take down the app.
+  if (value === undefined || value === "") {
+    console.warn("[SelectItem] skipped item with empty value:", children);
+    return null;
+  }
+  return (
   <SelectPrimitive.Item
     ref={ref}
+    value={value}
     className={cn(
       "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2",
       "text-[13px] text-gray-12 outline-none",
@@ -83,5 +93,6 @@ export const SelectItem = React.forwardRef<
     </span>
     <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
   </SelectPrimitive.Item>
-));
+  );
+});
 SelectItem.displayName = SelectPrimitive.Item.displayName;
