@@ -21,6 +21,12 @@ import type { SectionProps } from "../types";
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const ANY_DAY = "any";
 
+// Fallback when the backend predates the in-app updater (#48) and omits `autoUpdate`
+// — e.g. a server that hasn't been restarted after a frontend deploy, or the brief
+// window during an in-app self-update. Mirrors the backend default so a newer bundle
+// never crashes against an older API. Keep in sync with settings-store DEFAULT_SETTINGS.
+const DEFAULT_AUTO_UPDATE: StageState["autoUpdate"] = { enabled: false, dayOfWeek: null, hour: 3 };
+
 function formatHour(h: number): string {
   const am = h < 12;
   const h12 = h % 12 === 0 ? 12 : h % 12;
@@ -88,7 +94,7 @@ function UpdatesPanel({
             </FieldDescription>
 
             {/* Changelog of pending commits */}
-            {behind > 0 && s?.changelog.length ? (
+            {behind > 0 && s?.changelog?.length ? (
               <ul className="mt-1 flex flex-col gap-0.5 rounded-md border border-gray-a4 bg-gray-a2 p-2 text-caption2 text-gray-11 max-h-40 overflow-y-auto">
                 {s.changelog.map((line, i) => (
                   <li key={i} className="truncate">• {line}</li>
@@ -190,7 +196,7 @@ export function AdvancedSection({ stageState, updateStatus, handlers }: Pick<Sec
 
   return (
     <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
-      <UpdatesPanel updateStatus={updateStatus} autoUpdate={stageState.autoUpdate} handlers={handlers} />
+      <UpdatesPanel updateStatus={updateStatus} autoUpdate={stageState.autoUpdate ?? DEFAULT_AUTO_UPDATE} handlers={handlers} />
 
       <FieldSet title="Advanced">
         <FieldGroup>

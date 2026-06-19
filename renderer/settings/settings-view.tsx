@@ -10,6 +10,7 @@ import {
   ScrollArea,
   Button,
   toast,
+  ErrorBoundary,
 } from "../components/ui";
 import {
   Loader2Icon,
@@ -956,7 +957,11 @@ export function SettingsView() {
         </Sidebar>
       }
     >
-      <ScrollArea className="h-full" title={activeSection.label}>{renderSection()}</ScrollArea>
+      <ScrollArea className="h-full" title={activeSection.label}>
+        {/* Keep a render error in one section from blanking the whole window. Keyed
+            by the active tab so switching sections resets the boundary. */}
+        <ErrorBoundary key={activeSection.id}>{renderSection()}</ErrorBoundary>
+      </ScrollArea>
     </SplitView>
   );
 }
