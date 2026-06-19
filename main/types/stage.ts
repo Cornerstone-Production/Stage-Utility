@@ -403,4 +403,41 @@ export interface StageState {
   ndiEnabled: boolean;
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */
   publicUrl: string | null;
+  /** Automatic-update schedule (in-app self-update). */
+  autoUpdate: AutoUpdateSettings;
+}
+
+/** Scheduled auto-update config. When enabled, the server applies an available
+ *  update during the weekly window (skipping while a PCO service is live). */
+export interface AutoUpdateSettings {
+  enabled: boolean;
+  /** Day of week 0–6 (Sun–Sat), or null for any day. */
+  dayOfWeek: number | null;
+  /** Hour of day 0–23 (local time) the update window opens. */
+  hour: number;
+}
+
+/** In-app update status (git-based), surfaced in the Advanced tab. */
+export interface UpdateStatus {
+  /** False when this isn't a git checkout (or git is unavailable) — update via CLI. */
+  isGitRepo: boolean;
+  branch: string | null;
+  /** App version from package.json. */
+  version: string;
+  /** Short SHA + ISO commit date of the running checkout. */
+  currentSha: string | null;
+  currentDate: string | null;
+  /** Commits the local branch is behind its upstream. */
+  behind: number;
+  latestSha: string | null;
+  latestDate: string | null;
+  /** Commit subjects between current and latest (newest first), capped. */
+  changelog: string[];
+  lastCheckedAt: string | null;
+  /** "idle" normally; "checking" during a fetch; "updating" while the script runs. */
+  phase: "idle" | "checking" | "updating";
+  /** Outcome of the most recent apply (read from the updater's result file). */
+  lastResult: { ok: boolean; finishedAt: string; log: string | null } | null;
+  /** Non-null when the last check failed (e.g. no network). */
+  error: string | null;
 }

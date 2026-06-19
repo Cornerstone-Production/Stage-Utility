@@ -122,8 +122,10 @@ WorkingDirectory=${REPO_ROOT}
 Environment=STAGE_UTILITY_DATA=${DATA_DIR}
 Environment=NODE_ENV=production
 ExecStart=${NODE_BIN} --import tsx ${REPO_ROOT}/server.ts
-Restart=on-failure
-RestartSec=5
+# `always` (not on-failure) so the in-app updater can restart the service by
+# exiting the process after it pulls + rebuilds.
+Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
