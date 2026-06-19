@@ -2,7 +2,7 @@ import { useState, type ChangeEvent, type CSSProperties } from "react";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { PlusIcon, TrashIcon, CopyIcon, VideoIcon, GripVerticalIcon, ChevronLeftIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, CopyIcon, GripVerticalIcon, ChevronLeftIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { useIsMobile } from "../../lib/use-media-query";
 import {
@@ -135,7 +135,6 @@ function ViewDetail({
   // Parent remounts this component on view change (key={view.id}), so local
   // field state initializes fresh per view.
   const [editName, setEditName] = useState(view.name);
-  const [editNdi, setEditNdi] = useState(view.ndiSource ?? "");
   // Preview aspect ratio — shapes the thumbnail to match the target monitor
   // (default 16:9, e.g. a 37″ 4K panel). Editor-only; doesn't affect the kiosk.
   const [previewAspect, setPreviewAspect] = useState<number>(16 / 9);
@@ -144,11 +143,6 @@ function ViewDetail({
     const trimmed = editName.trim();
     if (trimmed && trimmed !== view.name) handlers.handleRenameView(view.id, trimmed);
     else setEditName(view.name);
-  }
-
-  function handleNdiBlur() {
-    const trimmed = editNdi.trim();
-    if (trimmed !== (view.ndiSource ?? "")) handlers.handleSetViewNdiSource(view.id, trimmed || null);
   }
 
   const slotViews = (stageState.views ?? []).filter((v) => v.kind === "slots" && v.id !== view.id);
@@ -201,7 +195,6 @@ function ViewDetail({
           <LayoutEditor
             key={view.id}
             view={view}
-            ndiEnabled={stageState.ndiEnabled ?? false}
             slotsViews={(stageState.views ?? []).filter((v) => v.kind === "slots")}
             templates={layoutTemplates}
             onSave={(layout) => handlers.handleSetViewLayout(view.id, layout)}
@@ -224,21 +217,6 @@ function ViewDetail({
             </Select>
           </div>
           <ViewPreview viewId={view.id} aspect={previewAspect} />
-        </div>
-      )}
-
-      {/* NDI source (native Apple client only) — hidden unless NDI is enabled in Advanced */}
-      {stageState.ndiEnabled && (
-        <div className="flex items-center gap-2">
-          <VideoIcon className="size-3.5 text-gray-9 shrink-0" />
-          <Input
-            value={editNdi}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setEditNdi(e.target.value)}
-            onBlur={handleNdiBlur}
-            placeholder="NDI source name (optional, native app only)"
-            className="flex-1 min-w-0 text-gray-12"
-            aria-label="NDI source name"
-          />
         </div>
       )}
 
@@ -282,7 +260,7 @@ function ViewDetail({
       ) : view.kind === "custom" ? null : (
         <p className="text-caption1 text-gray-9">
           {KIND_LABELS[view.kind]} views render a fixed layout from live Planning Center / ProPresenter
-          data — there's nothing to configure here yet besides the name and NDI source.
+          data — there's nothing to configure here yet besides the name.
         </p>
       )}
     </div>

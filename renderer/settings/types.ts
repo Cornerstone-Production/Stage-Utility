@@ -32,7 +32,6 @@ export interface SectionHandlers {
   handleNextPlan: () => Promise<void>;
   handleRefresh: () => Promise<void>;
   handleShowQrChange: (show: boolean) => Promise<void>;
-  handleSetNdiEnabled: (enabled: boolean) => Promise<void>;
   handleSetPublicUrl: (url: string | null) => Promise<void>;
   // In-app self-update
   handleCheckUpdates: () => Promise<void>;
@@ -62,7 +61,6 @@ export interface SectionHandlers {
   handleDuplicateView: (id: string) => Promise<void>;
   handleRemoveView: (id: string) => Promise<void>;
   handleSetViewKind: (id: string, kind: ViewKind) => Promise<void>;
-  handleSetViewNdiSource: (id: string, ndiSource: string | null) => Promise<void>;
   handleSetViewLayout: (id: string, layout: LayoutDTO) => Promise<void>;
   handleSaveLayoutTemplate: (name: string, layout: LayoutDTO) => Promise<void>;
   handleUpdateLayoutTemplate: (id: string, patch: { name?: string; layout?: LayoutDTO }) => Promise<void>;
