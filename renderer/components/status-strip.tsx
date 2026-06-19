@@ -10,10 +10,10 @@ interface StatusStripProps {
 // set on the wrapper. Because the slot card establishes [container-type:inline-size],
 // the cqi in that clamp resolves against the slot width — so the RF bar grows on a
 // 4K column and shrinks in the editor preview, staying proportional everywhere.
-const RF_UNIT = "clamp(0.6rem, 6.5cqi, 1.7rem)";
+const RF_UNIT = "clamp(0.58rem, 6cqi, 1.6rem)";
 
 function BatteryIcon({ level }: { level: number }) {
-  const style = { width: "calc(var(--rf) * 1.4)", height: "calc(var(--rf) * 1.4)" };
+  const style = { width: "calc(var(--rf) * 1.2)", height: "calc(var(--rf) * 1.2)" };
   if (level >= 60) return <BatteryFullIcon className="text-green-10 shrink-0" style={style} />;
   if (level >= 25) return <BatteryMediumIcon className="text-yellow-10 shrink-0" style={style} />;
   return <BatteryLowIcon className="text-red-10 shrink-0" style={style} />;
@@ -47,7 +47,7 @@ function RfBars({ bars }: { bars: number }) {
 
 // Hairline vertical divider between strip segments
 function Divider() {
-  return <span className="w-px self-stretch bg-white/10 shrink-0" style={{ margin: "0 calc(var(--rf) * 0.3)" }} />;
+  return <span className="w-px self-stretch bg-white/10 shrink-0" style={{ margin: "0 calc(var(--rf) * 0.2)" }} />;
 }
 
 export function StatusStrip({ device, className }: StatusStripProps) {
@@ -92,7 +92,7 @@ export function StatusStrip({ device, className }: StatusStripProps) {
           ? "text-yellow-10"
           : "text-red-10";
 
-  const valueTextStyle = { fontSize: "calc(var(--rf) * 1.25)" };
+  const valueTextStyle = { fontSize: "calc(var(--rf) * 1.05)" };
 
   return (
     <div

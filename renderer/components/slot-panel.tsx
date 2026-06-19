@@ -73,14 +73,15 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: Slo
         className,
       )}
     >
-      {/* Floating glass card — a vertical stack: photo region on top, a solid
-          info band below. [container-type:inline-size] makes every cqi/cqw unit
-          inside resolve against THIS card's width, so names/avatar/RF bar stay
-          proportional whether the slot is a sliver (preview) or a 4K column. */}
+      {/* Floating glass card — the photo fills the top and extends DOWN until it
+          meets the info card at the bottom; the two are separate stacked regions,
+          so the photo never sits behind the name/RF card. [container-type:inline-size]
+          makes every cqi/cqw unit inside resolve against THIS card's width, so
+          names/avatar/RF bar stay proportional from preview sliver to 4K column. */}
       <div className="relative flex flex-col flex-1 overflow-hidden rounded-3xl glass-card [container-type:inline-size]">
-        {/* ── Photo region (top) — the face lives here only; it never sits
-            behind the name/RF bar. A shorter-and-wider region means object-cover
-            crops top/bottom instead of the sides, so faces aren't pinched. ── */}
+        {/* ── Photo (top) — fills all the space above the info card and stops at
+            its top edge (object-cover crops the photo, never overlapping the
+            card). flex-1 so it grows to meet the card no matter the slot height. ── */}
         <div className="relative flex-1 min-h-0 overflow-hidden">
           {photoSrc ? (
             <img
@@ -128,25 +129,21 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: Slo
               </div>
             </div>
           )}
-
-          {/* Soft fade where the photo meets the info band, so the cut reads
-              as a deliberate transition rather than a hard seam. */}
-          <div
-            className="absolute inset-x-0 bottom-0 pointer-events-none"
-            style={{
-              height: "28%",
-              background:
-                "linear-gradient(to top, rgba(8,8,12,0.85) 0%, rgba(8,8,12,0.30) 60%, transparent 100%)",
-            }}
-          />
         </div>
 
-        {/* ── Info band (bottom) — opaque panel; name + position + RF bar. ── */}
+        {/* ── Info card (bottom) — a SOLID, opaque panel the photo stops at (the
+            image never shows behind it). macOS-26/Tahoe styling via a subtle
+            top-down gradient, a bright top hairline and a soft inner highlight. ── */}
         <div
-          className="relative z-10 flex flex-col"
-          style={{ background: "rgba(8,8,12,0.88)" }}
+          className="relative z-10 flex flex-col justify-start gap-1 px-3 pt-2.5 pb-2"
+          style={{
+            background:
+              "linear-gradient(180deg, rgb(26,27,34) 0%, rgb(15,16,21) 100%)",
+            borderTop: "1px solid rgba(255,255,255,0.12)",
+            boxShadow: "inset 0 1px 0 0 rgba(255,255,255,0.14)",
+          }}
         >
-          <div className="px-3 pt-2 pb-1">
+          <div>
             <span
               className="font-semibold text-white leading-tight line-clamp-2 block"
               style={{ fontSize: "clamp(1rem, 14cqi, 3.4rem)" }}
