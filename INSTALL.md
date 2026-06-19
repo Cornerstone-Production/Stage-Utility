@@ -20,7 +20,7 @@ set it to auto-start → configure in the browser.**
 ## Before you start (all platforms)
 
 - **Node.js ≥ 24** and **git** — the steps below install these per-OS.
-- **The repo URL:** `https://github.com/Cornerstone-Production/mic-display.git`.
+- **The repo URL:** `https://github.com/Cornerstone-Production/Stage-Utility.git`.
   It's a public repo, so cloning needs no authentication.
 - **Port 8788** must be reachable on your LAN (open it in the firewall — shown per
   platform). Override the port with the `STAGE_UTILITY_PORT` environment variable
@@ -53,8 +53,8 @@ Clone into a stable location (e.g. `/opt`):
 sudo mkdir -p /opt/stage-utility
 sudo chown "$USER" /opt/stage-utility
 cd /opt/stage-utility
-git clone https://github.com/Cornerstone-Production/mic-display.git
-cd mic-display
+git clone https://github.com/Cornerstone-Production/Stage-Utility.git
+cd Stage-Utility
 ```
 
 ### 3. Install + set to auto-start (one command)
@@ -96,7 +96,7 @@ journalctl -u stage-utility -f        # live logs
 sudo systemctl restart stage-utility  # restart
 
 # Update to the latest:
-cd /opt/stage-utility/mic-display && git pull && sudo ./scripts/install.sh
+cd /opt/stage-utility/Stage-Utility && git pull && sudo ./scripts/install.sh
 ```
 
 > To restart even on a *clean* exit (not only crashes), edit
@@ -126,8 +126,8 @@ node -v    # v24.x or newer
 
 ```bash
 cd ~/Apps            # or wherever you keep apps; create it if needed: mkdir -p ~/Apps
-git clone https://github.com/Cornerstone-Production/mic-display.git
-cd mic-display
+git clone https://github.com/Cornerstone-Production/Stage-Utility.git
+cd Stage-Utility
 ```
 
 ### 3. Build and test-run
@@ -147,14 +147,14 @@ Get your absolute Node path and note your repo path / username:
 
 ```bash
 which node           # e.g. /opt/homebrew/bin/node (Apple Silicon) or /usr/local/bin/node
-pwd                  # the mic-display path
+pwd                  # the Stage-Utility path
 whoami               # your username
 ```
 
 Create `/Library/LaunchDaemons/com.stage-utility.app.plist` (a system
 daemon → starts at boot before login). The label `com.stage-utility.app` is just an
 identifier — use your own reverse-DNS (e.g. `com.yourorg.stageutility`) if you prefer.
-Replace **`/ABS/PATH/TO/node`**, **`/ABS/PATH/TO/mic-display`**, and **`youruser`**:
+Replace **`/ABS/PATH/TO/node`**, **`/ABS/PATH/TO/Stage-Utility`**, and **`youruser`**:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -164,13 +164,13 @@ Replace **`/ABS/PATH/TO/node`**, **`/ABS/PATH/TO/mic-display`**, and **`youruser
 <dict>
   <key>Label</key>            <string>com.stage-utility.app</string>
   <key>UserName</key>         <string>youruser</string>
-  <key>WorkingDirectory</key> <string>/ABS/PATH/TO/mic-display</string>
+  <key>WorkingDirectory</key> <string>/ABS/PATH/TO/Stage-Utility</string>
   <key>ProgramArguments</key>
   <array>
     <string>/ABS/PATH/TO/node</string>
     <string>--import</string>
     <string>tsx</string>
-    <string>/ABS/PATH/TO/mic-display/server.ts</string>
+    <string>/ABS/PATH/TO/Stage-Utility/server.ts</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -208,7 +208,7 @@ tail -f /tmp/stage-utility.log                                    # logs
 sudo launchctl bootout system/com.stage-utility.app        # stop & unload
 
 # Update:
-cd /ABS/PATH/TO/mic-display && git pull && npm ci && npm run build
+cd /ABS/PATH/TO/Stage-Utility && git pull && npm ci && npm run build
 sudo launchctl kickstart -k system/com.stage-utility.app
 ```
 
@@ -238,8 +238,8 @@ node -v    # v24.x or newer
 
 ```powershell
 mkdir C:\StageUtility; cd C:\StageUtility
-git clone https://github.com/Cornerstone-Production/mic-display.git
-cd mic-display
+git clone https://github.com/Cornerstone-Production/Stage-Utility.git
+cd Stage-Utility
 ```
 
 ### 3. Build and test-run
@@ -260,7 +260,7 @@ Node's full path with `where.exe node`. Then, in an **Administrator PowerShell**
 
 ```powershell
 nssm install StageUtility "C:\Program Files\nodejs\node.exe" "--import tsx server.ts"
-nssm set StageUtility AppDirectory "C:\StageUtility\mic-display"
+nssm set StageUtility AppDirectory "C:\StageUtility\Stage-Utility"
 nssm set StageUtility AppEnvironmentExtra NODE_ENV=production STAGE_UTILITY_DATA=C:\ProgramData\stage-utility
 nssm set StageUtility Start SERVICE_AUTO_START          # start on boot
 nssm set StageUtility AppExit Default Restart           # restart on crash (NSSM default)
@@ -279,7 +279,7 @@ NSSM starts the service on boot and relaunches the process if it exits.
 4. **Actions:** New → Start a program:
    - Program/script: `C:\Program Files\nodejs\node.exe`
    - Add arguments: `--import tsx server.ts`
-   - Start in: `C:\StageUtility\mic-display`
+   - Start in: `C:\StageUtility\Stage-Utility`
 5. **Settings:** enable "If the task fails, restart every 1 minute" (up to 3 times).
 
 Set the data dir via a **system** environment variable
@@ -299,7 +299,7 @@ nssm stop StageUtility              # stop
 nssm remove StageUtility confirm    # uninstall the service
 
 # Update:
-cd C:\StageUtility\mic-display; git pull; npm ci; npm run build
+cd C:\StageUtility\Stage-Utility; git pull; npm ci; npm run build
 nssm restart StageUtility
 ```
 
