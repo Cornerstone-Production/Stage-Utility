@@ -376,8 +376,17 @@ class PcoService {
       };
     });
 
-    this.cacheSet(cacheKey, result);
-    return result;
+    // Exclude declined team members — they're not serving this plan, so a slot
+    // must never resolve to them. PCO `status` is "C" (confirmed), "U"
+    // (unconfirmed), or "D" (declined); match leniently in case the API returns
+    // the word form.
+    const attending = result.filter((m) => {
+      const s = m.status.trim().toUpperCase();
+      return s !== "D" && s !== "DECLINED";
+    });
+
+    this.cacheSet(cacheKey, attending);
+    return attending;
   }
 
   async listTeamPositions(
