@@ -5,7 +5,7 @@
 Please **do not** open a public issue for security problems.
 
 Report vulnerabilities privately through GitHub's
-[**Private vulnerability reporting**](https://github.com/Cornerstone-Production/mic-display/security/advisories/new)
+[**Private vulnerability reporting**](https://github.com/Cornerstone-Production/Stage-Utility/security/advisories/new)
 (Security → Advisories → "Report a vulnerability"). We aim to acknowledge reports
 within a few days and will coordinate a fix and disclosure timeline with you.
 

@@ -7,11 +7,11 @@
   "author": "Cornerstone Production",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Cornerstone-Production/mic-display.git"
+    "url": "git+https://github.com/Cornerstone-Production/Stage-Utility.git"
   },
-  "homepage": "https://github.com/Cornerstone-Production/mic-display#readme",
+  "homepage": "https://github.com/Cornerstone-Production/Stage-Utility#readme",
   "bugs": {
-    "url": "https://github.com/Cornerstone-Production/mic-display/issues"
+    "url": "https://github.com/Cornerstone-Production/Stage-Utility/issues"
   },
   "type": "module",
   "scripts": {

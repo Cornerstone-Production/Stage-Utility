@@ -79,8 +79,8 @@ HTML page.
 ## Get the code
 
 ```bash
-git clone https://github.com/Cornerstone-Production/mic-display.git
-cd mic-display
+git clone https://github.com/Cornerstone-Production/Stage-Utility.git
+cd Stage-Utility
 ```
 
 For installing on the actual display devices (Pi / Mac / Windows), the per-device
@@ -416,7 +416,7 @@ unrecoverable and you'll need to re-enter every credential.
 
 - **`main`** — stable, web-only release line. This is what you install and what the
   in-app updater follows. Tagged releases (`vX.Y.Z`) are published under
-  [Releases](https://github.com/Cornerstone-Production/mic-display/releases).
+  [Releases](https://github.com/Cornerstone-Production/Stage-Utility/releases).
 - **`beta`** — pre-release track for testing changes before they land on `main`. A device
   checked out on `beta` auto-updates from `beta`. Promote to `main` by merging + tagging.
 - Day-to-day work happens on short-lived `feat/*` / `fix/*` branches opened as PRs.
