@@ -76,8 +76,10 @@ if [[ -n "${STRAY_PID}" ]]; then
 fi
 
 # ── 3. Build ──────────────────────────────────────────────────────────────────
-log "Installing dependencies (npm ci)..."
-npm ci
+log "Installing dependencies (npm ci --include=dev)..."
+# --include=dev so build tooling (vite, etc., in devDependencies) is installed
+# even if this runs in an environment with NODE_ENV=production preset.
+npm ci --include=dev
 log "Building the web UI (npm run build)..."
 npm run build
 
