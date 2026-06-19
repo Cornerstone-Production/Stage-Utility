@@ -227,7 +227,7 @@ drive many displays, so you change content in one place. Both can be reordered. 
 - **Custom** — a free-form layout authored in the **visual editor**: a fixed design
   canvas (default 1920×1080) of positioned **objects** — clock, countdown, current/next
   slide text + notes, slide thumbnail, section chip, mic-slots grid, transcript, brand
-  logo, NDI placeholder, image, **plan file**, shape, text — each bound to the same live
+  logo, image, **plan file**, shape, text — each bound to the same live
   data. Positions and sizes are stored as fractions of the canvas, so a layout renders
   identically at any resolution.
 
@@ -411,3 +411,20 @@ unrecoverable and you'll need to re-enter every credential.
   stage view against a live service.
 - `npm run type-check`, `npm run lint`, and `npm run build` are all expected to pass
   cleanly before merging.
+
+## Branches & releases
+
+- **`main`** — stable, web-only release line. This is what you install and what the
+  in-app updater follows. Tagged releases (`vX.Y.Z`) are published under
+  [Releases](https://github.com/Cornerstone-Production/mic-display/releases).
+- **`beta`** — pre-release track for testing changes before they land on `main`. A device
+  checked out on `beta` auto-updates from `beta`. Promote to `main` by merging + tagging.
+- Day-to-day work happens on short-lived `feat/*` / `fix/*` branches opened as PRs.
+
+## License
+
+Licensed under the **GNU General Public License v3.0 (or later)** — see [LICENSE](LICENSE).
+
+## Security
+
+Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md).

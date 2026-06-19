@@ -66,7 +66,7 @@ const PALETTE: LayoutObjectType[] = [
   "text", "clock", "countdown-timer", "current-slide-text", "next-slide-text",
   "current-service-item", "next-service-item",
   "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
-  "transcript-strip", "brand-logo", "ndi-video", "image", "plan-attachment", "shape",
+  "transcript-strip", "brand-logo", "image", "plan-attachment", "shape",
 ];
 
 function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
@@ -376,7 +376,6 @@ function PixelField({ label, value, dim, onChange }: { label: string; value: num
 
 export function LayoutEditor({
   view,
-  ndiEnabled,
   slotsViews,
   templates,
   onSave,
@@ -385,7 +384,6 @@ export function LayoutEditor({
   onDeleteTemplate,
 }: {
   view: View;
-  ndiEnabled: boolean;
   slotsViews: View[];
   templates: LayoutTemplate[];
   onSave: (layout: LayoutDTO) => Promise<void>;
@@ -531,7 +529,7 @@ export function LayoutEditor({
         <Select value="" onValueChange={(t: string) => addObject(t as LayoutObjectType)}>
           <SelectTrigger className="w-40"><SelectValue placeholder="+ Add object" /></SelectTrigger>
           <SelectContent>
-            {PALETTE.filter((t) => ndiEnabled || t !== "ndi-video").map((t) => (
+            {PALETTE.map((t) => (
               <SelectItem key={t} value={t}>{TYPE_LABELS[t]}</SelectItem>
             ))}
           </SelectContent>

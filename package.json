@@ -3,6 +3,16 @@
   "version": "1.0.0",
   "description": "Display band lineup and wireless device status pulled from Planning Center Online and Shure wireless systems.",
   "private": true,
+  "license": "GPL-3.0-or-later",
+  "author": "Cornerstone Production",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Cornerstone-Production/mic-display.git"
+  },
+  "homepage": "https://github.com/Cornerstone-Production/mic-display#readme",
+  "bugs": {
+    "url": "https://github.com/Cornerstone-Production/mic-display/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

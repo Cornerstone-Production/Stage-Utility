@@ -344,15 +344,6 @@ export function SettingsView() {
     }
   }
 
-  async function handleSetNdiEnabled(enabled: boolean) {
-    try {
-      const next = await ipc<StageState>("stage:setNdiEnabled", { enabled });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to update NDI setting: ${String(err)}`);
-    }
-  }
-
   async function handleSetPublicUrl(url: string | null) {
     try {
       const next = await ipc<StageState>("stage:setPublicUrl", { url });
@@ -538,15 +529,6 @@ export function SettingsView() {
       queryClient.setQueryData(["stage:getState"], next);
     } catch (err) {
       toast.error(`Failed to change view type: ${String(err)}`);
-    }
-  }
-
-  async function handleSetViewNdiSource(id: string, ndiSource: string | null) {
-    try {
-      const next = await ipc<StageState>("views:setNdiSource", { id, ndiSource });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to set NDI source: ${String(err)}`);
     }
   }
 
@@ -788,7 +770,6 @@ export function SettingsView() {
     handleNextPlan,
     handleRefresh,
     handleShowQrChange,
-    handleSetNdiEnabled,
     handleSetPublicUrl,
     handleCheckUpdates,
     handleApplyUpdate,
@@ -806,7 +787,6 @@ export function SettingsView() {
     handleDuplicateView,
     handleRemoveView,
     handleSetViewKind,
-    handleSetViewNdiSource,
     handleSetViewLayout,
     handleSaveLayoutTemplate,
     handleUpdateLayoutTemplate,

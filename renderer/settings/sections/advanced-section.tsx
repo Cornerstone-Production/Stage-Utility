@@ -216,24 +216,9 @@ export function AdvancedSection({ stageState, updateStatus, handlers }: Pick<Sec
               onKeyDown={(e) => {
                 if (e.key === "Enter") e.currentTarget.blur();
               }}
-              placeholder="http://stageutility.prod.cornerstonelife.com"
+              placeholder="http://stage-display.example.com"
               className="text-gray-12"
               aria-label="Public address (DNS)"
-            />
-          </Field>
-
-          <Field orientation="horizontal">
-            <FieldContent>
-              <FieldLabel>Enable NDI features</FieldLabel>
-              <FieldDescription>
-                Shows NDI controls throughout the app — the NDI source field on each view and the NDI
-                video object in the layout editor. NDI only works in the native Apple client, so leave
-                this off for web/Raspberry Pi displays.
-              </FieldDescription>
-            </FieldContent>
-            <Switch
-              checked={stageState.ndiEnabled ?? false}
-              onCheckedChange={handlers.handleSetNdiEnabled}
             />
           </Field>
         </FieldGroup>

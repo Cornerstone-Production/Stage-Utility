@@ -151,9 +151,10 @@ pwd                  # the mic-display path
 whoami               # your username
 ```
 
-Create `/Library/LaunchDaemons/com.cornerstone.stageutility.plist` (a system
-daemon → starts at boot before login). Replace **`/ABS/PATH/TO/node`**,
-**`/ABS/PATH/TO/mic-display`**, and **`youruser`**:
+Create `/Library/LaunchDaemons/com.stage-utility.app.plist` (a system
+daemon → starts at boot before login). The label `com.stage-utility.app` is just an
+identifier — use your own reverse-DNS (e.g. `com.yourorg.stageutility`) if you prefer.
+Replace **`/ABS/PATH/TO/node`**, **`/ABS/PATH/TO/mic-display`**, and **`youruser`**:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -161,7 +162,7 @@ daemon → starts at boot before login). Replace **`/ABS/PATH/TO/node`**,
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key>            <string>com.cornerstone.stageutility</string>
+  <key>Label</key>            <string>com.stage-utility.app</string>
   <key>UserName</key>         <string>youruser</string>
   <key>WorkingDirectory</key> <string>/ABS/PATH/TO/mic-display</string>
   <key>ProgramArguments</key>
@@ -187,8 +188,8 @@ daemon → starts at boot before login). Replace **`/ABS/PATH/TO/node`**,
 Load and start it:
 
 ```bash
-sudo launchctl bootstrap system /Library/LaunchDaemons/com.cornerstone.stageutility.plist
-sudo launchctl enable system/com.cornerstone.stageutility
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.stage-utility.app.plist
+sudo launchctl enable system/com.stage-utility.app
 ```
 
 `RunAtLoad` starts it on every boot; `KeepAlive` relaunches it within seconds if
@@ -202,13 +203,13 @@ Open `http://<this-mac-ip>:8788/settings` and follow
 ### Operating & updating (macOS)
 
 ```bash
-sudo launchctl kickstart -k system/com.cornerstone.stageutility   # restart
+sudo launchctl kickstart -k system/com.stage-utility.app   # restart
 tail -f /tmp/stage-utility.log                                    # logs
-sudo launchctl bootout system/com.cornerstone.stageutility        # stop & unload
+sudo launchctl bootout system/com.stage-utility.app        # stop & unload
 
 # Update:
 cd /ABS/PATH/TO/mic-display && git pull && npm ci && npm run build
-sudo launchctl kickstart -k system/com.cornerstone.stageutility
+sudo launchctl kickstart -k system/com.stage-utility.app
 ```
 
 ---
@@ -372,7 +373,7 @@ start — look for a `recovered config` line in the logs.)
 ## Uninstall
 
 - **Linux:** `sudo ./scripts/uninstall.sh` (stops + removes the service).
-- **macOS:** `sudo launchctl bootout system/com.cornerstone.stageutility`, then delete the plist.
+- **macOS:** `sudo launchctl bootout system/com.stage-utility.app`, then delete the plist.
 - **Windows:** `nssm remove StageUtility confirm` (or delete the scheduled task).
 
 The data directory is never removed automatically — back it up or delete it deliberately.
