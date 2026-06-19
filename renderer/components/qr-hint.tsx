@@ -12,24 +12,46 @@ export function QrHint({ url, compact = false }: QrHintProps) {
   const size = compact ? 28 : 132;
 
   useEffect(() => {
-    if (!canvasRef.current || !url) return;
-    QRCode.toCanvas(canvasRef.current, url, {
+    const canvas = canvasRef.current;
+    if (!canvas || !url) return;
+    QRCode.toCanvas(canvas, url, {
       width: size,
       margin: 1,
       color: {
         dark: "#ffffff",
         light: "#00000000",
       },
-    }).catch((err: unknown) => {
-      console.error("[QrHint] QR generation error", err);
-    });
+    })
+      .then(() => {
+        // qrcode sets the canvas's intrinsic size AND inline style to the actual
+        // module pixel size, which for a long URL (e.g. a DNS public address)
+        // exceeds `size` and overflows the layout. Pin the *display* size back to
+        // `size` after render (the larger backing store just downscales crisply).
+        canvas.style.width = `${size}px`;
+        canvas.style.height = `${size}px`;
+      })
+      .catch((err: unknown) => {
+        console.error("[QrHint] QR generation error", err);
+      });
   }, [url, size]);
 
   if (!url) return null;
 
   if (compact) {
     // Bare QR (no pill/circle) on the kiosk top bar — matches the plain text.
-    return <canvas ref={canvasRef} width={size} height={size} className="rounded shrink-0 select-none" />;
+    // The CSS width/height cap the *display* size: for a long URL (e.g. a DNS
+    // public address) qrcode needs more modules than fit at the requested px and
+    // renders the canvas larger, overwriting the width attr — without this cap it
+    // overflows the top bar.
+    return (
+      <canvas
+        ref={canvasRef}
+        width={size}
+        height={size}
+        style={{ width: size, height: size }}
+        className="rounded shrink-0 select-none"
+      />
+    );
   }
 
   // Solid dark backdrop (theme-independent) so the white QR modules stay
