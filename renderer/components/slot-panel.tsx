@@ -73,22 +73,16 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: Slo
         className,
       )}
     >
-      {/* Floating glass card — a contained headshot on top of a macOS-style
-          "liquid glass" info panel. [container-type:inline-size] makes every
-          cqi/cqw unit inside resolve against THIS card's width, so names/avatar/
-          RF bar stay proportional whether the slot is a sliver (preview) or a
-          4K column. The card fills the column, but the photo is a fixed square
-          at the top (not flex-1), so the face keeps a natural crop instead of
-          being vertically stretched; the glass band fills the space below. */}
+      {/* Floating glass card — the photo fills the top and extends DOWN until it
+          meets the info card at the bottom; the two are separate stacked regions,
+          so the photo never sits behind the name/RF card. [container-type:inline-size]
+          makes every cqi/cqw unit inside resolve against THIS card's width, so
+          names/avatar/RF bar stay proportional from preview sliver to 4K column. */}
       <div className="relative flex flex-col flex-1 overflow-hidden rounded-3xl glass-card [container-type:inline-size]">
-        {/* ── Photo (top) — a contained, squared headshot. It owns its own box
-            (a fixed square, not flex-1 filling the whole tall column), so faces
-            keep a natural crop instead of being stretched. The band sits BELOW
-            it, never over it. flex-shrink lets it give way on very short cards. ── */}
-        <div
-          className="relative w-full overflow-hidden"
-          style={{ aspectRatio: "1 / 1", flex: "0 1 auto", minHeight: 0 }}
-        >
+        {/* ── Photo (top) — fills all the space above the info card and stops at
+            its top edge (object-cover crops the photo, never overlapping the
+            card). flex-1 so it grows to meet the card no matter the slot height. ── */}
+        <div className="relative flex-1 min-h-0 overflow-hidden">
           {photoSrc ? (
             <img
               src={photoSrc}
@@ -137,16 +131,14 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: Slo
           )}
         </div>
 
-        {/* ── Info band (bottom) — macOS-26/Tahoe "liquid glass": a translucent,
-            heavily-blurred + saturated panel with a bright top hairline and a
-            soft inner top highlight. Sits beneath the photo (no overlap). ── */}
+        {/* ── Info card (bottom) — a SOLID, opaque panel the photo stops at (the
+            image never shows behind it). macOS-26/Tahoe styling via a subtle
+            top-down gradient, a bright top hairline and a soft inner highlight. ── */}
         <div
           className="relative z-10 flex flex-col justify-start gap-1 px-3 pt-2.5 pb-2"
           style={{
             background:
-              "linear-gradient(180deg, rgba(40,40,52,0.55) 0%, rgba(14,14,20,0.72) 100%)",
-            backdropFilter: "blur(28px) saturate(1.7)",
-            WebkitBackdropFilter: "blur(28px) saturate(1.7)",
+              "linear-gradient(180deg, rgb(26,27,34) 0%, rgb(15,16,21) 100%)",
             borderTop: "1px solid rgba(255,255,255,0.12)",
             boxShadow: "inset 0 1px 0 0 rgba(255,255,255,0.14)",
           }}
