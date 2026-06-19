@@ -426,8 +426,11 @@ export function stripBraces(s: string): string {
   return s.replace(/^\{/, "").replace(/\}$/, "").trim();
 }
 
-/** Format a 6-digit frequency string to `NNN.NNN MHz`. */
+/** Format a Shure frequency value (kHz, e.g. "524350" or AD4Q's 7-digit
+ *  "0543125") to `NNN.NNN MHz`. Parses as an integer in kHz so it's robust to
+ *  leading zeros and field width differing across models. */
 export function formatFrequency(raw: string): string | null {
-  if (raw.length !== 6) return null;
-  return `${raw.slice(0, 3)}.${raw.slice(3)} MHz`;
+  const khz = parseInt(raw, 10);
+  if (Number.isNaN(khz) || khz <= 0) return null;
+  return `${(khz / 1000).toFixed(3)} MHz`;
 }
