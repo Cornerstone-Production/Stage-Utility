@@ -81,6 +81,18 @@ npm ci
 log "Building the web UI (npm run build)..."
 npm run build
 
+# ── 3b. Repo ownership ────────────────────────────────────────────────────────
+# `npm ci` / `npm run build` above ran as root (this script needs root for the
+# systemd unit), leaving node_modules/ and build/ root-owned. The in-app updater
+# runs as the SERVICE_USER and must be able to `git pull`, `npm ci`, and
+# `npm run build` — so hand it the whole repo. Without this, "Update now" fails
+# with EACCES on node_modules.
+if [[ "$(id -u)" -eq 0 ]] && id "${SERVICE_USER}" >/dev/null 2>&1; then
+  log "Handing repo ownership to ${SERVICE_USER} (so in-app updates work)..."
+  chown -R "${SERVICE_USER}" "${REPO_ROOT}" 2>/dev/null || \
+    warn "Could not chown ${REPO_ROOT} to ${SERVICE_USER}; in-app updates may fail with EACCES."
+fi
+
 # ── 4. Data directory ─────────────────────────────────────────────────────────
 log "Data directory: ${DATA_DIR} (owner: ${SERVICE_USER})"
 mkdir -p "${DATA_DIR}"
