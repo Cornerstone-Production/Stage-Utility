@@ -91,7 +91,10 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
   }
 
   function setDeviceBinding(channelId: string) {
-    if (!channelId) {
+    // "__none__" is the sentinel for the "None" option — Radix Select forbids an
+    // empty-string item value (it throws and crashes the settings tree), so map
+    // the sentinel back to clearing the binding.
+    if (!channelId || channelId === "__none__") {
       onChange({ ...slot, deviceBinding: null });
     } else {
       onChange({ ...slot, deviceBinding: { providerId: "wireless", channelId } });
@@ -379,12 +382,12 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
       {!isEmpty && wirelessChannels.length > 0 && (
         <div className="flex flex-col items-stretch gap-1.5 pl-4 sm:pl-9 sm:flex-row sm:items-center sm:gap-2">
           <span className="text-caption1 text-gray-9 shrink-0">Device channel:</span>
-          <Select value={slot.deviceBinding?.channelId ?? ""} onValueChange={setDeviceBinding}>
+          <Select value={slot.deviceBinding?.channelId ?? "__none__"} onValueChange={setDeviceBinding}>
             <SelectTrigger className="w-full sm:w-40">
               <SelectValue placeholder="None" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">None</SelectItem>
+              <SelectItem value="__none__">None</SelectItem>
               {wirelessChannels.map((ch) => (
                 <SelectItem key={ch.id} value={ch.id}>
                   {ch.label}
