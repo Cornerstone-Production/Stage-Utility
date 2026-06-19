@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type ChangeEvent } from "react";
-import { UploadIcon, TrashIcon, CropIcon } from "lucide-react";
+import { UploadIcon, TrashIcon, CropIcon, UserRoundIcon } from "lucide-react";
 import {
   FieldSet,
   FieldGroup,
@@ -23,7 +23,7 @@ const MAX_LOGO_BYTES = 1_500_000;
 const ACCEPTED = "image/png,image/jpeg,image/svg+xml,image/webp";
 
 type Crop = { scale: number; x: number; y: number };
-type Target = "app" | "empty";
+type Target = "app" | "empty" | "avatar";
 
 export function BrandingSection({
   stageState,
@@ -80,7 +80,8 @@ export function BrandingSection({
 
   // Re-open the editor on the ORIGINAL upload, restoring saved zoom/position.
   async function onAdjust(target: Target) {
-    const fallback = target === "app" ? stageState.appLogo : stageState.emptySlotLogo;
+    const fallback =
+      target === "app" ? stageState.appLogo : target === "empty" ? stageState.emptySlotLogo : stageState.defaultAvatar;
     try {
       const source = await invoke<BrandingSource>("stage:getBrandingSource", { target });
       setCropTarget(target);
@@ -102,11 +103,17 @@ export function BrandingSection({
         logoOriginal: result.original,
         logoCrop: result.crop,
       });
-    } else {
+    } else if (target === "empty") {
       handlers.handleSetBranding({
         emptyLogo: result.logo,
         emptyLogoOriginal: result.original,
         emptyLogoCrop: result.crop,
+      });
+    } else {
+      handlers.handleSetBranding({
+        avatar: result.logo,
+        avatarOriginal: result.original,
+        avatarCrop: result.crop,
       });
     }
   }
@@ -239,6 +246,47 @@ export function BrandingSection({
                     iconOnly
                     onClick={() => handlers.handleSetBranding({ emptyLogo: null })}
                     aria-label="Remove empty slot image"
+                  >
+                    <TrashIcon className="size-3.5 text-red-10" />
+                  </Button>
+                </>
+              )}
+            </div>
+          </Field>
+
+          {/* ── Default avatar (people with no PCO photo) ── */}
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Default avatar</FieldLabel>
+              <FieldDescription>
+                Shown for scheduled people who have no photo in Planning Center, in place of their
+                initials, recolored to match the theme. Optional — a built-in silhouette is used if unset.
+              </FieldDescription>
+            </FieldContent>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center size-12 rounded-md border border-gray-a4 overflow-hidden shrink-0 bg-[#13131a] text-white/45">
+                {stageState.defaultAvatar ? (
+                  <BrandLogo logo={stageState.defaultAvatar} monochrome className="size-full p-1" />
+                ) : (
+                  <UserRoundIcon className="size-6 text-white/30" />
+                )}
+              </div>
+              <Button variant="filled" size="small" onClick={() => openPicker("avatar")}>
+                <UploadIcon className="size-3.5 text-gray-9" />
+                {stageState.defaultAvatar ? "Replace" : "Upload"}
+              </Button>
+              {stageState.defaultAvatar && (
+                <>
+                  <Button variant="filled" size="small" onClick={() => onAdjust("avatar")}>
+                    <CropIcon className="size-3.5 text-gray-9" />
+                    Adjust
+                  </Button>
+                  <Button
+                    variant="transparent"
+                    size="small"
+                    iconOnly
+                    onClick={() => handlers.handleSetBranding({ avatar: null })}
+                    aria-label="Remove default avatar"
                   >
                     <TrashIcon className="size-3.5 text-red-10" />
                   </Button>

@@ -404,6 +404,9 @@ export function SettingsView() {
     emptyLogo?: string | null;
     emptyLogoOriginal?: string | null;
     emptyLogoCrop?: { scale: number; x: number; y: number } | null;
+    avatar?: string | null;
+    avatarOriginal?: string | null;
+    avatarCrop?: { scale: number; x: number; y: number } | null;
   }) {
     try {
       const next = await ipc<StageState>("stage:setBranding", partial);

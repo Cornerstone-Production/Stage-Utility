@@ -331,6 +331,9 @@ interface StageState {
   appLogoMonochrome: boolean;
   /** Image centered in empty slots on the kiosk (recolored to the kiosk gray). */
   emptySlotLogo: string | null;
+  /** Avatar shown for matched people with no PCO photo (recolored like a silhouette);
+   *  null = use the built-in person icon. */
+  defaultAvatar: string | null;
   /** Show NDI-related controls in settings (off by default; native client only). */
   ndiEnabled: boolean;
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */

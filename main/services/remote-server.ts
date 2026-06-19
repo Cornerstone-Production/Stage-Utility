@@ -986,7 +986,8 @@ export class RemoteServer {
 
     // ── Branding (app name + logos) ─────────────────────────────────────────
     if (method === "GET" && pathname === "/api/branding/source") {
-      const target = _url.searchParams.get("target") === "empty" ? "empty" : "app";
+      const t = _url.searchParams.get("target");
+      const target = t === "empty" ? "empty" : t === "avatar" ? "avatar" : "app";
       json(res, await stageController.getBrandingSource(target));
       return;
     }
@@ -998,7 +999,7 @@ export class RemoteServer {
       if (typeof body.monochrome === "boolean") partial.monochrome = body.monochrome;
 
       // Validate a data-URL image field; cap size so it can't bloat storage.
-      const validateImage = (key: "logo" | "logoOriginal" | "emptyLogo" | "emptyLogoOriginal"): boolean => {
+      const validateImage = (key: "logo" | "logoOriginal" | "emptyLogo" | "emptyLogoOriginal" | "avatar" | "avatarOriginal"): boolean => {
         if (!(key in body)) return true;
         const v = body[key];
         if (v === null) {
@@ -1020,8 +1021,10 @@ export class RemoteServer {
       if (!validateImage("logoOriginal")) return;
       if (!validateImage("emptyLogo")) return;
       if (!validateImage("emptyLogoOriginal")) return;
+      if (!validateImage("avatar")) return;
+      if (!validateImage("avatarOriginal")) return;
 
-      const readCrop = (key: "logoCrop" | "emptyLogoCrop"): void => {
+      const readCrop = (key: "logoCrop" | "emptyLogoCrop" | "avatarCrop"): void => {
         if (!(key in body)) return;
         const c = body[key] as Record<string, unknown> | null;
         partial[key] =
@@ -1031,6 +1034,7 @@ export class RemoteServer {
       };
       readCrop("logoCrop");
       readCrop("emptyLogoCrop");
+      readCrop("avatarCrop");
 
       const state = await stageController.setBranding(
         partial as Parameters<typeof stageController.setBranding>[0],

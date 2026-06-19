@@ -221,6 +221,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
           slots={slots}
           slotsLayout={srcView?.slotsLayout ?? null}
           emptySlotLogo={ctx.state.emptySlotLogo}
+          defaultAvatar={ctx.state.defaultAvatar}
           className="w-full h-full kiosk-surface"
         />
       );
