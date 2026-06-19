@@ -34,6 +34,10 @@ export interface SectionHandlers {
   handleShowQrChange: (show: boolean) => Promise<void>;
   handleSetNdiEnabled: (enabled: boolean) => Promise<void>;
   handleSetPublicUrl: (url: string | null) => Promise<void>;
+  // In-app self-update
+  handleCheckUpdates: () => Promise<void>;
+  handleApplyUpdate: () => Promise<void>;
+  handleSetAutoUpdate: (partial: { enabled?: boolean; dayOfWeek?: number | null; hour?: number }) => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {
     name?: string;
@@ -100,5 +104,6 @@ export interface SectionProps {
   isSavingSlots: boolean;
   isRefreshing: boolean;
   slotPresets: SlotPreset[];
+  updateStatus: UpdateStatus | null;
   handlers: SectionHandlers;
 }

@@ -44,6 +44,8 @@ export interface SettingsData {
   /** Public base URL (e.g. a DNS name behind a reverse proxy) used for the connect
    *  QR code and display links instead of the LAN IP. Null = use the LAN IP. */
   publicUrl: string | null;
+  /** Scheduled in-app auto-update window. */
+  autoUpdate: { enabled: boolean; dayOfWeek: number | null; hour: number };
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -69,6 +71,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   emptySlotLogoCrop: null,
   ndiEnabled: false,
   publicUrl: null,
+  autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
 };
 
 const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS);

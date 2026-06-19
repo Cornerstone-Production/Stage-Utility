@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { DisplayInfo, LayoutDTO, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, DisplayInfo, LayoutDTO, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -13,6 +13,7 @@ import { settingsStore } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
+import { updater } from "./updater.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
 
@@ -102,6 +103,7 @@ export class StageController {
     emptySlotLogo: null,
     ndiEnabled: false,
     publicUrl: null,
+    autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
   };
 
   // Live device statuses keyed by channelId.
@@ -114,6 +116,11 @@ export class StageController {
   // PCO credentials (set by IntegrationManager after config saves).
   private pcoAppId: string | null = null;
   private pcoSecret: string | null = null;
+
+  // Latest PCO live state (set by fetchLive) — used by the auto-update guard.
+  private lastLive: PcoLiveDTO | null = null;
+  // Hourly self-update availability check (+ scheduled auto-apply).
+  private updateCheckTimer: ReturnType<typeof setInterval> | null = null;
 
   // Hourly auto-refresh of the active plan.
   private autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -152,9 +159,11 @@ export class StageController {
       emptySlotLogo: settings.emptySlotLogo ?? null,
       ndiEnabled: settings.ndiEnabled ?? false,
       publicUrl: settings.publicUrl ?? null,
+      autoUpdate: settings.autoUpdate ?? { enabled: false, dayOfWeek: null, hour: 3 },
     };
     this.publicUrl = settings.publicUrl ?? null;
     this.applyRemoteUrl();
+    this.startUpdateChecks();
 
     await this.loadAllViewRawSlots(settings.serviceTypeId);
     this.recomputeResolved();
@@ -330,14 +339,28 @@ export class StageController {
    * Used by the live poller; never throws for the not-configured case.
    */
   async fetchLive(): Promise<PcoLiveDTO | null> {
-    if (!this.pcoAppId || !this.pcoSecret) return null;
-    if (!this.state.serviceTypeId || !this.state.planId) return null;
-    return pcoService.getLive(
+    if (!this.pcoAppId || !this.pcoSecret) {
+      this.lastLive = null;
+      return null;
+    }
+    if (!this.state.serviceTypeId || !this.state.planId) {
+      this.lastLive = null;
+      return null;
+    }
+    const live = await pcoService.getLive(
       this.pcoAppId,
       this.pcoSecret,
       this.state.serviceTypeId,
       this.state.planId,
     );
+    // Remembered for the auto-update guard (don't update mid-service).
+    this.lastLive = live;
+    return live;
+  }
+
+  /** True when a PCO Services Live session is running (used to defer auto-updates). */
+  isServiceLive(): boolean {
+    return this.lastLive != null && this.lastLive.mode !== "none";
   }
 
   /**
@@ -658,6 +681,59 @@ export class StageController {
     const t = target || "all";
     console.log(`[stage-controller] refreshDisplays → ${t}`);
     broadcast("display:refresh", { target: t });
+  }
+
+  // ── Self-update (auto-update schedule) ────────────────────────────────
+
+  async setAutoUpdate(partial: Partial<AutoUpdateSettings>): Promise<StageState> {
+    const next: AutoUpdateSettings = { ...this.state.autoUpdate, ...partial };
+    // Clamp hour to 0–23; dayOfWeek to 0–6 or null.
+    next.hour = Math.min(23, Math.max(0, Math.round(next.hour)));
+    next.dayOfWeek =
+      next.dayOfWeek == null ? null : Math.min(6, Math.max(0, Math.round(next.dayOfWeek)));
+    console.log(`[stage-controller] setAutoUpdate →`, next);
+    this.state = { ...this.state, autoUpdate: next };
+    await settingsStore.patch({ autoUpdate: next });
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Start the hourly update-availability check + scheduled auto-apply. */
+  private startUpdateChecks(): void {
+    if (this.updateCheckTimer) clearInterval(this.updateCheckTimer);
+    // Initial check shortly after boot, then hourly.
+    setTimeout(() => void this.updateCheckTick(), 30_000);
+    this.updateCheckTimer = setInterval(() => void this.updateCheckTick(), 60 * 60 * 1000);
+  }
+
+  stopUpdateChecks(): void {
+    if (this.updateCheckTimer) {
+      clearInterval(this.updateCheckTimer);
+      this.updateCheckTimer = null;
+    }
+  }
+
+  private async updateCheckTick(): Promise<void> {
+    try {
+      const status = await updater.checkForUpdate();
+      if (this.shouldAutoApply(status.behind, new Date())) {
+        console.log("[stage-controller] auto-update window — applying update");
+        await updater.applyUpdate();
+      }
+    } catch (err) {
+      console.error("[stage-controller] update check failed:", err);
+    }
+  }
+
+  /** Auto-apply gate: enabled + something to pull + inside the scheduled
+   *  day/hour window + not mid-service. Exposed for unit testing. */
+  shouldAutoApply(behind: number, now: Date): boolean {
+    const cfg = this.state.autoUpdate;
+    if (!cfg.enabled || behind <= 0) return false;
+    if (updater.phase === "updating") return false;
+    if (this.isServiceLive()) return false;
+    if (cfg.dayOfWeek != null && now.getDay() !== cfg.dayOfWeek) return false;
+    return now.getHours() === cfg.hour;
   }
 
   // ── Branding (app name + logo) ────────────────────────────────────────

@@ -123,6 +123,19 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "stage:setPublicUrl":
       return post<T>("/api/public-url", p);
 
+    // ── In-app self-update ───────────────────────────────────────────────
+    case "update:status":
+      return apiFetch<T>("/api/update/status");
+
+    case "update:check":
+      return post<T>("/api/update/check");
+
+    case "update:apply":
+      return post<T>("/api/update/apply");
+
+    case "update:setAuto":
+      return post<T>("/api/update/auto", p);
+
     case "displays:refresh":
       return post<T>("/api/displays/refresh", p);
 

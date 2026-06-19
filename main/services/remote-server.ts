@@ -16,6 +16,7 @@ import { integrationManager } from "./integration-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
 import { stageController } from "./stage-controller.js";
+import { updater } from "./updater.js";
 import { wirelessManager } from "./wireless-manager.js";
 
 // ── Static renderer build path candidates ──────────────────────────────────────
@@ -951,6 +952,34 @@ export class RemoteServer {
       const body = await readBody(req) as Record<string, unknown>;
       const url = typeof body.url === "string" ? body.url : null;
       const state = await stageController.setPublicUrl(url);
+      json(res, state);
+      return;
+    }
+
+    // ── In-app self-update ────────────────────────────────────────────────
+    if (method === "GET" && pathname === "/api/update/status") {
+      json(res, updater.getStatus());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/update/check") {
+      json(res, await updater.checkForUpdate());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/update/apply") {
+      try {
+        json(res, await updater.applyUpdate());
+      } catch (err) {
+        error(res, String(err instanceof Error ? err.message : err));
+      }
+      return;
+    }
+    if (method === "POST" && pathname === "/api/update/auto") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const partial: { enabled?: boolean; dayOfWeek?: number | null; hour?: number } = {};
+      if (typeof body.enabled === "boolean") partial.enabled = body.enabled;
+      if (body.dayOfWeek === null || typeof body.dayOfWeek === "number") partial.dayOfWeek = body.dayOfWeek;
+      if (typeof body.hour === "number") partial.hour = body.hour;
+      const state = await stageController.setAutoUpdate(partial);
       json(res, state);
       return;
     }

@@ -335,6 +335,33 @@ interface StageState {
   ndiEnabled: boolean;
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */
   publicUrl: string | null;
+  /** Automatic-update schedule (in-app self-update). */
+  autoUpdate: AutoUpdateSettings;
+}
+
+interface AutoUpdateSettings {
+  enabled: boolean;
+  /** Day of week 0–6 (Sun–Sat), or null for any day. */
+  dayOfWeek: number | null;
+  /** Hour of day 0–23 (local time) the update window opens. */
+  hour: number;
+}
+
+/** In-app update status (git-based), surfaced in the Advanced tab. */
+interface UpdateStatus {
+  isGitRepo: boolean;
+  branch: string | null;
+  version: string;
+  currentSha: string | null;
+  currentDate: string | null;
+  behind: number;
+  latestSha: string | null;
+  latestDate: string | null;
+  changelog: string[];
+  lastCheckedAt: string | null;
+  phase: "idle" | "checking" | "updating";
+  lastResult: { ok: boolean; finishedAt: string; log: string | null } | null;
+  error: string | null;
 }
 
 /** Editor source for a brand image (original upload + saved crop transform). */

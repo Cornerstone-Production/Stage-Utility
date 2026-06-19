@@ -65,6 +65,7 @@ console.log(`[server] ready — control panel at ${remoteServer.getLanUrl()}`);
 async function shutdown(signal: string): Promise<void> {
   console.log(`\n[server] received ${signal}, shutting down...`);
   stageController.stopAutoRefresh();
+  stageController.stopUpdateChecks();
   livePoller.stop();
   propresenterService.stop();
   prodcomService.stop();

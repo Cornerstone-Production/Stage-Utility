@@ -197,6 +197,12 @@ export function SettingsView() {
     queryFn: () => ipc<SlotPreset[]>("presets:list"),
   });
 
+  // In-app update status (git-based; surfaced in the Advanced tab).
+  const { data: updateStatus = null } = useQuery({
+    queryKey: ["update:status"],
+    queryFn: () => ipc<UpdateStatus>("update:status"),
+  });
+
   // Selected View for the Views tab master-detail (default to the first view).
   const [selectedViewId, setSelectedViewId] = useState<string>("");
 
@@ -230,6 +236,14 @@ export function SettingsView() {
     const unsub = onNotification("stage:state-changed", (payload: unknown) => {
       const s = payload as StageState;
       queryClient.setQueryData(["stage:getState"], s);
+    });
+    return unsub;
+  }, [queryClient]);
+
+  // Live update-status pushes (availability check, apply progress).
+  useEffect(() => {
+    const unsub = onNotification("update:status", (payload: unknown) => {
+      queryClient.setQueryData(["update:status"], payload as UpdateStatus);
     });
     return unsub;
   }, [queryClient]);
@@ -345,6 +359,38 @@ export function SettingsView() {
       toast.success(url ? "Public URL updated." : "Public URL cleared.");
     } catch (err) {
       toast.error(`Failed to update public URL: ${String(err)}`);
+    }
+  }
+
+  async function handleCheckUpdates() {
+    try {
+      const status = await ipc<UpdateStatus>("update:check");
+      queryClient.setQueryData(["update:status"], status);
+      if (!status.isGitRepo) toast.error("Not a git install — update from the command line.");
+      else if (status.error) toast.error(`Update check failed: ${status.error}`);
+      else if (status.behind > 0) toast.success(`${status.behind} update${status.behind === 1 ? "" : "s"} available.`);
+      else toast.success("You're up to date.");
+    } catch (err) {
+      toast.error(`Update check failed: ${String(err)}`);
+    }
+  }
+
+  async function handleApplyUpdate() {
+    try {
+      const status = await ipc<UpdateStatus>("update:apply");
+      queryClient.setQueryData(["update:status"], status);
+      toast.success("Updating… the displays will reload shortly.");
+    } catch (err) {
+      toast.error(`Failed to start update: ${String(err)}`);
+    }
+  }
+
+  async function handleSetAutoUpdate(partial: { enabled?: boolean; dayOfWeek?: number | null; hour?: number }) {
+    try {
+      const next = await ipc<StageState>("update:setAuto", partial);
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to update auto-update settings: ${String(err)}`);
     }
   }
 
@@ -743,6 +789,9 @@ export function SettingsView() {
     handleShowQrChange,
     handleSetNdiEnabled,
     handleSetPublicUrl,
+    handleCheckUpdates,
+    handleApplyUpdate,
+    handleSetAutoUpdate,
     handleSetAllowedServiceTypes,
     handleSetBranding,
     updateSlot,
@@ -831,7 +880,7 @@ export function SettingsView() {
       case "branding":
         return <BrandingSection stageState={stageState} handlers={handlers} />;
       case "advanced":
-        return <AdvancedSection stageState={stageState} handlers={handlers} />;
+        return <AdvancedSection stageState={stageState} updateStatus={updateStatus} handlers={handlers} />;
     }
   }
 
