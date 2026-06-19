@@ -35,8 +35,13 @@ write_result() {
 {
   echo "[update] git pull --ff-only origin $BRANCH"
   git pull --ff-only origin "$BRANCH" || { echo "[update] git pull failed (non-fast-forward or offline)"; write_result false; exit 1; }
-  echo "[update] npm ci"
-  npm ci || { echo "[update] npm ci failed"; write_result false; exit 1; }
+  echo "[update] npm ci --include=dev"
+  # --include=dev is REQUIRED: the service runs with NODE_ENV=production (set in
+  # the systemd unit), which this detached updater inherits. Under that env npm
+  # omits devDependencies by default — but the build tooling (vite, etc.) lives
+  # in devDependencies, so a plain `npm ci` installs prod-only deps and the next
+  # step fails with "vite: not found". Forcing dev deps keeps the build working.
+  npm ci --include=dev || { echo "[update] npm ci failed"; write_result false; exit 1; }
   echo "[update] npm run build"
   npm run build || { echo "[update] npm run build failed"; write_result false; exit 1; }
 } >>"$LOG" 2>&1
