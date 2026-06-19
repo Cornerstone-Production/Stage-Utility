@@ -1,7 +1,14 @@
 // shure-axient.ts — DeviceProvider for Shure Axient Digital (AD) wireless receivers.
 // Protocol: ASCII-over-TCP on port 2202 (Shure control protocol, AD family).
 // Init: GET 0 ALL, then SET 0 METER_RATE 1000 (1 s metering intervals).
-// SLOT-level REP messages (REP {ch} SLOT {n} ...) are intentionally ignored in v1.
+// SLOT-level messages (REP/SAMPLE {ch} SLOT {n} ...) carry per-transmitter
+// telemetry — a handheld/bodypack reports its battery/RF/frequency here, addressed
+// by receiver slot. We model one transmitter per channel, so we fold the slot's
+// telemetry onto its channel {ch} (see handleReport / handleSample below).
+//
+// NOTE: the exact SLOT token layout below follows the documented Shure AD protocol
+// but has NOT been verified against a physical handheld in this environment. Debug
+// logs print raw SLOT messages so the mapping can be confirmed on real hardware.
 
 import type { ConfigField } from "../../types/integrations.js";
 import {
@@ -57,13 +64,20 @@ export class ShureAxient extends ShureBaseProvider {
       return;
     }
 
-    // Skip SLOT-level reports (v1 — future enhancement).
-    // Detectable because the field token is "SLOT" when the parser reaches here
-    // only if the second token was numeric (the channel). If the raw message is
-    // `REP {ch} SLOT {n} {field} {value}` then token = "SLOT" here.
+    // SLOT-level report: `REP {ch} SLOT {n} {field} {value}`. The base parser
+    // reaches here with token = "SLOT" and rest = [n, field, value...]. A
+    // transmitter (handheld/bodypack) reports its telemetry this way, so unwrap
+    // the real field/value and apply it to channel {ch} via the same switch.
     if (token === "SLOT") {
-      console.debug(`[shure:${this.id}] ch${channel} SLOT report skipped (v1)`);
-      return;
+      const slotNum = rest[0];
+      const slotField = (rest[1] ?? "").toUpperCase();
+      const slotRest = rest.slice(2);
+      console.debug(
+        `[shure:${this.id}] ch${channel} SLOT ${slotNum} ${slotField} ${slotRest.join(" ")}`,
+      );
+      if (!slotField) return;
+      token = slotField;
+      rest = slotRest;
     }
 
     const state = this.channelStates.get(channel);
@@ -166,11 +180,15 @@ export class ShureAxient extends ShureBaseProvider {
     const state = this.channelStates.get(channel);
     if (!state) return;
 
-    const bmA = safeInt(tokens[8]);
-    const rfARaw = safeInt(tokens[9]);
-    const bmB = safeInt(tokens[10]);
-    const rfBRaw = safeInt(tokens[11]);
-    const audioRaw = safeInt(tokens[6]);
+    // SLOT-level metering: `SAMPLE {ch} SLOT {n} ALL ...` — everything from "ALL"
+    // onward shifts right by two tokens vs. the channel-level `SAMPLE {ch} ALL ...`.
+    const off = (tokens[2] ?? "").toUpperCase() === "SLOT" ? 2 : 0;
+
+    const bmA = safeInt(tokens[8 + off]);
+    const rfARaw = safeInt(tokens[9 + off]);
+    const bmB = safeInt(tokens[10 + off]);
+    const rfBRaw = safeInt(tokens[11 + off]);
+    const audioRaw = safeInt(tokens[6 + off]);
 
     if (!Number.isNaN(bmA) && !Number.isNaN(bmB)) {
       // bmA/bmB are bar-meter values 0–5 from the device.

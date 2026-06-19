@@ -17,6 +17,11 @@ import { updater } from "./updater.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
 
+// Coalescing window (ms) for live device-status updates. Wireless metering arrives
+// ~1/sec per channel; we collapse bursts into one re-resolve+broadcast per window
+// so the event loop isn't saturated, while keeping the RF bars visually live.
+const DEVICE_STATUS_FLUSH_MS = 150;
+
 /** Deep-clone a layout, minting fresh object ids so copies stay independent. */
 /** Normalize a user-entered base URL: trim, default to http:// if no scheme,
  *  strip a trailing slash. Returns null for blank input. */
@@ -109,6 +114,8 @@ export class StageController {
 
   // Live device statuses keyed by channelId.
   private deviceStatuses = new Map<string, DeviceStatus>();
+  // Coalesce timer for device-status updates (see applyDeviceStatus).
+  private deviceStatusFlushTimer: ReturnType<typeof setTimeout> | null = null;
   // Cached team members for the active plan.
   private teamMembers: TeamMemberDTO[] = [];
   // Raw (un-resolved) slot configs per VIEW id for the ACTIVE service type.
@@ -1365,10 +1372,28 @@ export class StageController {
   // ── Device status ──────────────────────────────────────────────────────
 
   applyDeviceStatus(channelId: string, status: DeviceStatus): void {
+    // Store immediately so any later read sees the freshest value...
     this.deviceStatuses.set(channelId, status);
-    // Re-resolve without clearing PCO data.
-    this.recomputeResolved();
-    this.broadcast();
+    // ...but coalesce the expensive re-resolve + full-state broadcast. Wireless
+    // providers emit metering ~1/sec PER channel; doing a full recomputeResolved()
+    // + broadcast() on every sample re-resolves all views and re-serialises the
+    // entire state several times a second, starving the event loop (this also
+    // stalled unrelated requests like switching a display's View). Debouncing onto
+    // a short trailing timer keeps the RF bars visually live (sub-200ms) while
+    // collapsing N-per-second-per-channel into a handful of cycles per second.
+    if (this.deviceStatusFlushTimer !== null) return;
+    this.deviceStatusFlushTimer = setTimeout(() => {
+      this.deviceStatusFlushTimer = null;
+      this.recomputeResolved();
+      this.broadcast();
+    }, DEVICE_STATUS_FLUSH_MS);
+  }
+
+  /** Cancel any pending coalesced device-status broadcast (used on shutdown). */
+  stopDeviceStatusUpdates(): void {
+    if (this.deviceStatusFlushTimer === null) return;
+    clearTimeout(this.deviceStatusFlushTimer);
+    this.deviceStatusFlushTimer = null;
   }
 
   // ── Internals ─────────────────────────────────────────────────────────

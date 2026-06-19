@@ -718,10 +718,19 @@ export function SettingsView() {
   }
 
   async function handleSetOutputView(id: string, viewId: string | null) {
+    // Optimistically update so the controlled <Select> reflects the new view
+    // immediately instead of snapping back to the stale cached value while the
+    // request is in flight; reconcile (or roll back) once the server responds.
+    const prev = queryClient.getQueryData<StageState>(["stage:getState"]);
+    if (prev) {
+      const outputs = prev.outputs.map((o) => (o.id === id ? { ...o, viewId } : o));
+      queryClient.setQueryData(["stage:getState"], { ...prev, outputs });
+    }
     try {
       const next = await ipc<StageState>("outputs:setView", { id, viewId });
       queryClient.setQueryData(["stage:getState"], next);
     } catch (err) {
+      if (prev) queryClient.setQueryData(["stage:getState"], prev);
       toast.error(`Failed to route display: ${String(err)}`);
     }
   }
