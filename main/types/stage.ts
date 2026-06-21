@@ -17,6 +17,9 @@ export interface TranscriptLineDTO {
   channel: string | null;
   /** Human channel label, if provided. */
   channelName: string | null;
+  /** Per-channel color from ProdCom, if it provides one (e.g. "#rrggbb"). When
+   *  null the UI falls back to a deterministic per-channel color. */
+  color: string | null;
   text: string;
   /** False = interim/partial hypothesis still being revised; true = finalized. */
   isFinal: boolean;
@@ -151,6 +154,7 @@ export type LayoutObjectConfig =
   | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }
   | { type: "slots-grid"; sourceViewId?: string | null } // embed a slots-View's grid
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
+  | { type: "live-controls" } // PCO Services Live Prev/Next buttons (interactive)
   | { type: "brand-logo"; useEmptySlotLogo?: boolean }
   | { type: "ndi-video" } // background; web shows a placeholder, Apple shows video
   | { type: "image"; src: string }

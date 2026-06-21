@@ -12,6 +12,12 @@ export function channelColor(channel: string | null): string {
   return CHANNEL_COLORS[h % CHANNEL_COLORS.length];
 }
 
+/** Color for a transcript line: a ProdCom-provided color wins, otherwise the
+ *  deterministic per-channel color. */
+export function lineColor(line: { color?: string | null; channel: string | null }): string {
+  return line.color ?? channelColor(line.channel);
+}
+
 /** Human label for a line's speaker/channel, or null when unknown. */
 export function channelLabel(line: { channelName: string | null; channel: string | null }): string | null {
   return line.channelName ?? line.channel ?? null;

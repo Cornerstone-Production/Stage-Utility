@@ -56,6 +56,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "section-chip": "Section chip",
   "slots-grid": "Mic slots",
   "transcript-strip": "Captions",
+  "live-controls": "PCO Prev/Next",
   "brand-logo": "Logo",
   "ndi-video": "NDI video",
   image: "Image",
@@ -63,7 +64,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   shape: "Shape",
 };
 const PALETTE: LayoutObjectType[] = [
-  "text", "clock", "countdown-timer", "current-slide-text", "next-slide-text",
+  "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
   "current-service-item", "next-service-item",
   "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
   "transcript-strip", "brand-logo", "image", "plan-attachment", "shape",
@@ -86,7 +87,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
 
 function defaultStyle(type: LayoutObjectType): LayoutStyle {
   if (type === "shape") return { background: "#3b82f6", opacity: 1 };
-  if (type === "ndi-video" || type === "slide-thumbnail" || type === "image" || type === "plan-attachment" || type === "brand-logo") return {};
+  if (type === "ndi-video" || type === "slide-thumbnail" || type === "image" || type === "plan-attachment" || type === "brand-logo" || type === "live-controls") return {};
   return { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 }
 
@@ -170,7 +171,7 @@ function EditorCanvas({
   objects: LayoutObject[];
   selectedId: string | null;
   gridOn: boolean;
-  ctx: Omit<LayoutRenderCtx, "H" | "ndiSource">;
+  ctx: Omit<LayoutRenderCtx, "H" | "ndiSource" | "interactive">;
   ndiSource: string | null;
   /** When false the canvas is a read-only preview (no overlay, handles, or drag). */
   interactive: boolean;
@@ -232,7 +233,9 @@ function EditorCanvas({
   }
 
   const sorted = [...objects].sort((a, b) => a.z - b.z);
-  const fullCtx: LayoutRenderCtx = { ...ctx, H: canvas.height, ndiSource };
+  // Editor canvas is never interactive — live-control objects render as static
+  // previews here so editing can't fire real PCO commands.
+  const fullCtx: LayoutRenderCtx = { ...ctx, H: canvas.height, ndiSource, interactive: false };
 
   const gridBg: CSSProperties = gridOn
     ? {
@@ -392,7 +395,8 @@ export function LayoutEditor({
   onDeleteTemplate: (id: string) => Promise<void>;
 }) {
   const data = useLayoutData();
-  const initial = view.layout ?? { version: 1 as const, canvas: { width: 1920, height: 1080, background: "#080810" }, objects: [] };
+  // background: null → inherits the shared kiosk surface (matches every other view).
+  const initial = view.layout ?? { version: 1 as const, canvas: { width: 1920, height: 1080, background: null }, objects: [] };
   const [canvas, setCanvas] = useState<LayoutCanvas>(initial.canvas);
   const [objects, setObjects] = useState<LayoutObject[]>(initial.objects);
   const [selectedId, setSelectedId] = useState<string | null>(initial.objects[0]?.id ?? null);

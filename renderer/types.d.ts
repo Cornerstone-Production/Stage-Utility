@@ -174,6 +174,7 @@ type LayoutObjectConfig =
   | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }
   | { type: "slots-grid"; sourceViewId?: string | null }
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
+  | { type: "live-controls" }
   | { type: "brand-logo"; useEmptySlotLogo?: boolean }
   | { type: "ndi-video" }
   | { type: "image"; src: string }
@@ -235,6 +236,8 @@ interface TranscriptLineDTO {
   id: string;
   channel: string | null;
   channelName: string | null;
+  /** Per-channel color from ProdCom if provided; null → deterministic fallback. */
+  color: string | null;
   text: string;
   isFinal: boolean;
   at: string;

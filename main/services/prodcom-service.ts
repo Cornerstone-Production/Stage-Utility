@@ -47,6 +47,16 @@ function firstBool(obj: unknown, keys: string[]): boolean | null {
   return null;
 }
 
+/** Normalize a raw color value to a CSS color string, or null. Accepts hex with
+ *  or without a leading "#" (3/4/6/8 digits) and passes through named colors. */
+function normalizeColor(raw: string | null): string | null {
+  if (!raw) return null;
+  const s = raw.trim();
+  if (!s) return null;
+  if (/^#?[0-9a-f]{3,8}$/i.test(s)) return s.startsWith("#") ? s : `#${s}`;
+  return /^[a-z]+$/i.test(s) ? s : null; // CSS named color, else ignore
+}
+
 class ProdComService {
   private host: string | null = null;
   private port: number | null = null;
@@ -198,6 +208,13 @@ class ProdComService {
     const payload = dataLines.join("\n");
     if (!payload || payload === "[DONE]") return;
 
+    // Diagnostic: with PRODCOM_DEBUG set, log every raw transcript frame exactly
+    // as ProdCom sent it — the ground truth for confirming whether a per-channel
+    // color field exists and its key name. Enable with `PRODCOM_DEBUG=1`.
+    if (process.env.PRODCOM_DEBUG) {
+      console.log(`[prodcom] RAW ${payload}`);
+    }
+
     let parsed: unknown = payload;
     try {
       parsed = JSON.parse(payload);
@@ -215,12 +232,18 @@ class ProdComService {
   private normalizeLine(data: unknown): TranscriptLineDTO | null {
     if (typeof data === "string") {
       if (!data.trim()) return null;
-      return { id: `t${++this.seq}`, channel: null, channelName: null, text: data, isFinal: true, at: new Date().toISOString() };
+      return { id: `t${++this.seq}`, channel: null, channelName: null, color: null, text: data, isFinal: true, at: new Date().toISOString() };
     }
     const text = firstString(data, ["text", "transcript", "content", "line", "value"]);
     if (text == null) return null;
     const channel = firstString(data, ["channelId", "channel", "channel_id", "channelIndex"]);
     const channelName = firstString(data, ["channelName", "channel_name", "name", "label"]);
+    // Use ProdCom's own channel color when it sends one; null → UI falls back to
+    // a deterministic per-channel color. (Field name unconfirmed — kept defensive;
+    // PRODCOM_DEBUG logs raw frames so the real key can be confirmed on site.)
+    const color = normalizeColor(
+      firstString(data, ["color", "colour", "channelColor", "channel_color", "hexColor", "hex"]),
+    );
 
     // ProdCom's flag is `inProgress` (true = partial). Fall back to other spellings.
     const inProgress = firstBool(data, ["inProgress", "in_progress", "partial", "interim"]);
@@ -233,7 +256,7 @@ class ProdComService {
 
     const id = firstString(data, ["id", "uuid", "lineId"]) ?? `t${++this.seq}`;
     const at = firstString(data, ["completeDate", "date", "timestamp", "time"]) ?? new Date().toISOString();
-    return { id, channel, channelName, text, isFinal, at };
+    return { id, channel, channelName, color, text, isFinal, at };
   }
 
   private ingest(line: TranscriptLineDTO): void {
