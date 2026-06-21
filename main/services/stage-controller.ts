@@ -555,7 +555,29 @@ export class StageController {
       try {
         const plans = await pcoService.listUpcomingPlans(this.pcoAppId!, this.pcoSecret!, type.id);
         if (plans.length === 0) continue;
-        const nearest = plans[0]; // already ordered sort_date asc
+
+        // PCO's `filter=future` keeps a plan in the list for the WHOLE service day,
+        // even after its service has already ended — so `plans[0]` is frequently the
+        // plan that just finished this morning. Walk past any plan whose service
+        // ended more than the grace window ago and take the first still-upcoming one.
+        // Without this, auto-mode "advances" right back onto the finished plan (its
+        // sort_date is the earliest in `future`) and never reaches the real next one.
+        let nearest: PlanDTO | null = null;
+        for (const p of plans) {
+          const endIso = await pcoService
+            .getServiceEnd(this.pcoAppId!, this.pcoSecret!, type.id, p.id)
+            .catch(() => null);
+          if (endIso) {
+            const end = Date.parse(endIso);
+            if (Number.isFinite(end) && Date.now() > end + StageController.ROLLOVER_GRACE_MS) {
+              continue; // finished plan still lingering in filter=future — skip it
+            }
+          }
+          nearest = p; // service still upcoming / within grace, or end unknown
+          break;
+        }
+        if (!nearest) continue; // every future plan for this type has already ended
+
         if (
           best === null ||
           (nearest.sortDate !== null &&
