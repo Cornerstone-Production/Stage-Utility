@@ -410,6 +410,8 @@ export interface StageState {
   ndiEnabled: boolean;
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */
   publicUrl: string | null;
+  /** User-assigned caption colors, keyed by ProdCom channel label. */
+  captionChannelColors: Record<string, string>;
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
 }

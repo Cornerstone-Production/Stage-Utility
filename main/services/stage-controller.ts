@@ -109,6 +109,7 @@ export class StageController {
     defaultAvatar: null,
     ndiEnabled: false,
     publicUrl: null,
+    captionChannelColors: {},
     autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
   };
 
@@ -168,6 +169,7 @@ export class StageController {
       defaultAvatar: settings.defaultAvatar ?? null,
       ndiEnabled: settings.ndiEnabled ?? false,
       publicUrl: settings.publicUrl ?? null,
+      captionChannelColors: settings.captionChannelColors ?? {},
       autoUpdate: settings.autoUpdate ?? { enabled: false, dayOfWeek: null, hour: 3 },
     };
     this.publicUrl = settings.publicUrl ?? null;
@@ -802,6 +804,24 @@ export class StageController {
     });
     this.state = { ...this.state, ...stateNext };
     await settingsStore.patch(settingsNext);
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Set (or clear, with color=null) a user-assigned caption color for a ProdCom
+   *  channel label. Persisted + broadcast so kiosks recolor live. */
+  async setCaptionChannelColor(channel: string, color: string | null): Promise<StageState> {
+    const key = channel.trim();
+    if (!key) return this.state;
+    const next = { ...this.state.captionChannelColors };
+    if (color && /^#?[0-9a-f]{3,8}$/i.test(color.trim())) {
+      const c = color.trim();
+      next[key] = c.startsWith("#") ? c : `#${c}`;
+    } else {
+      delete next[key]; // null/invalid → revert to auto
+    }
+    this.state = { ...this.state, captionChannelColors: next };
+    await settingsStore.patch({ captionChannelColors: next });
     this.broadcast();
     return this.state;
   }

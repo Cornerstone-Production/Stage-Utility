@@ -72,6 +72,7 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
       <TranscriptFeed
         lines={lines}
         scrollable
+        colorOverrides={state.captionChannelColors}
         lineClassName="text-[clamp(1.5rem,4.5vmin,3.25rem)]"
         emptyText="Waiting for transcript…"
         className="flex-1 px-[6vw] max-sm:px-4 py-6 max-sm:py-3"

@@ -163,6 +163,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
             lines={ctx.transcript}
             maxLines={c.maxLines ?? 3}
             showLabels
+            colorOverrides={ctx.state.captionChannelColors}
             textStyle={ts}
             gapClassName="gap-[0.3em]"
             className="w-full h-full"
@@ -172,7 +173,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       const last = ctx.transcript[ctx.transcript.length - 1];
       const speaker = channelLabel(last);
       return (
-        <span style={{ ...ts, color: lineColor(last), opacity: last.isFinal ? 1 : 0.55 }}>
+        <span style={{ ...ts, color: lineColor(last, ctx.state.captionChannelColors), opacity: last.isFinal ? 1 : 0.55 }}>
           {speaker ? `${speaker}: ${last.text}` : last.text}
         </span>
       );

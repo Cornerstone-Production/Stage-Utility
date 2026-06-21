@@ -993,6 +993,16 @@ export class RemoteServer {
       return;
     }
 
+    // ── Caption channel colors ──────────────────────────────────────────────
+    if (method === "POST" && pathname === "/api/caption-colors") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const channel = typeof body.channel === "string" ? body.channel : "";
+      const color = typeof body.color === "string" ? body.color : null;
+      const state = await stageController.setCaptionChannelColor(channel, color);
+      json(res, state);
+      return;
+    }
+
     // ── In-app self-update ────────────────────────────────────────────────
     if (method === "GET" && pathname === "/api/update/status") {
       json(res, updater.getStatus());

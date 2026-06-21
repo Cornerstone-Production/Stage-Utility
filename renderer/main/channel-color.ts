@@ -12,9 +12,15 @@ export function channelColor(channel: string | null): string {
   return CHANNEL_COLORS[h % CHANNEL_COLORS.length];
 }
 
-/** Color for a transcript line: a ProdCom-provided color wins, otherwise the
- *  deterministic per-channel color. */
-export function lineColor(line: { color?: string | null; channel: string | null }): string {
+/** Color for a transcript line. Priority: a user-assigned color for the channel
+ *  label (from Settings) → a ProdCom-provided color → the deterministic per-
+ *  channel color. */
+export function lineColor(
+  line: { color?: string | null; channel: string | null; channelName?: string | null },
+  overrides?: Record<string, string> | null,
+): string {
+  const label = line.channelName ?? line.channel ?? null;
+  if (overrides && label && overrides[label]) return overrides[label];
   return line.color ?? channelColor(line.channel);
 }
 

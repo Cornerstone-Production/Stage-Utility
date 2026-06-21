@@ -12,6 +12,8 @@ interface TranscriptFeedProps {
   /** Show the small speaker/channel label prefix. Defaults to auto (on if any
    *  line carries a channel/name). */
   showLabels?: boolean;
+  /** User-assigned colors keyed by channel label; overrides the auto color. */
+  colorOverrides?: Record<string, string> | null;
   /** Base text style applied to the container so font size/family/align cascade
    *  to every line (used by the layout object, sized to its box). */
   textStyle?: CSSProperties;
@@ -34,6 +36,7 @@ export function TranscriptFeed({
   maxLines,
   scrollable = false,
   showLabels,
+  colorOverrides,
   textStyle,
   lineClassName,
   gapClassName = "gap-3",
@@ -63,33 +66,37 @@ export function TranscriptFeed({
       onScroll={scrollable ? onScroll : undefined}
       style={textStyle}
       className={cn(
-        "flex flex-col justify-end min-h-0",
-        gapClassName,
+        "flex flex-col min-h-0",
         scrollable ? "overflow-y-auto" : "overflow-hidden",
         className,
       )}
     >
       {visible.length === 0 && emptyText ? (
-        <div className="flex-1 flex items-center justify-center">
+        <div className="m-auto">
           <span className="text-title3 text-white/30">{emptyText}</span>
         </div>
       ) : (
-        visible.map((l) => (
-          <p
-            key={l.id}
-            className={cn("leading-snug", lineClassName)}
-            style={{ color: lineColor(l), opacity: l.isFinal ? 1 : 0.55 }}
-          >
-            {labels && (l.channelName || l.channel) && (
-              <span className="text-[0.5em] font-medium uppercase tracking-wider text-white/40 mr-[0.6em] align-middle">
-                {l.channelName ?? l.channel}
-              </span>
-            )}
-            {l.text}
-          </p>
-        ))
+        // `mt-auto` bottom-anchors the lines when they don't fill the box, but
+        // (unlike justify-end on a scroll container) collapses once they
+        // overflow so the viewer can still scroll up to older lines.
+        <div className={cn("mt-auto flex flex-col", gapClassName)}>
+          {visible.map((l) => (
+            <p
+              key={l.id}
+              className={cn("leading-snug", lineClassName)}
+              style={{ color: lineColor(l, colorOverrides), opacity: l.isFinal ? 1 : 0.55 }}
+            >
+              {labels && (l.channelName || l.channel) && (
+                <span className="text-[0.5em] font-medium uppercase tracking-wider text-white/40 mr-[0.6em] align-middle">
+                  {l.channelName ?? l.channel}
+                </span>
+              )}
+              {l.text}
+            </p>
+          ))}
+          {scrollable && <div ref={endRef} />}
+        </div>
       )}
-      {scrollable && <div ref={endRef} />}
     </div>
   );
 }

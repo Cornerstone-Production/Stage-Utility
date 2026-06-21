@@ -123,6 +123,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "stage:setPublicUrl":
       return post<T>("/api/public-url", p);
 
+    case "captions:setChannelColor":
+      return post<T>("/api/caption-colors", p);
+
     // ── In-app self-update ───────────────────────────────────────────────
     case "update:status":
       return apiFetch<T>("/api/update/status");
