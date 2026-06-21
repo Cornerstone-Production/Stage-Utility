@@ -54,25 +54,15 @@ const WIRELESS_DESCRIPTOR: IntegrationDescriptor = {
   configSchema: [],
 };
 
-// Companion integration descriptor (future use, control endpoints already exist).
+// Companion integration descriptor. There is nothing for the app to dial — the
+// Bitfocus Companion module connects TO this app's HTTP/SSE API. So this carries
+// no config; the settings panel (CompanionInfoPanel) shows the URL to point
+// Companion at and a live connected-client count instead.
 const COMPANION_DESCRIPTOR: IntegrationDescriptor = {
   id: "companion",
   kind: "control",
   label: "Bitfocus Companion",
-  configSchema: [
-    {
-      key: "host",
-      label: "Companion Host",
-      type: "text",
-      placeholder: "192.168.1.50",
-    },
-    {
-      key: "port",
-      label: "Port",
-      type: "number",
-      placeholder: "8888",
-    },
-  ],
+  configSchema: [],
 };
 
 // ProPresenter integration — reads live slide/item status from the 7.9+ local
@@ -201,6 +191,19 @@ class IntegrationManager {
 
   getStates(): IntegrationState[] {
     return Array.from(this.states.values());
+  }
+
+  /** Live count of connected Companion-module clients (pushed from remote-server
+   *  as SSE streams marked with the X-Companion-Module header connect/close). */
+  private companionClients = 0;
+  setCompanionClients(count: number): void {
+    this.companionClients = count;
+    this.setConnectionState(
+      "companion",
+      count > 0 ? "connected" : "disconnected",
+      count > 0 ? `${count} Companion client(s) connected` : null,
+    );
+    this.broadcastStates();
   }
 
   async setConfig(
@@ -354,7 +357,15 @@ class IntegrationManager {
       }
 
       if (id === "companion") {
-        return { ok: true, message: "Companion endpoints available at /api/*" };
+        const n = this.companionClients;
+        const url = stageController.getState().remoteUrl;
+        const msg =
+          n > 0
+            ? `${n} Companion client(s) connected`
+            : `Ready — point Companion at ${url ?? "this server's LAN address"}`;
+        this.setConnectionState("companion", n > 0 ? "connected" : "disconnected", msg);
+        this.broadcastStates();
+        return { ok: true, message: msg };
       }
 
       if (id === "propresenter") {

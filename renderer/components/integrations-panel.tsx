@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
+import { CompanionInfoPanel } from "./companion-info-panel";
 import {
   Button,
   Field,
@@ -435,6 +436,8 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
                 />
                 {/* Per-channel caption colors, tucked under the ProdCom card. */}
                 {descriptor.id === "prodcom" && <CaptionColorsPanel />}
+                {/* Connect URL + live client count, under the Companion card. */}
+                {descriptor.id === "companion" && <CompanionInfoPanel state={state} />}
               </div>
             )}
           </div>
