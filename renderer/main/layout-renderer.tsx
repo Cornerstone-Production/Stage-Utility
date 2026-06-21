@@ -162,16 +162,18 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     }
     case "transcript-strip": {
       if (ctx.transcript.length === 0) return null;
-      if (c.mode === "rolling") {
-        // Multi-speaker feed: newest at the bottom, older shifting up — same
-        // behavior as the full transcription view, sized to this object's box.
+      if (c.mode !== "latest") {
+        // Multi-speaker feed that mirrors the dedicated captions display: newest
+        // line at the BOTTOM, older shifting up, LEFT-aligned (captions read left,
+        // not centered). Sized to this object's box; maxLines unset = show as many
+        // as fit (older clipped at the top, exactly like the full display).
         return (
           <TranscriptFeed
             lines={ctx.transcript}
-            maxLines={c.maxLines ?? 3}
+            maxLines={c.maxLines}
             showLabels
             colorOverrides={ctx.state.captionChannelColors}
-            textStyle={ts}
+            textStyle={{ ...ts, textAlign: "left" }}
             gapClassName="gap-[0.3em]"
             className="w-full h-full"
           />
