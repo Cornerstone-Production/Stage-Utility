@@ -106,7 +106,14 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       return span(clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h", c.showMeridiem ?? true));
     case "countdown-timer": {
       const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
-      return span(t ? fmtDuration(t.seconds) : "—");
+      if (!t) return span("—");
+      // Turn red once the timer goes negative (item or service ran over), like
+      // the dashboard; otherwise keep the object's configured color.
+      return (
+        <span style={t.over ? { ...ts, color: "var(--red-10)" } : ts}>
+          {fmtDuration(t.seconds)}
+        </span>
+      );
     }
     case "current-slide-text":
       return span(ctx.propresenter?.currentSlideText ?? ctx.propresenter?.currentItem ?? "");
