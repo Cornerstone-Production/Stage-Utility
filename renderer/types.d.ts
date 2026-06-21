@@ -174,6 +174,7 @@ type LayoutObjectConfig =
   | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }
   | { type: "slots-grid"; sourceViewId?: string | null }
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
+  | { type: "live-controls" }
   | { type: "brand-logo"; useEmptySlotLogo?: boolean }
   | { type: "ndi-video" }
   | { type: "image"; src: string }
@@ -235,6 +236,8 @@ interface TranscriptLineDTO {
   id: string;
   channel: string | null;
   channelName: string | null;
+  /** Per-channel color from ProdCom if provided; null → deterministic fallback. */
+  color: string | null;
   text: string;
   isFinal: boolean;
   at: string;
@@ -338,6 +341,8 @@ interface StageState {
   ndiEnabled: boolean;
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */
   publicUrl: string | null;
+  /** User-assigned caption colors, keyed by ProdCom channel label. */
+  captionChannelColors: Record<string, string>;
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
 }

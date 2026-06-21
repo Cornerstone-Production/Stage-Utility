@@ -40,7 +40,7 @@ class StageErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundar
   render() {
     if (this.state.error) {
       return (
-        <div className="flex flex-col items-center justify-center h-[100dvh] bg-[#080810] gap-4">
+        <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-4">
           <AlertCircleIcon className="size-8 text-red-10" />
           <p className="text-headline text-gray-9">Display error — please reload</p>
           <p className="text-caption1 text-gray-7">{this.state.error.message}</p>
@@ -169,7 +169,7 @@ function KioskTopBar({
 
 function KioskLoading() {
   return (
-    <div className="flex flex-col items-center justify-center h-[100dvh] bg-[#080810] gap-3">
+    <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3">
       <Loader2Icon className="size-8 text-gray-7 animate-spin" />
       <p className="text-headline text-gray-7">Loading stage…</p>
     </div>
@@ -178,7 +178,7 @@ function KioskLoading() {
 
 function KioskNotConfigured({ state, displayName }: { state: StageState; displayName: string | null }) {
   return (
-    <div className="flex flex-col h-[100dvh] bg-[#080810]">
+    <div className="flex flex-col h-[100dvh] kiosk-surface">
       <KioskTopBar
         serviceTypeName={state.serviceTypeName}
         planSeriesTitle={state.planSeriesTitle}
@@ -203,7 +203,7 @@ function KioskNotConfigured({ state, displayName }: { state: StageState; display
 
 function KioskEmpty({ state, displayName }: { state: StageState; displayName: string | null }) {
   return (
-    <div className="flex flex-col h-[100dvh] bg-[#080810]">
+    <div className="flex flex-col h-[100dvh] kiosk-surface">
       <KioskTopBar
         serviceTypeName={state.serviceTypeName}
         planSeriesTitle={state.planSeriesTitle}
@@ -229,7 +229,7 @@ function KioskEmpty({ state, displayName }: { state: StageState; displayName: st
 // Shown when an output exists but has no View routed to it.
 function KioskUnrouted({ state, displayName }: { state: StageState; displayName: string | null }) {
   return (
-    <div className="flex flex-col h-[100dvh] bg-[#080810]">
+    <div className="flex flex-col h-[100dvh] kiosk-surface">
       <KioskTopBar
         serviceTypeName={state.serviceTypeName}
         planSeriesTitle={state.planSeriesTitle}
@@ -254,7 +254,7 @@ function KioskUnrouted({ state, displayName }: { state: StageState; displayName:
 
 function KioskError({ message }: { message: string }) {
   return (
-    <div className="flex flex-col items-center justify-center h-[100dvh] bg-[#080810] gap-4 px-12 text-center">
+    <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-4 px-12 text-center">
       <AlertCircleIcon className="size-10 text-red-10" />
       <p className="text-title3 text-gray-9 font-semibold">Could not load stage state</p>
       <p className="text-caption1 text-gray-7">{message}</p>
@@ -326,7 +326,7 @@ export function StageView() {
     if (activeView?.layout) {
       return (
         <StageErrorBoundary>
-          <div className="flex flex-col h-[100dvh] overflow-hidden bg-black pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+          <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
             <KioskTopBar
               serviceTypeName={state.serviceTypeName}
               planSeriesTitle={state.planSeriesTitle}
@@ -339,7 +339,9 @@ export function StageView() {
               appLogoMonochrome={state.appLogoMonochrome}
             />
             <div className="flex-1 min-h-0">
-              <LayoutRenderer layout={activeView.layout} ndiSource={activeView.ndiSource ?? null} />
+              {/* interactive only on a real display route — never in the
+                  "/preview-…" iframe, so live-control objects can't fire PCO. */}
+              <LayoutRenderer layout={activeView.layout} ndiSource={activeView.ndiSource ?? null} interactive={!previewViewId} />
             </div>
           </div>
         </StageErrorBoundary>

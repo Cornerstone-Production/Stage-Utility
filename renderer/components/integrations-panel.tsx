@@ -3,6 +3,7 @@ import { useStageState } from "../main/use-stage-state";
 import { useState, useEffect, useCallback, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
+import { CaptionColorsPanel } from "./caption-colors-panel";
 import {
   Button,
   Field,
@@ -425,12 +426,16 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
                 <WirelessConnectionsPanel />
               </div>
             ) : (
-              <IntegrationCard
-                descriptor={descriptor}
-                state={state}
-                onStateChange={handleStateChange}
-                lastRefreshedAt={stageState?.lastRefreshedAt ?? null}
-              />
+              <div className="flex flex-col gap-3">
+                <IntegrationCard
+                  descriptor={descriptor}
+                  state={state}
+                  onStateChange={handleStateChange}
+                  lastRefreshedAt={stageState?.lastRefreshedAt ?? null}
+                />
+                {/* Per-channel caption colors, tucked under the ProdCom card. */}
+                {descriptor.id === "prodcom" && <CaptionColorsPanel />}
+              </div>
             )}
           </div>
         );

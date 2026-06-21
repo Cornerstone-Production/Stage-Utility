@@ -4,7 +4,9 @@ import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState } from "./use-dashboard-state";
 import { useTranscript } from "./use-transcript";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
-import { channelLabel } from "./channel-color";
+import { channelLabel, lineColor } from "./channel-color";
+import { TranscriptFeed } from "./transcript-feed";
+import { LiveControls } from "./live-controls";
 import { Loader2Icon } from "lucide-react";
 
 // Render context shared by every object renderer.
@@ -18,6 +20,9 @@ export interface LayoutRenderCtx {
   ndiSource: string | null;
   /** Canvas height in design px — basis for fraction→px font/spacing sizing. */
   H: number;
+  /** True only on a real display route. Interactive objects (live controls)
+   *  only fire their commands when true — never in the editor or preview iframe. */
+  interactive: boolean;
 }
 
 function pad(n: number): string {
@@ -101,7 +106,14 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       return span(clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h", c.showMeridiem ?? true));
     case "countdown-timer": {
       const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
-      return span(t ? fmtDuration(t.seconds) : "—");
+      if (!t) return span("—");
+      // Turn red once the timer goes negative (item or service ran over), like
+      // the dashboard; otherwise keep the object's configured color.
+      return (
+        <span style={t.over ? { ...ts, color: "var(--red-10)" } : ts}>
+          {fmtDuration(t.seconds)}
+        </span>
+      );
     }
     case "current-slide-text":
       return span(ctx.propresenter?.currentSlideText ?? ctx.propresenter?.currentItem ?? "");
@@ -151,21 +163,36 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "transcript-strip": {
       if (ctx.transcript.length === 0) return null;
       if (c.mode === "rolling") {
-        const lines = ctx.transcript.slice(-(c.maxLines ?? 3));
+        // Multi-speaker feed: newest at the bottom, older shifting up — same
+        // behavior as the full transcription view, sized to this object's box.
         return (
-          <div className="flex flex-col gap-1 w-full">
-            {lines.map((l) => (
-              <span key={l.id} style={{ ...ts, opacity: l.isFinal ? 1 : 0.55 }}>
-                {l.text}
-              </span>
-            ))}
-          </div>
+          <TranscriptFeed
+            lines={ctx.transcript}
+            maxLines={c.maxLines ?? 3}
+            showLabels
+            colorOverrides={ctx.state.captionChannelColors}
+            textStyle={ts}
+            gapClassName="gap-[0.3em]"
+            className="w-full h-full"
+          />
         );
       }
       const last = ctx.transcript[ctx.transcript.length - 1];
       const speaker = channelLabel(last);
-      return span(speaker ? `${speaker}: ${last.text}` : last.text);
+      return (
+        <span style={{ ...ts, color: lineColor(last, ctx.state.captionChannelColors), opacity: last.isFinal ? 1 : 0.55 }}>
+          {speaker ? `${speaker}: ${last.text}` : last.text}
+        </span>
+      );
     }
+    case "live-controls":
+      // PCO Services Live Prev/Next. Only wired up on a real display; in the
+      // editor/preview it renders the same buttons but they don't fire.
+      return (
+        <div className={ctx.interactive ? "w-full h-full" : "w-full h-full pointer-events-none"}>
+          <LiveControls className="w-full h-full" />
+        </div>
+      );
     case "brand-logo": {
       const logo = c.useEmptySlotLogo ? ctx.state.emptySlotLogo : ctx.state.appLogo;
       if (logo) {
@@ -473,7 +500,7 @@ export function useLayoutData() {
  * Renders a custom-layout View: a fixed design canvas scaled to fit the viewport,
  * with absolutely-positioned, live-data-bound objects.
  */
-export function LayoutRenderer({ layout, ndiSource }: { layout: LayoutDTO; ndiSource: string | null }) {
+export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
   const { state, isLoading, error, pcoLive, propresenter, transcript, now, skewMs } = useLayoutData();
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
@@ -495,30 +522,35 @@ export function LayoutRenderer({ layout, ndiSource }: { layout: LayoutDTO; ndiSo
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full bg-black">
+      <div className="flex items-center justify-center h-full kiosk-surface">
         <Loader2Icon className="size-8 text-gray-7 animate-spin" />
       </div>
     );
   }
   if (error || !state) {
     return (
-      <div className="flex items-center justify-center h-full bg-black text-gray-7">
+      <div className="flex items-center justify-center h-full kiosk-surface text-gray-7">
         Could not load layout
       </div>
     );
   }
 
   const { canvas } = layout;
-  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, transcript, now, skewMs, ndiSource, H: canvas.height };
+  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, transcript, now, skewMs, ndiSource, H: canvas.height, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
+  // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom
+  // layouts match every other view; only an explicit non-default solid overrides.
+  const bg = canvas.background;
+  const inheritSurface = bg == null || bg === "#000" || bg === "#000000" || bg === "#080810";
+
   return (
-    <div ref={setBox} className="relative w-full h-full bg-black overflow-hidden flex items-center justify-center">
+    <div ref={setBox} className="relative w-full h-full kiosk-surface overflow-hidden flex items-center justify-center">
       <div
         style={{
           width: canvas.width,
           height: canvas.height,
-          background: canvas.background ?? "#000",
+          background: inheritSurface ? "transparent" : bg,
           transform: `scale(${scale})`,
           transformOrigin: "center center",
           position: "relative",
