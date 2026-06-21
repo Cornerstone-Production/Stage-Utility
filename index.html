@@ -26,11 +26,10 @@
         --background: #080810;
       }
       html, body, #root {
-        /* Solid color FIRST so iOS fills the standalone safe areas (status bar /
-           home indicator) dark — a gradient alone has no background-color, which
-           iOS treats as white (the "white bars"). The gradient layers on top. */
+        /* Flat near-black so every view matches the slots view (no gradient).
+           Solid color also fills the iOS standalone safe areas (status bar /
+           home indicator) dark instead of white. */
         background-color: #080810;
-        background-image: radial-gradient(ellipse 120% 80% at 50% 0%, #0f0f1a 0%, #080810 55%, #040408 100%);
         /* Use the DYNAMIC viewport for the whole chain so it matches the views'
            h-[100dvh]. `100%`/`100vh` resolve to the LARGE viewport on iOS, which
            is taller than the visible area when the toolbars show — that mismatch

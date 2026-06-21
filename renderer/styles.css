@@ -184,18 +184,16 @@
   display: block !important;
 }
 
-/* Single source of truth for the kiosk backdrop (mirrors index.html's body).
-   Every view kind (slots, dashboard, stage, captions, custom) renders on this
-   so they all share one background. */
+/* Single source of truth for the kiosk backdrop. A FLAT color (no gradient) so
+   every view kind — slots, dashboard, stage, captions, custom — looks identical
+   to the slots view (which reads as flat near-black behind its cards). */
 :root {
   --kiosk-bg: #080810;
-  --kiosk-bg-gradient: radial-gradient(ellipse 120% 80% at 50% 0%, #0f0f1a 0%, #080810 55%, #040408 100%);
 }
 
-/* The kiosk backdrop. Applied behind the embedded "Mic slots" object in custom
-   layouts so its translucent slot cards read the same grey as the standalone
-   slots view instead of navy over a flat canvas. */
+/* The kiosk backdrop. Applied behind every view + the embedded "Mic slots"
+   object in custom layouts so they all share the one flat background. */
 .kiosk-surface {
   background-color: var(--kiosk-bg);
-  background-image: var(--kiosk-bg-gradient);
+  background-image: none;
 }

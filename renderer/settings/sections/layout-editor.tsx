@@ -76,7 +76,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "clock": return { type: "clock", showSeconds: true, format: "12h" };
     case "section-chip": return { type: "section-chip", which: "current" };
     case "slots-grid": return { type: "slots-grid", sourceViewId: null };
-    case "transcript-strip": return { type: "transcript-strip", mode: "latest", maxLines: 3 };
+    case "transcript-strip": return { type: "transcript-strip", mode: "rolling" };
     case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
     case "image": return { type: "image", src: "" };
     case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
@@ -88,6 +88,8 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
 function defaultStyle(type: LayoutObjectType): LayoutStyle {
   if (type === "shape") return { background: "#3b82f6", opacity: 1 };
   if (type === "ndi-video" || type === "slide-thumbnail" || type === "image" || type === "plan-attachment" || type === "brand-logo" || type === "live-controls") return {};
+  // Captions read left-aligned and bottom-anchored, like the dedicated display.
+  if (type === "transcript-strip") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "bottom" };
   return { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 }
 
