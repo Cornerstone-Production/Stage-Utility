@@ -426,6 +426,19 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
                 </span>
                 <WirelessConnectionsPanel />
               </div>
+            ) : descriptor.id === "companion" ? (
+              // Companion connects TO this app — there's nothing to enable, save,
+              // or test here, so skip the card chrome and just show the status +
+              // the connect-info panel.
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-headline font-semibold text-gray-12 flex-1 min-w-0 truncate">
+                    {descriptor.label}
+                  </span>
+                  <ConnectionBadge state={state} />
+                </div>
+                <CompanionInfoPanel state={state} />
+              </div>
             ) : (
               <div className="flex flex-col gap-3">
                 <IntegrationCard
@@ -436,8 +449,6 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
                 />
                 {/* Per-channel caption colors, tucked under the ProdCom card. */}
                 {descriptor.id === "prodcom" && <CaptionColorsPanel />}
-                {/* Connect URL + live client count, under the Companion card. */}
-                {descriptor.id === "companion" && <CompanionInfoPanel state={state} />}
               </div>
             )}
           </div>
