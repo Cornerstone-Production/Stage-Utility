@@ -114,6 +114,11 @@ async function readBody(req: http.IncomingMessage): Promise<unknown> {
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();
 
+// Count of currently-connected Companion-module clients (SSE streams opened with
+// the X-Companion-Module header / ?client=companion marker). Pushed into the
+// integration manager so the "companion" panel can show "N connected".
+let companionClients = 0;
+
 function sseWrite(res: http.ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
@@ -338,7 +343,23 @@ export class RemoteServer {
       sseWrite(res, "stage:state-changed", stageController.getState());
       sseWrite(res, "propresenter:status", propresenterService.getStatus());
       sseClients.add(res);
-      req.on("close", () => sseClients.delete(res));
+      // A Companion module marks its event stream so we can show a live
+      // connected-client count in the integration panel. Re-broadcast the
+      // integration states so the count updates everywhere immediately.
+      const isCompanion =
+        req.headers["x-companion-module"] != null ||
+        _url.searchParams.get("client") === "companion";
+      if (isCompanion) {
+        companionClients++;
+        integrationManager.setCompanionClients(companionClients);
+      }
+      req.on("close", () => {
+        sseClients.delete(res);
+        if (isCompanion) {
+          companionClients = Math.max(0, companionClients - 1);
+          integrationManager.setCompanionClients(companionClients);
+        }
+      });
       return;
     }
 
@@ -470,8 +491,15 @@ export class RemoteServer {
     }
 
     // ── Health ────────────────────────────────────────────────────────────
+    // Identity payload: lets an external client (e.g. the Bitfocus Companion
+    // module) confirm it reached a Stage Utility server and show its version/name.
     if (method === "GET" && pathname === "/api/health") {
-      json(res, { ok: true });
+      json(res, {
+        ok: true,
+        app: "stage-utility",
+        version: SERVER_VERSION,
+        name: stageController.getState().appName,
+      });
       return;
     }
 
