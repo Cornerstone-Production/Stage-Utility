@@ -103,6 +103,14 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
     }
   }
 
+  function setIemBinding(channelId: string) {
+    if (!channelId || channelId === "__none__") {
+      onChange({ ...slot, iemBinding: null });
+    } else {
+      onChange({ ...slot, iemBinding: { providerId: "wireless", channelId } });
+    }
+  }
+
   const currentMode: "pco" | "static" | "empty" = isPco ? "pco" : isStatic ? "static" : "empty";
 
   // Spacers are a horizontal gap for charger alignment — width + remove, plus an
@@ -397,6 +405,28 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
               ))}
             </SelectContent>
           </Select>
+        </div>
+      )}
+
+      {/* Optional second device (IEM/PSM pack) — adds a second battery bar beneath
+          the primary, e.g. a vocalist on a handheld who also wears an IEM pack. */}
+      {!isEmpty && !isSpacer && wirelessChannels.length > 0 && (
+        <div className="flex flex-col items-stretch gap-1.5 pl-4 sm:pl-9 sm:flex-row sm:items-center sm:gap-2">
+          <span className="text-caption1 text-gray-9 shrink-0">IEM pack:</span>
+          <Select value={slot.iemBinding?.channelId ?? "__none__"} onValueChange={setIemBinding}>
+            <SelectTrigger className="w-full sm:w-40">
+              <SelectValue placeholder="None" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">None</SelectItem>
+              {wirelessChannels.map((ch) => (
+                <SelectItem key={ch.id} value={ch.id}>
+                  {ch.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-caption2 text-gray-8">Adds a second battery bar (headphones icon) for the pack.</span>
         </div>
       )}
 

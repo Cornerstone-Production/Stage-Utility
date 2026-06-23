@@ -1,5 +1,5 @@
 import { cn } from "../lib/cn";
-import { BatteryFullIcon, BatteryLowIcon, BatteryMediumIcon, RadioIcon } from "lucide-react";
+import { BatteryFullIcon, BatteryLowIcon, BatteryMediumIcon, MicIcon, HeadphonesIcon } from "lucide-react";
 
 interface StatusStripProps {
   device: SlotDevice;
@@ -28,6 +28,13 @@ function chargeColor(pct: number): string {
   if (pct >= 60) return "bg-green-9";
   if (pct >= 25) return "bg-yellow-9";
   return "bg-red-9";
+}
+
+function readoutColor(level: number | null): string {
+  if (level === null) return "text-white/30";
+  if (level >= 60) return "text-green-10";
+  if (level >= 25) return "text-yellow-10";
+  return "text-red-10";
 }
 
 // A thin charge-level bar sized to sit directly under the 5-bar RF cluster. The
@@ -87,29 +94,12 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
   const showRf = micBound && !hideRf;
   const showFreq = micBound && !hideRf;
   const charge = device.charge;
+  const iemCharge = device.iemCharge;
+  const hasIem = iemCharge !== null;
 
-  // Nothing to show (no bound mic AND no charge source) — muted guard tile.
-  // slot-panel normally gates on this same condition.
-  if (!micBound && charge === null) {
-    return (
-      <div
-        className={cn(
-          "relative mx-2 mb-2 flex items-center justify-center gap-2 px-4 py-2",
-          "rounded-2xl overflow-hidden glass-dark",
-          className,
-        )}
-        style={{ ["--rf" as string]: RF_UNIT }}
-      >
-        <RadioIcon className="text-white/25 shrink-0" style={{ width: "calc(var(--rf) * 1.1)", height: "calc(var(--rf) * 1.1)" }} />
-        <span
-          className="tabular-nums text-white/30 truncate select-none"
-          style={{ fontSize: "calc(var(--rf) * 0.95)" }}
-        >
-          awaiting device
-        </span>
-      </div>
-    );
-  }
+  // Nothing to show (no RF, no charge, no IEM) — render nothing rather than an
+  // empty pill. slot-panel gates on the same condition, so this is a safety net.
+  if (!showRf && charge === null && iemCharge === null) return null;
 
   const statusColor =
     device.status === "ok"
@@ -145,11 +135,13 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
       }}
     >
       {/* ── RF + charge segment — the 5-bar RF cluster (when shown) with the thin
-          charge-level bar beneath it. With RF hidden or no mic bound, the charge
-          bar stands on its own. ── */}
+          charge bar(s) beneath it: the primary (mic / charger), then an optional
+          second bar for a bound IEM/PSM pack. With RF hidden or no mic bound, the
+          charge bar(s) stand on their own. ── */}
       <div className="flex flex-col items-center justify-center shrink-0" style={{ gap: "calc(var(--rf) * 0.18)" }}>
         {showRf && <RfBars bars={device.rf === null ? 0 : Math.max(0, Math.min(5, Math.round(device.rf)))} />}
         {(showRf || charge !== null) && <ChargeBar level={charge} />}
+        {hasIem && <ChargeBar level={iemCharge} />}
       </div>
 
       {/* ── Frequency segment — only with the RF bars (it's RF info). ── */}
@@ -168,17 +160,38 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
         </>
       )}
 
-      {/* ── Charge readout — battery icon + % from the configured source. ── */}
-      {charge !== null && (
-        <>
-          <Divider />
-          <div className="flex items-center shrink-0" style={{ gap: "calc(var(--rf) * 0.3)" }}>
-            <BatteryIcon level={charge} />
-            <span className={cn("font-bold tabular-nums leading-none", chargeReadoutColor)} style={valueTextStyle}>
-              {charge}%
-            </span>
-          </div>
-        </>
+      {/* ── Battery readout(s). With an IEM bound, two labeled rows (mic = handheld,
+          headphones = IEM pack); otherwise the single mic/charger battery. ── */}
+      {hasIem ? (
+        (charge !== null || iemCharge !== null) && (
+          <>
+            <Divider />
+            <div className="flex flex-col justify-center shrink-0" style={{ gap: "calc(var(--rf) * 0.18)" }}>
+              {charge !== null && (
+                <div className="flex items-center" style={{ gap: "calc(var(--rf) * 0.25)" }}>
+                  <MicIcon className={cn("shrink-0", readoutColor(charge))} style={{ width: "calc(var(--rf) * 0.95)", height: "calc(var(--rf) * 0.95)" }} />
+                  <span className={cn("font-bold tabular-nums leading-none", readoutColor(charge))} style={valueTextStyle}>{charge}%</span>
+                </div>
+              )}
+              <div className="flex items-center" style={{ gap: "calc(var(--rf) * 0.25)" }}>
+                <HeadphonesIcon className={cn("shrink-0", readoutColor(iemCharge))} style={{ width: "calc(var(--rf) * 0.95)", height: "calc(var(--rf) * 0.95)" }} />
+                <span className={cn("font-bold tabular-nums leading-none", readoutColor(iemCharge))} style={valueTextStyle}>{iemCharge}%</span>
+              </div>
+            </div>
+          </>
+        )
+      ) : (
+        charge !== null && (
+          <>
+            <Divider />
+            <div className="flex items-center shrink-0" style={{ gap: "calc(var(--rf) * 0.3)" }}>
+              <BatteryIcon level={charge} />
+              <span className={cn("font-bold tabular-nums leading-none", chargeReadoutColor)} style={valueTextStyle}>
+                {charge}%
+              </span>
+            </div>
+          </>
+        )
       )}
     </div>
   );

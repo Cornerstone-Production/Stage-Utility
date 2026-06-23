@@ -200,9 +200,14 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             )}
           </div>
 
-          {/* Status strip — when a mic is bound OR a charge source resolves a
-              level (so a charger-sourced charge bar can stand alone). */}
-          {(slot.device.status !== "none" || slot.device.charge !== null) && (
+          {/* Status strip — only when it has something to show: RF will be
+              visible (a mic is bound and RF isn't hidden), OR a charge level
+              resolved (mic battery / charger bay / IEM). A mic bound but offline
+              with RF hidden and no battery has nothing to display, so we skip the
+              strip entirely rather than render an empty pill. */}
+          {((slot.device.status !== "none" && !slot.hideRf) ||
+            slot.device.charge !== null ||
+            slot.device.iemCharge !== null) && (
             <StatusStrip device={slot.device} hideRf={slot.hideRf} />
           )}
         </div>

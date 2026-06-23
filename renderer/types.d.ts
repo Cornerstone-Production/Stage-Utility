@@ -95,6 +95,9 @@ interface SlotDevice {
   audioLevel: number | null;
   /** Resolved charge-bar level (mic battery, a charger bay, or null). */
   charge: number | null;
+  /** Resolved battery for a second device (e.g. IEM/PSM pack), shown as a
+   *  second bar beneath the primary. Null when no IEM is bound. */
+  iemCharge: number | null;
 }
 
 interface Slot {
@@ -109,6 +112,8 @@ interface Slot {
   chargeBayId?: string | null;
   /** Hide RF bars on this slot; show only the charge bar. */
   hideRf?: boolean;
+  /** Optional second device (e.g. IEM/PSM pack) whose battery shows as a second bar. */
+  iemBinding?: { providerId: string; channelId: string } | null;
   displayName?: string | null;
   photoUrl?: string | null;
   device: SlotDevice;
