@@ -492,6 +492,8 @@ export interface UpdateStatus {
   lastCheckedAt: string | null;
   /** "idle" normally; "checking" during a fetch; "updating" while the script runs. */
   phase: "idle" | "checking" | "updating";
+  /** Sub-phase while `phase==="updating"`, for the progress bar. Null otherwise. */
+  step: "pull" | "install" | "build" | "restarting" | null;
   /** Outcome of the most recent apply (read from the updater's result file). */
   lastResult: { ok: boolean; finishedAt: string; log: string | null } | null;
   /** Non-null when the last check failed (e.g. no network). */

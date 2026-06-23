@@ -49,12 +49,35 @@ class Updater {
     changelog: [],
     lastCheckedAt: null,
     phase: "idle",
+    step: null,
     lastResult: null,
     error: null,
   };
 
+  // While an apply runs, poll the progress/result files the detached script
+  // writes so we can broadcast sub-phase progress (the server stays alive through
+  // pull/install/build and is only killed at the very end).
+  private progressTimer: ReturnType<typeof setInterval> | null = null;
+  private applyStartedAt = 0;
+
   private resultFile(): string {
     return path.join(getUserDataPath(), "update-result.json");
+  }
+
+  private progressFile(): string {
+    return path.join(getUserDataPath(), "update-progress.json");
+  }
+
+  /** Read the detached updater's current step (written by scripts/update.*). */
+  private readProgressStep(): UpdateStatus["step"] {
+    try {
+      const r = JSON.parse(fs.readFileSync(this.progressFile(), "utf8")) as { step?: string };
+      const s = r.step;
+      if (s === "pull" || s === "install" || s === "build" || s === "restarting") return s;
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   private async git(args: string[], timeoutMs = 60_000): Promise<string> {
@@ -76,7 +99,12 @@ class Updater {
 
   /** Cached status (no network). Refreshes the local bits (sha, result file). */
   getStatus(): UpdateStatus {
-    return { ...this.status, version: pkgVersion(), lastResult: this.readResult() };
+    return {
+      ...this.status,
+      version: pkgVersion(),
+      step: this.status.phase === "updating" ? this.status.step : null,
+      lastResult: this.readResult(),
+    };
   }
 
   /** Fetch upstream and recompute how far behind we are. Network-touching. */
@@ -167,6 +195,19 @@ class Updater {
     const isWin = process.platform === "win32";
     const script = path.join(REPO_ROOT, "scripts", isWin ? "update.ps1" : "update.sh");
 
+    // Clear stale progress/result so the poller only reacts to this run.
+    this.applyStartedAt = Date.now();
+    try {
+      fs.writeFileSync(this.progressFile(), JSON.stringify({ step: "pull", at: new Date().toISOString() }));
+    } catch {
+      /* best-effort */
+    }
+    try {
+      fs.rmSync(this.resultFile(), { force: true });
+    } catch {
+      /* best-effort */
+    }
+
     const env = {
       ...process.env,
       STAGE_UPDATE_REPO: REPO_ROOT,
@@ -175,6 +216,7 @@ class Updater {
       STAGE_UPDATE_NODE_DIR: path.dirname(process.execPath),
       STAGE_UPDATE_SERVER_PID: String(process.pid),
       STAGE_UPDATE_RESULT: this.resultFile(),
+      STAGE_UPDATE_PROGRESS: this.progressFile(),
     };
 
     console.log(`[updater] applying update on ${branch} via ${script}`);
@@ -189,9 +231,59 @@ class Updater {
       : spawn("bash", [script], { cwd: REPO_ROOT, detached: true, stdio: "ignore", env });
     child.unref();
 
-    this.status = { ...this.status, phase: "updating" };
+    this.status = { ...this.status, phase: "updating", step: "pull" };
+    this.startProgressPolling();
     this.broadcast();
     return this.getStatus();
+  }
+
+  /**
+   * While an apply runs, watch the script's progress/result files (~1s) and
+   * broadcast sub-phase changes:
+   *   - progress file advances pull → install → build → (restarting) → broadcast.
+   *   - a result file newer than applyStartedAt with ok=false means the build
+   *     failed and the server was NOT killed: return to idle + surface the error.
+   *   - ok=true means success is imminent (the script sleeps briefly, then kills
+   *     us); flag "restarting" so the UI shows the final step before the socket
+   *     drops and the service manager relaunches with the new build.
+   */
+  private startProgressPolling(): void {
+    if (this.progressTimer) clearInterval(this.progressTimer);
+    this.progressTimer = setInterval(() => {
+      if (this.status.phase !== "updating") {
+        this.stopProgressPolling();
+        return;
+      }
+      const result = this.readResult();
+      if (result && Date.parse(result.finishedAt || "") >= this.applyStartedAt) {
+        if (result.ok) {
+          if (this.status.step !== "restarting") {
+            this.status = { ...this.status, step: "restarting" };
+            this.broadcast();
+          }
+        } else {
+          // Failed apply — server lives on. Drop back to idle and show why.
+          this.status = { ...this.status, phase: "idle", step: null };
+          this.stopProgressPolling();
+          this.broadcast();
+        }
+        return;
+      }
+      const step = this.readProgressStep();
+      if (step && step !== this.status.step) {
+        this.status = { ...this.status, step };
+        this.broadcast();
+      }
+    }, 1000);
+    // Don't keep the event loop alive solely for this timer.
+    this.progressTimer.unref?.();
+  }
+
+  private stopProgressPolling(): void {
+    if (this.progressTimer) {
+      clearInterval(this.progressTimer);
+      this.progressTimer = null;
+    }
   }
 
   private broadcast(): void {

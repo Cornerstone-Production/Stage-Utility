@@ -21,9 +21,15 @@ REPO="${STAGE_UPDATE_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 [ -n "${STAGE_UPDATE_NODE_DIR:-}" ] && PATH="${STAGE_UPDATE_NODE_DIR}:${PATH}"
 BRANCH="${STAGE_UPDATE_BRANCH:-$(git -C "$REPO" rev-parse --abbrev-ref HEAD)}"
 RESULT="${STAGE_UPDATE_RESULT:-$REPO/update-result.json}"
+PROGRESS="${STAGE_UPDATE_PROGRESS:-$REPO/update-progress.json}"
 
 cd "$REPO" || exit 1
 LOG="$(mktemp)"
+
+# Publish the current step so the (still-running) server can broadcast progress.
+write_progress() {
+  printf '{"step":"%s","at":"%s"}' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$PROGRESS" 2>/dev/null || true
+}
 
 # Write {ok, finishedAt, log} via node (guaranteed present — we're updating a
 # node app and NODE_DIR is on PATH), which handles JSON escaping safely.
@@ -33,8 +39,10 @@ write_result() {
 }
 
 {
+  write_progress pull
   echo "[update] git pull --ff-only origin $BRANCH"
   git pull --ff-only origin "$BRANCH" || { echo "[update] git pull failed (non-fast-forward or offline)"; write_result false; exit 1; }
+  write_progress install
   echo "[update] npm ci --include=dev"
   # --include=dev is REQUIRED: the service runs with NODE_ENV=production (set in
   # the systemd unit), which this detached updater inherits. Under that env npm
@@ -42,10 +50,12 @@ write_result() {
   # in devDependencies, so a plain `npm ci` installs prod-only deps and the next
   # step fails with "vite: not found". Forcing dev deps keeps the build working.
   npm ci --include=dev || { echo "[update] npm ci failed"; write_result false; exit 1; }
+  write_progress build
   echo "[update] npm run build"
   npm run build || { echo "[update] npm run build failed"; write_result false; exit 1; }
 } >>"$LOG" 2>&1
 
+write_progress restarting
 write_result true
 
 # Let the HTTP response flush, then restart by exiting the server.
