@@ -417,7 +417,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
           >
             <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="mic">Mic battery</SelectItem>
+              <SelectItem value="mic">Mic battery (transmitter)</SelectItem>
               <SelectItem value="charger">Charger bay</SelectItem>
               <SelectItem value="off">Off</SelectItem>
             </SelectContent>
@@ -440,6 +440,15 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
             Hide RF
           </label>
         </div>
+      )}
+      {!isEmpty && !isSpacer && (
+        <p className="pl-4 sm:pl-9 text-caption2 text-gray-8">
+          {slot.chargeSource === "off"
+            ? "Charge bar hidden. The pill shows RF only."
+            : slot.chargeSource === "charger"
+              ? "Battery reads from the chosen SBC charger bay. Leave Hide RF off to show RF bars and the charge level together in one pill."
+              : "Battery reads from the bound transmitter (e.g. the Axient handheld). Leave Hide RF off to show RF and battery together in one pill."}
+        </p>
       )}
     </div>
   );

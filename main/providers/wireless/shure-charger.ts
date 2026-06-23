@@ -26,6 +26,10 @@ export class ShureCharger extends ShureBaseProvider {
 
   protected readonly defaultChannels = 8;
   protected readonly defaultDeviceType = "charger" as const;
+  // `GET 0 ALL` dumps every populated bay, so let bays self-discover even if the
+  // connection's "Number of Bays" was set too low (e.g. 4 linked units = bays
+  // 1–8 over one IP). Capped by maxDynamicChannels in the base.
+  protected override allowDynamicChannels = true;
 
   // Re-poll the bays on a timer — chargers change slowly and may not push.
   private pollTimer: ReturnType<typeof setInterval> | null = null;
