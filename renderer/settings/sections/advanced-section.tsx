@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent } from "react";
-import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon } from "lucide-react";
+import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon } from "lucide-react";
 import {
   FieldSet,
   FieldGroup,
@@ -33,14 +33,53 @@ function formatHour(h: number): string {
   return `${h12}:00 ${am ? "AM" : "PM"}`;
 }
 
+// Maps each update sub-phase to a label + a (monotonic, approximate) percentage.
+// npm/git don't report true progress, so these are honest milestones rather than
+// a precise byte count — they always move forward and never imply more than is known.
+const STEP_META: Record<NonNullable<UpdateStatus["step"]>, { label: string; pct: number }> = {
+  pull: { label: "Downloading update…", pct: 20 },
+  install: { label: "Installing dependencies…", pct: 50 },
+  build: { label: "Building the app…", pct: 78 },
+  restarting: { label: "Restarting server…", pct: 94 },
+};
+
+// A thin determinate progress bar for the active update.
+function UpdateProgress({ step }: { step: UpdateStatus["step"] }) {
+  const meta = step ? STEP_META[step] : { label: "Starting…", pct: 8 };
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      <div className="flex items-center justify-between text-caption2 text-gray-11">
+        <span className="flex items-center gap-1.5">
+          <Loader2Icon className="size-3.5 animate-spin text-blue-9" />
+          {meta.label}
+        </span>
+        <span className="tabular-nums text-gray-10">{meta.pct}%</span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-a4">
+        <div
+          className="h-full rounded-full bg-blue-9 transition-[width] duration-700 ease-out"
+          style={{ width: `${meta.pct}%` }}
+        />
+      </div>
+      <p className="text-caption2 text-gray-9">
+        Keep this page open — it will reload automatically when the update finishes.
+      </p>
+    </div>
+  );
+}
+
 function UpdatesPanel({
   updateStatus,
   autoUpdate,
   handlers,
+  justUpdated,
+  onDismissJustUpdated,
 }: {
   updateStatus: SectionProps["updateStatus"];
   autoUpdate: StageState["autoUpdate"];
   handlers: SectionProps["handlers"];
+  justUpdated?: { version: string } | null;
+  onDismissJustUpdated?: () => void;
 }) {
   const s = updateStatus;
   const updating = s?.phase === "updating";
@@ -93,24 +132,56 @@ function UpdatesPanel({
               )}
             </FieldDescription>
 
+            {/* Success banner after an auto-reload completes (set pre-restart). */}
+            {justUpdated ? (
+              <div className="mt-2 flex items-start gap-2 rounded-md border border-green-a5 bg-green-a2 p-2.5 text-caption1 text-green-11">
+                <CheckCircle2Icon className="size-4 shrink-0 mt-0.5 text-green-10" />
+                <div className="flex-1">
+                  <p className="font-medium">Update installed successfully.</p>
+                  <p className="text-caption2 text-green-11/80">Now running {justUpdated.version}.</p>
+                </div>
+                {onDismissJustUpdated ? (
+                  <button
+                    type="button"
+                    onClick={onDismissJustUpdated}
+                    className="shrink-0 rounded p-0.5 text-green-11/70 hover:text-green-11"
+                    aria-label="Dismiss"
+                  >
+                    <XIcon className="size-3.5" />
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {/* Live progress while applying (survives until the page auto-reloads). */}
+            {updating ? <UpdateProgress step={s?.step ?? null} /> : null}
+
             {/* Changelog of pending commits */}
-            {behind > 0 && s?.changelog?.length ? (
-              <ul className="mt-1 flex flex-col gap-0.5 rounded-md border border-gray-a4 bg-gray-a2 p-2 text-caption2 text-gray-11 max-h-40 overflow-y-auto">
-                {s.changelog.map((line, i) => (
-                  <li key={i} className="truncate">• {line}</li>
-                ))}
-              </ul>
+            {!updating && behind > 0 && s?.changelog?.length ? (
+              <div className="mt-2 rounded-md border border-gray-a4 bg-gray-a2">
+                <p className="border-b border-gray-a4 px-2.5 py-1.5 text-caption2 font-medium text-gray-11">
+                  What's new
+                </p>
+                <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto p-2.5 text-caption2 text-gray-11">
+                  {s.changelog.map((line, i) => (
+                    <li key={i} className="flex gap-1.5">
+                      <span className="shrink-0 text-gray-9">•</span>
+                      <span className="min-w-0 break-words">{line}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : null}
 
             {/* Last apply result */}
-            {s?.lastResult && !s.lastResult.ok ? (
+            {!updating && s?.lastResult && !s.lastResult.ok ? (
               <p className="mt-1 flex items-start gap-1.5 text-caption2 text-red-10">
                 <AlertTriangleIcon className="size-3.5 shrink-0 mt-0.5" />
                 Last update failed{s.lastResult.finishedAt ? ` (${new Date(s.lastResult.finishedAt).toLocaleString()})` : ""}.
                 {s.lastResult.log ? ` ${s.lastResult.log.split("\n").filter(Boolean).slice(-1)[0]}` : ""}
               </p>
             ) : null}
-            {s && behind === 0 && !updating && (!s.lastResult || s.lastResult.ok) ? (
+            {!justUpdated && s && behind === 0 && !updating && (!s.lastResult || s.lastResult.ok) ? (
               <p className="mt-1 flex items-center gap-1.5 text-caption2 text-green-10">
                 <CheckCircle2Icon className="size-3.5" /> You're on the latest version.
               </p>
@@ -184,7 +255,16 @@ function UpdatesPanel({
   );
 }
 
-export function AdvancedSection({ stageState, updateStatus, handlers }: Pick<SectionProps, "stageState" | "updateStatus" | "handlers">) {
+export function AdvancedSection({
+  stageState,
+  updateStatus,
+  handlers,
+  justUpdated,
+  onDismissJustUpdated,
+}: Pick<SectionProps, "stageState" | "updateStatus" | "handlers"> & {
+  justUpdated?: { version: string } | null;
+  onDismissJustUpdated?: () => void;
+}) {
   // Local field state so typing doesn't fight the live store; commit on blur.
   const [publicUrl, setPublicUrl] = useState(stageState.publicUrl ?? "");
 
@@ -196,7 +276,13 @@ export function AdvancedSection({ stageState, updateStatus, handlers }: Pick<Sec
 
   return (
     <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
-      <UpdatesPanel updateStatus={updateStatus} autoUpdate={stageState.autoUpdate ?? DEFAULT_AUTO_UPDATE} handlers={handlers} />
+      <UpdatesPanel
+        updateStatus={updateStatus}
+        autoUpdate={stageState.autoUpdate ?? DEFAULT_AUTO_UPDATE}
+        handlers={handlers}
+        justUpdated={justUpdated ?? null}
+        onDismissJustUpdated={onDismissJustUpdated}
+      />
 
       <FieldSet title="Advanced">
         <FieldGroup>

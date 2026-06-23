@@ -14,6 +14,7 @@ $repo   = if ($env:STAGE_UPDATE_REPO)   { $env:STAGE_UPDATE_REPO }   else { Spli
 if ($env:STAGE_UPDATE_NODE_DIR) { $env:PATH = "$($env:STAGE_UPDATE_NODE_DIR);$($env:PATH)" }
 $branch = if ($env:STAGE_UPDATE_BRANCH) { $env:STAGE_UPDATE_BRANCH } else { (git -C $repo rev-parse --abbrev-ref HEAD).Trim() }
 $result = if ($env:STAGE_UPDATE_RESULT) { $env:STAGE_UPDATE_RESULT } else { Join-Path $repo "update-result.json" }
+$progress = if ($env:STAGE_UPDATE_PROGRESS) { $env:STAGE_UPDATE_PROGRESS } else { Join-Path $repo "update-progress.json" }
 
 Set-Location $repo
 $log = New-TemporaryFile
@@ -26,11 +27,24 @@ function Write-Result($ok) {
     ConvertTo-Json -Compress | Set-Content -Encoding utf8 $result
 }
 
+# Publish the current step so the (still-running) server can broadcast progress.
+function Write-Progress-Step($step) {
+  try {
+    @{ step = $step; at = (Get-Date).ToUniversalTime().ToString("o") } |
+      ConvertTo-Json -Compress | Set-Content -Encoding utf8 $progress
+  } catch {}
+}
+
 try {
+  Write-Progress-Step "pull"
   "[update] git pull --ff-only origin $branch" | Out-File -Append $log
   git pull --ff-only origin $branch *>> $log; if ($LASTEXITCODE -ne 0) { throw "git pull failed" }
-  "[update] npm ci"        | Out-File -Append $log
-  npm ci *>> $log;        if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+  Write-Progress-Step "install"
+  # --include=dev: the service runs with NODE_ENV=production, under which npm omits
+  # devDependencies — but the build tooling (vite, etc.) lives there. Force them in.
+  "[update] npm ci --include=dev" | Out-File -Append $log
+  npm ci --include=dev *>> $log;        if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+  Write-Progress-Step "build"
   "[update] npm run build" | Out-File -Append $log
   npm run build *>> $log; if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
 } catch {
@@ -39,6 +53,7 @@ try {
   exit 1
 }
 
+Write-Progress-Step "restarting"
 Write-Result $true
 
 # Let the HTTP response flush, then restart by stopping the server.

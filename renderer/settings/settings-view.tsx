@@ -1,5 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import {
@@ -42,6 +42,12 @@ import { BrandHeader } from "./brand-header";
 import { BrandLogo } from "../components/brand-logo";
 
 // ---- helpers ----------------------------------------------------------------
+
+// sessionStorage handshake spanning the update restart: "pending" is written when
+// the operator presses Update now; the post-restart page reads "done" to show a
+// success banner. sessionStorage (not local) so it's scoped to this tab.
+const UPDATE_PENDING_KEY = "stageUtility.update.pending";
+const UPDATE_DONE_KEY = "stageUtility.update.done";
 
 function ipc<T>(channel: string, ...args: unknown[]): Promise<T> {
   return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
@@ -203,6 +209,50 @@ export function SettingsView() {
     queryKey: ["update:status"],
     queryFn: () => ipc<UpdateStatus>("update:status"),
   });
+
+  // Tracks the running server's code version (from server:hello). Used to detect
+  // that an in-app update finished: the post-restart hello carries a new version.
+  const serverVersionRef = useRef<string | null>(null);
+  // Set once on mount from the handshake the pre-restart page left behind, so the
+  // Updates panel can show a "successfully updated" banner after the auto-reload.
+  const [justUpdated, setJustUpdated] = useState<{ version: string } | null>(() => {
+    try {
+      const raw = sessionStorage.getItem(UPDATE_DONE_KEY);
+      if (!raw) return null;
+      sessionStorage.removeItem(UPDATE_DONE_KEY);
+      return JSON.parse(raw) as { version: string };
+    } catch {
+      return null;
+    }
+  });
+
+  // Detect update completion across the server restart: a server:hello whose
+  // version differs from the one captured when we pressed "Update now" means the
+  // new build is live → record it and reload this page to load the new assets.
+  useEffect(() => {
+    return onNotification("server:hello", (payload: unknown) => {
+      const version = (payload as { version?: string } | null)?.version ?? null;
+      if (!version || version === "unknown") return;
+      if (serverVersionRef.current === null) serverVersionRef.current = version;
+      let pending: { fromVersion: string | null } | null = null;
+      try {
+        const raw = sessionStorage.getItem(UPDATE_PENDING_KEY);
+        pending = raw ? (JSON.parse(raw) as { fromVersion: string | null }) : null;
+      } catch {
+        pending = null;
+      }
+      if (pending && version !== pending.fromVersion) {
+        try {
+          sessionStorage.removeItem(UPDATE_PENDING_KEY);
+          sessionStorage.setItem(UPDATE_DONE_KEY, JSON.stringify({ version }));
+        } catch {
+          /* ignore */
+        }
+        // Brief beat so the "restarting" step paints before the reload.
+        setTimeout(() => window.location.reload(), 900);
+      }
+    });
+  }, []);
 
   // Selected View for the Views tab master-detail (default to the first view).
   const [selectedViewId, setSelectedViewId] = useState<string>("");
@@ -371,7 +421,18 @@ export function SettingsView() {
     try {
       const status = await ipc<UpdateStatus>("update:apply");
       queryClient.setQueryData(["update:status"], status);
-      toast.success("Updating… the displays will reload shortly.");
+      // Remember the version we're updating FROM, so the server:hello after the
+      // restart (carrying a new version) tells us the apply finished — then we
+      // reload this page to pick up the new assets and show a success banner.
+      try {
+        sessionStorage.setItem(
+          UPDATE_PENDING_KEY,
+          JSON.stringify({ fromVersion: serverVersionRef.current, at: Date.now() }),
+        );
+      } catch {
+        /* ignore */
+      }
+      toast.success("Updating… this page will reload automatically when it's done.");
     } catch (err) {
       toast.error(`Failed to start update: ${String(err)}`);
     }
@@ -873,7 +934,7 @@ export function SettingsView() {
       case "branding":
         return <BrandingSection stageState={stageState} handlers={handlers} />;
       case "advanced":
-        return <AdvancedSection stageState={stageState} updateStatus={updateStatus} handlers={handlers} />;
+        return <AdvancedSection stageState={stageState} updateStatus={updateStatus} handlers={handlers} justUpdated={justUpdated} onDismissJustUpdated={() => setJustUpdated(null)} />;
     }
   }
 

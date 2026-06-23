@@ -403,6 +403,7 @@ interface UpdateStatus {
   changelog: string[];
   lastCheckedAt: string | null;
   phase: "idle" | "checking" | "updating";
+  step: "pull" | "install" | "build" | "restarting" | null;
   lastResult: { ok: boolean; finishedAt: string; log: string | null } | null;
   error: string | null;
 }
