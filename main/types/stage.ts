@@ -212,6 +212,9 @@ export interface Output {
   name: string;
   /** The View this screen currently shows, or null when unrouted (renders a placeholder). */
   viewId: string | null;
+  /** When true, this screen renders a full black "blackout" regardless of its
+   *  routed View. Toggling it off restores the View instantly. */
+  blackout?: boolean;
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */
@@ -220,6 +223,7 @@ export interface ResolvedOutput {
   kind: ViewKind;
   ndiSource: string | null;
   viewName: string | null;
+  blackout: boolean;
 }
 
 /**

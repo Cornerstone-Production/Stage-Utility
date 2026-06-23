@@ -310,6 +310,13 @@ export function StageView() {
   // A real output (not a preview) with no View routed to it is unconfigured —
   // show a clear "no view assigned" screen rather than an empty slot grid.
   const resolved = previewViewId ? null : state.resolvedByOutput?.[displayId];
+
+  // Blackout: a true black screen on command (Companion / Displays page), taking
+  // priority over the routed View. Toggling it off restores the View instantly.
+  if (!previewViewId && resolved?.blackout) {
+    return <div className="fixed inset-0 z-50 bg-black" />;
+  }
+
   const isUnrouted = !previewViewId && (!resolved || resolved.viewId === null);
   if (isUnrouted) {
     return (

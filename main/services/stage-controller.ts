@@ -1271,6 +1271,20 @@ export class StageController {
     return this.state;
   }
 
+  /** Toggle (or set) a full black blackout on an output, independent of its View. */
+  async setOutputBlackout(id: string, blackout: boolean): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:setBlackout — output ${id} not found`);
+    }
+    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, blackout } : o));
+    console.log(`[stage-controller] setOutputBlackout output=${id} → ${blackout ? "ON" : "off"}`);
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
   /** Reorder outputs to match the given id order (drag-and-drop). */
   async reorderOutputs(orderedIds: string[]): Promise<StageState> {
     const byId = new Map(this.state.outputs.map((o) => [o.id, o]));
@@ -1579,6 +1593,7 @@ export class StageController {
         kind,
         ndiSource,
         viewName: view?.name ?? null,
+        blackout: output.blackout ?? false,
       };
       slotsByDisplay[output.id] = view && view.kind === "slots" ? (slotsByView[view.id] ?? []) : [];
       displays.push({ id: output.id, name: output.name, kind, ndiSource });

@@ -221,6 +221,8 @@ interface Output {
   id: string;
   name: string;
   viewId: string | null;
+  /** When true, the screen renders a full black blackout regardless of its View. */
+  blackout?: boolean;
 }
 
 /** Per-output render descriptor (output id → routed view's kind/ndi/name). */
@@ -229,6 +231,7 @@ interface ResolvedOutput {
   kind: ViewKind;
   ndiSource: string | null;
   viewName: string | null;
+  blackout: boolean;
 }
 
 /** A live transcript line from ProdCom (SSE "prodcom:transcript"). */

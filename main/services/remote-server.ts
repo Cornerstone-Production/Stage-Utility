@@ -806,7 +806,8 @@ export class RemoteServer {
       return;
     }
 
-    // PATCH /api/outputs/:id — { name? } and/or { viewId? } (viewId: string|null = routing)
+    // PATCH /api/outputs/:id — { name? }, { viewId? } (string|null = routing),
+    // and/or { blackout? } (boolean = full black screen)
     const outputPatchMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
     if (method === "PATCH" && outputPatchMatch) {
       const id = outputPatchMatch[1];
@@ -814,13 +815,15 @@ export class RemoteServer {
       const hasName = typeof body.name === "string";
       const hasViewId = "viewId" in body
         && (typeof body.viewId === "string" || body.viewId === null);
-      if (!hasName && !hasViewId) {
-        error(res, "body.name (string) or body.viewId (string|null) required");
+      const hasBlackout = typeof body.blackout === "boolean";
+      if (!hasName && !hasViewId && !hasBlackout) {
+        error(res, "body.name (string), body.viewId (string|null), or body.blackout (boolean) required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameOutput(id, body.name as string);
       if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null);
+      if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
       json(res, state);
       return;
     }
