@@ -78,7 +78,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
 
   const clock = new Date(now);
   const hh = clock.getHours();
-  const h12 = ((hh + 11) % 12) + 1;
+  const h12 = String(((hh + 11) % 12) + 1).padStart(2, "0");
   const cmm = String(clock.getMinutes()).padStart(2, "0");
   const css = String(clock.getSeconds()).padStart(2, "0");
   const ampm = hh < 12 ? "AM" : "PM";

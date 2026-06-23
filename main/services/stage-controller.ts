@@ -525,8 +525,17 @@ export class StageController {
       return this.state;
     }
 
-    // Plans are ordered by sort_date asc — pick the first (nearest upcoming).
-    const next = plans[0];
+    // Advance RELATIVE to the current plan, not just plans[0]. PCO's filter=future
+    // keeps today's (already-selected) plan in the list, so picking plans[0] left
+    // "Next plan" stuck on the current plan. Find the current plan and step to the
+    // one after it; if it isn't in the upcoming list (it's already past), jump to
+    // the nearest upcoming.
+    const idx = this.state.planId ? plans.findIndex((p) => p.id === this.state.planId) : -1;
+    const next = idx >= 0 ? plans[idx + 1] : plans[0];
+    if (!next) {
+      console.log("[stage-controller] selectNextPlan: already at the last upcoming plan");
+      return this.state;
+    }
     console.log(`[stage-controller] selectNextPlan → ${next.id} (${next.title})`);
     await this.applyPlan(next);
     return this.state;
