@@ -11,7 +11,7 @@ import type { ConfigField, ConnectionState } from "../../types/integrations.js";
 export interface ChannelState {
   channelId: string;
   name: string | null;
-  deviceType: "receiver" | "iem";
+  deviceType: "receiver" | "iem" | "charger";
   online: boolean;
   rfBars: number | null;
   rfLevelDbm: number | null;
@@ -19,6 +19,10 @@ export interface ChannelState {
   charging: boolean | null;
   frequencyLabel: string | null;
   audioLevel: number | null;
+  /** Charger-bay telemetry (null for mics & IEMs). */
+  cycles: number | null;
+  health: number | null;
+  tempC: number | null;
 }
 
 export interface ShureConfig {
@@ -45,7 +49,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
   /** Default channel count if cfg.channels is not supplied. */
   protected abstract readonly defaultChannels: number;
   /** Default device type for channels. Override per-subclass. */
-  protected abstract readonly defaultDeviceType: "receiver" | "iem";
+  protected abstract readonly defaultDeviceType: "receiver" | "iem" | "charger";
 
   private socket: net.Socket | null = null;
   private receiveBuffer = "";
@@ -155,6 +159,9 @@ export abstract class ShureBaseProvider implements DeviceProvider {
         charging: null,
         frequencyLabel: null,
         audioLevel: null,
+        cycles: null,
+        health: null,
+        tempC: null,
       });
     }
   }
@@ -174,6 +181,9 @@ export abstract class ShureBaseProvider implements DeviceProvider {
       charging: state.charging,
       frequencyLabel: state.frequencyLabel,
       audioLevel: state.audioLevel,
+      cycles: state.cycles,
+      health: state.health,
+      tempC: state.tempC,
       updatedAt: new Date().toISOString(),
     };
     this.statusCallback(status);

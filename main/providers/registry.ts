@@ -5,6 +5,7 @@ import type { DeviceProvider } from "../types/devices.js";
 import type { ConfigField, IntegrationDescriptor } from "../types/integrations.js";
 import { NoneProvider } from "./wireless/none-provider.js";
 import { ShureAxient } from "./wireless/shure-axient.js";
+import { ShureCharger } from "./wireless/shure-charger.js";
 import { ShurePsm } from "./wireless/shure-psm.js";
 import { ShureUlxd } from "./wireless/shure-ulxd.js";
 
@@ -33,7 +34,7 @@ function shureFields(channelsPlaceholder: string): ConfigField[] {
 }
 
 // Provider ids that have a real driver implementation.
-const DRIVER_IDS = new Set<string>(["none", "shure-ulxd", "shure-axient", "shure-psm"]);
+const DRIVER_IDS = new Set<string>(["none", "shure-ulxd", "shure-axient", "shure-psm", "shure-charger"]);
 
 // All provider descriptors — shown in the UI dropdown.
 const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
@@ -68,6 +69,15 @@ const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
       configSchema: shureFields("4"),
     },
   ],
+  [
+    "shure-charger",
+    {
+      id: "shure-charger",
+      kind: "wireless",
+      label: "Shure SBC Charger",
+      configSchema: shureFields("2"),
+    },
+  ],
 ]);
 
 export class ProviderRegistry {
@@ -94,6 +104,8 @@ export class ProviderRegistry {
         return new ShureAxient();
       case "shure-psm":
         return new ShurePsm();
+      case "shure-charger":
+        return new ShureCharger();
       default:
         return null;
     }

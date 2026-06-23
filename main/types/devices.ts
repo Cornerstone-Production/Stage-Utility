@@ -26,6 +26,10 @@ export interface DeviceStatus {
   charging: boolean | null;
   frequencyLabel: string | null;
   audioLevel: number | null;
+  /** Charger-bay telemetry (SBC-series chargers). null/absent for mics & IEMs. */
+  cycles: number | null;
+  health: number | null;
+  tempC: number | null;
   updatedAt: string;
 }
 

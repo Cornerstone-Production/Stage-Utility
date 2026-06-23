@@ -255,9 +255,75 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         />
       );
     }
+    case "charger-battery":
+      return <ChargerBattery config={c} all={ctx.state.chargerBays ?? []} H={ctx.H} baseStyle={ts} />;
     default:
       return null;
   }
+}
+
+function batteryColor(pct: number | null): string {
+  if (pct === null) return "rgba(255,255,255,0.4)";
+  if (pct >= 50) return "var(--green-10)";
+  if (pct >= 20) return "var(--yellow-10)";
+  return "var(--red-10)";
+}
+
+// Shure SBC charger bay battery levels. Renders one row per configured bay with
+// only the metrics toggled on; an empty/undocked bay reads "empty".
+function ChargerBattery({
+  config,
+  all,
+  H,
+  baseStyle,
+}: {
+  config: Extract<LayoutObjectConfig, { type: "charger-battery" }>;
+  all: ChargerBayDTO[];
+  H: number;
+  baseStyle: CSSProperties;
+}) {
+  const show = config.show ?? {};
+  const anyShown = show.battery || show.charging || show.cycles || show.health || show.temp;
+  const showBattery = show.battery || !anyShown; // never render a fully-empty row
+  const bays = config.bays ?? [];
+
+  if (bays.length === 0) {
+    return <span style={{ ...baseStyle, opacity: 0.35 }}>Charger bays</span>;
+  }
+
+  return (
+    <div
+      className="flex flex-col justify-center w-full h-full min-w-0"
+      style={{ ...baseStyle, gap: `${0.012 * H}px` }}
+    >
+      {bays.map((b) => {
+        const bay = all.find((x) => x.id === b.id) ?? null;
+        const label = b.label || (bay ? `Charger ${bay.chargerIndex} · Bay ${bay.bay}` : "Bay");
+        return (
+          <div key={b.id} className="flex items-center justify-between gap-[0.5em] w-full min-w-0">
+            <span className="truncate min-w-0 flex-1">{label}</span>
+            <span className="flex items-center gap-[0.6em] shrink-0 tabular-nums">
+              {!bay || !bay.online ? (
+                <span style={{ opacity: 0.35 }}>empty</span>
+              ) : (
+                <>
+                  {showBattery && (
+                    <span style={{ color: batteryColor(bay.battery), fontWeight: 700 }}>
+                      {bay.battery ?? "—"}%
+                    </span>
+                  )}
+                  {show.charging && bay.charging && <span style={{ opacity: 0.85 }}>⚡</span>}
+                  {show.cycles && <span style={{ opacity: 0.7 }}>{bay.cycles ?? "—"} cyc</span>}
+                  {show.health && <span style={{ opacity: 0.7 }}>health {bay.health ?? "—"}%</span>}
+                  {show.temp && <span style={{ opacity: 0.7 }}>{bay.tempC ?? "—"}°C</span>}
+                </>
+              )}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 // ── Plan-attachment object (e.g. the PCO stage plot) ─────────────────────────

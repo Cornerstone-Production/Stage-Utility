@@ -40,6 +40,7 @@ import {
   DialogFooter,
 } from "../../components/ui";
 import { ObjectContent, boxStyle, useLayoutData, loadProcessedAttachment, type LayoutRenderCtx } from "../../main/layout-renderer";
+import { useStageState } from "../../main/use-stage-state";
 
 // ── object metadata ──────────────────────────────────────────────────────────
 
@@ -57,6 +58,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "slots-grid": "Mic slots",
   "transcript-strip": "Captions",
   "live-controls": "PCO Prev/Next",
+  "charger-battery": "Charger battery",
   "brand-logo": "Logo",
   "ndi-video": "NDI video",
   image: "Image",
@@ -67,7 +69,7 @@ const PALETTE: LayoutObjectType[] = [
   "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
   "current-service-item", "next-service-item",
   "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
-  "transcript-strip", "brand-logo", "image", "plan-attachment", "shape",
+  "transcript-strip", "charger-battery", "brand-logo", "image", "plan-attachment", "shape",
 ];
 
 function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
@@ -77,6 +79,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "section-chip": return { type: "section-chip", which: "current" };
     case "slots-grid": return { type: "slots-grid", sourceViewId: null };
     case "transcript-strip": return { type: "transcript-strip", mode: "rolling" };
+    case "charger-battery": return { type: "charger-battery", bays: [], show: { battery: true, charging: true } };
     case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
     case "image": return { type: "image", src: "" };
     case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
@@ -90,6 +93,7 @@ function defaultStyle(type: LayoutObjectType): LayoutStyle {
   if (type === "ndi-video" || type === "slide-thumbnail" || type === "image" || type === "plan-attachment" || type === "brand-logo" || type === "live-controls") return {};
   // Captions read left-aligned and bottom-anchored, like the dedicated display.
   if (type === "transcript-strip") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "bottom" };
+  if (type === "charger-battery") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "middle" };
   return { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 }
 
@@ -894,6 +898,7 @@ function Inspector({
 }) {
   const s = o.style ?? {};
   const c = o.config;
+  const chargerBays = useStageState().state?.chargerBays ?? [];
   const isText = !["shape", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
 
   return (
@@ -958,6 +963,44 @@ function Inspector({
             </SelectContent>
           </Select>
         </Row>
+      )}
+      {c.type === "charger-battery" && (
+        <>
+          <Row label="Battery %"><Switch checked={c.show.battery ?? false} onCheckedChange={(v) => onConfig({ ...c, show: { ...c.show, battery: v } })} /></Row>
+          <Row label="Charging"><Switch checked={c.show.charging ?? false} onCheckedChange={(v) => onConfig({ ...c, show: { ...c.show, charging: v } })} /></Row>
+          <Row label="Cycles"><Switch checked={c.show.cycles ?? false} onCheckedChange={(v) => onConfig({ ...c, show: { ...c.show, cycles: v } })} /></Row>
+          <Row label="Health"><Switch checked={c.show.health ?? false} onCheckedChange={(v) => onConfig({ ...c, show: { ...c.show, health: v } })} /></Row>
+          <Row label="Temp"><Switch checked={c.show.temp ?? false} onCheckedChange={(v) => onConfig({ ...c, show: { ...c.show, temp: v } })} /></Row>
+          <div className="flex flex-col gap-1.5 pt-1">
+            <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Bays</span>
+            {c.bays.map((b, i) => {
+              const bay = chargerBays.find((x) => x.id === b.id);
+              const placeholder = bay ? `Charger ${bay.chargerIndex} · Bay ${bay.bay}` : "Bay";
+              return (
+                <div key={b.id} className="flex items-center gap-1.5">
+                  <Input
+                    value={b.label ?? ""}
+                    placeholder={placeholder}
+                    onChange={(e) => {
+                      const label = e.target.value;
+                      onConfig({ ...c, bays: c.bays.map((x, j) => (j === i ? { ...x, label: label || undefined } : x)) });
+                    }}
+                    className="text-gray-12 flex-1"
+                  />
+                  <Button variant="transparent" size="small" iconOnly onClick={() => onConfig({ ...c, bays: c.bays.filter((_, j) => j !== i) })} aria-label="Remove bay"><Trash2Icon className="size-3.5 text-red-10" /></Button>
+                </div>
+              );
+            })}
+            <Select value="" onValueChange={(id: string) => { if (id) onConfig({ ...c, bays: [...c.bays, { id }] }); }}>
+              <SelectTrigger><SelectValue placeholder={chargerBays.length ? "Add bay…" : "No charger bays detected"} /></SelectTrigger>
+              <SelectContent>
+                {chargerBays.filter((bay) => !c.bays.some((b) => b.id === bay.id)).map((bay) => (
+                  <SelectItem key={bay.id} value={bay.id}>{`Charger ${bay.chargerIndex} · Bay ${bay.bay}${bay.battery != null ? ` (${bay.battery}%)` : ""}`}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </>
       )}
       {c.type === "image" && (
         <Row label="URL"><Input value={c.src} onChange={(e) => onConfig({ type: "image", src: e.target.value })} placeholder="https://… or data:" className="text-gray-12" /></Row>

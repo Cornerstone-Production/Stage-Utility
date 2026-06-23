@@ -155,6 +155,13 @@ export type LayoutObjectConfig =
   | { type: "slots-grid"; sourceViewId?: string | null } // embed a slots-View's grid
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
   | { type: "live-controls" } // PCO Services Live Prev/Next buttons (interactive)
+  // Shure SBC charger bay battery levels. `bays` lists which bays to show (by
+  // ChargerBay id) with an optional custom label; `show` toggles each metric.
+  | {
+      type: "charger-battery";
+      bays: { id: string; label?: string }[];
+      show: { battery?: boolean; charging?: boolean; cycles?: boolean; health?: boolean; temp?: boolean };
+    }
   | { type: "brand-logo"; useEmptySlotLogo?: boolean }
   | { type: "ndi-video" } // background; web shows a placeholder, Apple shows video
   | { type: "image"; src: string }
@@ -419,8 +426,31 @@ export interface StageState {
   publicUrl: string | null;
   /** User-assigned caption colors, keyed by ProdCom channel label. */
   captionChannelColors: Record<string, string>;
+  /** Live battery bays from any Shure SBC charger connections. */
+  chargerBays: ChargerBayDTO[];
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
+}
+
+/** One battery bay of a Shure SBC charger (derived from charger-kind devices). */
+export interface ChargerBayDTO {
+  /** Stable id = the namespaced device channelId (connectionId::bay). */
+  id: string;
+  /** Charger connection id (the part before "::"). */
+  connectionId: string;
+  /** 1-based bay number within its charger. */
+  bay: number;
+  /** 1-based index of this charger among charger connections (for default labels). */
+  chargerIndex: number;
+  /** Device-reported battery/bay name, if any. */
+  name: string | null;
+  /** A battery is docked in the bay. */
+  online: boolean;
+  battery: number | null;
+  charging: boolean | null;
+  cycles: number | null;
+  health: number | null;
+  tempC: number | null;
 }
 
 /** Scheduled auto-update config. When enabled, the server applies an available

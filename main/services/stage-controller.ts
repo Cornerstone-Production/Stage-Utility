@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { AutoUpdateSettings, DisplayInfo, LayoutDTO, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -94,6 +94,7 @@ export class StageController {
     outputs: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", viewId: PRIMARY_DISPLAY_ID }],
     slotsByView: {},
     resolvedByOutput: {},
+    chargerBays: [],
     slots: [],
     slotsByDisplay: {},
     displays: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots", ndiSource: null }],
@@ -1605,9 +1606,36 @@ export class StageController {
       slotsByView,
       resolvedByOutput,
       slotsByDisplay,
+      chargerBays: this.computeChargerBays(),
       displays,
       slots,
     };
+  }
+
+  /** Derive charger battery bays from any charger-kind device statuses. The
+   *  device channelId is namespaced "connectionId::bay"; chargers are indexed
+   *  stably (sorted connectionId) so default bay labels stay consistent. */
+  private computeChargerBays(): ChargerBayDTO[] {
+    const charger = [...this.deviceStatuses.values()].filter((d) => d.deviceType === "charger");
+    const connIds = [...new Set(charger.map((d) => d.channelId.split("::")[0]))].sort();
+    return charger
+      .map((d): ChargerBayDTO => {
+        const [connectionId, bayStr] = d.channelId.split("::");
+        return {
+          id: d.channelId,
+          connectionId: connectionId ?? d.channelId,
+          bay: parseInt(bayStr ?? "0", 10) || 0,
+          chargerIndex: connIds.indexOf(connectionId ?? "") + 1,
+          name: d.name,
+          online: d.online,
+          battery: d.battery,
+          charging: d.charging,
+          cycles: d.cycles ?? null,
+          health: d.health ?? null,
+          tempC: d.tempC ?? null,
+        };
+      })
+      .sort((a, b) => a.chargerIndex - b.chargerIndex || a.bay - b.bay);
   }
 
   private broadcast(): void {
