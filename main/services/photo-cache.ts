@@ -40,17 +40,32 @@ export async function getPhotoPath(photoUrl: string): Promise<string | null> {
       // Not cached yet — fetch.
     }
 
-    const response = await fetch(photoUrl);
-    if (!response.ok) {
-      console.error(`[photo-cache] Failed to fetch ${photoUrl}: ${response.status}`);
-      return null;
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
+    // Fetch with a timeout + one retry: PCO photo URLs occasionally blip, and a
+    // hung connection would otherwise stall the slot. Failures aren't cached, so
+    // the next request (or the client's retry) re-attempts.
+    const buffer = await fetchPhoto(photoUrl);
+    if (!buffer) return null;
     await fs.writeFile(filePath, buffer);
     return filePath;
   } catch (err) {
     console.error("[photo-cache] Error caching photo:", err);
     return null;
   }
+}
+
+async function fetchPhoto(photoUrl: string): Promise<Buffer | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch(photoUrl, { signal: AbortSignal.timeout(8000) });
+      if (!response.ok) {
+        console.error(`[photo-cache] Failed to fetch ${photoUrl}: ${response.status}`);
+        if (response.status >= 400 && response.status < 500) return null; // don't retry client errors
+        continue;
+      }
+      return Buffer.from(await response.arrayBuffer());
+    } catch (err) {
+      console.error(`[photo-cache] fetch attempt ${attempt + 1} failed for ${photoUrl}:`, err instanceof Error ? err.message : err);
+    }
+  }
+  return null;
 }
