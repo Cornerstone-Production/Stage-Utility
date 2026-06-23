@@ -975,7 +975,7 @@ function Inspector({
             <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Bays</span>
             {c.bays.map((b, i) => {
               const bay = chargerBays.find((x) => x.id === b.id);
-              const placeholder = bay ? `Charger ${bay.chargerIndex} · Bay ${bay.bay}` : "Bay";
+              const placeholder = bay ? `${bay.connectionName ?? `Charger ${bay.chargerIndex}`} · Bay ${bay.bay}` : "Bay";
               return (
                 <div key={b.id} className="flex items-center gap-1.5">
                   <Input
@@ -995,7 +995,7 @@ function Inspector({
               <SelectTrigger><SelectValue placeholder={chargerBays.length ? "Add bay…" : "No charger bays detected"} /></SelectTrigger>
               <SelectContent>
                 {chargerBays.filter((bay) => !c.bays.some((b) => b.id === bay.id)).map((bay) => (
-                  <SelectItem key={bay.id} value={bay.id}>{`Charger ${bay.chargerIndex} · Bay ${bay.bay}${bay.battery != null ? ` (${bay.battery}%)` : ""}`}</SelectItem>
+                  <SelectItem key={bay.id} value={bay.id}>{`${bay.connectionName ?? `Charger ${bay.chargerIndex}`} · Bay ${bay.bay}${bay.battery != null ? ` (${bay.battery}%)` : ""}`}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

@@ -465,7 +465,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
                 <SelectItem value="__none__">None</SelectItem>
                 {chargerBays.map((b) => (
                   <SelectItem key={b.id} value={b.id}>
-                    {`Charger ${b.chargerIndex} · Bay ${b.bay}${b.battery != null ? ` (${b.battery}%)` : ""}`}
+                    {`${b.connectionName ?? `Charger ${b.chargerIndex}`} · Bay ${b.bay}${b.battery != null ? ` (${b.battery}%)` : ""}`}
                   </SelectItem>
                 ))}
               </SelectContent>

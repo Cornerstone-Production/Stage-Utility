@@ -378,6 +378,8 @@ interface ChargerBayDTO {
   connectionId: string;
   bay: number;
   chargerIndex: number;
+  /** The charger connection's user-set name (e.g. "SBC-220-03"), for bay labels. */
+  connectionName: string | null;
   name: string | null;
   online: boolean;
   battery: number | null;

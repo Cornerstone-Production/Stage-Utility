@@ -458,6 +458,9 @@ export interface ChargerBayDTO {
   bay: number;
   /** 1-based index of this charger among charger connections (for default labels). */
   chargerIndex: number;
+  /** The charger connection's user-set name (e.g. "SBC-220-03"), for unambiguous
+   *  bay labels that map to the physical unit. Null if not resolvable. */
+  connectionName: string | null;
   /** Device-reported battery/bay name, if any. */
   name: string | null;
   /** A battery is docked in the bay. */

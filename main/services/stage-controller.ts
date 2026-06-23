@@ -117,6 +117,9 @@ export class StageController {
 
   // Live device statuses keyed by channelId.
   private deviceStatuses = new Map<string, DeviceStatus>();
+  // Wireless connection display names keyed by connectionId — used to label
+  // charger bays by the user's connection name instead of an arbitrary index.
+  private connectionNames = new Map<string, string>();
   // Coalesce timer for device-status updates (see applyDeviceStatus).
   private deviceStatusFlushTimer: ReturnType<typeof setTimeout> | null = null;
   // Cached team members for the active plan.
@@ -1441,6 +1444,15 @@ export class StageController {
 
   // ── Device status ──────────────────────────────────────────────────────
 
+  /** Update the connectionId→name map (called when connections change), so
+   *  charger bays can be labeled by the user's connection name. Recomputes so
+   *  the new labels surface immediately. */
+  setConnectionNames(names: Map<string, string>): void {
+    this.connectionNames = names;
+    this.recomputeResolved();
+    this.broadcast();
+  }
+
   applyDeviceStatus(channelId: string, status: DeviceStatus): void {
     // Store immediately so any later read sees the freshest value...
     this.deviceStatuses.set(channelId, status);
@@ -1635,6 +1647,7 @@ export class StageController {
           connectionId: connectionId ?? d.channelId,
           bay: parseInt(bayStr ?? "0", 10) || 0,
           chargerIndex: connIds.indexOf(connectionId ?? "") + 1,
+          connectionName: this.connectionNames.get(connectionId ?? "") ?? null,
           name: d.name,
           online: d.online,
           battery: d.battery,
