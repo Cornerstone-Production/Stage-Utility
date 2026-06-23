@@ -175,6 +175,11 @@ type LayoutObjectConfig =
   | { type: "slots-grid"; sourceViewId?: string | null }
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
   | { type: "live-controls" }
+  | {
+      type: "charger-battery";
+      bays: { id: string; label?: string }[];
+      show: { battery?: boolean; charging?: boolean; cycles?: boolean; health?: boolean; temp?: boolean };
+    }
   | { type: "brand-logo"; useEmptySlotLogo?: boolean }
   | { type: "ndi-video" }
   | { type: "image"; src: string }
@@ -349,8 +354,24 @@ interface StageState {
   publicUrl: string | null;
   /** User-assigned caption colors, keyed by ProdCom channel label. */
   captionChannelColors: Record<string, string>;
+  /** Live battery bays from any Shure SBC charger connections. */
+  chargerBays: ChargerBayDTO[];
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
+}
+
+interface ChargerBayDTO {
+  id: string;
+  connectionId: string;
+  bay: number;
+  chargerIndex: number;
+  name: string | null;
+  online: boolean;
+  battery: number | null;
+  charging: boolean | null;
+  cycles: number | null;
+  health: number | null;
+  tempC: number | null;
 }
 
 interface AutoUpdateSettings {
