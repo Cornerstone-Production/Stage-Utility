@@ -19,11 +19,17 @@ export class ShureCharger extends ShureBaseProvider {
   readonly configSchema: ConfigField[] = [
     { key: "host", label: "Device IP / Hostname", type: "text", placeholder: "192.168.1.110" },
     { key: "port", label: "TCP Port", type: "number", placeholder: "2202" },
-    { key: "channels", label: "Number of Bays", type: "number", placeholder: "2" },
+    // One SBC220 = 2 bays; up to 4 can be linked behind one IP, reporting bays
+    // 1–8. Set this to 2 × (number of linked units).
+    { key: "channels", label: "Number of Bays", type: "number", placeholder: "8" },
   ];
 
-  protected readonly defaultChannels = 2;
+  protected readonly defaultChannels = 8;
   protected readonly defaultDeviceType = "charger" as const;
+  // `GET 0 ALL` dumps every populated bay, so let bays self-discover even if the
+  // connection's "Number of Bays" was set too low (e.g. 4 linked units = bays
+  // 1–8 over one IP). Capped by maxDynamicChannels in the base.
+  protected override allowDynamicChannels = true;
 
   // Re-poll the bays on a timer — chargers change slowly and may not push.
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -54,16 +60,10 @@ export class ShureCharger extends ShureBaseProvider {
   }
 
   private pollAllBays(): void {
-    const count = this.channelStates.size;
-    for (let bay = 1; bay <= count; bay++) {
-      this.send(`GET ${bay} BATT_CHARGE`);
-      this.send(`GET ${bay} BATT_CYCLE_COUNT`);
-      this.send(`GET ${bay} BATT_HEALTH`);
-      this.send(`GET ${bay} BATT_TEMP_C`);
-      this.send(`GET ${bay} CHARGE_STATUS`);
-      this.send(`GET ${bay} BATT_TYPE`);
-      this.send(`GET ${bay} CHAN_NAME`);
-    }
+    // One command dumps every field for all bays (+ device info). Confirmed
+    // against a live SBC220 (FW 1.4.53): per-bay BATT_DETECTED/CHARGE/STATE/
+    // CYCLE/HEALTH/TEMP_F, device-level MODEL/FW_VER/DEVICE_ID.
+    this.send("GET 0 ALL");
   }
 
   protected handleReport(channel: number, token: string, rest: string[]): void {
@@ -76,76 +76,60 @@ export class ShureCharger extends ShureBaseProvider {
     const value = rest.join(" ");
 
     switch (token) {
-      case "CHAN_NAME":
-      case "BATT_NAME": {
-        state.name = stripBraces(value).slice(0, 12) || null;
-        break;
-      }
-
-      // Charge percent. Shure reports 0–100; some firmwares use 0–255 — scale.
-      case "BATT_CHARGE":
-      case "BATT_CHARGE_PERCENT":
-      case "BATT_CHARGE_PERC": {
-        const n = safeInt(value);
-        if (!Number.isNaN(n)) {
-          const pct = n > 100 ? Math.round((n / 255) * 100) : n;
-          state.battery = clamp(pct, 0, 100);
-          state.online = true; // a charge reading means a battery is docked
+      // Occupancy: a battery is docked in the bay. Clears stale readings when removed.
+      case "BATT_DETECTED": {
+        const present = stripBraces(value).toUpperCase() === "YES";
+        state.online = present;
+        if (!present) {
+          state.battery = null;
+          state.charging = null;
+          state.cycles = null;
+          state.health = null;
+          state.tempC = null;
         }
         break;
       }
 
-      case "BATT_CYCLE_COUNT":
+      // Charge percent (0–100, zero-padded e.g. "087").
+      case "BATT_CHARGE": {
+        const n = safeInt(value);
+        if (!Number.isNaN(n)) state.battery = clamp(n, 0, 100);
+        break;
+      }
+
+      // FULL | CHARGING | … — drives the charging indicator.
+      case "BATT_STATE": {
+        const v = stripBraces(value).toUpperCase();
+        state.charging = v === "CHARGING";
+        break;
+      }
+
+      // Charge cycles (zero-padded e.g. "00569").
       case "BATT_CYCLE": {
         const n = safeInt(value);
         state.cycles = Number.isNaN(n) ? null : n;
         break;
       }
 
-      case "BATT_HEALTH":
-      case "BATT_HEALTH_PERCENT": {
+      // State-of-health percent.
+      case "BATT_HEALTH": {
         const n = safeInt(value);
         state.health = Number.isNaN(n) ? null : clamp(n, 0, 100);
         break;
       }
 
-      case "BATT_TEMP_C":
-      case "BATT_TEMP": {
-        const n = safeInt(value);
-        state.tempC = Number.isNaN(n) ? null : n;
-        break;
-      }
+      // Temperature: read from Fahrenheit and convert. The SBC220's BATT_TEMP_C
+      // field is unreliable on tested firmware (reports e.g. 062 while _F says
+      // 111°F ≈ 44°C), so we source from _F.
       case "BATT_TEMP_F": {
         const f = safeInt(value);
         state.tempC = Number.isNaN(f) ? null : Math.round(((f - 32) * 5) / 9);
         break;
       }
 
-      case "CHARGE_STATUS":
-      case "BATT_CHARGE_STATUS": {
-        const v = value.toUpperCase();
-        state.charging = v.includes("CHARGING") && !v.includes("NOT");
-        // An explicit empty/uninserted status marks the bay offline.
-        if (v.includes("EMPTY") || v.includes("UNINSERTED") || v.includes("NONE")) {
-          state.online = false;
-          state.battery = null;
-        }
-        break;
-      }
-
-      case "BATT_TYPE": {
-        const v = stripBraces(value).toUpperCase();
-        if (v === "" || v === "UNKNOWN" || v === "NONE" || v === "EMPTY") {
-          state.online = false;
-          state.battery = null;
-        } else {
-          state.online = true;
-        }
-        break;
-      }
-
       default:
-        console.debug(`[shure:${this.id}] ch${channel} unrecognised field: ${token}`);
+        // Other fields in the GET 0 ALL dump (BATT_BARS, BATT_TEMP_C, capacities,
+        // BATT_MODULE_TYPE, BATT_ERROR, device-level MODEL/FW_VER/…) are ignored.
         break;
     }
 

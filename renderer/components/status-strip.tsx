@@ -3,6 +3,8 @@ import { BatteryFullIcon, BatteryLowIcon, BatteryMediumIcon, RadioIcon } from "l
 
 interface StatusStripProps {
   device: SlotDevice;
+  /** Hide the RF bars (and frequency); show only the charge bar + level. */
+  hideRf?: boolean;
   className?: string;
 }
 
@@ -34,8 +36,10 @@ function chargeColor(pct: number): string {
 function ChargeBar({ level }: { level: number | null }) {
   return (
     <span
-      className="block w-full overflow-hidden rounded-full bg-white/10"
-      style={{ height: "calc(var(--rf) * 0.26)" }}
+      // Fixed width matching the 5-bar RF cluster, so the bar aligns under the
+      // bars and still renders at a sensible size when shown on its own (no RF).
+      className="block overflow-hidden rounded-full bg-white/10"
+      style={{ width: "calc(var(--rf) * 2.9)", height: "calc(var(--rf) * 0.26)" }}
     >
       {level !== null && (
         <span
@@ -78,12 +82,15 @@ function Divider() {
   return <span className="w-px self-stretch bg-white/10 shrink-0" style={{ margin: "0 calc(var(--rf) * 0.2)" }} />;
 }
 
-export function StatusStrip({ device, className }: StatusStripProps) {
-  const hasDevice = device.status !== "none";
+export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
+  const micBound = device.status !== "none";
+  const showRf = micBound && !hideRf;
+  const showFreq = micBound && !hideRf;
+  const charge = device.charge;
 
-  // "awaiting device" — muted glass tile (note: slot-panel only renders this
-  // component when device.status !== "none", so this branch is a safety guard)
-  if (!hasDevice) {
+  // Nothing to show (no bound mic AND no charge source) — muted guard tile.
+  // slot-panel normally gates on this same condition.
+  if (!micBound && charge === null) {
     return (
       <div
         className={cn(
@@ -111,12 +118,14 @@ export function StatusStrip({ device, className }: StatusStripProps) {
         ? "text-yellow-10"
         : "text-red-10";
 
-  const batteryColor =
-    device.battery === null
+  // Readout follows the charge SOURCE (mic battery or charger bay), so the number
+  // matches the bar.
+  const chargeReadoutColor =
+    charge === null
       ? "text-white/30"
-      : device.battery >= 60
+      : charge >= 60
         ? "text-green-10"
-        : device.battery >= 25
+        : charge >= 25
           ? "text-yellow-10"
           : "text-red-10";
 
@@ -135,45 +144,42 @@ export function StatusStrip({ device, className }: StatusStripProps) {
         padding: "calc(var(--rf) * 0.55) calc(var(--rf) * 0.6)",
       }}
     >
-      {/* ── RF segment — the 5-bar cluster with a thin charge-level bar tucked
-          directly beneath it (color-coded to the mic's battery). Always the same
-          shape so connected/offline pills render at identical size. ── */}
+      {/* ── RF + charge segment — the 5-bar RF cluster (when shown) with the thin
+          charge-level bar beneath it. With RF hidden or no mic bound, the charge
+          bar stands on its own. ── */}
       <div className="flex flex-col items-center justify-center shrink-0" style={{ gap: "calc(var(--rf) * 0.18)" }}>
-        <RfBars bars={device.rf === null ? 0 : Math.max(0, Math.min(5, Math.round(device.rf)))} />
-        <ChargeBar level={device.battery} />
+        {showRf && <RfBars bars={device.rf === null ? 0 : Math.max(0, Math.min(5, Math.round(device.rf)))} />}
+        {(showRf || charge !== null) && <ChargeBar level={charge} />}
       </div>
 
-      <Divider />
+      {/* ── Frequency segment — only with the RF bars (it's RF info). ── */}
+      {showFreq && (
+        <>
+          <Divider />
+          <div className="flex items-center flex-1 min-w-0">
+            {device.freq !== null ? (
+              <span className={cn("font-bold tabular-nums truncate leading-none", statusColor)} style={valueTextStyle}>
+                {device.freq}
+              </span>
+            ) : (
+              <span className="font-bold text-white/25 leading-none" style={valueTextStyle}>—</span>
+            )}
+          </div>
+        </>
+      )}
 
-      {/* ── Frequency segment ── */}
-      <div className="flex items-center flex-1 min-w-0">
-        {device.freq !== null ? (
-          <span
-            className={cn("font-bold tabular-nums truncate leading-none", statusColor)}
-            style={valueTextStyle}
-          >
-            {device.freq}
-          </span>
-        ) : (
-          <span className="font-bold text-white/25 leading-none" style={valueTextStyle}>—</span>
-        )}
-      </div>
-
-      <Divider />
-
-      {/* ── Battery segment ── */}
-      <div className="flex items-center shrink-0" style={{ gap: "calc(var(--rf) * 0.3)" }}>
-        {device.battery !== null ? (
-          <>
-            <BatteryIcon level={device.battery} />
-            <span className={cn("font-bold tabular-nums leading-none", batteryColor)} style={valueTextStyle}>
-              {device.battery}%
+      {/* ── Charge readout — battery icon + % from the configured source. ── */}
+      {charge !== null && (
+        <>
+          <Divider />
+          <div className="flex items-center shrink-0" style={{ gap: "calc(var(--rf) * 0.3)" }}>
+            <BatteryIcon level={charge} />
+            <span className={cn("font-bold tabular-nums leading-none", chargeReadoutColor)} style={valueTextStyle}>
+              {charge}%
             </span>
-          </>
-        ) : (
-          <span className="font-bold text-white/25 leading-none" style={valueTextStyle}>—</span>
-        )}
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -88,7 +88,7 @@ function clockText(now: number, showSeconds: boolean, format: "12h" | "24h", sho
   if (format === "12h") {
     const ampm = h < 12 ? "AM" : "PM";
     h = ((h + 11) % 12) + 1;
-    return `${h}:${m}${showSeconds ? `:${s}` : ""}${showMeridiem ? ` ${ampm}` : ""}`;
+    return `${pad(h)}:${m}${showSeconds ? `:${s}` : ""}${showMeridiem ? ` ${ampm}` : ""}`;
   }
   return `${pad(h)}:${m}${showSeconds ? `:${s}` : ""}`;
 }

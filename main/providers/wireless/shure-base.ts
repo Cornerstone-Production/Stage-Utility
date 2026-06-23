@@ -144,26 +144,46 @@ export abstract class ShureBaseProvider implements DeviceProvider {
     }
   }
 
+  /** When true, REP/SAMPLE frames for a channel beyond the configured count
+   *  auto-create that channel (capped at maxDynamicChannels). Chargers enable
+   *  this: `GET 0 ALL` dumps every populated bay, so the bay count self-discovers
+   *  regardless of the connection's "Number of Bays" setting. */
+  protected allowDynamicChannels = false;
+  protected readonly maxDynamicChannels = 64;
+
+  private buildDefaultChannelState(n: number): ChannelState {
+    return {
+      channelId: String(n),
+      name: null,
+      deviceType: this.defaultDeviceType,
+      online: false,
+      rfBars: null,
+      rfLevelDbm: null,
+      battery: null,
+      charging: null,
+      frequencyLabel: null,
+      audioLevel: null,
+      cycles: null,
+      health: null,
+      tempC: null,
+    };
+  }
+
   /** Initialise (or reset) channel states to their offline defaults. */
   protected initChannelStates(count: number): void {
     this.channelStates.clear();
     for (let n = 1; n <= count; n++) {
-      this.channelStates.set(n, {
-        channelId: String(n),
-        name: null,
-        deviceType: this.defaultDeviceType,
-        online: false,
-        rfBars: null,
-        rfLevelDbm: null,
-        battery: null,
-        charging: null,
-        frequencyLabel: null,
-        audioLevel: null,
-        cycles: null,
-        health: null,
-        tempC: null,
-      });
+      this.channelStates.set(n, this.buildDefaultChannelState(n));
     }
+  }
+
+  /** Return true if channel `ch` exists, creating it on demand when dynamic
+   *  channels are enabled and `ch` is within the sane cap. */
+  protected ensureChannel(ch: number): boolean {
+    if (this.channelStates.has(ch)) return true;
+    if (!this.allowDynamicChannels || ch < 1 || ch > this.maxDynamicChannels) return false;
+    this.channelStates.set(ch, this.buildDefaultChannelState(ch));
+    return true;
   }
 
   /** Emit a DeviceStatus for the given channel. */
@@ -315,7 +335,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
         console.debug(`[shure:${this.id}] SAMPLE — unrecognised channel token: ${tokens[1]}`);
         return;
       }
-      if (!this.channelStates.has(ch)) {
+      if (!this.ensureChannel(ch)) {
         console.debug(`[shure:${this.id}] SAMPLE ch ${ch} outside configured range`);
         return;
       }
@@ -333,7 +353,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
       const chNum = parseInt(secondToken, 10);
       if (!Number.isNaN(chNum)) {
         // Channel-level: REP {ch} {FIELD} {value...}
-        if (!this.channelStates.has(chNum)) {
+        if (!this.ensureChannel(chNum)) {
           console.debug(`[shure:${this.id}] REP ch ${chNum} outside configured range`);
           return;
         }

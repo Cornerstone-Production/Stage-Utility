@@ -177,8 +177,11 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             )}
           </div>
 
-          {/* Status strip — only when a device is bound */}
-          {slot.device.status !== "none" && <StatusStrip device={slot.device} />}
+          {/* Status strip — when a mic is bound OR a charge source resolves a
+              level (so a charger-sourced charge bar can stand alone). */}
+          {(slot.device.status !== "none" || slot.device.charge !== null) && (
+            <StatusStrip device={slot.device} hideRf={slot.hideRf} />
+          )}
         </div>
       </div>
     </div>

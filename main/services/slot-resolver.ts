@@ -10,11 +10,12 @@ const EMPTY_DEVICE: SlotDevice = {
   battery: null,
   freq: null,
   audioLevel: null,
+  charge: null,
 };
 
 function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
   if (!ds.online) {
-    return { status: "error", rf: null, battery: null, freq: ds.frequencyLabel, audioLevel: null };
+    return { status: "error", rf: null, battery: null, freq: ds.frequencyLabel, audioLevel: null, charge: null };
   }
   let status: SlotDevice["status"] = "ok";
   if (ds.rfBars !== null && ds.rfBars <= 1) status = "warn";
@@ -26,7 +27,26 @@ function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
     battery: ds.battery,
     freq: ds.frequencyLabel,
     audioLevel: ds.audioLevel,
+    charge: ds.battery,
   };
+}
+
+// Resolve the charge-bar level for a slot from its configured source. Defaults
+// to the bound mic's battery (current behavior); "charger" reads a chosen SBC
+// bay (independent of any bound mic); "off" hides the charge bar.
+function resolveCharge(
+  slot: Slot,
+  device: SlotDevice,
+  deviceStatuses: Map<string, DeviceStatus>,
+): number | null {
+  const src = slot.chargeSource ?? "mic";
+  if (src === "off") return null;
+  if (src === "charger") {
+    if (!slot.chargeBayId) return null;
+    const bay = deviceStatuses.get(slot.chargeBayId);
+    return bay && bay.online ? bay.battery : null;
+  }
+  return device.battery; // "mic"
 }
 
 // Normalize a PCO team-position name so sub-variants group with their base:
@@ -96,6 +116,7 @@ export function resolveSlots(
         const ds = deviceStatuses.get(slot.deviceBinding.channelId);
         if (ds) device = deviceStatusToSlotDevice(ds);
       }
+      device = { ...device, charge: resolveCharge(slot, device, deviceStatuses) };
       return { ...slot, device };
     }
 
@@ -106,6 +127,7 @@ export function resolveSlots(
       const ds = deviceStatuses.get(slot.deviceBinding.channelId);
       if (ds) device = deviceStatusToSlotDevice(ds);
     }
+    device = { ...device, charge: resolveCharge(slot, device, deviceStatuses) };
 
     return {
       ...slot,

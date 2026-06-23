@@ -31,6 +31,7 @@ import {
 } from "../../components/ui";
 import type { SectionHandlers, WirelessChannel } from "../types";
 import { PositionPicker } from "./position-picker";
+import { useStageState } from "../../main/use-stage-state";
 
 // ---- slot row (sortable) ----------------------------------------------------
 
@@ -54,6 +55,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
   const isStatic = slot.link.kind === "static";
   const isEmpty = slot.link.kind === "empty";
   const isSpacer = slot.link.kind === "spacer";
+  const chargerBays = useStageState().state?.chargerBays ?? [];
 
   function setChannel(channel: string) {
     onChange({ ...slot, channel });
@@ -396,6 +398,57 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
             </SelectContent>
           </Select>
         </div>
+      )}
+
+      {/* Charge bar source (not for spacer/empty): the bound mic's battery, a
+          specific SBC charger bay, or off — plus a hide-RF (charge-only) toggle. */}
+      {!isEmpty && !isSpacer && (
+        <div className="flex flex-col items-stretch gap-1.5 pl-4 sm:pl-9 sm:flex-row sm:items-center sm:gap-2">
+          <span className="text-caption1 text-gray-9 shrink-0">Charge bar:</span>
+          <Select
+            value={slot.chargeSource ?? "mic"}
+            onValueChange={(v: string) =>
+              onChange({
+                ...slot,
+                chargeSource: v as "mic" | "charger" | "off",
+                chargeBayId: v === "charger" ? (slot.chargeBayId ?? null) : null,
+              })
+            }
+          >
+            <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="mic">Mic battery (transmitter)</SelectItem>
+              <SelectItem value="charger">Charger bay</SelectItem>
+              <SelectItem value="off">Off</SelectItem>
+            </SelectContent>
+          </Select>
+          {slot.chargeSource === "charger" && (
+            <Select value={slot.chargeBayId ?? "__none__"} onValueChange={(v: string) => onChange({ ...slot, chargeBayId: v === "__none__" ? null : v })}>
+              <SelectTrigger className="w-full sm:w-48"><SelectValue placeholder="Pick a bay" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">None</SelectItem>
+                {chargerBays.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {`Charger ${b.chargerIndex} · Bay ${b.bay}${b.battery != null ? ` (${b.battery}%)` : ""}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <label className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0">
+            <Switch checked={slot.hideRf ?? false} onCheckedChange={(v: boolean) => onChange({ ...slot, hideRf: v })} />
+            Hide RF
+          </label>
+        </div>
+      )}
+      {!isEmpty && !isSpacer && (
+        <p className="pl-4 sm:pl-9 text-caption2 text-gray-8">
+          {slot.chargeSource === "off"
+            ? "Charge bar hidden. The pill shows RF only."
+            : slot.chargeSource === "charger"
+              ? "Battery reads from the chosen SBC charger bay. Leave Hide RF off to show RF bars and the charge level together in one pill."
+              : "Battery reads from the bound transmitter (e.g. the Axient handheld). Leave Hide RF off to show RF and battery together in one pill."}
+        </p>
       )}
     </div>
   );
