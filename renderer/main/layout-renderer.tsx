@@ -7,7 +7,7 @@ import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
 import { LiveControls } from "./live-controls";
-import { Loader2Icon } from "lucide-react";
+import { Loader2Icon, ZapIcon } from "lucide-react";
 
 // Render context shared by every object renderer.
 export interface LayoutRenderCtx {
@@ -312,7 +312,9 @@ function ChargerBattery({
                       {bay.battery ?? "—"}%
                     </span>
                   )}
-                  {show.charging && bay.charging && <span style={{ opacity: 0.85 }}>⚡</span>}
+                  {show.charging && bay.charging && (
+                    <ZapIcon style={{ width: "0.85em", height: "0.85em" }} className="inline-block shrink-0 text-green-10" aria-label="charging" />
+                  )}
                   {show.cycles && <span style={{ opacity: 0.7 }}>{bay.cycles ?? "—"} cyc</span>}
                   {show.health && <span style={{ opacity: 0.7 }}>health {bay.health ?? "—"}%</span>}
                   {show.temp && <span style={{ opacity: 0.7 }}>{bay.tempC ?? "—"}°C</span>}
