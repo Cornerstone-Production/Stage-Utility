@@ -121,12 +121,17 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
 
   const valueTextStyle = { fontSize: "calc(var(--rf) * 1.05)" };
 
+  // Charge-only pill (no RF bars, no frequency — e.g. an instrumentalist on a
+  // charger bay): center the bar + readout instead of left-aligning them.
+  const chargeOnly = !showRf && !showFreq;
+
   return (
     <div
       className={cn(
         // Solid pill inset from the card edge. It lives inside the opaque info
         // band now, so no heavy backdrop blur is needed (cheaper to render).
         "relative mx-2 mb-2 flex items-center rounded-2xl overflow-hidden glass-dark",
+        chargeOnly && "justify-center",
         className,
       )}
       style={{
