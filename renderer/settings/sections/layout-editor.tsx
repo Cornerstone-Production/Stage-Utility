@@ -252,7 +252,18 @@ function EditorCanvas({
       {scale > 0 && (
         <div
           className="relative overflow-hidden rounded-xl border border-gray-a4"
-          style={{ width: boxW, height: boxH, background: canvas.background ?? "#000", ...gridBg }}
+          style={{
+            width: boxW,
+            height: boxH,
+            // Mirror the kiosk: default/legacy backgrounds show the shared kiosk
+            // surface so the editor preview matches every other view.
+            background:
+              canvas.background == null ||
+              ["#000", "#000000", "#080810", "#0a0a0a"].includes(canvas.background)
+                ? "var(--kiosk-bg)"
+                : canvas.background,
+            ...gridBg,
+          }}
           onPointerDown={interactive ? () => onSelect(null) : undefined}
         >
           {/* Scaled content layer (visual only) */}
