@@ -2,14 +2,80 @@ import { useStageState } from "../main/use-stage-state";
 import { Button, toast } from "./ui";
 import { CopyIcon } from "lucide-react";
 
+// Copy that also works in a non-secure context (prod is served over plain HTTP,
+// where navigator.clipboard is undefined). Falls back to a hidden textarea +
+// execCommand("copy").
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (window.isSecureContext && navigator.clipboard) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fall through to the legacy path
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function CopyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-16 shrink-0 text-caption2 text-gray-9">{label}</span>
+      <code className="flex-1 min-w-0 truncate rounded bg-gray-a3 px-2 py-1 text-caption1 text-gray-12">
+        {value}
+      </code>
+      <Button
+        variant="transparent"
+        size="small"
+        iconOnly
+        onClick={async () => {
+          const ok = await copyText(value);
+          if (ok) toast.success(`${label} copied`);
+          else toast.error(`Couldn't copy — select and copy manually`);
+        }}
+        aria-label={`Copy ${label}`}
+        title={`Copy ${label}`}
+      >
+        <CopyIcon className="size-3.5 text-gray-9" />
+      </Button>
+    </div>
+  );
+}
+
 // Informational panel shown under the "Bitfocus Companion" integration card.
 // There is nothing to configure here: the Companion module connects TO this app's
-// HTTP/SSE API. So this just shows the URL operators point Companion at, and a
-// live count of connected Companion clients (pushed from the server as marked SSE
-// streams connect/close — see remote-server.ts + integration-manager.ts).
+// HTTP/SSE API. Companion can't resolve DNS and takes host + port as separate
+// fields, so we show the raw LAN IP and port split out (from state.lanUrl, not the
+// DNS publicUrl), plus a live connected-client count.
 export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
   const { state: stage } = useStageState();
-  const url = stage?.remoteUrl ?? null;
+  const lanUrl = stage?.lanUrl ?? null;
+
+  let host: string | null = null;
+  let port: string | null = null;
+  if (lanUrl) {
+    try {
+      const u = new URL(lanUrl);
+      host = u.hostname;
+      port = u.port || "8788";
+    } catch {
+      host = null;
+    }
+  }
+
   const connectedCount =
     state.connection === "connected" && state.message ? state.message : null;
 
@@ -17,35 +83,18 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
     <div className="mt-1 flex flex-col gap-2">
       <p className="text-caption1 text-gray-11">
         Add a <span className="text-gray-12 font-medium">Cornerstone Stage Utility</span>{" "}
-        connection in Bitfocus Companion and point it at this server. No password — it works
-        on your local network.
+        connection in Bitfocus Companion and enter this server&apos;s IP and port below. No
+        password — it works on your local network.
       </p>
 
-      <div className="flex items-center gap-2">
-        <code className="flex-1 min-w-0 truncate rounded bg-gray-a3 px-2 py-1 text-caption1 text-gray-12">
-          {url ?? "LAN address unavailable"}
-        </code>
-        <Button
-          variant="transparent"
-          size="small"
-          iconOnly
-          disabled={!url}
-          onClick={() =>
-            url &&
-            navigator.clipboard
-              .writeText(url)
-              .then(() => toast.success("URL copied"))
-              .catch(() => toast.error("Couldn't copy URL"))
-          }
-          aria-label="Copy connect URL"
-          title="Copy URL"
-        >
-          <CopyIcon className="size-3.5 text-gray-9" />
-        </Button>
-      </div>
-      <p className="text-caption2 text-gray-9">
-        In Companion, use the host/IP and port from this URL (default port 8788).
-      </p>
+      {host ? (
+        <>
+          <CopyField label="IP / Host" value={host} />
+          <CopyField label="Port" value={port ?? "8788"} />
+        </>
+      ) : (
+        <p className="text-caption1 text-gray-9">LAN address unavailable.</p>
+      )}
 
       <p className="text-caption1 text-gray-11">
         {connectedCount ?? "No Companion clients connected yet."}

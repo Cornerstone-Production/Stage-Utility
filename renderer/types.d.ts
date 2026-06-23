@@ -322,6 +322,9 @@ interface StageState {
   pcoConfigured: boolean;
   lastRefreshedAt: string | null;
   remoteUrl: string | null;
+  /** Raw LAN IP URL (http://<ip>:<port>) for the Companion panel; Companion can't
+   *  resolve DNS, so this is shown regardless of publicUrl. */
+  lanUrl: string | null;
   showQr: boolean;
   /** Allowlist of service type ids that Auto plan-mode follows and manual picker shows.
    *  Empty array means all types are allowed. */

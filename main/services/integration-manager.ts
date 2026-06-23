@@ -358,7 +358,8 @@ class IntegrationManager {
 
       if (id === "companion") {
         const n = this.companionClients;
-        const url = stageController.getState().remoteUrl;
+        // Companion can't resolve DNS — report the raw LAN IP URL.
+        const url = stageController.getState().lanUrl ?? stageController.getState().remoteUrl;
         const msg =
           n > 0
             ? `${n} Companion client(s) connected`

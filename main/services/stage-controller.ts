@@ -100,6 +100,7 @@ export class StageController {
     pcoConfigured: false,
     lastRefreshedAt: null,
     remoteUrl: null,
+    lanUrl: null,
     showQr: true,
     allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
     appName: "Stage Utility",
@@ -272,7 +273,10 @@ export class StageController {
   }
 
   private applyRemoteUrl(): void {
-    this.state = { ...this.state, remoteUrl: this.publicUrl || this.lanUrl };
+    // `remoteUrl` prefers the public DNS URL (for the connect QR / display links).
+    // `lanUrl` is always the raw LAN IP address — Bitfocus Companion can't resolve
+    // DNS, so its panel uses this regardless of any configured public URL.
+    this.state = { ...this.state, remoteUrl: this.publicUrl || this.lanUrl, lanUrl: this.lanUrl };
   }
 
   // ── Public state ──────────────────────────────────────────────────────
