@@ -55,6 +55,12 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
   const isStatic = slot.link.kind === "static";
   const isEmpty = slot.link.kind === "empty";
   const isSpacer = slot.link.kind === "spacer";
+  // IEM packs are a vocalist thing — only offer the second-bar picker on slots
+  // bound to a Vocals position (matches the resolver's vocal gate).
+  const isVocalSlot =
+    slot.link.kind === "pco" &&
+    slot.link.matchBy === "position" &&
+    slot.link.teamPositionName.replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase().includes("vocal");
   const chargerBays = useStageState().state?.chargerBays ?? [];
 
   function setChannel(channel: string) {
@@ -100,6 +106,14 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
       onChange({ ...slot, deviceBinding: null });
     } else {
       onChange({ ...slot, deviceBinding: { providerId: "wireless", channelId } });
+    }
+  }
+
+  function setIemBinding(channelId: string) {
+    if (!channelId || channelId === "__none__") {
+      onChange({ ...slot, iemBinding: null });
+    } else {
+      onChange({ ...slot, iemBinding: { providerId: "wireless", channelId } });
     }
   }
 
@@ -397,6 +411,28 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
               ))}
             </SelectContent>
           </Select>
+        </div>
+      )}
+
+      {/* Optional second device (IEM/PSM pack) — adds a second battery bar beneath
+          the primary. Vocalists only, since they're the ones on a handheld + IEM. */}
+      {isVocalSlot && wirelessChannels.length > 0 && (
+        <div className="flex flex-col items-stretch gap-1.5 pl-4 sm:pl-9 sm:flex-row sm:items-center sm:gap-2">
+          <span className="text-caption1 text-gray-9 shrink-0">IEM pack:</span>
+          <Select value={slot.iemBinding?.channelId ?? "__none__"} onValueChange={setIemBinding}>
+            <SelectTrigger className="w-full sm:w-40">
+              <SelectValue placeholder="None" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">None</SelectItem>
+              {wirelessChannels.map((ch) => (
+                <SelectItem key={ch.id} value={ch.id}>
+                  {ch.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-caption2 text-gray-8">Adds a second battery bar (headphones icon) for the pack.</span>
         </div>
       )}
 

@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { UserRoundIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { StatusStrip } from "./status-strip";
@@ -26,12 +27,33 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
     null;
 
   const hasPhoto = !isStatic && !isEmpty && !!slot.photoUrl;
-  const photoSrc = hasPhoto
-    ? `/photos?u=${encodeURIComponent(slot.photoUrl!)}`
-    : null;
 
-  // No-photo avatar: PCO/position slots matched to a person but with no photo.
-  const showAvatar = !isStatic && !isEmpty && !hasPhoto && !!displayName;
+  // Photo loads can fail transiently (the /photos proxy 404s when PCO is briefly
+  // unreachable; it self-heals on the next request since failures aren't cached).
+  // Retry once with a cache-busting query before falling back to the avatar, so a
+  // single blip never leaves a permanently blank slot.
+  const [imgAttempt, setImgAttempt] = useState(0);
+  const [imgFailed, setImgFailed] = useState(false);
+  // Reset retry/fail state whenever the underlying photo URL changes.
+  useEffect(() => {
+    setImgAttempt(0);
+    setImgFailed(false);
+  }, [slot.photoUrl]);
+
+  const photoSrc =
+    hasPhoto && !imgFailed
+      ? `/photos?u=${encodeURIComponent(slot.photoUrl!)}${imgAttempt > 0 ? `&r=${imgAttempt}` : ""}`
+      : null;
+
+  function handleImgError() {
+    // First failure: retry once (forces the proxy to re-fetch). Second: give up.
+    if (imgAttempt < 1) setImgAttempt((n) => n + 1);
+    else setImgFailed(true);
+  }
+
+  // No-photo avatar: PCO/position slots matched to a person with no photo, OR a
+  // slot whose photo failed to load after a retry (graceful fallback, not blank).
+  const showAvatar = !isStatic && !isEmpty && !!displayName && (!hasPhoto || imgFailed);
 
   // A PCO slot that resolved to nobody (no person scheduled, or no matching
   // note) shows the same blank/logo view as a configured empty slot.
@@ -93,6 +115,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
               alt={displayName ?? undefined}
               className="absolute inset-0 w-full h-full object-cover object-top"
               draggable={false}
+              onError={handleImgError}
             />
           ) : (
             <div
@@ -177,9 +200,14 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             )}
           </div>
 
-          {/* Status strip — when a mic is bound OR a charge source resolves a
-              level (so a charger-sourced charge bar can stand alone). */}
-          {(slot.device.status !== "none" || slot.device.charge !== null) && (
+          {/* Status strip — only when it has something to show: RF will be
+              visible (a mic is bound and RF isn't hidden), OR a charge level
+              resolved (mic battery / charger bay / IEM). A mic bound but offline
+              with RF hidden and no battery has nothing to display, so we skip the
+              strip entirely rather than render an empty pill. */}
+          {((slot.device.status !== "none" && !slot.hideRf) ||
+            slot.device.charge !== null ||
+            slot.device.iemCharge !== null) && (
             <StatusStrip device={slot.device} hideRf={slot.hideRf} />
           )}
         </div>

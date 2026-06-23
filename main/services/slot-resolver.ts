@@ -11,11 +11,12 @@ const EMPTY_DEVICE: SlotDevice = {
   freq: null,
   audioLevel: null,
   charge: null,
+  iemCharge: null,
 };
 
 function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
   if (!ds.online) {
-    return { status: "error", rf: null, battery: null, freq: ds.frequencyLabel, audioLevel: null, charge: null };
+    return { status: "error", rf: null, battery: null, freq: ds.frequencyLabel, audioLevel: null, charge: null, iemCharge: null };
   }
   let status: SlotDevice["status"] = "ok";
   if (ds.rfBars !== null && ds.rfBars <= 1) status = "warn";
@@ -28,7 +29,24 @@ function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
     freq: ds.frequencyLabel,
     audioLevel: ds.audioLevel,
     charge: ds.battery,
+    iemCharge: null,
   };
+}
+
+// Resolve the IEM/PSM pack battery for a slot's optional second device binding.
+// IEM packs are a vocalist thing, so this only resolves for vocal slots; other
+// roles never get a second bar even if an iemBinding lingers. Independent of the
+// primary mic; only shows while that device is online.
+function resolveIem(slot: Slot, deviceStatuses: Map<string, DeviceStatus>, isVocal: boolean): number | null {
+  if (!isVocal || !slot.iemBinding) return null;
+  const ds = deviceStatuses.get(slot.iemBinding.channelId);
+  return ds && ds.online ? ds.battery : null;
+}
+
+// A slot counts as a vocalist when its (configured or matched) position is a
+// "Vocals" role — "Vocals", "Vocals (BGVs)", "Lead Vocal", etc.
+function isVocalPosition(name: string | null | undefined): boolean {
+  return normalizePosition(name).includes("vocal");
 }
 
 // Resolve the charge-bar level for a slot from its configured source. Defaults
@@ -116,7 +134,7 @@ export function resolveSlots(
         const ds = deviceStatuses.get(slot.deviceBinding.channelId);
         if (ds) device = deviceStatusToSlotDevice(ds);
       }
-      device = { ...device, charge: resolveCharge(slot, device, deviceStatuses) };
+      device = { ...device, charge: resolveCharge(slot, device, deviceStatuses), iemCharge: resolveIem(slot, deviceStatuses, false) };
       return { ...slot, device };
     }
 
@@ -127,7 +145,14 @@ export function resolveSlots(
       const ds = deviceStatuses.get(slot.deviceBinding.channelId);
       if (ds) device = deviceStatusToSlotDevice(ds);
     }
-    device = { ...device, charge: resolveCharge(slot, device, deviceStatuses) };
+    // Vocalist if the slot is configured as a Vocals position, or the matched
+    // member's position is a vocal role (covers person-matched vocalists too).
+    const isVocal =
+      (slot.link.kind === "pco" &&
+        slot.link.matchBy === "position" &&
+        isVocalPosition(slot.link.teamPositionName)) ||
+      isVocalPosition(member?.teamPositionName);
+    device = { ...device, charge: resolveCharge(slot, device, deviceStatuses), iemCharge: resolveIem(slot, deviceStatuses, isVocal) };
 
     return {
       ...slot,

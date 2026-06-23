@@ -348,6 +348,9 @@ export interface SlotDevice {
   /** Resolved level for the charge bar, from the slot's chargeSource: the bound
    *  mic's battery, a chosen SBC charger bay, or null (off / no source). */
   charge: number | null;
+  /** Resolved battery for a second device (e.g. a vocalist's IEM/PSM pack),
+   *  shown as a second bar beneath the primary. Null when no IEM is bound. */
+  iemCharge: number | null;
 }
 
 export interface Slot {
@@ -363,6 +366,9 @@ export interface Slot {
   chargeBayId?: string | null;
   /** Hide the RF bars on this slot and show only the charge bar. */
   hideRf?: boolean;
+  /** Optional second device whose battery shows as a second bar beneath the
+   *  primary charge bar — e.g. a vocalist who also wears an IEM/PSM pack. */
+  iemBinding?: { providerId: string; channelId: string } | null;
   displayName?: string | null;
   photoUrl?: string | null;
   device: SlotDevice;

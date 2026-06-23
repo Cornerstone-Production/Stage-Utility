@@ -502,7 +502,7 @@ export function SettingsView() {
       deviceBinding: null,
       displayName: null,
       photoUrl: null,
-      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null },
+      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null },
     };
     setLocalSlots((prev) => [...prev, newSlot]);
     setSlotsDirty(true);
@@ -518,14 +518,22 @@ export function SettingsView() {
       deviceBinding: null,
       displayName: null,
       photoUrl: null,
-      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null },
+      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null },
     };
     setLocalSlots((prev) => [...prev, newSlot]);
     setSlotsDirty(true);
   }
 
   function removeSlot(idx: number) {
-    setLocalSlots((prev) => prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, order: i })));
+    setLocalSlots((prev) => {
+      const next = prev.map((s) => ({ ...s }));
+      // If the next slot was stacked onto the one being deleted, break the stack
+      // instead of letting it silently re-attach to the slot above the deleted one.
+      if (next[idx + 1]?.stackWithPrevious) {
+        next[idx + 1] = { ...next[idx + 1], stackWithPrevious: false };
+      }
+      return next.filter((_, i) => i !== idx).map((s, i) => ({ ...s, order: i }));
+    });
     setSlotsDirty(true);
   }
 
