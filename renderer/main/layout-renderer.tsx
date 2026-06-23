@@ -298,7 +298,7 @@ function ChargerBattery({
     >
       {bays.map((b) => {
         const bay = all.find((x) => x.id === b.id) ?? null;
-        const label = b.label || (bay ? `Charger ${bay.chargerIndex} · Bay ${bay.bay}` : "Bay");
+        const label = b.label || (bay ? `${bay.connectionName ?? `Charger ${bay.chargerIndex}`} · Bay ${bay.bay}` : "Bay");
         return (
           <div key={b.id} className="flex items-center justify-between gap-[0.5em] w-full min-w-0">
             <span className="truncate min-w-0 flex-1">{label}</span>

@@ -61,6 +61,10 @@ export class DeviceManager {
   async applyConnections(connections: WirelessConnection[]): Promise<void> {
     console.log(`[device-manager] applyConnections — ${connections.length} connection(s)`);
 
+    // Publish connectionId→name so charger bays can be labeled by the user's
+    // connection name (unambiguous) rather than an arbitrary sort-order index.
+    stageController.setConnectionNames(new Map(connections.map((c) => [c.id, c.name])));
+
     // Determine which connection ids should be active.
     const enabledWithDriver = new Set<string>();
     for (const conn of connections) {
