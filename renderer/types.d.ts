@@ -93,6 +93,8 @@ interface SlotDevice {
   battery: number | null;
   freq: string | null;
   audioLevel: number | null;
+  /** Resolved charge-bar level (mic battery, a charger bay, or null). */
+  charge: number | null;
 }
 
 interface Slot {
@@ -101,6 +103,12 @@ interface Slot {
   order: number;
   link: SlotLink;
   deviceBinding?: { providerId: string; channelId: string } | null;
+  /** Charge-bar source: "mic" (bound device, default), "charger" (chargeBayId), "off". */
+  chargeSource?: "mic" | "charger" | "off";
+  /** ChargerBay id (connectionId::bay) when chargeSource === "charger". */
+  chargeBayId?: string | null;
+  /** Hide RF bars on this slot; show only the charge bar. */
+  hideRf?: boolean;
   displayName?: string | null;
   photoUrl?: string | null;
   device: SlotDevice;

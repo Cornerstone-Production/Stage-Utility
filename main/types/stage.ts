@@ -345,6 +345,9 @@ export interface SlotDevice {
   battery: number | null;
   freq: string | null;
   audioLevel: number | null;
+  /** Resolved level for the charge bar, from the slot's chargeSource: the bound
+   *  mic's battery, a chosen SBC charger bay, or null (off / no source). */
+  charge: number | null;
 }
 
 export interface Slot {
@@ -353,6 +356,13 @@ export interface Slot {
   order: number;
   link: SlotLink;
   deviceBinding?: { providerId: string; channelId: string } | null;
+  /** Where the charge bar reads its level: "mic" = the bound device's battery
+   *  (default), "charger" = the SBC bay in `chargeBayId`, "off" = no charge bar. */
+  chargeSource?: "mic" | "charger" | "off";
+  /** ChargerBay id (connectionId::bay) when chargeSource === "charger". */
+  chargeBayId?: string | null;
+  /** Hide the RF bars on this slot and show only the charge bar. */
+  hideRf?: boolean;
   displayName?: string | null;
   photoUrl?: string | null;
   device: SlotDevice;
