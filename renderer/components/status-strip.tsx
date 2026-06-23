@@ -19,6 +19,34 @@ function BatteryIcon({ level }: { level: number }) {
   return <BatteryLowIcon className="text-red-10 shrink-0" style={style} />;
 }
 
+// Charge level uses the same thresholds as the battery readout / slot status
+// (green ≥60, yellow 25–59, red <25) and the same green as the active RF bars,
+// so it reads as one family.
+function chargeColor(pct: number): string {
+  if (pct >= 60) return "bg-green-9";
+  if (pct >= 25) return "bg-yellow-9";
+  return "bg-red-9";
+}
+
+// A thin charge-level bar sized to sit directly under the 5-bar RF cluster. The
+// track is always rendered (so every pill keeps the same height); the fill only
+// shows when a battery level is known.
+function ChargeBar({ level }: { level: number | null }) {
+  return (
+    <span
+      className="block w-full overflow-hidden rounded-full bg-white/10"
+      style={{ height: "calc(var(--rf) * 0.26)" }}
+    >
+      {level !== null && (
+        <span
+          className={cn("block h-full rounded-full transition-all", chargeColor(level))}
+          style={{ width: `${Math.max(0, Math.min(100, level))}%` }}
+        />
+      )}
+    </span>
+  );
+}
+
 function RfBars({ bars }: { bars: number }) {
   // 5 vertical bars with rounded caps; active bars use soft green with a subtle glow.
   // Heights/width/gap are multiples of --rf so the whole cluster scales as one.
@@ -107,11 +135,12 @@ export function StatusStrip({ device, className }: StatusStripProps) {
         padding: "calc(var(--rf) * 0.55) calc(var(--rf) * 0.6)",
       }}
     >
-      {/* ── RF segment — always the same 5-bar cluster so a connected and a
-          disconnected/offline device render at identical size (no bars active
-          = all grey). Keeps every status pill the same height. ── */}
-      <div className="flex items-center justify-center shrink-0">
+      {/* ── RF segment — the 5-bar cluster with a thin charge-level bar tucked
+          directly beneath it (color-coded to the mic's battery). Always the same
+          shape so connected/offline pills render at identical size. ── */}
+      <div className="flex flex-col items-center justify-center shrink-0" style={{ gap: "calc(var(--rf) * 0.18)" }}>
         <RfBars bars={device.rf === null ? 0 : Math.max(0, Math.min(5, Math.round(device.rf)))} />
+        <ChargeBar level={device.battery} />
       </div>
 
       <Divider />
