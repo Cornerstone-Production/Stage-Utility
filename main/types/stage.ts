@@ -212,6 +212,9 @@ export interface Output {
   name: string;
   /** The View this screen currently shows, or null when unrouted (renders a placeholder). */
   viewId: string | null;
+  /** When true, this screen renders a full black "blackout" regardless of its
+   *  routed View. Toggling it off restores the View instantly. */
+  blackout?: boolean;
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */
@@ -220,6 +223,7 @@ export interface ResolvedOutput {
   kind: ViewKind;
   ndiSource: string | null;
   viewName: string | null;
+  blackout: boolean;
 }
 
 /**
@@ -392,6 +396,9 @@ export interface StageState {
   pcoConfigured: boolean;
   lastRefreshedAt: string | null;
   remoteUrl: string | null;
+  /** Raw LAN IP URL (http://<ip>:<port>) for the Companion panel; Companion can't
+   *  resolve DNS, so this is shown regardless of publicUrl. */
+  lanUrl: string | null;
   showQr: boolean;
   /** Allowlisted service type IDs for auto mode. Empty array = all allowed. */
   allowedServiceTypeIds: string[];

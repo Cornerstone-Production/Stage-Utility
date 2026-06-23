@@ -7,8 +7,9 @@ export function RootView() {
   const slug = window.location.pathname.replace(/^\/+|\/+$/g, "");
 
   return (
-    // Kiosk root: no window chrome, solid dark background, edge-to-edge
-    <div className="h-full w-full overflow-hidden bg-[#0a0a0a]">
+    // Kiosk root: no window chrome, edge-to-edge, on the shared kiosk surface so
+    // a bg-transparent view (slots) shows the exact same color as kiosk-surface views.
+    <div className="h-full w-full overflow-hidden kiosk-surface">
       {slug === "" ? <DisplayPickerView /> : <Outlet />}
     </div>
   );

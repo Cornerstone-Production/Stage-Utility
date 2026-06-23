@@ -544,7 +544,8 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom
   // layouts match every other view; only an explicit non-default solid overrides.
   const bg = canvas.background;
-  const inheritSurface = bg == null || bg === "#000" || bg === "#000000" || bg === "#080810";
+  const inheritSurface =
+    bg == null || bg === "#000" || bg === "#000000" || bg === "#080810" || bg === "#0a0a0a";
 
   return (
     <div ref={setBox} className="relative w-full h-full kiosk-surface overflow-hidden flex items-center justify-center">

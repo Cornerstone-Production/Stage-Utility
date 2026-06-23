@@ -221,6 +221,8 @@ interface Output {
   id: string;
   name: string;
   viewId: string | null;
+  /** When true, the screen renders a full black blackout regardless of its View. */
+  blackout?: boolean;
 }
 
 /** Per-output render descriptor (output id → routed view's kind/ndi/name). */
@@ -229,6 +231,7 @@ interface ResolvedOutput {
   kind: ViewKind;
   ndiSource: string | null;
   viewName: string | null;
+  blackout: boolean;
 }
 
 /** A live transcript line from ProdCom (SSE "prodcom:transcript"). */
@@ -322,6 +325,9 @@ interface StageState {
   pcoConfigured: boolean;
   lastRefreshedAt: string | null;
   remoteUrl: string | null;
+  /** Raw LAN IP URL (http://<ip>:<port>) for the Companion panel; Companion can't
+   *  resolve DNS, so this is shown regardless of publicUrl. */
+  lanUrl: string | null;
   showQr: boolean;
   /** Allowlist of service type ids that Auto plan-mode follows and manual picker shows.
    *  Empty array means all types are allowed. */

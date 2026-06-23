@@ -9,10 +9,14 @@ interface SlotPanelProps {
   emptySlotLogo?: string | null;
   /** Optional avatar for matched people with no PCO photo; null = built-in silhouette. */
   defaultAvatar?: string | null;
+  /** Photo-forward layout: the photo fills the whole card and the name/position/RF
+   *  sit on a transparent gradient scrim at the bottom instead of a solid band that
+   *  butts below the photo. Used on the condensed phone grid so the photo stays big. */
+  overlay?: boolean;
   className?: string;
 }
 
-export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: SlotPanelProps) {
+export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false, className }: SlotPanelProps) {
   const isEmpty = slot.link.kind === "empty";
   const isStatic = slot.link.kind === "static";
   const solidColor = isStatic ? (slot.link as { kind: "static"; label: string; color: string }).color : null;
@@ -131,26 +135,35 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, className }: Slo
           )}
         </div>
 
-        {/* ── Info card (bottom) — a SOLID, opaque panel the photo stops at (the
-            image never shows behind it). macOS-26/Tahoe styling via a subtle
-            top-down gradient, a bright top hairline and a soft inner highlight. ── */}
+        {/* ── Info card (bottom). Stacked mode: a SOLID opaque panel the photo
+            butts up to (image never shows behind it), macOS-26/Tahoe styling.
+            Overlay mode (phone grid): an absolute, transparent→dark gradient
+            scrim over the bottom of the photo, so the photo fills the whole card
+            and stays visible while the name/RF remain legible. ── */}
         <div
-          className="relative z-10 flex flex-col justify-start gap-1 px-3 pt-2.5 pb-2"
-          style={{
-            background:
-              "linear-gradient(180deg, rgb(26,27,34) 0%, rgb(15,16,21) 100%)",
-            borderTop: "1px solid rgba(255,255,255,0.12)",
-            boxShadow: "inset 0 1px 0 0 rgba(255,255,255,0.14)",
-          }}
+          className={
+            overlay
+              ? "absolute inset-x-0 bottom-0 z-10 flex flex-col justify-end gap-0.5 px-3 pt-10 pb-2"
+              : "relative z-10 flex flex-col justify-start gap-1 px-3 pt-2.5 pb-2"
+          }
+          style={
+            overlay
+              ? { background: "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.88) 100%)" }
+              : {
+                  background: "linear-gradient(180deg, rgb(26,27,34) 0%, rgb(15,16,21) 100%)",
+                  borderTop: "1px solid rgba(255,255,255,0.12)",
+                  boxShadow: "inset 0 1px 0 0 rgba(255,255,255,0.14)",
+                }
+          }
         >
           <div>
             <span
               className="font-semibold text-white leading-tight line-clamp-2 block"
-              // Always reserve two lines (2 × the 1.25 leading-tight line-height)
-              // so a one-line name and a wrapped two-line name produce the SAME
-              // card height — keeping the photo bottom, position and RF bar
-              // aligned across every slot in the row.
-              style={{ fontSize: "clamp(1rem, 14cqi, 3.4rem)", minHeight: "2.5em" }}
+              // Stacked mode reserves two lines (2 × 1.25 leading-tight) so one- and
+              // two-line names yield the SAME card height, keeping photo bottoms /
+              // position / RF aligned across the row. Overlay mode sits at the bottom
+              // of the photo, so no reservation is needed (and avoids a tall scrim).
+              style={{ fontSize: "clamp(1rem, 14cqi, 3.4rem)", minHeight: overlay ? undefined : "2.5em" }}
             >
               {displayName ?? "—"}
             </span>

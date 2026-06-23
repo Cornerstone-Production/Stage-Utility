@@ -186,9 +186,11 @@
 
 /* Single source of truth for the kiosk backdrop. A FLAT color (no gradient) so
    every view kind — slots, dashboard, stage, captions, custom — looks identical
-   to the slots view (which reads as flat near-black behind its cards). */
+   to the slots view (which reads as flat near-black behind its cards).
+   NOTE: neutral #0a0a0a, NOT #080810 — the latter has a blue tint (B=16) that
+   read as "blueish" next to the neutral app shell. Everything derives from this. */
 :root {
-  --kiosk-bg: #080810;
+  --kiosk-bg: #0a0a0a;
 }
 
 /* The kiosk backdrop. Applied behind every view + the embedded "Mic slots"

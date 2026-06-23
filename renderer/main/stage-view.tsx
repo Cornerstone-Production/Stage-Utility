@@ -310,6 +310,13 @@ export function StageView() {
   // A real output (not a preview) with no View routed to it is unconfigured —
   // show a clear "no view assigned" screen rather than an empty slot grid.
   const resolved = previewViewId ? null : state.resolvedByOutput?.[displayId];
+
+  // Blackout: a true black screen on command (Companion / Displays page), taking
+  // priority over the routed View. Toggling it off restores the View instantly.
+  if (!previewViewId && resolved?.blackout) {
+    return <div className="fixed inset-0 z-50 bg-black" />;
+  }
+
   const isUnrouted = !previewViewId && (!resolved || resolved.viewId === null);
   if (isUnrouted) {
     return (
@@ -435,7 +442,7 @@ export function StageView() {
         <div className="hidden max-sm:grid grid-cols-2 auto-rows-max content-start gap-2 p-2 flex-1 min-h-0 overflow-y-auto overscroll-contain">
           {sortedSlots.filter((slot) => slot.link.kind !== "spacer").map((slot) => (
             <div key={slot.id} className="aspect-[3/4] flex [container-type:inline-size]">
-              <SlotPanel slot={slot} emptySlotLogo={state.emptySlotLogo} defaultAvatar={state.defaultAvatar} />
+              <SlotPanel slot={slot} emptySlotLogo={state.emptySlotLogo} defaultAvatar={state.defaultAvatar} overlay />
             </div>
           ))}
         </div>

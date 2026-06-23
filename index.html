@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
     />
     <!-- Tint the mobile browser chrome dark to match the kiosk UI. -->
-    <meta name="theme-color" content="#080810" />
+    <meta name="theme-color" content="#0a0a0a" />
     <!-- Add to Home Screen → standalone (no browser bars), edge-to-edge. -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -23,13 +23,14 @@
     </script>
     <style>
       :root, .dark {
-        --background: #080810;
+        --background: #0a0a0a;
       }
       html, body, #root {
         /* Flat near-black so every view matches the slots view (no gradient).
            Solid color also fills the iOS standalone safe areas (status bar /
-           home indicator) dark instead of white. */
-        background-color: #080810;
+           home indicator) dark instead of white. Neutral #0a0a0a (= --kiosk-bg),
+           not the blue-tinted #080810. */
+        background-color: #0a0a0a;
         /* Use the DYNAMIC viewport for the whole chain so it matches the views'
            h-[100dvh]. `100%`/`100vh` resolve to the LARGE viewport on iOS, which
            is taller than the visible area when the toolbars show — that mismatch
