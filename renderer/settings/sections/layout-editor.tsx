@@ -19,6 +19,7 @@ import {
   PencilIcon,
   CheckIcon,
   LayoutTemplateIcon,
+  CornerLeftUpIcon,
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import {
@@ -906,7 +907,7 @@ export function LayoutEditor({
 
       <div className="flex gap-3 @max-4xl:flex-col flex-1 min-h-0">
         {/* Canvas */}
-        <div className="flex-1 min-w-0 min-h-0">
+        <div className="flex-1 min-w-0 min-h-0 @max-4xl:flex-[0_0_55%]">
           {data.state ? (
             <EditorCanvas
               canvas={canvas}
@@ -930,7 +931,7 @@ export function LayoutEditor({
 
         {/* Side panel: layers + inspector (edit mode only) */}
         {isEditing && (
-        <div className="w-64 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full @max-4xl:shrink">
+        <div className="w-64 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full @max-4xl:flex-1">
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Layers</span>
@@ -946,6 +947,18 @@ export function LayoutEditor({
                 <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">
                   {o.config.type === "container" ? `${TYPE_LABELS[o.config.type]} (${o.children?.length ?? 0})` : TYPE_LABELS[o.config.type]}
                 </span>
+                {depth > 0 && (
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    onClick={(e) => { e.stopPropagation(); reparentToRoot(o.id); }}
+                    className="text-gray-9 hover:text-gray-12"
+                    aria-label="Move out of container"
+                    title="Move out of container"
+                  >
+                    <CornerLeftUpIcon className="size-3.5" />
+                  </span>
+                )}
                 <span
                   role="button"
                   tabIndex={-1}
@@ -1411,7 +1424,19 @@ function Inspector({
       <Row label="Fill"><input type="color" value={s.background ?? "#000000"} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent" />
         <Button variant="transparent" size="small" onClick={() => onStyle({ background: null })}>Clear</Button>
       </Row>
-      <Row label="Opacity"><NumberInput value={s.opacity ?? 1} step={0.05} min={0} max={1} onChange={(v) => onStyle({ opacity: v })} /></Row>
+      <Row label="Opacity">
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={s.opacity ?? 1}
+          onChange={(e) => onStyle({ opacity: parseFloat(e.target.value) })}
+          className="flex-1 min-w-0 accent-blue-9"
+          aria-label="Opacity"
+        />
+        <span className="text-caption2 text-gray-9 w-9 shrink-0 text-right tabular-nums">{Math.round((s.opacity ?? 1) * 100)}%</span>
+      </Row>
       <Row label="Radius"><NumberInput value={s.cornerRadius ?? 0} step={0.005} min={0} max={0.5} onChange={(v) => onStyle({ cornerRadius: v })} /></Row>
       <Row label="Padding"><NumberInput value={s.padding ?? 0} step={0.005} min={0} max={0.3} onChange={(v) => onStyle({ padding: v })} /></Row>
       <Row label="Border">
