@@ -18,6 +18,7 @@ import {
   AlignEndHorizontal,
   PencilIcon,
   CheckIcon,
+  LayoutTemplateIcon,
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import {
@@ -164,6 +165,52 @@ function makeObject(
     config: defaultConfig(type),
     style: defaultStyle(type),
   };
+}
+
+// Build the built-in "Dashboard" starter layout as editable nested objects: a
+// 2×2 grid of glass tiles (clock / PCO timer / current + next item) plus SPL and
+// captions strips, mirroring renderer/main/dashboard-view.tsx. All coords are
+// canvas fractions, so it works on any canvas (designed for 16:9). Fresh ids.
+function dashboardTemplate(): LayoutObject[] {
+  let z = 0;
+  const caption = (text: string): LayoutObject => ({
+    id: uid(), x: 0.06, y: 0.1, w: 0.88, h: 0.2, z: 1,
+    config: { type: "text", text },
+    style: { fontSize: 0.022, fontWeight: 600, color: "#9ca3af", uppercase: true, letterSpacing: 0.1, textAlign: "center", vAlign: "middle" },
+  });
+  const body = (config: LayoutObjectConfig, color: string, fontSize: number): LayoutObject => ({
+    id: uid(), x: 0.06, y: 0.34, w: 0.88, h: 0.56, z: 2,
+    config, style: { fontSize, fontWeight: 500, color, textAlign: "center", vAlign: "middle" },
+  });
+  const tile = (x: number, y: number, w: number, h: number, cap: string, content: LayoutObject): LayoutObject => ({
+    id: uid(), x, y, w, h, z: ++z, config: { type: "container" }, style: { ...CARD_PRESETS.neutral },
+    children: [caption(cap), content],
+  });
+  const m = 0.02, g = 0.02;
+  const colW = (1 - 2 * m - g) / 2;
+  const x1 = m, x2 = m + colW + g;
+  const rowH = 0.29, y1 = 0.03, y2 = y1 + rowH + g;
+  return [
+    tile(x1, y1, colW, rowH, "Current time", body({ type: "clock", showSeconds: true, format: "12h" }, "#ffffff", 0.09)),
+    tile(x2, y1, colW, rowH, "Service timer", body({ type: "countdown-timer" }, "#7fe3c4", 0.09)),
+    tile(x1, y2, colW, rowH, "Now", body({ type: "current-service-item" }, "#ffffff", 0.05)),
+    tile(x2, y2, colW, rowH, "Up next", body({ type: "next-service-item" }, "rgba(255,255,255,0.7)", 0.05)),
+    {
+      id: uid(), x: m, y: 0.65, w: 1 - 2 * m, h: 0.13, z: ++z,
+      config: { type: "container" }, style: { ...CARD_PRESETS.neutral },
+      children: [
+        { id: uid(), x: 0.02, y: 0.25, w: 0.12, h: 0.5, z: 1, config: { type: "text", text: "SPL" }, style: { fontSize: 0.03, fontWeight: 600, color: "#9ca3af", uppercase: true, letterSpacing: 0.1, textAlign: "left", vAlign: "middle" } },
+        { id: uid(), x: 0.15, y: 0.15, w: 0.83, h: 0.7, z: 2, config: { type: "spl-meter", meterId: null, metricKey: null, showLabel: true, thresholds: null }, style: { fontSize: 0.07, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "middle" } },
+      ],
+    },
+    {
+      id: uid(), x: m, y: 0.8, w: 1 - 2 * m, h: 0.17, z: ++z,
+      config: { type: "container" }, style: { ...CARD_PRESETS.neutral },
+      children: [
+        { id: uid(), x: 0.03, y: 0.12, w: 0.94, h: 0.76, z: 1, config: { type: "transcript-strip", mode: "rolling", maxLines: 2 }, style: { fontSize: 0.04, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "bottom" } },
+      ],
+    },
+  ];
 }
 
 const GRID = 48; // snap steps across the canvas
@@ -605,6 +652,13 @@ export function LayoutEditor({
     setSelectedId(null);
     setDirty(true);
   }
+  // Replace the layout with the built-in dashboard starter (editable nested tiles).
+  function startFromDashboard() {
+    pushHistory();
+    setObjects(dashboardTemplate());
+    setSelectedId(null);
+    setDirty(true);
+  }
 
   const selected = findById(objects, selectedId);
   // Max z among the TOP-LEVEL scope (for adding/duplicating top-level objects).
@@ -805,6 +859,9 @@ export function LayoutEditor({
         </Select>
         <Button variant="filled" size="small" onClick={undo} disabled={history.length === 0}>
           <UndoIcon className="size-3.5" /> Undo
+        </Button>
+        <Button variant="filled" size="small" onClick={startFromDashboard} title="Replace the layout with the dashboard design as editable tiles">
+          <LayoutTemplateIcon className="size-3.5" /> Start from Dashboard
         </Button>
 
         {templates.length > 0 && (
@@ -1310,6 +1367,16 @@ function Inspector({
       )}
 
       <Separator />
+
+      {/* Card style presets — one-click dashboard "glass tile" look on any object,
+          and "Flat" to clear it back. Just writes the shared style fields below. */}
+      <Row label="Card">
+        <div className="flex flex-wrap gap-1">
+          {([["neutral", "Glass"], ["green", "Green"], ["red", "Red"], ["amber", "Amber"], ["flat", "Flat"]] as [CardAccent, string][]).map(([a, label]) => (
+            <Button key={a} variant="filled" size="small" onClick={() => onStyle(CARD_PRESETS[a])}>{label}</Button>
+          ))}
+        </div>
+      </Row>
 
       {/* Style */}
       {isText && (
