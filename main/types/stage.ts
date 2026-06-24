@@ -200,22 +200,31 @@ export type LayoutObjectConfig =
       showLabel?: boolean;
       thresholds?: { amber: number; red: number } | null;
     }
-  | { type: "shape"; shape: "rect" | "ellipse" };
+  | { type: "shape"; shape: "rect" | "ellipse" }
+  // A styled box that holds other objects. Children are positioned as fractions
+  // of THIS container's box (not the canvas), so moving/resizing the container
+  // moves/scales its contents as a unit. The box itself is drawn from `style`
+  // (background/border/radius/padding) — same fields as any other object.
+  | { type: "container" };
 
 export type LayoutObjectType = LayoutObjectConfig["type"];
 
 export interface LayoutObject {
   id: string;
-  /** Position/size as fractions of the canvas (0..1). */
+  /** Position/size as fractions of the PARENT (the canvas for top-level objects,
+   *  or the containing container's box for nested children) — all 0..1. */
   x: number;
   y: number;
   w: number;
   h: number;
-  /** Paint order; higher = front. */
+  /** Paint order WITHIN the object's sibling scope; higher = front. */
   z: number;
   hidden?: boolean;
   style?: LayoutStyle;
   config: LayoutObjectConfig;
+  /** Nested objects, positioned relative to this object's box. Only meaningful
+   *  for `container` objects; absent/empty for leaf objects. */
+  children?: LayoutObject[];
 }
 
 export interface LayoutDTO {

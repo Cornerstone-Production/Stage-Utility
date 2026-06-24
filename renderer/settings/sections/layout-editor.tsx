@@ -40,6 +40,7 @@ import {
   DialogFooter,
 } from "../../components/ui";
 import { ObjectContent, boxStyle, useLayoutData, loadProcessedAttachment, type LayoutRenderCtx } from "../../main/layout-renderer";
+import { deepCloneFreshIds } from "../../main/layout-tree";
 import { useSplState } from "../../main/use-spl-state";
 import { useStageState } from "../../main/use-stage-state";
 
@@ -66,6 +67,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   image: "Image",
   "plan-attachment": "Plan file",
   shape: "Shape",
+  container: "Container",
 };
 const PALETTE: LayoutObjectType[] = [
   "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
@@ -447,7 +449,7 @@ export function LayoutEditor({
   }
   function loadTemplate(t: LayoutTemplate) {
     pushHistory();
-    setObjects(t.layout.objects.map((o) => ({ ...o, id: uid() })));
+    setObjects(t.layout.objects.map((o) => deepCloneFreshIds(o, uid)));
     setSelectedId(null);
     setDirty(true);
   }

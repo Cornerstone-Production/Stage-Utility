@@ -274,7 +274,8 @@ type LayoutObjectConfig =
       showLabel?: boolean;
       thresholds?: { amber: number; red: number } | null;
     }
-  | { type: "shape"; shape: "rect" | "ellipse" };
+  | { type: "shape"; shape: "rect" | "ellipse" }
+  | { type: "container" };
 
 type LayoutObjectType = LayoutObjectConfig["type"];
 
@@ -288,6 +289,7 @@ interface LayoutObject {
   hidden?: boolean;
   style?: LayoutStyle;
   config: LayoutObjectConfig;
+  children?: LayoutObject[];
 }
 
 interface LayoutDTO {

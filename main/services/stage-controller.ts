@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -33,16 +33,24 @@ function normalizeBaseUrl(url: string | null): string | null {
   return s.replace(/\/+$/, "");
 }
 
+// Deep-clone an object and its whole subtree, minting a fresh id at every depth.
+// Nested children must be cloned too, or duplicated Views/templates would share
+// child object references and collide on child ids.
+function cloneLayoutObject(o: LayoutObject): LayoutObject {
+  return {
+    ...o,
+    id: randomUUID(),
+    style: o.style ? { ...o.style } : undefined,
+    config: { ...o.config },
+    children: o.children?.map(cloneLayoutObject),
+  };
+}
+
 function cloneLayout(l: LayoutDTO): LayoutDTO {
   return {
     version: 1,
     canvas: { ...l.canvas },
-    objects: l.objects.map((o) => ({
-      ...o,
-      id: randomUUID(),
-      style: o.style ? { ...o.style } : undefined,
-      config: { ...o.config },
-    })),
+    objects: l.objects.map(cloneLayoutObject),
   };
 }
 
