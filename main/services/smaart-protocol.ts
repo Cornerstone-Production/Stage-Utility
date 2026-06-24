@@ -88,6 +88,20 @@ function str(v: unknown): string | null {
   return typeof v === "string" ? v : null;
 }
 
+/** From a supportedApiVersions list (`[{ "3": "/api/v3/" }, …]`), the non-empty
+ *  endpoint paths, highest version first. */
+function bestVersionPaths(list: unknown[]): string[] {
+  const entries: { ver: number; path: string }[] = [];
+  for (const item of list) {
+    if (item && typeof item === "object") {
+      for (const [k, v] of Object.entries(item as Record<string, unknown>)) {
+        if (typeof v === "string" && v) entries.push({ ver: parseInt(k, 10) || 0, path: v });
+      }
+    }
+  }
+  return entries.sort((a, b) => b.ver - a.ver).map((e) => e.path);
+}
+
 /** Flatten Smaart's `metrics: [{k:v}, …]` into `{ k: v }`, keeping finite numbers. */
 function flattenMetrics(raw: unknown): SplMetrics {
   const out: SplMetrics = {};
@@ -125,60 +139,125 @@ export class ModernSmaartAdapter implements SmaartAdapter {
   }
 
   async connect(opts: { password?: string | null }): Promise<void> {
-    const candidates = this.preferredPath ? [this.preferredPath] : DEFAULT_VERSION_PATHS;
+    // Probe candidate version paths. A real version endpoint answers a `get` with
+    // a Root object; an unsupported one (e.g. /api/v4/ on a v3 server) instead
+    // returns { supportedApiVersions: [...] } — follow that to the right path.
+    const tried = new Set<string>();
+    const queue: string[] = this.preferredPath ? [this.preferredPath] : [...DEFAULT_VERSION_PATHS];
     let lastErr: Error | null = null;
-    for (const path of candidates) {
+
+    for (let attempt = 0; attempt < 6 && queue.length > 0; attempt++) {
+      const path = queue.shift() as string;
+      if (tried.has(path)) continue;
+      tried.add(path);
+
+      let ws: WebSocket;
       try {
-        await this.openControl(path);
-        // Probe the Root object — proves the version and reports auth state.
-        const info = await this.request("get", undefined, undefined);
-        const resp = (info.response ?? info) as Record<string, unknown>;
-        this.serverInfo = {
-          applicationName: str(resp.applicationName),
-          applicationVersion: str(resp.applicationVersion),
-          authenticationRequired: resp.authenticationRequired === true,
-        };
-        this.apiVersion = path.replace(/\D/g, "") || "?";
-        if (this.serverInfo.authenticationRequired) {
-          const password = opts.password ?? "";
-          await this.request("set", undefined, [{ password }]);
-        }
-        return;
+        ws = await this.openSocket(path);
       } catch (err) {
         lastErr = err instanceof Error ? err : new Error(String(err));
-        this.teardownControl();
+        continue;
+      }
+
+      const outcome = await this.negotiate(ws);
+      if (outcome.kind === "root") {
+        this.control = ws;
+        this.attachSteadyHandlers(ws);
+        this.apiVersion = path.replace(/\D/g, "") || "?";
+        this.serverInfo = {
+          applicationName: str(outcome.root.applicationName),
+          applicationVersion: str(outcome.root.applicationVersion),
+          authenticationRequired: outcome.root.authenticationRequired === true,
+        };
+        if (this.serverInfo.authenticationRequired) {
+          await this.request("set", undefined, [{ password: opts.password ?? "" }]);
+        }
+        return;
+      }
+
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
+      if (outcome.kind === "redirect") {
+        for (const p of outcome.paths) if (!tried.has(p)) queue.unshift(p);
+      } else {
+        lastErr = new Error(`No usable Smaart API at ${path}`);
       }
     }
     throw lastErr ?? new Error("Could not connect to the Smaart API");
   }
 
-  private openControl(path: string): Promise<void> {
+  private openSocket(path: string): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(this.wsUrl(path));
       const timer = setTimeout(() => {
         ws.close();
         reject(new Error(`Connection to ${path} timed out`));
       }, CONNECT_TIMEOUT_MS);
-
       ws.addEventListener("open", () => {
         clearTimeout(timer);
-        this.control = ws;
-        resolve();
+        resolve(ws);
       });
-      ws.addEventListener("message", (ev) => this.onControlMessage(ev));
       ws.addEventListener("error", () => {
         clearTimeout(timer);
         reject(new Error(`WebSocket error connecting to ${path}`));
       });
-      ws.addEventListener("close", () => {
-        clearTimeout(timer);
-        // Fail any in-flight requests so callers don't hang.
-        for (const p of this.pending.splice(0)) {
-          clearTimeout(p.timer);
-          p.reject(new Error("Smaart control connection closed"));
+    });
+  }
+
+  /** Send one `get` and classify the first decisive frame: a Root response, a
+   *  version redirect, or nothing usable. Solicited/unsolicited frame order is
+   *  tolerated (every frame is inspected until one is decisive). */
+  private negotiate(
+    ws: WebSocket,
+  ): Promise<
+    | { kind: "root"; root: Record<string, unknown> }
+    | { kind: "redirect"; paths: string[] }
+    | { kind: "none" }
+  > {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => finish({ kind: "none" }), REQUEST_TIMEOUT_MS);
+      const onMsg = (ev: MessageEvent) => {
+        let msg: Record<string, unknown>;
+        try {
+          msg = JSON.parse(typeof ev.data === "string" ? ev.data : String(ev.data));
+        } catch {
+          return;
         }
-        if (this.control === ws) this.control = null;
-      });
+        if (Array.isArray(msg.supportedApiVersions)) {
+          finish({ kind: "redirect", paths: bestVersionPaths(msg.supportedApiVersions) });
+          return;
+        }
+        const resp = (msg.response ?? msg) as Record<string, unknown>;
+        if (str(resp.applicationName)) finish({ kind: "root", root: resp });
+        // Other frames (acks, etc.) — keep waiting.
+      };
+      const finish = (r: { kind: "root"; root: Record<string, unknown> } | { kind: "redirect"; paths: string[] } | { kind: "none" }) => {
+        clearTimeout(timer);
+        ws.removeEventListener("message", onMsg as EventListener);
+        resolve(r);
+      };
+      ws.addEventListener("message", onMsg as EventListener);
+      try {
+        ws.send(JSON.stringify({ sequenceNumber: this.seq++, action: "get" }));
+      } catch {
+        finish({ kind: "none" });
+      }
+    });
+  }
+
+  /** Wire the steady-state request/response + connection-loss handlers (after a
+   *  version path is confirmed). */
+  private attachSteadyHandlers(ws: WebSocket): void {
+    ws.addEventListener("message", (ev) => this.onControlMessage(ev));
+    ws.addEventListener("close", () => {
+      for (const p of this.pending.splice(0)) {
+        clearTimeout(p.timer);
+        p.reject(new Error("Smaart control connection closed"));
+      }
+      if (this.control === ws) this.control = null;
     });
   }
 
