@@ -632,6 +632,30 @@ export function LayoutEditor({
   const [isEditing, setIsEditing] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
 
+  // The editor lives inside a scrolling settings panel whose height doesn't
+  // cleanly clamp our flex chain (Radix ScrollArea wraps content in a content-
+  // sized box, so `h-full` grows with content). Without a fixed height the row
+  // would size to whichever column is taller — so selecting an object with a tall
+  // inspector stretched the canvas cell and re-centered the design, making it jump.
+  // Measure the body's available viewport height and pin it so only the side panel
+  // scrolls and the canvas stays put. `top` is stable (toolbar above is fixed), so
+  // this isn't circular with the height we set.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [bodyH, setBodyH] = useState<number | null>(null);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => {
+      const top = el.getBoundingClientRect().top;
+      setBodyH(Math.max(240, Math.round(window.innerHeight - top - 16)));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    const ro = new ResizeObserver(measure);
+    if (el.parentElement) ro.observe(el.parentElement);
+    return () => { window.removeEventListener("resize", measure); ro.disconnect(); };
+  }, [isEditing]);
+
   const currentLayout = (): LayoutDTO => ({ version: 1, canvas, objects });
 
   function discardChanges() {
@@ -905,7 +929,7 @@ export function LayoutEditor({
       </div>
       )}
 
-      <div className="flex gap-3 @max-4xl:flex-col flex-1 min-h-0">
+      <div ref={bodyRef} className="flex gap-3 @max-4xl:flex-col flex-1 min-h-0" style={bodyH ? { height: bodyH, flex: "none" } : undefined}>
         {/* Canvas */}
         <div className="flex-1 min-w-0 min-h-0 @max-4xl:flex-[0_0_55%]">
           {data.state ? (
