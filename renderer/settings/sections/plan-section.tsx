@@ -159,8 +159,17 @@ export function PlanSection({
       </FieldSet>
 
       {serviceTypes.length > 0 && (
-        <FieldSet title="Active Service Types">
+        <FieldSet>
           <FieldGroup>
+            <Field orientation="vertical">
+              <FieldContent>
+                <FieldLabel>Active Service Types</FieldLabel>
+                <FieldDescription>
+                  Auto plan mode follows only active types, and the manual picker is limited to them.
+                  Turning all off is the same as having them all active.
+                </FieldDescription>
+              </FieldContent>
+            </Field>
             {serviceTypes.map((st) => {
               const isOn = allowed.length === 0 || allowed.includes(st.id);
               return (
@@ -177,10 +186,6 @@ export function PlanSection({
               );
             })}
           </FieldGroup>
-          <FieldDescription>
-            Auto plan mode follows only active types, and the manual picker is limited to them.
-            Turning all off is the same as having them all active.
-          </FieldDescription>
         </FieldSet>
       )}
     </div>
