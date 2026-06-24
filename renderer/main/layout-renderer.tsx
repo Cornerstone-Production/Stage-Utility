@@ -95,6 +95,31 @@ function clockText(now: number, showSeconds: boolean, format: "12h" | "24h", sho
   return `${pad(h)}:${m}${showSeconds ? `:${s}` : ""}`;
 }
 
+/** Render one object (and, for containers, its children) as a positioned box.
+ *  Position/size are PERCENT of the parent — because the wrapper is absolutely
+ *  positioned, a child's % resolves against this box, so the same component
+ *  renders correctly at any nesting depth. Font/radius/padding stay canvas-
+ *  relative (boxStyle uses ctx.H = canvas height) regardless of depth. */
+export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
+  const kids = o.children?.length
+    ? [...o.children].filter((c) => !c.hidden).sort((a, b) => a.z - b.z)
+    : null;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: `${o.x * 100}%`,
+        top: `${o.y * 100}%`,
+        width: `${o.w * 100}%`,
+        height: `${o.h * 100}%`,
+        ...boxStyle(o, ctx.H),
+      }}
+    >
+      {kids ? kids.map((c) => <RenderObject key={c.id} o={c} ctx={ctx} />) : <ObjectContent o={o} ctx={ctx} />}
+    </div>
+  );
+}
+
 /** Render one object's inner content (the positioned box wraps this). */
 export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   const c = o.config;
@@ -231,6 +256,8 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       );
     case "shape":
       return null; // the box background is the shape
+    case "container":
+      return null; // the box is drawn by the wrapper; children render recursively
     case "ndi-video":
       return (
         <div className="flex flex-col items-center justify-center w-full h-full bg-black/60 text-white/40">
@@ -656,19 +683,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
         }}
       >
         {objects.map((o) => (
-          <div
-            key={o.id}
-            style={{
-              position: "absolute",
-              left: o.x * canvas.width,
-              top: o.y * canvas.height,
-              width: o.w * canvas.width,
-              height: o.h * canvas.height,
-              ...boxStyle(o, canvas.height),
-            }}
-          >
-            <ObjectContent o={o} ctx={ctx} />
-          </div>
+          <RenderObject key={o.id} o={o} ctx={ctx} />
         ))}
       </div>
     </div>

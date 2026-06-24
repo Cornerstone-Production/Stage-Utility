@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   UndoIcon,
   Trash2Icon,
@@ -18,6 +18,8 @@ import {
   AlignEndHorizontal,
   PencilIcon,
   CheckIcon,
+  LayoutTemplateIcon,
+  CornerLeftUpIcon,
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import {
@@ -40,6 +42,20 @@ import {
   DialogFooter,
 } from "../../components/ui";
 import { ObjectContent, boxStyle, useLayoutData, loadProcessedAttachment, type LayoutRenderCtx } from "../../main/layout-renderer";
+import {
+  findById,
+  mapById,
+  removeById,
+  getParentOf,
+  getSiblings,
+  insertChild,
+  depthOf,
+  forEachWithRect,
+  composeRect,
+  localizeRect,
+  deepCloneFreshIds,
+  type FracRect,
+} from "../../main/layout-tree";
 import { useSplState } from "../../main/use-spl-state";
 import { useStageState } from "../../main/use-stage-state";
 
@@ -66,13 +82,33 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   image: "Image",
   "plan-attachment": "Plan file",
   shape: "Shape",
+  container: "Container",
 };
 const PALETTE: LayoutObjectType[] = [
-  "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
+  "container", "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
   "current-service-item", "next-service-item",
   "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
   "transcript-strip", "charger-battery", "spl-meter", "brand-logo", "image", "plan-attachment", "shape",
 ];
+
+// Deepest allowed object depth (top-level = 0). A container holding objects = 1;
+// a container holding containers holding leaves = 2. Keeps the editor sane.
+const MAX_DEPTH = 2;
+
+// The canvas occupies the whole coordinate space; top-level objects are fractions of it.
+const CANVAS_FRAC: FracRect = { x: 0, y: 0, w: 1, h: 1 };
+
+// Dashboard "glass tile" look, expressed in the style fields every object shares.
+// Border/radius/padding are fractions of canvas HEIGHT (≈1px / 16px on a 1080 canvas).
+// Reused by the container default style and the Phase C preset buttons.
+type CardAccent = "neutral" | "green" | "red" | "amber" | "flat";
+const CARD_PRESETS: Record<CardAccent, LayoutStyle> = {
+  neutral: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
+  green: { background: "rgba(45,212,150,0.08)", borderColor: "rgba(45,212,150,0.13)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
+  red: { background: "rgba(229,72,77,0.10)", borderColor: "rgba(229,72,77,0.25)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
+  amber: { background: "rgba(255,197,61,0.08)", borderColor: "rgba(255,197,61,0.20)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
+  flat: { background: null, borderColor: null, borderWidth: 0, cornerRadius: 0, padding: 0 },
+};
 
 function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
   switch (type) {
@@ -87,12 +123,14 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "image": return { type: "image", src: "" };
     case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
     case "shape": return { type: "shape", shape: "rect" };
+    case "container": return { type: "container" };
     default: return { type } as LayoutObjectConfig;
   }
 }
 
 function defaultStyle(type: LayoutObjectType): LayoutStyle {
   if (type === "shape") return { background: "#3b82f6", opacity: 1 };
+  if (type === "container") return { ...CARD_PRESETS.neutral };
   if (type === "ndi-video" || type === "slide-thumbnail" || type === "image" || type === "plan-attachment" || type === "brand-logo" || type === "live-controls") return {};
   // Captions read left-aligned and bottom-anchored, like the dedicated display.
   if (type === "transcript-strip") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "bottom" };
@@ -113,14 +151,67 @@ function uid(): string {
   return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function makeObject(type: LayoutObjectType, zTop: number): LayoutObject {
+function makeObject(
+  type: LayoutObjectType,
+  z: number,
+  geom?: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h">>,
+): LayoutObject {
+  // Containers default to a card-sized box; everything else keeps the old default.
+  const base = type === "container" ? { x: 0.3, y: 0.32, w: 0.4, h: 0.32 } : { x: 0.35, y: 0.42, w: 0.3, h: 0.16 };
   return {
     id: uid(),
-    x: 0.35, y: 0.42, w: 0.3, h: 0.16,
-    z: zTop + 1,
+    ...base,
+    ...geom,
+    z,
     config: defaultConfig(type),
     style: defaultStyle(type),
   };
+}
+
+// Build the built-in "Dashboard" starter layout as editable nested objects: a
+// 2×2 grid of glass tiles (clock / PCO timer / current + next item) plus SPL and
+// captions strips, mirroring renderer/main/dashboard-view.tsx. All coords are
+// canvas fractions, so it works on any canvas (designed for 16:9). Fresh ids.
+function dashboardTemplate(): LayoutObject[] {
+  let z = 0;
+  const caption = (text: string): LayoutObject => ({
+    id: uid(), x: 0.06, y: 0.1, w: 0.88, h: 0.2, z: 1,
+    config: { type: "text", text },
+    style: { fontSize: 0.022, fontWeight: 600, color: "#9ca3af", uppercase: true, letterSpacing: 0.1, textAlign: "center", vAlign: "middle" },
+  });
+  const body = (config: LayoutObjectConfig, color: string, fontSize: number): LayoutObject => ({
+    id: uid(), x: 0.06, y: 0.34, w: 0.88, h: 0.56, z: 2,
+    config, style: { fontSize, fontWeight: 500, color, textAlign: "center", vAlign: "middle" },
+  });
+  const tile = (x: number, y: number, w: number, h: number, cap: string, content: LayoutObject): LayoutObject => ({
+    id: uid(), x, y, w, h, z: ++z, config: { type: "container" }, style: { ...CARD_PRESETS.neutral },
+    children: [caption(cap), content],
+  });
+  const m = 0.02, g = 0.02;
+  const colW = (1 - 2 * m - g) / 2;
+  const x1 = m, x2 = m + colW + g;
+  const rowH = 0.29, y1 = 0.03, y2 = y1 + rowH + g;
+  return [
+    tile(x1, y1, colW, rowH, "Current time", body({ type: "clock", showSeconds: true, format: "12h" }, "#ffffff", 0.09)),
+    tile(x2, y1, colW, rowH, "Service timer", body({ type: "countdown-timer" }, "#7fe3c4", 0.09)),
+    tile(x1, y2, colW, rowH, "Now", body({ type: "current-service-item" }, "#ffffff", 0.05)),
+    tile(x2, y2, colW, rowH, "Up next", body({ type: "next-service-item" }, "rgba(255,255,255,0.7)", 0.05)),
+    {
+      id: uid(), x: m, y: 0.65, w: 1 - 2 * m, h: 0.13, z: ++z,
+      config: { type: "container" }, style: { ...CARD_PRESETS.neutral },
+      children: [
+        { id: uid(), x: 0.02, y: 0.25, w: 0.12, h: 0.5, z: 1, config: { type: "text", text: "SPL" }, style: { fontSize: 0.03, fontWeight: 600, color: "#9ca3af", uppercase: true, letterSpacing: 0.1, textAlign: "left", vAlign: "middle" } },
+        { id: uid(), x: 0.15, y: 0.15, w: 0.83, h: 0.7, z: 2, config: { type: "spl-meter", meterId: null, metricKey: null, showLabel: true, thresholds: null }, style: { fontSize: 0.07, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "middle" } },
+      ],
+    },
+    {
+      id: uid(), x: m, y: 0.8, w: 1 - 2 * m, h: 0.17, z: ++z,
+      config: { type: "container" }, style: { ...CARD_PRESETS.neutral },
+      children: [
+        { id: uid(), x: 0.03, y: 0.12, w: 0.94, h: 0.76, z: 1, config: { type: "transcript-strip", mode: "rolling", maxLines: 2 }, style: { fontSize: 0.04, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "bottom" } },
+      ],
+    },
+  ];
 }
 
 const GRID = 48; // snap steps across the canvas
@@ -162,6 +253,59 @@ function applyResize(start: LayoutObject, h: Handle, dx: number, dy: number): Pi
   return { x, y, w, h: hh };
 }
 
+// Recursive visual render for the editor canvas. Mirrors the renderer's
+// RenderObject but DIMS hidden objects (by their own flag only) instead of
+// removing them, so the editor still shows hidden layers faintly.
+function EditorObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
+  const kids = o.children?.length ? [...o.children].sort((a, b) => a.z - b.z) : null;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: `${o.x * 100}%`, top: `${o.y * 100}%`,
+        width: `${o.w * 100}%`, height: `${o.h * 100}%`,
+        ...boxStyle(o, ctx.H),
+        opacity: (o.style?.opacity ?? 1) * (o.hidden ? 0.25 : 1),
+      }}
+    >
+      {kids ? kids.map((c) => <EditorObject key={c.id} o={c} ctx={ctx} />) : <ObjectContent o={o} ctx={ctx} />}
+    </div>
+  );
+}
+
+// Flatten the tree (parents before children, each scope by z desc) into rows with
+// a depth, for the indented Layers panel.
+function flattenLayers(nodes: LayoutObject[], depth = 0): { o: LayoutObject; depth: number }[] {
+  const out: { o: LayoutObject; depth: number }[] = [];
+  for (const o of [...nodes].sort((a, b) => b.z - a.z)) {
+    out.push({ o, depth });
+    if (o.children?.length) out.push(...flattenLayers(o.children, depth + 1));
+  }
+  return out;
+}
+
+// A container drop target captured at drag start (containers don't move while a
+// single object is dragged, so a start snapshot is valid for the whole drag).
+interface DropTarget {
+  id: string;
+  abs: FracRect;
+  depth: number;
+}
+
+// Pick the most specific (smallest) container whose box contains the point and
+// that can legally accept the dragged object without exceeding the depth cap.
+function findDropContainer(targets: DropTarget[], draggedIsContainer: boolean, cx: number, cy: number): string | null {
+  const hits = targets.filter((t) => {
+    const inside = cx >= t.abs.x && cx <= t.abs.x + t.abs.w && cy >= t.abs.y && cy <= t.abs.y + t.abs.h;
+    if (!inside) return false;
+    // A leaf may nest under a depth-0 or depth-1 container (child ends at depth ≤2).
+    // A container may only nest under a depth-0 container (its leaves end at depth ≤2).
+    return draggedIsContainer ? t.depth === 0 : t.depth <= 1;
+  });
+  hits.sort((a, b) => a.abs.w * a.abs.h - b.abs.w * b.abs.h);
+  return hits[0]?.id ?? null;
+}
+
 // ── canvas with interactive overlay ──────────────────────────────────────────
 
 interface DragState {
@@ -170,11 +314,77 @@ interface DragState {
   start: LayoutObject;
   px: number;
   py: number;
+  /** Rendered px size of the dragged object's PARENT box (canvas for top-level). */
+  parentW: number;
+  parentH: number;
+  /** Nesting depth of the dragged object (top-level = 0). */
+  depth: number;
+  /** Only top-level objects can be dropped into a container. */
+  canReparent: boolean;
+  /** Container drop targets captured at drag start. */
+  targets: DropTarget[];
+}
+
+// One overlay box (selection outline + move/resize handles), positioned in % of
+// its parent overlay node so nested children resolve correctly. Recurses for a
+// container's children.
+function OverlayNode({
+  o, parentAbs, depth, selectedId, onStart,
+}: {
+  o: LayoutObject;
+  parentAbs: FracRect;
+  depth: number;
+  selectedId: string | null;
+  onStart: (e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) => void;
+}) {
+  const sel = o.id === selectedId;
+  const abs = depth === 0 ? { x: o.x, y: o.y, w: o.w, h: o.h } : composeRect(parentAbs, o);
+  const kids = o.children?.length ? [...o.children].sort((a, b) => a.z - b.z) : null;
+  return (
+    <div
+      onPointerDown={(e) => onStart(e, o, "move", parentAbs, depth)}
+      className="absolute"
+      style={{
+        left: `${o.x * 100}%`, top: `${o.y * 100}%`,
+        width: `${o.w * 100}%`, height: `${o.h * 100}%`,
+        cursor: "move",
+        outline: sel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
+        outlineOffset: 0,
+        boxShadow: sel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
+      }}
+    >
+      <span
+        style={{
+          position: "absolute", top: 0, left: 0, transform: "translateY(-100%)",
+          fontSize: 10, lineHeight: "14px", padding: "0 5px", maxWidth: "100%",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          background: sel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
+          borderRadius: "4px 4px 0 0", pointerEvents: "none",
+        }}
+      >
+        {TYPE_LABELS[o.config.type]}
+      </span>
+      {sel &&
+        HANDLES.map((h) => {
+          const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2 };
+          if (h.includes("n")) pos.top = -5;
+          if (h.includes("s")) pos.bottom = -5;
+          if (h.includes("w")) pos.left = -5;
+          if (h.includes("e")) pos.right = -5;
+          if (h === "n" || h === "s") pos.left = "calc(50% - 4.5px)";
+          if (h === "e" || h === "w") pos.top = "calc(50% - 4.5px)";
+          return <div key={h} onPointerDown={(e) => onStart(e, o, h, parentAbs, depth)} style={{ ...pos, cursor: handleCursor(h) }} />;
+        })}
+      {kids?.map((c) => (
+        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} onStart={onStart} />
+      ))}
+    </div>
+  );
 }
 
 function EditorCanvas({
   canvas, objects, selectedId, gridOn, ctx, ndiSource, interactive,
-  onSelect, onGeom, onCommitStart,
+  onSelect, onGeom, onCommitStart, onReparent,
 }: {
   canvas: LayoutCanvas;
   objects: LayoutObject[];
@@ -187,6 +397,10 @@ function EditorCanvas({
   onSelect: (id: string | null) => void;
   onGeom: (id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => void;
   onCommitStart: () => void;
+  /** Drop a top-level object into a container (reparent on drag release).
+   *  `objAbs` is the object's final absolute canvas rect; `containerAbs` the
+   *  container's absolute rect — together they give the new parent-local geom. */
+  onReparent: (id: string, containerId: string, objAbs: FracRect, containerAbs: FracRect) => void;
 }) {
   // Measure the available area (this wrapper), then letterbox the design canvas to
   // fit BOTH axes so it never overflows on ultrawide/portrait/short screens.
@@ -205,40 +419,75 @@ function EditorCanvas({
   const boxW = canvas.width * scale;
   const boxH = canvas.height * scale;
   const [drag, setDrag] = useState<DragState | null>(null);
+  // Latest local geom set during the active drag (so pointerup can hit-test the
+  // drop without depending on the parent's async state update).
+  const dragGeom = useRef<Pick<LayoutObject, "x" | "y" | "w" | "h"> | null>(null);
 
   // Window-level move/up while dragging.
   useEffect(() => {
     if (!drag || boxW <= 0) return;
+    // Deltas are fractions of the dragged object's PARENT box; snap is disabled
+    // inside a container (the canvas grid is drawn at canvas scale and wouldn't
+    // line up with per-container snapping).
+    const snapOn = gridOn && drag.depth === 0;
     const onMove = (e: globalThis.PointerEvent) => {
-      const dx = (e.clientX - drag.px) / boxW;
-      const dy = (e.clientY - drag.py) / boxH;
+      const dx = (e.clientX - drag.px) / drag.parentW;
+      const dy = (e.clientY - drag.py) / drag.parentH;
+      let geom: Pick<LayoutObject, "x" | "y" | "w" | "h">;
       if (drag.mode === "move") {
-        const x = clamp(snap(drag.start.x + dx, gridOn), 0, 1 - drag.start.w);
-        const y = clamp(snap(drag.start.y + dy, gridOn), 0, 1 - drag.start.h);
-        onGeom(drag.id, { x, y, w: drag.start.w, h: drag.start.h });
+        const x = clamp(snap(drag.start.x + dx, snapOn), 0, 1 - drag.start.w);
+        const y = clamp(snap(drag.start.y + dy, snapOn), 0, 1 - drag.start.h);
+        geom = { x, y, w: drag.start.w, h: drag.start.h };
       } else {
         const g = applyResize(drag.start, drag.mode, dx, dy);
-        onGeom(drag.id, {
-          x: snap(g.x, gridOn), y: snap(g.y, gridOn),
-          w: snap(g.w, gridOn), h: snap(g.h, gridOn),
-        });
+        geom = { x: snap(g.x, snapOn), y: snap(g.y, snapOn), w: snap(g.w, snapOn), h: snap(g.h, snapOn) };
       }
+      dragGeom.current = geom;
+      onGeom(drag.id, geom);
     };
-    const onUp = () => setDrag(null);
+    const onUp = () => {
+      const g = dragGeom.current;
+      // Only a top-level object dropped onto a container reparents into it.
+      if (drag.mode === "move" && drag.canReparent && g) {
+        const cx = g.x + g.w / 2;
+        const cy = g.y + g.h / 2;
+        const target = findDropContainer(drag.targets, drag.start.config.type === "container", cx, cy);
+        const t = target ? drag.targets.find((x) => x.id === target) : null;
+        // A top-level object's local geom IS its absolute canvas rect.
+        if (t) onReparent(drag.id, t.id, { x: g.x, y: g.y, w: g.w, h: g.h }, t.abs);
+      }
+      dragGeom.current = null;
+      setDrag(null);
+    };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [drag, boxW, boxH, gridOn, onGeom]);
+  }, [drag, boxW, boxH, gridOn, onGeom, onReparent]);
 
-  function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle) {
+  function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) {
     e.stopPropagation();
     e.preventDefault();
     onSelect(o.id);
     onCommitStart();
-    setDrag({ id: o.id, mode, start: o, px: e.clientX, py: e.clientY });
+    // Snapshot container drop targets, excluding the dragged object and its own
+    // subtree (can't drop a container into itself or its descendant).
+    const excluded = new Set<string>();
+    const dragged = findById(objects, o.id);
+    const collect = (n: LayoutObject) => { excluded.add(n.id); n.children?.forEach(collect); };
+    if (dragged) collect(dragged);
+    const targets: DropTarget[] = [];
+    forEachWithRect(objects, (n) => {
+      if (n.o.config.type === "container" && !excluded.has(n.o.id)) targets.push({ id: n.o.id, abs: n.abs, depth: n.depth });
+    });
+    dragGeom.current = { x: o.x, y: o.y, w: o.w, h: o.h };
+    setDrag({
+      id: o.id, mode, start: o, px: e.clientX, py: e.clientY,
+      parentW: parentAbs.w * boxW, parentH: parentAbs.h * boxH,
+      depth, canReparent: depth === 0, targets,
+    });
   }
 
   const sorted = [...objects].sort((a, b) => a.z - b.z);
@@ -282,72 +531,25 @@ function EditorCanvas({
             }}
           >
             {sorted.map((o) => (
-              <div
-                key={o.id}
-                style={{
-                  position: "absolute",
-                  left: o.x * canvas.width, top: o.y * canvas.height,
-                  width: o.w * canvas.width, height: o.h * canvas.height,
-                  opacity: o.hidden ? 0.25 : 1,
-                  ...boxStyle(o, canvas.height),
-                }}
-              >
-                <ObjectContent o={o} ctx={fullCtx} />
-              </div>
+              <EditorObject key={o.id} o={o} ctx={fullCtx} />
             ))}
           </div>
 
-          {/* Interaction overlay (rendered px) — edit mode only */}
+          {/* Interaction overlay (rendered px) — edit mode only. Recursive so a
+              container's children are individually selectable/draggable; the
+              overlay is unclipped so name-tags and handles stay visible. */}
           {interactive && (
             <div className="absolute inset-0">
-              {sorted.map((o) => {
-                const sel = o.id === selectedId;
-                return (
-                  <div
-                    key={o.id}
-                    onPointerDown={(e) => startDrag(e, o, "move")}
-                    className="absolute"
-                    style={{
-                      left: `${o.x * 100}%`, top: `${o.y * 100}%`,
-                      width: `${o.w * 100}%`, height: `${o.h * 100}%`,
-                      cursor: "move",
-                      outline: sel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
-                      outlineOffset: 0,
-                      boxShadow: sel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
-                    }}
-                  >
-                    {/* Name tag so objects are easy to tell apart */}
-                    <span
-                      style={{
-                        position: "absolute", top: 0, left: 0, transform: "translateY(-100%)",
-                        fontSize: 10, lineHeight: "14px", padding: "0 5px", maxWidth: "100%",
-                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                        background: sel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
-                        borderRadius: "4px 4px 0 0", pointerEvents: "none",
-                      }}
-                    >
-                      {TYPE_LABELS[o.config.type]}
-                    </span>
-                    {sel &&
-                      HANDLES.map((h) => {
-                        const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2 };
-                        if (h.includes("n")) pos.top = -5;
-                        if (h.includes("s")) pos.bottom = -5;
-                        if (h.includes("w")) pos.left = -5;
-                        if (h.includes("e")) pos.right = -5;
-                        if (h === "n" || h === "s") { pos.left = "calc(50% - 4.5px)"; }
-                        if (h === "e" || h === "w") { pos.top = "calc(50% - 4.5px)"; }
-                        return (
-                          <div
-                            key={h}
-                            onPointerDown={(e) => startDrag(e, o, h)}
-                            style={{ ...pos, cursor: handleCursor(h) }}
-                          />
-                        );
-                      })}
-                  </div>
-                );
-              })}
+              {sorted.map((o) => (
+                <OverlayNode
+                  key={o.id}
+                  o={o}
+                  parentAbs={CANVAS_FRAC}
+                  depth={0}
+                  selectedId={selectedId}
+                  onStart={startDrag}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -430,6 +632,30 @@ export function LayoutEditor({
   const [isEditing, setIsEditing] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
 
+  // The editor lives inside a scrolling settings panel whose height doesn't
+  // cleanly clamp our flex chain (Radix ScrollArea wraps content in a content-
+  // sized box, so `h-full` grows with content). Without a fixed height the row
+  // would size to whichever column is taller — so selecting an object with a tall
+  // inspector stretched the canvas cell and re-centered the design, making it jump.
+  // Measure the body's available viewport height and pin it so only the side panel
+  // scrolls and the canvas stays put. `top` is stable (toolbar above is fixed), so
+  // this isn't circular with the height we set.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [bodyH, setBodyH] = useState<number | null>(null);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => {
+      const top = el.getBoundingClientRect().top;
+      setBodyH(Math.max(240, Math.round(window.innerHeight - top - 16)));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    const ro = new ResizeObserver(measure);
+    if (el.parentElement) ro.observe(el.parentElement);
+    return () => { window.removeEventListener("resize", measure); ro.disconnect(); };
+  }, [isEditing]);
+
   const currentLayout = (): LayoutDTO => ({ version: 1, canvas, objects });
 
   function discardChanges() {
@@ -447,13 +673,31 @@ export function LayoutEditor({
   }
   function loadTemplate(t: LayoutTemplate) {
     pushHistory();
-    setObjects(t.layout.objects.map((o) => ({ ...o, id: uid() })));
+    setObjects(t.layout.objects.map((o) => deepCloneFreshIds(o, uid)));
+    setSelectedId(null);
+    setDirty(true);
+  }
+  // Replace the layout with the built-in dashboard starter (editable nested tiles).
+  function startFromDashboard() {
+    pushHistory();
+    setObjects(dashboardTemplate());
     setSelectedId(null);
     setDirty(true);
   }
 
-  const selected = objects.find((o) => o.id === selectedId) ?? null;
+  const selected = findById(objects, selectedId);
+  // Max z among the TOP-LEVEL scope (for adding/duplicating top-level objects).
   const zTop = objects.reduce((m, o) => Math.max(m, o.z), 0);
+
+  // Absolute (canvas-space) rect of the selected object's PARENT — the canvas for
+  // a top-level object, or the containing container's box for a nested child. Used
+  // to show position/size in parent-relative px and to reparent the child out.
+  let selParentAbs: FracRect = { x: 0, y: 0, w: 1, h: 1 };
+  const selDepth = selected ? depthOf(objects, selected.id) : 0;
+  if (selected && selDepth > 0) {
+    const parent = getParentOf(objects, selected.id);
+    if (parent) forEachWithRect(objects, (n) => { if (n.o.id === parent.id) selParentAbs = n.abs; });
+  }
 
   const pushHistory = useCallback(() => {
     setHistory((h) => [...h.slice(-49), objects]);
@@ -461,50 +705,112 @@ export function LayoutEditor({
   }, [objects]);
 
   function update(id: string, patch: Partial<LayoutObject>) {
-    setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, ...patch })));
   }
   function updateStyle(id: string, patch: Partial<LayoutStyle>) {
-    setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, style: { ...o.style, ...patch } } : o)));
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, style: { ...o.style, ...patch } })));
   }
   function updateConfig(id: string, config: LayoutObjectConfig) {
-    setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, config } : o)));
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, config })));
   }
   // Geometry updates during a drag don't each push history (startDrag already did).
   const onGeom = useCallback((id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => {
-    setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, ...geom } : o)));
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, ...geom })));
     setDirty(true);
   }, []);
 
   function addObject(type: LayoutObjectType) {
     pushHistory();
-    const o = makeObject(type, zTop);
-    setObjects((prev) => [...prev, o]);
-    setSelectedId(o.id);
+    // If a container is selected (and nesting stays within the depth cap), add the
+    // new object INTO it; otherwise add at the top level.
+    const intoId = selected && selected.config.type === "container" ? selected.id : null;
+    const targetDepth = intoId ? depthOf(objects, intoId) + 1 : 0;
+    const canNest =
+      intoId != null && targetDepth <= MAX_DEPTH && !(type === "container" && targetDepth >= MAX_DEPTH);
+    if (canNest && intoId) {
+      const siblingMaxZ = (selected?.children ?? []).reduce((m, o) => Math.max(m, o.z), 0);
+      // Default a new child to a centered box inside the container's local space.
+      const geom = type === "container" ? { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } : { x: 0.1, y: 0.3, w: 0.8, h: 0.4 };
+      const child = makeObject(type, siblingMaxZ + 1, geom);
+      setObjects((prev) => insertChild(prev, intoId, child));
+      setSelectedId(child.id);
+    } else {
+      const o = makeObject(type, zTop + 1);
+      setObjects((prev) => [...prev, o]);
+      setSelectedId(o.id);
+    }
   }
   function removeObject(id: string) {
     pushHistory();
-    setObjects((prev) => prev.filter((o) => o.id !== id));
+    setObjects((prev) => removeById(prev, id).tree);
     if (selectedId === id) setSelectedId(null);
   }
   function duplicateObject(id: string) {
-    const src = objects.find((o) => o.id === id);
+    const src = findById(objects, id);
     if (!src) return;
     pushHistory();
-    const copy: LayoutObject = { ...src, id: uid(), x: clamp(src.x + 0.03, 0, 1 - src.w), y: clamp(src.y + 0.03, 0, 1 - src.h), z: zTop + 1 };
-    setObjects((prev) => [...prev, copy]);
+    const siblings = getSiblings(objects, id);
+    const z = siblings.reduce((m, o) => Math.max(m, o.z), 0) + 1;
+    const copy: LayoutObject = {
+      ...deepCloneFreshIds(src, uid),
+      x: clamp(src.x + 0.03, 0, 1 - src.w),
+      y: clamp(src.y + 0.03, 0, 1 - src.h),
+      z,
+    };
+    const parent = getParentOf(objects, id);
+    setObjects((prev) => (parent ? insertChild(prev, parent.id, copy) : [...prev, copy]));
     setSelectedId(copy.id);
   }
-  function reorder(id: string, dir: "front" | "back" | "up" | "down") {
+  // Move a nested object out to the top level, keeping its on-screen position by
+  // converting its parent-local rect to an absolute canvas rect.
+  function reparentToRoot(id: string) {
+    let abs: FracRect | null = null;
+    forEachWithRect(objects, (n) => { if (n.o.id === id) abs = n.abs; });
+    if (!abs) return;
+    const placed: FracRect = abs;
     pushHistory();
     setObjects((prev) => {
-      const sorted = [...prev].sort((a, b) => a.z - b.z);
+      const { tree, removed } = removeById(prev, id);
+      if (!removed) return prev;
+      const z = tree.reduce((m, o) => Math.max(m, o.z), 0) + 1;
+      return [...tree, { ...removed, x: placed.x, y: placed.y, w: placed.w, h: placed.h, z }];
+    });
+  }
+  // Drop a top-level object into a container, converting its absolute canvas rect
+  // to a parent-local rect so it stays put. Stable identity (no deps) so the
+  // canvas drag effect doesn't re-subscribe its window listeners mid-drag. The
+  // move gesture already pushed history at drag start, so this doesn't push again.
+  const reparentIntoContainer = useCallback((id: string, containerId: string, objAbs: FracRect, contAbs: FracRect) => {
+    setObjects((prev) => {
+      const { tree, removed } = removeById(prev, id);
+      if (!removed) return prev;
+      const local = localizeRect(contAbs, objAbs);
+      const w = Math.min(local.w, 1);
+      const h = Math.min(local.h, 1);
+      const cont = findById(tree, containerId);
+      const z = (cont?.children ?? []).reduce((m, o) => Math.max(m, o.z), 0) + 1;
+      return insertChild(tree, containerId, { ...removed, x: clamp(local.x, 0, 1 - w), y: clamp(local.y, 0, 1 - h), w, h, z });
+    });
+    setDirty(true);
+    setSelectedId(id);
+  }, []);
+  function reorder(id: string, dir: "front" | "back" | "up" | "down") {
+    pushHistory();
+    const reorderScope = (list: LayoutObject[]): LayoutObject[] => {
+      const sorted = [...list].sort((a, b) => a.z - b.z);
       const idx = sorted.findIndex((o) => o.id === id);
-      if (idx === -1) return prev;
+      if (idx === -1) return list;
       if (dir === "front") sorted.push(sorted.splice(idx, 1)[0]);
       else if (dir === "back") sorted.unshift(sorted.splice(idx, 1)[0]);
       else if (dir === "up" && idx < sorted.length - 1) [sorted[idx], sorted[idx + 1]] = [sorted[idx + 1], sorted[idx]];
       else if (dir === "down" && idx > 0) [sorted[idx], sorted[idx - 1]] = [sorted[idx - 1], sorted[idx]];
       return sorted.map((o, i) => ({ ...o, z: i + 1 }));
+    };
+    setObjects((prev) => {
+      const parent = getParentOf(prev, id);
+      return parent
+        ? mapById(prev, parent.id, (p) => ({ ...p, children: reorderScope(p.children ?? []) }))
+        : reorderScope(prev);
     });
   }
   function undo() {
@@ -533,7 +839,7 @@ export function LayoutEditor({
     return (...a: T) => { pushHistory(); fn(...a); };
   }
 
-  const layersDesc = [...objects].sort((a, b) => b.z - a.z);
+  const layerRows = flattenLayers(objects);
 
   return (
     <div className="flex flex-col gap-3 @container h-full min-h-0">
@@ -579,6 +885,9 @@ export function LayoutEditor({
         <Button variant="filled" size="small" onClick={undo} disabled={history.length === 0}>
           <UndoIcon className="size-3.5" /> Undo
         </Button>
+        <Button variant="filled" size="small" onClick={startFromDashboard} title="Replace the layout with the dashboard design as editable tiles">
+          <LayoutTemplateIcon className="size-3.5" /> Start from Dashboard
+        </Button>
 
         {templates.length > 0 && (
           <Select
@@ -620,9 +929,9 @@ export function LayoutEditor({
       </div>
       )}
 
-      <div className="flex gap-3 @max-4xl:flex-col flex-1 min-h-0">
+      <div ref={bodyRef} className="flex gap-3 @max-4xl:flex-col flex-1 min-h-0" style={bodyH ? { height: bodyH, flex: "none" } : undefined}>
         {/* Canvas */}
-        <div className="flex-1 min-w-0 min-h-0">
+        <div className="flex-1 min-w-0 min-h-0 @max-4xl:flex-[0_0_55%]">
           {data.state ? (
             <EditorCanvas
               canvas={canvas}
@@ -635,6 +944,7 @@ export function LayoutEditor({
               onSelect={setSelectedId}
               onGeom={onGeom}
               onCommitStart={pushHistory}
+              onReparent={reparentIntoContainer}
             />
           ) : (
             <div className="w-full h-full rounded-xl border border-gray-a4 flex items-center justify-center text-gray-7">
@@ -645,19 +955,34 @@ export function LayoutEditor({
 
         {/* Side panel: layers + inspector (edit mode only) */}
         {isEditing && (
-        <div className="w-64 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full @max-4xl:shrink">
+        <div className="w-64 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full @max-4xl:flex-1">
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Layers</span>
-            {layersDesc.length === 0 && <span className="text-caption2 text-gray-7">No objects yet — add one above.</span>}
-            {layersDesc.map((o) => (
+            {layerRows.length === 0 && <span className="text-caption2 text-gray-7">No objects yet — add one above.</span>}
+            {layerRows.map(({ o, depth }) => (
               <button
                 key={o.id}
                 type="button"
                 onClick={() => setSelectedId(o.id)}
-                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-left ${o.id === selectedId ? "bg-gray-a4" : "hover:bg-gray-a3"}`}
+                style={{ paddingLeft: 8 + depth * 14 }}
+                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left ${o.id === selectedId ? "bg-gray-a4" : "hover:bg-gray-a3"}`}
               >
-                <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">{TYPE_LABELS[o.config.type]}</span>
+                <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">
+                  {o.config.type === "container" ? `${TYPE_LABELS[o.config.type]} (${o.children?.length ?? 0})` : TYPE_LABELS[o.config.type]}
+                </span>
+                {depth > 0 && (
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    onClick={(e) => { e.stopPropagation(); reparentToRoot(o.id); }}
+                    className="text-gray-9 hover:text-gray-12"
+                    aria-label="Move out of container"
+                    title="Move out of container"
+                  >
+                    <CornerLeftUpIcon className="size-3.5" />
+                  </span>
+                )}
                 <span
                   role="button"
                   tabIndex={-1}
@@ -678,6 +1003,9 @@ export function LayoutEditor({
                 key={selected.id}
                 o={selected}
                 canvas={canvas}
+                parentW={selParentAbs.w * canvas.width}
+                parentH={selParentAbs.h * canvas.height}
+                nested={selDepth > 0}
                 slotsViews={slotsViews}
                 onGeom={(g) => { /* numeric position edits */ pushHistory(); update(selected.id, g); }}
                 onStyle={withHistory((patch: Partial<LayoutStyle>) => updateStyle(selected.id, patch))}
@@ -685,6 +1013,7 @@ export function LayoutEditor({
                 onReorder={(d) => reorder(selected.id, d)}
                 onDuplicate={() => duplicateObject(selected.id)}
                 onRemove={() => removeObject(selected.id)}
+                onReparentOut={() => reparentToRoot(selected.id)}
               />
             </>
           )}
@@ -887,10 +1216,15 @@ function PlanAttachmentConfig({
 }
 
 function Inspector({
-  o, canvas, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove,
+  o, canvas, parentW, parentH, nested, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove, onReparentOut,
 }: {
   o: LayoutObject;
   canvas: LayoutCanvas;
+  /** Design-px size of this object's parent box (the canvas for top-level). */
+  parentW: number;
+  parentH: number;
+  /** True when this object lives inside a container. */
+  nested: boolean;
   slotsViews: View[];
   onGeom: (g: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h">>) => void;
   onStyle: (patch: Partial<LayoutStyle>) => void;
@@ -898,12 +1232,16 @@ function Inspector({
   onReorder: (d: "front" | "back" | "up" | "down") => void;
   onDuplicate: () => void;
   onRemove: () => void;
+  onReparentOut: () => void;
 }) {
   const s = o.style ?? {};
   const c = o.config;
   const chargerBays = useStageState().state?.chargerBays ?? [];
   const spl = useSplState();
-  const isText = !["shape", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
+  const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
+  // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
+  // to 1 decimal so they read as whole numbers but still allow fine values).
+  const pxOf = (frac: number | undefined, dflt: number) => Math.round((frac ?? dflt) * canvas.height * 10) / 10;
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -914,6 +1252,12 @@ function Inspector({
         <Button variant="transparent" size="small" iconOnly onClick={onDuplicate} aria-label="Duplicate"><CopyIcon className="size-3.5 text-gray-9" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={onRemove} aria-label="Delete"><Trash2Icon className="size-3.5 text-red-10" /></Button>
       </div>
+
+      {nested && (
+        <Button variant="filled" size="small" onClick={onReparentOut}>
+          <CornerLeftUpIcon className="size-3.5" /> Move out of container
+        </Button>
+      )}
 
       {/* Binding */}
       {c.type === "text" && (
@@ -1070,10 +1414,20 @@ function Inspector({
 
       <Separator />
 
+      {/* Card style presets — one-click dashboard "glass tile" look on any object,
+          and "Flat" to clear it back. Just writes the shared style fields below. */}
+      <Row label="Card">
+        <div className="flex flex-wrap gap-1">
+          {([["neutral", "Glass"], ["green", "Green"], ["red", "Red"], ["amber", "Amber"], ["flat", "Flat"]] as [CardAccent, string][]).map(([a, label]) => (
+            <Button key={a} variant="filled" size="small" onClick={() => onStyle(CARD_PRESETS[a])}>{label}</Button>
+          ))}
+        </div>
+      </Row>
+
       {/* Style */}
       {isText && (
         <>
-          <Row label="Font size"><NumberInput value={s.fontSize ?? 0.05} step={0.005} min={0.01} max={0.5} onChange={(v) => onStyle({ fontSize: v })} /></Row>
+          <Row label="Font size"><NumberField value={pxOf(s.fontSize, 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
           <Row label="Weight">
             <Select value={String(s.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1103,9 +1457,23 @@ function Inspector({
       <Row label="Fill"><input type="color" value={s.background ?? "#000000"} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent" />
         <Button variant="transparent" size="small" onClick={() => onStyle({ background: null })}>Clear</Button>
       </Row>
-      <Row label="Opacity"><NumberInput value={s.opacity ?? 1} step={0.05} min={0} max={1} onChange={(v) => onStyle({ opacity: v })} /></Row>
-      <Row label="Radius"><NumberInput value={s.cornerRadius ?? 0} step={0.005} min={0} max={0.5} onChange={(v) => onStyle({ cornerRadius: v })} /></Row>
-      <Row label="Padding"><NumberInput value={s.padding ?? 0} step={0.005} min={0} max={0.3} onChange={(v) => onStyle({ padding: v })} /></Row>
+      <Row label="Opacity">
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={Math.round((s.opacity ?? 1) * 100)}
+          onChange={(e) => onStyle({ opacity: parseInt(e.target.value, 10) / 100 })}
+          className="flex-1 min-w-0 accent-blue-9"
+          aria-label="Opacity"
+        />
+        <div className="w-16 shrink-0">
+          <NumberField value={Math.round((s.opacity ?? 1) * 100)} step={1} min={0} max={100} suffix="%" onChange={(v) => onStyle({ opacity: clamp(v / 100, 0, 1) })} />
+        </div>
+      </Row>
+      <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
+      <Row label="Padding"><NumberField value={pxOf(s.padding, 0)} step={1} min={0} max={Math.round(0.3 * canvas.height)} suffix="px" onChange={(px) => onStyle({ padding: px / canvas.height })} /></Row>
       <Row label="Border">
         <input
           type="color"
@@ -1126,7 +1494,7 @@ function Inspector({
 
       <Separator />
 
-      {/* Align to canvas */}
+      {/* Align within the parent (canvas for top-level, container box if nested) */}
       <Row label="Align">
         <ButtonGroup>
           <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ x: 0 })} aria-label="Align left" title="Align left"><AlignStartVertical className="size-3.5" /></Button>
@@ -1140,13 +1508,15 @@ function Inspector({
         </ButtonGroup>
       </Row>
 
-      {/* Position & size in design-canvas pixels */}
-      <span className="text-caption2 text-gray-9">Position &amp; size ({canvas.width}×{canvas.height})</span>
+      {/* Position & size in design-px of the parent box (canvas for top-level) */}
+      <span className="text-caption2 text-gray-9">
+        Position &amp; size ({Math.round(parentW)}×{Math.round(parentH)}{nested ? " · in container" : ""})
+      </span>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-        <PixelField label="X" value={o.x} dim={canvas.width} onChange={(v) => onGeom({ x: clamp(v, 0, 1 - o.w) })} />
-        <PixelField label="Y" value={o.y} dim={canvas.height} onChange={(v) => onGeom({ y: clamp(v, 0, 1 - o.h) })} />
-        <PixelField label="W" value={o.w} dim={canvas.width} onChange={(v) => onGeom({ w: clamp(v, MIN, 1 - o.x) })} />
-        <PixelField label="H" value={o.h} dim={canvas.height} onChange={(v) => onGeom({ h: clamp(v, MIN, 1 - o.y) })} />
+        <PixelField label="X" value={o.x} dim={parentW} onChange={(v) => onGeom({ x: clamp(v, 0, 1 - o.w) })} />
+        <PixelField label="Y" value={o.y} dim={parentH} onChange={(v) => onGeom({ y: clamp(v, 0, 1 - o.h) })} />
+        <PixelField label="W" value={o.w} dim={parentW} onChange={(v) => onGeom({ w: clamp(v, MIN, 1 - o.x) })} />
+        <PixelField label="H" value={o.h} dim={parentH} onChange={(v) => onGeom({ h: clamp(v, MIN, 1 - o.y) })} />
       </div>
     </div>
   );
