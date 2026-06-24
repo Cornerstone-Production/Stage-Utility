@@ -40,7 +40,18 @@ import {
   DialogFooter,
 } from "../../components/ui";
 import { ObjectContent, boxStyle, useLayoutData, loadProcessedAttachment, type LayoutRenderCtx } from "../../main/layout-renderer";
-import { deepCloneFreshIds } from "../../main/layout-tree";
+import {
+  findById,
+  mapById,
+  removeById,
+  getParentOf,
+  getSiblings,
+  insertChild,
+  depthOf,
+  forEachWithRect,
+  deepCloneFreshIds,
+  type FracRect,
+} from "../../main/layout-tree";
 import { useSplState } from "../../main/use-spl-state";
 import { useStageState } from "../../main/use-stage-state";
 
@@ -70,11 +81,27 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   container: "Container",
 };
 const PALETTE: LayoutObjectType[] = [
-  "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
+  "container", "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
   "current-service-item", "next-service-item",
   "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
   "transcript-strip", "charger-battery", "spl-meter", "brand-logo", "image", "plan-attachment", "shape",
 ];
+
+// Deepest allowed object depth (top-level = 0). A container holding objects = 1;
+// a container holding containers holding leaves = 2. Keeps the editor sane.
+const MAX_DEPTH = 2;
+
+// Dashboard "glass tile" look, expressed in the style fields every object shares.
+// Border/radius/padding are fractions of canvas HEIGHT (≈1px / 16px on a 1080 canvas).
+// Reused by the container default style and the Phase C preset buttons.
+type CardAccent = "neutral" | "green" | "red" | "amber" | "flat";
+const CARD_PRESETS: Record<CardAccent, LayoutStyle> = {
+  neutral: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
+  green: { background: "rgba(45,212,150,0.08)", borderColor: "rgba(45,212,150,0.13)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
+  red: { background: "rgba(229,72,77,0.10)", borderColor: "rgba(229,72,77,0.25)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
+  amber: { background: "rgba(255,197,61,0.08)", borderColor: "rgba(255,197,61,0.20)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
+  flat: { background: null, borderColor: null, borderWidth: 0, cornerRadius: 0, padding: 0 },
+};
 
 function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
   switch (type) {
@@ -89,12 +116,14 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "image": return { type: "image", src: "" };
     case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
     case "shape": return { type: "shape", shape: "rect" };
+    case "container": return { type: "container" };
     default: return { type } as LayoutObjectConfig;
   }
 }
 
 function defaultStyle(type: LayoutObjectType): LayoutStyle {
   if (type === "shape") return { background: "#3b82f6", opacity: 1 };
+  if (type === "container") return { ...CARD_PRESETS.neutral };
   if (type === "ndi-video" || type === "slide-thumbnail" || type === "image" || type === "plan-attachment" || type === "brand-logo" || type === "live-controls") return {};
   // Captions read left-aligned and bottom-anchored, like the dedicated display.
   if (type === "transcript-strip") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "bottom" };
@@ -115,11 +144,18 @@ function uid(): string {
   return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function makeObject(type: LayoutObjectType, zTop: number): LayoutObject {
+function makeObject(
+  type: LayoutObjectType,
+  z: number,
+  geom?: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h">>,
+): LayoutObject {
+  // Containers default to a card-sized box; everything else keeps the old default.
+  const base = type === "container" ? { x: 0.3, y: 0.32, w: 0.4, h: 0.32 } : { x: 0.35, y: 0.42, w: 0.3, h: 0.16 };
   return {
     id: uid(),
-    x: 0.35, y: 0.42, w: 0.3, h: 0.16,
-    z: zTop + 1,
+    ...base,
+    ...geom,
+    z,
     config: defaultConfig(type),
     style: defaultStyle(type),
   };
@@ -162,6 +198,37 @@ function applyResize(start: LayoutObject, h: Handle, dx: number, dy: number): Pi
   w = Math.min(w, 1 - x);
   hh = Math.min(hh, 1 - y);
   return { x, y, w, h: hh };
+}
+
+// Recursive visual render for the editor canvas. Mirrors the renderer's
+// RenderObject but DIMS hidden objects (by their own flag only) instead of
+// removing them, so the editor still shows hidden layers faintly.
+function EditorObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
+  const kids = o.children?.length ? [...o.children].sort((a, b) => a.z - b.z) : null;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: `${o.x * 100}%`, top: `${o.y * 100}%`,
+        width: `${o.w * 100}%`, height: `${o.h * 100}%`,
+        ...boxStyle(o, ctx.H),
+        opacity: (o.style?.opacity ?? 1) * (o.hidden ? 0.25 : 1),
+      }}
+    >
+      {kids ? kids.map((c) => <EditorObject key={c.id} o={c} ctx={ctx} />) : <ObjectContent o={o} ctx={ctx} />}
+    </div>
+  );
+}
+
+// Flatten the tree (parents before children, each scope by z desc) into rows with
+// a depth, for the indented Layers panel.
+function flattenLayers(nodes: LayoutObject[], depth = 0): { o: LayoutObject; depth: number }[] {
+  const out: { o: LayoutObject; depth: number }[] = [];
+  for (const o of [...nodes].sort((a, b) => b.z - a.z)) {
+    out.push({ o, depth });
+    if (o.children?.length) out.push(...flattenLayers(o.children, depth + 1));
+  }
+  return out;
 }
 
 // ── canvas with interactive overlay ──────────────────────────────────────────
@@ -284,18 +351,7 @@ function EditorCanvas({
             }}
           >
             {sorted.map((o) => (
-              <div
-                key={o.id}
-                style={{
-                  position: "absolute",
-                  left: o.x * canvas.width, top: o.y * canvas.height,
-                  width: o.w * canvas.width, height: o.h * canvas.height,
-                  opacity: o.hidden ? 0.25 : 1,
-                  ...boxStyle(o, canvas.height),
-                }}
-              >
-                <ObjectContent o={o} ctx={fullCtx} />
-              </div>
+              <EditorObject key={o.id} o={o} ctx={fullCtx} />
             ))}
           </div>
 
@@ -454,8 +510,19 @@ export function LayoutEditor({
     setDirty(true);
   }
 
-  const selected = objects.find((o) => o.id === selectedId) ?? null;
+  const selected = findById(objects, selectedId);
+  // Max z among the TOP-LEVEL scope (for adding/duplicating top-level objects).
   const zTop = objects.reduce((m, o) => Math.max(m, o.z), 0);
+
+  // Absolute (canvas-space) rect of the selected object's PARENT — the canvas for
+  // a top-level object, or the containing container's box for a nested child. Used
+  // to show position/size in parent-relative px and to reparent the child out.
+  let selParentAbs: FracRect = { x: 0, y: 0, w: 1, h: 1 };
+  const selDepth = selected ? depthOf(objects, selected.id) : 0;
+  if (selected && selDepth > 0) {
+    const parent = getParentOf(objects, selected.id);
+    if (parent) forEachWithRect(objects, (n) => { if (n.o.id === parent.id) selParentAbs = n.abs; });
+  }
 
   const pushHistory = useCallback(() => {
     setHistory((h) => [...h.slice(-49), objects]);
@@ -463,50 +530,94 @@ export function LayoutEditor({
   }, [objects]);
 
   function update(id: string, patch: Partial<LayoutObject>) {
-    setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, ...patch })));
   }
   function updateStyle(id: string, patch: Partial<LayoutStyle>) {
-    setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, style: { ...o.style, ...patch } } : o)));
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, style: { ...o.style, ...patch } })));
   }
   function updateConfig(id: string, config: LayoutObjectConfig) {
-    setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, config } : o)));
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, config })));
   }
   // Geometry updates during a drag don't each push history (startDrag already did).
   const onGeom = useCallback((id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => {
-    setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, ...geom } : o)));
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, ...geom })));
     setDirty(true);
   }, []);
 
   function addObject(type: LayoutObjectType) {
     pushHistory();
-    const o = makeObject(type, zTop);
-    setObjects((prev) => [...prev, o]);
-    setSelectedId(o.id);
+    // If a container is selected (and nesting stays within the depth cap), add the
+    // new object INTO it; otherwise add at the top level.
+    const intoId = selected && selected.config.type === "container" ? selected.id : null;
+    const targetDepth = intoId ? depthOf(objects, intoId) + 1 : 0;
+    const canNest =
+      intoId != null && targetDepth <= MAX_DEPTH && !(type === "container" && targetDepth >= MAX_DEPTH);
+    if (canNest && intoId) {
+      const siblingMaxZ = (selected?.children ?? []).reduce((m, o) => Math.max(m, o.z), 0);
+      // Default a new child to a centered box inside the container's local space.
+      const geom = type === "container" ? { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } : { x: 0.1, y: 0.3, w: 0.8, h: 0.4 };
+      const child = makeObject(type, siblingMaxZ + 1, geom);
+      setObjects((prev) => insertChild(prev, intoId, child));
+      setSelectedId(child.id);
+    } else {
+      const o = makeObject(type, zTop + 1);
+      setObjects((prev) => [...prev, o]);
+      setSelectedId(o.id);
+    }
   }
   function removeObject(id: string) {
     pushHistory();
-    setObjects((prev) => prev.filter((o) => o.id !== id));
+    setObjects((prev) => removeById(prev, id).tree);
     if (selectedId === id) setSelectedId(null);
   }
   function duplicateObject(id: string) {
-    const src = objects.find((o) => o.id === id);
+    const src = findById(objects, id);
     if (!src) return;
     pushHistory();
-    const copy: LayoutObject = { ...src, id: uid(), x: clamp(src.x + 0.03, 0, 1 - src.w), y: clamp(src.y + 0.03, 0, 1 - src.h), z: zTop + 1 };
-    setObjects((prev) => [...prev, copy]);
+    const siblings = getSiblings(objects, id);
+    const z = siblings.reduce((m, o) => Math.max(m, o.z), 0) + 1;
+    const copy: LayoutObject = {
+      ...deepCloneFreshIds(src, uid),
+      x: clamp(src.x + 0.03, 0, 1 - src.w),
+      y: clamp(src.y + 0.03, 0, 1 - src.h),
+      z,
+    };
+    const parent = getParentOf(objects, id);
+    setObjects((prev) => (parent ? insertChild(prev, parent.id, copy) : [...prev, copy]));
     setSelectedId(copy.id);
+  }
+  // Move a nested object out to the top level, keeping its on-screen position by
+  // converting its parent-local rect to an absolute canvas rect.
+  function reparentToRoot(id: string) {
+    let abs: FracRect | null = null;
+    forEachWithRect(objects, (n) => { if (n.o.id === id) abs = n.abs; });
+    if (!abs) return;
+    const placed: FracRect = abs;
+    pushHistory();
+    setObjects((prev) => {
+      const { tree, removed } = removeById(prev, id);
+      if (!removed) return prev;
+      const z = tree.reduce((m, o) => Math.max(m, o.z), 0) + 1;
+      return [...tree, { ...removed, x: placed.x, y: placed.y, w: placed.w, h: placed.h, z }];
+    });
   }
   function reorder(id: string, dir: "front" | "back" | "up" | "down") {
     pushHistory();
-    setObjects((prev) => {
-      const sorted = [...prev].sort((a, b) => a.z - b.z);
+    const reorderScope = (list: LayoutObject[]): LayoutObject[] => {
+      const sorted = [...list].sort((a, b) => a.z - b.z);
       const idx = sorted.findIndex((o) => o.id === id);
-      if (idx === -1) return prev;
+      if (idx === -1) return list;
       if (dir === "front") sorted.push(sorted.splice(idx, 1)[0]);
       else if (dir === "back") sorted.unshift(sorted.splice(idx, 1)[0]);
       else if (dir === "up" && idx < sorted.length - 1) [sorted[idx], sorted[idx + 1]] = [sorted[idx + 1], sorted[idx]];
       else if (dir === "down" && idx > 0) [sorted[idx], sorted[idx - 1]] = [sorted[idx - 1], sorted[idx]];
       return sorted.map((o, i) => ({ ...o, z: i + 1 }));
+    };
+    setObjects((prev) => {
+      const parent = getParentOf(prev, id);
+      return parent
+        ? mapById(prev, parent.id, (p) => ({ ...p, children: reorderScope(p.children ?? []) }))
+        : reorderScope(prev);
     });
   }
   function undo() {
@@ -535,7 +646,7 @@ export function LayoutEditor({
     return (...a: T) => { pushHistory(); fn(...a); };
   }
 
-  const layersDesc = [...objects].sort((a, b) => b.z - a.z);
+  const layerRows = flattenLayers(objects);
 
   return (
     <div className="flex flex-col gap-3 @container h-full min-h-0">
@@ -651,15 +762,18 @@ export function LayoutEditor({
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Layers</span>
-            {layersDesc.length === 0 && <span className="text-caption2 text-gray-7">No objects yet — add one above.</span>}
-            {layersDesc.map((o) => (
+            {layerRows.length === 0 && <span className="text-caption2 text-gray-7">No objects yet — add one above.</span>}
+            {layerRows.map(({ o, depth }) => (
               <button
                 key={o.id}
                 type="button"
                 onClick={() => setSelectedId(o.id)}
-                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-left ${o.id === selectedId ? "bg-gray-a4" : "hover:bg-gray-a3"}`}
+                style={{ paddingLeft: 8 + depth * 14 }}
+                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left ${o.id === selectedId ? "bg-gray-a4" : "hover:bg-gray-a3"}`}
               >
-                <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">{TYPE_LABELS[o.config.type]}</span>
+                <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">
+                  {o.config.type === "container" ? `${TYPE_LABELS[o.config.type]} (${o.children?.length ?? 0})` : TYPE_LABELS[o.config.type]}
+                </span>
                 <span
                   role="button"
                   tabIndex={-1}
@@ -680,6 +794,9 @@ export function LayoutEditor({
                 key={selected.id}
                 o={selected}
                 canvas={canvas}
+                parentW={selParentAbs.w * canvas.width}
+                parentH={selParentAbs.h * canvas.height}
+                nested={selDepth > 0}
                 slotsViews={slotsViews}
                 onGeom={(g) => { /* numeric position edits */ pushHistory(); update(selected.id, g); }}
                 onStyle={withHistory((patch: Partial<LayoutStyle>) => updateStyle(selected.id, patch))}
@@ -687,6 +804,7 @@ export function LayoutEditor({
                 onReorder={(d) => reorder(selected.id, d)}
                 onDuplicate={() => duplicateObject(selected.id)}
                 onRemove={() => removeObject(selected.id)}
+                onReparentOut={() => reparentToRoot(selected.id)}
               />
             </>
           )}
@@ -889,10 +1007,15 @@ function PlanAttachmentConfig({
 }
 
 function Inspector({
-  o, canvas, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove,
+  o, canvas, parentW, parentH, nested, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove, onReparentOut,
 }: {
   o: LayoutObject;
   canvas: LayoutCanvas;
+  /** Design-px size of this object's parent box (the canvas for top-level). */
+  parentW: number;
+  parentH: number;
+  /** True when this object lives inside a container. */
+  nested: boolean;
   slotsViews: View[];
   onGeom: (g: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h">>) => void;
   onStyle: (patch: Partial<LayoutStyle>) => void;
@@ -900,12 +1023,13 @@ function Inspector({
   onReorder: (d: "front" | "back" | "up" | "down") => void;
   onDuplicate: () => void;
   onRemove: () => void;
+  onReparentOut: () => void;
 }) {
   const s = o.style ?? {};
   const c = o.config;
   const chargerBays = useStageState().state?.chargerBays ?? [];
   const spl = useSplState();
-  const isText = !["shape", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
+  const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -1128,7 +1252,13 @@ function Inspector({
 
       <Separator />
 
-      {/* Align to canvas */}
+      {nested && (
+        <Button variant="filled" size="small" onClick={onReparentOut}>
+          Move out of container
+        </Button>
+      )}
+
+      {/* Align within the parent (canvas for top-level, container box if nested) */}
       <Row label="Align">
         <ButtonGroup>
           <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ x: 0 })} aria-label="Align left" title="Align left"><AlignStartVertical className="size-3.5" /></Button>
@@ -1142,13 +1272,15 @@ function Inspector({
         </ButtonGroup>
       </Row>
 
-      {/* Position & size in design-canvas pixels */}
-      <span className="text-caption2 text-gray-9">Position &amp; size ({canvas.width}×{canvas.height})</span>
+      {/* Position & size in design-px of the parent box (canvas for top-level) */}
+      <span className="text-caption2 text-gray-9">
+        Position &amp; size ({Math.round(parentW)}×{Math.round(parentH)}{nested ? " · in container" : ""})
+      </span>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-        <PixelField label="X" value={o.x} dim={canvas.width} onChange={(v) => onGeom({ x: clamp(v, 0, 1 - o.w) })} />
-        <PixelField label="Y" value={o.y} dim={canvas.height} onChange={(v) => onGeom({ y: clamp(v, 0, 1 - o.h) })} />
-        <PixelField label="W" value={o.w} dim={canvas.width} onChange={(v) => onGeom({ w: clamp(v, MIN, 1 - o.x) })} />
-        <PixelField label="H" value={o.h} dim={canvas.height} onChange={(v) => onGeom({ h: clamp(v, MIN, 1 - o.y) })} />
+        <PixelField label="X" value={o.x} dim={parentW} onChange={(v) => onGeom({ x: clamp(v, 0, 1 - o.w) })} />
+        <PixelField label="Y" value={o.y} dim={parentH} onChange={(v) => onGeom({ y: clamp(v, 0, 1 - o.h) })} />
+        <PixelField label="W" value={o.w} dim={parentW} onChange={(v) => onGeom({ w: clamp(v, MIN, 1 - o.x) })} />
+        <PixelField label="H" value={o.h} dim={parentH} onChange={(v) => onGeom({ h: clamp(v, MIN, 1 - o.y) })} />
       </div>
     </div>
   );
