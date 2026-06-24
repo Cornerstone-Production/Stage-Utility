@@ -281,7 +281,7 @@ function CompanionPanel() {
   const state = data?.states.find((s) => s.id === "companion");
   if (!state) return null;
   return (
-    <FieldSet title="Bitfocus Companion">
+    <FieldSet>
       <CompanionInfoPanel state={state} />
     </FieldSet>
   );
@@ -316,8 +316,6 @@ export function AdvancedSection({
         onDismissJustUpdated={onDismissJustUpdated}
       />
 
-      <CompanionPanel />
-
       <FieldSet title="Advanced">
         <FieldGroup>
           <Field orientation="vertical">
@@ -343,6 +341,8 @@ export function AdvancedSection({
           </Field>
         </FieldGroup>
       </FieldSet>
+
+      <CompanionPanel />
     </div>
   );
 }
