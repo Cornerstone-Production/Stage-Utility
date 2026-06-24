@@ -161,7 +161,12 @@ export type LayoutObjectConfig =
   | { type: "current-slide-notes" }
   | { type: "slide-thumbnail" }
   | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }
-  | { type: "slots-grid"; sourceViewId?: string | null } // embed a slots-View's grid
+  // Mic-slots grid. `source: "view"` embeds an existing slots-View's grid by
+  // `sourceViewId`; `source: "inline"` defines its own slot set, stored per service
+  // type keyed by this object's id (resolved into `StageState.slotsByLayoutObject`),
+  // with `slotsLayout` holding its physical-inch alignment. Missing `source` ==
+  // "view" (back-compat with existing objects).
+  | { type: "slots-grid"; source?: "view" | "inline"; sourceViewId?: string | null; slotsLayout?: SlotsLayout | null }
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
   | { type: "live-controls" } // PCO Services Live Prev/Next buttons (interactive)
   // Shure SBC charger bay battery levels. `bays` lists which bays to show (by
@@ -510,6 +515,9 @@ export interface StageState {
   /** Resolved slots keyed by View id (for slots-kind Views). Drives both the
    *  kiosk (via the output's routed view) and the settings editor/preview. */
   slotsByView: Record<string, Slot[]>;
+  /** Resolved slots for inline mic-slots objects, keyed by the layout object's id
+   *  (a custom-layout `slots-grid` with `source: "inline"`). */
+  slotsByLayoutObject: Record<string, Slot[]>;
   /** Per-output render descriptor (output id → routed view's kind/ndi/name). */
   resolvedByOutput: Record<string, ResolvedOutput>;
 

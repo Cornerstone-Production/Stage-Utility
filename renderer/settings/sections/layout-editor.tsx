@@ -58,6 +58,7 @@ import {
 } from "../../main/layout-tree";
 import { useSplState } from "../../main/use-spl-state";
 import { useStageState } from "../../main/use-stage-state";
+import { InlineSlotsEditor } from "./inline-slots-editor";
 
 // ── object metadata ──────────────────────────────────────────────────────────
 
@@ -115,7 +116,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "text": return { type: "text", text: "Text" };
     case "clock": return { type: "clock", showSeconds: true, format: "12h" };
     case "section-chip": return { type: "section-chip", which: "current" };
-    case "slots-grid": return { type: "slots-grid", sourceViewId: null };
+    case "slots-grid": return { type: "slots-grid", source: "inline", sourceViewId: null };
     case "transcript-strip": return { type: "transcript-strip", mode: "rolling" };
     case "charger-battery": return { type: "charger-battery", bays: [], show: { battery: true, charging: true } };
     case "spl-meter": return { type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null };
@@ -686,6 +687,12 @@ export function LayoutEditor({
   }
 
   const selected = findById(objects, selectedId);
+  // The selected object iff it's an inline mic-slots grid (config narrowed so the
+  // inline slot editor below the canvas gets its id + alignment).
+  const inlineGrid =
+    selected && selected.config.type === "slots-grid" && (selected.config.source ?? "view") === "inline"
+      ? { id: selected.id, config: selected.config }
+      : null;
   // Max z among the TOP-LEVEL scope (for adding/duplicating top-level objects).
   const zTop = objects.reduce((m, o) => Math.max(m, o.z), 0);
 
@@ -1045,6 +1052,22 @@ export function LayoutEditor({
         )}
       </div>
 
+      {/* Inline mic-slots editor — full width below the canvas when an inline
+          slots-grid object is selected (scroll down to reach it). */}
+      {isEditing && inlineGrid && (
+        <div className="pb-[40vh]">
+          <Separator />
+          <div className="pt-3">
+            <InlineSlotsEditor
+              key={inlineGrid.id}
+              objectId={inlineGrid.id}
+              slotsLayout={inlineGrid.config.slotsLayout ?? null}
+              onSetLayout={(next) => { pushHistory(); updateConfig(inlineGrid.id, { ...inlineGrid.config, slotsLayout: next }); }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Leaving edit mode with unsaved changes. */}
       <DialogPrimitive.Root open={confirmLeave} onOpenChange={setConfirmLeave}>
         <DialogContent className="max-w-sm">
@@ -1302,16 +1325,31 @@ function Inspector({
           )}
         </>
       )}
-      {c.type === "slots-grid" && (
-        <Row label="Source">
-          <Select value={c.sourceViewId ?? ""} onValueChange={(v: string) => onConfig({ type: "slots-grid", sourceViewId: v || null })}>
-            <SelectTrigger><SelectValue placeholder="Mic-slots view…" /></SelectTrigger>
-            <SelectContent>
-              {slotsViews.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </Row>
-      )}
+      {c.type === "slots-grid" && (() => {
+        const isInline = (c.source ?? "view") === "inline";
+        return (
+          <>
+            <Row label="Source">
+              <ButtonGroup>
+                <Button variant={isInline ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, source: "inline" })}>Define here</Button>
+                <Button variant={!isInline ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, source: "view" })}>Embed a view</Button>
+              </ButtonGroup>
+            </Row>
+            {isInline ? (
+              <p className="text-caption2 text-gray-9 leading-snug">Edit this grid's slots below the canvas.</p>
+            ) : (
+              <Row label="View">
+                <Select value={c.sourceViewId ?? ""} onValueChange={(v: string) => onConfig({ ...c, source: "view", sourceViewId: v || null })}>
+                  <SelectTrigger><SelectValue placeholder="Mic-slots view…" /></SelectTrigger>
+                  <SelectContent>
+                    {slotsViews.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Row>
+            )}
+          </>
+        );
+      })()}
       {c.type === "charger-battery" && (
         <>
           <Row label="Battery %"><Switch checked={c.show.battery ?? false} onCheckedChange={(v) => onConfig({ ...c, show: { ...c.show, battery: v } })} /></Row>

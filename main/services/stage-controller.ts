@@ -54,6 +54,38 @@ function cloneLayout(l: LayoutDTO): LayoutDTO {
   };
 }
 
+// Like cloneLayoutObject, but records each old→new id so callers can carry
+// per-object side data (e.g. inline mic-slots stored by object id) to the copy.
+function cloneLayoutObjectMapped(o: LayoutObject, idMap: Map<string, string>): LayoutObject {
+  const id = randomUUID();
+  idMap.set(o.id, id);
+  return {
+    ...o,
+    id,
+    style: o.style ? { ...o.style } : undefined,
+    config: { ...o.config },
+    children: o.children?.map((c) => cloneLayoutObjectMapped(c, idMap)),
+  };
+}
+
+function cloneLayoutWithMap(l: LayoutDTO): { layout: LayoutDTO; idMap: Map<string, string> } {
+  const idMap = new Map<string, string>();
+  const layout: LayoutDTO = { version: 1, canvas: { ...l.canvas }, objects: l.objects.map((o) => cloneLayoutObjectMapped(o, idMap)) };
+  return { layout, idMap };
+}
+
+// Visit every inline mic-slots object id across all custom views' layouts (a
+// `slots-grid` with source "inline"); recurses into container children.
+function forEachInlineSlotsGrid(views: View[], cb: (objectId: string) => void): void {
+  const walk = (objs: LayoutObject[]): void => {
+    for (const o of objs) {
+      if (o.config.type === "slots-grid" && o.config.source === "inline") cb(o.id);
+      if (o.children?.length) walk(o.children);
+    }
+  };
+  for (const v of views) if (v.kind === "custom" && v.layout) walk(v.layout.objects);
+}
+
 function defaultViewName(kind: ViewKind): string {
   switch (kind) {
     case "dashboard": return "Dashboard";
@@ -101,6 +133,7 @@ export class StageController {
     views: [{ id: PRIMARY_DISPLAY_ID, name: "Slots", kind: "slots", ndiSource: null, createdAt: "" }],
     outputs: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", viewId: PRIMARY_DISPLAY_ID }],
     slotsByView: {},
+    slotsByLayoutObject: {},
     resolvedByOutput: {},
     chargerBays: [],
     slots: [],
@@ -134,6 +167,9 @@ export class StageController {
   private teamMembers: TeamMemberDTO[] = [];
   // Raw (un-resolved) slot configs per VIEW id for the ACTIVE service type.
   private rawSlotsByView = new Map<string, Slot[]>();
+  // Raw (unresolved) slots for inline mic-slots objects, keyed by layout object id,
+  // for the active service type. Resolved into state.slotsByLayoutObject.
+  private rawSlotsByObject = new Map<string, Slot[]>();
 
   // PCO credentials (set by IntegrationManager after config saves).
   private pcoAppId: string | null = null;
@@ -731,6 +767,22 @@ export class StageController {
     return this.state;
   }
 
+  /** Persist + apply an inline mic-slots object's slot configuration (a custom
+   *  layout `slots-grid` with source "inline") for the active service type, keyed
+   *  by the layout object's id, then re-resolve and broadcast. */
+  async setLayoutObjectSlots(objectId: string, slots: Slot[]): Promise<StageState> {
+    if (!this.state.serviceTypeId) {
+      console.log("[stage-controller] setLayoutObjectSlots: no active service type — slots not persisted");
+    } else {
+      console.log(`[stage-controller] setLayoutObjectSlots (${slots.length} slots) for object=${objectId} serviceType=${this.state.serviceTypeId}`);
+      await slotsStore.setSlots(objectId, this.state.serviceTypeId, slots);
+    }
+    this.rawSlotsByObject.set(objectId, slots);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
   // ── QR visibility ─────────────────────────────────────────────────────
 
   async setShowQr(show: boolean): Promise<StageState> {
@@ -1005,12 +1057,14 @@ export class StageController {
 
   /** Replace a preset's slots with the target view's current slots (a "save over"
    *  this preset). Reuses the savePreset snapshot logic. */
-  async overwritePreset(id: string, target: string): Promise<SlotPreset[]> {
+  // `explicitSlots` overwrites with the given slots directly (used by inline
+  // mic-slots objects, which aren't view-keyed); otherwise read the target view's.
+  async overwritePreset(id: string, target: string, explicitSlots?: Slot[]): Promise<SlotPreset[]> {
     const viewId = this.viewIdForTarget(target);
     const presets = await presetsStore.load();
     if (!presets.find((p) => p.id === id)) throw new Error(`Preset ${id} not found`);
-    const rawSlots = this.rawSlotsByView.get(viewId) ?? [];
-    console.log(`[stage-controller] overwritePreset ${id} from view=${viewId} (${rawSlots.length} slots)`);
+    const rawSlots = explicitSlots ?? this.rawSlotsByView.get(viewId) ?? [];
+    console.log(`[stage-controller] overwritePreset ${id} (${rawSlots.length} slots)`);
     const updated = presets.map((p) =>
       p.id === id ? { ...p, slots: rawSlots.map((s) => ({ ...s, id: randomUUID() })) } : p,
     );
@@ -1180,6 +1234,16 @@ export class StageController {
     console.log(`[stage-controller] setViewLayout id=${id} (${layout.objects.length} objects)`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
+    // Load raw slots for any newly-added inline mic-slots objects, and drop the
+    // in-memory entries for grids no longer present in any layout.
+    const inlineIds = new Set<string>();
+    forEachInlineSlotsGrid(this.state.views, (oid) => inlineIds.add(oid));
+    if (this.state.serviceTypeId) {
+      for (const oid of inlineIds) {
+        if (!this.rawSlotsByObject.has(oid)) this.rawSlotsByObject.set(oid, await slotsStore.getSlots(oid, this.state.serviceTypeId));
+      }
+    }
+    for (const key of [...this.rawSlotsByObject.keys()]) if (!inlineIds.has(key)) this.rawSlotsByObject.delete(key);
     this.recomputeResolved();
     this.broadcast();
     return this.state;
@@ -1189,14 +1253,16 @@ export class StageController {
     const src = this.state.views.find((v) => v.id === id);
     if (!src) throw new Error(`views:duplicate — view ${id} not found`);
     const newId = this.nextViewId();
+    // Deep-clone the layout, recording old→new object ids so inline mic-slots can
+    // be carried over to the copy.
+    const cloned = src.layout ? cloneLayoutWithMap(src.layout) : null;
     const copy: View = {
       id: newId,
       name: name?.trim() || `${src.name} copy`,
       kind: src.kind,
       ndiSource: src.ndiSource ?? null,
       createdAt: new Date().toISOString(),
-      // Deep-clone via helper so nested object props (e.g. style/config) aren't shared.
-      layout: src.layout ? cloneLayout(src.layout) : null,
+      layout: cloned?.layout ?? null,
     };
     console.log(`[stage-controller] duplicateView ${id} → ${newId} "${copy.name}"`);
     const views = [...this.state.views, copy];
@@ -1210,6 +1276,18 @@ export class StageController {
       this.rawSlotsByView.set(newId, slots);
       if (this.state.serviceTypeId) {
         await slotsStore.setSlots(newId, this.state.serviceTypeId, slots);
+      }
+    }
+    // Copy each inline mic-slots object's slots (all service types) to the cloned
+    // object ids, so the duplicated layout keeps its lineups.
+    if (cloned) {
+      const inlineOldIds: string[] = [];
+      forEachInlineSlotsGrid([src], (oid) => inlineOldIds.push(oid));
+      for (const oldId of inlineOldIds) {
+        const mapped = cloned.idMap.get(oldId);
+        if (!mapped) continue;
+        await slotsStore.copyKey(oldId, mapped, () => randomUUID());
+        if (this.state.serviceTypeId) this.rawSlotsByObject.set(mapped, await slotsStore.getSlots(mapped, this.state.serviceTypeId));
       }
     }
     this.recomputeResolved();
@@ -1236,7 +1314,17 @@ export class StageController {
       throw new Error("views:delete — cannot remove the last view");
     }
     console.log(`[stage-controller] deleteView id=${id}`);
+    const removed = this.state.views.find((v) => v.id === id);
     const views = this.state.views.filter((v) => v.id !== id);
+    // Drop any inline mic-slots stored for this view's layout objects.
+    if (removed) {
+      const inlineIds: string[] = [];
+      forEachInlineSlotsGrid([removed], (oid) => inlineIds.push(oid));
+      for (const oid of inlineIds) {
+        await slotsStore.removeDisplay(oid);
+        this.rawSlotsByObject.delete(oid);
+      }
+    }
     // Unroute any outputs pointing at this view (render placeholder, never fail).
     const outputs = this.state.outputs.map((o) =>
       o.viewId === id ? { ...o, viewId: null } : o,
@@ -1615,6 +1703,13 @@ export class StageController {
    *  primary View additionally adopts the legacy "default" bucket if present. */
   private async loadAllViewRawSlots(serviceTypeId: string | null): Promise<void> {
     this.rawSlotsByView.clear();
+    this.rawSlotsByObject.clear();
+    // Inline mic-slots objects (custom layouts) — keyed by object id.
+    if (serviceTypeId) {
+      const inlineIds: string[] = [];
+      forEachInlineSlotsGrid(this.state.views, (oid) => inlineIds.push(oid));
+      for (const oid of inlineIds) this.rawSlotsByObject.set(oid, await slotsStore.getSlots(oid, serviceTypeId));
+    }
     const primaryViewId = this.primaryViewId();
     for (const view of this.state.views) {
       if (view.kind !== "slots") continue;
@@ -1646,6 +1741,13 @@ export class StageController {
       slotsByView[view.id] = resolveSlots(raw, this.teamMembers, this.deviceStatuses);
     }
 
+    // Inline mic-slots objects on custom layouts — resolved by object id.
+    const slotsByLayoutObject: Record<string, Slot[]> = {};
+    forEachInlineSlotsGrid(this.state.views, (oid) => {
+      const raw = this.rawSlotsByObject.get(oid) ?? [];
+      slotsByLayoutObject[oid] = resolveSlots(raw, this.teamMembers, this.deviceStatuses);
+    });
+
     const resolvedByOutput: Record<string, ResolvedOutput> = {};
     const slotsByDisplay: Record<string, Slot[]> = {};
     const displays: DisplayInfo[] = [];
@@ -1668,6 +1770,7 @@ export class StageController {
     this.state = {
       ...this.state,
       slotsByView,
+      slotsByLayoutObject,
       resolvedByOutput,
       slotsByDisplay,
       chargerBays: this.computeChargerBays(),

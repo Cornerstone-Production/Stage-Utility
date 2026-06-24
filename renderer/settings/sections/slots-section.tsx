@@ -494,7 +494,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
 // A stacked column (a lead slot + its `stackWithPrevious` followers) is ONE
 // sortable unit, so dragging moves the whole group and never splits a stack.
 
-function SortableSlotGroup({
+export function SortableSlotGroup({
   slots,
   startIndex,
   wirelessChannels,
@@ -687,7 +687,7 @@ function downloadJson(filename: string, data: unknown) {
  * Save / recall / export / import named slot arrangements. Presets are global —
  * saving captures the current view's slots; recall applies a preset to this view.
  */
-type PresetHandlers = Pick<
+export type PresetHandlers = Pick<
   SectionHandlers,
   | "handleSavePreset"
   | "handleApplyPreset"
@@ -770,7 +770,7 @@ function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers:
   );
 }
 
-function PresetsPanel({
+export function PresetsPanel({
   presets,
   localSlots,
   handlers,
@@ -896,7 +896,7 @@ function PresetsPanel({
  * width and default charger-column width (inches). When on, the kiosk sizes columns
  * in inches so they line up with the chargers; spacers fill the gaps/margins.
  */
-function AlignmentPanel({
+export function AlignmentPanel({
   layout,
   slots,
   onChange,

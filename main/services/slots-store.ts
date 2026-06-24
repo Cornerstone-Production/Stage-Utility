@@ -70,6 +70,22 @@ export const slotsStore = {
     return existing;
   },
 
+  // Copy an entire key's per-service-type slot config to a new key, minting fresh
+  // slot ids in each set (used when a custom layout / View with inline mic-slots is
+  // duplicated). No-op if the source key has nothing.
+  async copyKey(srcKey: string, destKey: string, freshId: () => string): Promise<void> {
+    const map = await loadNormalised();
+    const src = map[srcKey];
+    if (!src) return;
+    const copy: Record<string, Slot[]> = {};
+    for (const [serviceTypeId, slots] of Object.entries(src)) {
+      copy[serviceTypeId] = slots.map((s) => ({ ...s, id: freshId() }));
+    }
+    map[destKey] = copy;
+    await store.save(map);
+    console.log(`[slots-store] copyKey ${srcKey} → ${destKey}`);
+  },
+
   async removeDisplay(displayId: string): Promise<void> {
     const map = await loadNormalised();
     if (displayId in map) {
