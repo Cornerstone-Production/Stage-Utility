@@ -321,9 +321,12 @@ Then work through the sidebar:
    Developers → Personal Access Tokens).
 2. **Integrations → Wireless Gear** *(optional)* — pick your Shure model and
    enter its IP, TCP port (usually `2202`), and channel count.
-3. **Integrations → ProPresenter / ProdCom** *(optional)* — host + API port.
-4. **Service Types**, **Plan**, **Views**, **Displays** — choose allowed service
-   types, pick a plan (or Auto), build views, and route each display to a view.
+3. **Integrations → ProPresenter / ProdCom / Smaart** *(optional)* — host + API
+   port (ProPresenter `1025`, ProdCom `24480`, Smaart `26000` for live SPL).
+4. **Plan**, **Views**, **Displays** — pick a plan (or Auto) and toggle which
+   **Active Service Types** auto-selection considers, build views (slots, dashboard,
+   stage, captions, script, SPL rundown, or a custom visual layout), and route each
+   display to a view.
 5. **Advanced → Public address (DNS)** *(optional)* — if you reach the server via
    a DNS name (e.g. behind a reverse proxy), set it here so the connect QR code
    and display links use it instead of the LAN IP.

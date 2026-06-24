@@ -11,6 +11,9 @@ several live sources and shows them on monitors around the stage:
   (Verse/Chorus/Bridge/Intro/Outro…), chords, running timers, and a slide thumbnail.
 - **ProdCom** — live audio **transcription** (captions), shown full-screen or as a
   strip on the dashboards.
+- **Smaart** (Rational Acoustics) — live **SPL** (sound-pressure level) from a FOH
+  measurement rig: shown on the dashboards/custom layouts and recorded as a max/avg
+  **per service item** across a service, with a history browser for past services.
 
 Each monitor is a **display** (a screen at its own URL) pointed at a **view** —
 reusable content you build once and can route to any number of displays. A view is one
@@ -150,9 +153,13 @@ in the repo. Open `…/settings-window.html` and work through the sidebar:
    slide text, section, chords, timers, and thumbnail.
 4. **Integrations → ProdCom** *(optional)* — host + API port (default `24480`), plus
    an API key only if ProdCom's "Require Authentication" is on. Drives the captions.
-5. **Service Types** — choose which PCO service types are in play.
+5. **Integrations → Smaart (SPL)** *(optional)* — host + port (default `26000`), plus a
+   password only if Smaart's API requires it. Enable the API in Smaart (Options →
+   Preferences → API; modern JSON-over-WebSocket API, Smaart 8.3+). Drives the SPL meter
+   object/cards, the per-item max/avg recording, and the **SPL History** browser.
 6. **Plan** — **Auto** (follow the next upcoming event; rolls to the next one ~1 h
-   after the current service ends) or **Manual** (pick a plan).
+   after the current service ends) or **Manual** (pick a plan). **Active Service Types**
+   here toggles which PCO service types auto-plan selection considers.
 7. **Views** — build reusable content (drag to reorder, duplicate, live preview).
    Pick a **type** when you create one:
    - **Slots** — the channel grid: link each slot to a PCO person/position, a static
@@ -162,8 +169,16 @@ in the repo. Open `…/settings-window.html` and work through the sidebar:
    - **Stage** — confidence view: slide text, section, chords, preview, timers.
    - **Captions** — full-screen transcription.
    - **Custom** — a visual editor: drag/resize objects (clocks, countdowns, slide
-     text, mic-slot grids, captions, logos, images, shapes, …) onto a canvas, style
-     them, and **save designs to a reusable layout library** to reuse on other views.
+     text, mic-slot grids, captions, SPL meters, charger battery, logos, images, shapes,
+     **containers**, …) onto a canvas and style them. Group objects inside a **container**
+     that moves/resizes as a unit, apply one-click **card presets** (the dashboards'
+     rounded "glass tile" look — or **Flat** to clear it), use **Start from Dashboard**
+     to drop in the dashboard design as editable tiles, and **save designs to a reusable
+     layout library** to reuse on other views.
+   - **Script** — a full service rundown (every plan item with PCO note columns,
+     section headers, length, clock + live countdown; current item highlighted), with an
+     optional per-display PCO Prev/Next control.
+   - **SPL Rundown** — a compact item-plus-max-SPL list for the live service.
 8. **Displays** — your physical screens. Each has its own URL and is **routed to a
    view** (one view can drive many screens). Rename, drag to reorder, or open in its
    own window.
@@ -197,6 +212,7 @@ React app instead.
 | **Wireless Gear** | wireless | per-device host / port / channels | Shure **ULX-D**, **Axient Digital**, and **PSM (in-ear)** drivers over TCP; reports RF, battery, charging, frequency, audio level. |
 | **ProPresenter** | control | host, API port (`1025`) | Talks directly to ProPresenter 7.9+'s local HTTP API (LAN, no auth). Polls the active presentation, slide status, arrangement, timers, and a thumbnail; broadcasts `propresenter:status`. Section is resolved from the arrangement **play order** (works through repeats, jumps, and text-less Intro/Instrumental/Outro slides). |
 | **ProdCom** | lineup | host, API port (`24480`), API key | Holds an SSE connection to ProdCom's transcript stream and re-broadcasts `prodcom:transcript`; backfills recent lines on connect. Powers the Captions display + dashboard transcript strips. |
+| **Smaart (SPL)** | control | host, port (`26000`), password | Connects to Smaart's modern JSON-over-WebSocket API (8.3+, auto-negotiates SDK V3/V4) for live SPL. Streams per-meter readings (`spl:metrics`), and a server-side recorder tracks max/avg SPL **per plan item** during a live service (`spl:history`), browsable per past service under **SPL History**. |
 | **Bitfocus Companion** | control | host, port | Descriptor present; control endpoints exist. Reserved for future use. |
 
 ## Data model & concepts
@@ -223,12 +239,26 @@ drive many displays, so you change content in one place. Both can be reordered. 
 - **Stage** — a confidence view: current/next slide text, song section + chords, a
   live slide thumbnail, running timers, and the countdown.
 - **Captions** — full-screen, auto-scrolling transcription from ProdCom.
+- **Script** — a full service rundown: every plan item with PCO note-category columns,
+  section headers, length, a clock and the live countdown, with the current item
+  highlighted; an optional per-display PCO Prev/Next control.
+- **SPL Rundown** — a compact item-plus-max-SPL list for the live service.
 - **Custom** — a free-form layout authored in the **visual editor**: a fixed design
   canvas (default 1920×1080) of positioned **objects** — clock, countdown, current/next
-  slide text + notes, slide thumbnail, section chip, mic-slots grid, transcript, brand
-  logo, image, **plan file**, shape, text — each bound to the same live
-  data. Positions and sizes are stored as fractions of the canvas, so a layout renders
-  identically at any resolution.
+  slide text + notes, slide thumbnail, section chip, mic-slots grid, transcript, SPL
+  meter, charger battery, PCO live controls, brand logo, image, **plan file**, shape,
+  text, and **container** — each bound to the same live data. Positions and sizes are
+  stored as fractions of the canvas, so a layout renders identically at any resolution.
+
+  **Containers** are styled boxes that hold other objects: a child's position/size is a
+  fraction of its container, so moving or resizing the container moves and scales its
+  contents as a unit (nesting up to two levels). Drop a top-level object onto a container
+  to nest it; pop it back out from the inspector or the layers panel. **Card presets**
+  (Glass / Green / Red / Amber, or **Flat** to clear) apply the built-in dashboards'
+  rounded "glass tile" look — fill, border, radius, padding — to any object in one click,
+  fully opt-in and reversible. **Start from Dashboard** builds the dashboard layout
+  (clock, PCO timer, current/next item, SPL, captions) as editable nested tiles. Style
+  sizes (font, radius, padding, border) edit in px and opacity as a 0–100% slider.
 
   The **plan-file** object shows a file attached to the *current Planning Center plan* —
   e.g. the stage plot. It matches by filename (case-insensitive substring, default
@@ -324,12 +354,21 @@ and `POST /api/displays` + `PATCH/DELETE /api/displays/:id`.
 | GET | `/api/propresenter/thumbnail?k=…` | Live slide thumbnail (JPEG proxy; `k` cache-busts per slide) |
 | GET | `/api/prodcom/transcript` | Recent transcript buffer (backfill for a freshly-loaded Captions display) |
 
+**SPL (Smaart) & rundown**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/spl/metrics` | Latest live SPL reading per meter (device/channel) |
+| GET | `/api/spl/history/current` | The active service's per-item SPL record (live) |
+| GET | `/api/spl/history` | List saved past-service SPL records |
+| GET | `/api/spl/history/:key` | One past-service record |
+| GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
+
 **Branding & other**
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/branding/source?target=app\|empty` | Original (un-cropped) brand/empty logo source |
 | POST | `/api/branding` | Update app name + logos |
-| GET | `/api/events` | Server-Sent Events stream (`stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `integrations:state-changed`, `wireless:connections-changed`) |
+| GET | `/api/events` | Server-Sent Events stream (`stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `spl:metrics`, `spl:history`, `integrations:state-changed`, `wireless:connections-changed`) |
 | GET | `/photos?u=…` | Cached Planning Center photo proxy |
 
 ## Project structure
@@ -383,6 +422,7 @@ State persists in a **data directory** — `$STAGE_UTILITY_DATA` if set, otherwi
 - `views.json` — view definitions (kind + config; custom views carry their layout)
 - `slots.json` — slot sets, keyed by view + service type
 - `layout-templates.json` — saved custom-layout library; `presets.json` — slot presets
+- `spl-history.json` — per-item SPL recordings (one record per service), for SPL History
 - `secrets.bin` — integration secrets, **AES-256-GCM encrypted**
 - `encryption.key` — 32-byte key, auto-generated on first run (mode `600`)
 - `photo-cache/` — cached PCO photos
