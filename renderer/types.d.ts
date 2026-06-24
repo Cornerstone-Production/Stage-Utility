@@ -83,6 +83,22 @@ interface ServiceTypeDTO {
   name: string;
 }
 
+interface PlanItemDTO {
+  id: string;
+  title: string;
+  itemType: string;
+  lengthSec: number;
+  sequence: number;
+  notesByCategory: Record<string, string>;
+  description: string | null;
+}
+
+interface PlanItemsDTO {
+  planId: string | null;
+  items: PlanItemDTO[];
+  noteCategories: string[];
+}
+
 interface PlanDTO {
   id: string;
   title: string;
@@ -161,7 +177,14 @@ interface Slot {
   widthIn?: number;
 }
 
-type ViewKind = "slots" | "dashboard" | "stage" | "transcription" | "custom";
+type ViewKind =
+  | "slots"
+  | "dashboard"
+  | "stage"
+  | "transcription"
+  | "custom"
+  | "script"
+  | "spl-rundown";
 /** @deprecated alias for ViewKind. */
 type DisplayKind = ViewKind;
 
@@ -176,6 +199,8 @@ interface View {
   layout?: LayoutDTO | null;
   /** Physical-alignment config for a slots-View (inches); absent → equal widths. */
   slotsLayout?: SlotsLayout | null;
+  /** Show the PCO Live Prev/Next controls on a "script" View (default false). */
+  showLiveControls?: boolean;
 }
 
 interface SlotsLayout {

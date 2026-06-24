@@ -1,7 +1,7 @@
 // Planning Center Online client (Basic Auth: App ID + Secret).
 // Flattens JSON:API responses to slim DTOs. ~30s in-memory cache.
 
-import type { PcoAttachmentDTO, PcoLiveDTO, PlanDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
+import type { PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 const CACHE_TTL_MS = 30_000;
@@ -316,6 +316,94 @@ class PcoService {
 
     this.cacheSet(cacheKey, result);
     return result;
+  }
+
+  /** Ordered note-category names for a service type (the script columns). Cached. */
+  async listItemNoteCategories(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+  ): Promise<string[]> {
+    const cacheKey = `note-categories:${appId}:${serviceTypeId}`;
+    const cached = this.cacheGet<string[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/item_note_categories?per_page=100`;
+    const json = await this.request(url, appId, secret).catch(() => null);
+    const items = json && Array.isArray(json.data) ? json.data : [];
+    const result = items
+      .map((n) => ({
+        name: typeof n.attributes.name === "string" ? n.attributes.name : "",
+        sequence: typeof n.attributes.sequence === "number" ? n.attributes.sequence : 0,
+      }))
+      .filter((c) => c.name)
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((c) => c.name);
+
+    this.cacheSet(cacheKey, result);
+    return result;
+  }
+
+  /**
+   * The full ordered rundown of a plan's items, with each item's notes grouped by
+   * note-category name (the Audio/Band/MD/Vocals columns). `item_type === "header"`
+   * marks a section row. Paginated + cached ~30s.
+   */
+  async listPlanItems(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<PlanItemDTO[]> {
+    const cacheKey = `plan-items:${appId}:${planId}`;
+    const cached = this.cacheGet<PlanItemDTO[]>(cacheKey);
+    if (cached) return cached;
+
+    const out: PlanItemDTO[] = [];
+    let url: string | null =
+      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/items?include=item_notes&per_page=100`;
+
+    for (let page = 0; url && page < 6; page++) {
+      const json: PcoResponse & { links?: { next?: string } } = await this.request(url, appId, secret);
+      const items = Array.isArray(json.data) ? json.data : [json.data];
+
+      // Index included ItemNote nodes by id (carry content + category_name).
+      const notesById = new Map<string, { category: string; content: string }>();
+      for (const n of json.included ?? []) {
+        if (n.type !== "ItemNote") continue;
+        const category = typeof n.attributes.category_name === "string" ? n.attributes.category_name : "";
+        const content = typeof n.attributes.content === "string" ? n.attributes.content : "";
+        if (category && content) notesById.set(n.id, { category, content });
+      }
+
+      for (const item of items) {
+        const a = item.attributes;
+        const noteRefs = item.relationships?.item_notes?.data;
+        const notesByCategory: Record<string, string> = {};
+        if (Array.isArray(noteRefs)) {
+          for (const ref of noteRefs) {
+            const note = notesById.get(ref.id);
+            if (note) notesByCategory[note.category] = note.content;
+          }
+        }
+        out.push({
+          id: item.id,
+          title: String(a.title ?? a.description ?? "Untitled"),
+          itemType: typeof a.item_type === "string" ? a.item_type : "item",
+          lengthSec: typeof a.length === "number" ? a.length : 0,
+          sequence: typeof a.sequence === "number" ? a.sequence : out.length,
+          notesByCategory,
+          description: typeof a.description === "string" && a.description ? a.description : null,
+        });
+      }
+
+      const next = json.links?.next;
+      url = typeof next === "string" && next ? next : null;
+    }
+
+    out.sort((a, b) => a.sequence - b.sequence);
+    this.cacheSet(cacheKey, out);
+    return out;
   }
 
   async listTeamMembers(

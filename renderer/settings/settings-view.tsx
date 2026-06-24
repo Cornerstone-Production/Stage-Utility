@@ -21,6 +21,7 @@ import {
   PlugIcon,
   QrCodeIcon,
   PaletteIcon,
+  ActivityIcon,
   SlidersHorizontalIcon,
   SunIcon,
   MoonIcon,
@@ -38,6 +39,7 @@ import { IntegrationsSection } from "./sections/integrations-section";
 import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
 import { AdvancedSection } from "./sections/advanced-section";
+import { SplHistorySection } from "./sections/spl-history-section";
 import { BrandHeader } from "./brand-header";
 import { BrandLogo } from "../components/brand-logo";
 
@@ -142,6 +144,7 @@ const SECTIONS: SectionItem[] = [
   { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4 text-gray-11" /> },
   { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4 text-gray-11" /> },
   { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4 text-gray-11" /> },
+  { id: "spl-history", label: "SPL History", icon: <ActivityIcon className="size-4 text-gray-11" /> },
   { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
 ];
 
@@ -941,6 +944,8 @@ export function SettingsView() {
         return <ConnectSection stageState={stageState} handlers={handlers} />;
       case "branding":
         return <BrandingSection stageState={stageState} handlers={handlers} />;
+      case "spl-history":
+        return <SplHistorySection />;
       case "advanced":
         return <AdvancedSection stageState={stageState} updateStatus={updateStatus} handlers={handlers} justUpdated={justUpdated} onDismissJustUpdated={() => setJustUpdated(null)} />;
     }

@@ -108,6 +108,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "pco:getLive":
       return apiFetch<T>("/api/pco/live");
 
+    case "pco:getPlanItems":
+      return apiFetch<T>("/api/pco/plan-items");
+
     case "propresenter:getStatus":
       return apiFetch<T>("/api/propresenter/status");
 
@@ -116,6 +119,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "spl:getHistoryCurrent":
       return apiFetch<T>("/api/spl/history/current");
+
+    case "spl:listHistory":
+      return apiFetch<T>("/api/spl/history");
+
+    case "spl:getHistory": {
+      const key = p.serviceKey as string;
+      return apiFetch<T>(`/api/spl/history/${encodeURIComponent(key)}`);
+    }
 
     case "stage:setAllowedServiceTypes":
       return post<T>("/api/allowed-service-types", p);
@@ -221,6 +232,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "views:setSlotsLayout": {
       const id = p.id as string;
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { slotsLayout: p.slotsLayout });
+    }
+
+    case "views:setShowLiveControls": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { showLiveControls: p.showLiveControls });
     }
 
     case "views:setSlots": {

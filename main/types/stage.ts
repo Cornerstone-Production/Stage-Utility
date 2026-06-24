@@ -4,7 +4,14 @@
  * What a View renders: slot grid (default), dashboard, stage, transcription, or
  * a "custom" free-form layout authored with the visual editor (see {@link LayoutDTO}).
  */
-export type ViewKind = "slots" | "dashboard" | "stage" | "transcription" | "custom";
+export type ViewKind =
+  | "slots"
+  | "dashboard"
+  | "stage"
+  | "transcription"
+  | "custom"
+  | "script"
+  | "spl-rundown";
 
 /** @deprecated Back-compat alias retained for the legacy display model. Use ViewKind. */
 export type DisplayKind = ViewKind;
@@ -90,6 +97,8 @@ export interface View {
    * (the monitor's active width), so widths render at true physical inches.
    */
   slotsLayout?: SlotsLayout | null;
+  /** Show the PCO Live Prev/Next controls on a "script" View (default false). */
+  showLiveControls?: boolean;
 }
 
 /** Physical layout config for a slots-View. All measurements in inches. */
@@ -358,6 +367,29 @@ export interface PlanDTO {
   seriesTitle: string | null;
   sortDate: string | null;
   dates: string | null;
+}
+
+/** One line-item of a PCO plan (song / header / media / item). */
+export interface PlanItemDTO {
+  id: string;
+  title: string;
+  /** PCO item_type: "song" | "header" | "media" | "item". "header" = section row. */
+  itemType: string;
+  /** Planned length in seconds (0 when unset). */
+  lengthSec: number;
+  /** Order within the plan. */
+  sequence: number;
+  /** Per-note-category content (e.g. {"Audio": "...", "Vocals": "..."}). */
+  notesByCategory: Record<string, string>;
+  description: string | null;
+}
+
+/** A plan's full rundown plus the ordered note-category column names. */
+export interface PlanItemsDTO {
+  planId: string | null;
+  items: PlanItemDTO[];
+  /** Ordered note-category names (the script columns: Audio, Band, MD, Vocals…). */
+  noteCategories: string[];
 }
 
 /** A file attached to a PCO plan (e.g. a stage plot, chart, or rundown PDF). */

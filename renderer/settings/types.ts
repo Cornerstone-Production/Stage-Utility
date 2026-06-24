@@ -11,6 +11,7 @@ export type SectionId =
   | "integrations"
   | "connect"
   | "branding"
+  | "spl-history"
   | "advanced";
 
 export interface SectionItem {
