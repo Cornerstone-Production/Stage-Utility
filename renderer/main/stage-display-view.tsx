@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
+import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useTranscript } from "./use-transcript";
 import { channelColor, channelLabel } from "./channel-color";
 import { LiveControls } from "./live-controls";
@@ -44,6 +45,7 @@ function SectionChip({ section, size = "md" }: { section: ProSection | null; siz
 export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
   const transcript = useTranscript();
+  const spl = useSplState();
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -88,6 +90,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
 
   const pro = propresenter;
   const connected = !!pro?.connected;
+  const splVal = resolveSplValue(spl);
   const previewSrc =
     connected && pro?.slidePreviewKey
       ? `/api/propresenter/thumbnail?k=${encodeURIComponent(pro.slidePreviewKey)}`
@@ -138,8 +141,8 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
       </div>
 
       <div className="flex flex-col flex-1 min-h-0 gap-2.5 max-sm:gap-2 p-3 max-sm:p-2">
-        {/* Top strip: remaining slides · clock · PCO live */}
-        <div className="grid grid-cols-3 gap-2.5 h-[16%] min-h-0">
+        {/* Top strip: remaining slides · clock · PCO live · (SPL when present) */}
+        <div className={`grid gap-2.5 h-[16%] min-h-0 ${splVal ? "grid-cols-4" : "grid-cols-3"}`}>
           <Cell label="Remaining slides">
             <span className="text-[clamp(1.5rem,7vmin,3.5rem)] font-medium leading-none tabular-nums">
               {pro?.slidesRemaining ?? "—"}
@@ -175,6 +178,13 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
               <span className="text-white/35 text-[clamp(0.8rem,2.4vmin,1.1rem)]">No live service</span>
             )}
           </Cell>
+          {splVal && (
+            <Cell label={`SPL · ${splVal.metricKey}`}>
+              <span className="text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums">
+                {Math.round(splVal.value)}<span className="text-white/45 text-[0.6em]"> dB</span>
+              </span>
+            </Cell>
+          )}
         </div>
 
         {/* Current slide: section chip + text + preview. The preview is hidden on
