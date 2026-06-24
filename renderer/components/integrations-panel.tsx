@@ -22,6 +22,7 @@ import {
   Switch,
   Status,
   Separator,
+  NumberInput,
   toast,
 } from "../components/ui";
 import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from "lucide-react";
@@ -286,9 +287,16 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
                     onChange={(v) => setField(field.key, v)}
                     placeholder={field.placeholder}
                   />
+                ) : field.type === "number" ? (
+                  <NumberInput
+                    value={typeof value === "number" ? value : Number(value) || 0}
+                    onChange={(n) => setField(field.key, String(n))}
+                    className="w-44"
+                    aria-label={field.label}
+                  />
                 ) : (
                   <Input
-                    type={field.type === "password" ? "password" : field.type === "number" ? "number" : "text"}
+                    type={field.type === "password" ? "password" : "text"}
                     value={typeof value === "string" || typeof value === "number" ? String(value) : ""}
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setField(field.key, e.target.value)}
                     placeholder={field.placeholder ?? ""}
@@ -408,8 +416,10 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
     );
   }
 
-  const { descriptors, states } = data;
+  const { descriptors: allDescriptors, states } = data;
   const stateMap = new Map(states.map((s) => [s.id, s]));
+  // Companion lives on the Advanced tab — there's nothing to configure here.
+  const descriptors = allDescriptors.filter((d) => d.id !== "companion");
 
   return (
     <div className={cn("flex flex-col gap-0", className)}>

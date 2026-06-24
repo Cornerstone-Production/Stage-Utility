@@ -9,6 +9,9 @@ const NO_SPINNER =
 export interface NumberInputProps {
   value: number;
   onChange: (value: number) => void;
+  /** Fired on a "settled" value — blur or a stepper click — for commit-on-blur
+   *  callers (onChange still fires live for dirty-tracking). */
+  onCommit?: (value: number) => void;
   step?: number;
   min?: number;
   max?: number;
@@ -28,6 +31,7 @@ export interface NumberInputProps {
 export function NumberInput({
   value,
   onChange,
+  onCommit,
   step = 1,
   min,
   max,
@@ -61,6 +65,7 @@ export function NumberInput({
     const base = Number.isFinite(value) ? value : 0;
     const next = clamp(Number((base + dir * step).toFixed(6)));
     onChange(next);
+    onCommit?.(next);
     setText(String(next));
   }
 
@@ -87,10 +92,12 @@ export function NumberInput({
           setEditing(false);
           if (text.trim() === "" || !Number.isFinite(Number.parseFloat(text))) {
             setText(String(Number.isFinite(value) ? value : 0));
+            onCommit?.(Number.isFinite(value) ? value : 0);
           } else {
             const clamped = clamp(Number.parseFloat(text));
             setText(String(clamped));
             if (clamped !== value) onChange(clamped);
+            onCommit?.(clamped);
           }
         }}
         onChange={(e) => commitText(e.target.value)}

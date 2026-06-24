@@ -1,5 +1,8 @@
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon } from "lucide-react";
+import { invoke, onNotification } from "../../lib/api";
+import { CompanionInfoPanel } from "../../components/companion-info-panel";
 import {
   FieldSet,
   FieldGroup,
@@ -255,6 +258,35 @@ function UpdatesPanel({
   );
 }
 
+// Bitfocus Companion lives here (not on Integrations) — there's nothing to dial;
+// Companion connects TO this app, so this just shows the URL + live client count.
+function CompanionPanel() {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["integrations:list"],
+    queryFn: () =>
+      invoke<{ descriptors: IntegrationDescriptor[]; states: IntegrationState[] }>("integrations:list"),
+  });
+  useEffect(() => {
+    return onNotification("integrations:state-changed", (payload: unknown) => {
+      const states = payload as IntegrationState[];
+      queryClient.setQueryData(
+        ["integrations:list"],
+        (prev: { descriptors: IntegrationDescriptor[]; states: IntegrationState[] } | undefined) =>
+          prev ? { ...prev, states } : prev,
+      );
+    });
+  }, [queryClient]);
+
+  const state = data?.states.find((s) => s.id === "companion");
+  if (!state) return null;
+  return (
+    <FieldSet title="Bitfocus Companion">
+      <CompanionInfoPanel state={state} />
+    </FieldSet>
+  );
+}
+
 export function AdvancedSection({
   stageState,
   updateStatus,
@@ -283,6 +315,8 @@ export function AdvancedSection({
         justUpdated={justUpdated ?? null}
         onDismissJustUpdated={onDismissJustUpdated}
       />
+
+      <CompanionPanel />
 
       <FieldSet title="Advanced">
         <FieldGroup>
