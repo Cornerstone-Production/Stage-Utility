@@ -5,7 +5,6 @@ import type { useSensors } from "@dnd-kit/core";
 
 export type SectionId =
   | "plan"
-  | "service-types"
   | "views"
   | "displays"
   | "integrations"

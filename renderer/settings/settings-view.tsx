@@ -16,7 +16,6 @@ import {
   Loader2Icon,
   MonitorIcon,
   CalendarIcon,
-  LayersIcon,
   LayoutTemplateIcon,
   PlugIcon,
   QrCodeIcon,
@@ -32,7 +31,6 @@ import { useIsMobile } from "../lib/use-media-query";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SectionItem, WirelessChannel, SectionHandlers } from "./types";
 import { PlanSection } from "./sections/plan-section";
-import { ServiceTypesSection } from "./sections/service-types-section";
 import { ViewsSection } from "./sections/views-section";
 import { OutputsSection } from "./sections/outputs-section";
 import { IntegrationsSection } from "./sections/integrations-section";
@@ -138,7 +136,6 @@ function useSidebarCollapsed() {
 
 const SECTIONS: SectionItem[] = [
   { id: "plan", label: "Plan", icon: <CalendarIcon className="size-4 text-gray-11" /> },
-  { id: "service-types", label: "Service Types", icon: <LayersIcon className="size-4 text-gray-11" /> },
   { id: "views", label: "Views", icon: <LayoutTemplateIcon className="size-4 text-gray-11" /> },
   { id: "displays", label: "Displays", icon: <MonitorIcon className="size-4 text-gray-11" /> },
   { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4 text-gray-11" /> },
@@ -935,10 +932,6 @@ export function SettingsView() {
             isRefreshing={isRefreshing}
             handlers={handlers}
           />
-        );
-      case "service-types":
-        return (
-          <ServiceTypesSection stageState={stageState} serviceTypes={serviceTypes} handlers={handlers} />
         );
       case "views":
         return (

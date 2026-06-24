@@ -13,6 +13,7 @@ import {
   SelectContent,
   SelectItem,
   SelectValue,
+  Switch,
 } from "../../components/ui";
 import type { SectionProps } from "../types";
 
@@ -26,6 +27,21 @@ export function PlanSection({
   const allowed = stageState.allowedServiceTypeIds ?? [];
   const visibleServiceTypes =
     allowed.length === 0 ? serviceTypes : serviceTypes.filter((st) => allowed.includes(st.id));
+
+  // Toggle which service types are "active" — the ones auto plan mode follows and
+  // the manual picker is limited to. An empty allowed-list means "all active".
+  function toggleActive(id: string, checked: boolean) {
+    let next: string[];
+    if (allowed.length === 0) {
+      next = checked ? [] : serviceTypes.map((st) => st.id).filter((sid) => sid !== id);
+    } else if (checked) {
+      next = [...allowed, id];
+      if (next.length === serviceTypes.length) next = []; // all on → normalize to "all active"
+    } else {
+      next = allowed.filter((sid) => sid !== id);
+    }
+    handlers.handleSetAllowedServiceTypes(next).catch(() => {});
+  }
 
   return (
     <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
@@ -141,6 +157,32 @@ export function PlanSection({
           </Field>
         </FieldGroup>
       </FieldSet>
+
+      {serviceTypes.length > 0 && (
+        <FieldSet title="Active Service Types">
+          <FieldGroup>
+            {serviceTypes.map((st) => {
+              const isOn = allowed.length === 0 || allowed.includes(st.id);
+              return (
+                <Field key={st.id} orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel>{st.name}</FieldLabel>
+                  </FieldContent>
+                  <Switch
+                    checked={isOn}
+                    onCheckedChange={(v: boolean) => toggleActive(st.id, v)}
+                    aria-label={`Activate ${st.name}`}
+                  />
+                </Field>
+              );
+            })}
+          </FieldGroup>
+          <FieldDescription>
+            Auto plan mode follows only active types, and the manual picker is limited to them.
+            Turning all off is the same as having them all active.
+          </FieldDescription>
+        </FieldSet>
+      )}
     </div>
   );
 }
