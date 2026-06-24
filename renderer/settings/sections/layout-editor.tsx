@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   UndoIcon,
   Trash2Icon,
@@ -49,6 +49,8 @@ import {
   insertChild,
   depthOf,
   forEachWithRect,
+  composeRect,
+  localizeRect,
   deepCloneFreshIds,
   type FracRect,
 } from "../../main/layout-tree";
@@ -90,6 +92,9 @@ const PALETTE: LayoutObjectType[] = [
 // Deepest allowed object depth (top-level = 0). A container holding objects = 1;
 // a container holding containers holding leaves = 2. Keeps the editor sane.
 const MAX_DEPTH = 2;
+
+// The canvas occupies the whole coordinate space; top-level objects are fractions of it.
+const CANVAS_FRAC: FracRect = { x: 0, y: 0, w: 1, h: 1 };
 
 // Dashboard "glass tile" look, expressed in the style fields every object shares.
 // Border/radius/padding are fractions of canvas HEIGHT (≈1px / 16px on a 1080 canvas).
@@ -231,6 +236,28 @@ function flattenLayers(nodes: LayoutObject[], depth = 0): { o: LayoutObject; dep
   return out;
 }
 
+// A container drop target captured at drag start (containers don't move while a
+// single object is dragged, so a start snapshot is valid for the whole drag).
+interface DropTarget {
+  id: string;
+  abs: FracRect;
+  depth: number;
+}
+
+// Pick the most specific (smallest) container whose box contains the point and
+// that can legally accept the dragged object without exceeding the depth cap.
+function findDropContainer(targets: DropTarget[], draggedIsContainer: boolean, cx: number, cy: number): string | null {
+  const hits = targets.filter((t) => {
+    const inside = cx >= t.abs.x && cx <= t.abs.x + t.abs.w && cy >= t.abs.y && cy <= t.abs.y + t.abs.h;
+    if (!inside) return false;
+    // A leaf may nest under a depth-0 or depth-1 container (child ends at depth ≤2).
+    // A container may only nest under a depth-0 container (its leaves end at depth ≤2).
+    return draggedIsContainer ? t.depth === 0 : t.depth <= 1;
+  });
+  hits.sort((a, b) => a.abs.w * a.abs.h - b.abs.w * b.abs.h);
+  return hits[0]?.id ?? null;
+}
+
 // ── canvas with interactive overlay ──────────────────────────────────────────
 
 interface DragState {
@@ -239,11 +266,77 @@ interface DragState {
   start: LayoutObject;
   px: number;
   py: number;
+  /** Rendered px size of the dragged object's PARENT box (canvas for top-level). */
+  parentW: number;
+  parentH: number;
+  /** Nesting depth of the dragged object (top-level = 0). */
+  depth: number;
+  /** Only top-level objects can be dropped into a container. */
+  canReparent: boolean;
+  /** Container drop targets captured at drag start. */
+  targets: DropTarget[];
+}
+
+// One overlay box (selection outline + move/resize handles), positioned in % of
+// its parent overlay node so nested children resolve correctly. Recurses for a
+// container's children.
+function OverlayNode({
+  o, parentAbs, depth, selectedId, onStart,
+}: {
+  o: LayoutObject;
+  parentAbs: FracRect;
+  depth: number;
+  selectedId: string | null;
+  onStart: (e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) => void;
+}) {
+  const sel = o.id === selectedId;
+  const abs = depth === 0 ? { x: o.x, y: o.y, w: o.w, h: o.h } : composeRect(parentAbs, o);
+  const kids = o.children?.length ? [...o.children].sort((a, b) => a.z - b.z) : null;
+  return (
+    <div
+      onPointerDown={(e) => onStart(e, o, "move", parentAbs, depth)}
+      className="absolute"
+      style={{
+        left: `${o.x * 100}%`, top: `${o.y * 100}%`,
+        width: `${o.w * 100}%`, height: `${o.h * 100}%`,
+        cursor: "move",
+        outline: sel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
+        outlineOffset: 0,
+        boxShadow: sel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
+      }}
+    >
+      <span
+        style={{
+          position: "absolute", top: 0, left: 0, transform: "translateY(-100%)",
+          fontSize: 10, lineHeight: "14px", padding: "0 5px", maxWidth: "100%",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          background: sel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
+          borderRadius: "4px 4px 0 0", pointerEvents: "none",
+        }}
+      >
+        {TYPE_LABELS[o.config.type]}
+      </span>
+      {sel &&
+        HANDLES.map((h) => {
+          const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2 };
+          if (h.includes("n")) pos.top = -5;
+          if (h.includes("s")) pos.bottom = -5;
+          if (h.includes("w")) pos.left = -5;
+          if (h.includes("e")) pos.right = -5;
+          if (h === "n" || h === "s") pos.left = "calc(50% - 4.5px)";
+          if (h === "e" || h === "w") pos.top = "calc(50% - 4.5px)";
+          return <div key={h} onPointerDown={(e) => onStart(e, o, h, parentAbs, depth)} style={{ ...pos, cursor: handleCursor(h) }} />;
+        })}
+      {kids?.map((c) => (
+        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} onStart={onStart} />
+      ))}
+    </div>
+  );
 }
 
 function EditorCanvas({
   canvas, objects, selectedId, gridOn, ctx, ndiSource, interactive,
-  onSelect, onGeom, onCommitStart,
+  onSelect, onGeom, onCommitStart, onReparent,
 }: {
   canvas: LayoutCanvas;
   objects: LayoutObject[];
@@ -256,6 +349,10 @@ function EditorCanvas({
   onSelect: (id: string | null) => void;
   onGeom: (id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => void;
   onCommitStart: () => void;
+  /** Drop a top-level object into a container (reparent on drag release).
+   *  `objAbs` is the object's final absolute canvas rect; `containerAbs` the
+   *  container's absolute rect — together they give the new parent-local geom. */
+  onReparent: (id: string, containerId: string, objAbs: FracRect, containerAbs: FracRect) => void;
 }) {
   // Measure the available area (this wrapper), then letterbox the design canvas to
   // fit BOTH axes so it never overflows on ultrawide/portrait/short screens.
@@ -274,40 +371,75 @@ function EditorCanvas({
   const boxW = canvas.width * scale;
   const boxH = canvas.height * scale;
   const [drag, setDrag] = useState<DragState | null>(null);
+  // Latest local geom set during the active drag (so pointerup can hit-test the
+  // drop without depending on the parent's async state update).
+  const dragGeom = useRef<Pick<LayoutObject, "x" | "y" | "w" | "h"> | null>(null);
 
   // Window-level move/up while dragging.
   useEffect(() => {
     if (!drag || boxW <= 0) return;
+    // Deltas are fractions of the dragged object's PARENT box; snap is disabled
+    // inside a container (the canvas grid is drawn at canvas scale and wouldn't
+    // line up with per-container snapping).
+    const snapOn = gridOn && drag.depth === 0;
     const onMove = (e: globalThis.PointerEvent) => {
-      const dx = (e.clientX - drag.px) / boxW;
-      const dy = (e.clientY - drag.py) / boxH;
+      const dx = (e.clientX - drag.px) / drag.parentW;
+      const dy = (e.clientY - drag.py) / drag.parentH;
+      let geom: Pick<LayoutObject, "x" | "y" | "w" | "h">;
       if (drag.mode === "move") {
-        const x = clamp(snap(drag.start.x + dx, gridOn), 0, 1 - drag.start.w);
-        const y = clamp(snap(drag.start.y + dy, gridOn), 0, 1 - drag.start.h);
-        onGeom(drag.id, { x, y, w: drag.start.w, h: drag.start.h });
+        const x = clamp(snap(drag.start.x + dx, snapOn), 0, 1 - drag.start.w);
+        const y = clamp(snap(drag.start.y + dy, snapOn), 0, 1 - drag.start.h);
+        geom = { x, y, w: drag.start.w, h: drag.start.h };
       } else {
         const g = applyResize(drag.start, drag.mode, dx, dy);
-        onGeom(drag.id, {
-          x: snap(g.x, gridOn), y: snap(g.y, gridOn),
-          w: snap(g.w, gridOn), h: snap(g.h, gridOn),
-        });
+        geom = { x: snap(g.x, snapOn), y: snap(g.y, snapOn), w: snap(g.w, snapOn), h: snap(g.h, snapOn) };
       }
+      dragGeom.current = geom;
+      onGeom(drag.id, geom);
     };
-    const onUp = () => setDrag(null);
+    const onUp = () => {
+      const g = dragGeom.current;
+      // Only a top-level object dropped onto a container reparents into it.
+      if (drag.mode === "move" && drag.canReparent && g) {
+        const cx = g.x + g.w / 2;
+        const cy = g.y + g.h / 2;
+        const target = findDropContainer(drag.targets, drag.start.config.type === "container", cx, cy);
+        const t = target ? drag.targets.find((x) => x.id === target) : null;
+        // A top-level object's local geom IS its absolute canvas rect.
+        if (t) onReparent(drag.id, t.id, { x: g.x, y: g.y, w: g.w, h: g.h }, t.abs);
+      }
+      dragGeom.current = null;
+      setDrag(null);
+    };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [drag, boxW, boxH, gridOn, onGeom]);
+  }, [drag, boxW, boxH, gridOn, onGeom, onReparent]);
 
-  function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle) {
+  function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) {
     e.stopPropagation();
     e.preventDefault();
     onSelect(o.id);
     onCommitStart();
-    setDrag({ id: o.id, mode, start: o, px: e.clientX, py: e.clientY });
+    // Snapshot container drop targets, excluding the dragged object and its own
+    // subtree (can't drop a container into itself or its descendant).
+    const excluded = new Set<string>();
+    const dragged = findById(objects, o.id);
+    const collect = (n: LayoutObject) => { excluded.add(n.id); n.children?.forEach(collect); };
+    if (dragged) collect(dragged);
+    const targets: DropTarget[] = [];
+    forEachWithRect(objects, (n) => {
+      if (n.o.config.type === "container" && !excluded.has(n.o.id)) targets.push({ id: n.o.id, abs: n.abs, depth: n.depth });
+    });
+    dragGeom.current = { x: o.x, y: o.y, w: o.w, h: o.h };
+    setDrag({
+      id: o.id, mode, start: o, px: e.clientX, py: e.clientY,
+      parentW: parentAbs.w * boxW, parentH: parentAbs.h * boxH,
+      depth, canReparent: depth === 0, targets,
+    });
   }
 
   const sorted = [...objects].sort((a, b) => a.z - b.z);
@@ -355,57 +487,21 @@ function EditorCanvas({
             ))}
           </div>
 
-          {/* Interaction overlay (rendered px) — edit mode only */}
+          {/* Interaction overlay (rendered px) — edit mode only. Recursive so a
+              container's children are individually selectable/draggable; the
+              overlay is unclipped so name-tags and handles stay visible. */}
           {interactive && (
             <div className="absolute inset-0">
-              {sorted.map((o) => {
-                const sel = o.id === selectedId;
-                return (
-                  <div
-                    key={o.id}
-                    onPointerDown={(e) => startDrag(e, o, "move")}
-                    className="absolute"
-                    style={{
-                      left: `${o.x * 100}%`, top: `${o.y * 100}%`,
-                      width: `${o.w * 100}%`, height: `${o.h * 100}%`,
-                      cursor: "move",
-                      outline: sel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
-                      outlineOffset: 0,
-                      boxShadow: sel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
-                    }}
-                  >
-                    {/* Name tag so objects are easy to tell apart */}
-                    <span
-                      style={{
-                        position: "absolute", top: 0, left: 0, transform: "translateY(-100%)",
-                        fontSize: 10, lineHeight: "14px", padding: "0 5px", maxWidth: "100%",
-                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                        background: sel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
-                        borderRadius: "4px 4px 0 0", pointerEvents: "none",
-                      }}
-                    >
-                      {TYPE_LABELS[o.config.type]}
-                    </span>
-                    {sel &&
-                      HANDLES.map((h) => {
-                        const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2 };
-                        if (h.includes("n")) pos.top = -5;
-                        if (h.includes("s")) pos.bottom = -5;
-                        if (h.includes("w")) pos.left = -5;
-                        if (h.includes("e")) pos.right = -5;
-                        if (h === "n" || h === "s") { pos.left = "calc(50% - 4.5px)"; }
-                        if (h === "e" || h === "w") { pos.top = "calc(50% - 4.5px)"; }
-                        return (
-                          <div
-                            key={h}
-                            onPointerDown={(e) => startDrag(e, o, h)}
-                            style={{ ...pos, cursor: handleCursor(h) }}
-                          />
-                        );
-                      })}
-                  </div>
-                );
-              })}
+              {sorted.map((o) => (
+                <OverlayNode
+                  key={o.id}
+                  o={o}
+                  parentAbs={CANVAS_FRAC}
+                  depth={0}
+                  selectedId={selectedId}
+                  onStart={startDrag}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -601,6 +697,24 @@ export function LayoutEditor({
       return [...tree, { ...removed, x: placed.x, y: placed.y, w: placed.w, h: placed.h, z }];
     });
   }
+  // Drop a top-level object into a container, converting its absolute canvas rect
+  // to a parent-local rect so it stays put. Stable identity (no deps) so the
+  // canvas drag effect doesn't re-subscribe its window listeners mid-drag. The
+  // move gesture already pushed history at drag start, so this doesn't push again.
+  const reparentIntoContainer = useCallback((id: string, containerId: string, objAbs: FracRect, contAbs: FracRect) => {
+    setObjects((prev) => {
+      const { tree, removed } = removeById(prev, id);
+      if (!removed) return prev;
+      const local = localizeRect(contAbs, objAbs);
+      const w = Math.min(local.w, 1);
+      const h = Math.min(local.h, 1);
+      const cont = findById(tree, containerId);
+      const z = (cont?.children ?? []).reduce((m, o) => Math.max(m, o.z), 0) + 1;
+      return insertChild(tree, containerId, { ...removed, x: clamp(local.x, 0, 1 - w), y: clamp(local.y, 0, 1 - h), w, h, z });
+    });
+    setDirty(true);
+    setSelectedId(id);
+  }, []);
   function reorder(id: string, dir: "front" | "back" | "up" | "down") {
     pushHistory();
     const reorderScope = (list: LayoutObject[]): LayoutObject[] => {
@@ -748,6 +862,7 @@ export function LayoutEditor({
               onSelect={setSelectedId}
               onGeom={onGeom}
               onCommitStart={pushHistory}
+              onReparent={reparentIntoContainer}
             />
           ) : (
             <div className="w-full h-full rounded-xl border border-gray-a4 flex items-center justify-center text-gray-7">
