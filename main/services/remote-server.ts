@@ -19,6 +19,8 @@ import { integrationManager } from "./integration-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
 import { smaartService } from "./smaart-service.js";
+import { splHistoryStore } from "./spl-history-store.js";
+import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
 import { updater } from "./updater.js";
 import { wirelessManager } from "./wireless-manager.js";
@@ -92,7 +94,15 @@ function error(res: http.ServerResponse, message: string, status = 400): void {
 }
 
 function isDisplayKind(v: unknown): v is DisplayKind {
-  return v === "slots" || v === "dashboard" || v === "stage" || v === "transcription" || v === "custom";
+  return (
+    v === "slots" ||
+    v === "dashboard" ||
+    v === "stage" ||
+    v === "transcription" ||
+    v === "custom" ||
+    v === "script" ||
+    v === "spl-rundown"
+  );
 }
 
 async function readBody(req: http.IncomingMessage): Promise<unknown> {
@@ -344,6 +354,7 @@ export class RemoteServer {
       sseWrite(res, "stage:state-changed", stageController.getState());
       sseWrite(res, "propresenter:status", propresenterService.getStatus());
       sseWrite(res, "spl:metrics", smaartService.getLatest());
+      sseWrite(res, "spl:history", splRecorder.getCurrent());
       sseClients.add(res);
       // A Companion module marks its event stream so we can show a live
       // connected-client count in the integration panel. Re-broadcast the
@@ -378,10 +389,32 @@ export class RemoteServer {
       json(res, smaartService.getLatest());
       return;
     }
+    if (method === "GET" && pathname === "/api/spl/history/current") {
+      json(res, splRecorder.getCurrent());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/spl/history") {
+      json(res, await splHistoryStore.list());
+      return;
+    }
+    {
+      const histMatch = pathname.match(/^\/api\/spl\/history\/([^/]+)$/);
+      if (method === "GET" && histMatch && histMatch[1] !== "current") {
+        json(res, await splHistoryStore.get(decodeURIComponent(histMatch[1])));
+        return;
+      }
+    }
 
     // List the current plan's attachments (powers the layout editor's file picker).
     if (method === "GET" && pathname === "/api/pco/attachments") {
       json(res, await stageController.listPlanAttachments());
+      return;
+    }
+
+    // Full rundown of the current plan (items + note columns) for the script /
+    // SPL-rundown dashboards.
+    if (method === "GET" && pathname === "/api/pco/plan-items") {
+      json(res, await stageController.listCurrentPlanItems());
       return;
     }
 
@@ -724,8 +757,9 @@ export class RemoteServer {
       const hasLayout = "layout" in body && body.layout != null && typeof body.layout === "object";
       const hasSlotsLayout = "slotsLayout" in body
         && (body.slotsLayout === null || typeof body.slotsLayout === "object");
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout) {
-        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), or body.slotsLayout (object|null) required");
+      const hasShowLiveControls = typeof body.showLiveControls === "boolean";
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasShowLiveControls) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), or body.showLiveControls (boolean) required");
         return;
       }
       let state = stageController.getState();
@@ -734,6 +768,7 @@ export class RemoteServer {
       if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
       if (hasLayout) state = await stageController.setViewLayout(id, body.layout as LayoutDTO);
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
+      if (hasShowLiveControls) state = await stageController.setViewShowLiveControls(id, body.showLiveControls as boolean);
       json(res, state);
       return;
     }

@@ -4,7 +4,14 @@
  * What a View renders: slot grid (default), dashboard, stage, transcription, or
  * a "custom" free-form layout authored with the visual editor (see {@link LayoutDTO}).
  */
-export type ViewKind = "slots" | "dashboard" | "stage" | "transcription" | "custom";
+export type ViewKind =
+  | "slots"
+  | "dashboard"
+  | "stage"
+  | "transcription"
+  | "custom"
+  | "script"
+  | "spl-rundown";
 
 /** @deprecated Back-compat alias retained for the legacy display model. Use ViewKind. */
 export type DisplayKind = ViewKind;
@@ -90,6 +97,8 @@ export interface View {
    * (the monitor's active width), so widths render at true physical inches.
    */
   slotsLayout?: SlotsLayout | null;
+  /** Show the PCO Live Prev/Next controls on a "script" View (default false). */
+  showLiveControls?: boolean;
 }
 
 /** Physical layout config for a slots-View. All measurements in inches. */
@@ -251,6 +260,8 @@ export interface ResolvedOutput {
  */
 export interface PcoLiveDTO {
   mode: "item" | "preservice" | "none";
+  /** Stable PCO item id of the current live item ("item" mode) — keys SPL recording. */
+  currentItemId: string | null;
   /** Item title ("item") or service label ("preservice"). */
   label: string | null;
   /** Item's planned length in seconds ("item" mode). */
@@ -312,6 +323,39 @@ export interface SplMetricsDTO {
   meters: Record<string, SplMeterDTO>;
 }
 
+/** Per-item recorded SPL across one service. */
+export interface SplItemHistory {
+  itemId: string;
+  title: string;
+  /** Order within the service (incrementing as items go live). */
+  sequence: number;
+  /** Peak recorded value of the chosen metric (dB), or null if never sampled. */
+  maxSpl: number | null;
+  /** Running mean of the chosen metric (dB), or null if never sampled. */
+  avgSpl: number | null;
+  sampleCount: number;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+/** SPL recording for one service occurrence, keyed by serviceKey. */
+export interface ServiceSplHistory {
+  /** `${serviceTypeId}:${planId}:${YYYY-MM-DD}`. */
+  serviceKey: string;
+  serviceTypeId: string | null;
+  planId: string | null;
+  planTitle: string | null;
+  seriesTitle: string | null;
+  /** Local date the recording started (YYYY-MM-DD). */
+  serviceDate: string;
+  /** Which Smaart meter + metric the levels were recorded from. */
+  meterId: string | null;
+  metricKey: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  items: SplItemHistory[];
+}
+
 export interface ServiceTypeDTO {
   id: string;
   name: string;
@@ -323,6 +367,29 @@ export interface PlanDTO {
   seriesTitle: string | null;
   sortDate: string | null;
   dates: string | null;
+}
+
+/** One line-item of a PCO plan (song / header / media / item). */
+export interface PlanItemDTO {
+  id: string;
+  title: string;
+  /** PCO item_type: "song" | "header" | "media" | "item". "header" = section row. */
+  itemType: string;
+  /** Planned length in seconds (0 when unset). */
+  lengthSec: number;
+  /** Order within the plan. */
+  sequence: number;
+  /** Per-note-category content (e.g. {"Audio": "...", "Vocals": "..."}). */
+  notesByCategory: Record<string, string>;
+  description: string | null;
+}
+
+/** A plan's full rundown plus the ordered note-category column names. */
+export interface PlanItemsDTO {
+  planId: string | null;
+  items: PlanItemDTO[];
+  /** Ordered note-category names (the script columns: Audio, Band, MD, Vocals…). */
+  noteCategories: string[];
 }
 
 /** A file attached to a PCO plan (e.g. a stage plot, chart, or rundown PDF). */

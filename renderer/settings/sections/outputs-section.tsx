@@ -21,6 +21,8 @@ const KIND_LABELS: Record<ViewKind, string> = {
   stage: "Stage",
   transcription: "Captions",
   custom: "Custom Layout",
+  script: "Script",
+  "spl-rundown": "SPL Rundown",
 };
 
 const UNROUTED = "__none__";

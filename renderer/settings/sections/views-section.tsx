@@ -14,8 +14,10 @@ import {
   SelectItem,
   SelectValue,
   Separator,
+  Switch,
   Dialog,
 } from "../../components/ui";
+import { invoke } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { SlotEditor } from "./slots-section";
 import { ViewPreview } from "./view-preview";
@@ -27,8 +29,10 @@ const KIND_LABELS: Record<ViewKind, string> = {
   stage: "Stage",
   transcription: "Captions",
   custom: "Custom Layout",
+  script: "Script",
+  "spl-rundown": "SPL Rundown",
 };
-const KIND_ORDER: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "custom"];
+const KIND_ORDER: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "script", "spl-rundown", "custom"];
 
 const VIEWS_LIST_COLLAPSED_KEY = "stage-utility:views-list-collapsed";
 
@@ -257,7 +261,27 @@ function ViewDetail({
             handlers={handlers}
           />
         </>
-      ) : view.kind === "custom" ? null : (
+      ) : view.kind === "custom" ? null : view.kind === "script" ? (
+        <>
+          <Separator />
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col">
+              <span className="text-caption1 text-gray-12">Show PCO Prev/Next controls</span>
+              <span className="text-caption2 text-gray-9">
+                Adds the Planning Center Live Prev/Next buttons to this script display.
+              </span>
+            </div>
+            <Switch
+              checked={view.showLiveControls ?? false}
+              onCheckedChange={(v) => void invoke("views:setShowLiveControls", { id: view.id, showLiveControls: v })}
+            />
+          </div>
+          <p className="text-caption2 text-gray-9">
+            The Script view renders the live plan rundown (items + note columns) with the clock,
+            the PCO countdown, and a max-SPL column per item.
+          </p>
+        </>
+      ) : (
         <p className="text-caption1 text-gray-9">
           {KIND_LABELS[view.kind]} views render a fixed layout from live Planning Center / ProPresenter
           data — there's nothing to configure here yet besides the name.

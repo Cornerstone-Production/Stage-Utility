@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
-import { CompanionInfoPanel } from "./companion-info-panel";
 import {
   Button,
   Field,
@@ -22,6 +21,7 @@ import {
   Switch,
   Status,
   Separator,
+  NumberInput,
   toast,
 } from "../components/ui";
 import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from "lucide-react";
@@ -286,9 +286,16 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
                     onChange={(v) => setField(field.key, v)}
                     placeholder={field.placeholder}
                   />
+                ) : field.type === "number" ? (
+                  <NumberInput
+                    value={typeof value === "number" ? value : Number(value) || 0}
+                    onChange={(n) => setField(field.key, String(n))}
+                    className="w-44"
+                    aria-label={field.label}
+                  />
                 ) : (
                   <Input
-                    type={field.type === "password" ? "password" : field.type === "number" ? "number" : "text"}
+                    type={field.type === "password" ? "password" : "text"}
                     value={typeof value === "string" || typeof value === "number" ? String(value) : ""}
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setField(field.key, e.target.value)}
                     placeholder={field.placeholder ?? ""}
@@ -408,8 +415,10 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
     );
   }
 
-  const { descriptors, states } = data;
+  const { descriptors: allDescriptors, states } = data;
   const stateMap = new Map(states.map((s) => [s.id, s]));
+  // Companion lives on the Advanced tab — there's nothing to configure here.
+  const descriptors = allDescriptors.filter((d) => d.id !== "companion");
 
   return (
     <div className={cn("flex flex-col gap-0", className)}>
@@ -425,19 +434,6 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
                   {descriptor.label}
                 </span>
                 <WirelessConnectionsPanel />
-              </div>
-            ) : descriptor.id === "companion" ? (
-              // Companion connects TO this app — there's nothing to enable, save,
-              // or test here, so skip the card chrome and just show the status +
-              // the connect-info panel.
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-headline font-semibold text-gray-12 flex-1 min-w-0 truncate">
-                    {descriptor.label}
-                  </span>
-                  <ConnectionBadge state={state} />
-                </div>
-                <CompanionInfoPanel state={state} />
               </div>
             ) : (
               <div className="flex flex-col gap-3">

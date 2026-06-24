@@ -18,6 +18,7 @@ import {
   Switch,
   Status,
   Separator,
+  NumberInput,
   toast,
 } from "../components/ui";
 import {
@@ -26,6 +27,8 @@ import {
   Loader2Icon,
   CheckCircle2Icon,
   XCircleIcon,
+  ChevronRightIcon,
+  ChevronDownIcon,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 
@@ -164,6 +167,18 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
+
+  // Collapse configured connections by default so the list stays compact — a
+  // freshly-added one (no config yet) starts expanded so it's ready to edit.
+  const isConfigured = !!provider && provider.configSchema.some((f) => {
+    const v = conn.config[f.key];
+    return v != null && v !== "" && !(Array.isArray(v) && v.length === 0);
+  });
+  const [expanded, setExpanded] = useState(!isConfigured);
+  // A one-line summary of the configured target (e.g. host) for the collapsed row.
+  const summary = provider?.configSchema
+    .map((f) => conn.config[f.key])
+    .find((v) => typeof v === "string" && v.trim()) as string | undefined;
 
   // Sync local name if the connection updates from outside (e.g. broadcast)
   useEffect(() => {
@@ -351,15 +366,17 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
                     onChange={(v) => handleIpListChange(field.key, v)}
                     placeholder={field.placeholder}
                   />
+                ) : field.type === "number" ? (
+                  <NumberInput
+                    value={typeof value === "number" ? value : Number(value) || 0}
+                    onChange={(n) => handleConfigChange(field.key, String(n))}
+                    onCommit={() => handleConfigFieldBlur(field.key)}
+                    className="w-44"
+                    aria-label={field.label}
+                  />
                 ) : (
                   <Input
-                    type={
-                      field.type === "password"
-                        ? "password"
-                        : field.type === "number"
-                          ? "number"
-                          : "text"
-                    }
+                    type={field.type === "password" ? "password" : "text"}
                     value={
                       typeof value === "string" || typeof value === "number" ? String(value) : ""
                     }
@@ -381,8 +398,21 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Header: name input + provider select + enable switch + remove */}
+      {/* Header: collapse toggle + name input + provider select + enable + remove */}
       <div className="flex items-center gap-2">
+        <Button
+          variant="transparent"
+          size="small"
+          iconOnly
+          onClick={() => setExpanded((v) => !v)}
+          aria-label={expanded ? "Collapse" : "Expand"}
+        >
+          {expanded ? (
+            <ChevronDownIcon className="size-4 text-gray-9" />
+          ) : (
+            <ChevronRightIcon className="size-4 text-gray-9" />
+          )}
+        </Button>
         <Input
           value={localName}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setLocalName(e.target.value)}
@@ -431,36 +461,42 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
         </Button>
       </div>
 
-      {/* Type-specific config */}
-      {renderConfigFields()}
+      {expanded ? (
+        <>
+          {/* Type-specific config */}
+          {renderConfigFields()}
 
-      {/* Test row */}
-      <div className="flex items-center gap-2">
-        <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting}>
-          {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
-          Test
-        </Button>
-        {testResult !== null && (
-          <span
-            className={cn(
-              "text-caption1 flex items-center gap-1",
-              testResult.ok ? "text-green-10" : "text-red-10",
+          {/* Test row */}
+          <div className="flex items-center gap-2">
+            <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting}>
+              {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
+              Test
+            </Button>
+            {testResult !== null && (
+              <span
+                className={cn(
+                  "text-caption1 flex items-center gap-1",
+                  testResult.ok ? "text-green-10" : "text-red-10",
+                )}
+              >
+                {testResult.ok ? (
+                  <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />
+                ) : (
+                  <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
+                )}
+                {testResult.ok
+                  ? (testResult.message ?? "OK")
+                  : (testResult.message ?? "Failed")}
+              </span>
             )}
-          >
-            {testResult.ok ? (
-              <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />
-            ) : (
-              <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
+            {conn.message && !testResult && (
+              <span className="text-caption1 text-gray-9">{conn.message}</span>
             )}
-            {testResult.ok
-              ? (testResult.message ?? "OK")
-              : (testResult.message ?? "Failed")}
-          </span>
-        )}
-        {conn.message && !testResult && (
-          <span className="text-caption1 text-gray-9">{conn.message}</span>
-        )}
-      </div>
+          </div>
+        </>
+      ) : (
+        summary && <span className="pl-9 text-caption2 text-gray-9">{summary}</span>
+      )}
     </div>
   );
 }
@@ -558,15 +594,16 @@ export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanel
           How often all wireless gear is queried for status.
         </span>
       </div>
-      <Input
-        type="number"
-        value={meterInput}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => setMeterInput(e.target.value)}
-        onBlur={commitMeterRate}
-        className="w-24 tabular-nums"
+      <NumberInput
+        value={Number(meterInput) || 0}
+        onChange={(n) => setMeterInput(String(n))}
+        onCommit={commitMeterRate}
+        step={100}
+        min={0}
+        suffix="ms"
+        className="w-28"
         aria-label="Polling interval in milliseconds"
       />
-      <span className="text-caption1 text-gray-9 shrink-0">ms</span>
     </div>
   );
 
