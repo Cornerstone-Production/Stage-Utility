@@ -1239,6 +1239,9 @@ function Inspector({
   const chargerBays = useStageState().state?.chargerBays ?? [];
   const spl = useSplState();
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
+  // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
+  // to 1 decimal so they read as whole numbers but still allow fine values).
+  const pxOf = (frac: number | undefined, dflt: number) => Math.round((frac ?? dflt) * canvas.height * 10) / 10;
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -1249,6 +1252,12 @@ function Inspector({
         <Button variant="transparent" size="small" iconOnly onClick={onDuplicate} aria-label="Duplicate"><CopyIcon className="size-3.5 text-gray-9" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={onRemove} aria-label="Delete"><Trash2Icon className="size-3.5 text-red-10" /></Button>
       </div>
+
+      {nested && (
+        <Button variant="filled" size="small" onClick={onReparentOut}>
+          <CornerLeftUpIcon className="size-3.5" /> Move out of container
+        </Button>
+      )}
 
       {/* Binding */}
       {c.type === "text" && (
@@ -1418,7 +1427,7 @@ function Inspector({
       {/* Style */}
       {isText && (
         <>
-          <Row label="Font size"><NumberInput value={s.fontSize ?? 0.05} step={0.005} min={0.01} max={0.5} onChange={(v) => onStyle({ fontSize: v })} /></Row>
+          <Row label="Font size"><NumberField value={pxOf(s.fontSize, 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
           <Row label="Weight">
             <Select value={String(s.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1452,17 +1461,19 @@ function Inspector({
         <input
           type="range"
           min={0}
-          max={1}
-          step={0.01}
-          value={s.opacity ?? 1}
-          onChange={(e) => onStyle({ opacity: parseFloat(e.target.value) })}
+          max={100}
+          step={1}
+          value={Math.round((s.opacity ?? 1) * 100)}
+          onChange={(e) => onStyle({ opacity: parseInt(e.target.value, 10) / 100 })}
           className="flex-1 min-w-0 accent-blue-9"
           aria-label="Opacity"
         />
-        <span className="text-caption2 text-gray-9 w-9 shrink-0 text-right tabular-nums">{Math.round((s.opacity ?? 1) * 100)}%</span>
+        <div className="w-16 shrink-0">
+          <NumberField value={Math.round((s.opacity ?? 1) * 100)} step={1} min={0} max={100} suffix="%" onChange={(v) => onStyle({ opacity: clamp(v / 100, 0, 1) })} />
+        </div>
       </Row>
-      <Row label="Radius"><NumberInput value={s.cornerRadius ?? 0} step={0.005} min={0} max={0.5} onChange={(v) => onStyle({ cornerRadius: v })} /></Row>
-      <Row label="Padding"><NumberInput value={s.padding ?? 0} step={0.005} min={0} max={0.3} onChange={(v) => onStyle({ padding: v })} /></Row>
+      <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
+      <Row label="Padding"><NumberField value={pxOf(s.padding, 0)} step={1} min={0} max={Math.round(0.3 * canvas.height)} suffix="px" onChange={(px) => onStyle({ padding: px / canvas.height })} /></Row>
       <Row label="Border">
         <input
           type="color"
@@ -1482,12 +1493,6 @@ function Inspector({
       </Row>
 
       <Separator />
-
-      {nested && (
-        <Button variant="filled" size="small" onClick={onReparentOut}>
-          Move out of container
-        </Button>
-      )}
 
       {/* Align within the parent (canvas for top-level, container box if nested) */}
       <Row label="Align">
