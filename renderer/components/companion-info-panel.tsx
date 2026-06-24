@@ -1,5 +1,13 @@
 import { useStageState } from "../main/use-stage-state";
-import { Button, toast } from "./ui";
+import {
+  Button,
+  Field,
+  FieldGroup,
+  FieldContent,
+  FieldLabel,
+  FieldDescription,
+  toast,
+} from "./ui";
 import { CopyIcon } from "lucide-react";
 
 // Copy that also works in a non-secure context (prod is served over plain HTTP,
@@ -32,26 +40,30 @@ async function copyText(text: string): Promise<boolean> {
 
 function CopyField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-16 shrink-0 text-caption2 text-gray-9">{label}</span>
-      <code className="flex-1 min-w-0 truncate rounded bg-gray-a3 px-2 py-1 text-caption1 text-gray-12">
-        {value}
-      </code>
-      <Button
-        variant="transparent"
-        size="small"
-        iconOnly
-        onClick={async () => {
-          const ok = await copyText(value);
-          if (ok) toast.success(`${label} copied`);
-          else toast.error(`Couldn't copy — select and copy manually`);
-        }}
-        aria-label={`Copy ${label}`}
-        title={`Copy ${label}`}
-      >
-        <CopyIcon className="size-3.5 text-gray-9" />
-      </Button>
-    </div>
+    <Field orientation="horizontal">
+      <FieldContent>
+        <FieldLabel>{label}</FieldLabel>
+      </FieldContent>
+      <div className="flex items-center gap-1.5 w-full min-w-0 sm:w-56">
+        <code className="flex-1 min-w-0 truncate rounded bg-gray-a3 px-2 py-1 text-caption1 text-gray-12 tabular-nums">
+          {value}
+        </code>
+        <Button
+          variant="transparent"
+          size="small"
+          iconOnly
+          onClick={async () => {
+            const ok = await copyText(value);
+            if (ok) toast.success(`${label} copied`);
+            else toast.error(`Couldn't copy — select and copy manually`);
+          }}
+          aria-label={`Copy ${label}`}
+          title={`Copy ${label}`}
+        >
+          <CopyIcon className="size-3.5 text-gray-9" />
+        </Button>
+      </div>
+    </Field>
   );
 }
 
@@ -80,12 +92,17 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
     state.connection === "connected" && state.message ? state.message : null;
 
   return (
-    <div className="mt-1 flex flex-col gap-2">
-      <p className="text-caption1 text-gray-11">
-        Add a <span className="text-gray-12 font-medium">Cornerstone Stage Utility</span>{" "}
-        connection in Bitfocus Companion and enter this server&apos;s IP and port below. No
-        password — it works on your local network.
-      </p>
+    <FieldGroup>
+      <Field orientation="vertical">
+        <FieldContent>
+          <FieldLabel>Bitfocus Companion</FieldLabel>
+          <FieldDescription>
+            Add a <span className="text-gray-12 font-medium">Cornerstone Stage Utility</span>{" "}
+            connection in Bitfocus Companion and enter this server&apos;s IP and port below. No
+            password — it works on your local network.
+          </FieldDescription>
+        </FieldContent>
+      </Field>
 
       {host ? (
         <>
@@ -93,12 +110,22 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
           <CopyField label="Port" value={port ?? "8788"} />
         </>
       ) : (
-        <p className="text-caption1 text-gray-9">LAN address unavailable.</p>
+        <Field orientation="horizontal">
+          <FieldContent>
+            <FieldLabel>IP / Host</FieldLabel>
+          </FieldContent>
+          <span className="text-caption1 text-gray-9">LAN address unavailable.</span>
+        </Field>
       )}
 
-      <p className="text-caption1 text-gray-11">
-        {connectedCount ?? "No Companion clients connected yet."}
-      </p>
-    </div>
+      <Field orientation="horizontal">
+        <FieldContent>
+          <FieldLabel>Status</FieldLabel>
+        </FieldContent>
+        <span className="text-caption1 text-gray-10">
+          {connectedCount ?? "No Companion clients connected yet."}
+        </span>
+      </Field>
+    </FieldGroup>
   );
 }

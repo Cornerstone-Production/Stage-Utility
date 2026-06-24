@@ -9,6 +9,8 @@ import { useStageState } from "./use-stage-state";
 import { DashboardView } from "./dashboard-view";
 import { StageDisplayView } from "./stage-display-view";
 import { TranscriptionView } from "./transcription-view";
+import { ScriptView } from "./script-view";
+import { SplRundownView } from "./spl-rundown-view";
 import { LayoutRenderer } from "./layout-renderer";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 
@@ -380,6 +382,24 @@ export function StageView() {
     return (
       <StageErrorBoundary>
         <TranscriptionView displayId={displayId} />
+      </StageErrorBoundary>
+    );
+  }
+  if (kind === "script") {
+    const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
+    return (
+      <StageErrorBoundary>
+        <ScriptView
+          displayId={displayId}
+          showLiveControls={(activeView?.showLiveControls ?? false) && !previewViewId}
+        />
+      </StageErrorBoundary>
+    );
+  }
+  if (kind === "spl-rundown") {
+    return (
+      <StageErrorBoundary>
+        <SplRundownView displayId={displayId} />
       </StageErrorBoundary>
     );
   }

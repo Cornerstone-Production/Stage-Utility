@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -411,6 +411,27 @@ export class StageController {
       this.state.serviceTypeId,
       this.state.planId,
     );
+  }
+
+  /**
+   * The active plan's full rundown (items + note-category columns) for the
+   * ScriptViewer / SPL-rundown dashboards. Empty when unconfigured / no plan.
+   * `noteCategories` is the canonical column order, narrowed to those actually
+   * used by at least one item.
+   */
+  async listCurrentPlanItems(): Promise<PlanItemsDTO> {
+    const empty: PlanItemsDTO = { planId: this.state.planId, items: [], noteCategories: [] };
+    if (!this.pcoAppId || !this.pcoSecret) return empty;
+    if (!this.state.serviceTypeId || !this.state.planId) return empty;
+    const [items, categories] = await Promise.all([
+      pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId, this.state.planId),
+      pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId),
+    ]);
+    const used = new Set<string>();
+    for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
+    const ordered = categories.filter((c) => used.has(c));
+    for (const c of used) if (!ordered.includes(c)) ordered.push(c); // any non-canonical, at end
+    return { planId: this.state.planId, items, noteCategories: ordered };
   }
 
   /**
@@ -1121,6 +1142,20 @@ export class StageController {
     }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, slotsLayout } : v));
     console.log(`[stage-controller] setViewSlotsLayout id=${id} ${slotsLayout ? `${slotsLayout.displayWidthIn}in` : "(off)"}`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Toggle the PCO Live Prev/Next controls on a "script" View. */
+  async setViewShowLiveControls(id: string, showLiveControls: boolean): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:setShowLiveControls — view ${id} not found`);
+    }
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, showLiveControls } : v));
+    console.log(`[stage-controller] setViewShowLiveControls id=${id} → ${showLiveControls}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();

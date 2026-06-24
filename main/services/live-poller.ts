@@ -8,6 +8,7 @@
 
 import type { PcoLiveDTO } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
+import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
 
 const LIVE_INTERVAL_MS = 1000;
@@ -53,6 +54,8 @@ class LivePoller {
 
     if (live) {
       broadcast("pco:live", live);
+      // Fold the current SPL reading into the live item's running max/avg.
+      void splRecorder.onLiveTick(live);
     }
 
     // Auto mode: roll to the next event once the current one ended (+1h grace).

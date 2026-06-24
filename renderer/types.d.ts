@@ -53,9 +53,50 @@ interface SplMetricsDTO {
   meters: Record<string, SplMeterDTO>;
 }
 
+interface SplItemHistory {
+  itemId: string;
+  title: string;
+  sequence: number;
+  maxSpl: number | null;
+  avgSpl: number | null;
+  sampleCount: number;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+interface ServiceSplHistory {
+  serviceKey: string;
+  serviceTypeId: string | null;
+  planId: string | null;
+  planTitle: string | null;
+  seriesTitle: string | null;
+  serviceDate: string;
+  meterId: string | null;
+  metricKey: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  items: SplItemHistory[];
+}
+
 interface ServiceTypeDTO {
   id: string;
   name: string;
+}
+
+interface PlanItemDTO {
+  id: string;
+  title: string;
+  itemType: string;
+  lengthSec: number;
+  sequence: number;
+  notesByCategory: Record<string, string>;
+  description: string | null;
+}
+
+interface PlanItemsDTO {
+  planId: string | null;
+  items: PlanItemDTO[];
+  noteCategories: string[];
 }
 
 interface PlanDTO {
@@ -136,7 +177,14 @@ interface Slot {
   widthIn?: number;
 }
 
-type ViewKind = "slots" | "dashboard" | "stage" | "transcription" | "custom";
+type ViewKind =
+  | "slots"
+  | "dashboard"
+  | "stage"
+  | "transcription"
+  | "custom"
+  | "script"
+  | "spl-rundown";
 /** @deprecated alias for ViewKind. */
 type DisplayKind = ViewKind;
 
@@ -151,6 +199,8 @@ interface View {
   layout?: LayoutDTO | null;
   /** Physical-alignment config for a slots-View (inches); absent → equal widths. */
   slotsLayout?: SlotsLayout | null;
+  /** Show the PCO Live Prev/Next controls on a "script" View (default false). */
+  showLiveControls?: boolean;
 }
 
 interface SlotsLayout {
@@ -307,6 +357,7 @@ interface ProTimer {
 /** Live PCO countdown (SSE "pco:live") — always counts down (preservice → item). */
 interface PcoLiveDTO {
   mode: "item" | "preservice" | "none";
+  currentItemId: string | null;
   label: string | null;
   lengthSec: number | null;
   liveStartAt: string | null;

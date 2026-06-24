@@ -1,5 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import {
@@ -16,11 +16,11 @@ import {
   Loader2Icon,
   MonitorIcon,
   CalendarIcon,
-  LayersIcon,
   LayoutTemplateIcon,
   PlugIcon,
   QrCodeIcon,
   PaletteIcon,
+  ActivityIcon,
   SlidersHorizontalIcon,
   SunIcon,
   MoonIcon,
@@ -31,13 +31,13 @@ import { useIsMobile } from "../lib/use-media-query";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SectionItem, WirelessChannel, SectionHandlers } from "./types";
 import { PlanSection } from "./sections/plan-section";
-import { ServiceTypesSection } from "./sections/service-types-section";
 import { ViewsSection } from "./sections/views-section";
 import { OutputsSection } from "./sections/outputs-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
 import { AdvancedSection } from "./sections/advanced-section";
+import { SplHistorySection } from "./sections/spl-history-section";
 import { BrandHeader } from "./brand-header";
 import { BrandLogo } from "../components/brand-logo";
 
@@ -136,12 +136,12 @@ function useSidebarCollapsed() {
 
 const SECTIONS: SectionItem[] = [
   { id: "plan", label: "Plan", icon: <CalendarIcon className="size-4 text-gray-11" /> },
-  { id: "service-types", label: "Service Types", icon: <LayersIcon className="size-4 text-gray-11" /> },
   { id: "views", label: "Views", icon: <LayoutTemplateIcon className="size-4 text-gray-11" /> },
   { id: "displays", label: "Displays", icon: <MonitorIcon className="size-4 text-gray-11" /> },
   { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4 text-gray-11" /> },
   { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4 text-gray-11" /> },
   { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4 text-gray-11" /> },
+  { id: "spl-history", label: "SPL History", icon: <ActivityIcon className="size-4 text-gray-11" /> },
   { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
 ];
 
@@ -203,6 +203,26 @@ export function SettingsView() {
     queryKey: ["presets:list"],
     queryFn: () => ipc<SlotPreset[]>("presets:list"),
   });
+
+  // Show the SPL History tab only when Smaart is configured (enabled) OR there's
+  // recorded history. Gating on the persisted setting (not live connection) means
+  // the tab survives the Smaart PC being powered off after a service, and past
+  // history stays reachable even if Smaart is later disabled.
+  const { data: integrationsData } = useQuery({
+    queryKey: ["integrations:list"],
+    queryFn: () => ipc<{ states: IntegrationState[] }>("integrations:list"),
+  });
+  const { data: splHistoryList } = useQuery({
+    queryKey: ["spl:listHistory"],
+    queryFn: () => ipc<ServiceSplHistory[]>("spl:listHistory"),
+  });
+  const showSplHistory =
+    (integrationsData?.states?.some((s) => s.id === "smaart" && s.enabled) ?? false) ||
+    (splHistoryList?.length ?? 0) > 0;
+  const sections = useMemo(
+    () => SECTIONS.filter((s) => s.id !== "spl-history" || showSplHistory),
+    [showSplHistory],
+  );
 
   // In-app update status (git-based; surfaced in the Advanced tab).
   const { data: updateStatus = null } = useQuery({
@@ -913,10 +933,6 @@ export function SettingsView() {
             handlers={handlers}
           />
         );
-      case "service-types":
-        return (
-          <ServiceTypesSection stageState={stageState} serviceTypes={serviceTypes} handlers={handlers} />
-        );
       case "views":
         return (
           <ViewsSection
@@ -941,6 +957,12 @@ export function SettingsView() {
         return <ConnectSection stageState={stageState} handlers={handlers} />;
       case "branding":
         return <BrandingSection stageState={stageState} handlers={handlers} />;
+      case "spl-history":
+        return (
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+            <SplHistorySection />
+          </div>
+        );
       case "advanced":
         return <AdvancedSection stageState={stageState} updateStatus={updateStatus} handlers={handlers} justUpdated={justUpdated} onDismissJustUpdated={() => setJustUpdated(null)} />;
     }
@@ -991,12 +1013,12 @@ export function SettingsView() {
           )}
 
           <SidebarList
-            items={SECTIONS}
+            items={sections}
             selectedItem={activeSection}
             onSelectedItemChange={setActiveSection}
             getItemKey={(s: SectionItem) => s.id}
           >
-            {SECTIONS.map((section) => (
+            {sections.map((section) => (
               <SidebarListItem key={section.id} item={section} icon={section.icon} title={section.label} />
             ))}
           </SidebarList>
