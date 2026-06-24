@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
-import { CompanionInfoPanel } from "./companion-info-panel";
 import {
   Button,
   Field,
@@ -435,19 +434,6 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
                   {descriptor.label}
                 </span>
                 <WirelessConnectionsPanel />
-              </div>
-            ) : descriptor.id === "companion" ? (
-              // Companion connects TO this app — there's nothing to enable, save,
-              // or test here, so skip the card chrome and just show the status +
-              // the connect-info panel.
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-headline font-semibold text-gray-12 flex-1 min-w-0 truncate">
-                    {descriptor.label}
-                  </span>
-                  <ConnectionBadge state={state} />
-                </div>
-                <CompanionInfoPanel state={state} />
               </div>
             ) : (
               <div className="flex flex-col gap-3">
