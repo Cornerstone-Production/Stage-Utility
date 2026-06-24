@@ -40,6 +40,7 @@ import {
   DialogFooter,
 } from "../../components/ui";
 import { ObjectContent, boxStyle, useLayoutData, loadProcessedAttachment, type LayoutRenderCtx } from "../../main/layout-renderer";
+import { useSplState } from "../../main/use-spl-state";
 import { useStageState } from "../../main/use-stage-state";
 
 // ── object metadata ──────────────────────────────────────────────────────────
@@ -59,6 +60,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "transcript-strip": "Captions",
   "live-controls": "PCO Prev/Next",
   "charger-battery": "Charger battery",
+  "spl-meter": "SPL meter",
   "brand-logo": "Logo",
   "ndi-video": "NDI video",
   image: "Image",
@@ -69,7 +71,7 @@ const PALETTE: LayoutObjectType[] = [
   "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
   "current-service-item", "next-service-item",
   "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
-  "transcript-strip", "charger-battery", "brand-logo", "image", "plan-attachment", "shape",
+  "transcript-strip", "charger-battery", "spl-meter", "brand-logo", "image", "plan-attachment", "shape",
 ];
 
 function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
@@ -80,6 +82,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "slots-grid": return { type: "slots-grid", sourceViewId: null };
     case "transcript-strip": return { type: "transcript-strip", mode: "rolling" };
     case "charger-battery": return { type: "charger-battery", bays: [], show: { battery: true, charging: true } };
+    case "spl-meter": return { type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null };
     case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
     case "image": return { type: "image", src: "" };
     case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
@@ -899,6 +902,7 @@ function Inspector({
   const s = o.style ?? {};
   const c = o.config;
   const chargerBays = useStageState().state?.chargerBays ?? [];
+  const spl = useSplState();
   const isText = !["shape", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
 
   return (
@@ -1002,6 +1006,50 @@ function Inspector({
           </div>
         </>
       )}
+      {c.type === "spl-meter" && (() => {
+        const meters = spl?.meters ?? {};
+        const meterIds = Object.keys(meters);
+        // Union of metric keys across all meters so the picker is usable even
+        // before the selected channel has reported a reading.
+        const metricKeys = Array.from(
+          new Set(meterIds.flatMap((id) => Object.keys(meters[id].metrics))),
+        );
+        const t = c.thresholds;
+        return (
+          <>
+            <Row label="Meter">
+              <Select value={c.meterId ?? ""} onValueChange={(v: string) => onConfig({ ...c, meterId: v || null })}>
+                <SelectTrigger><SelectValue placeholder={meterIds.length ? "Auto (first)" : "No meters detected"} /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Auto (first)</SelectItem>
+                  {meterIds.map((id) => (
+                    <SelectItem key={id} value={id}>{`${meters[id].deviceName} · ${meters[id].channelName}`}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Row>
+            <Row label="Metric">
+              <Select value={c.metricKey ?? ""} onValueChange={(v: string) => onConfig({ ...c, metricKey: v || null })}>
+                <SelectTrigger><SelectValue placeholder={metricKeys.length ? "Auto" : "No data yet"} /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Auto</SelectItem>
+                  {metricKeys.map((k) => <SelectItem key={k} value={k}>{k}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Row>
+            <Row label="Show metric name"><Switch checked={c.showLabel ?? false} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} /></Row>
+            <Row label="Color thresholds">
+              <Switch checked={!!t} onCheckedChange={(v) => onConfig({ ...c, thresholds: v ? { amber: 95, red: 100 } : null })} />
+            </Row>
+            {t && (
+              <>
+                <Row label="Amber ≥ (dB)"><NumberInput value={t.amber} step={1} min={0} max={140} onChange={(v) => onConfig({ ...c, thresholds: { ...t, amber: Math.round(v) } })} /></Row>
+                <Row label="Red ≥ (dB)"><NumberInput value={t.red} step={1} min={0} max={140} onChange={(v) => onConfig({ ...c, thresholds: { ...t, red: Math.round(v) } })} /></Row>
+              </>
+            )}
+          </>
+        );
+      })()}
       {c.type === "image" && (
         <Row label="URL"><Input value={c.src} onChange={(e) => onConfig({ type: "image", src: e.target.value })} placeholder="https://… or data:" className="text-gray-12" /></Row>
       )}

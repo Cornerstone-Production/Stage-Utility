@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
+import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useTranscript } from "./use-transcript";
 import { channelColor, channelLabel } from "./channel-color";
 import { LiveControls } from "./live-controls";
@@ -15,6 +16,7 @@ interface DashboardViewProps {
 export function DashboardView({ displayId }: DashboardViewProps) {
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
   const transcript = useTranscript();
+  const spl = useSplState();
 
   // One ticking clock drives both the wall clock and the live countdown.
   const [now, setNow] = useState(() => Date.now());
@@ -210,6 +212,8 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         </Tile>
       </div>
 
+        <SplStrip spl={spl} />
+
         <TranscriptStrip lines={transcript} />
 
         <LiveControls />
@@ -233,6 +237,29 @@ function TranscriptStrip({ lines }: { lines: TranscriptLineDTO[] }) {
       </span>
       <span className={`text-[clamp(0.9rem,2.4vmin,1.4rem)] truncate ${last.isFinal ? "text-white/85" : "text-white/50"}`}>
         {last.text}
+      </span>
+    </div>
+  );
+}
+
+/** Live SPL readout — only renders when Smaart is connected and reporting. */
+function SplStrip({ spl }: { spl: SplMetricsDTO | null }) {
+  const r = resolveSplValue(spl);
+  if (!r) return null;
+  return (
+    <div className="shrink-0 rounded-2xl border border-white/8 bg-white/4 px-4 py-3 flex items-center gap-3 min-h-0">
+      <span
+        className="text-caption2 font-semibold uppercase tracking-wider shrink-0 text-white/40"
+        style={{ letterSpacing: "0.1em" }}
+      >
+        SPL
+      </span>
+      <span className="text-[clamp(1.4rem,5vmin,2.4rem)] font-medium text-white/90 leading-none tabular-nums">
+        {Math.round(r.value)}
+        <span className="text-[0.5em] text-white/45 ml-1">dB</span>
+      </span>
+      <span className="text-caption1 text-white/40 ml-auto truncate">
+        {r.metricKey} · {r.meterLabel}
       </span>
     </div>
   );

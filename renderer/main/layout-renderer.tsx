@@ -2,6 +2,7 @@ import { useState, useEffect, type CSSProperties } from "react";
 import { BrandLogo } from "../components/brand-logo";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState } from "./use-dashboard-state";
+import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useTranscript } from "./use-transcript";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { channelLabel, lineColor } from "./channel-color";
@@ -15,6 +16,7 @@ export interface LayoutRenderCtx {
   propresenter: ProPresenterStatusDTO | null;
   pcoLive: PcoLiveDTO | null;
   transcript: TranscriptLineDTO[];
+  spl: SplMetricsDTO | null;
   now: number;
   skewMs: number;
   ndiSource: string | null;
@@ -257,9 +259,33 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     }
     case "charger-battery":
       return <ChargerBattery config={c} all={ctx.state.chargerBays ?? []} H={ctx.H} baseStyle={ts} />;
+    case "spl-meter": {
+      const r = resolveSplValue(ctx.spl, c.meterId, c.metricKey);
+      if (!r) return <span style={{ ...ts, opacity: 0.4 }}>— dB</span>;
+      const color = splThresholdColor(r.value, c.thresholds);
+      return (
+        <span style={color ? { ...ts, color } : ts}>
+          {`${Math.round(r.value)} dB`}
+          {c.showLabel && (
+            <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{` ${r.metricKey}`}</span>
+          )}
+        </span>
+      );
+    }
     default:
       return null;
   }
+}
+
+/** Amber/red once the value crosses the configured dB thresholds, else null (keep base color). */
+function splThresholdColor(
+  value: number,
+  thresholds: { amber: number; red: number } | null | undefined,
+): string | null {
+  if (!thresholds) return null;
+  if (value >= thresholds.red) return "var(--red-10)";
+  if (value >= thresholds.amber) return "var(--yellow-10)";
+  return null;
 }
 
 function batteryColor(pct: number | null): string {
@@ -552,6 +578,7 @@ function PlanAttachment({
 export function useLayoutData() {
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
   const transcript = useTranscript();
+  const spl = useSplState();
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -563,7 +590,7 @@ export function useLayoutData() {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  return { state, isLoading, error, pcoLive, propresenter, transcript, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, transcript, spl, now, skewMs };
 }
 
 /**
@@ -571,7 +598,7 @@ export function useLayoutData() {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, transcript, now, skewMs } = useLayoutData();
+  const { state, isLoading, error, pcoLive, propresenter, transcript, spl, now, skewMs } = useLayoutData();
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -606,7 +633,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   }
 
   const { canvas } = layout;
-  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, transcript, now, skewMs, ndiSource, H: canvas.height, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, transcript, spl, now, skewMs, ndiSource, H: canvas.height, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

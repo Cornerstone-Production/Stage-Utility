@@ -111,6 +111,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "propresenter:getStatus":
       return apiFetch<T>("/api/propresenter/status");
 
+    case "spl:getMetrics":
+      return apiFetch<T>("/api/spl/metrics");
+
     case "stage:setAllowedServiceTypes":
       return post<T>("/api/allowed-service-types", p);
 

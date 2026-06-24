@@ -180,6 +180,17 @@ export type LayoutObjectConfig =
       trim?: boolean;
       background?: "keep" | "black" | "transparent";
     }
+  // A live SPL value from Smaart. `meterId` selects a device/channel
+  // ("device::channel"); `metricKey` selects which value to show (e.g. "SPL A
+  // Slow", "LAeq 10"); both default to the first available. Optional thresholds
+  // color the readout amber/red above the given dB levels.
+  | {
+      type: "spl-meter";
+      meterId?: string | null;
+      metricKey?: string | null;
+      showLabel?: boolean;
+      thresholds?: { amber: number; red: number } | null;
+    }
   | { type: "shape"; shape: "rect" | "ellipse" };
 
 export type LayoutObjectType = LayoutObjectConfig["type"];
@@ -281,6 +292,24 @@ export interface ProPresenterStatusDTO {
   timers: ProTimer[];
   /** "<activeUuid>:<index>" — changes on slide change so the preview <img> refetches. */
   slidePreviewKey: string | null;
+}
+
+/** One Smaart SPL meter (a calibrated device/channel) and its latest values. */
+export interface SplMeterDTO {
+  deviceName: string;
+  channelName: string;
+  /** Latest metric values, keyed exactly as Smaart names them (e.g. "SPL A Slow"). */
+  metrics: Record<string, number>;
+  /** ISO timestamp of the latest reading, or null before any reading. */
+  ts: string | null;
+}
+
+/** Live SPL state (pushed on "spl:metrics"). `meters` is keyed "device::channel". */
+export interface SplMetricsDTO {
+  connected: boolean;
+  /** Negotiated Smaart API version ("3", "4", …) or null when offline. */
+  apiVersion: string | null;
+  meters: Record<string, SplMeterDTO>;
 }
 
 export interface ServiceTypeDTO {

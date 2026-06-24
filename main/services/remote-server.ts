@@ -18,6 +18,7 @@ import { deviceManager } from "./device-manager.js";
 import { integrationManager } from "./integration-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
+import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
 import { updater } from "./updater.js";
 import { wirelessManager } from "./wireless-manager.js";
@@ -342,6 +343,7 @@ export class RemoteServer {
       // channels otherwise only broadcast on change, leaving a fresh client blank.
       sseWrite(res, "stage:state-changed", stageController.getState());
       sseWrite(res, "propresenter:status", propresenterService.getStatus());
+      sseWrite(res, "spl:metrics", smaartService.getLatest());
       sseClients.add(res);
       // A Companion module marks its event stream so we can show a live
       // connected-client count in the integration panel. Re-broadcast the
@@ -370,6 +372,10 @@ export class RemoteServer {
     }
     if (method === "GET" && pathname === "/api/pco/live") {
       json(res, await stageController.fetchLive());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/spl/metrics") {
+      json(res, smaartService.getLatest());
       return;
     }
 

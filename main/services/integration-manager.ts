@@ -8,6 +8,7 @@ import { prodcomService } from "./prodcom-service.js";
 import { propresenterService } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
 import { settingsStore } from "./settings-store.js";
+import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
 import { wirelessManager } from "./wireless-manager.js";
 
@@ -115,12 +116,41 @@ const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+// Smaart integration — connects to Smaart's API (JSON-over-WebSocket, default
+// port 26000) for live SPL meter values. Modern API (Smaart 8.3+) only.
+const SMAART_DESCRIPTOR: IntegrationDescriptor = {
+  id: "smaart",
+  kind: "control",
+  label: "Smaart (SPL)",
+  configSchema: [
+    {
+      key: "host",
+      label: "Smaart Host",
+      type: "text",
+      placeholder: "192.168.1.50",
+    },
+    {
+      key: "port",
+      label: "API Port",
+      type: "number",
+      placeholder: "26000",
+    },
+    {
+      key: "password",
+      label: "API Password",
+      type: "password",
+      placeholder: "(only if the Smaart API requires authentication)",
+    },
+  ],
+};
+
 const DESCRIPTORS: IntegrationDescriptor[] = [
   PCO_DESCRIPTOR,
   WIRELESS_DESCRIPTOR,
   COMPANION_DESCRIPTOR,
   PROPRESENTER_DESCRIPTOR,
   PRODCOM_DESCRIPTOR,
+  SMAART_DESCRIPTOR,
 ];
 
 // Keys that are secrets for each integration id.
@@ -130,6 +160,7 @@ const SECRET_KEYS: Record<string, string[]> = {
   companion: [],
   propresenter: [],
   prodcom: ["apiKey"],
+  smaart: ["password"],
 };
 
 class IntegrationManager {
@@ -177,6 +208,8 @@ class IntegrationManager {
     this.applyPropresenter();
     // Start the ProdCom transcript stream if enabled + configured.
     void this.applyProdcom();
+    // Start the Smaart SPL connection if enabled + configured.
+    await this.applySmaart();
 
     console.log("[integration-manager] init complete", {
       integrations: Array.from(this.states.keys()),
@@ -288,6 +321,10 @@ class IntegrationManager {
       await this.applyProdcom();
     }
 
+    if (id === "smaart") {
+      await this.applySmaart();
+    }
+
     this.broadcastStates();
     return this.states.get(id)!;
   }
@@ -320,6 +357,10 @@ class IntegrationManager {
 
     if (id === "prodcom") {
       await this.applyProdcom();
+    }
+
+    if (id === "smaart") {
+      await this.applySmaart();
     }
 
     this.broadcastStates();
@@ -392,6 +433,18 @@ class IntegrationManager {
         const secrets = await secretsStore.getSecrets("prodcom");
         const result = await prodcomService.test(host, port, secrets.apiKey ?? null);
         this.setConnectionState("prodcom", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "smaart") {
+        const { host, port } = this.getSmaartTarget();
+        if (!host || !port) {
+          return { ok: false, message: "Host and Port are required" };
+        }
+        const secrets = await secretsStore.getSecrets("smaart");
+        const result = await smaartService.test(host, port, secrets.password ?? null);
+        this.setConnectionState("smaart", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
         return result;
       }
@@ -489,6 +542,39 @@ class IntegrationManager {
     } else {
       prodcomService.stop();
       this.setConnectionState("prodcom", "disconnected", null);
+    }
+  }
+
+  private getSmaartTarget(): { host: string | null; port: number | null } {
+    const cfg = this.states.get("smaart")?.config ?? {};
+    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
+    const rawPort = cfg.port;
+    const port =
+      typeof rawPort === "number"
+        ? rawPort
+        : typeof rawPort === "string" && rawPort.trim()
+          ? parseInt(rawPort, 10)
+          : NaN;
+    // Default to Smaart's standard API port when only a host is given.
+    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 26000 : null };
+  }
+
+  /** Start/stop the Smaart SPL connection to match enabled + configured state. */
+  private async applySmaart(): Promise<void> {
+    smaartService.setConnectionListener((state, message) => {
+      this.setConnectionState("smaart", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("smaart")?.enabled ?? false;
+    const { host, port } = this.getSmaartTarget();
+    if (enabled && host && port) {
+      const secrets = await secretsStore.getSecrets("smaart");
+      this.setConnectionState("smaart", "connecting", `Connecting ${host}:${port}`);
+      smaartService.configure(host, port, secrets.password ?? null);
+    } else {
+      smaartService.stop();
+      this.setConnectionState("smaart", "disconnected", null);
     }
   }
 

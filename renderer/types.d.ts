@@ -40,6 +40,19 @@ interface DeviceStatus {
   updatedAt: string;
 }
 
+interface SplMeterDTO {
+  deviceName: string;
+  channelName: string;
+  metrics: Record<string, number>;
+  ts: string | null;
+}
+
+interface SplMetricsDTO {
+  connected: boolean;
+  apiVersion: string | null;
+  meters: Record<string, SplMeterDTO>;
+}
+
 interface ServiceTypeDTO {
   id: string;
   name: string;
@@ -203,6 +216,13 @@ type LayoutObjectConfig =
       crop?: { top: number; right: number; bottom: number; left: number };
       trim?: boolean;
       background?: "keep" | "black" | "transparent";
+    }
+  | {
+      type: "spl-meter";
+      meterId?: string | null;
+      metricKey?: string | null;
+      showLabel?: boolean;
+      thresholds?: { amber: number; red: number } | null;
     }
   | { type: "shape"; shape: "rect" | "ellipse" };
 
