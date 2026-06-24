@@ -251,6 +251,8 @@ export interface ResolvedOutput {
  */
 export interface PcoLiveDTO {
   mode: "item" | "preservice" | "none";
+  /** Stable PCO item id of the current live item ("item" mode) — keys SPL recording. */
+  currentItemId: string | null;
   /** Item title ("item") or service label ("preservice"). */
   label: string | null;
   /** Item's planned length in seconds ("item" mode). */
@@ -310,6 +312,39 @@ export interface SplMetricsDTO {
   /** Negotiated Smaart API version ("3", "4", …) or null when offline. */
   apiVersion: string | null;
   meters: Record<string, SplMeterDTO>;
+}
+
+/** Per-item recorded SPL across one service. */
+export interface SplItemHistory {
+  itemId: string;
+  title: string;
+  /** Order within the service (incrementing as items go live). */
+  sequence: number;
+  /** Peak recorded value of the chosen metric (dB), or null if never sampled. */
+  maxSpl: number | null;
+  /** Running mean of the chosen metric (dB), or null if never sampled. */
+  avgSpl: number | null;
+  sampleCount: number;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+/** SPL recording for one service occurrence, keyed by serviceKey. */
+export interface ServiceSplHistory {
+  /** `${serviceTypeId}:${planId}:${YYYY-MM-DD}`. */
+  serviceKey: string;
+  serviceTypeId: string | null;
+  planId: string | null;
+  planTitle: string | null;
+  seriesTitle: string | null;
+  /** Local date the recording started (YYYY-MM-DD). */
+  serviceDate: string;
+  /** Which Smaart meter + metric the levels were recorded from. */
+  meterId: string | null;
+  metricKey: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  items: SplItemHistory[];
 }
 
 export interface ServiceTypeDTO {

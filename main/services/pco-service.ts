@@ -495,6 +495,7 @@ class PcoService {
       const adjLen = planLen + offset;
       return {
         mode: "item",
+        currentItemId: itemId,
         label: typeof itemNode.attributes.title === "string" ? itemNode.attributes.title : null,
         lengthSec: adjLen > 0 ? adjLen : null,
         liveStartAt,
@@ -508,6 +509,7 @@ class PcoService {
     if (startAt) {
       return {
         mode: "preservice",
+        currentItemId: null,
         label: "Service starts",
         lengthSec: null,
         liveStartAt: null,
@@ -516,7 +518,7 @@ class PcoService {
       };
     }
 
-    return { mode: "none", label: null, lengthSec: null, liveStartAt: null, targetAt: null, serverNow };
+    return { mode: "none", currentItemId: null, label: null, lengthSec: null, liveStartAt: null, targetAt: null, serverNow };
   }
 
   /**

@@ -32,6 +32,35 @@ export function useSplState(): SplMetricsDTO | null {
 }
 
 /**
+ * The in-progress per-item SPL recording for the live service, pushed on the
+ * "spl:history" channel. Hydrates once on mount then stays live. null when
+ * nothing is recording.
+ */
+export function useSplHistory(): ServiceSplHistory | null {
+  const [history, setHistory] = useState<ServiceSplHistory | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<ServiceSplHistory | null>("spl:getHistoryCurrent")
+      .then((h) => {
+        if (!cancelled && h) setHistory(h);
+      })
+      .catch(() => {
+        /* nothing recording yet — ignore */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return onNotification("spl:history", (p) => setHistory(p as ServiceSplHistory | null));
+  }, []);
+
+  return history;
+}
+
+/**
  * Resolve a single SPL reading from a meters map. With no `meterId`, picks the
  * first meter; with no `metricKey`, prefers a sensible default metric, else the
  * first available. Returns the numeric value + the resolved labels, or null.
