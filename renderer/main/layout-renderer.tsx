@@ -461,7 +461,10 @@ const NEAR_WHITE = 244; // r,g,b all above this counts as "page white"
 // Rasterize a PDF page (~1600px wide, capped) to a fresh canvas.
 async function rasterizePdf(data: ArrayBuffer, pageNum: number): Promise<HTMLCanvasElement> {
   const pdfjs = await loadPdfjs();
-  const doc = await pdfjs.getDocument({ data }).promise;
+  // pdf.js v6: cleanup is via the loading task (PDFDocumentProxy.destroy() was
+  // removed); render() now takes the `canvas` itself, not just its 2D context.
+  const loadingTask = pdfjs.getDocument({ data });
+  const doc = await loadingTask.promise;
   try {
     const n = Math.min(Math.max(Math.round(pageNum) || 1, 1), doc.numPages);
     const page = await doc.getPage(n);
@@ -473,10 +476,10 @@ async function rasterizePdf(data: ArrayBuffer, pageNum: number): Promise<HTMLCan
     canvas.height = Math.ceil(viewport.height);
     const c2d = canvas.getContext("2d");
     if (!c2d) throw new Error("no 2d context");
-    await page.render({ canvasContext: c2d, viewport }).promise;
+    await page.render({ canvas, canvasContext: c2d, viewport }).promise;
     return canvas;
   } finally {
-    void doc.destroy();
+    void loadingTask.destroy();
   }
 }
 
