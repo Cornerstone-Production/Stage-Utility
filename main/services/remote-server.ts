@@ -13,10 +13,12 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 
 import type { DisplayKind, LayoutDTO, Slot, SlotsLayout } from "../types/stage.js";
+import type { OscArg } from "../types/osc.js";
 import { addBroadcastListener } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
 import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
+import { oscManager } from "./osc-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
 import { smaartService } from "./smaart-service.js";
@@ -357,6 +359,7 @@ export class RemoteServer {
       sseWrite(res, "spl:metrics", smaartService.getLatest());
       sseWrite(res, "spl:history", splRecorder.getCurrent());
       sseWrite(res, "obs:status", obsService.getLatest());
+      sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseClients.add(res);
       // A Companion module marks its event stream so we can show a live
       // connected-client count in the integration panel. Re-broadcast the
@@ -393,6 +396,10 @@ export class RemoteServer {
     }
     if (method === "GET" && pathname === "/api/obs/status") {
       json(res, obsService.getLatest());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/osc/feedback") {
+      json(res, oscManager.getFeedback());
       return;
     }
     if (method === "GET" && pathname === "/api/spl/history/current") {
@@ -997,6 +1004,81 @@ export class RemoteServer {
       const id = wirelessTestMatch[1];
       const result = await wirelessManager.testConnection({ id });
       json(res, result);
+      return;
+    }
+
+    // ── OSC ────────────────────────────────────────────────────────────────
+    if (method === "GET" && pathname === "/api/osc/targets") {
+      json(res, oscManager.listTargets());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/osc/targets") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const name = typeof body.name === "string" ? body.name : undefined;
+      const targets = await oscManager.addTarget({ name });
+      integrationManager.refreshOscSummary();
+      json(res, targets, 201);
+      return;
+    }
+    // POST /api/osc/send — { targetId, address, args? }
+    if (method === "POST" && pathname === "/api/osc/send") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.targetId !== "string" || typeof body.address !== "string") {
+        error(res, "body.targetId (string) and body.address (string) required");
+        return;
+      }
+      const args = Array.isArray(body.args) ? (body.args as OscArg[]) : [];
+      try {
+        const result = await oscManager.send(body.targetId, body.address, args);
+        json(res, result);
+      } catch (err) {
+        error(res, err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+    if (method === "GET" && pathname === "/api/osc/feedback-port") {
+      json(res, { port: oscManager.getFeedbackPort() });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/osc/feedback-port") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const port = typeof body.port === "number" ? body.port : parseInt(String(body.port), 10);
+      if (!Number.isFinite(port)) {
+        error(res, "body.port (number) required");
+        return;
+      }
+      json(res, await oscManager.setFeedbackPort(port));
+      return;
+    }
+    // POST /api/osc/targets/:id/test
+    const oscTestMatch = pathname.match(/^\/api\/osc\/targets\/([^/]+)\/test$/);
+    if (method === "POST" && oscTestMatch) {
+      const result = await oscManager.testTarget({ id: oscTestMatch[1] });
+      json(res, result);
+      return;
+    }
+    // PATCH or POST /api/osc/targets/:id
+    const oscTargetMatch = pathname.match(/^\/api\/osc\/targets\/([^/]+)$/);
+    if ((method === "PATCH" || method === "POST") && oscTargetMatch) {
+      const id = oscTargetMatch[1];
+      const body = await readBody(req) as Record<string, unknown>;
+      const rawPatch = (body.patch ?? body) as Record<string, unknown>;
+      const patch: { name?: string; enabled?: boolean; config?: Record<string, unknown> } = {};
+      if (typeof rawPatch.name === "string") patch.name = rawPatch.name;
+      if (typeof rawPatch.enabled === "boolean") patch.enabled = rawPatch.enabled;
+      if (typeof rawPatch.config === "object" && rawPatch.config !== null) {
+        patch.config = rawPatch.config as Record<string, unknown>;
+      }
+      const targets = await oscManager.updateTarget({ id, patch });
+      integrationManager.refreshOscSummary();
+      json(res, targets);
+      return;
+    }
+    // DELETE /api/osc/targets/:id
+    if (method === "DELETE" && oscTargetMatch) {
+      const targets = await oscManager.removeTarget({ id: oscTargetMatch[1] });
+      integrationManager.refreshOscSummary();
+      json(res, targets);
       return;
     }
 

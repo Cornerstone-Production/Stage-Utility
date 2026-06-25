@@ -5,6 +5,7 @@
 import type { IntegrationDescriptor, IntegrationState } from "../types/integrations.js";
 import { broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
+import { oscManager } from "./osc-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
@@ -174,6 +175,16 @@ const OBS_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+// OSC integration — sends OSC to LAN gear from custom-layout buttons and reflects
+// device state back. Targets are managed as a separate list (like wireless), so
+// the descriptor itself carries no config fields.
+const OSC_DESCRIPTOR: IntegrationDescriptor = {
+  id: "osc",
+  kind: "control",
+  label: "OSC",
+  configSchema: [],
+};
+
 const DESCRIPTORS: IntegrationDescriptor[] = [
   PCO_DESCRIPTOR,
   WIRELESS_DESCRIPTOR,
@@ -182,6 +193,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   PRODCOM_DESCRIPTOR,
   SMAART_DESCRIPTOR,
   OBS_DESCRIPTOR,
+  OSC_DESCRIPTOR,
 ];
 
 // Keys that are secrets for each integration id.
@@ -244,6 +256,9 @@ class IntegrationManager {
     await this.applySmaart();
     // Start the OBS connection if enabled + configured.
     await this.applyObs();
+    // Start the OSC manager (UDP send + feedback listener; per-target enable).
+    await oscManager.init();
+    this.refreshOscSummary();
 
     console.log("[integration-manager] init complete", {
       integrations: Array.from(this.states.keys()),
@@ -702,6 +717,17 @@ class IntegrationManager {
       );
     } else {
       this.setConnectionState("wireless", "disconnected", null);
+    }
+  }
+
+  /** Reflect an aggregated summary of OSC targets on the master "osc" state. */
+  refreshOscSummary(): void {
+    const targets = oscManager.listTargets();
+    const enabled = targets.filter((t) => t.enabled).length;
+    if (enabled > 0) {
+      this.setConnectionState("osc", "connected", `${enabled} target(s) active`);
+    } else {
+      this.setConnectionState("osc", "disconnected", targets.length ? `${targets.length} target(s)` : null);
     }
   }
 

@@ -3,6 +3,7 @@ import { useStageState } from "../main/use-stage-state";
 import { useState, useEffect, useCallback, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
+import { OscTargetsPanel } from "./osc-targets-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
 import {
   Button,
@@ -434,6 +435,13 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
                   {descriptor.label}
                 </span>
                 <WirelessConnectionsPanel />
+              </div>
+            ) : descriptor.id === "osc" ? (
+              <div className="flex flex-col gap-3">
+                <span className="text-headline font-semibold text-gray-12">
+                  {descriptor.label}
+                </span>
+                <OscTargetsPanel />
               </div>
             ) : (
               <div className="flex flex-col gap-3">

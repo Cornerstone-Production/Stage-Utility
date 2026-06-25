@@ -4,6 +4,8 @@ import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
+import { useOscState, resolveOscActive } from "./use-osc-state";
+import { OscButton } from "./osc-button";
 import { useTranscript } from "./use-transcript";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { channelLabel, lineColor } from "./channel-color";
@@ -19,6 +21,7 @@ export interface LayoutRenderCtx {
   transcript: TranscriptLineDTO[];
   spl: SplMetricsDTO | null;
   obs: ObsStatusDTO | null;
+  osc: OscFeedbackDTO | null;
   now: number;
   skewMs: number;
   ndiSource: string | null;
@@ -337,6 +340,15 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         </span>
       );
     }
+    case "osc-button":
+      return (
+        <OscButton
+          config={c}
+          active={resolveOscActive(ctx.osc, c.targetId ?? null, c.feedback)}
+          interactive={ctx.interactive}
+          ts={ts}
+        />
+      );
     default:
       return null;
   }
@@ -645,6 +657,7 @@ export function useLayoutData() {
   const transcript = useTranscript();
   const spl = useSplState();
   const obs = useObsState();
+  const osc = useOscState();
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -656,7 +669,7 @@ export function useLayoutData() {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  return { state, isLoading, error, pcoLive, propresenter, transcript, spl, obs, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, transcript, spl, obs, osc, now, skewMs };
 }
 
 /**
@@ -664,7 +677,7 @@ export function useLayoutData() {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, transcript, spl, obs, now, skewMs } = useLayoutData();
+  const { state, isLoading, error, pcoLive, propresenter, transcript, spl, obs, osc, now, skewMs } = useLayoutData();
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -699,7 +712,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   }
 
   const { canvas } = layout;
-  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, transcript, spl, obs, now, skewMs, ndiSource, H: canvas.height, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, transcript, spl, obs, osc, now, skewMs, ndiSource, H: canvas.height, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

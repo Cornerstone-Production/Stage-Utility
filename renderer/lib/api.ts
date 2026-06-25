@@ -398,6 +398,40 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "wireless:setMeterRate":
       return post<T>("/api/wireless/meter-rate", p);
 
+    // ── OSC ──────────────────────────────────────────────────────────────
+    case "osc:listTargets":
+      return apiFetch<T>("/api/osc/targets");
+
+    case "osc:addTarget":
+      return post<T>("/api/osc/targets", p);
+
+    case "osc:updateTarget": {
+      const id = p.id as string;
+      return patch<T>(`/api/osc/targets/${encodeURIComponent(id)}`, { patch: p.patch });
+    }
+
+    case "osc:removeTarget": {
+      const id = p.id as string;
+      return del<T>(`/api/osc/targets/${encodeURIComponent(id)}`);
+    }
+
+    case "osc:testTarget": {
+      const id = p.id as string;
+      return post<T>(`/api/osc/targets/${encodeURIComponent(id)}/test`);
+    }
+
+    case "osc:send":
+      return post<T>("/api/osc/send", p);
+
+    case "osc:getFeedback":
+      return apiFetch<T>("/api/osc/feedback");
+
+    case "osc:getFeedbackPort":
+      return apiFetch<T>("/api/osc/feedback-port");
+
+    case "osc:setFeedbackPort":
+      return post<T>("/api/osc/feedback-port", p);
+
     // ── Window / app ───────────────────────────────────────────────────
     case "window:closeSettings":
       window.close();

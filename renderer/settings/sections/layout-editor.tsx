@@ -58,6 +58,7 @@ import {
 } from "../../main/layout-tree";
 import { useSplState } from "../../main/use-spl-state";
 import { useObsState } from "../../main/use-obs-state";
+import { useOscTargets } from "../../main/use-osc-state";
 import { useStageState } from "../../main/use-stage-state";
 import { InlineSlotsEditor } from "./inline-slots-editor";
 
@@ -80,6 +81,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "charger-battery": "Charger battery",
   "spl-meter": "SPL meter",
   "obs-status": "OBS status",
+  "osc-button": "OSC button",
   "brand-logo": "Logo",
   "ndi-video": "NDI video",
   image: "Image",
@@ -91,7 +93,7 @@ const PALETTE: LayoutObjectType[] = [
   "container", "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
   "current-service-item", "next-service-item",
   "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
-  "transcript-strip", "charger-battery", "spl-meter", "obs-status", "brand-logo", "image", "plan-attachment", "shape",
+  "transcript-strip", "charger-battery", "spl-meter", "obs-status", "osc-button", "brand-logo", "image", "plan-attachment", "shape",
 ];
 
 // Deepest allowed object depth (top-level = 0). A container holding objects = 1;
@@ -123,6 +125,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "charger-battery": return { type: "charger-battery", bays: [], show: { battery: true, charging: true } };
     case "spl-meter": return { type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null };
     case "obs-status": return { type: "obs-status", showTimecode: false, hideWhenIdle: false, fillWhenRecording: true };
+    case "osc-button": return { type: "osc-button", targetId: null, label: "Button", address: "/", args: [], feedback: null };
     case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
     case "image": return { type: "image", src: "" };
     case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
@@ -141,6 +144,8 @@ function defaultStyle(type: LayoutObjectType): LayoutStyle {
   if (type === "charger-battery") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "middle" };
   // OBS status reads as a bold pill (glass when idle, fills red when recording).
   if (type === "obs-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_PRESETS.neutral };
+  // OSC button reads as a tappable pill.
+  if (type === "osc-button") return { fontSize: 0.045, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
   return { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 }
 
@@ -1274,6 +1279,7 @@ function Inspector({
   const chargerBays = useStageState().state?.chargerBays ?? [];
   const spl = useSplState();
   const obs = useObsState();
+  const oscTargets = useOscTargets();
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
@@ -1463,6 +1469,61 @@ function Inspector({
           <Row label="Hide when idle"><Switch checked={c.hideWhenIdle ?? false} onCheckedChange={(v) => onConfig({ ...c, hideWhenIdle: v })} /></Row>
         </>
       )}
+      {c.type === "osc-button" && (() => {
+        const oc = c; // narrowed osc-button config (preserved into nested fns)
+        const args = oc.args ?? [];
+        const fb = oc.feedback ?? null;
+        function setArg(i: number, patch: Partial<OscArg>) {
+          const next = args.map((a, idx) => (idx === i ? { ...a, ...patch } : a));
+          onConfig({ ...oc, args: next });
+        }
+        return (
+          <>
+            <Row label="Target">
+              <Select value={c.targetId ?? ""} onValueChange={(v: string) => onConfig({ ...c, targetId: v || null })}>
+                <SelectTrigger><SelectValue placeholder={oscTargets.length ? "Select target" : "No OSC targets"} /></SelectTrigger>
+                <SelectContent>
+                  {oscTargets.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Row>
+            <Row label="Label"><Input value={c.label ?? ""} onChange={(e) => onConfig({ ...c, label: e.target.value })} placeholder="Button" className="text-gray-12" /></Row>
+            <Row label="Address"><Input value={c.address} onChange={(e) => onConfig({ ...c, address: e.target.value })} placeholder="/ch/01/mix/on" className="text-gray-12" /></Row>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Arguments</span>
+              {args.map((a, i) => (
+                <div key={i} className="flex items-center gap-1">
+                  <Select value={a.type} onValueChange={(v: string) => setArg(i, { type: v as OscArg["type"] })}>
+                    <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="i">int</SelectItem>
+                      <SelectItem value="f">float</SelectItem>
+                      <SelectItem value="s">string</SelectItem>
+                      <SelectItem value="T">true</SelectItem>
+                      <SelectItem value="F">false</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {a.type !== "T" && a.type !== "F" && (
+                    <Input value={String(a.value ?? "")} onChange={(e) => setArg(i, { value: e.target.value })} placeholder="value" className="flex-1 min-w-0 text-gray-12" />
+                  )}
+                  <Button variant="transparent" size="small" iconOnly onClick={() => onConfig({ ...c, args: args.filter((_, idx) => idx !== i) })} aria-label="Remove argument"><Trash2Icon className="size-3.5 text-gray-9" /></Button>
+                </div>
+              ))}
+              <Button variant="transparent" size="small" className="self-start" onClick={() => onConfig({ ...c, args: [...args, { type: "i", value: "1" }] })}>Add argument</Button>
+            </div>
+            <Row label="Feedback">
+              <Switch checked={!!fb} onCheckedChange={(v) => onConfig({ ...c, feedback: v ? { address: c.address || "/", equals: 1 } : null })} />
+            </Row>
+            {fb && (
+              <>
+                <Row label="Watch address"><Input value={fb.address} onChange={(e) => onConfig({ ...c, feedback: { ...fb, address: e.target.value } })} placeholder="/ch/01/mix/on" className="text-gray-12" /></Row>
+                <Row label="Active when ="><Input value={String(fb.equals ?? "")} onChange={(e) => onConfig({ ...c, feedback: { ...fb, equals: e.target.value } })} placeholder="1 (blank = any truthy)" className="text-gray-12" /></Row>
+                <Row label="Active color"><Input value={fb.activeColor ?? ""} onChange={(e) => onConfig({ ...c, feedback: { ...fb, activeColor: e.target.value } })} placeholder="var(--red-9)" className="text-gray-12" /></Row>
+              </>
+            )}
+          </>
+        );
+      })()}
       {c.type === "image" && (
         <Row label="URL"><Input value={c.src} onChange={(e) => onConfig({ type: "image", src: e.target.value })} placeholder="https://… or data:" className="text-gray-12" /></Row>
       )}

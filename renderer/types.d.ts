@@ -62,6 +62,35 @@ interface ObsStatusDTO {
   recordTimecode: string | null;
 }
 
+interface OscArg {
+  type: "i" | "f" | "s" | "T" | "F";
+  value?: number | string;
+}
+
+interface OscFeedbackBind {
+  address: string;
+  equals?: number | string | boolean;
+  activeColor?: string;
+}
+
+interface OscTarget {
+  id: string;
+  name: string;
+  enabled: boolean;
+  connection: ConnectionState;
+  message: string | null;
+  config: {
+    host?: string;
+    port?: number;
+    subscribeAddress?: string;
+    subscribeIntervalSec?: number;
+  };
+}
+
+interface OscFeedbackDTO {
+  values: Record<string, number | string | boolean>;
+}
+
 interface SplItemHistory {
   itemId: string;
   title: string;
@@ -291,6 +320,14 @@ type LayoutObjectConfig =
       showTimecode?: boolean;
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
+    }
+  | {
+      type: "osc-button";
+      targetId?: string | null;
+      label?: string;
+      address: string;
+      args?: OscArg[];
+      feedback?: OscFeedbackBind | null;
     }
   | { type: "shape"; shape: "rect" | "ellipse" }
   | { type: "container" };

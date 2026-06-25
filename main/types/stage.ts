@@ -1,5 +1,7 @@
 // Shared stage types — frontend mirrors these shapes exactly.
 
+import type { OscArg, OscFeedbackBind } from "./osc.js";
+
 /**
  * What a View renders: slot grid (default), dashboard, stage, transcription, or
  * a "custom" free-form layout authored with the visual editor (see {@link LayoutDTO}).
@@ -219,6 +221,17 @@ export type LayoutObjectConfig =
       showTimecode?: boolean;
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
+    }
+  // An OSC control button. Tapping it (on a real display / operator surface, never
+  // in the editor) sends `address` + `args` to the chosen OSC target. `feedback`
+  // optionally lights the button from incoming OSC. Send-only if no feedback bind.
+  | {
+      type: "osc-button";
+      targetId?: string | null;
+      label?: string;
+      address: string;
+      args?: OscArg[];
+      feedback?: OscFeedbackBind | null;
     }
   | { type: "shape"; shape: "rect" | "ellipse" }
   // A styled box that holds other objects. Children are positioned as fractions
