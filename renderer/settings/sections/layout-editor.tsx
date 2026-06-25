@@ -505,7 +505,7 @@ function EditorCanvas({
     : {};
 
   return (
-    <div ref={setWrap} className="relative w-full h-full flex items-center justify-center select-none">
+    <div ref={setWrap} className="relative w-full h-full flex items-start justify-center select-none">
       {scale > 0 && (
         <div
           className="relative overflow-hidden rounded-xl border border-gray-a4"
