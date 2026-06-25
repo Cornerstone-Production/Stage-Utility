@@ -722,6 +722,19 @@ export class RemoteServer {
       return;
     }
 
+    // POST /api/layout-objects/:objectId/slots — { slots } (inline mic-slots grid)
+    const objectSlotsMatch = pathname.match(/^\/api\/layout-objects\/([^/]+)\/slots$/);
+    if (method === "POST" && objectSlotsMatch) {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.slots)) {
+        error(res, "body.slots (array) required");
+        return;
+      }
+      const state = await stageController.setLayoutObjectSlots(objectSlotsMatch[1], body.slots as Slot[]);
+      json(res, state);
+      return;
+    }
+
     // POST /api/views/:id/duplicate — { name? }
     const viewDuplicateMatch = pathname.match(/^\/api\/views\/([^/]+)\/duplicate$/);
     if (method === "POST" && viewDuplicateMatch) {
@@ -1228,7 +1241,11 @@ export class RemoteServer {
       const body = await readBody(req) as Record<string, unknown>;
       let presets = await stageController.listPresets();
       if (typeof body.name === "string") presets = await stageController.renamePreset(id, body.name);
-      if (typeof body.overwriteFromDisplayId === "string") {
+      // `slots` (explicit) overwrites with those directly (inline mic-slots objects);
+      // otherwise overwrite from the given view/display's current slots.
+      if (Array.isArray(body.slots)) {
+        presets = await stageController.overwritePreset(id, "", body.slots as Slot[]);
+      } else if (typeof body.overwriteFromDisplayId === "string") {
         presets = await stageController.overwritePreset(id, body.overwriteFromDisplayId);
       }
       json(res, presets);

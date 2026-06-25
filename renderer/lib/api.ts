@@ -202,7 +202,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "presets:overwrite": {
       const id = p.id as string;
-      return patch<T>(`/api/presets/${encodeURIComponent(id)}`, { overwriteFromDisplayId: p.displayId });
+      // Pass explicit `slots` (inline mic-slots) when present, else overwrite from a view.
+      return patch<T>(`/api/presets/${encodeURIComponent(id)}`, p.slots ? { slots: p.slots } : { overwriteFromDisplayId: p.displayId });
     }
 
     // ── Views (content) ──────────────────────────────────────────────────
@@ -242,6 +243,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "views:setSlots": {
       const id = p.id as string;
       return post<T>(`/api/views/${encodeURIComponent(id)}/slots`, { slots: p.slots });
+    }
+
+    case "layoutObjects:setSlots": {
+      const id = p.id as string;
+      return post<T>(`/api/layout-objects/${encodeURIComponent(id)}/slots`, { slots: p.slots });
     }
 
     case "views:duplicate": {

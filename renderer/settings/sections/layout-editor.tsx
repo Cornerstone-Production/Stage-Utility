@@ -58,6 +58,7 @@ import {
 } from "../../main/layout-tree";
 import { useSplState } from "../../main/use-spl-state";
 import { useStageState } from "../../main/use-stage-state";
+import { InlineSlotsEditor } from "./inline-slots-editor";
 
 // ── object metadata ──────────────────────────────────────────────────────────
 
@@ -115,7 +116,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "text": return { type: "text", text: "Text" };
     case "clock": return { type: "clock", showSeconds: true, format: "12h" };
     case "section-chip": return { type: "section-chip", which: "current" };
-    case "slots-grid": return { type: "slots-grid", sourceViewId: null };
+    case "slots-grid": return { type: "slots-grid", source: "inline", sourceViewId: null };
     case "transcript-strip": return { type: "transcript-strip", mode: "rolling" };
     case "charger-battery": return { type: "charger-battery", bays: [], show: { battery: true, charging: true } };
     case "spl-meter": return { type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null };
@@ -504,7 +505,7 @@ function EditorCanvas({
     : {};
 
   return (
-    <div ref={setWrap} className="relative w-full h-full flex items-center justify-center select-none">
+    <div ref={setWrap} className="relative w-full h-full flex items-start justify-center select-none">
       {scale > 0 && (
         <div
           className="relative overflow-hidden rounded-xl border border-gray-a4"
@@ -632,29 +633,33 @@ export function LayoutEditor({
   const [isEditing, setIsEditing] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
 
-  // The editor lives inside a scrolling settings panel whose height doesn't
-  // cleanly clamp our flex chain (Radix ScrollArea wraps content in a content-
-  // sized box, so `h-full` grows with content). Without a fixed height the row
-  // would size to whichever column is taller — so selecting an object with a tall
-  // inspector stretched the canvas cell and re-centered the design, making it jump.
-  // Measure the body's available viewport height and pin it so only the side panel
-  // scrolls and the canvas stays put. `top` is stable (toolbar above is fixed), so
-  // this isn't circular with the height we set.
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const [bodyH, setBodyH] = useState<number | null>(null);
+  // Size the canvas to its own aspect-ratio height, derived from the canvas cell's
+  // WIDTH (capped at the viewport). This gives the canvas a definite height — so it
+  // can't collapse inside the Radix ScrollArea (whose content-sized wrapper breaks
+  // `h-full`) and can't jump when a taller inspector grows the row — while keeping
+  // the row only as tall as the preview, so anything below it (the inline mic-slots
+  // editor) sits right underneath instead of after a viewport-tall gap. Width/top
+  // don't depend on the height we set, so this isn't circular.
+  const canvasCellRef = useRef<HTMLDivElement>(null);
+  const [canvasH, setCanvasH] = useState<number | null>(null);
   useEffect(() => {
-    const el = bodyRef.current;
+    const el = canvasCellRef.current;
     if (!el) return;
+    const aspect = canvas.width / canvas.height;
     const measure = () => {
+      const width = el.clientWidth;
       const top = el.getBoundingClientRect().top;
-      setBodyH(Math.max(240, Math.round(window.innerHeight - top - 16)));
+      const maxH = Math.max(240, window.innerHeight - top - 16);
+      const fit = width > 0 ? width / aspect : maxH;
+      setCanvasH(Math.round(Math.min(fit, maxH)));
     };
     measure();
     window.addEventListener("resize", measure);
+    // Observe the row (parent) for width changes; not `el` itself (we set its height).
     const ro = new ResizeObserver(measure);
     if (el.parentElement) ro.observe(el.parentElement);
     return () => { window.removeEventListener("resize", measure); ro.disconnect(); };
-  }, [isEditing]);
+  }, [isEditing, canvas.width, canvas.height]);
 
   const currentLayout = (): LayoutDTO => ({ version: 1, canvas, objects });
 
@@ -686,6 +691,12 @@ export function LayoutEditor({
   }
 
   const selected = findById(objects, selectedId);
+  // The selected object iff it's an inline mic-slots grid (config narrowed so the
+  // inline slot editor below the canvas gets its id + alignment).
+  const inlineGrid =
+    selected && selected.config.type === "slots-grid" && (selected.config.source ?? "view") === "inline"
+      ? { id: selected.id, config: selected.config }
+      : null;
   // Max z among the TOP-LEVEL scope (for adding/duplicating top-level objects).
   const zTop = objects.reduce((m, o) => Math.max(m, o.z), 0);
 
@@ -929,9 +940,11 @@ export function LayoutEditor({
       </div>
       )}
 
-      <div ref={bodyRef} className="flex gap-3 @max-4xl:flex-col flex-1 min-h-0" style={bodyH ? { height: bodyH, flex: "none" } : undefined}>
-        {/* Canvas */}
-        <div className="flex-1 min-w-0 min-h-0 @max-4xl:flex-[0_0_55%]">
+      <div className="flex gap-3 @max-4xl:flex-col min-h-0">
+        {/* Canvas — height derived from its width + the design aspect (capped at
+            the viewport), so it has a definite size, never jumps, and the inline
+            slots editor sits right below it. */}
+        <div ref={canvasCellRef} className="flex-1 min-w-0 @max-4xl:flex-none" style={{ height: canvasH ?? undefined }}>
           {data.state ? (
             <EditorCanvas
               canvas={canvas}
@@ -953,9 +966,10 @@ export function LayoutEditor({
           )}
         </div>
 
-        {/* Side panel: layers + inspector (edit mode only) */}
+        {/* Side panel: layers + inspector (edit mode only). Capped to the canvas
+            height so it scrolls beside the preview instead of stretching the row. */}
         {isEditing && (
-        <div className="w-64 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full @max-4xl:flex-1">
+        <div className="w-64 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: canvasH ?? undefined }}>
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Layers</span>
@@ -1044,6 +1058,22 @@ export function LayoutEditor({
         </div>
         )}
       </div>
+
+      {/* Inline mic-slots editor — full width below the canvas when an inline
+          slots-grid object is selected (scroll down to reach it). */}
+      {isEditing && inlineGrid && (
+        <div className="pb-[40vh]">
+          <Separator />
+          <div className="pt-3">
+            <InlineSlotsEditor
+              key={inlineGrid.id}
+              objectId={inlineGrid.id}
+              slotsLayout={inlineGrid.config.slotsLayout ?? null}
+              onSetLayout={(next) => { pushHistory(); updateConfig(inlineGrid.id, { ...inlineGrid.config, slotsLayout: next }); }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Leaving edit mode with unsaved changes. */}
       <DialogPrimitive.Root open={confirmLeave} onOpenChange={setConfirmLeave}>
@@ -1302,16 +1332,34 @@ function Inspector({
           )}
         </>
       )}
-      {c.type === "slots-grid" && (
-        <Row label="Source">
-          <Select value={c.sourceViewId ?? ""} onValueChange={(v: string) => onConfig({ type: "slots-grid", sourceViewId: v || null })}>
-            <SelectTrigger><SelectValue placeholder="Mic-slots view…" /></SelectTrigger>
-            <SelectContent>
-              {slotsViews.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </Row>
-      )}
+      {c.type === "slots-grid" && (() => {
+        const isInline = (c.source ?? "view") === "inline";
+        return (
+          <>
+            <Row label="Source">
+              <Select value={isInline ? "inline" : "view"} onValueChange={(v: string) => onConfig({ ...c, source: v === "inline" ? "inline" : "view" })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="inline">Define here</SelectItem>
+                  <SelectItem value="view">Embed a view</SelectItem>
+                </SelectContent>
+              </Select>
+            </Row>
+            {isInline ? (
+              <p className="text-caption2 text-gray-9 leading-snug">Edit this grid's slots below the canvas.</p>
+            ) : (
+              <Row label="View">
+                <Select value={c.sourceViewId ?? ""} onValueChange={(v: string) => onConfig({ ...c, source: "view", sourceViewId: v || null })}>
+                  <SelectTrigger><SelectValue placeholder="Mic-slots view…" /></SelectTrigger>
+                  <SelectContent>
+                    {slotsViews.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Row>
+            )}
+          </>
+        );
+      })()}
       {c.type === "charger-battery" && (
         <>
           <Row label="Battery %"><Switch checked={c.show.battery ?? false} onCheckedChange={(v) => onConfig({ ...c, show: { ...c.show, battery: v } })} /></Row>

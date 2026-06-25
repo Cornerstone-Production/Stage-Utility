@@ -266,18 +266,27 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         </div>
       );
     case "slots-grid": {
-      const slots = c.sourceViewId ? (ctx.state.slotsByView?.[c.sourceViewId] ?? []) : [];
+      // Inline: this object owns its slots (resolved by object id). Otherwise:
+      // embed an existing slots-View's resolved grid by sourceViewId.
+      const inline = c.source === "inline";
+      const slots = inline
+        ? (ctx.state.slotsByLayoutObject?.[o.id] ?? [])
+        : c.sourceViewId
+          ? (ctx.state.slotsByView?.[c.sourceViewId] ?? [])
+          : [];
       if (slots.length === 0) {
         return <span style={{ ...ts, color: "rgba(255,255,255,0.3)" }}>Mic slots</span>;
       }
       // Render via the same component the standalone slots view uses, honoring the
-      // source View's physical-inch alignment, over the kiosk backdrop so it looks
-      // identical (grey, not navy). `.kiosk-surface` paints the kiosk gradient.
-      const srcView = c.sourceViewId ? (ctx.state.views?.find((v) => v.id === c.sourceViewId) ?? null) : null;
+      // physical-inch alignment (the object's own when inline, else the source
+      // View's), over the kiosk backdrop so it looks identical.
+      const slotsLayout = inline
+        ? (c.slotsLayout ?? null)
+        : (c.sourceViewId ? (ctx.state.views?.find((v) => v.id === c.sourceViewId)?.slotsLayout ?? null) : null);
       return (
         <SlotsColumns
           slots={slots}
-          slotsLayout={srcView?.slotsLayout ?? null}
+          slotsLayout={slotsLayout}
           emptySlotLogo={ctx.state.emptySlotLogo}
           defaultAvatar={ctx.state.defaultAvatar}
           className="w-full h-full kiosk-surface"

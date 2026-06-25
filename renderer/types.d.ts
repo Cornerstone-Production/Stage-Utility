@@ -248,7 +248,7 @@ type LayoutObjectConfig =
   | { type: "current-slide-notes" }
   | { type: "slide-thumbnail" }
   | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }
-  | { type: "slots-grid"; sourceViewId?: string | null }
+  | { type: "slots-grid"; source?: "view" | "inline"; sourceViewId?: string | null; slotsLayout?: SlotsLayout | null }
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
   | { type: "live-controls" }
   | {
@@ -403,6 +403,8 @@ interface StageState {
   outputs: Output[];
   /** Resolved slots keyed by View id (slots-kind Views). */
   slotsByView: Record<string, Slot[]>;
+  /** Resolved slots for inline mic-slots objects, keyed by layout object id. */
+  slotsByLayoutObject: Record<string, Slot[]>;
   /** Per-output render descriptor (output id → routed view's kind/ndi/name). */
   resolvedByOutput: Record<string, ResolvedOutput>;
 
