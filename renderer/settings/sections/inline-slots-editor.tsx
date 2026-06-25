@@ -142,10 +142,14 @@ export function InlineSlotsEditor({
   }
 
   // Copy a slots-View's lineup into this grid as a starting point (fresh ids).
+  // Also carry over the source view's physical-inch alignment so the columns line
+  // up the same way — otherwise spacer columns render full-width and spread out.
   const slotsViews = (state?.views ?? []).filter((v) => v.kind === "slots");
   function seedFromView(viewId: string) {
+    const view = slotsViews.find((v) => v.id === viewId);
     const src = state?.slotsByView?.[viewId] ?? [];
     setLocalSlots(src.map((s, i) => ({ ...s, id: freshSlotId(), order: i })));
+    onSetLayout(view?.slotsLayout ?? null);
     setDirty(true);
   }
 

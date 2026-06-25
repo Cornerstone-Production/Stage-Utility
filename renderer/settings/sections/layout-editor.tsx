@@ -1330,10 +1330,13 @@ function Inspector({
         return (
           <>
             <Row label="Source">
-              <ButtonGroup>
-                <Button variant={isInline ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, source: "inline" })}>Define here</Button>
-                <Button variant={!isInline ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, source: "view" })}>Embed a view</Button>
-              </ButtonGroup>
+              <Select value={isInline ? "inline" : "view"} onValueChange={(v: string) => onConfig({ ...c, source: v === "inline" ? "inline" : "view" })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="inline">Define here</SelectItem>
+                  <SelectItem value="view">Embed a view</SelectItem>
+                </SelectContent>
+              </Select>
             </Row>
             {isInline ? (
               <p className="text-caption2 text-gray-9 leading-snug">Edit this grid's slots below the canvas.</p>
