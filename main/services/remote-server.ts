@@ -16,6 +16,7 @@ import type { DisplayKind, LayoutDTO, Slot, SlotsLayout } from "../types/stage.j
 import { addBroadcastListener } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
 import { integrationManager } from "./integration-manager.js";
+import { obsService } from "./obs-service.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
 import { smaartService } from "./smaart-service.js";
@@ -355,6 +356,7 @@ export class RemoteServer {
       sseWrite(res, "propresenter:status", propresenterService.getStatus());
       sseWrite(res, "spl:metrics", smaartService.getLatest());
       sseWrite(res, "spl:history", splRecorder.getCurrent());
+      sseWrite(res, "obs:status", obsService.getLatest());
       sseClients.add(res);
       // A Companion module marks its event stream so we can show a live
       // connected-client count in the integration panel. Re-broadcast the
@@ -387,6 +389,10 @@ export class RemoteServer {
     }
     if (method === "GET" && pathname === "/api/spl/metrics") {
       json(res, smaartService.getLatest());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/obs/status") {
+      json(res, obsService.getLatest());
       return;
     }
     if (method === "GET" && pathname === "/api/spl/history/current") {

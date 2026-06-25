@@ -3,6 +3,7 @@ import { BrandLogo } from "../components/brand-logo";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
+import { useObsState } from "./use-obs-state";
 import { useTranscript } from "./use-transcript";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { channelLabel, lineColor } from "./channel-color";
@@ -17,6 +18,7 @@ export interface LayoutRenderCtx {
   pcoLive: PcoLiveDTO | null;
   transcript: TranscriptLineDTO[];
   spl: SplMetricsDTO | null;
+  obs: ObsStatusDTO | null;
   now: number;
   skewMs: number;
   ndiSource: string | null;
@@ -305,6 +307,33 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
           {c.showLabel && (
             <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{` ${r.metricKey}`}</span>
           )}
+        </span>
+      );
+    }
+    case "obs-status": {
+      const obs = ctx.obs;
+      const connected = obs?.connected ?? false;
+      const recording = obs?.recording ?? false;
+      // Pure tally-light mode: nothing on screen unless OBS is recording.
+      if (!recording && (c.hideWhenIdle ?? false)) return null;
+      if (recording) {
+        const tc = c.showTimecode && obs?.recordTimecode ? ` ${obs.recordTimecode}` : "";
+        const label = `${c.recordingText ?? "OBS: Recording"}${tc}`;
+        // Fill the whole box red (a strong room cue) or just color the text.
+        if (c.fillWhenRecording ?? true) {
+          return (
+            <div style={{ ...ts, color: "#ffffff", background: "var(--red-9)", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "inherit" }}>
+              {label}
+            </div>
+          );
+        }
+        return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
+      }
+      // Not recording: dim when offline so a neutral badge is never mistaken for
+      // "not recording" when OBS is merely unreachable.
+      return (
+        <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
+          {connected ? (c.idleText ?? "OBS: Standby") : (c.offlineText ?? "OBS: Offline")}
         </span>
       );
     }
@@ -615,6 +644,7 @@ export function useLayoutData() {
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
   const transcript = useTranscript();
   const spl = useSplState();
+  const obs = useObsState();
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -626,7 +656,7 @@ export function useLayoutData() {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  return { state, isLoading, error, pcoLive, propresenter, transcript, spl, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, transcript, spl, obs, now, skewMs };
 }
 
 /**
@@ -634,7 +664,7 @@ export function useLayoutData() {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, transcript, spl, now, skewMs } = useLayoutData();
+  const { state, isLoading, error, pcoLive, propresenter, transcript, spl, obs, now, skewMs } = useLayoutData();
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -669,7 +699,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   }
 
   const { canvas } = layout;
-  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, transcript, spl, now, skewMs, ndiSource, H: canvas.height, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, transcript, spl, obs, now, skewMs, ndiSource, H: canvas.height, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

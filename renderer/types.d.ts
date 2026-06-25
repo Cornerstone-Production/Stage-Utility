@@ -53,6 +53,15 @@ interface SplMetricsDTO {
   meters: Record<string, SplMeterDTO>;
 }
 
+interface ObsStatusDTO {
+  connected: boolean;
+  recording: boolean;
+  recordPaused: boolean;
+  streaming: boolean;
+  virtualCam: boolean;
+  recordTimecode: string | null;
+}
+
 interface SplItemHistory {
   itemId: string;
   title: string;
@@ -273,6 +282,15 @@ type LayoutObjectConfig =
       metricKey?: string | null;
       showLabel?: boolean;
       thresholds?: { amber: number; red: number } | null;
+    }
+  | {
+      type: "obs-status";
+      recordingText?: string;
+      idleText?: string;
+      offlineText?: string;
+      showTimecode?: boolean;
+      hideWhenIdle?: boolean;
+      fillWhenRecording?: boolean;
     }
   | { type: "shape"; shape: "rect" | "ellipse" }
   | { type: "container" };

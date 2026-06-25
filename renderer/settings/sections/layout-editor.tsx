@@ -57,6 +57,7 @@ import {
   type FracRect,
 } from "../../main/layout-tree";
 import { useSplState } from "../../main/use-spl-state";
+import { useObsState } from "../../main/use-obs-state";
 import { useStageState } from "../../main/use-stage-state";
 import { InlineSlotsEditor } from "./inline-slots-editor";
 
@@ -78,6 +79,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "live-controls": "PCO Prev/Next",
   "charger-battery": "Charger battery",
   "spl-meter": "SPL meter",
+  "obs-status": "OBS status",
   "brand-logo": "Logo",
   "ndi-video": "NDI video",
   image: "Image",
@@ -89,7 +91,7 @@ const PALETTE: LayoutObjectType[] = [
   "container", "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
   "current-service-item", "next-service-item",
   "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
-  "transcript-strip", "charger-battery", "spl-meter", "brand-logo", "image", "plan-attachment", "shape",
+  "transcript-strip", "charger-battery", "spl-meter", "obs-status", "brand-logo", "image", "plan-attachment", "shape",
 ];
 
 // Deepest allowed object depth (top-level = 0). A container holding objects = 1;
@@ -120,6 +122,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "transcript-strip": return { type: "transcript-strip", mode: "rolling" };
     case "charger-battery": return { type: "charger-battery", bays: [], show: { battery: true, charging: true } };
     case "spl-meter": return { type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null };
+    case "obs-status": return { type: "obs-status", showTimecode: false, hideWhenIdle: false, fillWhenRecording: true };
     case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
     case "image": return { type: "image", src: "" };
     case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
@@ -136,6 +139,8 @@ function defaultStyle(type: LayoutObjectType): LayoutStyle {
   // Captions read left-aligned and bottom-anchored, like the dedicated display.
   if (type === "transcript-strip") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "bottom" };
   if (type === "charger-battery") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "middle" };
+  // OBS status reads as a bold pill (glass when idle, fills red when recording).
+  if (type === "obs-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_PRESETS.neutral };
   return { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 }
 
@@ -1268,6 +1273,7 @@ function Inspector({
   const c = o.config;
   const chargerBays = useStageState().state?.chargerBays ?? [];
   const spl = useSplState();
+  const obs = useObsState();
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
@@ -1442,6 +1448,21 @@ function Inspector({
           </>
         );
       })()}
+      {c.type === "obs-status" && (
+        <>
+          <Row label="OBS">
+            <span className="text-caption2 text-gray-10">
+              {obs?.connected ? (obs.recording ? "Recording now" : "Connected · idle") : "Not connected"}
+            </span>
+          </Row>
+          <Row label="Recording text"><Input value={c.recordingText ?? ""} onChange={(e) => onConfig({ ...c, recordingText: e.target.value })} placeholder="OBS: Recording" className="text-gray-12" /></Row>
+          <Row label="Idle text"><Input value={c.idleText ?? ""} onChange={(e) => onConfig({ ...c, idleText: e.target.value })} placeholder="OBS: Standby" className="text-gray-12" /></Row>
+          <Row label="Offline text"><Input value={c.offlineText ?? ""} onChange={(e) => onConfig({ ...c, offlineText: e.target.value })} placeholder="OBS: Offline" className="text-gray-12" /></Row>
+          <Row label="Fill red when recording"><Switch checked={c.fillWhenRecording ?? true} onCheckedChange={(v) => onConfig({ ...c, fillWhenRecording: v })} /></Row>
+          <Row label="Show timecode"><Switch checked={c.showTimecode ?? false} onCheckedChange={(v) => onConfig({ ...c, showTimecode: v })} /></Row>
+          <Row label="Hide when idle"><Switch checked={c.hideWhenIdle ?? false} onCheckedChange={(v) => onConfig({ ...c, hideWhenIdle: v })} /></Row>
+        </>
+      )}
       {c.type === "image" && (
         <Row label="URL"><Input value={c.src} onChange={(e) => onConfig({ type: "image", src: e.target.value })} placeholder="https://… or data:" className="text-gray-12" /></Row>
       )}

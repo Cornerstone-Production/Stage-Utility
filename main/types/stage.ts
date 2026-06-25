@@ -205,6 +205,21 @@ export type LayoutObjectConfig =
       showLabel?: boolean;
       thresholds?: { amber: number; red: number } | null;
     }
+  // Live OBS recording indicator (from the OBS integration, `StageState`-adjacent
+  // `obs:status` channel). Turns red while recording. The label texts default to
+  // "OBS: Recording" / "OBS: Standby" / "OBS: Offline". `hideWhenIdle` makes it a
+  // pure tally light (render nothing unless recording); `fillWhenRecording` fills
+  // the whole box red instead of just coloring the text; `showTimecode` appends
+  // the record duration.
+  | {
+      type: "obs-status";
+      recordingText?: string;
+      idleText?: string;
+      offlineText?: string;
+      showTimecode?: boolean;
+      hideWhenIdle?: boolean;
+      fillWhenRecording?: boolean;
+    }
   | { type: "shape"; shape: "rect" | "ellipse" }
   // A styled box that holds other objects. Children are positioned as fractions
   // of THIS container's box (not the canvas), so moving/resizing the container
@@ -335,6 +350,19 @@ export interface SplMetricsDTO {
   /** Negotiated Smaart API version ("3", "4", …) or null when offline. */
   apiVersion: string | null;
   meters: Record<string, SplMeterDTO>;
+}
+
+/** Live OBS Studio output state (pushed on "obs:status"). `connected` is the
+ *  obs-websocket link; the rest reflect OBS's outputs. v1 surfaces recording for
+ *  the layout object, but streaming/virtual-cam are carried for future objects. */
+export interface ObsStatusDTO {
+  connected: boolean;
+  recording: boolean;
+  recordPaused: boolean;
+  streaming: boolean;
+  virtualCam: boolean;
+  /** "HH:MM:SS" record duration while recording, else null. */
+  recordTimecode: string | null;
 }
 
 /** Per-item recorded SPL across one service. */

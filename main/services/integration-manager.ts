@@ -4,6 +4,7 @@
 
 import type { IntegrationDescriptor, IntegrationState } from "../types/integrations.js";
 import { broadcast } from "./broadcaster.js";
+import { obsService } from "./obs-service.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
@@ -144,6 +145,35 @@ const SMAART_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+// OBS Studio integration — connects to OBS's built-in obs-websocket v5 server
+// (Tools → WebSocket Server Settings; default port 4455) for live output state
+// (e.g. recording) shown by the custom-layout "OBS status" object.
+const OBS_DESCRIPTOR: IntegrationDescriptor = {
+  id: "obs",
+  kind: "control",
+  label: "OBS Studio",
+  configSchema: [
+    {
+      key: "host",
+      label: "OBS Host",
+      type: "text",
+      placeholder: "192.168.1.50",
+    },
+    {
+      key: "port",
+      label: "WebSocket Port",
+      type: "number",
+      placeholder: "4455",
+    },
+    {
+      key: "password",
+      label: "Server Password",
+      type: "password",
+      placeholder: "(from OBS → Tools → WebSocket Server Settings)",
+    },
+  ],
+};
+
 const DESCRIPTORS: IntegrationDescriptor[] = [
   PCO_DESCRIPTOR,
   WIRELESS_DESCRIPTOR,
@@ -151,6 +181,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   PROPRESENTER_DESCRIPTOR,
   PRODCOM_DESCRIPTOR,
   SMAART_DESCRIPTOR,
+  OBS_DESCRIPTOR,
 ];
 
 // Keys that are secrets for each integration id.
@@ -161,6 +192,7 @@ const SECRET_KEYS: Record<string, string[]> = {
   propresenter: [],
   prodcom: ["apiKey"],
   smaart: ["password"],
+  obs: ["password"],
 };
 
 class IntegrationManager {
@@ -210,6 +242,8 @@ class IntegrationManager {
     void this.applyProdcom();
     // Start the Smaart SPL connection if enabled + configured.
     await this.applySmaart();
+    // Start the OBS connection if enabled + configured.
+    await this.applyObs();
 
     console.log("[integration-manager] init complete", {
       integrations: Array.from(this.states.keys()),
@@ -325,6 +359,10 @@ class IntegrationManager {
       await this.applySmaart();
     }
 
+    if (id === "obs") {
+      await this.applyObs();
+    }
+
     this.broadcastStates();
     return this.states.get(id)!;
   }
@@ -361,6 +399,10 @@ class IntegrationManager {
 
     if (id === "smaart") {
       await this.applySmaart();
+    }
+
+    if (id === "obs") {
+      await this.applyObs();
     }
 
     this.broadcastStates();
@@ -445,6 +487,18 @@ class IntegrationManager {
         const secrets = await secretsStore.getSecrets("smaart");
         const result = await smaartService.test(host, port, secrets.password ?? null);
         this.setConnectionState("smaart", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "obs") {
+        const { host, port } = this.getObsTarget();
+        if (!host || !port) {
+          return { ok: false, message: "Host and Port are required" };
+        }
+        const secrets = await secretsStore.getSecrets("obs");
+        const result = await obsService.test(host, port, secrets.password ?? null);
+        this.setConnectionState("obs", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
         return result;
       }
@@ -575,6 +629,39 @@ class IntegrationManager {
     } else {
       smaartService.stop();
       this.setConnectionState("smaart", "disconnected", null);
+    }
+  }
+
+  private getObsTarget(): { host: string | null; port: number | null } {
+    const cfg = this.states.get("obs")?.config ?? {};
+    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
+    const rawPort = cfg.port;
+    const port =
+      typeof rawPort === "number"
+        ? rawPort
+        : typeof rawPort === "string" && rawPort.trim()
+          ? parseInt(rawPort, 10)
+          : NaN;
+    // Default to obs-websocket's standard port when only a host is given.
+    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 4455 : null };
+  }
+
+  /** Start/stop the OBS connection to match enabled + configured state. */
+  private async applyObs(): Promise<void> {
+    obsService.setConnectionListener((state, message) => {
+      this.setConnectionState("obs", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("obs")?.enabled ?? false;
+    const { host, port } = this.getObsTarget();
+    if (enabled && host && port) {
+      const secrets = await secretsStore.getSecrets("obs");
+      this.setConnectionState("obs", "connecting", `Connecting ${host}:${port}`);
+      obsService.configure(host, port, secrets.password ?? null);
+    } else {
+      obsService.stop();
+      this.setConnectionState("obs", "disconnected", null);
     }
   }
 
