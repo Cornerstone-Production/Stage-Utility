@@ -1,0 +1,8 @@
+version: v2
+inputs:
+  - directory: ../idl
+plugins:
+  - remote: buf.build/bufbuild/es:v2.12.1
+    out: src/connectRPC/gen
+    opt:
+      - target=ts
