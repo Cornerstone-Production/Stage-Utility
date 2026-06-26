@@ -644,18 +644,23 @@ export class StageController {
         // ended more than the grace window ago and take the first still-upcoming one.
         // Without this, auto-mode "advances" right back onto the finished plan (its
         // sort_date is the earliest in `future`) and never reaches the real next one.
+        // Resolve every candidate plan's service end concurrently (each is a
+        // cached /plan_times lookup) instead of awaiting them one-by-one.
+        const ends = await Promise.all(
+          plans.map((p) =>
+            pcoService.getServiceEnd(this.pcoAppId!, this.pcoSecret!, type.id, p.id).catch(() => null),
+          ),
+        );
         let nearest: PlanDTO | null = null;
-        for (const p of plans) {
-          const endIso = await pcoService
-            .getServiceEnd(this.pcoAppId!, this.pcoSecret!, type.id, p.id)
-            .catch(() => null);
+        for (let i = 0; i < plans.length; i++) {
+          const endIso = ends[i];
           if (endIso) {
             const end = Date.parse(endIso);
             if (Number.isFinite(end) && Date.now() > end + StageController.ROLLOVER_GRACE_MS) {
               continue; // finished plan still lingering in filter=future — skip it
             }
           }
-          nearest = p; // service still upcoming / within grace, or end unknown
+          nearest = plans[i]; // service still upcoming / within grace, or end unknown
           break;
         }
         if (!nearest) continue; // every future plan for this type has already ended
@@ -1523,9 +1528,14 @@ export class StageController {
 
   // ── Refresh ───────────────────────────────────────────────────────────
 
-  async refresh(): Promise<StageState> {
-    console.log("[stage-controller] refresh");
-    pcoService.clearCache();
+  async refresh(full = true): Promise<StageState> {
+    console.log(`[stage-controller] refresh (${full ? "full" : "targeted"})`);
+    // Manual "Refresh now" (full) drops the whole cache for a clean re-pull. The
+    // unattended periodic tick only invalidates the active plan, so static
+    // metadata (service types, note categories, team positions, other plans'
+    // service times) stays cached instead of being re-fetched every interval.
+    if (full) pcoService.clearCache();
+    else if (this.state.planId) pcoService.clearPlanCache(this.state.planId);
 
     if (this.state.planMode === "auto") {
       await this.selectGlobalNextPlan();
@@ -1565,7 +1575,7 @@ export class StageController {
     this.isRefreshing = true;
     try {
       console.log("[stage-controller] auto-refresh tick");
-      await this.refresh();
+      await this.refresh(false);
     } catch (err) {
       console.error("[stage-controller] auto-refresh failed:", err);
     } finally {
