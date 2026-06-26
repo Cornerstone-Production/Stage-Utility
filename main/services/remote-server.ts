@@ -128,6 +128,11 @@ async function readBody(req: http.IncomingMessage): Promise<unknown> {
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();
 
+// Small FIFO cache of ProPresenter slide thumbnails, keyed by the per-slide
+// cache-bust token. Lets multiple displays showing the same slide share one
+// upstream fetch instead of each hitting ProPresenter.
+const thumbnailCache = new Map<string, { buf: Buffer; contentType: string }>();
+
 // Count of currently-connected Companion-module clients (SSE streams opened with
 // the X-Companion-Module header / ?client=companion marker). Pushed into the
 // integration manager so the "companion" panel can show "N connected".
@@ -512,6 +517,16 @@ export class RemoteServer {
         res.end("ProPresenter not connected / no active slide");
         return;
       }
+      // Cache the fetched image so N displays showing the same slide don't each
+      // hit ProPresenter. Key on the client's cache-bust token (`?k=` = the
+      // slidePreviewKey, which changes per slide), else the slide's uuid:index.
+      const cacheKey = _url.searchParams.get("k") || `${target.uuid}:${target.index}`;
+      const hit = thumbnailCache.get(cacheKey);
+      if (hit) {
+        res.writeHead(200, { "Content-Type": hit.contentType, "Cache-Control": "no-store" });
+        res.end(hit.buf);
+        return;
+      }
       const path = `/v1/presentation/${target.uuid}/thumbnail/${target.index}?quality=${PROPRESENTER_THUMBNAIL_QUALITY}`;
       const upstream = http.get({ host: target.host, port: target.port, path, timeout: 5000 }, (up) => {
         if ((up.statusCode ?? 0) >= 400) {
@@ -520,11 +535,20 @@ export class RemoteServer {
           res.end(`ProPresenter thumbnail HTTP ${up.statusCode}`);
           return;
         }
-        res.writeHead(200, {
-          "Content-Type": up.headers["content-type"] ?? "image/jpeg",
-          "Cache-Control": "no-store",
+        const contentType = up.headers["content-type"] ?? "image/jpeg";
+        const chunks: Buffer[] = [];
+        up.on("data", (c: Buffer) => chunks.push(c));
+        up.on("end", () => {
+          const buf = Buffer.concat(chunks);
+          // Bound the cache (FIFO) — slide keys are short-lived, a few is plenty.
+          if (thumbnailCache.size >= 16) {
+            const firstKey = thumbnailCache.keys().next().value;
+            if (firstKey !== undefined) thumbnailCache.delete(firstKey);
+          }
+          thumbnailCache.set(cacheKey, { buf, contentType });
+          res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-store" });
+          res.end(buf);
         });
-        up.pipe(res);
       });
       upstream.on("timeout", () => upstream.destroy(new Error("timeout")));
       upstream.on("error", (e) => {

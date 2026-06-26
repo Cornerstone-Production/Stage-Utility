@@ -32,8 +32,10 @@ export class ShureCharger extends ShureBaseProvider {
   protected override allowDynamicChannels = true;
 
   // Re-poll the bays on a timer — chargers change slowly and may not push.
+  // 30s (was 15s) halves the command volume with no practical loss of freshness
+  // (battery %, dock/undock change slowly).
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private static readonly POLL_MS = 15_000;
+  private static readonly POLL_MS = 30_000;
 
   protected initChannelStates(count: number): void {
     super.initChannelStates(count);

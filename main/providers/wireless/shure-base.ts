@@ -39,8 +39,10 @@ const RECONNECT_BASE_MS = 3_000;
 const RECONNECT_MAX_MS = 30_000;
 // Connect-phase inactivity timeout (ms) — fail fast on a wrong/unreachable IP.
 const CONNECT_TIMEOUT_MS = 10_000;
-// Heartbeat interval in ms.
-const HEARTBEAT_INTERVAL_MS = 30_000;
+// Heartbeat interval in ms. 60s (was 30s) — TCP keep-alive is already enabled at
+// the socket level (setKeepAlive), so this app-level probe only needs to be a
+// slow backstop; halving it trims idle command chatter to each receiver.
+const HEARTBEAT_INTERVAL_MS = 60_000;
 
 export abstract class ShureBaseProvider implements DeviceProvider {
   abstract readonly id: string;
