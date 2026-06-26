@@ -1217,6 +1217,19 @@ export class RemoteServer {
       }
       return;
     }
+    if (method === "POST" && pathname === "/api/update/track") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.branch !== "string") {
+        error(res, "body.branch (string) required");
+        return;
+      }
+      try {
+        json(res, await updater.switchTrack(body.branch));
+      } catch (err) {
+        error(res, String(err instanceof Error ? err.message : err));
+      }
+      return;
+    }
     if (method === "POST" && pathname === "/api/update/auto") {
       const body = await readBody(req) as Record<string, unknown>;
       const partial: { enabled?: boolean; dayOfWeek?: number | null; hour?: number } = {};

@@ -37,8 +37,15 @@ function Write-Progress-Step($step) {
 
 try {
   Write-Progress-Step "pull"
-  "[update] git pull --ff-only origin $branch" | Out-File -Append $log
-  git pull --ff-only origin $branch *>> $log; if ($LASTEXITCODE -ne 0) { throw "git pull failed" }
+  if ($env:STAGE_UPDATE_CHECKOUT) {
+    # Switching tracks: fetch the target branch and force the local branch to it.
+    "[update] git fetch origin $branch; git checkout -B $branch origin/$branch" | Out-File -Append $log
+    git fetch origin $branch *>> $log; if ($LASTEXITCODE -ne 0) { throw "git fetch failed" }
+    git checkout -B $branch "origin/$branch" *>> $log; if ($LASTEXITCODE -ne 0) { throw "git checkout failed" }
+  } else {
+    "[update] git pull --ff-only origin $branch" | Out-File -Append $log
+    git pull --ff-only origin $branch *>> $log; if ($LASTEXITCODE -ne 0) { throw "git pull failed" }
+  }
   Write-Progress-Step "install"
   # --include=dev: the service runs with NODE_ENV=production, under which npm omits
   # devDependencies — but the build tooling (vite, etc.) lives there. Force them in.
