@@ -202,6 +202,7 @@ function playOrderSections(active: unknown): { name: string; colorHex: string }[
 class ProPresenterService {
   private host: string | null = null;
   private port: number | null = null;
+  private pollMs = POLL_INTERVAL_MS;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private last: ProPresenterStatusDTO = OFFLINE;
@@ -233,9 +234,11 @@ class ProPresenterService {
     this.onConn?.(state, message);
   }
 
-  configure(host: string, port: number): void {
+  configure(host: string, port: number, pollMs?: number): void {
     this.host = host?.trim() || null;
     this.port = port > 0 ? Math.floor(port) : null;
+    // Clamp to a sane floor so a bad setting can't hammer ProPresenter.
+    this.pollMs = pollMs && pollMs >= 200 ? Math.floor(pollMs) : POLL_INTERVAL_MS;
     this.reported = null;
     this.restart();
   }
@@ -306,7 +309,7 @@ class ProPresenterService {
 
       this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
       this.report("connected", `Connected to ${host}:${port}`);
-      this.schedule(POLL_INTERVAL_MS);
+      this.schedule(this.pollMs);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[propresenter] poll error:", msg);

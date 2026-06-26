@@ -87,6 +87,12 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
       type: "number",
       placeholder: "1025",
     },
+    {
+      key: "pollMs",
+      label: "Poll interval (ms)",
+      type: "number",
+      placeholder: "500 (lower = snappier, more requests)",
+    },
   ],
 };
 
@@ -547,7 +553,7 @@ class IntegrationManager {
     return Number.isFinite(min) && min > 0 ? min * 60 * 1000 : 60 * 60 * 1000;
   }
 
-  private getPropresenterTarget(): { host: string | null; port: number | null } {
+  private getPropresenterTarget(): { host: string | null; port: number | null; pollMs: number | null } {
     const cfg = this.states.get("propresenter")?.config ?? {};
     const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
     const rawPort = cfg.port;
@@ -557,7 +563,18 @@ class IntegrationManager {
         : typeof rawPort === "string" && rawPort.trim()
           ? parseInt(rawPort, 10)
           : NaN;
-    return { host, port: Number.isFinite(port) && port > 0 ? port : null };
+    const rawPoll = cfg.pollMs;
+    const pollMs =
+      typeof rawPoll === "number"
+        ? rawPoll
+        : typeof rawPoll === "string" && rawPoll.trim()
+          ? parseInt(rawPoll, 10)
+          : NaN;
+    return {
+      host,
+      port: Number.isFinite(port) && port > 0 ? port : null,
+      pollMs: Number.isFinite(pollMs) && pollMs > 0 ? pollMs : null,
+    };
   }
 
   /** Start/stop the ProPresenter poller to match enabled + configured state. */
@@ -570,12 +587,12 @@ class IntegrationManager {
     });
 
     const enabled = this.states.get("propresenter")?.enabled ?? false;
-    const { host, port } = this.getPropresenterTarget();
+    const { host, port, pollMs } = this.getPropresenterTarget();
     if (enabled && host && port) {
       // configure() starts polling; the listener flips this to connected/error
       // on the first tick.
       this.setConnectionState("propresenter", "connecting", `Polling ${host}:${port}`);
-      propresenterService.configure(host, port);
+      propresenterService.configure(host, port, pollMs ?? undefined);
     } else {
       propresenterService.stop();
       this.setConnectionState("propresenter", "disconnected", null);
