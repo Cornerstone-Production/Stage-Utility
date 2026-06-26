@@ -1,0 +1,8 @@
+version: v2
+name: buf.build/cornerstone-production/stage-utility
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

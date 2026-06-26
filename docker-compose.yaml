@@ -1,0 +1,79 @@
+services:
+  server:
+    image: ghcr.io/cornerstone-production/stage-utility/server:main
+    container_name: stage-utility-server
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-qO-",
+          "--post-data={}",
+          "--header=Content-Type: application/json",
+          "http://127.0.0.1:8080/stage.v1.StageService/Hello",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    profiles:
+      - serve
+
+  server-local:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    image: ghcr.io/cornerstone-production/stage-utility/server:local
+    container_name: stage-utility-server
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-qO-",
+          "--post-data={}",
+          "--header=Content-Type: application/json",
+          "http://127.0.0.1:8080/stage.v1.StageService/Hello",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    profiles:
+      - serve-local
+
+  client:
+    image: ghcr.io/cornerstone-production/stage-utility/client:main
+    container_name: stage-utility-client
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "8081:80"
+    restart: unless-stopped
+    profiles:
+      - serve
+
+  client-local:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        # Browser-visible API URL (host port mapped to the server service).
+        VITE_API_URL: http://localhost:8080
+    image: ghcr.io/cornerstone-production/stage-utility/client:local
+    container_name: stage-utility-client
+    depends_on:
+      server-local:
+        condition: service_healthy
+    ports:
+      - "8081:80"
+    restart: unless-stopped
+    profiles:
+      - serve-local
