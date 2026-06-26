@@ -40,8 +40,15 @@ write_result() {
 
 {
   write_progress pull
-  echo "[update] git pull --ff-only origin $BRANCH"
-  git pull --ff-only origin "$BRANCH" || { echo "[update] git pull failed (non-fast-forward or offline)"; write_result false; exit 1; }
+  if [ -n "${STAGE_UPDATE_CHECKOUT:-}" ]; then
+    # Switching tracks: fetch the target branch and force the local branch to it.
+    echo "[update] git fetch origin $BRANCH && git checkout -B $BRANCH origin/$BRANCH"
+    git fetch origin "$BRANCH" || { echo "[update] git fetch failed (offline?)"; write_result false; exit 1; }
+    git checkout -B "$BRANCH" "origin/$BRANCH" || { echo "[update] git checkout failed"; write_result false; exit 1; }
+  else
+    echo "[update] git pull --ff-only origin $BRANCH"
+    git pull --ff-only origin "$BRANCH" || { echo "[update] git pull failed (non-fast-forward or offline)"; write_result false; exit 1; }
+  fi
   write_progress install
   echo "[update] npm ci --include=dev"
   # --include=dev is REQUIRED: the service runs with NODE_ENV=production (set in

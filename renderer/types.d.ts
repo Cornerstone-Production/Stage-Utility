@@ -474,6 +474,7 @@ interface AutoUpdateSettings {
 
 /** In-app update status (git-based), surfaced in the Advanced tab. */
 interface UpdateStatus {
+  tracks: string[];
   isGitRepo: boolean;
   branch: string | null;
   version: string;

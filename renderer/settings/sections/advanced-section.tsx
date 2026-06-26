@@ -87,10 +87,25 @@ function UpdatesPanel({
   const s = updateStatus;
   const updating = s?.phase === "updating";
   const behind = s?.behind ?? 0;
+  const [trackSel, setTrackSel] = useState<string | null>(null);
 
   function onUpdateNow() {
     if (window.confirm("Update now? The displays will go blank and reload for a few seconds while the server restarts.")) {
       handlers.handleApplyUpdate();
+    }
+  }
+
+  function onSwitchTrack() {
+    const branch = trackSel ?? s?.branch ?? null;
+    if (!branch || branch === s?.branch) return;
+    if (
+      window.confirm(
+        `Switch the update track to "${branch}"? The server will reinstall + rebuild and restart (displays go blank for a few seconds), then follow the ${branch} branch.`,
+      )
+    ) {
+      void invoke("update:setTrack", { branch }).catch((e) =>
+        window.alert(`Track switch failed: ${e instanceof Error ? e.message : String(e)}`),
+      );
     }
   }
 
@@ -202,6 +217,35 @@ function UpdatesPanel({
             </Button>
           </div>
         </Field>
+
+        {/* Update track (beta / main) */}
+        {s && (s.tracks?.length ?? 0) > 1 ? (
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Update track</FieldLabel>
+              <FieldDescription>
+                Which branch this server follows. <b>main</b> is the stable production track; <b>beta</b> gets
+                new features first for testing. Switching reinstalls, rebuilds, and restarts the server.
+              </FieldDescription>
+            </FieldContent>
+            <div className="flex items-center gap-2">
+              <Select value={trackSel ?? s.branch ?? ""} onValueChange={setTrackSel} disabled={updating}>
+                <SelectTrigger className="w-28" aria-label="Update track"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {s.tracks.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="filled"
+                size="small"
+                disabled={updating || (trackSel ?? s.branch) === s.branch}
+                onClick={onSwitchTrack}
+              >
+                Switch
+              </Button>
+            </div>
+          </Field>
+        ) : null}
 
         {/* Automatic updates */}
         <Field orientation="horizontal">
