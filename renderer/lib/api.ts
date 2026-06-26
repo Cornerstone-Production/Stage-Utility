@@ -162,6 +162,26 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "update:setTrack":
       return post<T>("/api/update/track", p);
 
+    // ── Config snapshot (backup / restore) ───────────────────────────────
+    case "config:listSnapshots":
+      return apiFetch<T>("/api/config/snapshots");
+
+    case "config:saveSnapshot":
+      return post<T>("/api/config/snapshots", { name: p.name });
+
+    case "config:recallSnapshot": {
+      const id = p.id as string;
+      return post<T>(`/api/config/snapshots/${encodeURIComponent(id)}/recall`);
+    }
+
+    case "config:deleteSnapshot": {
+      const id = p.id as string;
+      return del<T>(`/api/config/snapshots/${encodeURIComponent(id)}`);
+    }
+
+    case "config:import":
+      return post<T>("/api/config/import", { bundle: p.bundle });
+
     case "displays:refresh":
       return post<T>("/api/displays/refresh", p);
 

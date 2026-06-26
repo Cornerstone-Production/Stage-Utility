@@ -16,6 +16,7 @@ import type { DisplayKind, LayoutDTO, Slot, SlotsLayout } from "../types/stage.j
 import type { OscArg } from "../types/osc.js";
 import { addBroadcastListener } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
+import { configSnapshot } from "./config-snapshot.js";
 import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { oscManager } from "./osc-manager.js";
@@ -132,6 +133,13 @@ const sseClients = new Set<http.ServerResponse>();
 // cache-bust token. Lets multiple displays showing the same slide share one
 // upstream fetch instead of each hitting ProPresenter.
 const thumbnailCache = new Map<string, { buf: Buffer; contentType: string }>();
+
+// Exit so the service manager (systemd/launchd/NSSM Restart=always) relaunches us
+// — used after restoring a config snapshot so every integration re-initializes
+// from the restored files. The HTTP response is flushed first.
+function scheduleRestart(): void {
+  setTimeout(() => process.exit(0), 1200);
+}
 
 // Count of currently-connected Companion-module clients (SSE streams opened with
 // the X-Companion-Module header / ?client=companion marker). Pushed into the
@@ -1238,6 +1246,63 @@ export class RemoteServer {
       if (typeof body.hour === "number") partial.hour = body.hour;
       const state = await stageController.setAutoUpdate(partial);
       json(res, state);
+      return;
+    }
+
+    // ── Config snapshot (backup / restore) ──────────────────────────────────
+    // Download the full config (secrets excluded) as a .json file.
+    if (method === "GET" && pathname === "/api/config/export") {
+      const bundle = await configSnapshot.build();
+      const fname = `stage-utility-config-${new Date().toISOString().slice(0, 10)}.json`;
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Content-Disposition": `attachment; filename="${fname}"`,
+      });
+      res.end(JSON.stringify(bundle, null, 2));
+      return;
+    }
+    // Restore an uploaded config bundle, then restart to apply.
+    if (method === "POST" && pathname === "/api/config/import") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const bundle = "bundle" in body ? body.bundle : body;
+      try {
+        const applied = await configSnapshot.apply(bundle);
+        json(res, { ok: true, applied, restarting: true });
+        scheduleRestart();
+      } catch (err) {
+        error(res, String(err instanceof Error ? err.message : err));
+      }
+      return;
+    }
+    // List saved snapshots.
+    if (method === "GET" && pathname === "/api/config/snapshots") {
+      json(res, await configSnapshot.list());
+      return;
+    }
+    // Save the current config as a named snapshot.
+    if (method === "POST" && pathname === "/api/config/snapshots") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const name = typeof body.name === "string" ? body.name : "";
+      json(res, await configSnapshot.save(name), 201);
+      return;
+    }
+    // Recall a saved snapshot (apply + restart).
+    const snapRecallMatch = pathname.match(/^\/api\/config\/snapshots\/([^/]+)\/recall$/);
+    if (method === "POST" && snapRecallMatch) {
+      try {
+        const applied = await configSnapshot.recall(snapRecallMatch[1]);
+        json(res, { ok: true, applied, restarting: true });
+        scheduleRestart();
+      } catch (err) {
+        error(res, String(err instanceof Error ? err.message : err));
+      }
+      return;
+    }
+    // Delete a saved snapshot.
+    const snapDeleteMatch = pathname.match(/^\/api\/config\/snapshots\/([^/]+)$/);
+    if (method === "DELETE" && snapDeleteMatch) {
+      await configSnapshot.delete(snapDeleteMatch[1]);
+      json(res, { ok: true });
       return;
     }
 

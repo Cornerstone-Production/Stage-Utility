@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon } from "lucide-react";
 import { invoke, onNotification } from "../../lib/api";
@@ -18,7 +18,9 @@ import {
   SelectContent,
   SelectItem,
   SelectValue,
+  toast,
 } from "../../components/ui";
+import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import type { SectionProps } from "../types";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -331,6 +333,155 @@ function CompanionPanel() {
   );
 }
 
+interface SnapshotMeta {
+  id: string;
+  name: string;
+  createdAt: string;
+  appVersion: string;
+  fileCount: number;
+}
+
+// Backup / restore the whole config (secrets excluded). Download/upload a file,
+// or save/recall named snapshots. Restoring overwrites config + restarts.
+function ConfigSnapshotPanel() {
+  const queryClient = useQueryClient();
+  const { data: snapshots } = useQuery({
+    queryKey: ["config:listSnapshots"],
+    queryFn: () => invoke<SnapshotMeta[]>("config:listSnapshots"),
+    retry: 1,
+  });
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["config:listSnapshots"] });
+
+  function download() {
+    // The export route sets Content-Disposition: attachment, so this downloads
+    // without navigating away.
+    window.location.assign("/api/config/export");
+  }
+
+  async function saveCurrent() {
+    setBusy(true);
+    try {
+      await invoke("config:saveSnapshot", { name: name.trim() || undefined });
+      setName("");
+      await refresh();
+      toast.success("Snapshot saved.");
+    } catch (e) {
+      toast.error(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function recall(id: string, label: string) {
+    if (!window.confirm(`Recall "${label}"?\n\nThis overwrites the current config (views, integrations, branding, etc.) and restarts the server — displays go blank for a few seconds. Secrets (API keys/passwords) are kept as-is.`)) return;
+    try {
+      await invoke("config:recallSnapshot", { id });
+      toast.success("Restoring… the server is restarting.");
+    } catch (e) {
+      toast.error(`Recall failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function remove(id: string) {
+    if (!window.confirm("Delete this snapshot?")) return;
+    try {
+      await invoke("config:deleteSnapshot", { id });
+      await refresh();
+    } catch (e) {
+      toast.error(`Delete failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function onUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const bundle = JSON.parse(await file.text());
+      if (window.confirm(`Restore config from "${file.name}"?\n\nThis overwrites the current config and restarts the server. Secrets aren't included — you'll re-enter API keys/passwords after.`)) {
+        await invoke("config:import", { bundle });
+        toast.success("Restoring… the server is restarting.");
+      }
+    } catch (err) {
+      toast.error(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  return (
+    <FieldSet title="Backup & restore">
+      <FieldGroup>
+        <Field orientation="vertical">
+          <FieldContent>
+            <FieldLabel>Config snapshot</FieldLabel>
+            <FieldDescription>
+              Save, download, or restore your full configuration — views, custom layouts,
+              integration hosts/ports/names, branding, and display options. Secrets (API keys,
+              passwords) are not included, so the file is safe to store; you re-enter those after a
+              restore. Restoring overwrites the current config and restarts the server.
+            </FieldDescription>
+          </FieldContent>
+
+          <div className="flex flex-wrap gap-2">
+            <Button variant="filled" size="small" onClick={download}>
+              <DlIcon className="size-3.5 text-gray-9" /> Download config
+            </Button>
+            <Button variant="filled" size="small" onClick={() => fileRef.current?.click()}>
+              <UploadIcon className="size-3.5 text-gray-9" /> Upload &amp; restore
+            </Button>
+            <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={onUpload} />
+          </div>
+
+          {/* Save current as a named snapshot */}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Input
+              value={name}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+              placeholder="Snapshot name (e.g. Sunday AM)"
+              className="w-56 text-gray-12"
+              aria-label="Snapshot name"
+            />
+            <Button variant="accent" size="small" onClick={saveCurrent} disabled={busy}>
+              <SaveIcon className="size-3.5" /> Save current
+            </Button>
+          </div>
+
+          {/* Saved snapshots list */}
+          {snapshots && snapshots.length > 0 ? (
+            <div className="mt-2 rounded-md border border-gray-a4 bg-gray-a2">
+              {snapshots.map((s, i) => (
+                <div
+                  key={s.id}
+                  className={`flex items-center gap-2 px-2.5 py-2 ${i > 0 ? "border-t border-gray-a4" : ""}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="truncate text-caption1 text-gray-12">{s.name}</p>
+                    <p className="text-caption2 text-gray-9">
+                      {new Date(s.createdAt).toLocaleString()} · v{s.appVersion} · {s.fileCount} file{s.fileCount === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <Button variant="filled" size="small" onClick={() => recall(s.id, s.name)}>
+                    <RotateCcwIcon className="size-3.5 text-gray-9" /> Recall
+                  </Button>
+                  <Button variant="transparent" size="small" iconOnly onClick={() => remove(s.id)} aria-label="Delete snapshot">
+                    <Trash2Icon className="size-3.5 text-red-10" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-2 text-caption2 text-gray-9">No saved snapshots yet.</p>
+          )}
+        </Field>
+      </FieldGroup>
+    </FieldSet>
+  );
+}
+
 export function AdvancedSection({
   stageState,
   updateStatus,
@@ -385,6 +536,8 @@ export function AdvancedSection({
           </Field>
         </FieldGroup>
       </FieldSet>
+
+      <ConfigSnapshotPanel />
 
       <CompanionPanel />
     </div>
