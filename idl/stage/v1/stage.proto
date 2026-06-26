@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package stage.v1;
+
+option go_package = "github.com/cornerstone-production/stage-utility/server/internal/connecthandlers/gen/stage/v1";
+
+message HelloRequest {}
+
+message HelloResponse {}
+
+service StageService {
+  rpc Hello(HelloRequest) returns (HelloResponse);
+}
