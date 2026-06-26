@@ -600,6 +600,8 @@ export interface UpdateStatus {
   /** False when this isn't a git checkout (or git is unavailable) — update via CLI. */
   isGitRepo: boolean;
   branch: string | null;
+  /** Selectable update tracks (git branches) the operator can switch between. */
+  tracks: string[];
   /** App version from package.json. */
   version: string;
   /** Short SHA + ISO commit date of the running checkout. */

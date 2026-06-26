@@ -28,6 +28,10 @@ const REPO_ROOT = path.resolve(path.dirname(__filename), "..", "..");
 
 const CHANGELOG_CAP = 20;
 
+// Update tracks the operator may switch between in-app (git branches on origin).
+// "main" = stable/production, "beta" = pre-release test track.
+const TRACKS = ["main", "beta"];
+
 function pkgVersion(): string {
   try {
     return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version ?? "0.0.0";
@@ -40,6 +44,7 @@ class Updater {
   private status: UpdateStatus = {
     isGitRepo: false,
     branch: null,
+    tracks: TRACKS,
     version: pkgVersion(),
     currentSha: null,
     currentDate: null,
@@ -191,7 +196,33 @@ class Updater {
     const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
     if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before updating.");
 
-    const branch = this.status.branch ?? "main";
+    return this.launch(this.status.branch ?? "main", false);
+  }
+
+  /**
+   * Switch update tracks (e.g. main ↔ beta) and apply: checks out the target
+   * branch (force-pointing it at origin/<branch>), then installs/builds/restarts.
+   * Same machinery as applyUpdate but with the checkout step enabled.
+   */
+  async switchTrack(branch: string): Promise<UpdateStatus> {
+    if (!TRACKS.includes(branch)) throw new Error(`Unknown update track: ${branch}`);
+    if (this.status.phase === "updating") throw new Error("An update is already running.");
+    if (!this.status.isGitRepo) {
+      await this.checkForUpdate();
+      if (!this.status.isGitRepo) throw new Error("Not a git checkout — switch tracks from the command line.");
+    }
+    if (branch === this.status.branch) {
+      // Already on this track — just run a normal update so it's not a no-op.
+      return this.applyUpdate();
+    }
+    const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
+    if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before switching tracks.");
+
+    return this.launch(branch, true);
+  }
+
+  /** Spawn the detached update/switch script and enter the "updating" phase. */
+  private launch(branch: string, checkout: boolean): UpdateStatus {
     const isWin = process.platform === "win32";
     const script = path.join(REPO_ROOT, "scripts", isWin ? "update.ps1" : "update.sh");
 
@@ -212,6 +243,9 @@ class Updater {
       ...process.env,
       STAGE_UPDATE_REPO: REPO_ROOT,
       STAGE_UPDATE_BRANCH: branch,
+      // When set, the script checks out the branch (force-points it at origin)
+      // before building — used for switching tracks, not a same-branch update.
+      STAGE_UPDATE_CHECKOUT: checkout ? "1" : "",
       // So `npm`/`node` resolve under a service manager's minimal PATH.
       STAGE_UPDATE_NODE_DIR: path.dirname(process.execPath),
       STAGE_UPDATE_SERVER_PID: String(process.pid),
@@ -219,7 +253,7 @@ class Updater {
       STAGE_UPDATE_PROGRESS: this.progressFile(),
     };
 
-    console.log(`[updater] applying update on ${branch} via ${script}`);
+    console.log(`[updater] ${checkout ? "switching to" : "applying update on"} ${branch} via ${script}`);
     const child = isWin
       ? spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], {
           cwd: REPO_ROOT,
