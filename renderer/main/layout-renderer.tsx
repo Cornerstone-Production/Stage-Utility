@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type CSSProperties } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, type CSSProperties } from "react";
 import { BrandLogo } from "../components/brand-logo";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState } from "./use-dashboard-state";
@@ -674,10 +674,59 @@ function ServiceOrderObject({
   ctx: LayoutRenderCtx;
 }) {
   const liveRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const items = ctx.planItems?.items ?? [];
   const currentId = ctx.pcoLive?.currentItemId ?? null;
   const scroll = config.scroll ?? "auto";
   const highlightLive = config.highlightLive ?? true;
+  const autoFit = config.autoFit ?? true;
+
+  const H = ctx.H;
+  // null/undefined = all present, [] = none, [..] = chosen (and still present).
+  const present = ctx.planItems?.noteCategories ?? [];
+  const cats =
+    config.noteCategories == null ? present : config.noteCategories.filter((k) => present.includes(k));
+  // Content signature: re-fit when the item count or shown note categories change.
+  const contentKey = `${items.length}:${cats.join(",")}`;
+
+  // Auto-fit: shrink the base font (everything derives from it) so the whole list
+  // fits the object's height with no scroll, clamped to a readable minimum. Scale is
+  // back-derived from the live scrollHeight so it converges in a pass or two.
+  const MIN_FIT = 0.5;
+  const [fitScale, setFitScale] = useState(1);
+  const fitRef = useRef(1);
+  fitRef.current = fitScale;
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => {
+      if (!autoFit) {
+        if (fitRef.current !== 1) setFitScale(1);
+        return;
+      }
+      const ch = el.clientHeight;
+      const sh = el.scrollHeight;
+      if (ch <= 0 || sh <= 0) return;
+      const cur = fitRef.current;
+      const natural = sh / cur; // content height at scale 1
+      const desired = Math.max(MIN_FIT, Math.min(1, ch / natural));
+      if (Math.abs(desired - cur) > 0.005) setFitScale(desired);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [autoFit, contentKey, H, fitScale]);
+
+  // Auto-hide scrollbar: only show the thin bar while actively scrolling.
+  const [scrolling, setScrolling] = useState(false);
+  const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (scrollTimer.current) clearTimeout(scrollTimer.current); }, []);
+  const onScroll = () => {
+    setScrolling(true);
+    if (scrollTimer.current) clearTimeout(scrollTimer.current);
+    scrollTimer.current = setTimeout(() => setScrolling(false), 700);
+  };
 
   useEffect(() => {
     if (scroll === "auto" && liveRef.current) {
@@ -686,33 +735,30 @@ function ServiceOrderObject({
   }, [currentId, scroll, items.length]);
 
   const s = o.style ?? {};
-  const H = ctx.H;
-  const base = (s.fontSize ?? 0.035) * H;
+  const base = (s.fontSize ?? 0.035) * H * fitScale;
   const color = s.color ?? "#ffffff";
 
   if (items.length === 0) {
     return <span style={{ ...textStyle(o, H), opacity: 0.4 }}>No service plan</span>;
   }
 
-  // null/undefined = all present, [] = none, [..] = chosen (and still present).
-  const present = ctx.planItems?.noteCategories ?? [];
-  const cats =
-    config.noteCategories == null ? present : config.noteCategories.filter((k) => present.includes(k));
-
   return (
     <div
+      ref={scrollRef}
+      onScroll={onScroll}
+      className={`so-scroll${scrolling ? " scrolling" : ""}`}
       style={{
         width: "100%",
         height: "100%",
         overflowY: scroll === "auto" ? "hidden" : "auto",
         display: "flex",
         flexDirection: "column",
-        gap: `${base * 0.35}px`,
+        gap: `${base * 0.12}px`,
         color,
         fontWeight: s.fontWeight ?? 500,
       }}
     >
-      {items.map((it) => {
+      {items.map((it, idx) => {
         if (it.itemType === "header") {
           return (
             <div
@@ -723,7 +769,7 @@ function ServiceOrderObject({
                 textTransform: "uppercase",
                 letterSpacing: "0.08em",
                 opacity: 0.5,
-                marginTop: `${base * 0.4}px`,
+                marginTop: `${base * 0.3}px`,
               }}
             >
               {it.title}
@@ -731,15 +777,19 @@ function ServiceOrderObject({
           );
         }
         const isLive = highlightLive && currentId != null && it.id === currentId;
+        // Hairline between consecutive items (not the first, not right under a header).
+        const prev = items[idx - 1];
+        const divider = idx > 0 && prev && prev.itemType !== "header" && !isLive;
         return (
           <div
             key={it.id}
             ref={isLive ? liveRef : undefined}
             style={{
-              borderRadius: `${0.01 * H}px`,
-              padding: `${base * 0.25}px ${base * 0.4}px`,
+              borderRadius: `${0.008 * H}px`,
+              padding: `${base * 0.1}px ${base * 0.3}px`,
               background: isLive ? "rgba(45,212,150,0.16)" : undefined,
               borderLeft: isLive ? `${0.004 * H}px solid var(--green-9, #2dd496)` : `${0.004 * H}px solid transparent`,
+              borderTop: divider ? "1px solid rgba(255,255,255,0.07)" : undefined,
             }}
           >
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: `${base * 0.5}px` }}>
@@ -756,7 +806,7 @@ function ServiceOrderObject({
               const note = it.notesByCategory[k];
               if (!note) return null;
               return (
-                <div key={k} style={{ fontSize: `${base * 0.78}px`, opacity: 0.75, marginTop: `${base * 0.1}px`, lineHeight: 1.2 }}>
+                <div key={k} style={{ fontSize: `${base * 0.78}px`, opacity: 0.75, marginTop: `${base * 0.05}px`, lineHeight: 1.15 }}>
                   <span style={{ opacity: 0.6 }}>{k}: </span>
                   {note}
                 </div>

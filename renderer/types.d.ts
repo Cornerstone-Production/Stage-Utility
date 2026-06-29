@@ -346,6 +346,7 @@ type LayoutObjectConfig =
       showLength?: boolean;
       highlightLive?: boolean;
       scroll?: "auto" | "static";
+      autoFit?: boolean;
     }
   | { type: "container" };
 

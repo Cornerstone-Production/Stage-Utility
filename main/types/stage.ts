@@ -251,6 +251,8 @@ export type LayoutObjectConfig =
       showLength?: boolean;
       highlightLive?: boolean;
       scroll?: "auto" | "static";
+      /** Shrink the text so the whole order fits the object height (no scroll). */
+      autoFit?: boolean;
     }
   // A styled box that holds other objects. Children are positioned as fractions
   // of THIS container's box (not the canvas), so moving/resizing the container

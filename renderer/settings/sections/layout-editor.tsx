@@ -137,7 +137,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "image": return { type: "image", src: "" };
     case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
     case "shape": return { type: "shape", shape: "rect" };
-    case "service-order": return { type: "service-order", noteCategories: null, showLength: false, highlightLive: true, scroll: "auto" };
+    case "service-order": return { type: "service-order", noteCategories: null, showLength: false, highlightLive: true, scroll: "auto", autoFit: true };
     case "container": return { type: "container" };
     default: return { type } as LayoutObjectConfig;
   }
@@ -1647,6 +1647,7 @@ function Inspector({
               <Button variant={c.scroll === "static" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, scroll: "static" })}>Static</Button>
             </ButtonGroup>
           </Row>
+          <Row label="Fit to height"><Switch checked={c.autoFit ?? true} onCheckedChange={(v) => onConfig({ ...c, autoFit: v })} /></Row>
           <Row label="Highlight live"><Switch checked={c.highlightLive ?? true} onCheckedChange={(v) => onConfig({ ...c, highlightLive: v })} /></Row>
           <Row label="Show length"><Switch checked={c.showLength ?? false} onCheckedChange={(v) => onConfig({ ...c, showLength: v })} /></Row>
           {(() => {
