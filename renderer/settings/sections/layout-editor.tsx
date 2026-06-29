@@ -254,6 +254,26 @@ const CANVAS_PRESETS: { id: string; label: string; w: number; h: number }[] = [
 ];
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
+// A native <input type="color"> only accepts solid "#rrggbb". Style colors can be
+// translucent rgba() (the glass presets), #rgb, #rrggbbaa, var(), or named — so
+// coerce to a solid hex for the swatch's value (dropping alpha) to avoid the
+// browser's "does not conform to #rrggbb" warning. The stored style keeps its
+// original value until the user picks a new one.
+function hexForInput(v: string | null | undefined, fallback: string): string {
+  if (!v) return fallback;
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v;
+  const m3 = v.match(/^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/);
+  if (m3) return `#${m3[1]}${m3[1]}${m3[2]}${m3[2]}${m3[3]}${m3[3]}`;
+  const m8 = v.match(/^#([0-9a-fA-F]{6})[0-9a-fA-F]{2}$/);
+  if (m8) return `#${m8[1]}`;
+  const rgb = v.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (rgb) {
+    const h = (n: number) => clamp(n, 0, 255).toString(16).padStart(2, "0");
+    return `#${h(+rgb[1])}${h(+rgb[2])}${h(+rgb[3])}`;
+  }
+  return fallback;
+}
+
 // Grid step per axis. x is a plain fraction of width (1/GRID); y is scaled by the
 // canvas aspect so the cell is the SAME number of px on both axes (a SQUARE grid),
 // regardless of canvas shape. Snapping uses these so objects land on the lines you
@@ -1895,7 +1915,7 @@ function Inspector({
               <SelectContent>{WEIGHTS.map((w) => <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
             </Select>
           </Row>
-          <Row label="Color"><input type="color" value={s.color ?? "#ffffff"} onChange={(e) => onStyle({ color: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent" /></Row>
+          <Row label="Color"><input type="color" value={hexForInput(s.color, "#ffffff")} onChange={(e) => onStyle({ color: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent" /></Row>
           <Row label="Align">
             <ButtonGroup>
               {(["left", "center", "right"] as const).map((a) => (
@@ -1915,7 +1935,7 @@ function Inspector({
           <Row label="Max lines"><NumberInput value={s.lineClamp ?? 0} step={1} min={0} max={10} onChange={(v) => onStyle({ lineClamp: v > 0 ? Math.round(v) : null })} /></Row>
         </>
       )}
-      <Row label="Fill"><input type="color" value={s.background ?? "#000000"} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent" />
+      <Row label="Fill"><input type="color" value={hexForInput(s.background, "#000000")} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent" />
         <Button variant="transparent" size="small" onClick={() => onStyle({ background: null })}>Clear</Button>
       </Row>
       <Row label="Opacity">
@@ -1938,7 +1958,7 @@ function Inspector({
       <Row label="Border">
         <input
           type="color"
-          value={s.borderColor ?? "#ffffff"}
+          value={hexForInput(s.borderColor, "#ffffff")}
           onChange={(e) => onStyle({ borderColor: e.target.value, borderWidth: s.borderWidth ?? 0 })}
           className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent"
           aria-label="Border color"
