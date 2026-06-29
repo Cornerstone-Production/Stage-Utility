@@ -34,6 +34,19 @@ class SplHistoryStore {
     }));
   }
 
+  /** Delete one service record by key. Returns true if it existed. */
+  async delete(serviceKey: string): Promise<boolean> {
+    let existed = false;
+    await this.store.update((file) => {
+      existed = serviceKey in file.services;
+      if (!existed) return file;
+      const services = { ...file.services };
+      delete services[serviceKey];
+      return { services };
+    });
+    return existed;
+  }
+
   /** Smaart metric keys the History tab should surface (empty = auto default). */
   async getVisibleMetrics(): Promise<string[]> {
     const s = await settingsStore.get();

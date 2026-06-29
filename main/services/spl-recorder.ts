@@ -21,9 +21,26 @@ const PREFERRED_METRICS = ["SPL A Slow", "SPL A Fast", "LAeq 10", "SPL Slow", "S
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
-function todayLocal(): string {
-  const d = new Date();
+function localDate(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function todayLocal(): string {
+  return localDate(new Date());
+}
+
+// A live item is only recordable when its service is actually happening today.
+// PCO keeps returning a `current_item_time` for a Live session that was started
+// but never cleared, so stepping through an *upcoming* plan's items in PCO Live
+// during the week (rehearsal, pre-building a service) would otherwise create a
+// stray history record dated today for a service days away. Gate on the service
+// occurrence's local date (falling back to the item's live_start_at), and only
+// record when that date is today.
+export function isLiveServiceToday(live: PcoLiveDTO): boolean {
+  const ref = live.serviceTimeStartsAt ?? live.liveStartAt;
+  if (!ref) return true; // no date signal at all — preserve legacy behavior
+  const d = new Date(ref);
+  if (Number.isNaN(d.getTime())) return true; // unparseable — don't block recording
+  return localDate(d) === todayLocal();
 }
 
 interface MeterSample {
@@ -62,7 +79,7 @@ class SplRecorder {
     if (!live || this.busy) return;
     this.busy = true;
     try {
-      if (live.mode === "item" && live.currentItemId) {
+      if (live.mode === "item" && live.currentItemId && isLiveServiceToday(live)) {
         await this.ensureRecord(live);
         if (!this.current) return;
         if (live.currentItemId !== this.lastItemId) {

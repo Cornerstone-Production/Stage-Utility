@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon, Trash2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
 
@@ -128,6 +128,20 @@ export function SplHistorySection() {
     [detail],
   );
 
+  async function deleteService(key: string, title: string) {
+    if (!window.confirm(`Delete the SPL recording for "${title}"? This can't be undone.`)) return;
+    setList((prev) => (prev ? prev.filter((s) => s.serviceKey !== key) : prev));
+    if (selectedKey === key) setSelectedKey(null);
+    try {
+      await invoke("spl:deleteHistory", { serviceKey: key });
+    } catch {
+      // Reload from the server if the delete failed so the UI reflects truth.
+      invoke<ServiceSplHistory[]>("spl:listHistory")
+        .then((l) => setList(l))
+        .catch(() => {});
+    }
+  }
+
   async function toggleMetric(key: string) {
     const base = shownMetrics;
     const next = base.includes(key) ? base.filter((k) => k !== key) : [...base, key];
@@ -248,31 +262,43 @@ export function SplHistorySection() {
 
       <div className="flex flex-col gap-2">
         {dayServices.map((s) => (
-          <button
+          <div
             key={s.serviceKey}
-            className="flex items-center justify-between gap-3 rounded-lg border border-gray-5 bg-gray-2 px-3 py-2.5 text-left hover:bg-gray-3 transition-colors"
-            onClick={() => setSelectedKey(s.serviceKey)}
+            className="flex items-center gap-1 rounded-lg border border-gray-5 bg-gray-2 pr-1.5 hover:bg-gray-3 transition-colors"
           >
-            <div className="flex flex-col min-w-0">
-              <span className="text-body font-medium text-gray-12 truncate">{s.planTitle ?? s.serviceKey}</span>
-              <span className="text-caption2 text-gray-9 truncate">
-                {fmtTime(s.serviceTimeStartsAt ?? s.startedAt) ? `${fmtTime(s.serviceTimeStartsAt ?? s.startedAt)} · ` : ""}
-                {s.seriesTitle ? `${s.seriesTitle} · ` : ""}
-                {s.items.length} items
+            <button
+              className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left"
+              onClick={() => setSelectedKey(s.serviceKey)}
+            >
+              <div className="flex flex-col min-w-0">
+                <span className="text-body font-medium text-gray-12 truncate">{s.planTitle ?? s.serviceKey}</span>
+                <span className="text-caption2 text-gray-9 truncate">
+                  {fmtTime(s.serviceTimeStartsAt ?? s.startedAt) ? `${fmtTime(s.serviceTimeStartsAt ?? s.startedAt)} · ` : ""}
+                  {s.seriesTitle ? `${s.seriesTitle} · ` : ""}
+                  {s.items.length} items
+                </span>
+              </div>
+              <span className="shrink-0 tabular-nums text-caption1 text-gray-11 text-right">
+                {shownMetrics.map((k) => {
+                  const v = serviceMetricMax(s, k);
+                  return v == null ? null : (
+                    <span key={k} className="ml-3 whitespace-nowrap">
+                      <span className="text-gray-9">{k} </span>
+                      {Math.round(v)}
+                    </span>
+                  );
+                })}
               </span>
-            </div>
-            <span className="shrink-0 tabular-nums text-caption1 text-gray-11 text-right">
-              {shownMetrics.map((k) => {
-                const v = serviceMetricMax(s, k);
-                return v == null ? null : (
-                  <span key={k} className="ml-3 whitespace-nowrap">
-                    <span className="text-gray-9">{k} </span>
-                    {Math.round(v)}
-                  </span>
-                );
-              })}
-            </span>
-          </button>
+            </button>
+            <button
+              className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+              onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
+              aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
+              title="Delete recording"
+            >
+              <Trash2Icon className="size-4" />
+            </button>
+          </div>
         ))}
         {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
       </div>

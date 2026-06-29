@@ -435,9 +435,16 @@ export class RemoteServer {
     }
     {
       const histMatch = pathname.match(/^\/api\/spl\/history\/([^/]+)$/);
-      if (method === "GET" && histMatch && histMatch[1] !== "current") {
-        json(res, await splHistoryStore.get(decodeURIComponent(histMatch[1])));
-        return;
+      if (histMatch && histMatch[1] !== "current") {
+        const key = decodeURIComponent(histMatch[1]);
+        if (method === "GET") {
+          json(res, await splHistoryStore.get(key));
+          return;
+        }
+        if (method === "DELETE") {
+          json(res, { deleted: await splHistoryStore.delete(key) });
+          return;
+        }
       }
     }
 

@@ -131,6 +131,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return apiFetch<T>(`/api/spl/history/${encodeURIComponent(key)}`);
     }
 
+    case "spl:deleteHistory": {
+      const key = p.serviceKey as string;
+      return del<T>(`/api/spl/history/${encodeURIComponent(key)}`);
+    }
+
     case "spl:getVisibleMetrics":
       return apiFetch<T>("/api/spl/visible-metrics");
 
