@@ -9,6 +9,7 @@ import { oscManager } from "./osc-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
+import { type SenSourceConfig, sensourceService } from "./sensource-service.js";
 import { settingsStore } from "./settings-store.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
@@ -191,6 +192,28 @@ const OSC_DESCRIPTOR: IntegrationDescriptor = {
   configSchema: [],
 };
 
+// SenSource Vea people-counter integration — polls the Vea API for live people
+// counts (attendance / occupancy), shown by the custom-layout "People counter"
+// object. The operator enters an API client id + secret (created in the Vea
+// app); a directly-issued long-lived token can be pasted instead. Location/zone
+// selection is handled by a dedicated picker (saved as non-secret config).
+const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
+  id: "sensource",
+  kind: "control",
+  label: "SenSource Vea",
+  configSchema: [
+    { key: "clientId", label: "API Client ID", type: "text", placeholder: "(from Vea → API clients)" },
+    { key: "clientSecret", label: "API Client Secret", type: "password", placeholder: "(from Vea → API clients)" },
+    {
+      key: "apiToken",
+      label: "Static token (optional)",
+      type: "password",
+      placeholder: "(only if your Vea account issues a long-lived token)",
+    },
+    { key: "pollSeconds", label: "Poll interval (s)", type: "number", placeholder: "45" },
+  ],
+};
+
 const DESCRIPTORS: IntegrationDescriptor[] = [
   PCO_DESCRIPTOR,
   WIRELESS_DESCRIPTOR,
@@ -200,6 +223,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   SMAART_DESCRIPTOR,
   OBS_DESCRIPTOR,
   OSC_DESCRIPTOR,
+  SENSOURCE_DESCRIPTOR,
 ];
 
 // Keys that are secrets for each integration id.
@@ -211,6 +235,7 @@ const SECRET_KEYS: Record<string, string[]> = {
   prodcom: ["apiKey"],
   smaart: ["password"],
   obs: ["password"],
+  sensource: ["clientSecret", "apiToken"],
 };
 
 class IntegrationManager {
@@ -265,6 +290,8 @@ class IntegrationManager {
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
     await oscManager.init();
     this.refreshOscSummary();
+    // Start the SenSource Vea poller if it's enabled + has credentials.
+    await this.applySensource();
 
     console.log("[integration-manager] init complete", {
       integrations: Array.from(this.states.keys()),
@@ -384,6 +411,10 @@ class IntegrationManager {
       await this.applyObs();
     }
 
+    if (id === "sensource") {
+      await this.applySensource();
+    }
+
     this.broadcastStates();
     return this.states.get(id)!;
   }
@@ -424,6 +455,10 @@ class IntegrationManager {
 
     if (id === "obs") {
       await this.applyObs();
+    }
+
+    if (id === "sensource") {
+      await this.applySensource();
     }
 
     this.broadcastStates();
@@ -520,6 +555,17 @@ class IntegrationManager {
         const secrets = await secretsStore.getSecrets("obs");
         const result = await obsService.test(host, port, secrets.password ?? null);
         this.setConnectionState("obs", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "sensource") {
+        const cfg = await this.getSensourceConfig();
+        if (!cfg.apiToken && (!cfg.clientId || !cfg.clientSecret)) {
+          return { ok: false, message: "Client ID and Secret (or a static token) are required" };
+        }
+        const result = await sensourceService.test(cfg);
+        this.setConnectionState("sensource", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
         return result;
       }
@@ -694,6 +740,56 @@ class IntegrationManager {
     } else {
       obsService.stop();
       this.setConnectionState("obs", "disconnected", null);
+    }
+  }
+
+  /** Resolve the SenSource config from non-secret state + the secrets store. */
+  private async getSensourceConfig(): Promise<SenSourceConfig> {
+    const cfg = this.states.get("sensource")?.config ?? {};
+    const secrets = await secretsStore.getSecrets("sensource");
+    const rawPoll = cfg.pollSeconds;
+    const pollSeconds =
+      typeof rawPoll === "number"
+        ? rawPoll
+        : typeof rawPoll === "string" && rawPoll.trim()
+          ? parseInt(rawPoll, 10)
+          : NaN;
+    return {
+      clientId: typeof cfg.clientId === "string" && cfg.clientId.trim() ? cfg.clientId.trim() : null,
+      clientSecret: secrets.clientSecret || null,
+      apiToken: secrets.apiToken || null,
+      pollSeconds: Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : 45,
+      locationId:
+        typeof cfg.locationId === "string" && cfg.locationId.trim() ? cfg.locationId.trim() : null,
+      zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.filter((z): z is string => typeof z === "string") : [],
+    };
+  }
+
+  /** List Vea locations for the settings picker (uses the saved credentials). */
+  async getSensourceLocations(): Promise<{ locationId: string; name: string }[]> {
+    const cfg = await this.getSensourceConfig();
+    if (!cfg.apiToken && (!cfg.clientId || !cfg.clientSecret)) {
+      throw new Error("Enter and save SenSource credentials first");
+    }
+    return sensourceService.listLocationsWith(cfg);
+  }
+
+  /** Start/stop the SenSource poller to match enabled + credentialed state. */
+  private async applySensource(): Promise<void> {
+    sensourceService.setConnectionListener((state, message) => {
+      this.setConnectionState("sensource", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("sensource")?.enabled ?? false;
+    const cfg = await this.getSensourceConfig();
+    const hasCreds = !!cfg.apiToken || (!!cfg.clientId && !!cfg.clientSecret);
+    if (enabled && hasCreds) {
+      this.setConnectionState("sensource", "connecting", "Authenticating with SenSource Vea");
+      sensourceService.configure(cfg);
+    } else {
+      sensourceService.stop();
+      this.setConnectionState("sensource", "disconnected", null);
     }
   }
 

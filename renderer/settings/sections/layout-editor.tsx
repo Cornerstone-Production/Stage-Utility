@@ -61,6 +61,7 @@ import {
   type FracRect,
 } from "../../main/layout-tree";
 import { useSplState } from "../../main/use-spl-state";
+import { usePeopleCountState } from "../../main/use-people-count-state";
 import { useObsState } from "../../main/use-obs-state";
 import { useOscTargets } from "../../main/use-osc-state";
 import { useStageState } from "../../main/use-stage-state";
@@ -89,6 +90,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "spl-meter": "SPL meter",
   "obs-status": "OBS status",
   "osc-button": "OSC button",
+  "people-counter": "People counter",
   "brand-logo": "Logo",
   "ndi-video": "NDI video",
   image: "Image",
@@ -100,7 +102,7 @@ const PALETTE: LayoutObjectType[] = [
   "container", "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
   "current-service-item", "next-service-item", "service-order",
   "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
-  "transcript-strip", "charger-battery", "spl-meter", "obs-status", "osc-button", "brand-logo", "image", "plan-attachment", "shape",
+  "transcript-strip", "charger-battery", "spl-meter", "obs-status", "osc-button", "people-counter", "brand-logo", "image", "plan-attachment", "shape",
 ];
 
 // Deepest allowed object depth (top-level = 0). A container holding objects = 1;
@@ -133,6 +135,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "spl-meter": return { type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null };
     case "obs-status": return { type: "obs-status", showTimecode: false, hideWhenIdle: false, fillWhenRecording: true };
     case "osc-button": return { type: "osc-button", targetId: null, label: "Button", address: "/", args: [], feedback: null };
+    case "people-counter": return { type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true };
     case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
     case "image": return { type: "image", src: "" };
     case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
@@ -156,6 +159,8 @@ function defaultStyle(type: LayoutObjectType): LayoutStyle {
   if (type === "obs-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_PRESETS.neutral };
   // OSC button reads as a tappable pill.
   if (type === "osc-button") return { fontSize: 0.045, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
+  // People counter reads as a big bold number.
+  if (type === "people-counter") return { fontSize: 0.12, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
   return { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 }
 
@@ -1579,6 +1584,7 @@ function Inspector({
   const chargerBays = useStageState().state?.chargerBays ?? [];
   const spl = useSplState();
   const obs = useObsState();
+  const peopleCount = usePeopleCountState();
   const oscTargets = useOscTargets();
   const planItems = usePlanItems();
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
@@ -1872,6 +1878,32 @@ function Inspector({
                 <Row label="Active when ="><Input value={String(fb.equals ?? "")} onChange={(e) => onConfig({ ...c, feedback: { ...fb, equals: e.target.value } })} placeholder="1 (blank = any truthy)" className="text-gray-12" /></Row>
                 <Row label="Active color"><Input value={fb.activeColor ?? ""} onChange={(e) => onConfig({ ...c, feedback: { ...fb, activeColor: e.target.value } })} placeholder="var(--red-9)" className="text-gray-12" /></Row>
               </>
+            )}
+          </>
+        );
+      })()}
+      {c.type === "people-counter" && (() => {
+        const zones = peopleCount?.zones ?? [];
+        return (
+          <>
+            <Row label="Count">
+              <ButtonGroup>
+                <Button variant={(c.metric ?? "attendance") === "attendance" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, metric: "attendance" })}>Attendance</Button>
+                <Button variant={c.metric === "occupancy" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, metric: "occupancy" })}>In room</Button>
+              </ButtonGroup>
+            </Row>
+            <Row label="Zone">
+              <Select value={c.zoneId ?? ""} onValueChange={(v: string) => onConfig({ ...c, zoneId: v || null })}>
+                <SelectTrigger><SelectValue placeholder={zones.length ? "Building total" : "No zones detected"} /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Building total</SelectItem>
+                  {zones.map((z) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Row>
+            <Row label="Show label"><Switch checked={c.showLabel ?? true} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} /></Row>
+            {(c.showLabel ?? true) && (
+              <Row label="Label"><Input value={c.label ?? ""} onChange={(e) => onConfig({ ...c, label: e.target.value })} placeholder={c.metric === "occupancy" ? "in room" : "people"} className="text-gray-12" /></Row>
             )}
           </>
         );

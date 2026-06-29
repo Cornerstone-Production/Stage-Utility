@@ -91,6 +91,19 @@ interface OscFeedbackDTO {
   values: Record<string, number | string | boolean>;
 }
 
+interface PeopleZoneCount {
+  id: string;
+  name: string;
+  attendance: number;
+  occupancy: number;
+}
+interface PeopleCountDTO {
+  connected: boolean;
+  updatedAt: string | null;
+  total: { attendance: number | null; occupancy: number | null };
+  zones: PeopleZoneCount[];
+}
+
 interface SplMetricStat {
   max: number | null;
   avg: number | null;
@@ -340,6 +353,13 @@ type LayoutObjectConfig =
       feedback?: OscFeedbackBind | null;
     }
   | { type: "shape"; shape: "rect" | "ellipse" }
+  | {
+      type: "people-counter";
+      metric?: "attendance" | "occupancy";
+      zoneId?: string | null;
+      label?: string;
+      showLabel?: boolean;
+    }
   | {
       type: "service-order";
       noteCategories?: string[] | null;

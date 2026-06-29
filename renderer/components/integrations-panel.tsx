@@ -309,6 +309,10 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
         </FieldGroup>
       </FieldSet>
 
+      {descriptor.id === "sensource" && (
+        <SenSourceLocationPicker state={state} onStateChange={onStateChange} />
+      )}
+
       {/* Actions row */}
       <div className="flex items-center gap-2">
         <Button variant="filled" size="small" onClick={handleSave} disabled={isSaving}>
@@ -346,6 +350,76 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---- SenSource location picker ----------------------------------------------
+
+// Lists Vea locations (after credentials are saved) and persists the chosen one
+// as non-secret config (locationId). The poller defaults to the whole org when
+// no location is set; selecting one narrows the counts to that location.
+function SenSourceLocationPicker({
+  state,
+  onStateChange,
+}: {
+  state: IntegrationState;
+  onStateChange: (next: IntegrationState) => void;
+}) {
+  const [locations, setLocations] = useState<{ locationId: string; name: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const current = typeof state.config.locationId === "string" ? state.config.locationId : "";
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await invoke<{ locationId: string; name: string }[]>("sensource:listLocations");
+      setLocations(list);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  async function choose(locationId: string) {
+    try {
+      const next = await invoke<IntegrationState>("integrations:setConfig", {
+        id: "sensource",
+        config: { locationId },
+      });
+      onStateChange(next);
+    } catch (err) {
+      toast.error(`Could not save location: ${String(err)}`);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <span className="text-caption1 text-gray-11 w-44 shrink-0">Location</span>
+        <Select value={current} onValueChange={(v: string) => choose(v)}>
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder={locations.length ? "Whole organization" : "Load to choose"} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Whole organization</SelectItem>
+            {locations.map((l) => (
+              <SelectItem key={l.locationId} value={l.locationId}>{l.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button variant="transparent" size="small" onClick={load} disabled={loading}>
+          {loading ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : <RefreshCwIcon className="size-3.5 text-gray-9" />}
+          Load locations
+        </Button>
+      </div>
+      {error && <span className="text-caption2 text-red-10">{error}</span>}
+      <span className="text-caption2 text-gray-9">
+        Counts come from this location&apos;s zones. Pick the per-zone breakdown on each People-counter object.
+      </span>
     </div>
   );
 }

@@ -241,6 +241,17 @@ export type LayoutObjectConfig =
       feedback?: OscFeedbackBind | null;
     }
   | { type: "shape"; shape: "rect" | "ellipse" }
+  // A live people count from the SenSource Vea integration ("people:count"
+  // channel). `metric` picks attendance (Σins today) or occupancy (in-room now);
+  // `zoneId` null = building total, else a single zone. Optional `label` shown
+  // when `showLabel`.
+  | {
+      type: "people-counter";
+      metric?: "attendance" | "occupancy";
+      zoneId?: string | null;
+      label?: string;
+      showLabel?: boolean;
+    }
   // The current PCO service order as a full list. Highlights the live item and
   // shows each item's notes (e.g. vocal parts). `noteCategories`: null = all
   // present, [] = none, [..] = chosen. `scroll`: "auto" keeps the live item in
@@ -416,6 +427,25 @@ export interface ObsStatusDTO {
   virtualCam: boolean;
   /** "HH:MM:SS" record duration while recording, else null. */
   recordTimecode: string | null;
+}
+
+/** Live people counts from the SenSource Vea integration (pushed on
+ *  "people:count"). Counts are polled (SenSource has no real-time endpoint) and
+ *  computed from today's traffic: attendance = Σins, occupancy = Σins − Σouts
+ *  (clamped ≥0). `zones` is the per-zone breakdown; `total` sums the selected
+ *  zones. `null` numbers mean "no data yet". */
+export interface PeopleZoneCount {
+  id: string;
+  name: string;
+  attendance: number;
+  occupancy: number;
+}
+export interface PeopleCountDTO {
+  connected: boolean;
+  /** ISO timestamp of the last successful poll, or null. */
+  updatedAt: string | null;
+  total: { attendance: number | null; occupancy: number | null };
+  zones: PeopleZoneCount[];
 }
 
 /** Running max/mean of one Smaart metric over an item (e.g. "LAeq 10"). */

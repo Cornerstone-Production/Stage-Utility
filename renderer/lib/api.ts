@@ -126,6 +126,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "spl:listHistory":
       return apiFetch<T>("/api/spl/history");
 
+    case "people:getCount":
+      return apiFetch<T>("/api/people/count");
+
+    case "sensource:listLocations":
+      return apiFetch<T>("/api/sensource/locations");
+
     case "spl:getHistory": {
       const key = p.serviceKey as string;
       return apiFetch<T>(`/api/spl/history/${encodeURIComponent(key)}`);

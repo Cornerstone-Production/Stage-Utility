@@ -5,6 +5,7 @@ import { useDashboardState } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
+import { usePeopleCountState, resolvePeopleValue } from "./use-people-count-state";
 import { OscButton } from "./osc-button";
 import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
@@ -25,6 +26,8 @@ export interface LayoutRenderCtx {
   spl: SplMetricsDTO | null;
   obs: ObsStatusDTO | null;
   osc: OscFeedbackDTO | null;
+  /** Live SenSource Vea people counts — for the people-counter object. */
+  peopleCount: PeopleCountDTO | null;
   now: number;
   skewMs: number;
   ndiSource: string | null;
@@ -316,6 +319,21 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
           {`${Math.round(r.value)} dB`}
           {c.showLabel && (
             <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{` ${r.metricKey}`}</span>
+          )}
+        </span>
+      );
+    }
+    case "people-counter": {
+      const metric = c.metric ?? "attendance";
+      const value = resolvePeopleValue(ctx.peopleCount, metric, c.zoneId);
+      if (value == null) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      return (
+        <span style={ts}>
+          {value.toLocaleString()}
+          {c.showLabel && (
+            <span style={{ opacity: 0.6, fontSize: "0.6em" }}>
+              {` ${c.label ?? (metric === "occupancy" ? "in room" : "people")}`}
+            </span>
           )}
         </span>
       );
@@ -826,6 +844,7 @@ export function useLayoutData() {
   const spl = useSplState();
   const obs = useObsState();
   const osc = useOscState();
+  const peopleCount = usePeopleCountState();
   const planItems = usePlanItems();
 
   const [now, setNow] = useState(() => Date.now());
@@ -838,7 +857,7 @@ export function useLayoutData() {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  return { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, now, skewMs };
 }
 
 /**
@@ -846,7 +865,7 @@ export function useLayoutData() {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, now, skewMs } = useLayoutData();
+  const { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, now, skewMs } = useLayoutData();
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -890,7 +909,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // with the window instead of the design canvas.
   const fill = canvas.fit === "fill";
   const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, planItems, transcript, spl, obs, osc, now, skewMs, ndiSource, H, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, now, skewMs, ndiSource, H, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

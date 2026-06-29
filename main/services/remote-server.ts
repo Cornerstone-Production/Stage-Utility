@@ -22,6 +22,7 @@ import { obsService } from "./obs-service.js";
 import { oscManager } from "./osc-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
+import { sensourceService } from "./sensource-service.js";
 import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { splRecorder } from "./spl-recorder.js";
@@ -373,6 +374,7 @@ export class RemoteServer {
       sseWrite(res, "spl:history", splRecorder.getCurrent());
       sseWrite(res, "obs:status", obsService.getLatest());
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
+      sseWrite(res, "people:count", sensourceService.getLatest());
       sseClients.add(res);
       // A Companion module marks its event stream so we can show a live
       // connected-client count in the integration panel. Re-broadcast the
@@ -413,6 +415,18 @@ export class RemoteServer {
     }
     if (method === "GET" && pathname === "/api/osc/feedback") {
       json(res, oscManager.getFeedback());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/people/count") {
+      json(res, sensourceService.getLatest());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/sensource/locations") {
+      try {
+        json(res, await integrationManager.getSensourceLocations());
+      } catch (err) {
+        json(res, { error: err instanceof Error ? err.message : String(err) }, 502);
+      }
       return;
     }
     if (method === "GET" && pathname === "/api/spl/history/current") {
