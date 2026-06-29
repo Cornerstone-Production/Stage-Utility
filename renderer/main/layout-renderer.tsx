@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties } from "react";
+import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { BrandLogo } from "../components/brand-logo";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState } from "./use-dashboard-state";
@@ -7,6 +7,7 @@ import { useObsState } from "./use-obs-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { OscButton } from "./osc-button";
 import { useTranscript } from "./use-transcript";
+import { usePlanItems } from "./use-plan-items";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
@@ -18,6 +19,8 @@ export interface LayoutRenderCtx {
   state: StageState;
   propresenter: ProPresenterStatusDTO | null;
   pcoLive: PcoLiveDTO | null;
+  /** Current PCO plan rundown (items + note categories) — for the service-order object. */
+  planItems: PlanItemsDTO | null;
   transcript: TranscriptLineDTO[];
   spl: SplMetricsDTO | null;
   obs: ObsStatusDTO | null;
@@ -157,6 +160,8 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       return span(ctx.pcoLive?.currentItemTitle ?? ctx.propresenter?.currentServiceItem ?? "");
     case "next-service-item":
       return span(ctx.pcoLive?.nextItemTitle ?? ctx.propresenter?.nextServiceItem ?? "");
+    case "service-order":
+      return <ServiceOrderObject o={o} config={c} ctx={ctx} />;
     case "current-slide-notes":
       return span(ctx.propresenter?.currentNotes ?? "");
     case "section-chip": {
@@ -656,6 +661,114 @@ function PlanAttachment({
   );
 }
 
+/** The PCO service order as a scrolling list — highlights the live item and shows
+ *  the chosen note categories (e.g. vocal parts) under each item. Reuses the cached
+ *  plan-items pipeline (no new PCO request). */
+function ServiceOrderObject({
+  o,
+  config,
+  ctx,
+}: {
+  o: LayoutObject;
+  config: Extract<LayoutObjectConfig, { type: "service-order" }>;
+  ctx: LayoutRenderCtx;
+}) {
+  const liveRef = useRef<HTMLDivElement | null>(null);
+  const items = ctx.planItems?.items ?? [];
+  const currentId = ctx.pcoLive?.currentItemId ?? null;
+  const scroll = config.scroll ?? "auto";
+  const highlightLive = config.highlightLive ?? true;
+
+  useEffect(() => {
+    if (scroll === "auto" && liveRef.current) {
+      liveRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [currentId, scroll, items.length]);
+
+  const s = o.style ?? {};
+  const H = ctx.H;
+  const base = (s.fontSize ?? 0.035) * H;
+  const color = s.color ?? "#ffffff";
+
+  if (items.length === 0) {
+    return <span style={{ ...textStyle(o, H), opacity: 0.4 }}>No service plan</span>;
+  }
+
+  // null/undefined = all present, [] = none, [..] = chosen (and still present).
+  const present = ctx.planItems?.noteCategories ?? [];
+  const cats =
+    config.noteCategories == null ? present : config.noteCategories.filter((k) => present.includes(k));
+
+  return (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        overflowY: scroll === "auto" ? "hidden" : "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: `${base * 0.35}px`,
+        color,
+        fontWeight: s.fontWeight ?? 500,
+      }}
+    >
+      {items.map((it) => {
+        if (it.itemType === "header") {
+          return (
+            <div
+              key={it.id}
+              style={{
+                fontSize: `${base * 0.7}px`,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                opacity: 0.5,
+                marginTop: `${base * 0.4}px`,
+              }}
+            >
+              {it.title}
+            </div>
+          );
+        }
+        const isLive = highlightLive && currentId != null && it.id === currentId;
+        return (
+          <div
+            key={it.id}
+            ref={isLive ? liveRef : undefined}
+            style={{
+              borderRadius: `${0.01 * H}px`,
+              padding: `${base * 0.25}px ${base * 0.4}px`,
+              background: isLive ? "rgba(45,212,150,0.16)" : undefined,
+              borderLeft: isLive ? `${0.004 * H}px solid var(--green-9, #2dd496)` : `${0.004 * H}px solid transparent`,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: `${base * 0.5}px` }}>
+              <span style={{ fontSize: `${base}px`, color: isLive ? "var(--green-11, #4ade80)" : color }}>
+                {it.title || "Untitled"}
+              </span>
+              {config.showLength && it.lengthSec > 0 && (
+                <span style={{ fontSize: `${base * 0.75}px`, opacity: 0.55, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+                  {fmtDuration(it.lengthSec)}
+                </span>
+              )}
+            </div>
+            {cats.map((k) => {
+              const note = it.notesByCategory[k];
+              if (!note) return null;
+              return (
+                <div key={k} style={{ fontSize: `${base * 0.78}px`, opacity: 0.75, marginTop: `${base * 0.1}px`, lineHeight: 1.2 }}>
+                  <span style={{ opacity: 0.6 }}>{k}: </span>
+                  {note}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Live data + tickers shared by the kiosk renderer and the settings editor. */
 export function useLayoutData() {
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
@@ -663,6 +776,7 @@ export function useLayoutData() {
   const spl = useSplState();
   const obs = useObsState();
   const osc = useOscState();
+  const planItems = usePlanItems();
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -674,7 +788,7 @@ export function useLayoutData() {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  return { state, isLoading, error, pcoLive, propresenter, transcript, spl, obs, osc, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, now, skewMs };
 }
 
 /**
@@ -682,7 +796,7 @@ export function useLayoutData() {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, transcript, spl, obs, osc, now, skewMs } = useLayoutData();
+  const { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, now, skewMs } = useLayoutData();
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -717,7 +831,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   }
 
   const { canvas } = layout;
-  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, transcript, spl, obs, osc, now, skewMs, ndiSource, H: canvas.height, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, planItems, transcript, spl, obs, osc, now, skewMs, ndiSource, H: canvas.height, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

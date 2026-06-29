@@ -320,6 +320,18 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return del<T>(`/api/layout-templates/${encodeURIComponent(id)}`);
     }
 
+    // ── Layout groups (reusable object/container library) ──────────────────
+    case "layoutGroups:list":
+      return apiFetch<T>("/api/layout-groups");
+
+    case "layoutGroups:save":
+      return post<T>("/api/layout-groups", { name: p.name, object: p.object });
+
+    case "layoutGroups:delete": {
+      const id = p.id as string;
+      return del<T>(`/api/layout-groups/${encodeURIComponent(id)}`);
+    }
+
     // ── Outputs (physical screens + routing) ──────────────────────────────
     case "outputs:add":
       return post<T>("/api/outputs", p);

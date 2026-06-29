@@ -339,6 +339,13 @@ type LayoutObjectConfig =
       feedback?: OscFeedbackBind | null;
     }
   | { type: "shape"; shape: "rect" | "ellipse" }
+  | {
+      type: "service-order";
+      noteCategories?: string[] | null;
+      showLength?: boolean;
+      highlightLive?: boolean;
+      scroll?: "auto" | "static";
+    }
   | { type: "container" };
 
 type LayoutObjectType = LayoutObjectConfig["type"];
@@ -351,6 +358,7 @@ interface LayoutObject {
   h: number;
   z: number;
   hidden?: boolean;
+  locked?: boolean;
   style?: LayoutStyle;
   config: LayoutObjectConfig;
   children?: LayoutObject[];
@@ -367,6 +375,14 @@ interface LayoutTemplate {
   id: string;
   name: string;
   layout: LayoutDTO;
+  createdAt: string;
+}
+
+/** A named, reusable single object (container + children) — a "group". */
+interface LayoutGroup {
+  id: string;
+  name: string;
+  object: LayoutObject;
   createdAt: string;
 }
 

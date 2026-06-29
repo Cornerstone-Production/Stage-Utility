@@ -12,7 +12,7 @@ import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
-import type { DisplayKind, LayoutDTO, Slot, SlotsLayout } from "../types/stage.js";
+import type { DisplayKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../types/stage.js";
 import type { OscArg } from "../types/osc.js";
 import { addBroadcastListener } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
@@ -884,6 +884,30 @@ export class RemoteServer {
     const tplDeleteMatch = pathname.match(/^\/api\/layout-templates\/([^/]+)$/);
     if (method === "DELETE" && tplDeleteMatch) {
       const list = await stageController.deleteLayoutTemplate(tplDeleteMatch[1]);
+      json(res, list);
+      return;
+    }
+
+    // ── Layout groups (reusable object/container library) ─────────────────
+    if (method === "GET" && pathname === "/api/layout-groups") {
+      json(res, await stageController.listLayoutGroups());
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/layout-groups") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.name !== "string" || body.object == null || typeof body.object !== "object") {
+        error(res, "body.name (string) and body.object (object) required");
+        return;
+      }
+      const list = await stageController.saveLayoutGroup(body.name, body.object as LayoutObject);
+      json(res, list, 201);
+      return;
+    }
+
+    const grpDeleteMatch = pathname.match(/^\/api\/layout-groups\/([^/]+)$/);
+    if (method === "DELETE" && grpDeleteMatch) {
+      const list = await stageController.deleteLayoutGroup(grpDeleteMatch[1]);
       json(res, list);
       return;
     }

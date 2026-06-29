@@ -20,6 +20,9 @@ import {
   CheckIcon,
   LayoutTemplateIcon,
   CornerLeftUpIcon,
+  LockIcon,
+  UnlockIcon,
+  PackagePlusIcon,
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import {
@@ -54,12 +57,15 @@ import {
   composeRect,
   localizeRect,
   deepCloneFreshIds,
+  isLockedInTree,
   type FracRect,
 } from "../../main/layout-tree";
 import { useSplState } from "../../main/use-spl-state";
 import { useObsState } from "../../main/use-obs-state";
 import { useOscTargets } from "../../main/use-osc-state";
 import { useStageState } from "../../main/use-stage-state";
+import { usePlanItems } from "../../main/use-plan-items";
+import { invoke } from "../../lib/api";
 import { InlineSlotsEditor } from "./inline-slots-editor";
 
 // ── object metadata ──────────────────────────────────────────────────────────
@@ -72,6 +78,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "next-slide-text": "Next slide",
   "current-service-item": "Current item",
   "next-service-item": "Next item",
+  "service-order": "Service order",
   "current-slide-notes": "Slide notes",
   "slide-thumbnail": "Slide image",
   "section-chip": "Section chip",
@@ -91,7 +98,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
 };
 const PALETTE: LayoutObjectType[] = [
   "container", "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
-  "current-service-item", "next-service-item",
+  "current-service-item", "next-service-item", "service-order",
   "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
   "transcript-strip", "charger-battery", "spl-meter", "obs-status", "osc-button", "brand-logo", "image", "plan-attachment", "shape",
 ];
@@ -130,6 +137,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "image": return { type: "image", src: "" };
     case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
     case "shape": return { type: "shape", shape: "rect" };
+    case "service-order": return { type: "service-order", noteCategories: null, showLength: false, highlightLive: true, scroll: "auto" };
     case "container": return { type: "container" };
     default: return { type } as LayoutObjectConfig;
   }
@@ -142,6 +150,8 @@ function defaultStyle(type: LayoutObjectType): LayoutStyle {
   // Captions read left-aligned and bottom-anchored, like the dedicated display.
   if (type === "transcript-strip") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "bottom" };
   if (type === "charger-battery") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "middle" };
+  // Service order is a left-aligned, top-anchored list.
+  if (type === "service-order") return { fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" };
   // OBS status reads as a bold pill (glass when idle, fills red when recording).
   if (type === "obs-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_PRESETS.neutral };
   // OSC button reads as a tappable pill.
@@ -169,10 +179,16 @@ function makeObject(
 ): LayoutObject {
   // Containers default to a card-sized box; everything else keeps the old default.
   const base = type === "container" ? { x: 0.3, y: 0.32, w: 0.4, h: 0.32 } : { x: 0.35, y: 0.42, w: 0.3, h: 0.16 };
+  // Snap the default geometry onto the grid so new objects' edges land on grid
+  // lines (both position AND size), not mid-cell.
+  const g = { ...base, ...geom };
+  const sg = (v: number) => Math.round(v * GRID) / GRID;
   return {
     id: uid(),
-    ...base,
-    ...geom,
+    x: sg(g.x),
+    y: sg(g.y),
+    w: sg(g.w),
+    h: sg(g.h),
     z,
     config: defaultConfig(type),
     style: defaultStyle(type),
@@ -340,15 +356,18 @@ interface DragState {
 // its parent overlay node so nested children resolve correctly. Recurses for a
 // container's children.
 function OverlayNode({
-  o, parentAbs, depth, selectedId, onStart,
+  o, parentAbs, depth, selectedId, onStart, parentLocked = false,
 }: {
   o: LayoutObject;
   parentAbs: FracRect;
   depth: number;
   selectedId: string | null;
   onStart: (e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) => void;
+  /** True when an ancestor container is locked, so this node is locked too. */
+  parentLocked?: boolean;
 }) {
   const sel = o.id === selectedId;
+  const locked = parentLocked || !!o.locked;
   const abs = depth === 0 ? { x: o.x, y: o.y, w: o.w, h: o.h } : composeRect(parentAbs, o);
   const kids = o.children?.length ? [...o.children].sort((a, b) => a.z - b.z) : null;
   return (
@@ -358,7 +377,7 @@ function OverlayNode({
       style={{
         left: `${o.x * 100}%`, top: `${o.y * 100}%`,
         width: `${o.w * 100}%`, height: `${o.h * 100}%`,
-        cursor: "move",
+        cursor: locked ? "default" : "move",
         outline: sel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
         outlineOffset: 0,
         boxShadow: sel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
@@ -367,15 +386,17 @@ function OverlayNode({
       <span
         style={{
           position: "absolute", top: 0, left: 0, transform: "translateY(-100%)",
+          display: "inline-flex", alignItems: "center", gap: 3,
           fontSize: 10, lineHeight: "14px", padding: "0 5px", maxWidth: "100%",
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
           background: sel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
           borderRadius: "4px 4px 0 0", pointerEvents: "none",
         }}
       >
+        {locked && <LockIcon style={{ width: 9, height: 9 }} />}
         {TYPE_LABELS[o.config.type]}
       </span>
-      {sel &&
+      {sel && !locked &&
         HANDLES.map((h) => {
           const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2 };
           if (h.includes("n")) pos.top = -5;
@@ -387,7 +408,7 @@ function OverlayNode({
           return <div key={h} onPointerDown={(e) => onStart(e, o, h, parentAbs, depth)} style={{ ...pos, cursor: handleCursor(h) }} />;
         })}
       {kids?.map((c) => (
-        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} onStart={onStart} />
+        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} onStart={onStart} parentLocked={locked} />
       ))}
     </div>
   );
@@ -482,16 +503,19 @@ function EditorCanvas({
     e.stopPropagation();
     e.preventDefault();
     onSelect(o.id);
+    // Locked objects (and anything inside a locked container) select but never move.
+    if (isLockedInTree(objects, o.id)) return;
     onCommitStart();
     // Snapshot container drop targets, excluding the dragged object and its own
-    // subtree (can't drop a container into itself or its descendant).
+    // subtree (can't drop a container into itself or its descendant) and any locked
+    // container (so nothing can be dropped INTO a locked container either).
     const excluded = new Set<string>();
     const dragged = findById(objects, o.id);
     const collect = (n: LayoutObject) => { excluded.add(n.id); n.children?.forEach(collect); };
     if (dragged) collect(dragged);
     const targets: DropTarget[] = [];
     forEachWithRect(objects, (n) => {
-      if (n.o.config.type === "container" && !excluded.has(n.o.id)) targets.push({ id: n.o.id, abs: n.abs, depth: n.depth });
+      if (n.o.config.type === "container" && !excluded.has(n.o.id) && !isLockedInTree(objects, n.o.id)) targets.push({ id: n.o.id, abs: n.abs, depth: n.depth });
     });
     dragGeom.current = { x: o.x, y: o.y, w: o.w, h: o.h };
     setDrag({
@@ -506,13 +530,20 @@ function EditorCanvas({
   // previews here so editing can't fire real PCO commands.
   const fullCtx: LayoutRenderCtx = { ...ctx, H: canvas.height, ndiSource, interactive: false };
 
-  const gridBg: CSSProperties = gridOn
-    ? {
-        backgroundImage:
-          "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)",
-        backgroundSize: `${100 / GRID}% ${100 / GRID}%`,
-      }
-    : {};
+  // Grid is drawn as its own overlay layer (below) that shares the EXACT box of the
+  // scaled content layer — so cells (boxW/GRID) and object coords (frac·boxW) line
+  // up regardless of the canvas box's 1px border / border-box sizing.
+  const gridLayer: CSSProperties = {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: boxW,
+    height: boxH,
+    pointerEvents: "none",
+    backgroundImage:
+      "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)",
+    backgroundSize: `${boxW / GRID}px ${boxH / GRID}px`,
+  };
 
   return (
     <div ref={setWrap} className="relative w-full h-full flex items-start justify-center select-none">
@@ -529,10 +560,10 @@ function EditorCanvas({
               ["#000", "#000000", "#080810", "#0a0a0a"].includes(canvas.background)
                 ? "var(--kiosk-bg)"
                 : canvas.background,
-            ...gridBg,
           }}
           onPointerDown={interactive ? () => onSelect(null) : undefined}
         >
+          {gridOn && <div style={gridLayer} />}
           {/* Scaled content layer (visual only) */}
           <div
             style={{
@@ -642,6 +673,13 @@ export function LayoutEditor({
   // clicked, so a stray drag on a live display's layout can't mutate it.
   const [isEditing, setIsEditing] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  // Reusable object/container groups (loaded from the global library).
+  const [groups, setGroups] = useState<LayoutGroup[]>([]);
+  const [groupDlgOpen, setGroupDlgOpen] = useState(false);
+  const [groupName, setGroupName] = useState("");
+  useEffect(() => {
+    invoke<LayoutGroup[]>("layoutGroups:list").then(setGroups).catch(() => setGroups([]));
+  }, []);
 
   // Size the canvas to its own aspect-ratio height, derived from the canvas cell's
   // WIDTH (capped at the viewport). This gives the canvas a definite height — so it
@@ -697,6 +735,31 @@ export function LayoutEditor({
     pushHistory();
     setObjects(dashboardTemplate());
     setSelectedId(null);
+    setDirty(true);
+  }
+
+  // ── Reusable groups (save the selected container; insert a saved group) ──
+  async function saveSelectedAsGroup() {
+    const sel = findById(objects, selectedId);
+    if (!sel) return;
+    try {
+      const list = await invoke<LayoutGroup[]>("layoutGroups:save", { name: groupName.trim() || "Group", object: sel });
+      setGroups(list);
+    } catch { /* ignore */ }
+    setGroupDlgOpen(false);
+    setGroupName("");
+  }
+  async function deleteGroup(id: string) {
+    try {
+      const list = await invoke<LayoutGroup[]>("layoutGroups:delete", { id });
+      setGroups(list);
+    } catch { /* ignore */ }
+  }
+  function insertGroup(g: LayoutGroup) {
+    pushHistory();
+    const copy = { ...deepCloneFreshIds(g.object, uid), z: zTop + 1 };
+    setObjects((prev) => [...prev, copy]);
+    setSelectedId(copy.id);
     setDirty(true);
   }
 
@@ -762,6 +825,7 @@ export function LayoutEditor({
     }
   }
   function removeObject(id: string) {
+    if (isLockedInTree(objects, id)) return; // locked → must unlock before deleting
     pushHistory();
     setObjects((prev) => removeById(prev, id).tree);
     if (selectedId === id) setSelectedId(null);
@@ -1010,6 +1074,15 @@ export function LayoutEditor({
                 <span
                   role="button"
                   tabIndex={-1}
+                  onClick={(e) => { e.stopPropagation(); pushHistory(); update(o.id, { locked: !o.locked }); }}
+                  className={o.locked ? "text-amber-10" : "text-gray-9 hover:text-gray-12"}
+                  aria-label={o.locked ? "Unlock" : "Lock"}
+                >
+                  {o.locked ? <LockIcon className="size-3.5" /> : <UnlockIcon className="size-3.5" />}
+                </span>
+                <span
+                  role="button"
+                  tabIndex={-1}
                   onClick={(e) => { e.stopPropagation(); pushHistory(); update(o.id, { hidden: !o.hidden }); }}
                   className="text-gray-9 hover:text-gray-12"
                   aria-label={o.hidden ? "Show" : "Hide"}
@@ -1030,6 +1103,7 @@ export function LayoutEditor({
                 parentW={selParentAbs.w * canvas.width}
                 parentH={selParentAbs.h * canvas.height}
                 nested={selDepth > 0}
+                locked={isLockedInTree(objects, selected.id)}
                 slotsViews={slotsViews}
                 onGeom={(g) => { /* numeric position edits */ pushHistory(); update(selected.id, g); }}
                 onStyle={withHistory((patch: Partial<LayoutStyle>) => updateStyle(selected.id, patch))}
@@ -1038,6 +1112,8 @@ export function LayoutEditor({
                 onDuplicate={() => duplicateObject(selected.id)}
                 onRemove={() => removeObject(selected.id)}
                 onReparentOut={() => reparentToRoot(selected.id)}
+                onToggleLock={() => { pushHistory(); update(selected.id, { locked: !selected.locked }); }}
+                onSaveGroup={() => { setGroupName(""); setGroupDlgOpen(true); }}
               />
             </>
           )}
@@ -1065,6 +1141,27 @@ export function LayoutEditor({
               </div>
             </>
           )}
+
+          {/* Saved groups library (reusable containers) */}
+          <Separator />
+          <div className="flex flex-col gap-1">
+            <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Saved groups</span>
+            {groups.length === 0 ? (
+              <span className="text-caption2 text-gray-9">Select a container and use the package icon in the inspector to save it as a reusable group.</span>
+            ) : (
+              groups.map((g) => (
+                <div key={g.id} className="flex items-center gap-0.5 rounded-md px-2 py-1 hover:bg-gray-a3">
+                  <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">{g.name}</span>
+                  <Button variant="transparent" size="small" iconOnly onClick={() => insertGroup(g)} aria-label="Insert group" title="Insert into this view">
+                    <DownloadIcon className="size-3.5 text-gray-9" />
+                  </Button>
+                  <Button variant="transparent" size="small" iconOnly onClick={() => deleteGroup(g.id)} aria-label="Delete group">
+                    <Trash2Icon className="size-3.5 text-red-10" />
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
         </div>
         )}
       </div>
@@ -1110,6 +1207,29 @@ export function LayoutEditor({
             >
               {saving ? "Saving…" : "Save & close"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </DialogPrimitive.Root>
+
+      {/* Save the selected container as a reusable group. */}
+      <DialogPrimitive.Root open={groupDlgOpen} onOpenChange={setGroupDlgOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Save as group</DialogTitle>
+            <DialogDescription>
+              Save this container and its objects as a reusable group you can insert into other custom views.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+            placeholder="Group name (e.g. Vocal notes panel)"
+            className="text-gray-12"
+            autoFocus
+          />
+          <DialogFooter>
+            <Button variant="transparent" size="small" onClick={() => setGroupDlgOpen(false)}>Cancel</Button>
+            <Button variant="accent" size="small" disabled={groupName.trim().length === 0} onClick={saveSelectedAsGroup}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </DialogPrimitive.Root>
@@ -1256,7 +1376,7 @@ function PlanAttachmentConfig({
 }
 
 function Inspector({
-  o, canvas, parentW, parentH, nested, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove, onReparentOut,
+  o, canvas, parentW, parentH, nested, locked, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup,
 }: {
   o: LayoutObject;
   canvas: LayoutCanvas;
@@ -1265,6 +1385,8 @@ function Inspector({
   parentH: number;
   /** True when this object lives inside a container. */
   nested: boolean;
+  /** True when this object — or an ancestor container — is locked. */
+  locked: boolean;
   slotsViews: View[];
   onGeom: (g: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h">>) => void;
   onStyle: (patch: Partial<LayoutStyle>) => void;
@@ -1273,6 +1395,9 @@ function Inspector({
   onDuplicate: () => void;
   onRemove: () => void;
   onReparentOut: () => void;
+  onToggleLock: () => void;
+  /** Save this object (typically a container) to the reusable group library. */
+  onSaveGroup: () => void;
 }) {
   const s = o.style ?? {};
   const c = o.config;
@@ -1280,6 +1405,7 @@ function Inspector({
   const spl = useSplState();
   const obs = useObsState();
   const oscTargets = useOscTargets();
+  const planItems = usePlanItems();
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
@@ -1289,10 +1415,16 @@ function Inspector({
     <div className="flex flex-col gap-2.5">
       <div className="flex items-center gap-1">
         <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 flex-1">{TYPE_LABELS[c.type]}</span>
+        {c.type === "container" && (
+          <Button variant="transparent" size="small" iconOnly onClick={onSaveGroup} aria-label="Save as group"><PackagePlusIcon className="size-3.5 text-gray-9" /></Button>
+        )}
+        <Button variant="transparent" size="small" iconOnly onClick={onToggleLock} aria-label={o.locked ? "Unlock" : "Lock"}>
+          {o.locked ? <LockIcon className="size-3.5 text-amber-10" /> : <UnlockIcon className="size-3.5 text-gray-9" />}
+        </Button>
         <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("up")} aria-label="Bring forward"><ChevronUpIcon className="size-3.5" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("down")} aria-label="Send backward"><ChevronDownIcon className="size-3.5" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={onDuplicate} aria-label="Duplicate"><CopyIcon className="size-3.5 text-gray-9" /></Button>
-        <Button variant="transparent" size="small" iconOnly onClick={onRemove} aria-label="Delete"><Trash2Icon className="size-3.5 text-red-10" /></Button>
+        <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onRemove} aria-label="Delete"><Trash2Icon className={`size-3.5 ${locked ? "text-gray-7" : "text-red-10"}`} /></Button>
       </div>
 
       {nested && (
@@ -1330,6 +1462,49 @@ function Inspector({
             </SelectContent>
           </Select>
         </Row>
+      )}
+      {c.type === "service-order" && (
+        <>
+          <Row label="Scroll">
+            <ButtonGroup>
+              <Button variant={(c.scroll ?? "auto") === "auto" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, scroll: "auto" })}>Follow live</Button>
+              <Button variant={c.scroll === "static" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, scroll: "static" })}>Static</Button>
+            </ButtonGroup>
+          </Row>
+          <Row label="Highlight live"><Switch checked={c.highlightLive ?? true} onCheckedChange={(v) => onConfig({ ...c, highlightLive: v })} /></Row>
+          <Row label="Show length"><Switch checked={c.showLength ?? false} onCheckedChange={(v) => onConfig({ ...c, showLength: v })} /></Row>
+          {(() => {
+            const present = planItems?.noteCategories ?? [];
+            if (present.length === 0) {
+              return <span className="text-caption2 text-gray-9">Note categories appear once a plan with notes is loaded.</span>;
+            }
+            // null/undefined = all shown; otherwise the explicit subset.
+            const shown = c.noteCategories == null ? present : present.filter((k) => c.noteCategories!.includes(k));
+            const toggle = (k: string) => {
+              const next = shown.includes(k) ? shown.filter((x) => x !== k) : [...shown, k];
+              onConfig({ ...c, noteCategories: next });
+            };
+            return (
+              <div className="flex flex-col gap-1">
+                <span className="text-caption2 text-gray-9">Notes shown</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {present.map((k) => {
+                    const on = shown.includes(k);
+                    return (
+                      <button
+                        key={k}
+                        onClick={() => toggle(k)}
+                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"}`}
+                      >
+                        {k}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+        </>
       )}
       {c.type === "transcript-strip" && (
         <>

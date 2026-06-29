@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -12,6 +12,7 @@ import { resolveSlots } from "./slot-resolver.js";
 import { settingsStore } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
+import { layoutGroupsStore } from "./layout-groups-store.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { updater } from "./updater.js";
 
@@ -1119,6 +1120,37 @@ export class StageController {
     const list = await layoutTemplatesStore.load();
     const updated = list.filter((t) => t.id !== id);
     await layoutTemplatesStore.save(updated);
+    return updated;
+  }
+
+  // ── Layout groups (reusable object/container library) ───────────────────
+  // Like templates, but a single object subtree the operator inserts into a view
+  // rather than a whole-layout replace. (Inline mic-slot data is per-object/
+  // per-service-type and is NOT carried — same as templates; re-pick slots after.)
+
+  async listLayoutGroups(): Promise<LayoutGroup[]> {
+    return layoutGroupsStore.load();
+  }
+
+  async saveLayoutGroup(name: string, object: LayoutObject): Promise<LayoutGroup[]> {
+    const list = await layoutGroupsStore.load();
+    const group: LayoutGroup = {
+      id: randomUUID(),
+      name: name.trim() || "Group",
+      object: cloneLayoutObject(object), // fresh ids so the library copy is isolated
+      createdAt: new Date().toISOString(),
+    };
+    console.log(`[stage-controller] saveLayoutGroup "${group.name}" (${(group.object.children?.length ?? 0)} children)`);
+    const updated = [...list, group];
+    await layoutGroupsStore.save(updated);
+    return updated;
+  }
+
+  async deleteLayoutGroup(id: string): Promise<LayoutGroup[]> {
+    console.log(`[stage-controller] deleteLayoutGroup ${id}`);
+    const list = await layoutGroupsStore.load();
+    const updated = list.filter((g) => g.id !== id);
+    await layoutGroupsStore.save(updated);
     return updated;
   }
 

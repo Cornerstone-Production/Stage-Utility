@@ -234,6 +234,17 @@ export type LayoutObjectConfig =
       feedback?: OscFeedbackBind | null;
     }
   | { type: "shape"; shape: "rect" | "ellipse" }
+  // The current PCO service order as a full list. Highlights the live item and
+  // shows each item's notes (e.g. vocal parts). `noteCategories`: null = all
+  // present, [] = none, [..] = chosen. `scroll`: "auto" keeps the live item in
+  // view; "static" renders in place. Reuses the cached plan-items pipeline.
+  | {
+      type: "service-order";
+      noteCategories?: string[] | null;
+      showLength?: boolean;
+      highlightLive?: boolean;
+      scroll?: "auto" | "static";
+    }
   // A styled box that holds other objects. Children are positioned as fractions
   // of THIS container's box (not the canvas), so moving/resizing the container
   // moves/scales its contents as a unit. The box itself is drawn from `style`
@@ -253,6 +264,9 @@ export interface LayoutObject {
   /** Paint order WITHIN the object's sibling scope; higher = front. */
   z: number;
   hidden?: boolean;
+  /** When true, the editor won't move/resize/reparent/delete this object — and,
+   *  for a container, anything nested inside it — until it's unlocked. */
+  locked?: boolean;
   style?: LayoutStyle;
   config: LayoutObjectConfig;
   /** Nested objects, positioned relative to this object's box. Only meaningful
@@ -272,6 +286,15 @@ export interface LayoutTemplate {
   id: string;
   name: string;
   layout: LayoutDTO;
+  createdAt: string;
+}
+
+/** A named, reusable single object (typically a container + its children) that can
+ *  be inserted into any custom View — a "group" in the editor. */
+export interface LayoutGroup {
+  id: string;
+  name: string;
+  object: LayoutObject;
   createdAt: string;
 }
 
