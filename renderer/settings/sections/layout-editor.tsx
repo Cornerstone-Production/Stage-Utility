@@ -178,17 +178,12 @@ function makeObject(
   geom?: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h">>,
 ): LayoutObject {
   // Containers default to a card-sized box; everything else keeps the old default.
+  // (Top-level adds are snapped to the square grid by the caller via snapRectToGrid.)
   const base = type === "container" ? { x: 0.3, y: 0.32, w: 0.4, h: 0.32 } : { x: 0.35, y: 0.42, w: 0.3, h: 0.16 };
-  // Snap the default geometry onto the grid so new objects' edges land on grid
-  // lines (both position AND size), not mid-cell.
-  const g = { ...base, ...geom };
-  const sg = (v: number) => Math.round(v * GRID) / GRID;
   return {
     id: uid(),
-    x: sg(g.x),
-    y: sg(g.y),
-    w: sg(g.w),
-    h: sg(g.h),
+    ...base,
+    ...geom,
     z,
     config: defaultConfig(type),
     style: defaultStyle(type),
@@ -253,7 +248,36 @@ const CANVAS_PRESETS: { id: string; label: string; w: number; h: number }[] = [
   { id: "21:9", label: "Ultrawide · 21:9", w: 2560, h: 1080 },
 ];
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-const snap = (v: number, on: boolean) => (on ? Math.round(v * GRID) / GRID : v);
+
+// Grid step per axis. x is a plain fraction of width (1/GRID); y is scaled by the
+// canvas aspect so the cell is the SAME number of px on both axes (a SQUARE grid),
+// regardless of canvas shape. Snapping uses these so objects land on the lines you
+// see — including objects nested in a container (snapping is done in absolute
+// canvas space, then converted back to the parent's local coords).
+function gridUnits(canvas: LayoutCanvas): { xUnit: number; yUnit: number } {
+  return { xUnit: 1 / GRID, yUnit: (canvas.width / canvas.height) / GRID };
+}
+const snapTo = (v: number, unit: number) => Math.round(v / unit) * unit;
+
+// Snap a parent-LOCAL rect to the canvas grid. Composes to absolute, snaps x/y
+// (and w/h when `size`), then localizes back so nested objects align to the same
+// visible grid as top-level ones.
+function snapRectToGrid(
+  local: FracRect,
+  parentAbs: FracRect,
+  canvas: LayoutCanvas,
+  size: boolean,
+): FracRect {
+  const { xUnit, yUnit } = gridUnits(canvas);
+  const abs = composeRect(parentAbs, local);
+  const snapped = {
+    x: snapTo(abs.x, xUnit),
+    y: snapTo(abs.y, yUnit),
+    w: size ? Math.max(xUnit, snapTo(abs.w, xUnit)) : abs.w,
+    h: size ? Math.max(yUnit, snapTo(abs.h, yUnit)) : abs.h,
+  };
+  return localizeRect(parentAbs, snapped);
+}
 
 type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
@@ -344,6 +368,8 @@ interface DragState {
   /** Rendered px size of the dragged object's PARENT box (canvas for top-level). */
   parentW: number;
   parentH: number;
+  /** Absolute (canvas-space) rect of the parent — for snapping in canvas space. */
+  parentAbs: FracRect;
   /** Nesting depth of the dragged object (top-level = 0). */
   depth: number;
   /** Only top-level objects can be dropped into a container. */
@@ -458,21 +484,20 @@ function EditorCanvas({
   // Window-level move/up while dragging.
   useEffect(() => {
     if (!drag || boxW <= 0) return;
-    // Deltas are fractions of the dragged object's PARENT box; snap is disabled
-    // inside a container (the canvas grid is drawn at canvas scale and wouldn't
-    // line up with per-container snapping).
-    const snapOn = gridOn && drag.depth === 0;
+    // Deltas are fractions of the dragged object's PARENT box. Snapping is done in
+    // ABSOLUTE canvas space (snapRectToGrid), so objects nested in a container land
+    // on the same visible grid as top-level ones.
     const onMove = (e: globalThis.PointerEvent) => {
       const dx = (e.clientX - drag.px) / drag.parentW;
       const dy = (e.clientY - drag.py) / drag.parentH;
       let geom: Pick<LayoutObject, "x" | "y" | "w" | "h">;
       if (drag.mode === "move") {
-        const x = clamp(snap(drag.start.x + dx, snapOn), 0, 1 - drag.start.w);
-        const y = clamp(snap(drag.start.y + dy, snapOn), 0, 1 - drag.start.h);
-        geom = { x, y, w: drag.start.w, h: drag.start.h };
+        const local = { x: drag.start.x + dx, y: drag.start.y + dy, w: drag.start.w, h: drag.start.h };
+        const snapped = gridOn ? snapRectToGrid(local, drag.parentAbs, canvas, false) : local;
+        geom = { x: clamp(snapped.x, 0, 1 - drag.start.w), y: clamp(snapped.y, 0, 1 - drag.start.h), w: drag.start.w, h: drag.start.h };
       } else {
         const g = applyResize(drag.start, drag.mode, dx, dy);
-        geom = { x: snap(g.x, snapOn), y: snap(g.y, snapOn), w: snap(g.w, snapOn), h: snap(g.h, snapOn) };
+        geom = gridOn ? snapRectToGrid(g, drag.parentAbs, canvas, true) : g;
       }
       dragGeom.current = geom;
       onGeom(drag.id, geom);
@@ -497,7 +522,7 @@ function EditorCanvas({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [drag, boxW, boxH, gridOn, onGeom, onReparent]);
+  }, [drag, boxW, boxH, gridOn, canvas, onGeom, onReparent]);
 
   function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) {
     e.stopPropagation();
@@ -521,7 +546,7 @@ function EditorCanvas({
     setDrag({
       id: o.id, mode, start: o, px: e.clientX, py: e.clientY,
       parentW: parentAbs.w * boxW, parentH: parentAbs.h * boxH,
-      depth, canReparent: depth === 0, targets,
+      parentAbs, depth, canReparent: depth === 0, targets,
     });
   }
 
@@ -531,8 +556,10 @@ function EditorCanvas({
   const fullCtx: LayoutRenderCtx = { ...ctx, H: canvas.height, ndiSource, interactive: false };
 
   // Grid is drawn as its own overlay layer (below) that shares the EXACT box of the
-  // scaled content layer — so cells (boxW/GRID) and object coords (frac·boxW) line
-  // up regardless of the canvas box's 1px border / border-box sizing.
+  // scaled content layer — so cells and object coords line up regardless of the
+  // canvas box's 1px border / border-box sizing. SQUARE cells (same px on both
+  // axes) so the lines match the snap step exactly on any canvas shape.
+  const cellPx = boxW / GRID;
   const gridLayer: CSSProperties = {
     position: "absolute",
     top: 0,
@@ -542,7 +569,7 @@ function EditorCanvas({
     pointerEvents: "none",
     backgroundImage:
       "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)",
-    backgroundSize: `${boxW / GRID}px ${boxH / GRID}px`,
+    backgroundSize: `${cellPx}px ${cellPx}px`,
   };
 
   return (
@@ -820,9 +847,25 @@ export function LayoutEditor({
       setSelectedId(child.id);
     } else {
       const o = makeObject(type, zTop + 1);
-      setObjects((prev) => [...prev, o]);
+      // Snap a new top-level object onto the square grid so its edges land on lines.
+      const sn = snapRectToGrid({ x: o.x, y: o.y, w: o.w, h: o.h }, CANVAS_FRAC, canvas, true);
+      setObjects((prev) => [...prev, { ...o, ...sn }]);
       setSelectedId(o.id);
     }
+  }
+  /** Snap the selected object's existing position + size onto the grid. */
+  function snapObjectToGrid(id: string) {
+    const o = findById(objects, id);
+    if (!o) return;
+    const depth = depthOf(objects, id);
+    let pAbs: FracRect = CANVAS_FRAC;
+    if (depth > 0) {
+      const p = getParentOf(objects, id);
+      if (p) forEachWithRect(objects, (n) => { if (n.o.id === p.id) pAbs = n.abs; });
+    }
+    const sn = snapRectToGrid({ x: o.x, y: o.y, w: o.w, h: o.h }, pAbs, canvas, true);
+    pushHistory();
+    update(id, sn);
   }
   function removeObject(id: string) {
     if (isLockedInTree(objects, id)) return; // locked → must unlock before deleting
@@ -1114,6 +1157,7 @@ export function LayoutEditor({
                 onReparentOut={() => reparentToRoot(selected.id)}
                 onToggleLock={() => { pushHistory(); update(selected.id, { locked: !selected.locked }); }}
                 onSaveGroup={() => { setGroupName(""); setGroupDlgOpen(true); }}
+                onSnapToGrid={() => snapObjectToGrid(selected.id)}
               />
             </>
           )}
@@ -1376,7 +1420,7 @@ function PlanAttachmentConfig({
 }
 
 function Inspector({
-  o, canvas, parentW, parentH, nested, locked, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup,
+  o, canvas, parentW, parentH, nested, locked, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
 }: {
   o: LayoutObject;
   canvas: LayoutCanvas;
@@ -1398,6 +1442,8 @@ function Inspector({
   onToggleLock: () => void;
   /** Save this object (typically a container) to the reusable group library. */
   onSaveGroup: () => void;
+  /** Snap this object's existing position + size onto the grid. */
+  onSnapToGrid: () => void;
 }) {
   const s = o.style ?? {};
   const c = o.config;
@@ -1418,6 +1464,7 @@ function Inspector({
         {c.type === "container" && (
           <Button variant="transparent" size="small" iconOnly onClick={onSaveGroup} aria-label="Save as group"><PackagePlusIcon className="size-3.5 text-gray-9" /></Button>
         )}
+        <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onSnapToGrid} aria-label="Snap to grid" title="Snap position + size to the grid"><Grid3x3Icon className="size-3.5 text-gray-9" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={onToggleLock} aria-label={o.locked ? "Unlock" : "Lock"}>
           {o.locked ? <LockIcon className="size-3.5 text-amber-10" /> : <UnlockIcon className="size-3.5 text-gray-9" />}
         </Button>

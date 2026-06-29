@@ -25,6 +25,9 @@ PROGRESS="${STAGE_UPDATE_PROGRESS:-$REPO/update-progress.json}"
 
 cd "$REPO" || exit 1
 LOG="$(mktemp)"
+# Commit before the pull — lets us diff what changed and skip the (slow) reinstall
+# / rebuild when an update doesn't touch them.
+OLD_REV="$(git rev-parse HEAD 2>/dev/null || echo none)"
 
 # Publish the current step so the (still-running) server can broadcast progress.
 write_progress() {
@@ -49,17 +52,43 @@ write_result() {
     echo "[update] git pull --ff-only origin $BRANCH"
     git pull --ff-only origin "$BRANCH" || { echo "[update] git pull failed (non-fast-forward or offline)"; write_result false; exit 1; }
   fi
-  write_progress install
-  echo "[update] npm ci --include=dev"
-  # --include=dev is REQUIRED: the service runs with NODE_ENV=production (set in
-  # the systemd unit), which this detached updater inherits. Under that env npm
-  # omits devDependencies by default — but the build tooling (vite, etc.) lives
-  # in devDependencies, so a plain `npm ci` installs prod-only deps and the next
-  # step fails with "vite: not found". Forcing dev deps keeps the build working.
-  npm ci --include=dev || { echo "[update] npm ci failed"; write_result false; exit 1; }
-  write_progress build
-  echo "[update] npm run build"
-  npm run build || { echo "[update] npm run build failed"; write_result false; exit 1; }
+  # Decide what's actually needed. The backend runs via tsx (no build), so a
+  # backend-only update just needs a restart. Reinstall only when the lockfile
+  # changed; rebuild only when renderer/build inputs changed. Default to doing the
+  # work whenever we can't tell (no OLD rev, or build/ missing).
+  NEW_REV="$(git rev-parse HEAD 2>/dev/null || echo none)"
+  NEED_INSTALL=1
+  NEED_BUILD=1
+  if [ "$OLD_REV" != "none" ] && [ "$NEW_REV" != "none" ] && [ -d build ]; then
+    CHANGED="$(git diff --name-only "$OLD_REV" "$NEW_REV" 2>/dev/null || echo "")"
+    echo "[update] changed files:"; echo "$CHANGED" | sed 's/^/[update]   /'
+    NEED_INSTALL=0; NEED_BUILD=0
+    # Lockfile change → reinstall (and rebuild, since deps may feed the bundle).
+    if echo "$CHANGED" | grep -q '^package-lock\.json$'; then NEED_INSTALL=1; NEED_BUILD=1; fi
+    # Any renderer/build input change → rebuild the bundle.
+    if echo "$CHANGED" | grep -qE '^(renderer/|index\.html|vite\.config|tailwind\.config|postcss\.config|package\.json|tsconfig)'; then NEED_BUILD=1; fi
+  fi
+
+  if [ "$NEED_INSTALL" = "1" ]; then
+    write_progress install
+    echo "[update] npm ci --include=dev"
+    # --include=dev is REQUIRED: the service runs with NODE_ENV=production (set in
+    # the systemd unit), which this detached updater inherits. Under that env npm
+    # omits devDependencies by default — but the build tooling (vite, etc.) lives
+    # in devDependencies, so a plain `npm ci` installs prod-only deps and the next
+    # step fails with "vite: not found". Forcing dev deps keeps the build working.
+    npm ci --include=dev || { echo "[update] npm ci failed"; write_result false; exit 1; }
+  else
+    echo "[update] dependencies unchanged — skipping npm ci"
+  fi
+
+  if [ "$NEED_BUILD" = "1" ]; then
+    write_progress build
+    echo "[update] npm run build"
+    npm run build || { echo "[update] npm run build failed"; write_result false; exit 1; }
+  else
+    echo "[update] no renderer changes — skipping npm run build (backend runs via tsx)"
+  fi
 } >>"$LOG" 2>&1
 
 write_progress restarting
