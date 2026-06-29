@@ -765,6 +765,32 @@ export function LayoutEditor({
     setDirty(true);
   }
 
+  // Snap EVERY object (position + size, recursively) onto the grid in one click —
+  // for cleaning up existing layouts whose objects predate grid snapping. Locked
+  // objects/subtrees are left untouched.
+  function snapAllToGrid() {
+    const { xUnit, yUnit } = gridUnits(canvas);
+    const snapNode = (o: LayoutObject, parentAbs: FracRect, ancestorLocked: boolean): LayoutObject => {
+      if (ancestorLocked || o.locked) return o; // respect locks
+      const abs = composeRect(parentAbs, { x: o.x, y: o.y, w: o.w, h: o.h });
+      const snappedAbs = {
+        x: snapTo(abs.x, xUnit),
+        y: snapTo(abs.y, yUnit),
+        w: Math.max(xUnit, snapTo(abs.w, xUnit)),
+        h: Math.max(yUnit, snapTo(abs.h, yUnit)),
+      };
+      const local = localizeRect(parentAbs, snappedAbs);
+      return {
+        ...o,
+        x: local.x, y: local.y, w: local.w, h: local.h,
+        children: o.children?.map((c) => snapNode(c, snappedAbs, false)),
+      };
+    };
+    pushHistory();
+    setObjects((prev) => prev.map((o) => snapNode(o, CANVAS_FRAC, false)));
+    setDirty(true);
+  }
+
   // ── Reusable groups (save the selected container; insert a saved group) ──
   async function saveSelectedAsGroup() {
     const sel = findById(objects, selectedId);
@@ -994,6 +1020,9 @@ export function LayoutEditor({
         </Select>
         <Button variant={gridOn ? "accent" : "filled"} size="small" onClick={() => setGridOn((v) => !v)} aria-label="Toggle snap grid">
           <Grid3x3Icon className="size-3.5" /> Grid
+        </Button>
+        <Button variant="filled" size="small" onClick={snapAllToGrid} aria-label="Snap all objects to grid" title="Snap every object's position + size to the grid">
+          Snap all
         </Button>
         <Select
           value={CANVAS_PRESETS.find((p) => p.w === canvas.width && p.h === canvas.height)?.id ?? "custom"}
