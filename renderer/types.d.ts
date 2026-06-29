@@ -260,6 +260,7 @@ interface LayoutCanvas {
   width: number;
   height: number;
   background?: string | null;
+  fit?: "contain" | "fill";
 }
 
 type LayoutHAlign = "left" | "center" | "right";

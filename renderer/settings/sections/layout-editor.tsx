@@ -245,7 +245,12 @@ const CANVAS_PRESETS: { id: string; label: string; w: number; h: number }[] = [
   { id: "16:9", label: "Landscape · 16:9", w: 1920, h: 1080 },
   { id: "9:16", label: "Portrait · 9:16", w: 1080, h: 1920 },
   { id: "4:3", label: "Standard · 4:3", w: 1440, h: 1080 },
+  { id: "16:10", label: "Widescreen · 16:10", w: 1920, h: 1200 },
   { id: "21:9", label: "Ultrawide · 21:9", w: 2560, h: 1080 },
+  { id: "32:9", label: "Super ultrawide · 32:9", w: 3840, h: 1080 },
+  { id: "1:1", label: "Square · 1:1", w: 1080, h: 1080 },
+  { id: "3:2", label: "3:2", w: 1620, h: 1080 },
+  { id: "5:4", label: "5:4", w: 1350, h: 1080 },
 ];
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -254,21 +259,26 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 // regardless of canvas shape. Snapping uses these so objects land on the lines you
 // see — including objects nested in a container (snapping is done in absolute
 // canvas space, then converted back to the parent's local coords).
-function gridUnits(canvas: LayoutCanvas): { xUnit: number; yUnit: number } {
-  return { xUnit: 1 / GRID, yUnit: (canvas.width / canvas.height) / GRID };
+// Derive grid units from the actual rendered box aspect (boxW/boxH) so the snap
+// grid matches the SQUARE grid drawn on that box — correct whether the canvas is
+// letterboxed (box aspect == design aspect) or fills the window (box aspect ==
+// window aspect).
+function gridUnits(boxW: number, boxH: number): { xUnit: number; yUnit: number } {
+  return { xUnit: 1 / GRID, yUnit: boxH > 0 ? (boxW / boxH) / GRID : 1 / GRID };
 }
 const snapTo = (v: number, unit: number) => Math.round(v / unit) * unit;
 
-// Snap a parent-LOCAL rect to the canvas grid. Composes to absolute, snaps x/y
-// (and w/h when `size`), then localizes back so nested objects align to the same
-// visible grid as top-level ones.
+// Snap a parent-LOCAL rect to the grid. Composes to absolute, snaps x/y (and w/h
+// when `size`), then localizes back so nested objects align to the same visible
+// grid as top-level ones. `boxW`/`boxH` are the rendered canvas box dimensions.
 function snapRectToGrid(
   local: FracRect,
   parentAbs: FracRect,
-  canvas: LayoutCanvas,
+  boxW: number,
+  boxH: number,
   size: boolean,
 ): FracRect {
-  const { xUnit, yUnit } = gridUnits(canvas);
+  const { xUnit, yUnit } = gridUnits(boxW, boxH);
   const abs = composeRect(parentAbs, local);
   const snapped = {
     x: snapTo(abs.x, xUnit),
@@ -442,7 +452,7 @@ function OverlayNode({
 
 function EditorCanvas({
   canvas, objects, selectedId, gridOn, ctx, ndiSource, interactive,
-  onSelect, onGeom, onCommitStart, onReparent,
+  onSelect, onGeom, onCommitStart, onReparent, onBoxSize,
 }: {
   canvas: LayoutCanvas;
   objects: LayoutObject[];
@@ -455,6 +465,9 @@ function EditorCanvas({
   onSelect: (id: string | null) => void;
   onGeom: (id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => void;
   onCommitStart: () => void;
+  /** Reports the rendered canvas box size so the parent's snap actions (Snap all /
+   *  Snap to grid) use the same grid aspect as the canvas. */
+  onBoxSize?: (w: number, h: number) => void;
   /** Drop a top-level object into a container (reparent on drag release).
    *  `objAbs` is the object's final absolute canvas rect; `containerAbs` the
    *  container's absolute rect — together they give the new parent-local geom. */
@@ -493,9 +506,18 @@ function EditorCanvas({
     };
   }, [wrap]);
 
+  // "fill" mode: the canvas fills the whole editor pane (objects reflow, just like
+  // on a display set to fill) instead of letterboxing the design aspect.
+  const fill = canvas.fit === "fill";
   const scale = avail.w > 0 && avail.h > 0 ? Math.min(avail.w / canvas.width, avail.h / canvas.height) : 0;
-  const boxW = canvas.width * scale;
-  const boxH = canvas.height * scale;
+  const boxW = fill ? avail.w : canvas.width * scale;
+  const boxH = fill ? avail.h : canvas.height * scale;
+  // Report the box size up so parent snap actions use the same grid aspect.
+  useEffect(() => {
+    if (boxW > 0 && boxH > 0) onBoxSize?.(boxW, boxH);
+    // onBoxSize is a stable useCallback from the parent; deps are the sizes only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boxW, boxH]);
   const [drag, setDrag] = useState<DragState | null>(null);
   // Latest local geom set during the active drag (so pointerup can hit-test the
   // drop without depending on the parent's async state update).
@@ -513,11 +535,11 @@ function EditorCanvas({
       let geom: Pick<LayoutObject, "x" | "y" | "w" | "h">;
       if (drag.mode === "move") {
         const local = { x: drag.start.x + dx, y: drag.start.y + dy, w: drag.start.w, h: drag.start.h };
-        const snapped = gridOn ? snapRectToGrid(local, drag.parentAbs, canvas, false) : local;
+        const snapped = gridOn ? snapRectToGrid(local, drag.parentAbs, boxW, boxH, false) : local;
         geom = { x: clamp(snapped.x, 0, 1 - drag.start.w), y: clamp(snapped.y, 0, 1 - drag.start.h), w: drag.start.w, h: drag.start.h };
       } else {
         const g = applyResize(drag.start, drag.mode, dx, dy);
-        geom = gridOn ? snapRectToGrid(g, drag.parentAbs, canvas, true) : g;
+        geom = gridOn ? snapRectToGrid(g, drag.parentAbs, boxW, boxH, true) : g;
       }
       dragGeom.current = geom;
       onGeom(drag.id, geom);
@@ -573,7 +595,7 @@ function EditorCanvas({
   const sorted = [...objects].sort((a, b) => a.z - b.z);
   // Editor canvas is never interactive — live-control objects render as static
   // previews here so editing can't fire real PCO commands.
-  const fullCtx: LayoutRenderCtx = { ...ctx, H: canvas.height, ndiSource, interactive: false };
+  const fullCtx: LayoutRenderCtx = { ...ctx, H: fill ? boxH : canvas.height, ndiSource, interactive: false };
 
   // Grid is drawn as its own overlay layer (below) that shares the EXACT box of the
   // scaled content layer — so cells and object coords line up regardless of the
@@ -594,7 +616,7 @@ function EditorCanvas({
 
   return (
     <div ref={setWrap} className="relative w-full h-full flex items-start justify-center select-none">
-      {scale > 0 && (
+      {boxW > 0 && boxH > 0 && (
         <div
           className="relative overflow-hidden rounded-xl"
           style={{
@@ -618,13 +640,18 @@ function EditorCanvas({
           onPointerDown={interactive ? () => onSelect(null) : undefined}
         >
           {gridOn && <div style={gridLayer} />}
-          {/* Scaled content layer (visual only) */}
+          {/* Content layer (visual only). Letterbox: design dims scaled. Fill: the
+              layer IS the box (objects positioned by % of the live box). */}
           <div
-            style={{
-              width: canvas.width, height: canvas.height,
-              transform: `scale(${scale})`, transformOrigin: "top left",
-              position: "absolute", top: 0, left: 0, pointerEvents: "none",
-            }}
+            style={
+              fill
+                ? { width: boxW, height: boxH, position: "absolute", top: 0, left: 0, pointerEvents: "none" }
+                : {
+                    width: canvas.width, height: canvas.height,
+                    transform: `scale(${scale})`, transformOrigin: "top left",
+                    position: "absolute", top: 0, left: 0, pointerEvents: "none",
+                  }
+            }
           >
             {sorted.map((o) => (
               <EditorObject key={o.id} o={o} ctx={fullCtx} />
@@ -728,6 +755,13 @@ export function LayoutEditor({
   const [gridOn, setGridOn] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tplName, setTplName] = useState("");
+  // Rendered canvas box size (reported by EditorCanvas) — so the Snap actions use
+  // the same grid aspect the canvas actually draws (matters in fill mode).
+  const [editorBox, setEditorBox] = useState({ w: 0, h: 0 });
+  const handleBoxSize = useCallback(
+    (w: number, h: number) => setEditorBox((prev) => (prev.w === w && prev.h === h ? prev : { w, h })),
+    [],
+  );
   // View-only by default: a custom view opens as a clean preview until "Edit" is
   // clicked, so a stray drag on a live display's layout can't mutate it.
   const [isEditing, setIsEditing] = useState(false);
@@ -753,12 +787,14 @@ export function LayoutEditor({
     const el = canvasCellRef.current;
     if (!el) return;
     const aspect = canvas.width / canvas.height;
+    // In fill mode the canvas fills the available height (no design aspect).
+    const fillMode = canvas.fit === "fill";
     const measure = () => {
       const width = el.clientWidth;
       const top = el.getBoundingClientRect().top;
       const maxH = Math.max(240, window.innerHeight - top - 16);
       const fit = width > 0 ? width / aspect : maxH;
-      setCanvasH(Math.round(Math.min(fit, maxH)));
+      setCanvasH(Math.round(fillMode ? maxH : Math.min(fit, maxH)));
     };
     measure();
     window.addEventListener("resize", measure);
@@ -766,7 +802,7 @@ export function LayoutEditor({
     const ro = new ResizeObserver(measure);
     if (el.parentElement) ro.observe(el.parentElement);
     return () => { window.removeEventListener("resize", measure); ro.disconnect(); };
-  }, [isEditing, canvas.width, canvas.height]);
+  }, [isEditing, canvas.width, canvas.height, canvas.fit]);
 
   const currentLayout = (): LayoutDTO => ({ version: 1, canvas, objects });
 
@@ -801,7 +837,7 @@ export function LayoutEditor({
   // for cleaning up existing layouts whose objects predate grid snapping. Locked
   // objects/subtrees are left untouched.
   function snapAllToGrid() {
-    const { xUnit, yUnit } = gridUnits(canvas);
+    const { xUnit, yUnit } = gridUnits(editorBox.w || canvas.width, editorBox.h || canvas.height);
     const snapNode = (o: LayoutObject, parentAbs: FracRect, ancestorLocked: boolean): LayoutObject => {
       if (ancestorLocked || o.locked) return o; // respect locks
       const abs = composeRect(parentAbs, { x: o.x, y: o.y, w: o.w, h: o.h });
@@ -906,7 +942,7 @@ export function LayoutEditor({
     } else {
       const o = makeObject(type, zTop + 1);
       // Snap a new top-level object onto the square grid so its edges land on lines.
-      const sn = snapRectToGrid({ x: o.x, y: o.y, w: o.w, h: o.h }, CANVAS_FRAC, canvas, true);
+      const sn = snapRectToGrid({ x: o.x, y: o.y, w: o.w, h: o.h }, CANVAS_FRAC, editorBox.w || canvas.width, editorBox.h || canvas.height, true);
       setObjects((prev) => [...prev, { ...o, ...sn }]);
       setSelectedId(o.id);
     }
@@ -921,7 +957,7 @@ export function LayoutEditor({
       const p = getParentOf(objects, id);
       if (p) forEachWithRect(objects, (n) => { if (n.o.id === p.id) pAbs = n.abs; });
     }
-    const sn = snapRectToGrid({ x: o.x, y: o.y, w: o.w, h: o.h }, pAbs, canvas, true);
+    const sn = snapRectToGrid({ x: o.x, y: o.y, w: o.w, h: o.h }, pAbs, editorBox.w || canvas.width, editorBox.h || canvas.height, true);
     pushHistory();
     update(id, sn);
   }
@@ -1071,6 +1107,17 @@ export function LayoutEditor({
             )}
           </SelectContent>
         </Select>
+        {/* Custom canvas size */}
+        <div className="flex items-center gap-1" title="Custom canvas size (design width × height)">
+          <NumberField value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
+          <span className="text-caption2 text-gray-9">×</span>
+          <NumberField value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
+        </div>
+        {/* Fit: letterbox the design aspect, or fill the whole window. */}
+        <ButtonGroup>
+          <Button variant={canvas.fit !== "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "contain" }); setDirty(true); }} title="Letterbox: keep the design aspect (adds bars on mismatched screens)">Letterbox</Button>
+          <Button variant={canvas.fit === "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "fill" }); setDirty(true); }} title="Fill: use the whole window; objects reflow to its shape (no bars)">Fill</Button>
+        </ButtonGroup>
         <Button variant="filled" size="small" onClick={undo} disabled={history.length === 0}>
           <UndoIcon className="size-3.5" /> Undo
         </Button>
@@ -1136,6 +1183,7 @@ export function LayoutEditor({
               onGeom={onGeom}
               onCommitStart={pushHistory}
               onReparent={reparentIntoContainer}
+              onBoxSize={handleBoxSize}
             />
           ) : (
             <div className="w-full h-full rounded-xl border border-gray-a4 flex items-center justify-center text-gray-7">

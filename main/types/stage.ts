@@ -124,6 +124,13 @@ export interface LayoutCanvas {
   height: number;
   /** Solid background behind all objects (under NDI). "#rrggbb[aa]" or null. */
   background?: string | null;
+  /**
+   * How the layout fits its display/editor area:
+   * - "contain" (default): letterbox the design aspect (bars on mismatched screens).
+   * - "fill": fill the whole window — objects (fractional) reflow to the window's
+   *   shape, fonts scale by window height; no bars, no distortion.
+   */
+  fit?: "contain" | "fill";
 }
 
 export type LayoutHAlign = "left" | "center" | "right";

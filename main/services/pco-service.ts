@@ -198,9 +198,16 @@ class PcoService {
     if (response.status === 401) {
       throw new Error("PCO auth failed — check App ID/Secret in Integrations settings");
     }
+    if (response.status === 403) {
+      // Almost always: no Live session is actually running for this plan, or the
+      // connected Planning Center account isn't a permitted Live controller.
+      throw new Error(
+        "Can't control PCO Live — start a Live session for this plan in Planning Center, and make sure the connected account can control Live for this service type.",
+      );
+    }
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`PCO live control error ${response.status}: ${body || response.statusText}`);
+      throw new Error(`PCO live control failed (${response.status}). ${response.statusText || body}`);
     }
   }
 

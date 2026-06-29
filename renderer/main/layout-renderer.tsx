@@ -802,12 +802,16 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // the observer attaches when the canvas mounts (after the loading guard).
   const [box, setBox] = useState<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
+  const [dims, setDims] = useState({ w: 0, h: 0 });
   useEffect(() => {
     if (!box) return;
     const measure = () => {
       const cw = box.clientWidth;
       const ch = box.clientHeight;
-      if (cw > 0 && ch > 0) setScale(Math.min(cw / layout.canvas.width, ch / layout.canvas.height));
+      if (cw > 0 && ch > 0) {
+        setScale(Math.min(cw / layout.canvas.width, ch / layout.canvas.height));
+        setDims({ w: cw, h: ch });
+      }
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -831,7 +835,12 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   }
 
   const { canvas } = layout;
-  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, planItems, transcript, spl, obs, osc, now, skewMs, ndiSource, H: canvas.height, interactive };
+  // "fill": objects (fractional) reflow to fill the whole window — no letterbox.
+  // Fonts (fractions of canvas HEIGHT) scale by the live window height so they grow
+  // with the window instead of the design canvas.
+  const fill = canvas.fit === "fill";
+  const H = fill ? dims.h || canvas.height : canvas.height;
+  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, planItems, transcript, spl, obs, osc, now, skewMs, ndiSource, H, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom
@@ -843,15 +852,23 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   return (
     <div ref={setBox} className="relative w-full h-full kiosk-surface overflow-hidden flex items-center justify-center">
       <div
-        style={{
-          width: canvas.width,
-          height: canvas.height,
-          background: inheritSurface ? "transparent" : bg,
-          transform: `scale(${scale})`,
-          transformOrigin: "center center",
-          position: "relative",
-          flexShrink: 0,
-        }}
+        style={
+          fill
+            ? {
+                position: "absolute",
+                inset: 0,
+                background: inheritSurface ? "transparent" : bg,
+              }
+            : {
+                width: canvas.width,
+                height: canvas.height,
+                background: inheritSurface ? "transparent" : bg,
+                transform: `scale(${scale})`,
+                transformOrigin: "center center",
+                position: "relative",
+                flexShrink: 0,
+              }
+        }
       >
         {objects.map((o) => (
           <RenderObject key={o.id} o={o} ctx={ctx} />
