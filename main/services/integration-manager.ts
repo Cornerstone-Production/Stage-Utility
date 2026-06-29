@@ -3,7 +3,8 @@
 // secrets via secretsStore; broadcasts "integrations:state-changed".
 
 import type { IntegrationDescriptor, IntegrationState } from "../types/integrations.js";
-import { broadcast } from "./broadcaster.js";
+import type { PeopleCountDTO } from "../types/stage.js";
+import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
 import { oscManager } from "./osc-manager.js";
 import { prodcomService } from "./prodcom-service.js";
@@ -13,6 +14,7 @@ import { type SenSourceConfig, sensourceService } from "./sensource-service.js";
 import { settingsStore } from "./settings-store.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
+import { type TslFeed, tslService } from "./tsl-service.js";
 import { wirelessManager } from "./wireless-manager.js";
 
 // PCO integration descriptor.
@@ -214,6 +216,20 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+// Ross MultiViewer (TSL UMD) integration — pushes a people count to a Ross
+// multiviewer tile as on-tile text via TSL UMD 3.1 over TCP. Which count drives
+// which tile is configured as "feeds" (a custom panel), saved as non-secret
+// config; the descriptor schema carries just the switcher host + TSL port.
+const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
+  id: "ross-tsl",
+  kind: "control",
+  label: "Ross MultiViewer (TSL UMD)",
+  configSchema: [
+    { key: "host", label: "Switcher Host", type: "text", placeholder: "192.168.1.60" },
+    { key: "port", label: "TSL Port", type: "number", placeholder: "(TSL UMD input port on the Ross)" },
+  ],
+};
+
 const DESCRIPTORS: IntegrationDescriptor[] = [
   PCO_DESCRIPTOR,
   WIRELESS_DESCRIPTOR,
@@ -224,6 +240,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   OBS_DESCRIPTOR,
   OSC_DESCRIPTOR,
   SENSOURCE_DESCRIPTOR,
+  ROSS_TSL_DESCRIPTOR,
 ];
 
 // Keys that are secrets for each integration id.
@@ -236,6 +253,7 @@ const SECRET_KEYS: Record<string, string[]> = {
   smaart: ["password"],
   obs: ["password"],
   sensource: ["clientSecret", "apiToken"],
+  "ross-tsl": [],
 };
 
 class IntegrationManager {
@@ -292,6 +310,12 @@ class IntegrationManager {
     this.refreshOscSummary();
     // Start the SenSource Vea poller if it's enabled + has credentials.
     await this.applySensource();
+    // Forward live people counts to the Ross TSL sender (it ignores them when
+    // disconnected), then start it if enabled + configured.
+    addBroadcastListener((channel, payload) => {
+      if (channel === "people:count") tslService.onPeopleCount(payload as PeopleCountDTO);
+    });
+    await this.applyRossTsl();
 
     console.log("[integration-manager] init complete", {
       integrations: Array.from(this.states.keys()),
@@ -415,6 +439,10 @@ class IntegrationManager {
       await this.applySensource();
     }
 
+    if (id === "ross-tsl") {
+      await this.applyRossTsl();
+    }
+
     this.broadcastStates();
     return this.states.get(id)!;
   }
@@ -459,6 +487,10 @@ class IntegrationManager {
 
     if (id === "sensource") {
       await this.applySensource();
+    }
+
+    if (id === "ross-tsl") {
+      await this.applyRossTsl();
     }
 
     this.broadcastStates();
@@ -566,6 +598,17 @@ class IntegrationManager {
         }
         const result = await sensourceService.test(cfg);
         this.setConnectionState("sensource", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "ross-tsl") {
+        const { host, port } = this.getRossTslConfig();
+        if (!host || !port) {
+          return { ok: false, message: "Switcher Host and TSL Port are required" };
+        }
+        const result = await tslService.test(host, port);
+        this.setConnectionState("ross-tsl", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
         return result;
       }
@@ -790,6 +833,39 @@ class IntegrationManager {
     } else {
       sensourceService.stop();
       this.setConnectionState("sensource", "disconnected", null);
+    }
+  }
+
+  /** Resolve the Ross TSL config (host/port + the feed→display-index mappings). */
+  private getRossTslConfig(): { host: string | null; port: number | null; feeds: TslFeed[] } {
+    const cfg = this.states.get("ross-tsl")?.config ?? {};
+    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
+    const rawPort = cfg.port;
+    const port =
+      typeof rawPort === "number"
+        ? rawPort
+        : typeof rawPort === "string" && rawPort.trim()
+          ? parseInt(rawPort, 10)
+          : NaN;
+    const feeds = Array.isArray(cfg.feeds) ? (cfg.feeds as TslFeed[]) : [];
+    return { host, port: Number.isFinite(port) && port > 0 ? port : null, feeds };
+  }
+
+  /** Start/stop the Ross TSL sender to match enabled + configured state. */
+  private async applyRossTsl(): Promise<void> {
+    tslService.setConnectionListener((state, message) => {
+      this.setConnectionState("ross-tsl", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("ross-tsl")?.enabled ?? false;
+    const { host, port, feeds } = this.getRossTslConfig();
+    if (enabled && host && port) {
+      this.setConnectionState("ross-tsl", "connecting", `Connecting ${host}:${port}`);
+      tslService.configure(host, port, feeds);
+    } else {
+      tslService.stop();
+      this.setConnectionState("ross-tsl", "disconnected", null);
     }
   }
 
