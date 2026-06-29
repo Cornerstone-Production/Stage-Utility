@@ -258,6 +258,10 @@ class ProPresenterService {
     }
     this.activeUuid = null;
     this.slideIdxZero = null;
+    // Drop the playlist-items cache too, so a reconnect to a different (or edited)
+    // service can't leak a stale "next item" from the previous playlist.
+    this.playlistUuid = null;
+    this.playlistItems = [];
     if (this.last.connected) this.emit(OFFLINE);
   }
 

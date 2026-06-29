@@ -46,6 +46,36 @@ interface CacheEntry<T> {
   expiresAt: number;
 }
 
+/** A plan's "service" plan_time — one per service occurrence (e.g. 9am, 11am). */
+interface ServiceTime {
+  id: string;
+  startsAt: string;
+  endsAt: string | null;
+}
+
+/**
+ * Current + next item titles from the PLAN order (the authoritative rundown),
+ * given the live item id. "next" skips header rows; with no live item yet it's the
+ * first non-header item. Drives the Current/Next display blocks from PCO, so an
+ * off-plan ProPresenter playlist can't leak an item that isn't in today's plan.
+ */
+export function resolvePlanCurrentNext(
+  items: PlanItemDTO[],
+  currentItemId: string | null,
+): { currentItemTitle: string | null; nextItemTitle: string | null } {
+  if (items.length === 0) return { currentItemTitle: null, nextItemTitle: null };
+  const idx = currentItemId ? items.findIndex((i) => i.id === currentItemId) : -1;
+  const current = idx >= 0 ? items[idx] : null;
+  let next: PlanItemDTO | null = null;
+  for (let i = idx + 1; i < items.length; i++) {
+    if (items[i].itemType !== "header") {
+      next = items[i];
+      break;
+    }
+  }
+  return { currentItemTitle: current?.title ?? null, nextItemTitle: next?.title ?? null };
+}
+
 // Generic JSON:API node from PCO
 interface PcoNode {
   id: string;
@@ -641,6 +671,15 @@ class PcoService {
     const live = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
     const included = json.included ?? [];
 
+    // The chosen "service" plan_time occurrence (e.g. 9am vs 11am). Resolved in
+    // EVERY mode (cached LONG) so it can (a) supply the pre-service countdown target
+    // and (b) let SPL history separate back-to-back services that share one plan.
+    const serviceTime = this.pickServiceTime(
+      await this.getServiceTimes(appId, secret, serviceTypeId, planId),
+    );
+    const serviceTimeId = serviceTime?.id ?? null;
+    const serviceTimeStartsAt = serviceTime?.startsAt ?? null;
+
     // ── "item" mode: a plan item is currently live. ──
     // (current_item_time must resolve to one of THIS plan's items — its item is in
     // the `items` include. A session whose item isn't ours, or no session at all,
@@ -653,6 +692,12 @@ class PcoService {
     const itemId = itemRef && !Array.isArray(itemRef) ? itemRef.id : null;
     const itemNode =
       itemId ? included.find((n) => n.type === "Item" && n.id === itemId) : null;
+
+    // Current/next item titles follow the PCO PLAN order (authoritative), not the
+    // ProPresenter playlist — so an off-plan presentation can't leak a wrong "next".
+    // listPlanItems is cached, so this is essentially free on most live ticks.
+    const planItems = await this.listPlanItems(appId, secret, serviceTypeId, planId).catch(() => []);
+    const { currentItemTitle, nextItemTitle } = resolvePlanCurrentNext(planItems, itemId);
 
     if (it && typeof liveStartAt === "string" && liveStartAt && itemNode) {
       // "Full Item Length" = the *plan item's* length (ItemTime.length is often 0)
@@ -670,24 +715,43 @@ class PcoService {
         liveStartAt,
         targetAt: null,
         serverNow,
+        currentItemTitle,
+        nextItemTitle,
+        serviceTimeId,
+        serviceTimeStartsAt,
       };
     }
 
     // ── "preservice" mode: count down to the service start (PCO's pre-service timer). ──
-    const startAt = await this.getServiceStart(appId, secret, serviceTypeId, planId);
-    if (startAt) {
+    if (serviceTimeStartsAt) {
       return {
         mode: "preservice",
         currentItemId: null,
         label: "Service starts",
         lengthSec: null,
         liveStartAt: null,
-        targetAt: startAt,
+        targetAt: serviceTimeStartsAt,
         serverNow,
+        currentItemTitle,
+        nextItemTitle,
+        serviceTimeId,
+        serviceTimeStartsAt,
       };
     }
 
-    return { mode: "none", currentItemId: null, label: null, lengthSec: null, liveStartAt: null, targetAt: null, serverNow };
+    return {
+      mode: "none",
+      currentItemId: null,
+      label: null,
+      lengthSec: null,
+      liveStartAt: null,
+      targetAt: null,
+      serverNow,
+      currentItemTitle,
+      nextItemTitle,
+      serviceTimeId,
+      serviceTimeStartsAt,
+    };
   }
 
   /**
@@ -701,9 +765,9 @@ class PcoService {
     secret: string,
     serviceTypeId: string,
     planId: string,
-  ): Promise<{ startsAt: string; endsAt: string | null }[]> {
+  ): Promise<ServiceTime[]> {
     const cacheKey = `plan-times:${planId}`;
-    const cached = this.cacheGet<{ startsAt: string; endsAt: string | null }[]>(cacheKey);
+    const cached = this.cacheGet<ServiceTime[]>(cacheKey);
     if (cached) return cached;
 
     const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times`;
@@ -712,10 +776,11 @@ class PcoService {
     const services = times
       .filter((t) => t.attributes.time_type === "service")
       .map((t) => ({
+        id: t.id,
         startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
         endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
       }))
-      .filter((t): t is { startsAt: string; endsAt: string | null } => !!t.startsAt);
+      .filter((t): t is ServiceTime => !!t.startsAt);
 
     this.cacheSet(cacheKey, services, TTL_LONG_MS);
     return services;
@@ -723,25 +788,12 @@ class PcoService {
 
   /** Choose the relevant "service" time: the soonest whose end is still in the
    *  future, else the latest. (Same selection start + end always shared.) */
-  private pickServiceTime(
-    services: { startsAt: string; endsAt: string | null }[],
-  ): { startsAt: string; endsAt: string | null } | null {
+  private pickServiceTime(services: ServiceTime[]): ServiceTime | null {
     const now = Date.now();
     const upcoming = services
       .filter((t) => (t.endsAt ? Date.parse(t.endsAt) > now : true))
       .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
     return upcoming ?? services.slice().sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt))[0] ?? null;
-  }
-
-  /** The plan's service start time (ISO) for the pre-service countdown. */
-  private async getServiceStart(
-    appId: string,
-    secret: string,
-    serviceTypeId: string,
-    planId: string,
-  ): Promise<string | null> {
-    const chosen = this.pickServiceTime(await this.getServiceTimes(appId, secret, serviceTypeId, planId));
-    return chosen?.startsAt ?? null;
   }
 
   /** The current plan's service END time (ISO) — used by auto-mode rollover. */

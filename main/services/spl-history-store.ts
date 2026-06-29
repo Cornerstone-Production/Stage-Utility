@@ -1,9 +1,11 @@
 // spl-history-store.ts — Persists per-item SPL recordings, one record per service
-// occurrence, keyed by `${serviceTypeId}:${planId}:${YYYY-MM-DD}`. Backed by the
-// generic DataStore (spl-history.json in the data dir).
+// occurrence, keyed by `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`
+// (the service-time id separates back-to-back services that share one plan). Backed
+// by the generic DataStore (spl-history.json in the data dir).
 
 import type { ServiceSplHistory } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+import { settingsStore } from "./settings-store.js";
 
 interface SplHistoryFile {
   services: Record<string, ServiceSplHistory>;
@@ -30,6 +32,18 @@ class SplHistoryStore {
     await this.store.update((file) => ({
       services: { ...file.services, [record.serviceKey]: record },
     }));
+  }
+
+  /** Smaart metric keys the History tab should surface (empty = auto default). */
+  async getVisibleMetrics(): Promise<string[]> {
+    const s = await settingsStore.get();
+    return s.splVisibleMetrics ?? [];
+  }
+
+  async setVisibleMetrics(metrics: string[]): Promise<string[]> {
+    const clean = metrics.filter((m): m is string => typeof m === "string");
+    await settingsStore.patch({ splVisibleMetrics: clean });
+    return clean;
   }
 }
 

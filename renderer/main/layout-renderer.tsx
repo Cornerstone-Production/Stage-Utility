@@ -152,9 +152,11 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "next-slide-text":
       return span(ctx.propresenter?.nextSlideText ?? ctx.propresenter?.nextItem ?? "");
     case "current-service-item":
-      return span(ctx.propresenter?.currentServiceItem ?? "");
+      // Follow the PCO plan order (authoritative); fall back to ProPresenter's
+      // active playlist only when PCO has no current item.
+      return span(ctx.pcoLive?.currentItemTitle ?? ctx.propresenter?.currentServiceItem ?? "");
     case "next-service-item":
-      return span(ctx.propresenter?.nextServiceItem ?? "");
+      return span(ctx.pcoLive?.nextItemTitle ?? ctx.propresenter?.nextServiceItem ?? "");
     case "current-slide-notes":
       return span(ctx.propresenter?.currentNotes ?? "");
     case "section-chip": {

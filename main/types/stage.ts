@@ -314,6 +314,14 @@ export interface PcoLiveDTO {
   targetAt: string | null;
   /** Server clock at send time (ISO) so the client can correct for skew. */
   serverNow: string;
+  /** Current item title from the PCO PLAN order (authoritative), or null. */
+  currentItemTitle: string | null;
+  /** Next non-header item title from the PCO PLAN order, or null. */
+  nextItemTitle: string | null;
+  /** PCO "service" plan_time id for this occurrence (9am vs 11am) — keys SPL recording. */
+  serviceTimeId: string | null;
+  /** ISO start of the chosen service occurrence (also the preservice target). */
+  serviceTimeStartsAt: string | null;
 }
 
 /** Live ProPresenter status (pushed on "propresenter:status"). */
@@ -378,15 +386,27 @@ export interface ObsStatusDTO {
   recordTimecode: string | null;
 }
 
+/** Running max/mean of one Smaart metric over an item (e.g. "LAeq 10"). */
+export interface SplMetricStat {
+  max: number | null;
+  avg: number | null;
+  count: number;
+}
+
 /** Per-item recorded SPL across one service. */
 export interface SplItemHistory {
   itemId: string;
   title: string;
   /** Order within the service (incrementing as items go live). */
   sequence: number;
-  /** Peak recorded value of the chosen metric (dB), or null if never sampled. */
+  /**
+   * Per-metric max/mean for EVERY metric the meter reported (peak, LAeq, LCeq, …),
+   * keyed by Smaart metric name. The History tab chooses which to surface.
+   */
+  metrics: Record<string, SplMetricStat>;
+  /** Legacy single-metric peak (dB) — kept populated for back-compat reads. */
   maxSpl: number | null;
-  /** Running mean of the chosen metric (dB), or null if never sampled. */
+  /** Legacy single-metric running mean (dB) — kept populated for back-compat reads. */
   avgSpl: number | null;
   sampleCount: number;
   startedAt: string;
@@ -395,7 +415,7 @@ export interface SplItemHistory {
 
 /** SPL recording for one service occurrence, keyed by serviceKey. */
 export interface ServiceSplHistory {
-  /** `${serviceTypeId}:${planId}:${YYYY-MM-DD}`. */
+  /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */
   serviceKey: string;
   serviceTypeId: string | null;
   planId: string | null;
@@ -403,8 +423,13 @@ export interface ServiceSplHistory {
   seriesTitle: string | null;
   /** Local date the recording started (YYYY-MM-DD). */
   serviceDate: string;
-  /** Which Smaart meter + metric the levels were recorded from. */
+  /** PCO "service" plan_time id for this occurrence (null when unknown). */
+  serviceTimeId: string | null;
+  /** ISO start of this service occurrence (for the title, e.g. "9:00 AM"). */
+  serviceTimeStartsAt: string | null;
+  /** Which Smaart meter the levels were recorded from. */
   meterId: string | null;
+  /** Legacy "primary" metric key (first preferred) — for back-compat display. */
   metricKey: string | null;
   startedAt: string;
   endedAt: string | null;

@@ -56,6 +56,8 @@ export interface SettingsData {
   autoUpdate: { enabled: boolean; dayOfWeek: number | null; hour: number };
   /** Local UDP port the OSC integration listens on for device feedback. */
   oscFeedbackPort: number;
+  /** Smaart metric keys to surface in the SPL History tab (empty = auto default). */
+  splVisibleMetrics: string[];
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -87,6 +89,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   captionChannelColors: {},
   autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
   oscFeedbackPort: 9000,
+  splVisibleMetrics: [],
 };
 
 const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS);

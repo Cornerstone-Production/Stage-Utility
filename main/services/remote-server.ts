@@ -423,6 +423,16 @@ export class RemoteServer {
       json(res, await splHistoryStore.list());
       return;
     }
+    if (method === "GET" && pathname === "/api/spl/visible-metrics") {
+      json(res, { metrics: await splHistoryStore.getVisibleMetrics() });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/spl/visible-metrics") {
+      const body = (await readBody(req)) as Record<string, unknown>;
+      const metrics = Array.isArray(body.metrics) ? (body.metrics as unknown[]) : [];
+      json(res, { metrics: await splHistoryStore.setVisibleMetrics(metrics as string[]) });
+      return;
+    }
     {
       const histMatch = pathname.match(/^\/api\/spl\/history\/([^/]+)$/);
       if (method === "GET" && histMatch && histMatch[1] !== "current") {

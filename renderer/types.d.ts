@@ -91,10 +91,17 @@ interface OscFeedbackDTO {
   values: Record<string, number | string | boolean>;
 }
 
+interface SplMetricStat {
+  max: number | null;
+  avg: number | null;
+  count: number;
+}
+
 interface SplItemHistory {
   itemId: string;
   title: string;
   sequence: number;
+  metrics: Record<string, SplMetricStat>;
   maxSpl: number | null;
   avgSpl: number | null;
   sampleCount: number;
@@ -109,6 +116,8 @@ interface ServiceSplHistory {
   planTitle: string | null;
   seriesTitle: string | null;
   serviceDate: string;
+  serviceTimeId: string | null;
+  serviceTimeStartsAt: string | null;
   meterId: string | null;
   metricKey: string | null;
   startedAt: string;
@@ -420,6 +429,10 @@ interface PcoLiveDTO {
   liveStartAt: string | null;
   targetAt: string | null;
   serverNow: string;
+  currentItemTitle: string | null;
+  nextItemTitle: string | null;
+  serviceTimeId: string | null;
+  serviceTimeStartsAt: string | null;
 }
 
 /** Live ProPresenter status (SSE "propresenter:status"). */

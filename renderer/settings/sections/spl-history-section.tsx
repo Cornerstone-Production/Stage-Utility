@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Loader2Icon } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
 
@@ -9,19 +9,73 @@ function fmtDate(iso: string): string {
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 }
 
+function fmtTime(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+/** A YYYY-MM-DD day label (local), for grouping/navigating recorded services. */
+function fmtDay(day: string): string {
+  const d = new Date(`${day}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return day;
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+}
+
+/** Per-metric stat for an item, with legacy single-metric fallback. */
+function metricStat(item: SplItemHistory, key: string, record: ServiceSplHistory): SplMetricStat | null {
+  const m = item.metrics?.[key];
+  if (m) return m;
+  // Legacy records stored a single metric in maxSpl/avgSpl under record.metricKey.
+  if (record.metricKey === key) return { max: item.maxSpl, avg: item.avgSpl, count: item.sampleCount };
+  return null;
+}
+
+/** Highest value of one metric across a whole service. */
+function serviceMetricMax(s: ServiceSplHistory, key: string): number | null {
+  let m: number | null = null;
+  for (const it of s.items) {
+    const st = metricStat(it, key, s);
+    if (st?.max != null) m = m == null ? st.max : Math.max(m, st.max);
+  }
+  return m;
+}
+
+/** When the user hasn't chosen, show a sensible default: an SPL metric + an LAeq metric. */
+function defaultVisible(keys: string[]): string[] {
+  const out: string[] = [];
+  const spl = keys.find((k) => /spl/i.test(k));
+  const laeq = keys.find((k) => /laeq/i.test(k));
+  if (spl) out.push(spl);
+  if (laeq && laeq !== spl) out.push(laeq);
+  return out.length ? out : keys.slice(0, 2);
+}
+
+function dB(v: number | null): string {
+  return v == null ? "—" : `${Math.round(v)} dB`;
+}
+
 /**
- * SPL History — browse past services and their recorded per-item max/avg SPL.
- * Read-only and PCO-free (item titles were snapshotted into each record).
+ * SPL History — browse past services and their recorded per-item levels. Every
+ * Smaart metric is recorded; the operator chooses which to surface here. Services
+ * are grouped by day with prev/next-day navigation, and back-to-back services on
+ * one day are kept separate (one record per PCO service-time occurrence).
  */
 export function SplHistorySection() {
   const [list, setList] = useState<ServiceSplHistory[] | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<ServiceSplHistory | null>(null);
+  const [visible, setVisible] = useState<string[]>([]);
+  const [day, setDay] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<ServiceSplHistory[]>("spl:listHistory")
       .then((l) => setList(l))
       .catch(() => setList([]));
+    invoke<{ metrics: string[] }>("spl:getVisibleMetrics")
+      .then((r) => setVisible(r.metrics ?? []))
+      .catch(() => setVisible([]));
   }, []);
 
   useEffect(() => {
@@ -31,21 +85,59 @@ export function SplHistorySection() {
     }
     let cancelled = false;
     invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: selectedKey })
-      .then((d) => {
-        if (!cancelled) setDetail(d);
-      })
-      .catch(() => {
-        if (!cancelled) setDetail(null);
-      });
+      .then((d) => !cancelled && setDetail(d))
+      .catch(() => !cancelled && setDetail(null));
     return () => {
       cancelled = true;
     };
   }, [selectedKey]);
 
+  // All metric keys ever recorded — drives the surface-these picker.
+  const allKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const s of list ?? []) {
+      for (const it of s.items) if (it.metrics) for (const k of Object.keys(it.metrics)) keys.add(k);
+      if (s.metricKey) keys.add(s.metricKey);
+    }
+    return Array.from(keys).sort();
+  }, [list]);
+
+  const shownMetrics = useMemo(() => {
+    const filtered = visible.filter((k) => allKeys.includes(k));
+    return filtered.length ? filtered : defaultVisible(allKeys);
+  }, [visible, allKeys]);
+
+  // Days that have recordings, newest first — for the date navigator.
+  const days = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of list ?? []) set.add(s.serviceDate);
+    return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
+  }, [list]);
+
+  useEffect(() => {
+    if (day == null && days.length > 0) setDay(days[0]);
+  }, [days, day]);
+
+  const dayServices = useMemo(
+    () => (list ?? []).filter((s) => s.serviceDate === day),
+    [list, day],
+  );
+
   const items = useMemo(
     () => (detail?.items ?? []).slice().sort((a, b) => a.sequence - b.sequence),
     [detail],
   );
+
+  async function toggleMetric(key: string) {
+    const base = shownMetrics;
+    const next = base.includes(key) ? base.filter((k) => k !== key) : [...base, key];
+    setVisible(next);
+    try {
+      await invoke("spl:setVisibleMetrics", { metrics: next });
+    } catch {
+      /* best-effort persist */
+    }
+  }
 
   if (list === null) {
     return (
@@ -67,6 +159,7 @@ export function SplHistorySection() {
     );
   }
 
+  // ── Detail view: one service, per-item levels for each surfaced metric. ──
   if (detail) {
     return (
       <div className="flex flex-col gap-4">
@@ -81,41 +174,80 @@ export function SplHistorySection() {
           <span className="text-caption1 text-gray-9">
             {detail.seriesTitle ? `${detail.seriesTitle} · ` : ""}
             {fmtDate(detail.startedAt)}
-            {detail.metricKey ? ` · ${detail.metricKey}` : ""}
+            {fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt)
+              ? ` · ${fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt)}`
+              : ""}
           </span>
         </div>
-        <table className="w-full border-collapse text-caption1">
-          <thead className="text-gray-9 text-left border-b border-gray-5">
-            <tr>
-              <th className="py-1.5 pr-3 font-medium">Item</th>
-              <th className="py-1.5 px-3 font-medium text-right w-24">Max</th>
-              <th className="py-1.5 pl-3 font-medium text-right w-24">Avg</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((it) => (
-              <tr key={it.itemId} className="border-b border-gray-4">
-                <td className="py-1.5 pr-3 text-gray-12">{it.title || "Untitled"}</td>
-                <td className="py-1.5 px-3 text-right tabular-nums text-gray-12">
-                  {it.maxSpl != null ? `${Math.round(it.maxSpl)} dB` : "—"}
-                </td>
-                <td className="py-1.5 pl-3 text-right tabular-nums text-gray-10">
-                  {it.avgSpl != null ? `${Math.round(it.avgSpl)} dB` : "—"}
-                </td>
+        <MetricPicker allKeys={allKeys} shown={shownMetrics} onToggle={toggleMetric} />
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-caption1">
+            <thead className="text-gray-9 text-left border-b border-gray-5">
+              <tr>
+                <th className="py-1.5 pr-3 font-medium">Item</th>
+                {shownMetrics.map((k) => (
+                  <th key={k} className="py-1.5 px-3 font-medium text-right whitespace-nowrap" colSpan={2}>
+                    {k}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+              <tr className="text-gray-8">
+                <th />
+                {shownMetrics.map((k) => (
+                  <Fragment key={k}>
+                    <th className="py-1 px-3 font-normal text-right w-20">Max</th>
+                    <th className="py-1 px-3 font-normal text-right w-20">Avg</th>
+                  </Fragment>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it) => (
+                <tr key={it.itemId} className="border-b border-gray-4">
+                  <td className="py-1.5 pr-3 text-gray-12 whitespace-nowrap">{it.title || "Untitled"}</td>
+                  {shownMetrics.map((k) => {
+                    const st = metricStat(it, k, detail);
+                    return (
+                      <FragmentCells key={k} max={st?.max ?? null} avg={st?.avg ?? null} />
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   }
 
+  // ── List view: services for the selected day, with day navigation. ──
+  const dayIdx = day ? days.indexOf(day) : -1;
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-caption1 text-gray-9 mb-1">Past services with recorded SPL. Select one to view per-item levels.</p>
-      {list.map((s) => {
-        const peak = s.items.reduce<number | null>((m, it) => (it.maxSpl == null ? m : m == null ? it.maxSpl : Math.max(m, it.maxSpl)), null);
-        return (
+    <div className="flex flex-col gap-3">
+      <MetricPicker allKeys={allKeys} shown={shownMetrics} onToggle={toggleMetric} />
+
+      <div className="flex items-center justify-between gap-2">
+        <button
+          className="rounded-md border border-gray-5 p-1.5 text-gray-11 enabled:hover:bg-gray-3 disabled:opacity-40"
+          disabled={dayIdx < 0 || dayIdx >= days.length - 1}
+          onClick={() => setDay(days[dayIdx + 1])}
+          aria-label="Earlier day"
+        >
+          <ChevronLeftIcon className="size-4" />
+        </button>
+        <span className="text-body font-medium text-gray-12">{day ? fmtDay(day) : "—"}</span>
+        <button
+          className="rounded-md border border-gray-5 p-1.5 text-gray-11 enabled:hover:bg-gray-3 disabled:opacity-40"
+          disabled={dayIdx <= 0}
+          onClick={() => setDay(days[dayIdx - 1])}
+          aria-label="Later day"
+        >
+          <ChevronRightIcon className="size-4" />
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {dayServices.map((s) => (
           <button
             key={s.serviceKey}
             className="flex items-center justify-between gap-3 rounded-lg border border-gray-5 bg-gray-2 px-3 py-2.5 text-left hover:bg-gray-3 transition-colors"
@@ -124,15 +256,72 @@ export function SplHistorySection() {
             <div className="flex flex-col min-w-0">
               <span className="text-body font-medium text-gray-12 truncate">{s.planTitle ?? s.serviceKey}</span>
               <span className="text-caption2 text-gray-9 truncate">
-                {s.seriesTitle ? `${s.seriesTitle} · ` : ""}{fmtDate(s.startedAt)} · {s.items.length} items
+                {fmtTime(s.serviceTimeStartsAt ?? s.startedAt) ? `${fmtTime(s.serviceTimeStartsAt ?? s.startedAt)} · ` : ""}
+                {s.seriesTitle ? `${s.seriesTitle} · ` : ""}
+                {s.items.length} items
               </span>
             </div>
-            <span className="shrink-0 tabular-nums text-caption1 text-gray-11">
-              {peak != null ? `peak ${Math.round(peak)} dB` : "—"}
+            <span className="shrink-0 tabular-nums text-caption1 text-gray-11 text-right">
+              {shownMetrics.map((k) => {
+                const v = serviceMetricMax(s, k);
+                return v == null ? null : (
+                  <span key={k} className="ml-3 whitespace-nowrap">
+                    <span className="text-gray-9">{k} </span>
+                    {Math.round(v)}
+                  </span>
+                );
+              })}
             </span>
           </button>
-        );
-      })}
+        ))}
+        {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
+      </div>
+    </div>
+  );
+}
+
+/** Two right-aligned dB cells (Max, Avg) for one metric. */
+function FragmentCells({ max, avg }: { max: number | null; avg: number | null }) {
+  return (
+    <>
+      <td className="py-1.5 px-3 text-right tabular-nums text-gray-12">{dB(max)}</td>
+      <td className="py-1.5 px-3 text-right tabular-nums text-gray-10">{dB(avg)}</td>
+    </>
+  );
+}
+
+/** Toggle chips for which metrics to surface. */
+function MetricPicker({
+  allKeys,
+  shown,
+  onToggle,
+}: {
+  allKeys: string[];
+  shown: string[];
+  onToggle: (key: string) => void;
+}) {
+  if (allKeys.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-caption2 text-gray-9">Show metrics</span>
+      <div className="flex flex-wrap gap-1.5">
+        {allKeys.map((k) => {
+          const on = shown.includes(k);
+          return (
+            <button
+              key={k}
+              onClick={() => onToggle(k)}
+              className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${
+                on
+                  ? "border-blue-7 bg-blue-3 text-blue-11"
+                  : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"
+              }`}
+            >
+              {k}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -7,9 +7,12 @@ export interface PcoTimer {
   mode: "item" | "preservice";
   /** Item title, or "Service starts". */
   label: string | null;
-  /** Seconds remaining; negative when over (item) or once the start passes. */
+  /** Seconds remaining; negative when over (item) or once the start passes. When
+   *  `countUp`, this is elapsed seconds (positive, increasing) instead. */
   seconds: number;
   over: boolean;
+  /** True for a live item with no known length — `seconds` counts UP (elapsed). */
+  countUp: boolean;
 }
 
 /** Compute the live countdown. Returns null when there's nothing to count down. */
@@ -22,9 +25,15 @@ export function computePcoTimer(
   const serverNow = now + skewMs;
 
   if (pcoLive.mode === "item") {
-    if (pcoLive.lengthSec == null || !pcoLive.liveStartAt) return null;
-    const remaining = pcoLive.lengthSec - (serverNow - Date.parse(pcoLive.liveStartAt)) / 1000;
-    return { mode: "item", label: pcoLive.label, seconds: remaining, over: remaining < 0 };
+    if (!pcoLive.liveStartAt) return null;
+    const elapsed = (serverNow - Date.parse(pcoLive.liveStartAt)) / 1000;
+    if (pcoLive.lengthSec == null || pcoLive.lengthSec <= 0) {
+      // Live item with no set length (e.g. a pre-service item) — count UP elapsed so
+      // it still reads as live instead of reverting to the service-start countdown.
+      return { mode: "item", label: pcoLive.label, seconds: elapsed, over: false, countUp: true };
+    }
+    const remaining = pcoLive.lengthSec - elapsed;
+    return { mode: "item", label: pcoLive.label, seconds: remaining, over: remaining < 0, countUp: false };
   }
 
   // preservice
@@ -35,6 +44,7 @@ export function computePcoTimer(
     label: pcoLive.label ?? "Service starts",
     seconds: remaining,
     over: remaining < 0,
+    countUp: false,
   };
 }
 

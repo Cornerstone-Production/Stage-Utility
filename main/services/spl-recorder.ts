@@ -26,23 +26,21 @@ function todayLocal(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-interface Level {
+interface MeterSample {
   meterId: string;
-  metricKey: string;
-  value: number;
+  /** EVERY metric the first meter reported this tick (peak, LAeq, LCeq, …). */
+  metrics: Record<string, number>;
 }
 
-/** Pick a single level from the live SPL state (first meter, preferred metric). */
-function pickLevel(spl: SplMetricsDTO | null): Level | null {
+/** Grab the first meter's full metric set from the live SPL state. */
+function pickMeter(spl: SplMetricsDTO | null): MeterSample | null {
   if (!spl || !spl.connected) return null;
   const ids = Object.keys(spl.meters);
   if (ids.length === 0) return null;
   const id = ids[0];
   const meter = spl.meters[id];
-  const keys = Object.keys(meter.metrics);
-  if (keys.length === 0) return null;
-  const key = PREFERRED_METRICS.find((k) => k in meter.metrics) ?? keys[0];
-  return { meterId: id, metricKey: key, value: meter.metrics[key] };
+  if (!meter || Object.keys(meter.metrics).length === 0) return null;
+  return { meterId: id, metrics: meter.metrics };
 }
 
 class SplRecorder {
@@ -65,13 +63,13 @@ class SplRecorder {
     this.busy = true;
     try {
       if (live.mode === "item" && live.currentItemId) {
-        await this.ensureRecord();
+        await this.ensureRecord(live);
         if (!this.current) return;
         if (live.currentItemId !== this.lastItemId) {
           this.finalizePrevItem();
           this.lastItemId = live.currentItemId;
         }
-        this.recordSample(live.currentItemId, live.label, pickLevel(smaartService.getLatest()));
+        this.recordSample(live.currentItemId, live.label, pickMeter(smaartService.getLatest()));
         broadcast("spl:history", this.current);
         this.schedulePersist();
       }
@@ -82,12 +80,30 @@ class SplRecorder {
     }
   }
 
-  private async ensureRecord(): Promise<void> {
+  private async ensureRecord(live: PcoLiveDTO): Promise<void> {
     const st = stageController.getState();
     if (!st.serviceTypeId || !st.planId) return; // can't key a record yet
     const date = todayLocal();
-    const key = `${st.serviceTypeId}:${st.planId}:${date}`;
+    // Separate back-to-back services that share one plan by the PCO service-time
+    // occurrence (9am vs 11am). pickServiceTime flips to the next occurrence as one
+    // ends, which is exactly the boundary we want. Fall back to the date when no
+    // service time is known (keeps legacy keys stable).
+    const serviceTimeId = live.serviceTimeId;
+    const key = `${st.serviceTypeId}:${st.planId}:${serviceTimeId ?? date}`;
     if (this.currentKey === key && this.current) return;
+
+    // Guard a transient null serviceTimeId (cache miss / network blip) from
+    // splitting the open record mid-service: keep the current record when it's the
+    // same plan + date and we just lost the occasion id.
+    if (
+      serviceTimeId == null &&
+      this.current &&
+      this.current.serviceTypeId === st.serviceTypeId &&
+      this.current.planId === st.planId &&
+      this.current.serviceDate === date
+    ) {
+      return;
+    }
 
     // Key changed → finalize + persist the outgoing record.
     if (this.current) {
@@ -109,6 +125,8 @@ class SplRecorder {
         planTitle: st.planTitle,
         seriesTitle: st.planSeriesTitle ?? null,
         serviceDate: date,
+        serviceTimeId: serviceTimeId ?? null,
+        serviceTimeStartsAt: live.serviceTimeStartsAt,
         meterId: null,
         metricKey: null,
         startedAt: new Date().toISOString(),
@@ -121,7 +139,7 @@ class SplRecorder {
     this.lastItemId = null; // re-detect the live item on the next sample
   }
 
-  private recordSample(itemId: string, title: string | null, sample: Level | null): void {
+  private recordSample(itemId: string, title: string | null, sample: MeterSample | null): void {
     if (!this.current) return;
     let item = this.current.items.find((i) => i.itemId === itemId);
     if (!item) {
@@ -129,6 +147,7 @@ class SplRecorder {
         itemId,
         title: title ?? "",
         sequence: this.nextSequence++,
+        metrics: {},
         maxSpl: null,
         avgSpl: null,
         sampleCount: 0,
@@ -139,17 +158,34 @@ class SplRecorder {
     } else if (title && item.title !== title) {
       item.title = title;
     }
+    if (!item.metrics) item.metrics = {}; // resumed legacy record
 
     if (sample) {
       if (this.current.meterId == null) {
         this.current.meterId = sample.meterId;
-        this.current.metricKey = sample.metricKey;
+        this.current.metricKey =
+          PREFERRED_METRICS.find((k) => k in sample.metrics) ?? Object.keys(sample.metrics)[0] ?? null;
       }
-      const v = sample.value;
-      item.maxSpl = item.maxSpl == null ? v : Math.max(item.maxSpl, v);
-      item.avgSpl =
-        item.avgSpl == null ? v : (item.avgSpl * item.sampleCount + v) / (item.sampleCount + 1);
-      item.sampleCount += 1;
+      // Fold EVERY reported metric into its own running max/mean.
+      for (const [key, v] of Object.entries(sample.metrics)) {
+        let st = item.metrics[key];
+        if (!st) {
+          st = { max: null, avg: null, count: 0 };
+          item.metrics[key] = st;
+        }
+        st.max = st.max == null ? v : Math.max(st.max, v);
+        st.avg = st.avg == null ? v : (st.avg * st.count + v) / (st.count + 1);
+        st.count += 1;
+      }
+      // Keep the legacy single-metric fields populated (primary metric) for back-compat.
+      const pk = this.current.metricKey;
+      if (pk && pk in sample.metrics) {
+        const v = sample.metrics[pk];
+        item.maxSpl = item.maxSpl == null ? v : Math.max(item.maxSpl, v);
+        item.avgSpl =
+          item.avgSpl == null ? v : (item.avgSpl * item.sampleCount + v) / (item.sampleCount + 1);
+        item.sampleCount += 1;
+      }
     }
   }
 

@@ -131,6 +131,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return apiFetch<T>(`/api/spl/history/${encodeURIComponent(key)}`);
     }
 
+    case "spl:getVisibleMetrics":
+      return apiFetch<T>("/api/spl/visible-metrics");
+
+    case "spl:setVisibleMetrics":
+      return post<T>("/api/spl/visible-metrics", p);
+
     case "stage:setAllowedServiceTypes":
       return post<T>("/api/allowed-service-types", p);
 
