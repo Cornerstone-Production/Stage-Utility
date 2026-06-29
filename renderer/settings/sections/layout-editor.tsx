@@ -466,11 +466,31 @@ function EditorCanvas({
   const [avail, setAvail] = useState({ w: 0, h: 0 });
   useEffect(() => {
     if (!wrap) return;
-    const m = () => setAvail({ w: wrap.clientWidth, h: wrap.clientHeight });
+    // Measure from the live bounding rect (not clientWidth, which can lag a
+    // responsive reflow). Re-measure on the next frame + after a short settle, and
+    // on window resize, so boxW always tracks the REAL column width — otherwise a
+    // stale (too-wide) value makes the grid/content/overlay layers size larger than
+    // the box and drift off the grid.
+    const m = () => {
+      const r = wrap.getBoundingClientRect();
+      setAvail((prev) =>
+        Math.abs(prev.w - r.width) < 0.5 && Math.abs(prev.h - r.height) < 0.5
+          ? prev
+          : { w: r.width, h: r.height },
+      );
+    };
     m();
+    const raf = requestAnimationFrame(m);
+    const t = setTimeout(m, 80);
     const ro = new ResizeObserver(m);
     ro.observe(wrap);
-    return () => ro.disconnect();
+    window.addEventListener("resize", m);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(t);
+      ro.disconnect();
+      window.removeEventListener("resize", m);
+    };
   }, [wrap]);
 
   const scale = avail.w > 0 && avail.h > 0 ? Math.min(avail.w / canvas.width, avail.h / canvas.height) : 0;
@@ -576,10 +596,17 @@ function EditorCanvas({
     <div ref={setWrap} className="relative w-full h-full flex items-start justify-center select-none">
       {scale > 0 && (
         <div
-          className="relative overflow-hidden rounded-xl border border-gray-a4"
+          className="relative overflow-hidden rounded-xl"
           style={{
             width: boxW,
             height: boxH,
+            // Frame drawn as an INSET shadow, not a border: a real border + the
+            // global border-box sizing would shrink the padding box, so the
+            // `inset-0` overlay (selection boxes + resize handles) would sit in a
+            // box 2px narrower than the grid/content layers and drift off the grid
+            // toward the right/bottom. An inset shadow frames it without changing
+            // the box, so overlay, grid, and content share one coordinate space.
+            boxShadow: "inset 0 0 0 1px var(--gray-a4)",
             // Mirror the kiosk: default/legacy backgrounds show the shared kiosk
             // surface so the editor preview matches every other view.
             background:
@@ -606,9 +633,14 @@ function EditorCanvas({
 
           {/* Interaction overlay (rendered px) — edit mode only. Recursive so a
               container's children are individually selectable/draggable; the
-              overlay is unclipped so name-tags and handles stay visible. */}
+              overlay is unclipped so name-tags and handles stay visible. MUST use
+              the same explicit boxW×boxH as the grid + content layers (NOT
+              `inset-0`): if the outer box is ever flex-shrunk below boxW, inset-0
+              would fill the shrunk box and the overlay would scale differently
+              from the grid/content, so selection boxes + handles would drift off
+              the grid. */}
           {interactive && (
-            <div className="absolute inset-0">
+            <div style={{ position: "absolute", top: 0, left: 0, width: boxW, height: boxH }}>
               {sorted.map((o) => (
                 <OverlayNode
                   key={o.id}
