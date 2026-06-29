@@ -431,6 +431,14 @@ State persists in a **data directory** — `$STAGE_UTILITY_DATA` if set, otherwi
 **Back up this directory.** If you lose `encryption.key`, the encrypted secrets are
 unrecoverable and you'll need to re-enter every credential.
 
+**Keeping the key out of a synced/backed-up data dir.** By default the key sits next to
+`secrets.bin` so the service can decrypt unattended at boot. If you back up or sync the data
+dir, the key travels with the ciphertext — to avoid that, store the key elsewhere via
+`STAGE_UTILITY_KEY_FILE=/abs/path/to/key` (key file at a path you control) or
+`STAGE_UTILITY_KEY=<base64-or-hex>` (a raw 32-byte key supplied via the environment; no key
+file is written — generate one with `openssl rand -base64 32`). See
+[SECURITY.md](SECURITY.md) for the threat model.
+
 ## Development notes
 
 - **React Compiler** is enabled in `vite.config.ts` via `@rolldown/plugin-babel` +
