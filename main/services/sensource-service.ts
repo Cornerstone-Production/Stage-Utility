@@ -52,6 +52,39 @@ interface VeaLocation {
   name: string;
 }
 
+export interface VeaZone {
+  zoneId: string;
+  name: string;
+  /** Parent location, when the API exposes it (field name varies / may be absent). */
+  locationId: string | null;
+}
+
+/** Vea's static + occupancy endpoints wrap rows in `{ results: [...] }`, but a few
+ *  (older /location responses) return a bare array. Tolerate both. */
+function asRows(data: unknown): Record<string, unknown>[] {
+  const arr = Array.isArray(data)
+    ? data
+    : data && typeof data === "object" && Array.isArray((data as { results?: unknown }).results)
+      ? (data as { results: unknown[] }).results
+      : [];
+  return arr.filter((r): r is Record<string, unknown> => !!r && typeof r === "object");
+}
+
+/** Probe the handful of field names Vea has used for a zone's parent location. */
+function probeLocationId(z: Record<string, unknown>): string | null {
+  const direct = z.locationId ?? z.location_id ?? z.parentId ?? z.parent_id;
+  if (typeof direct === "string" && direct) return direct;
+  const nested = z.location;
+  if (nested && typeof nested === "object") {
+    const id = (nested as Record<string, unknown>).locationId ?? (nested as Record<string, unknown>).id;
+    if (typeof id === "string" && id) return id;
+  }
+  return null;
+}
+
+/** Zone-list cache TTL — zones change rarely, the poll runs every ~45s. */
+const ZONES_TTL_MS = 5 * 60_000;
+
 export interface ReducedTraffic {
   zones: PeopleZoneCount[];
   /** Raw building-wide sums across all zones (for the correct total occupancy). */
@@ -61,8 +94,11 @@ export interface ReducedTraffic {
 
 /** Sum a day's traffic rows into per-zone attendance/occupancy + building totals.
  *  Tolerant of both the detailed (`ins`/`outs`) and grouped (`sumins`/`sumouts`)
- *  response shapes, and of rows that omit the zone name. Exported for unit tests. */
-export function reduceTraffic(rows: unknown[]): ReducedTraffic {
+ *  response shapes, and of rows that omit the zone name. When `allow` is given,
+ *  only those zone ids contribute — this is how scoping is enforced, since the Vea
+ *  `/data/traffic` endpoint has no working location/zone filter param (we always
+ *  request every zone and narrow client-side). Exported for unit tests. */
+export function reduceTraffic(rows: unknown[], allow?: Set<string> | null): ReducedTraffic {
   const byZone = new Map<string, { name: string; ins: number; outs: number }>();
   for (const r of rows) {
     if (!r || typeof r !== "object") continue;
@@ -74,6 +110,7 @@ export function reduceTraffic(rows: unknown[]): ReducedTraffic {
           ? row.entityId
           : null;
     if (!id) continue;
+    if (allow && allow.size > 0 && !allow.has(id)) continue;
     const ins = num(row.sumins) ?? num(row.ins) ?? 0;
     const outs = num(row.sumouts) ?? num(row.outs) ?? 0;
     const name = typeof row.name === "string" && row.name ? row.name : null;
@@ -125,6 +162,8 @@ class SenSourceService {
   private last: PeopleCountDTO = OFFLINE;
   /** Rolling building-total samples for the people-graph trend object. */
   private history: PeopleHistoryPoint[] = [];
+  /** Cached /zone listing for location→zone scoping (see cachedZones). */
+  private zonesCache: { at: number; zones: VeaZone[] } | null = null;
 
   private onConn: ((state: ConnState, message: string | null) => void) | null = null;
   private reported: ConnState | null = null;
@@ -149,6 +188,7 @@ class SenSourceService {
     this.token = null;
     this.tokenExpiresAt = 0;
     this.reported = null;
+    this.zonesCache = null;
     this.restart();
   }
 
@@ -217,14 +257,71 @@ class SenSourceService {
   /** List the locations the client can see (backs the settings picker). */
   async listLocations(): Promise<VeaLocation[]> {
     const data = await this.apiGet<unknown>("/location");
-    if (!Array.isArray(data)) return [];
-    return data
-      .filter((l): l is Record<string, unknown> => !!l && typeof l === "object")
+    return asRows(data)
       .map((l) => ({
-        locationId: String(l.locationId ?? ""),
+        locationId: String(l.locationId ?? l.id ?? ""),
         name: typeof l.name === "string" ? l.name : String(l.locationId ?? ""),
       }))
       .filter((l) => l.locationId);
+  }
+
+  /** List the zones the client can see (backs the zone multi-select + scoping). */
+  async listZones(): Promise<VeaZone[]> {
+    const data = await this.apiGet<unknown>("/zone");
+    return asRows(data)
+      .map((z) => ({
+        zoneId: String(z.zoneId ?? z.entityId ?? z.id ?? ""),
+        name: typeof z.name === "string" && z.name ? z.name : String(z.zoneId ?? ""),
+        locationId: probeLocationId(z),
+      }))
+      .filter((z) => z.zoneId);
+  }
+
+  /** List zones with a given config without disturbing a running poller. */
+  async listZonesWith(cfg: SenSourceConfig): Promise<VeaZone[]> {
+    if (this.cfg) return this.listZones();
+    const prev = this.cfg;
+    this.cfg = cfg;
+    try {
+      return await this.listZones();
+    } finally {
+      this.cfg = prev;
+      this.token = null;
+      this.tokenExpiresAt = 0;
+    }
+  }
+
+  /** Cached zone list (5-min TTL) — the poll resolves a location's zones from it
+   *  without re-listing every tick. */
+  private async cachedZones(): Promise<VeaZone[]> {
+    const now = Date.now();
+    if (this.zonesCache && now - this.zonesCache.at < ZONES_TTL_MS) return this.zonesCache.zones;
+    const zones = await this.listZones();
+    this.zonesCache = { at: now, zones };
+    return zones;
+  }
+
+  /** Resolve the set of zone ids the building total should sum. Explicit zone
+   *  selection wins; otherwise a selected location is mapped to its zones (when
+   *  the API exposes the parent-location field); otherwise null = all zones. */
+  private async resolveAllowedZones(): Promise<Set<string> | null> {
+    const cfg = this.cfg;
+    if (!cfg) return null;
+    if (cfg.zoneIds.length) return new Set(cfg.zoneIds);
+    if (cfg.locationId) {
+      try {
+        const ids = (await this.cachedZones())
+          .filter((z) => z.locationId === cfg.locationId)
+          .map((z) => z.zoneId);
+        if (ids.length) return new Set(ids);
+        console.warn(
+          "[sensource] a location is selected but no zones map to it (the API may not expose zone→location); counting all visible zones. Pick specific zones to scope reliably.",
+        );
+      } catch (err) {
+        console.warn("[sensource] zone resolution failed; counting all zones:", err);
+      }
+    }
+    return null;
   }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -282,20 +379,24 @@ class SenSourceService {
   private async poll(): Promise<void> {
     if (!this.running || !this.cfg) return;
     try {
+      // The Vea /data/traffic endpoint has NO working location/zone filter param
+      // (locationIds/entityIds are silently ignored — confirmed against the public
+      // API + every reference client), so we always request all zones for today
+      // and narrow to the selected zones CLIENT-SIDE. excludeClosedHours matches
+      // the reference clients (drops after-hours sensor noise).
       const params = new URLSearchParams({
         relativeDate: "today",
         dateGroupings: "day",
         entityType: "zone",
         metrics: "ins,outs",
+        excludeClosedHours: "true",
       });
-      // entityIds restricts to chosen zones; otherwise a locationId narrows to
-      // one location so the org-wide default isn't pulled when nothing is set.
-      if (this.cfg.zoneIds.length) params.set("entityIds", this.cfg.zoneIds.join(","));
-      else if (this.cfg.locationId) params.set("locationIds", this.cfg.locationId);
 
+      const allow = await this.resolveAllowedZones();
       const body = await this.apiGet<{ results?: unknown[] }>(`/data/traffic?${params.toString()}`);
-      const reduced = reduceTraffic(body.results ?? []);
-      this.report("connected", `${reduced.zones.length} zone(s)`);
+      const reduced = reduceTraffic(body.results ?? [], allow);
+      const scope = allow ? `${reduced.zones.length} of selected zone(s)` : `${reduced.zones.length} zone(s)`;
+      this.report("connected", scope);
       const dto = buildDto(reduced, new Date().toISOString());
       // Append a building-total sample to the rolling trend buffer.
       this.history.push({

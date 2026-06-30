@@ -434,6 +434,14 @@ export class RemoteServer {
       }
       return;
     }
+    if (method === "GET" && pathname === "/api/sensource/zones") {
+      try {
+        json(res, await integrationManager.getSensourceZones());
+      } catch (err) {
+        json(res, { error: err instanceof Error ? err.message : String(err) }, 502);
+      }
+      return;
+    }
     if (method === "GET" && pathname === "/api/spl/history/current") {
       json(res, splRecorder.getCurrent());
       return;

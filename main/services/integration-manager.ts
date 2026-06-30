@@ -851,6 +851,16 @@ class IntegrationManager {
     return sensourceService.listLocationsWith(cfg);
   }
 
+  /** List Vea zones for the settings picker — the reliable scoping mechanism
+   *  (the API has no working server-side location/zone filter). */
+  async getSensourceZones(): Promise<{ zoneId: string; name: string; locationId: string | null }[]> {
+    const cfg = await this.getSensourceConfig();
+    if (!cfg.apiToken && (!cfg.clientId || !cfg.clientSecret)) {
+      throw new Error("Enter and save SenSource credentials first");
+    }
+    return sensourceService.listZonesWith(cfg);
+  }
+
   /** Start/stop the SenSource poller to match enabled + credentialed state. */
   private async applySensource(): Promise<void> {
     sensourceService.setConnectionListener((state, message) => {
