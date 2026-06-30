@@ -589,6 +589,45 @@ export interface ServiceAttendance {
   lastOccupancy: number;
 }
 
+/** One plan item's planned-vs-actual timing within a recorded service. */
+export interface ServiceTimelineItem {
+  itemId: string;
+  title: string;
+  sequence: number;
+  /** Planned length from PCO (seconds), or null if unset. Snapshotted at record time. */
+  plannedLengthSec: number | null;
+  /** ISO when the item went live (PCO live_start_at, else first seen). */
+  startedAt: string;
+  /** ISO when the next item went live / the service ended (null while live). */
+  endedAt: string | null;
+  /** Actual elapsed seconds (endedAt − startedAt), null while still live. */
+  actualDurationSec: number | null;
+}
+
+/** Recorded ACTUAL service rundown timing for one occurrence — when each item
+ *  really went live and how long it ran vs its planned length. Captured from PCO
+ *  Live independent of Smaart/SPL. Keyed like the SPL + attendance records, so the
+ *  three line up per service occurrence. Late-start and per-item overrun are
+ *  derived from these fields (not stored). */
+export interface ServiceTimeline {
+  /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */
+  serviceKey: string;
+  serviceTypeId: string | null;
+  planId: string | null;
+  planTitle: string | null;
+  seriesTitle: string | null;
+  /** Local date the recording started (YYYY-MM-DD). */
+  serviceDate: string;
+  serviceTimeId: string | null;
+  /** Scheduled service start (PCO service-time occurrence). */
+  serviceTimeStartsAt: string | null;
+  /** ISO when recording began (first live item seen). */
+  startedAt: string;
+  /** ISO when recording ended / service finalized. */
+  endedAt: string | null;
+  items: ServiceTimelineItem[];
+}
+
 export interface ServiceTypeDTO {
   id: string;
   name: string;

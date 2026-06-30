@@ -161,6 +161,22 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return del<T>(`/api/attendance/history/${encodeURIComponent(key)}`);
     }
 
+    case "serviceTimeline:getCurrent":
+      return apiFetch<T>("/api/service-timeline/current");
+
+    case "serviceTimeline:list":
+      return apiFetch<T>("/api/service-timeline");
+
+    case "serviceTimeline:get": {
+      const key = p.serviceKey as string;
+      return apiFetch<T>(`/api/service-timeline/${encodeURIComponent(key)}`);
+    }
+
+    case "serviceTimeline:delete": {
+      const key = p.serviceKey as string;
+      return del<T>(`/api/service-timeline/${encodeURIComponent(key)}`);
+    }
+
     case "spl:getVisibleMetrics":
       return apiFetch<T>("/api/spl/visible-metrics");
 

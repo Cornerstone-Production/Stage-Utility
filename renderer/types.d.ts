@@ -176,6 +176,28 @@ interface ServiceAttendance {
   lastAttendance: number;
   lastOccupancy: number;
 }
+interface ServiceTimelineItem {
+  itemId: string;
+  title: string;
+  sequence: number;
+  plannedLengthSec: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  actualDurationSec: number | null;
+}
+interface ServiceTimeline {
+  serviceKey: string;
+  serviceTypeId: string | null;
+  planId: string | null;
+  planTitle: string | null;
+  seriesTitle: string | null;
+  serviceDate: string;
+  serviceTimeId: string | null;
+  serviceTimeStartsAt: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  items: ServiceTimelineItem[];
+}
 
 interface ServiceTypeDTO {
   id: string;

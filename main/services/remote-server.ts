@@ -28,6 +28,8 @@ import { splHistoryStore } from "./spl-history-store.js";
 import { splRecorder } from "./spl-recorder.js";
 import { attendanceStore } from "./attendance-store.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
+import { serviceTimelineStore } from "./service-timeline-store.js";
+import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { stageController } from "./stage-controller.js";
 import { updater } from "./updater.js";
 import { wirelessManager } from "./wireless-manager.js";
@@ -377,6 +379,7 @@ export class RemoteServer {
       sseWrite(res, "spl:metrics", smaartService.getLatest());
       sseWrite(res, "spl:history", splRecorder.getCurrent());
       sseWrite(res, "attendance:history", attendanceRecorder.getCurrent());
+      sseWrite(res, "service-timeline:history", serviceTimelineRecorder.getCurrent());
       sseWrite(res, "obs:status", obsService.getLatest());
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
@@ -494,6 +497,30 @@ export class RemoteServer {
         }
         if (method === "DELETE") {
           json(res, { deleted: await attendanceStore.delete(key) });
+          return;
+        }
+      }
+    }
+
+    // ── Service timeline (actual rundown timing; mirrors the SPL/attendance routes) ──
+    if (method === "GET" && pathname === "/api/service-timeline/current") {
+      json(res, serviceTimelineRecorder.getCurrent());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/service-timeline") {
+      json(res, await serviceTimelineStore.list());
+      return;
+    }
+    {
+      const tlMatch = pathname.match(/^\/api\/service-timeline\/([^/]+)$/);
+      if (tlMatch && tlMatch[1] !== "current") {
+        const key = decodeURIComponent(tlMatch[1]);
+        if (method === "GET") {
+          json(res, await serviceTimelineStore.get(key));
+          return;
+        }
+        if (method === "DELETE") {
+          json(res, { deleted: await serviceTimelineStore.delete(key) });
           return;
         }
       }
