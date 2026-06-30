@@ -214,12 +214,18 @@ interface BaptismState {
   finishedAt: string | null;
   people: BaptismPerson[];
   pendingTestimonyMs: number | null;
+  serviceTitle: string | null;
+  serviceTypeId: string | null;
+  planId: string | null;
 }
 interface BaptismSession {
   id: string;
   startedAt: string;
   finishedAt: string;
   people: BaptismPerson[];
+  title: string | null;
+  serviceTypeId: string | null;
+  planId: string | null;
 }
 
 interface ServiceTypeDTO {

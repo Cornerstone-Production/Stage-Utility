@@ -14,6 +14,7 @@
 import type { BaptismMode, BaptismPerson, BaptismSession, BaptismState } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { baptismStore } from "./baptism-store.js";
+import { stageController } from "./stage-controller.js";
 
 function idleState(mode: BaptismMode): BaptismState {
   return {
@@ -26,6 +27,9 @@ function idleState(mode: BaptismMode): BaptismState {
     finishedAt: null,
     people: [],
     pendingTestimonyMs: null,
+    serviceTitle: null,
+    serviceTypeId: null,
+    planId: null,
   };
 }
 
@@ -76,11 +80,22 @@ class BaptismTimerService {
     return this.commit();
   }
 
-  /** Begin a fresh session — person 1's testimony. */
+  /** Begin a fresh session — person 1's testimony. Snapshots the active PCO
+   *  service/plan so the session can be named + cross-linked to Service History. */
   start(): BaptismState {
     if (this.state.phase !== "idle") return this.state;
     const now = new Date().toISOString();
-    this.state = { ...idleState(this.state.mode), phase: "testimony", personNumber: 1, segmentStartedAt: now, sessionStartedAt: now };
+    const st = stageController.getState();
+    this.state = {
+      ...idleState(this.state.mode),
+      phase: "testimony",
+      personNumber: 1,
+      segmentStartedAt: now,
+      sessionStartedAt: now,
+      serviceTitle: st.planTitle ?? null,
+      serviceTypeId: st.serviceTypeId ?? null,
+      planId: st.planId ?? null,
+    };
     return this.commit();
   }
 
@@ -150,7 +165,15 @@ class BaptismTimerService {
     const finishedAt = new Date().toISOString();
     this.state = { ...this.state, phase: "idle", segmentStartedAt: null, pendingTestimonyMs: null, finishedAt, people };
     if (people.length > 0 && this.state.sessionStartedAt) {
-      void baptismStore.addSession({ id: `bap-${Date.parse(this.state.sessionStartedAt)}`, startedAt: this.state.sessionStartedAt, finishedAt, people });
+      void baptismStore.addSession({
+        id: `bap-${Date.parse(this.state.sessionStartedAt)}`,
+        startedAt: this.state.sessionStartedAt,
+        finishedAt,
+        people,
+        title: this.state.serviceTitle,
+        serviceTypeId: this.state.serviceTypeId,
+        planId: this.state.planId,
+      });
     }
     return this.commit();
   }

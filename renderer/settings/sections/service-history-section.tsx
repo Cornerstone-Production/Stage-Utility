@@ -69,8 +69,24 @@ function overrunStats(tl: ServiceTimeline) {
   return { avg: deltas.reduce((a, b) => a + b, 0) / deltas.length, over: deltas.filter((d) => d > 0).length, total: deltas.length };
 }
 
-/** A plain-text service report combining timing + attendance + audio (shareable). */
-function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null): string {
+/** Baptism sessions that overlap a service's recorded window. */
+function linkedBaptisms(all: BaptismSession[], tl: ServiceTimeline): BaptismSession[] {
+  const ds = Date.parse(tl.startedAt);
+  const de = tl.endedAt ? Date.parse(tl.endedAt) : ds + 6 * 3600 * 1000;
+  return all.filter((b) => {
+    const bs = Date.parse(b.startedAt);
+    const be = Date.parse(b.finishedAt);
+    return Number.isFinite(bs) && Number.isFinite(be) && bs <= de && be >= ds;
+  });
+}
+function baptismTotals(sessions: BaptismSession[]) {
+  const people = sessions.reduce((a, b) => a + b.people.length, 0);
+  const ms = sessions.reduce((a, b) => a + b.people.reduce((x, p) => x + p.testimonyMs + p.baptizeMs, 0), 0);
+  return { people, sec: ms / 1000 };
+}
+
+/** A plain-text service report combining timing + attendance + audio + baptisms (shareable). */
+function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null, baptisms: BaptismSession[] = []): string {
   const sum = summarize(tl);
   const o = overrunStats(tl);
   const L: string[] = [];
@@ -97,6 +113,11 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
       if (it.maxSpl != null) L.push(`${i + 1}. ${it.title || "—"}  ${it.maxSpl.toFixed(1)}`);
     });
   }
+  if (baptisms.length) {
+    const t = baptismTotals(baptisms);
+    L.push("", "BAPTISMS");
+    L.push(`${t.people} baptized · total ${fmtDur(t.sec)}`);
+  }
   return L.join("\n");
 }
 
@@ -113,6 +134,8 @@ export function ServiceHistorySection() {
   // The matching attendance + SPL records (same serviceKey) for the combined report.
   const [attendance, setAttendance] = useState<ServiceAttendance | null>(null);
   const [spl, setSpl] = useState<ServiceSplHistory | null>(null);
+  // Baptism sessions (cross-linked to a service by time overlap).
+  const [baptisms, setBaptisms] = useState<BaptismSession[]>([]);
   const [day, setDay] = useState<string | null>(null);
 
   function reload() {
@@ -159,6 +182,10 @@ export function ServiceHistorySection() {
     invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: selectedKey })
       .then((s) => !cancelled && setSpl(s))
       .catch(() => !cancelled && setSpl(null));
+    // Baptism sessions are cross-linked to the service by time overlap.
+    invoke<BaptismSession[]>("baptism:sessions")
+      .then((b) => !cancelled && setBaptisms(b))
+      .catch(() => !cancelled && setBaptisms([]));
     return () => {
       cancelled = true;
     };
@@ -214,8 +241,10 @@ export function ServiceHistorySection() {
     const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
     const over = overrunStats(detail);
     const det = detail; // narrow for the async handler
+    const linkedBap = linkedBaptisms(baptisms, detail);
+    const bapTot = baptismTotals(linkedBap);
     async function copyReport() {
-      const ok = await copyText(buildReport(det, attendance, spl));
+      const ok = await copyText(buildReport(det, attendance, spl, linkedBap));
       if (ok) toast.success("Report copied to clipboard");
       else toast.error("Couldn't copy the report");
     }
@@ -293,6 +322,16 @@ export function ServiceHistorySection() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+        {linkedBap.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-caption1 font-medium text-gray-11">Baptisms</span>
+            <div className="flex flex-wrap gap-2 text-caption1 tabular-nums">
+              <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Baptized </span><span className="text-gray-12">{bapTot.people}</span></span>
+              <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Total time </span><span className="text-gray-12">{fmtDur(bapTot.sec)}</span></span>
+            </div>
+            <span className="text-caption2 text-gray-9">Per-person testimony/baptism splits are in the Baptisms tab.</span>
           </div>
         )}
       </div>

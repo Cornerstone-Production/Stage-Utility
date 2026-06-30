@@ -235,7 +235,7 @@ function PastSession({ s, open, onToggle, onDelete }: { s: BaptismSession; open:
         <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2 text-left" onClick={onToggle} aria-expanded={open}>
           <span className="flex items-center gap-1.5 min-w-0">
             <ChevronRightIcon className={cn("size-3.5 text-gray-9 shrink-0 transition-transform", open && "rotate-90")} />
-            <span className="text-caption1 text-gray-12 truncate">{fmtDate(s.startedAt)}</span>
+            <span className="text-caption1 text-gray-12 truncate">{s.title ? `${s.title} · ${fmtDate(s.startedAt)}` : fmtDate(s.startedAt)}</span>
           </span>
           <span className="shrink-0 tabular-nums text-caption1 text-gray-9">{n} baptized · {fmtClock(tot)}</span>
         </button>

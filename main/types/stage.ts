@@ -673,6 +673,11 @@ export interface BaptismState {
   people: BaptismPerson[];
   /** Testimony split captured for the in-progress person (set while in "baptism"). */
   pendingTestimonyMs: number | null;
+  /** PCO service context snapshotted when the session started — names the session
+   *  and lets Service History cross-link it. Null if no plan was active. */
+  serviceTitle: string | null;
+  serviceTypeId: string | null;
+  planId: string | null;
 }
 
 /** A finished baptism session, kept for later review. */
@@ -681,6 +686,10 @@ export interface BaptismSession {
   startedAt: string;
   finishedAt: string;
   people: BaptismPerson[];
+  /** Service/plan title active when the session started (for the label). */
+  title: string | null;
+  serviceTypeId: string | null;
+  planId: string | null;
 }
 
 export interface ServiceTypeDTO {
