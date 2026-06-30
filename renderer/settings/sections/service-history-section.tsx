@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, Trash2Icon, ClockIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, Trash2Icon, ClockIcon, CopyIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
-import { confirm, EmptyState, SkeletonRows } from "../../components/ui";
+import { confirm, EmptyState, SkeletonRows, Button, toast } from "../../components/ui";
+import { copyText } from "../../lib/clipboard";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -58,6 +59,47 @@ function summarize(rec: ServiceTimeline) {
   return { lateStartSec, planned: plannedKnown ? planned : null, actual, firstStart };
 }
 
+/** Mean per-item over/under (seconds) + how many ran over, for items with both
+ *  planned and actual times. */
+function overrunStats(tl: ServiceTimeline) {
+  const deltas = tl.items
+    .filter((it) => it.plannedLengthSec != null && it.actualDurationSec != null)
+    .map((it) => (it.actualDurationSec as number) - (it.plannedLengthSec as number));
+  if (!deltas.length) return { avg: null as number | null, over: 0, total: 0 };
+  return { avg: deltas.reduce((a, b) => a + b, 0) / deltas.length, over: deltas.filter((d) => d > 0).length, total: deltas.length };
+}
+
+/** A plain-text service report combining timing + attendance + audio (shareable). */
+function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null): string {
+  const sum = summarize(tl);
+  const o = overrunStats(tl);
+  const L: string[] = [];
+  L.push(tl.planTitle ?? tl.serviceKey);
+  const meta = [tl.seriesTitle, fmtDate(tl.startedAt), fmtTime(tl.serviceTimeStartsAt ?? tl.startedAt)].filter(Boolean).join(" · ");
+  if (meta) L.push(meta);
+  L.push("", "TIMING");
+  L.push(`Started ${fmtTime(sum.firstStart)}${sum.lateStartSec != null ? ` (${fmtDelta(sum.lateStartSec)} ${sum.lateStartSec >= 0 ? "late" : "early"})` : ""}`);
+  L.push(`Planned ${fmtDur(sum.planned)} · Actual ${fmtDur(sum.actual)}${sum.planned != null ? ` (${fmtDelta(sum.actual - sum.planned)})` : ""}`);
+  if (o.avg != null) L.push(`Avg item overrun ${fmtDelta(o.avg)} (${o.over} of ${o.total} over)`);
+  L.push("", "RUNDOWN");
+  tl.items.forEach((it, i) => {
+    const d = it.plannedLengthSec != null && it.actualDurationSec != null ? (it.actualDurationSec as number) - (it.plannedLengthSec as number) : null;
+    L.push(`${i + 1}. ${it.title || "—"}  plan ${fmtDur(it.plannedLengthSec)}  actual ${it.endedAt == null ? "(live)" : fmtDur(it.actualDurationSec)}${d != null ? `  ${fmtDelta(d)}` : ""}`);
+  });
+  if (att) {
+    const avgOcc = att.samples.length ? Math.round(att.samples.reduce((s, p) => s + p.occupancy, 0) / att.samples.length) : null;
+    L.push("", "ATTENDANCE");
+    L.push(`Peak attendance ${att.peakAttendance.toLocaleString()} · Peak in-room ${att.peakOccupancy.toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
+  }
+  if (spl && spl.items.length) {
+    L.push("", "AUDIO — peak SPL (dB)");
+    spl.items.forEach((it, i) => {
+      if (it.maxSpl != null) L.push(`${i + 1}. ${it.title || "—"}  ${it.maxSpl.toFixed(1)}`);
+    });
+  }
+  return L.join("\n");
+}
+
 /**
  * Service history — the ACTUAL recorded rundown for past services: when each item
  * went live and how long it ran vs its planned length, plus whether the service
@@ -68,6 +110,9 @@ export function ServiceHistorySection() {
   const [list, setList] = useState<ServiceTimeline[] | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<ServiceTimeline | null>(null);
+  // The matching attendance + SPL records (same serviceKey) for the combined report.
+  const [attendance, setAttendance] = useState<ServiceAttendance | null>(null);
+  const [spl, setSpl] = useState<ServiceSplHistory | null>(null);
   const [day, setDay] = useState<string | null>(null);
 
   function reload() {
@@ -99,12 +144,21 @@ export function ServiceHistorySection() {
   useEffect(() => {
     if (!selectedKey) {
       setDetail(null);
+      setAttendance(null);
+      setSpl(null);
       return;
     }
     let cancelled = false;
     invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: selectedKey })
       .then((d) => !cancelled && setDetail(d))
       .catch(() => !cancelled && setDetail(null));
+    // Best-effort: pull the matching attendance + SPL records for the full report.
+    invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: selectedKey })
+      .then((a) => !cancelled && setAttendance(a))
+      .catch(() => !cancelled && setAttendance(null));
+    invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: selectedKey })
+      .then((s) => !cancelled && setSpl(s))
+      .catch(() => !cancelled && setSpl(null));
     return () => {
       cancelled = true;
     };
@@ -158,28 +212,43 @@ export function ServiceHistorySection() {
     const live = detail.endedAt == null;
     const sum = summarize(detail);
     const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
+    const over = overrunStats(detail);
+    const det = detail; // narrow for the async handler
+    async function copyReport() {
+      const ok = await copyText(buildReport(det, attendance, spl));
+      if (ok) toast.success("Report copied to clipboard");
+      else toast.error("Couldn't copy the report");
+    }
+    const avgOcc = attendance && attendance.samples.length
+      ? Math.round(attendance.samples.reduce((s, p) => s + p.occupancy, 0) / attendance.samples.length)
+      : null;
     return (
       <div className="flex flex-col gap-4">
         <button className="self-start text-caption1 text-blue-11 hover:underline" onClick={() => setSelectedKey(null)}>
           ← All services
         </button>
-        <div className="flex flex-col">
-          <span className="text-title3 font-semibold text-gray-12">
-            {detail.planTitle ?? detail.serviceKey}
-            {live && <span className="ml-2 align-middle rounded-full bg-red-9 px-2 py-0.5 text-[10px] font-semibold text-white">LIVE</span>}
-          </span>
-          <span className="text-caption1 text-gray-9">
-            {detail.seriesTitle ? `${detail.seriesTitle} · ` : ""}
-            {fmtDate(detail.startedAt)}
-            {fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt) ? ` · ${fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt)}` : ""}
-          </span>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col">
+            <span className="text-title3 font-semibold text-gray-12">
+              {detail.planTitle ?? detail.serviceKey}
+              {live && <span className="ml-2 align-middle rounded-full bg-red-9 px-2 py-0.5 text-[10px] font-semibold text-white">LIVE</span>}
+            </span>
+            <span className="text-caption1 text-gray-9">
+              {detail.seriesTitle ? `${detail.seriesTitle} · ` : ""}
+              {fmtDate(detail.startedAt)}
+              {fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt) ? ` · ${fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt)}` : ""}
+            </span>
+          </div>
+          <Button variant="filled" size="small" onClick={copyReport} tooltip="Copy a full text report (timing + attendance + audio)">
+            <CopyIcon className="size-3.5 text-gray-9" /> Copy report
+          </Button>
         </div>
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat label="Started" value={fmtTime(sum.firstStart)} accent={sum.lateStartSec != null && sum.lateStartSec > 60 ? "text-amber-11" : "text-gray-12"} sub={sum.lateStartSec != null ? (sum.lateStartSec >= 0 ? `${fmtDelta(sum.lateStartSec)} late` : `${fmtDelta(sum.lateStartSec)} early`) : undefined} />
           <Stat label="Planned" value={fmtDur(sum.planned)} accent="text-gray-12" />
           <Stat label="Actual" value={fmtDur(sum.actual)} accent="text-blue-11" sub={totalDelta != null ? `${fmtDelta(totalDelta)} vs plan` : undefined} />
-          <Stat label="Items" value={String(detail.items.length)} accent="text-gray-12" />
+          <Stat label="Avg overrun" value={over.avg != null ? fmtDelta(over.avg) : "—"} accent={over.avg != null && over.avg > 0 ? "text-red-11" : "text-gray-12"} sub={over.total ? `${over.over} of ${over.total} over` : undefined} />
         </div>
 
         <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
@@ -201,6 +270,31 @@ export function ServiceHistorySection() {
             );
           })}
         </div>
+
+        {/* Combined report: attendance + audio for the same service occurrence. */}
+        {attendance && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-caption1 font-medium text-gray-11">Attendance</span>
+            <div className="flex flex-wrap gap-2 text-caption1 tabular-nums">
+              <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Peak attendance </span><span className="text-blue-11">{attendance.peakAttendance.toLocaleString()}</span></span>
+              <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Peak in-room </span><span className="text-green-11">{attendance.peakOccupancy.toLocaleString()}</span></span>
+              {avgOcc != null && <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Avg in-room </span><span className="text-gray-12">{avgOcc.toLocaleString()}</span></span>}
+            </div>
+          </div>
+        )}
+        {spl && spl.items.some((it) => it.maxSpl != null) && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-caption1 font-medium text-gray-11">Audio — peak SPL</span>
+            <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
+              {spl.items.filter((it) => it.maxSpl != null).map((it, i) => (
+                <div key={it.itemId} className={`grid grid-cols-[1fr_5rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"}`}>
+                  <span className="text-gray-12 truncate">{it.title || "—"}</span>
+                  <span className="text-right text-amber-11">{(it.maxSpl as number).toFixed(1)} dB</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
