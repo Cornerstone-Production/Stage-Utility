@@ -542,10 +542,16 @@ export class RemoteServer {
       switch (action) {
         case "start": json(res, baptismTimerService.start()); return;
         case "baptized": json(res, baptismTimerService.baptized()); return;
+        case "start-baptisms": json(res, baptismTimerService.startBaptisms()); return;
         case "next": json(res, baptismTimerService.next()); return;
         case "undo": json(res, baptismTimerService.undo()); return;
         case "finish": json(res, baptismTimerService.finish()); return;
         case "reset": json(res, baptismTimerService.reset()); return;
+        case "mode": {
+          const body = (await readBody(req)) as Record<string, unknown>;
+          json(res, baptismTimerService.setMode(body.mode === "grouped" ? "grouped" : "per-person"));
+          return;
+        }
       }
     }
     {

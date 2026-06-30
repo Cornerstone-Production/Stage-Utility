@@ -644,6 +644,10 @@ export interface ServiceTimeline {
 
 export type BaptismPhase = "idle" | "testimony" | "baptism";
 
+/** "per-person": testimony→baptism for each person in turn. "grouped": time every
+ *  testimony first, then every baptism (a separate testimony section + baptism section). */
+export type BaptismMode = "per-person" | "grouped";
+
 export interface BaptismPerson {
   /** Testimony duration (ms). */
   testimonyMs: number;
@@ -652,9 +656,13 @@ export interface BaptismPerson {
 }
 
 export interface BaptismState {
+  /** Workflow: per-person vs grouped (all testimonies, then all baptisms). */
+  mode: BaptismMode;
   phase: BaptismPhase;
   /** 1-based number of the person currently being timed (or about to start). */
   personNumber: number;
+  /** Grouped baptism pass: 0-based index of the person currently being baptized. */
+  baptismIndex: number;
   /** ISO when the current segment (testimony/baptism) started; null when idle. */
   segmentStartedAt: string | null;
   /** ISO when the session began; null before the first start. */

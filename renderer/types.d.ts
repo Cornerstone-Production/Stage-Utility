@@ -199,13 +199,16 @@ interface ServiceTimeline {
   items: ServiceTimelineItem[];
 }
 type BaptismPhase = "idle" | "testimony" | "baptism";
+type BaptismMode = "per-person" | "grouped";
 interface BaptismPerson {
   testimonyMs: number;
   baptizeMs: number;
 }
 interface BaptismState {
+  mode: BaptismMode;
   phase: BaptismPhase;
   personNumber: number;
+  baptismIndex: number;
   segmentStartedAt: string | null;
   sessionStartedAt: string | null;
   finishedAt: string | null;

@@ -185,8 +185,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/baptism/start");
     case "baptism:baptized":
       return post<T>("/api/baptism/baptized");
+    case "baptism:startBaptisms":
+      return post<T>("/api/baptism/start-baptisms");
     case "baptism:next":
       return post<T>("/api/baptism/next");
+    case "baptism:setMode":
+      return post<T>("/api/baptism/mode", { mode: p.mode });
     case "baptism:undo":
       return post<T>("/api/baptism/undo");
     case "baptism:finish":

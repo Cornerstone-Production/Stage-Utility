@@ -576,7 +576,8 @@ function BaptismTimer({
   if (field === "live") {
     if (state && state.phase !== "idle" && state.segmentStartedAt) {
       value = fmtClock(Math.max(0, now - Date.parse(state.segmentStartedAt)));
-      fallback = state.phase === "testimony" ? `Person ${state.personNumber} · testimony` : `Person ${state.personNumber} · baptism`;
+      if (state.phase === "testimony") fallback = state.mode === "grouped" ? `Testimony ${state.personNumber}` : `Person ${state.personNumber} · testimony`;
+      else fallback = state.mode === "grouped" ? `Baptism ${state.baptismIndex + 1}` : `Person ${state.personNumber} · baptism`;
     } else {
       value = "0:00";
       fallback = "ready";

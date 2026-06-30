@@ -3,6 +3,7 @@ import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, Trash2Icon } from "luc
 
 import { invoke } from "../../lib/api";
 import { Button, confirm, toast } from "../../components/ui";
+import { cn } from "../../lib/cn";
 import { useBaptismState, summarizeBaptism, fmtClock } from "../../main/use-baptism-state";
 
 function fmtDate(iso: string): string {
@@ -38,10 +39,10 @@ export function BaptismsSection() {
     return () => clearInterval(id);
   }, [segStart]);
 
-  async function act(channel: string, after?: () => void) {
+  async function act(channel: string, after?: () => void, payload?: Record<string, unknown>) {
     setBusy(true);
     try {
-      await invoke(channel);
+      await invoke(channel, payload);
       after?.();
     } catch (err) {
       toast.error(`Action failed: ${String(err)}`);
@@ -59,10 +60,36 @@ export function BaptismsSection() {
   const sum = summarizeBaptism(state);
   const justFinished = phase === "idle" && state.finishedAt != null && state.people.length > 0;
 
-  const phaseLabel = phase === "testimony" ? "Testimony" : phase === "baptism" ? "Baptism" : justFinished ? "Finished" : "Ready";
+  const grouped = state.mode === "grouped";
+  const lastBaptism = grouped && phase === "baptism" && state.baptismIndex >= state.people.length - 1;
   const phaseColor = phase === "testimony" ? "text-blue-11" : phase === "baptism" ? "text-green-11" : "text-gray-11";
-  const primaryLabel = phase === "idle" ? "Start" : phase === "testimony" ? "Mark baptized" : "Next person";
-  const primaryChannel = phase === "idle" ? "baptism:start" : phase === "testimony" ? "baptism:baptized" : "baptism:next";
+
+  // Phase-aware primary action (label + channel), per workflow.
+  let primaryLabel: string;
+  let primaryChannel: string;
+  if (phase === "idle") {
+    primaryLabel = grouped ? "Start testimonies" : "Start";
+    primaryChannel = "baptism:start";
+  } else if (phase === "testimony") {
+    primaryLabel = grouped ? "Next testimony" : "Mark baptized";
+    primaryChannel = grouped ? "baptism:next" : "baptism:baptized";
+  } else {
+    // baptism
+    if (grouped) {
+      primaryLabel = lastBaptism ? "Finish baptisms" : "Next baptism";
+      primaryChannel = lastBaptism ? "baptism:finish" : "baptism:next";
+    } else {
+      primaryLabel = "Next person";
+      primaryChannel = "baptism:next";
+    }
+  }
+
+  // Readout heading.
+  let readoutLabel: string;
+  if (phase === "idle") readoutLabel = justFinished ? "Finished" : "Ready";
+  else if (grouped && phase === "testimony") readoutLabel = `Testimony · Person ${state.personNumber}`;
+  else if (grouped && phase === "baptism") readoutLabel = `Baptism · Person ${state.baptismIndex + 1} of ${state.people.length}`;
+  else readoutLabel = `Person ${state.personNumber} · ${phase === "testimony" ? "Testimony" : "Baptism"}`;
 
   async function resetAll() {
     if (!(await confirm({ title: "Reset baptism timer?", message: "Clear the current session and all splits. This can't be undone.", confirmLabel: "Reset", destructive: true }))) return;
@@ -81,13 +108,34 @@ export function BaptismsSection() {
     <div className="flex flex-col gap-5 max-w-2xl">
       <div className="flex flex-col gap-1">
         <span className="text-title3 font-semibold text-gray-12">Baptism timer</span>
-        <span className="text-caption1 text-gray-9">Time each person&apos;s testimony and baptism. Splits, totals and averages are tracked live and can be shown on a display with the &ldquo;Baptism timer&rdquo; layout object.</span>
+        <span className="text-caption1 text-gray-9">Time testimonies and baptisms. Splits, totals and averages are tracked live and can be shown on a display with the &ldquo;Baptism timer&rdquo; layout object.</span>
+      </div>
+
+      {/* Workflow mode */}
+      <div className="flex items-center gap-2">
+        <span className="text-caption1 text-gray-9">Workflow</span>
+        <div className="inline-flex rounded-md border border-gray-5 overflow-hidden">
+          {([["per-person", "Per person"], ["grouped", "Grouped"]] as const).map(([m, label]) => (
+            <button
+              key={m}
+              disabled={busy || phase !== "idle"}
+              onClick={() => void act("baptism:setMode", undefined, { mode: m })}
+              className={cn("px-2.5 py-1 text-caption1 transition-colors", state.mode === m ? "bg-blue-9 text-white" : "text-gray-11 enabled:hover:bg-gray-3", "disabled:opacity-50")}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <span className="text-caption2 text-gray-8">
+          {grouped ? "all testimonies, then all baptisms" : "each person: testimony then baptism"}
+          {phase !== "idle" && " · finish or reset to switch"}
+        </span>
       </div>
 
       {/* Live readout */}
       <div className="flex flex-col items-center gap-1 rounded-xl border border-gray-5 bg-gray-2 py-6">
         <span className={`text-caption1 font-medium uppercase tracking-wide ${phaseColor}`}>
-          {phase === "idle" ? phaseLabel : `Person ${state.personNumber} · ${phaseLabel}`}
+          {readoutLabel}
         </span>
         <span className="text-[3.5rem] leading-none font-bold tabular-nums text-gray-12">
           {phase === "idle" ? (justFinished ? fmtClock(sum.totalMs) : "0:00") : fmtClock(liveMs)}
@@ -99,10 +147,15 @@ export function BaptismsSection() {
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="accent" disabled={busy} onClick={() => void act(primaryChannel)} className="px-6 py-2 text-body">
+        <Button variant="accent" disabled={busy} onClick={() => void act(primaryChannel, primaryChannel === "baptism:finish" ? reloadSessions : undefined)} className="px-6 py-2 text-body">
           {primaryLabel}
         </Button>
-        {phase !== "idle" && (
+        {grouped && phase === "testimony" && (
+          <Button variant="filled" disabled={busy} onClick={() => void act("baptism:startBaptisms")} tooltip="Done with testimonies — start timing baptisms">
+            Start baptisms →
+          </Button>
+        )}
+        {phase !== "idle" && primaryChannel !== "baptism:finish" && (
           <Button variant="filled" disabled={busy} onClick={() => void act("baptism:finish", reloadSessions)} tooltip="End the session and log it">
             <FlagIcon className="size-4 text-gray-9" /> Finish
           </Button>
