@@ -331,12 +331,14 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       const metric = c.metric ?? "attendance";
       const value = resolvePeopleValue(ctx.peopleCount, metric, c.zoneId);
       if (value == null) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      const fallbackLabel =
+        metric === "occupancy" ? "in room" : metric === "peak" ? "peak" : metric === "min" ? "low" : metric === "avg" ? "avg" : "people";
       return (
         <span style={ts}>
           {value.toLocaleString()}
           {c.showLabel && (
             <span style={{ opacity: 0.6, fontSize: "0.6em" }}>
-              {` ${c.label ?? (metric === "occupancy" ? "in room" : "people")}`}
+              {` ${c.label ?? fallbackLabel}`}
             </span>
           )}
         </span>

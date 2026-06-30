@@ -91,7 +91,7 @@ function defaultViewName(kind: ViewKind): string {
   switch (kind) {
     case "dashboard": return "Dashboard";
     case "stage": return "Stage";
-    case "transcription": return "Captions";
+    case "transcription": return "Transcription";
     case "custom": return "Custom";
     default: return "Slots";
   }
@@ -1793,12 +1793,18 @@ export class StageController {
       slotsByView[view.id] = resolveSlots(raw, this.teamMembers, this.deviceStatuses);
     }
 
-    // Inline mic-slots objects on custom layouts — resolved by object id.
+    // Inline mic-slots objects on custom layouts — resolved by object id. We
+    // resolve every object that has raw slots, not just those already saved into a
+    // persisted view, so a freshly-added inline grid shows its slots immediately
+    // after "Save slots" (before the layout itself is saved). Orphaned ids are
+    // pruned from rawSlotsByObject when the layout is next saved (setViewLayout).
     const slotsByLayoutObject: Record<string, Slot[]> = {};
-    forEachInlineSlotsGrid(this.state.views, (oid) => {
+    const resolveObjectSlots = (oid: string) => {
       const raw = this.rawSlotsByObject.get(oid) ?? [];
       slotsByLayoutObject[oid] = resolveSlots(raw, this.teamMembers, this.deviceStatuses);
-    });
+    };
+    forEachInlineSlotsGrid(this.state.views, resolveObjectSlots);
+    for (const oid of this.rawSlotsByObject.keys()) if (!(oid in slotsByLayoutObject)) resolveObjectSlots(oid);
 
     const resolvedByOutput: Record<string, ResolvedOutput> = {};
     const slotsByDisplay: Record<string, Slot[]> = {};

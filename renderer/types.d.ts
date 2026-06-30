@@ -109,7 +109,13 @@ interface PeopleHistoryPoint {
 interface PeopleCountDTO {
   connected: boolean;
   updatedAt: string | null;
-  total: { attendance: number | null; occupancy: number | null };
+  total: {
+    attendance: number | null;
+    occupancy: number | null;
+    peak?: number | null;
+    min?: number | null;
+    avg?: number | null;
+  };
   zones: PeopleZoneCount[];
   history?: PeopleHistoryPoint[];
 }
@@ -403,7 +409,7 @@ type LayoutObjectConfig =
     }
   | {
       type: "people-counter";
-      metric?: "attendance" | "occupancy";
+      metric?: "attendance" | "occupancy" | "peak" | "min" | "avg";
       zoneId?: string | null;
       label?: string;
       showLabel?: boolean;

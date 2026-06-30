@@ -277,7 +277,9 @@ export type LayoutObjectConfig =
   // when `showLabel`.
   | {
       type: "people-counter";
-      metric?: "attendance" | "occupancy";
+      // attendance (Σins) / occupancy (in-room now) resolve per-zone or building;
+      // peak/min/avg (today, from the space endpoint) are building-only.
+      metric?: "attendance" | "occupancy" | "peak" | "min" | "avg";
       zoneId?: string | null;
       label?: string;
       showLabel?: boolean;
@@ -490,7 +492,15 @@ export interface PeopleCountDTO {
   connected: boolean;
   /** ISO timestamp of the last successful poll, or null. */
   updatedAt: string | null;
-  total: { attendance: number | null; occupancy: number | null };
+  total: {
+    attendance: number | null;
+    occupancy: number | null;
+    /** Today's peak/lowest/mean occupancy (from the authoritative space endpoint;
+     *  null when no space exists — building-wide only, not per-zone). */
+    peak?: number | null;
+    min?: number | null;
+    avg?: number | null;
+  };
   zones: PeopleZoneCount[];
   /** Rolling building-total samples (oldest→newest) for the people-graph object.
    *  In-memory only — resets when the server restarts. */

@@ -28,7 +28,7 @@ const KIND_LABELS: Record<ViewKind, string> = {
   slots: "Mic Slots",
   dashboard: "Dashboard",
   stage: "Stage",
-  transcription: "Captions",
+  transcription: "Transcription",
   custom: "Custom Layout",
   script: "Script",
   "spl-rundown": "SPL Rundown",
@@ -468,7 +468,7 @@ export function ViewsSection({
           <EmptyState
             icon={<PlusIcon />}
             title="No views yet"
-            hint="A view defines what a screen shows (mic slots, a dashboard, captions, or a custom layout). Use “Add view” to create your first."
+            hint="A view defines what a screen shows (mic slots, a dashboard, transcription, or a custom layout). Use “Add view” to create your first."
           />
         )}
       </div>

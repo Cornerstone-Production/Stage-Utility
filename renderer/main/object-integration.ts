@@ -10,7 +10,7 @@ export const OBJECT_INTEGRATION: Partial<Record<LayoutObjectType, { id: string; 
   "people-counter": { id: "sensource", label: "SenSource" },
   "people-graph": { id: "sensource", label: "SenSource" },
   "osc-button": { id: "osc", label: "OSC" },
-  "transcript-strip": { id: "prodcom", label: "captions" },
+  "transcript-strip": { id: "prodcom", label: "transcription" },
   "charger-battery": { id: "wireless", label: "wireless" },
   "wireless-summary": { id: "wireless", label: "wireless" },
 };

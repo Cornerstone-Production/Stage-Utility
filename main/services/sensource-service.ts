@@ -81,16 +81,34 @@ export interface SpaceOccupancy {
   attendance: number;
   /** Today's peak occupancy across the spaces (Vea's authoritative max). */
   peak: number;
+  /** Today's lowest occupancy across the spaces. */
+  min: number;
+  /** Today's mean occupancy (Σ per-space avg — exact for one space). */
+  avg: number;
   /** How many space rows contributed (0 → caller should fall back to zone traffic). */
   spaces: number;
 }
 
+/** Coerce a number OR a numeric string (Vea returns avgoccupancy as a string). */
+function numLoose(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number.parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 /** Net the space-occupancy rows into a building total. `allow` (space ids) scopes
- *  client-side; empty/undefined sums every returned space. Exported for tests. */
+ *  client-side; empty/undefined sums every returned space. peak/min/avg are summed
+ *  across spaces (exact for a single space — the common case; an approximation for
+ *  multiple spaces since per-space extrema occur at different times). Exported for tests. */
 export function reduceSpaceOccupancy(rows: unknown[], allow?: Set<string> | null): SpaceOccupancy {
   let ins = 0;
   let outs = 0;
   let peak = 0;
+  let min = 0;
+  let avg = 0;
   let spaces = 0;
   for (const r of rows) {
     if (!r || typeof r !== "object") continue;
@@ -101,12 +119,16 @@ export function reduceSpaceOccupancy(rows: unknown[], allow?: Set<string> | null
     ins += num(row.sumins) ?? 0;
     outs += num(row.sumouts) ?? 0;
     peak += num(row.maxoccupancy) ?? 0;
+    min += num(row.minoccupancy) ?? 0;
+    avg += numLoose(row.avgoccupancy) ?? 0;
     spaces++;
   }
   return {
     occupancy: Math.max(0, Math.round(ins - outs)),
     attendance: Math.max(0, Math.round(ins)),
     peak: Math.max(0, Math.round(peak)),
+    min: Math.max(0, Math.round(min)),
+    avg: Math.max(0, Math.round(avg)),
     spaces,
   };
 }
@@ -200,7 +222,14 @@ function buildDto(reduced: ReducedTraffic, updatedAt: string): PeopleCountDTO {
   // clamped ≥0 once at the building level. Attendance = total entries today.
   const attendance = Math.max(0, Math.round(reduced.totalIns));
   const occupancy = Math.max(0, Math.round(reduced.totalIns - reduced.totalOuts));
-  return { connected: true, updatedAt, total: { attendance, occupancy }, zones: reduced.zones };
+  // peak/min/avg are only available from the space endpoint (the poll overrides
+  // total when a space exists); the zone-traffic fallback leaves them null.
+  return {
+    connected: true,
+    updatedAt,
+    total: { attendance, occupancy, peak: null, min: null, avg: null },
+    zones: reduced.zones,
+  };
 }
 
 class SenSourceService {
@@ -538,7 +567,13 @@ class SenSourceService {
         const oBody = await this.apiGet<{ results?: unknown[] }>(`/data/occupancy?${oParams.toString()}`);
         const occ = reduceSpaceOccupancy(oBody.results ?? [], await this.resolveAllowedSpaces());
         if (occ.spaces > 0) {
-          dto.total = { attendance: occ.attendance, occupancy: occ.occupancy };
+          dto.total = {
+            attendance: occ.attendance,
+            occupancy: occ.occupancy,
+            peak: occ.peak,
+            min: occ.min,
+            avg: occ.avg,
+          };
           occSource = `space×${occ.spaces}`;
         }
       } catch (err) {

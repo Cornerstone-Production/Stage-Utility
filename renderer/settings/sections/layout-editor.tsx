@@ -89,7 +89,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "slide-thumbnail": "Slide image",
   "section-chip": "Section chip",
   "slots-grid": "Mic slots",
-  "transcript-strip": "Captions",
+  "transcript-strip": "Transcription",
   "live-controls": "PCO Prev/Next",
   "charger-battery": "Charger battery",
   "spl-meter": "SPL meter",
@@ -117,7 +117,7 @@ const PALETTE_GROUPS: { label: string; types: LayoutObjectType[] }[] = [
   { label: "ProPresenter", types: ["current-slide-text", "next-slide-text", "current-slide-notes", "slide-thumbnail", "section-chip"] },
   { label: "Mics & RF", types: ["slots-grid", "charger-battery", "wireless-summary"] },
   { label: "Audio (SPL)", types: ["spl-meter"] },
-  { label: "Captions", types: ["transcript-strip"] },
+  { label: "Transcription", types: ["transcript-strip"] },
   { label: "People", types: ["people-counter", "people-graph"] },
   { label: "OBS", types: ["obs-status"] },
   { label: "Control", types: ["osc-button"] },
@@ -2130,26 +2130,46 @@ function Inspector({
       })()}
       {c.type === "people-counter" && (() => {
         const zones = peopleCount?.zones ?? [];
+        const metric = c.metric ?? "attendance";
+        const perZone = metric === "attendance" || metric === "occupancy";
+        const labelHint: Record<string, string> = { attendance: "people", occupancy: "in room", peak: "peak", min: "low", avg: "average" };
         return (
           <>
-            <RowToggle
-              label="Count"
-              value={c.metric ?? "attendance"}
-              options={[{ value: "attendance", label: "Attendance" }, { value: "occupancy", label: "In room" }]}
-              onChange={(v) => onConfig({ ...c, metric: v })}
-            />
-            <Row label="Zone">
-              <Select value={c.zoneId ?? ""} onValueChange={(v: string) => onConfig({ ...c, zoneId: v || null })}>
-                <SelectTrigger><SelectValue placeholder={zones.length ? "Building total" : "No zones detected"} /></SelectTrigger>
+            <Row label="Count">
+              <Select
+                value={metric}
+                onValueChange={(v: string) => {
+                  const m = v as NonNullable<typeof c.metric>;
+                  // peak/min/avg are building-wide only — drop any zone selection.
+                  onConfig({ ...c, metric: m, zoneId: m === "attendance" || m === "occupancy" ? c.zoneId : null });
+                }}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Building total</SelectItem>
-                  {zones.map((z) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
+                  <SelectItem value="occupancy">In room (now)</SelectItem>
+                  <SelectItem value="attendance">Attendance (today)</SelectItem>
+                  <SelectItem value="peak">Peak (today)</SelectItem>
+                  <SelectItem value="min">Low (today)</SelectItem>
+                  <SelectItem value="avg">Average (today)</SelectItem>
                 </SelectContent>
               </Select>
             </Row>
+            {perZone ? (
+              <Row label="Zone">
+                <Select value={c.zoneId ?? ""} onValueChange={(v: string) => onConfig({ ...c, zoneId: v || null })}>
+                  <SelectTrigger><SelectValue placeholder={zones.length ? "Building total" : "No zones detected"} /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Building total</SelectItem>
+                    {zones.map((z) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Row>
+            ) : (
+              <p className="text-caption2 text-gray-9 leading-snug">Peak, low and average are building-wide (today), from the occupancy sensor.</p>
+            )}
             <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
             {(c.showLabel ?? true) && (
-              <RowText label="Label" value={c.label ?? ""} placeholder={c.metric === "occupancy" ? "in room" : "people"} onChange={(v) => onConfig({ ...c, label: v })} />
+              <RowText label="Label" value={c.label ?? ""} placeholder={labelHint[metric]} onChange={(v) => onConfig({ ...c, label: v })} />
             )}
           </>
         );

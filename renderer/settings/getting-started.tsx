@@ -40,7 +40,7 @@ export function GettingStarted({
     },
     {
       label: "Route a display",
-      hint: "Point a screen at a View (mic slots, dashboard, captions, or a custom layout).",
+      hint: "Point a screen at a View (mic slots, dashboard, transcription, or a custom layout).",
       done: routedDisplay,
       section: "displays",
     },

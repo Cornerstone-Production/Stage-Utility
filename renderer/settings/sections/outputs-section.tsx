@@ -20,7 +20,7 @@ const KIND_LABELS: Record<ViewKind, string> = {
   slots: "Mic Slots",
   dashboard: "Dashboard",
   stage: "Stage",
-  transcription: "Captions",
+  transcription: "Transcription",
   custom: "Custom Layout",
   script: "Script",
   "spl-rundown": "SPL Rundown",

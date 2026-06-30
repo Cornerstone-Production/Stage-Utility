@@ -7,7 +7,7 @@ import { Button, toast } from "./ui";
 import { ChevronRightIcon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 
-// Collapsible "Caption colors" disclosure shown under the ProdCom integration.
+// Collapsible "Transcription colors" disclosure shown under the ProdCom integration.
 // Lists every channel seen in the transcript (plus any already assigned) and lets
 // the user pick a color per channel. ProdCom doesn't send colors, so this is the
 // way to control them; a pick overrides the otherwise-automatic per-channel color.
@@ -45,7 +45,7 @@ export function CaptionColorsPanel() {
         aria-expanded={open}
       >
         <ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
-        Caption colors
+        Transcription colors
       </button>
 
       {open && (

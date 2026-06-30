@@ -29,7 +29,7 @@ interface TranscriptFeedProps {
 /**
  * Bottom-anchored, multi-speaker transcript feed: newest line at the bottom,
  * older lines shifting up. Shared by the full-screen transcription view and the
- * compact "Captions" layout object so they behave identically.
+ * compact "Transcription" layout object so they behave identically.
  */
 export function TranscriptFeed({
   lines,
