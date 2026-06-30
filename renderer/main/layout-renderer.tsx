@@ -462,10 +462,23 @@ function SplMeterValue({
   );
 }
 
+/** A "nice" rounded step for an axis span (1/2/5 × 10ⁿ). */
+function niceStep(span: number): number {
+  const s = span > 0 ? span : 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(s)));
+  const f = s / pow;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
+}
+function hhmm(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
 // A sparkline of the building-total people count over the rolling history.
-// Draws a filled area + line in a 0–100 viewBox stretched to the object box
-// (non-scaling stroke keeps the line crisp at any aspect). Optional current-value
-// label overlaid top-left.
+// The filled area + line live in a 0–100 viewBox stretched to the object box
+// (non-scaling stroke keeps the line crisp at any aspect); axis labels are crisp
+// HTML overlays. Y-axis auto-scales to nice rounded bounds with headroom (so a
+// spike never clips, top or bottom), and x-axis shows the first/last sample time.
 function PeopleGraph({
   history,
   metric,
@@ -481,28 +494,56 @@ function PeopleGraph({
 }) {
   const vals = history.map((h) => (metric === "attendance" ? h.attendance : h.occupancy));
   if (vals.length < 2) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const range = max - min || 1;
   const n = vals.length;
-  const line = vals
-    .map((v, i) => `${((i / (n - 1)) * 100).toFixed(2)},${(100 - ((v - min) / range) * 100).toFixed(2)}`)
-    .join(" ");
   const stroke = ts.color ?? "#ffffff";
+
+  // Nice rounded bounds with headroom so the line never sits on an edge.
+  const dataMin = Math.min(...vals);
+  const dataMax = Math.max(...vals);
+  const step = niceStep((dataMax - dataMin) / 2);
+  const lo = Math.max(0, Math.floor(dataMin / step) * step);
+  let hi = Math.ceil(dataMax / step) * step;
+  if (hi <= dataMax) hi += step; // guarantee a gap above the peak
+  if (hi === lo) hi = lo + step;
+  const range = hi - lo;
+  const mid = lo + range / 2;
+
+  // Plot rect inside the 0–100 box: leave room for y labels (left) + x labels (bottom).
+  const PADL = 13, PADR = 2, PADT = 9, PADB = 16;
+  const px = (i: number) => PADL + (i / (n - 1)) * (100 - PADL - PADR);
+  const py = (v: number) => PADT + (1 - (v - lo) / range) * (100 - PADT - PADB);
+  const line = vals.map((v, i) => `${px(i).toFixed(2)},${py(v).toFixed(2)}`).join(" ");
+  const fontPx = Math.max(7, 0.035 * H);
+  const yLabel = (v: number): string => Math.round(v).toLocaleString();
+  const labelStyle = (top: string): CSSProperties => ({
+    position: "absolute", left: 0, top, transform: "translateY(-50%)",
+    color: stroke, opacity: 0.7, fontSize: `${fontPx}px`, lineHeight: 1, fontWeight: 600,
+  });
+  const yTop = `${PADT}%`, yMidPct = `${PADT + (100 - PADT - PADB) / 2}%`, yBot = `${100 - PADB}%`;
+
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: "100%", height: "100%", display: "block" }}>
-        <polygon points={`0,100 ${line} 100,100`} fill={stroke} fillOpacity={0.15} />
-        <polyline points={line} fill="none" stroke={stroke} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+        {/* gridlines at lo / mid / hi */}
+        {[PADT, PADT + (100 - PADT - PADB) / 2, 100 - PADB].map((y, i) => (
+          <line key={i} x1={PADL} y1={y} x2={100 - PADR} y2={y} stroke={stroke} strokeOpacity={0.18} strokeWidth={0.75} vectorEffect="non-scaling-stroke" />
+        ))}
+        <polygon points={`${PADL},${100 - PADB} ${line} ${100 - PADR},${100 - PADB}`} fill={stroke} fillOpacity={0.13} />
+        <polyline points={line} fill="none" stroke={stroke} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
       </svg>
+
+      {/* y-axis value labels (crisp HTML overlays) */}
+      <span style={labelStyle(yTop)}>{yLabel(hi)}</span>
+      <span style={labelStyle(yMidPct)}>{yLabel(mid)}</span>
+      <span style={labelStyle(yBot)}>{yLabel(lo)}</span>
+
+      {/* x-axis time labels */}
+      <span style={{ position: "absolute", left: `${PADL}%`, bottom: 0, color: stroke, opacity: 0.7, fontSize: `${fontPx}px`, lineHeight: 1 }}>{hhmm(history[0].t)}</span>
+      <span style={{ position: "absolute", right: `${PADR}%`, bottom: 0, color: stroke, opacity: 0.7, fontSize: `${fontPx}px`, lineHeight: 1 }}>{hhmm(history[n - 1].t)}</span>
+
+      {/* current value readout (top-right, clear of the y-max label) */}
       {config.showLabel && (
-        <span
-          style={{
-            position: "absolute", top: 0, left: 0, color: stroke,
-            fontSize: `${0.05 * H}px`, fontWeight: 600, lineHeight: 1,
-            padding: `${0.01 * H}px`, opacity: 0.85,
-          }}
-        >
+        <span style={{ position: "absolute", top: 0, right: `${PADR}%`, color: stroke, fontSize: `${fontPx * 1.3}px`, fontWeight: 700, lineHeight: 1, opacity: 0.95 }}>
           {(config.label ? `${config.label} ` : "") + vals[n - 1].toLocaleString()}
         </span>
       )}
