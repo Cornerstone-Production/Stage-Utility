@@ -310,7 +310,7 @@ type LayoutObjectConfig =
   | { type: "slide-thumbnail" }
   | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }
   | { type: "slots-grid"; source?: "view" | "inline"; sourceViewId?: string | null; slotsLayout?: SlotsLayout | null }
-  | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
+  | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number; hideChannels?: string[] }
   | { type: "live-controls" }
   | {
       type: "charger-battery";
@@ -354,6 +354,19 @@ type LayoutObjectConfig =
       feedback?: OscFeedbackBind | null;
     }
   | { type: "shape"; shape: "rect" | "ellipse" }
+  | {
+      type: "integration-status";
+      integrationId?: string | null;
+      label?: string;
+      showLabel?: boolean;
+    }
+  | {
+      type: "wireless-summary";
+      showOnline?: boolean;
+      showBattery?: boolean;
+      label?: string;
+      showLabel?: boolean;
+    }
   | {
       type: "people-counter";
       metric?: "attendance" | "occupancy";

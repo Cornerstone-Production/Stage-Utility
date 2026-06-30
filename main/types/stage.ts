@@ -179,7 +179,9 @@ export type LayoutObjectConfig =
   // with `slotsLayout` holding its physical-inch alignment. Missing `source` ==
   // "view" (back-compat with existing objects).
   | { type: "slots-grid"; source?: "view" | "inline"; sourceViewId?: string | null; slotsLayout?: SlotsLayout | null }
-  | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
+  // `hideChannels` drops lines from the named ProdCom channels (by channel name)
+  // so a strip can show only the channels you care about.
+  | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number; hideChannels?: string[] }
   | { type: "live-controls" } // PCO Services Live Prev/Next buttons (interactive)
   // Shure SBC charger bay battery levels. `bays` lists which bays to show (by
   // ChargerBay id) with an optional custom label; `show` toggles each metric.
@@ -247,6 +249,26 @@ export type LayoutObjectConfig =
       feedback?: OscFeedbackBind | null;
     }
   | { type: "shape"; shape: "rect" | "ellipse" }
+  // A connection-status light for any integration, driven by the
+  // "integrations:state-changed" channel. `integrationId` selects which (null =
+  // first). Dot color reflects the live connection (green/amber/red/grey);
+  // `label` overrides the integration's friendly name.
+  | {
+      type: "integration-status";
+      integrationId?: string | null;
+      label?: string;
+      showLabel?: boolean;
+    }
+  // A compact wireless fleet summary computed from all configured connections'
+  // channels: `showOnline` → "online/total", `showBattery` → the lowest live
+  // battery % (colored). Optional `label` prefix when `showLabel`.
+  | {
+      type: "wireless-summary";
+      showOnline?: boolean;
+      showBattery?: boolean;
+      label?: string;
+      showLabel?: boolean;
+    }
   // A live people count from the SenSource Vea integration ("people:count"
   // channel). `metric` picks attendance (Σins today) or occupancy (in-room now);
   // `zoneId` null = building total, else a single zone. Optional `label` shown

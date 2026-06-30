@@ -11,4 +11,5 @@ export const OBJECT_INTEGRATION: Partial<Record<LayoutObjectType, { id: string; 
   "osc-button": { id: "osc", label: "OSC" },
   "transcript-strip": { id: "prodcom", label: "captions" },
   "charger-battery": { id: "wireless", label: "wireless" },
+  "wireless-summary": { id: "wireless", label: "wireless" },
 };

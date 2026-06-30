@@ -69,7 +69,7 @@ import { useObsState } from "../../main/use-obs-state";
 import { useOscTargets } from "../../main/use-osc-state";
 import { useStageState } from "../../main/use-stage-state";
 import { usePlanItems } from "../../main/use-plan-items";
-import { useEnabledIntegrations } from "../../main/use-integration-states";
+import { useEnabledIntegrations, useIntegrations } from "../../main/use-integration-states";
 import { OBJECT_INTEGRATION } from "../../main/object-integration";
 import { invoke } from "../../lib/api";
 import { InlineSlotsEditor } from "./inline-slots-editor";
@@ -95,6 +95,8 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "spl-meter": "SPL meter",
   "obs-status": "OBS status",
   "osc-button": "OSC button",
+  "integration-status": "Integration status",
+  "wireless-summary": "Wireless summary",
   "people-counter": "People counter",
   "brand-logo": "Logo",
   "ndi-video": "NDI video",
@@ -112,12 +114,13 @@ const PALETTE_GROUPS: { label: string; types: LayoutObjectType[] }[] = [
   { label: "Text & time", types: ["text", "clock", "countdown-timer"] },
   { label: "PCO / service", types: ["live-controls", "current-service-item", "next-service-item", "service-order", "plan-attachment"] },
   { label: "ProPresenter", types: ["current-slide-text", "next-slide-text", "current-slide-notes", "slide-thumbnail", "section-chip"] },
-  { label: "Mics & RF", types: ["slots-grid", "charger-battery"] },
+  { label: "Mics & RF", types: ["slots-grid", "charger-battery", "wireless-summary"] },
   { label: "Audio (SPL)", types: ["spl-meter"] },
   { label: "Captions", types: ["transcript-strip"] },
   { label: "People", types: ["people-counter"] },
   { label: "OBS", types: ["obs-status"] },
   { label: "Control", types: ["osc-button"] },
+  { label: "Status", types: ["integration-status"] },
 ];
 
 // Object types that have no per-object options — the inspector shows a "styling
@@ -160,6 +163,8 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "spl-meter": return { type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null };
     case "obs-status": return { type: "obs-status", mode: "recording", showTimecode: false, hideWhenIdle: false, fillWhenRecording: true };
     case "osc-button": return { type: "osc-button", targetId: null, label: "Button", address: "/", args: [], feedback: null };
+    case "integration-status": return { type: "integration-status", integrationId: null, showLabel: true };
+    case "wireless-summary": return { type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" };
     case "people-counter": return { type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true };
     case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
     case "image": return { type: "image", src: "" };
@@ -186,6 +191,8 @@ function defaultStyle(type: LayoutObjectType): LayoutStyle {
   if (type === "osc-button") return { fontSize: 0.045, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
   // People counter reads as a big bold number.
   if (type === "people-counter") return { fontSize: 0.12, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
+  // Status / wireless summary read as a compact label-sized pill.
+  if (type === "integration-status" || type === "wireless-summary") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
   return { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 }
 
@@ -1272,7 +1279,7 @@ export function LayoutEditor({
               selectedId={selectedId}
               gridOn={gridOn && isEditing}
               interactive={isEditing}
-              ctx={{ ...data, state: data.state }}
+              ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels }}
               ndiSource={view.ndiSource ?? null}
               onSelect={setSelectedId}
               onGeom={onGeom}
@@ -1657,6 +1664,8 @@ function Inspector({
   const peopleCount = usePeopleCountState();
   const oscTargets = useOscTargets();
   const planItems = usePlanItems();
+  const integrationsSnap = useIntegrations();
+  const captionChannels = Object.keys(useStageState().state?.captionChannelColors ?? {});
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
@@ -1769,6 +1778,64 @@ function Inspector({
           </Row>
           {c.mode === "rolling" && (
             <Row label="Lines"><NumberInput value={c.maxLines ?? 3} step={1} min={1} max={10} onChange={(v) => onConfig({ ...c, maxLines: Math.round(v) })} /></Row>
+          )}
+          {captionChannels.length === 0 ? (
+            <span className="text-caption2 text-gray-9">Channels appear here once captions arrive — toggle any to hide.</span>
+          ) : (() => {
+            const hidden = c.hideChannels ?? [];
+            const toggle = (ch: string) => {
+              const next = hidden.includes(ch) ? hidden.filter((x) => x !== ch) : [...hidden, ch];
+              onConfig({ ...c, hideChannels: next.length ? next : undefined });
+            };
+            return (
+              <div className="flex flex-col gap-1">
+                <span className="text-caption2 text-gray-9">Channels shown</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {captionChannels.map((ch) => {
+                    const on = !hidden.includes(ch);
+                    return (
+                      <button
+                        key={ch}
+                        onClick={() => toggle(ch)}
+                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"}`}
+                      >
+                        {ch}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+        </>
+      )}
+      {c.type === "integration-status" && (() => {
+        const states = integrationsSnap.states;
+        return (
+          <>
+            <Row label="Integration">
+              <Select value={c.integrationId ?? ""} onValueChange={(v: string) => onConfig({ ...c, integrationId: v || null })}>
+                <SelectTrigger><SelectValue placeholder={states.length ? "First available" : "No integrations"} /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">First available</SelectItem>
+                  {states.map((st) => <SelectItem key={st.id} value={st.id}>{integrationsSnap.labels[st.id] ?? st.id}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Row>
+            <Row label="Show label"><Switch checked={c.showLabel ?? true} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} /></Row>
+            {(c.showLabel ?? true) && (
+              <Row label="Label"><Input value={c.label ?? ""} onChange={(e) => onConfig({ ...c, label: e.target.value })} placeholder="integration name" className="text-gray-12" /></Row>
+            )}
+          </>
+        );
+      })()}
+      {c.type === "wireless-summary" && (
+        <>
+          <Row label="Online count"><Switch checked={c.showOnline ?? true} onCheckedChange={(v) => onConfig({ ...c, showOnline: v })} /></Row>
+          <Row label="Lowest battery"><Switch checked={c.showBattery ?? true} onCheckedChange={(v) => onConfig({ ...c, showBattery: v })} /></Row>
+          <Row label="Show label"><Switch checked={c.showLabel ?? false} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} /></Row>
+          {(c.showLabel ?? false) && (
+            <Row label="Label"><Input value={c.label ?? ""} onChange={(e) => onConfig({ ...c, label: e.target.value })} placeholder="Mics" className="text-gray-12" /></Row>
           )}
         </>
       )}

@@ -6,6 +6,8 @@ import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue } from "./use-people-count-state";
+import { useIntegrations } from "./use-integration-states";
+import { useWirelessChannels } from "./use-wireless-channels";
 import { OscButton } from "./osc-button";
 import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
@@ -28,6 +30,11 @@ export interface LayoutRenderCtx {
   osc: OscFeedbackDTO | null;
   /** Live SenSource Vea people counts — for the people-counter object. */
   peopleCount: PeopleCountDTO | null;
+  /** Live integration connection states + friendly labels — for the integration-status object. */
+  integrations: IntegrationState[];
+  integrationLabels: Record<string, string>;
+  /** Flat wireless channel list — for the wireless-summary object. */
+  wireless: DeviceStatus[];
   now: number;
   skewMs: number;
   ndiSource: string | null;
@@ -206,7 +213,12 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       );
     }
     case "transcript-strip": {
-      if (ctx.transcript.length === 0) return null;
+      // Optionally drop lines from hidden channels (by channel name).
+      const hidden = c.hideChannels ?? [];
+      const lines = hidden.length
+        ? ctx.transcript.filter((l) => !hidden.includes(l.channelName ?? ""))
+        : ctx.transcript;
+      if (lines.length === 0) return null;
       if (c.mode !== "latest") {
         // Multi-speaker feed that mirrors the dedicated captions display: newest
         // line at the BOTTOM, older shifting up, LEFT-aligned (captions read left,
@@ -214,7 +226,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         // as fit (older clipped at the top, exactly like the full display).
         return (
           <TranscriptFeed
-            lines={ctx.transcript}
+            lines={lines}
             maxLines={c.maxLines}
             showLabels
             colorOverrides={ctx.state.captionChannelColors}
@@ -224,7 +236,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
           />
         );
       }
-      const last = ctx.transcript[ctx.transcript.length - 1];
+      const last = lines[lines.length - 1];
       const speaker = channelLabel(last);
       return (
         <span style={{ ...ts, color: lineColor(last, ctx.state.captionChannelColors), opacity: last.isFinal ? 1 : 0.55 }}>
@@ -385,6 +397,41 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
           ts={ts}
         />
       );
+    case "integration-status": {
+      const st = c.integrationId ? ctx.integrations.find((i) => i.id === c.integrationId) : ctx.integrations[0];
+      const conn = st?.connection ?? "disconnected";
+      const dot =
+        conn === "connected" ? "var(--green-10)"
+        : conn === "error" ? "var(--red-10)"
+        : conn === "connecting" ? "var(--yellow-10)"
+        : "rgba(255,255,255,0.35)";
+      const name = c.label ?? (st ? (ctx.integrationLabels[st.id] ?? st.id) : "—");
+      return (
+        <span style={{ ...ts, width: "auto", display: "inline-flex", alignItems: "center", gap: "0.4em" }}>
+          <span style={{ width: "0.6em", height: "0.6em", borderRadius: "50%", background: dot, flexShrink: 0 }} />
+          {(c.showLabel ?? true) && <span>{name}</span>}
+        </span>
+      );
+    }
+    case "wireless-summary": {
+      const ch = ctx.wireless;
+      if (ch.length === 0) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      const online = ch.filter((d) => d.online).length;
+      const batteries = ch.filter((d) => d.online && d.battery != null).map((d) => d.battery as number);
+      const lowest = batteries.length ? Math.min(...batteries) : null;
+      const showOnline = c.showOnline ?? true;
+      const showBattery = c.showBattery ?? true;
+      const prefix = (c.showLabel ?? false) && c.label ? `${c.label} ` : "";
+      return (
+        <span style={{ ...ts, width: "auto", display: "inline-flex", alignItems: "baseline", gap: "0.4em" }}>
+          {prefix && <span>{prefix.trim()}</span>}
+          {showOnline && <span>{online}/{ch.length}</span>}
+          {showBattery && lowest != null && (
+            <span style={{ color: batteryColor(lowest) }}>{lowest}%</span>
+          )}
+        </span>
+      );
+    }
     default:
       return null;
   }
@@ -857,6 +904,8 @@ export function useLayoutData() {
   const osc = useOscState();
   const peopleCount = usePeopleCountState();
   const planItems = usePlanItems();
+  const integrationsSnap = useIntegrations();
+  const wireless = useWirelessChannels();
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -868,7 +917,7 @@ export function useLayoutData() {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  return { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -876,7 +925,7 @@ export function useLayoutData() {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, now, skewMs } = useLayoutData();
+  const { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, integrationsSnap, wireless, now, skewMs } = useLayoutData();
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -920,7 +969,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // with the window instead of the design canvas.
   const fill = canvas.fit === "fill";
   const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, now, skewMs, ndiSource, H, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

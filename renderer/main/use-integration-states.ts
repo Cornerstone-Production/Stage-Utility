@@ -39,3 +39,45 @@ export function useEnabledIntegrations(): Set<string> {
 
   return enabled;
 }
+
+export interface IntegrationsSnapshot {
+  /** Live per-integration state (id, enabled, connection, message, config). */
+  states: IntegrationState[];
+  /** Friendly descriptor label keyed by integration id (for display). */
+  labels: Record<string, string>;
+}
+
+/**
+ * Full integration snapshot — live `connection` state plus the friendly label
+ * for each integration. Backs the "Integration status" layout object and its
+ * editor picker. Hydrates from `integrations:list`, stays live via
+ * `integrations:state-changed`.
+ */
+export function useIntegrations(): IntegrationsSnapshot {
+  const [snap, setSnap] = useState<IntegrationsSnapshot>(() => ({ states: [], labels: {} }));
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<{ descriptors: { id: string; label: string }[]; states: IntegrationState[] }>("integrations:list")
+      .then((r) => {
+        if (cancelled || !r) return;
+        const labels: Record<string, string> = {};
+        for (const d of r.descriptors ?? []) labels[d.id] = d.label;
+        setSnap({ states: r.states ?? [], labels });
+      })
+      .catch(() => {
+        /* not reachable yet */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return onNotification("integrations:state-changed", (p) => {
+      setSnap((prev) => ({ ...prev, states: p as IntegrationState[] }));
+    });
+  }, []);
+
+  return snap;
+}
