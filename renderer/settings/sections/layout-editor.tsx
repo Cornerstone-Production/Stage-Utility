@@ -790,6 +790,52 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+// ── Declarative inspector rows ───────────────────────────────────────────────
+// Thin label+control wrappers so each object's inspector block reads as a list
+// of options and every control is laid out consistently. Bespoke controls
+// (live-data selects, list editors) still use <Row> directly.
+
+function RowSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return <Row label={label}><Switch checked={checked} onCheckedChange={onChange} /></Row>;
+}
+
+function RowText({ label, value, placeholder, onChange }: { label: string; value: string; placeholder?: string; onChange: (v: string) => void }) {
+  return (
+    <Row label={label}>
+      <Input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className="text-gray-12" />
+    </Row>
+  );
+}
+
+function RowNumber({ label, value, step, min, max, onChange }: { label: string; value: number; step?: number; min?: number; max?: number; onChange: (v: number) => void }) {
+  return <Row label={label}><NumberInput value={value} step={step} min={min} max={max} onChange={onChange} /></Row>;
+}
+
+/** A segmented (accent/filled) button toggle — the most repeated inspector control. */
+function RowToggle<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <Row label={label}>
+      <ButtonGroup>
+        {options.map((o) => (
+          <Button key={o.value} variant={value === o.value ? "accent" : "filled"} size="small" onClick={() => onChange(o.value)}>
+            {o.label}
+          </Button>
+        ))}
+      </ButtonGroup>
+    </Row>
+  );
+}
+
 /** Thin wrappers over the shared themed NumberInput (kept so existing call sites
  *  and PixelField don't change). */
 function NumberField({ value, onChange, step = 1, min, max, suffix }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number; suffix?: string }) {
@@ -1732,19 +1778,19 @@ function Inspector({
 
       {/* Binding */}
       {c.type === "text" && (
-        <Row label="Text"><Input value={c.text} onChange={(e) => onConfig({ type: "text", text: e.target.value })} className="text-gray-12" /></Row>
+        <RowText label="Text" value={c.text} onChange={(v) => onConfig({ type: "text", text: v })} />
       )}
       {c.type === "clock" && (
         <>
-          <Row label="Format">
-            <ButtonGroup>
-              <Button variant={c.format !== "24h" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, format: "12h" })}>12h</Button>
-              <Button variant={c.format === "24h" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, format: "24h" })}>24h</Button>
-            </ButtonGroup>
-          </Row>
-          <Row label="Seconds"><Switch checked={c.showSeconds ?? true} onCheckedChange={(v) => onConfig({ ...c, showSeconds: v })} /></Row>
+          <RowToggle
+            label="Format"
+            value={c.format === "24h" ? "24h" : "12h"}
+            options={[{ value: "12h", label: "12h" }, { value: "24h", label: "24h" }]}
+            onChange={(v) => onConfig({ ...c, format: v })}
+          />
+          <RowSwitch label="Seconds" checked={c.showSeconds ?? true} onChange={(v) => onConfig({ ...c, showSeconds: v })} />
           {c.format !== "24h" && (
-            <Row label="AM / PM"><Switch checked={c.showMeridiem ?? true} onCheckedChange={(v) => onConfig({ ...c, showMeridiem: v })} /></Row>
+            <RowSwitch label="AM / PM" checked={c.showMeridiem ?? true} onChange={(v) => onConfig({ ...c, showMeridiem: v })} />
           )}
         </>
       )}
@@ -1762,15 +1808,15 @@ function Inspector({
       )}
       {c.type === "service-order" && (
         <>
-          <Row label="Scroll">
-            <ButtonGroup>
-              <Button variant={(c.scroll ?? "auto") === "auto" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, scroll: "auto" })}>Follow live</Button>
-              <Button variant={c.scroll === "static" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, scroll: "static" })}>Static</Button>
-            </ButtonGroup>
-          </Row>
-          <Row label="Fit to height"><Switch checked={c.autoFit ?? true} onCheckedChange={(v) => onConfig({ ...c, autoFit: v })} /></Row>
-          <Row label="Highlight live"><Switch checked={c.highlightLive ?? true} onCheckedChange={(v) => onConfig({ ...c, highlightLive: v })} /></Row>
-          <Row label="Show length"><Switch checked={c.showLength ?? false} onCheckedChange={(v) => onConfig({ ...c, showLength: v })} /></Row>
+          <RowToggle
+            label="Scroll"
+            value={c.scroll ?? "auto"}
+            options={[{ value: "auto", label: "Follow live" }, { value: "static", label: "Static" }]}
+            onChange={(v) => onConfig({ ...c, scroll: v })}
+          />
+          <RowSwitch label="Fit to height" checked={c.autoFit ?? true} onChange={(v) => onConfig({ ...c, autoFit: v })} />
+          <RowSwitch label="Highlight live" checked={c.highlightLive ?? true} onChange={(v) => onConfig({ ...c, highlightLive: v })} />
+          <RowSwitch label="Show length" checked={c.showLength ?? false} onChange={(v) => onConfig({ ...c, showLength: v })} />
           {(() => {
             const present = planItems?.noteCategories ?? [];
             if (present.length === 0) {
@@ -1806,14 +1852,14 @@ function Inspector({
       )}
       {c.type === "transcript-strip" && (
         <>
-          <Row label="Mode">
-            <ButtonGroup>
-              <Button variant={c.mode === "latest" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, mode: "latest" })}>Latest</Button>
-              <Button variant={c.mode === "rolling" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, mode: "rolling" })}>Rolling</Button>
-            </ButtonGroup>
-          </Row>
+          <RowToggle
+            label="Mode"
+            value={c.mode}
+            options={[{ value: "latest", label: "Latest" }, { value: "rolling", label: "Rolling" }]}
+            onChange={(v) => onConfig({ ...c, mode: v })}
+          />
           {c.mode === "rolling" && (
-            <Row label="Lines"><NumberInput value={c.maxLines ?? 3} step={1} min={1} max={10} onChange={(v) => onConfig({ ...c, maxLines: Math.round(v) })} /></Row>
+            <RowNumber label="Lines" value={c.maxLines ?? 3} step={1} min={1} max={10} onChange={(v) => onConfig({ ...c, maxLines: Math.round(v) })} />
           )}
           {captionChannels.length === 0 ? (
             <span className="text-caption2 text-gray-9">Channels appear here once captions arrive — toggle any to hide.</span>
@@ -1858,20 +1904,20 @@ function Inspector({
                 </SelectContent>
               </Select>
             </Row>
-            <Row label="Show label"><Switch checked={c.showLabel ?? true} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} /></Row>
+            <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
             {(c.showLabel ?? true) && (
-              <Row label="Label"><Input value={c.label ?? ""} onChange={(e) => onConfig({ ...c, label: e.target.value })} placeholder="integration name" className="text-gray-12" /></Row>
+              <RowText label="Label" value={c.label ?? ""} placeholder="integration name" onChange={(v) => onConfig({ ...c, label: v })} />
             )}
           </>
         );
       })()}
       {c.type === "wireless-summary" && (
         <>
-          <Row label="Online count"><Switch checked={c.showOnline ?? true} onCheckedChange={(v) => onConfig({ ...c, showOnline: v })} /></Row>
-          <Row label="Lowest battery"><Switch checked={c.showBattery ?? true} onCheckedChange={(v) => onConfig({ ...c, showBattery: v })} /></Row>
-          <Row label="Show label"><Switch checked={c.showLabel ?? false} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} /></Row>
+          <RowSwitch label="Online count" checked={c.showOnline ?? true} onChange={(v) => onConfig({ ...c, showOnline: v })} />
+          <RowSwitch label="Lowest battery" checked={c.showBattery ?? true} onChange={(v) => onConfig({ ...c, showBattery: v })} />
+          <RowSwitch label="Show label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
           {(c.showLabel ?? false) && (
-            <Row label="Label"><Input value={c.label ?? ""} onChange={(e) => onConfig({ ...c, label: e.target.value })} placeholder="Mics" className="text-gray-12" /></Row>
+            <RowText label="Label" value={c.label ?? ""} placeholder="Mics" onChange={(v) => onConfig({ ...c, label: v })} />
           )}
         </>
       )}
@@ -1905,11 +1951,11 @@ function Inspector({
       })()}
       {c.type === "charger-battery" && (
         <>
-          <Row label="Battery %"><Switch checked={c.show.battery ?? false} onCheckedChange={(v) => onConfig({ ...c, show: { ...c.show, battery: v } })} /></Row>
-          <Row label="Charging"><Switch checked={c.show.charging ?? false} onCheckedChange={(v) => onConfig({ ...c, show: { ...c.show, charging: v } })} /></Row>
-          <Row label="Cycles"><Switch checked={c.show.cycles ?? false} onCheckedChange={(v) => onConfig({ ...c, show: { ...c.show, cycles: v } })} /></Row>
-          <Row label="Health"><Switch checked={c.show.health ?? false} onCheckedChange={(v) => onConfig({ ...c, show: { ...c.show, health: v } })} /></Row>
-          <Row label="Temp"><Switch checked={c.show.temp ?? false} onCheckedChange={(v) => onConfig({ ...c, show: { ...c.show, temp: v } })} /></Row>
+          <RowSwitch label="Battery %" checked={c.show.battery ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, battery: v } })} />
+          <RowSwitch label="Charging" checked={c.show.charging ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, charging: v } })} />
+          <RowSwitch label="Cycles" checked={c.show.cycles ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, cycles: v } })} />
+          <RowSwitch label="Health" checked={c.show.health ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, health: v } })} />
+          <RowSwitch label="Temp" checked={c.show.temp ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, temp: v } })} />
           <div className="flex flex-col gap-1.5 pt-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Bays</span>
             {c.bays.map((b, i) => {
@@ -1972,15 +2018,13 @@ function Inspector({
                 </SelectContent>
               </Select>
             </Row>
-            <Row label="Show metric name"><Switch checked={c.showLabel ?? false} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} /></Row>
-            <Row label="Peak hold"><Switch checked={c.peakHold ?? false} onCheckedChange={(v) => onConfig({ ...c, peakHold: v })} /></Row>
-            <Row label="Color thresholds">
-              <Switch checked={!!t} onCheckedChange={(v) => onConfig({ ...c, thresholds: v ? { amber: 95, red: 100 } : null })} />
-            </Row>
+            <RowSwitch label="Show metric name" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+            <RowSwitch label="Peak hold" checked={c.peakHold ?? false} onChange={(v) => onConfig({ ...c, peakHold: v })} />
+            <RowSwitch label="Color thresholds" checked={!!t} onChange={(v) => onConfig({ ...c, thresholds: v ? { amber: 95, red: 100 } : null })} />
             {t && (
               <>
-                <Row label="Amber ≥ (dB)"><NumberInput value={t.amber} step={1} min={0} max={140} onChange={(v) => onConfig({ ...c, thresholds: { ...t, amber: Math.round(v) } })} /></Row>
-                <Row label="Red ≥ (dB)"><NumberInput value={t.red} step={1} min={0} max={140} onChange={(v) => onConfig({ ...c, thresholds: { ...t, red: Math.round(v) } })} /></Row>
+                <RowNumber label="Amber ≥ (dB)" value={t.amber} step={1} min={0} max={140} onChange={(v) => onConfig({ ...c, thresholds: { ...t, amber: Math.round(v) } })} />
+                <RowNumber label="Red ≥ (dB)" value={t.red} step={1} min={0} max={140} onChange={(v) => onConfig({ ...c, thresholds: { ...t, red: Math.round(v) } })} />
               </>
             )}
           </>
@@ -2008,29 +2052,24 @@ function Inspector({
               </Select>
             </Row>
             <Row label="OBS"><span className="text-caption2 text-gray-10">{liveLabel}</span></Row>
-            <Row label="Active text"><Input value={c.recordingText ?? ""} onChange={(e) => onConfig({ ...c, recordingText: e.target.value })} placeholder={activePlaceholder} className="text-gray-12" /></Row>
-            <Row label="Idle text"><Input value={c.idleText ?? ""} onChange={(e) => onConfig({ ...c, idleText: e.target.value })} placeholder={idlePlaceholder} className="text-gray-12" /></Row>
-            <Row label="Offline text"><Input value={c.offlineText ?? ""} onChange={(e) => onConfig({ ...c, offlineText: e.target.value })} placeholder="OBS: Offline" className="text-gray-12" /></Row>
-            <Row label="Fill red when active"><Switch checked={c.fillWhenRecording ?? true} onCheckedChange={(v) => onConfig({ ...c, fillWhenRecording: v })} /></Row>
+            <RowText label="Active text" value={c.recordingText ?? ""} placeholder={activePlaceholder} onChange={(v) => onConfig({ ...c, recordingText: v })} />
+            <RowText label="Idle text" value={c.idleText ?? ""} placeholder={idlePlaceholder} onChange={(v) => onConfig({ ...c, idleText: v })} />
+            <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="OBS: Offline" onChange={(v) => onConfig({ ...c, offlineText: v })} />
+            <RowSwitch label="Fill red when active" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
             {mode === "recording" && (
-              <Row label="Show timecode"><Switch checked={c.showTimecode ?? false} onCheckedChange={(v) => onConfig({ ...c, showTimecode: v })} /></Row>
+              <RowSwitch label="Show timecode" checked={c.showTimecode ?? false} onChange={(v) => onConfig({ ...c, showTimecode: v })} />
             )}
-            <Row label="Hide when idle"><Switch checked={c.hideWhenIdle ?? false} onCheckedChange={(v) => onConfig({ ...c, hideWhenIdle: v })} /></Row>
+            <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
           </>
         );
       })()}
       {c.type === "countdown-timer" && (
         <>
-          <Row label="Amber warning">
-            <Switch
-              checked={c.warnSeconds != null}
-              onCheckedChange={(v) => onConfig({ ...c, warnSeconds: v ? 60 : undefined })}
-            />
-          </Row>
+          <RowSwitch label="Amber warning" checked={c.warnSeconds != null} onChange={(v) => onConfig({ ...c, warnSeconds: v ? 60 : undefined })} />
           {c.warnSeconds != null && (
-            <Row label="Warn at (s)"><NumberInput value={c.warnSeconds} step={5} min={0} max={3600} onChange={(v) => onConfig({ ...c, warnSeconds: Math.round(v) })} /></Row>
+            <RowNumber label="Warn at (s)" value={c.warnSeconds} step={5} min={0} max={3600} onChange={(v) => onConfig({ ...c, warnSeconds: Math.round(v) })} />
           )}
-          <Row label="Hide when idle"><Switch checked={c.hideWhenIdle ?? false} onCheckedChange={(v) => onConfig({ ...c, hideWhenIdle: v })} /></Row>
+          <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
         </>
       )}
       {c.type === "osc-button" && (() => {
@@ -2051,8 +2090,8 @@ function Inspector({
                 </SelectContent>
               </Select>
             </Row>
-            <Row label="Label"><Input value={c.label ?? ""} onChange={(e) => onConfig({ ...c, label: e.target.value })} placeholder="Button" className="text-gray-12" /></Row>
-            <Row label="Address"><Input value={c.address} onChange={(e) => onConfig({ ...c, address: e.target.value })} placeholder="/ch/01/mix/on" className="text-gray-12" /></Row>
+            <RowText label="Label" value={c.label ?? ""} placeholder="Button" onChange={(v) => onConfig({ ...c, label: v })} />
+            <RowText label="Address" value={c.address} placeholder="/ch/01/mix/on" onChange={(v) => onConfig({ ...c, address: v })} />
             <div className="flex flex-col gap-1.5">
               <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Arguments</span>
               {args.map((a, i) => (
@@ -2075,14 +2114,12 @@ function Inspector({
               ))}
               <Button variant="transparent" size="small" className="self-start" onClick={() => onConfig({ ...c, args: [...args, { type: "i", value: "1" }] })}>Add argument</Button>
             </div>
-            <Row label="Feedback">
-              <Switch checked={!!fb} onCheckedChange={(v) => onConfig({ ...c, feedback: v ? { address: c.address || "/", equals: 1 } : null })} />
-            </Row>
+            <RowSwitch label="Feedback" checked={!!fb} onChange={(v) => onConfig({ ...c, feedback: v ? { address: c.address || "/", equals: 1 } : null })} />
             {fb && (
               <>
-                <Row label="Watch address"><Input value={fb.address} onChange={(e) => onConfig({ ...c, feedback: { ...fb, address: e.target.value } })} placeholder="/ch/01/mix/on" className="text-gray-12" /></Row>
-                <Row label="Active when ="><Input value={String(fb.equals ?? "")} onChange={(e) => onConfig({ ...c, feedback: { ...fb, equals: e.target.value } })} placeholder="1 (blank = any truthy)" className="text-gray-12" /></Row>
-                <Row label="Active color"><Input value={fb.activeColor ?? ""} onChange={(e) => onConfig({ ...c, feedback: { ...fb, activeColor: e.target.value } })} placeholder="var(--red-9)" className="text-gray-12" /></Row>
+                <RowText label="Watch address" value={fb.address} placeholder="/ch/01/mix/on" onChange={(v) => onConfig({ ...c, feedback: { ...fb, address: v } })} />
+                <RowText label="Active when =" value={String(fb.equals ?? "")} placeholder="1 (blank = any truthy)" onChange={(v) => onConfig({ ...c, feedback: { ...fb, equals: v } })} />
+                <RowText label="Active color" value={fb.activeColor ?? ""} placeholder="var(--red-9)" onChange={(v) => onConfig({ ...c, feedback: { ...fb, activeColor: v } })} />
               </>
             )}
           </>
@@ -2092,12 +2129,12 @@ function Inspector({
         const zones = peopleCount?.zones ?? [];
         return (
           <>
-            <Row label="Count">
-              <ButtonGroup>
-                <Button variant={(c.metric ?? "attendance") === "attendance" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, metric: "attendance" })}>Attendance</Button>
-                <Button variant={c.metric === "occupancy" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, metric: "occupancy" })}>In room</Button>
-              </ButtonGroup>
-            </Row>
+            <RowToggle
+              label="Count"
+              value={c.metric ?? "attendance"}
+              options={[{ value: "attendance", label: "Attendance" }, { value: "occupancy", label: "In room" }]}
+              onChange={(v) => onConfig({ ...c, metric: v })}
+            />
             <Row label="Zone">
               <Select value={c.zoneId ?? ""} onValueChange={(v: string) => onConfig({ ...c, zoneId: v || null })}>
                 <SelectTrigger><SelectValue placeholder={zones.length ? "Building total" : "No zones detected"} /></SelectTrigger>
@@ -2107,44 +2144,44 @@ function Inspector({
                 </SelectContent>
               </Select>
             </Row>
-            <Row label="Show label"><Switch checked={c.showLabel ?? true} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} /></Row>
+            <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
             {(c.showLabel ?? true) && (
-              <Row label="Label"><Input value={c.label ?? ""} onChange={(e) => onConfig({ ...c, label: e.target.value })} placeholder={c.metric === "occupancy" ? "in room" : "people"} className="text-gray-12" /></Row>
+              <RowText label="Label" value={c.label ?? ""} placeholder={c.metric === "occupancy" ? "in room" : "people"} onChange={(v) => onConfig({ ...c, label: v })} />
             )}
           </>
         );
       })()}
       {c.type === "people-graph" && (
         <>
-          <Row label="Count">
-            <ButtonGroup>
-              <Button variant={c.metric === "attendance" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, metric: "attendance" })}>Attendance</Button>
-              <Button variant={(c.metric ?? "occupancy") === "occupancy" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, metric: "occupancy" })}>In room</Button>
-            </ButtonGroup>
-          </Row>
-          <Row label="Show value"><Switch checked={c.showLabel ?? true} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} /></Row>
+          <RowToggle
+            label="Count"
+            value={c.metric ?? "occupancy"}
+            options={[{ value: "attendance", label: "Attendance" }, { value: "occupancy", label: "In room" }]}
+            onChange={(v) => onConfig({ ...c, metric: v })}
+          />
+          <RowSwitch label="Show value" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
           {(c.showLabel ?? true) && (
-            <Row label="Label"><Input value={c.label ?? ""} onChange={(e) => onConfig({ ...c, label: e.target.value })} placeholder={c.metric === "attendance" ? "Attendance" : "In room"} className="text-gray-12" /></Row>
+            <RowText label="Label" value={c.label ?? ""} placeholder={c.metric === "attendance" ? "Attendance" : "In room"} onChange={(v) => onConfig({ ...c, label: v })} />
           )}
           <p className="text-caption2 text-gray-9 leading-snug">Trend builds while the server runs; the line color is the object's text color below.</p>
         </>
       )}
       {c.type === "image" && (
-        <Row label="URL"><Input value={c.src} onChange={(e) => onConfig({ type: "image", src: e.target.value })} placeholder="https://… or data:" className="text-gray-12" /></Row>
+        <RowText label="URL" value={c.src} placeholder="https://… or data:" onChange={(v) => onConfig({ type: "image", src: v })} />
       )}
       {c.type === "plan-attachment" && (
         <PlanAttachmentConfig c={c} onConfig={onConfig} o={o} canvas={canvas} onGeom={onGeom} />
       )}
       {c.type === "shape" && (
-        <Row label="Shape">
-          <ButtonGroup>
-            <Button variant={c.shape === "rect" ? "accent" : "filled"} size="small" onClick={() => onConfig({ type: "shape", shape: "rect" })}>Rect</Button>
-            <Button variant={c.shape === "ellipse" ? "accent" : "filled"} size="small" onClick={() => onConfig({ type: "shape", shape: "ellipse" })}>Ellipse</Button>
-          </ButtonGroup>
-        </Row>
+        <RowToggle
+          label="Shape"
+          value={c.shape}
+          options={[{ value: "rect", label: "Rect" }, { value: "ellipse", label: "Ellipse" }]}
+          onChange={(v) => onConfig({ type: "shape", shape: v })}
+        />
       )}
       {c.type === "brand-logo" && (
-        <Row label="Empty logo"><Switch checked={c.useEmptySlotLogo ?? false} onCheckedChange={(v) => onConfig({ type: "brand-logo", useEmptySlotLogo: v })} /></Row>
+        <RowSwitch label="Empty logo" checked={c.useEmptySlotLogo ?? false} onChange={(v) => onConfig({ type: "brand-logo", useEmptySlotLogo: v })} />
       )}
       {NO_CONFIG_TYPES.has(c.type) && (
         <p className="text-caption2 text-gray-9 leading-snug">Updates automatically — no options. Use the styling controls below.</p>
