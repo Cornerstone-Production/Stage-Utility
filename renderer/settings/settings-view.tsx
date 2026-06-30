@@ -21,6 +21,7 @@ import {
   QrCodeIcon,
   PaletteIcon,
   ActivityIcon,
+  UsersIcon,
   SlidersHorizontalIcon,
   SunIcon,
   MoonIcon,
@@ -39,6 +40,7 @@ import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import { SplHistorySection } from "./sections/spl-history-section";
+import { AttendanceHistorySection } from "./sections/attendance-history-section";
 import { GettingStarted } from "./getting-started";
 import { BrandHeader } from "./brand-header";
 import { BrandLogo } from "../components/brand-logo";
@@ -144,6 +146,7 @@ const SECTIONS: SectionItem[] = [
   { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4 text-gray-11" /> },
   { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4 text-gray-11" /> },
   { id: "spl-history", label: "SPL History", icon: <ActivityIcon className="size-4 text-gray-11" /> },
+  { id: "attendance", label: "Attendance", icon: <UsersIcon className="size-4 text-gray-11" /> },
   { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
 ];
 
@@ -221,9 +224,20 @@ export function SettingsView() {
   const showSplHistory =
     (integrationsData?.states?.some((s) => s.id === "smaart" && s.enabled) ?? false) ||
     (splHistoryList?.length ?? 0) > 0;
+  const { data: attendanceList } = useQuery({
+    queryKey: ["attendance:listHistory"],
+    queryFn: () => ipc<ServiceAttendance[]>("attendance:listHistory"),
+  });
+  const showAttendance =
+    (integrationsData?.states?.some((s) => s.id === "sensource" && s.enabled) ?? false) ||
+    (attendanceList?.length ?? 0) > 0;
   const sections = useMemo(
-    () => SECTIONS.filter((s) => s.id !== "spl-history" || showSplHistory),
-    [showSplHistory],
+    () =>
+      SECTIONS.filter(
+        (s) =>
+          (s.id !== "spl-history" || showSplHistory) && (s.id !== "attendance" || showAttendance),
+      ),
+    [showSplHistory, showAttendance],
   );
 
   // In-app update status (git-based; surfaced in the Advanced tab).
@@ -987,6 +1001,12 @@ export function SettingsView() {
         return (
           <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
             <SplHistorySection />
+          </div>
+        );
+      case "attendance":
+        return (
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+            <AttendanceHistorySection />
           </div>
         );
       case "advanced":

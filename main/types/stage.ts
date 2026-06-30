@@ -547,6 +547,38 @@ export interface ServiceSplHistory {
   items: SplItemHistory[];
 }
 
+/** One sampled point of building-total people counts during a service. */
+export interface AttendanceSample {
+  /** ISO timestamp of the sample. */
+  t: string;
+  attendance: number;
+  occupancy: number;
+}
+
+/** Recorded attendance/occupancy trend for one service occurrence, keyed by
+ *  serviceKey (same scheme as ServiceSplHistory). */
+export interface ServiceAttendance {
+  /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */
+  serviceKey: string;
+  serviceTypeId: string | null;
+  planId: string | null;
+  planTitle: string | null;
+  seriesTitle: string | null;
+  /** Local date the recording started (YYYY-MM-DD). */
+  serviceDate: string;
+  serviceTimeId: string | null;
+  serviceTimeStartsAt: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  /** Down-sampled building-total samples across the service (oldest→newest). */
+  samples: AttendanceSample[];
+  peakAttendance: number;
+  peakOccupancy: number;
+  /** Most recent sampled values (for the summary row). */
+  lastAttendance: number;
+  lastOccupancy: number;
+}
+
 export interface ServiceTypeDTO {
   id: string;
   name: string;

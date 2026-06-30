@@ -26,6 +26,8 @@ import { sensourceService } from "./sensource-service.js";
 import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { splRecorder } from "./spl-recorder.js";
+import { attendanceStore } from "./attendance-store.js";
+import { attendanceRecorder } from "./attendance-recorder.js";
 import { stageController } from "./stage-controller.js";
 import { updater } from "./updater.js";
 import { wirelessManager } from "./wireless-manager.js";
@@ -374,6 +376,7 @@ export class RemoteServer {
       sseWrite(res, "propresenter:status", propresenterService.getStatus());
       sseWrite(res, "spl:metrics", smaartService.getLatest());
       sseWrite(res, "spl:history", splRecorder.getCurrent());
+      sseWrite(res, "attendance:history", attendanceRecorder.getCurrent());
       sseWrite(res, "obs:status", obsService.getLatest());
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
@@ -459,6 +462,30 @@ export class RemoteServer {
         }
         if (method === "DELETE") {
           json(res, { deleted: await splHistoryStore.delete(key) });
+          return;
+        }
+      }
+    }
+
+    // ── Attendance history (mirrors the SPL history routes) ─────────────────
+    if (method === "GET" && pathname === "/api/attendance/history/current") {
+      json(res, attendanceRecorder.getCurrent());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/attendance/history") {
+      json(res, await attendanceStore.list());
+      return;
+    }
+    {
+      const attMatch = pathname.match(/^\/api\/attendance\/history\/([^/]+)$/);
+      if (attMatch && attMatch[1] !== "current") {
+        const key = decodeURIComponent(attMatch[1]);
+        if (method === "GET") {
+          json(res, await attendanceStore.get(key));
+          return;
+        }
+        if (method === "DELETE") {
+          json(res, { deleted: await attendanceStore.delete(key) });
           return;
         }
       }

@@ -148,6 +148,29 @@ interface ServiceSplHistory {
   items: SplItemHistory[];
 }
 
+interface AttendanceSample {
+  t: string;
+  attendance: number;
+  occupancy: number;
+}
+interface ServiceAttendance {
+  serviceKey: string;
+  serviceTypeId: string | null;
+  planId: string | null;
+  planTitle: string | null;
+  seriesTitle: string | null;
+  serviceDate: string;
+  serviceTimeId: string | null;
+  serviceTimeStartsAt: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  samples: AttendanceSample[];
+  peakAttendance: number;
+  peakOccupancy: number;
+  lastAttendance: number;
+  lastOccupancy: number;
+}
+
 interface ServiceTypeDTO {
   id: string;
   name: string;

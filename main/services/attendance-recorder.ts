@@ -1,0 +1,146 @@
+// attendance-recorder.ts — Records the building-total attendance/occupancy trend
+// across a live service. Driven from the live-poller (the single server-side
+// writer) alongside the SPL recorder, so it never double-counts across kiosks.
+//
+// On each live tick with an item in progress (and the service happening today —
+// see isLiveServiceToday) it samples the latest SenSource totals, folds the peaks,
+// and appends a down-sampled point to that service occurrence's trend. Records are
+// keyed `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}` and persisted,
+// so a mid-service restart resumes the same record.
+
+import type { PcoLiveDTO, ServiceAttendance } from "../types/stage.js";
+import { broadcast } from "./broadcaster.js";
+import { attendanceStore } from "./attendance-store.js";
+import { sensourceService } from "./sensource-service.js";
+import { isLiveServiceToday } from "./spl-recorder.js";
+import { stageController } from "./stage-controller.js";
+
+const PERSIST_DEBOUNCE_MS = 4000;
+/** Minimum gap between recorded trend points (attendance changes slowly). */
+const SAMPLE_INTERVAL_MS = 30_000;
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+function todayLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+class AttendanceRecorder {
+  private current: ServiceAttendance | null = null;
+  private currentKey: string | null = null;
+  private lastSampleAt = 0;
+  private busy = false;
+  private dirty = false;
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Active in-progress record (for hydration), or null when nothing is recording. */
+  getCurrent(): ServiceAttendance | null {
+    return this.current;
+  }
+
+  /** Called by the live-poller after each pco:live broadcast. */
+  async onLiveTick(live: PcoLiveDTO | null): Promise<void> {
+    if (!live || this.busy) return;
+    this.busy = true;
+    try {
+      if (live.mode === "item" && live.currentItemId && isLiveServiceToday(live)) {
+        await this.ensureRecord(live);
+        if (!this.current) return;
+
+        const p = sensourceService.getLatest();
+        if (!p.connected || p.total.attendance == null || p.total.occupancy == null) return;
+        const a = p.total.attendance;
+        const o = p.total.occupancy;
+        this.current.peakAttendance = Math.max(this.current.peakAttendance, a);
+        this.current.peakOccupancy = Math.max(this.current.peakOccupancy, o);
+        this.current.lastAttendance = a;
+        this.current.lastOccupancy = o;
+
+        const now = Date.now();
+        if (now - this.lastSampleAt >= SAMPLE_INTERVAL_MS) {
+          this.current.samples.push({ t: new Date().toISOString(), attendance: a, occupancy: o });
+          this.lastSampleAt = now;
+          this.schedulePersist();
+        }
+        broadcast("attendance:history", this.current);
+      }
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async ensureRecord(live: PcoLiveDTO): Promise<void> {
+    const st = stageController.getState();
+    if (!st.serviceTypeId || !st.planId) return;
+    const date = todayLocal();
+    const serviceTimeId = live.serviceTimeId;
+    const key = `${st.serviceTypeId}:${st.planId}:${serviceTimeId ?? date}`;
+    if (this.currentKey === key && this.current) return;
+
+    // Tolerate a transient null serviceTimeId (cache miss) — keep the open record
+    // if it's the same plan + date, so we don't split mid-service.
+    if (
+      serviceTimeId == null &&
+      this.current &&
+      this.current.serviceTypeId === st.serviceTypeId &&
+      this.current.planId === st.planId &&
+      this.current.serviceDate === date
+    ) {
+      return;
+    }
+
+    // Key changed → finalize + persist the outgoing record.
+    if (this.current) {
+      this.finalizeRecord();
+      await attendanceStore.upsert(this.current);
+    }
+
+    // Resume an existing record for this occurrence (e.g. after a restart), else create.
+    const existing = await attendanceStore.get(key);
+    if (existing) {
+      this.current = existing;
+      this.current.endedAt = null;
+    } else {
+      this.current = {
+        serviceKey: key,
+        serviceTypeId: st.serviceTypeId,
+        planId: st.planId,
+        planTitle: st.planTitle,
+        seriesTitle: st.planSeriesTitle ?? null,
+        serviceDate: date,
+        serviceTimeId: serviceTimeId ?? null,
+        serviceTimeStartsAt: live.serviceTimeStartsAt,
+        startedAt: new Date().toISOString(),
+        endedAt: null,
+        samples: [],
+        peakAttendance: 0,
+        peakOccupancy: 0,
+        lastAttendance: 0,
+        lastOccupancy: 0,
+      };
+    }
+    this.currentKey = key;
+    this.lastSampleAt = 0; // sample immediately on the next tick
+  }
+
+  private finalizeRecord(): void {
+    if (!this.current) return;
+    this.current.endedAt = new Date().toISOString();
+  }
+
+  private schedulePersist(): void {
+    this.dirty = true;
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      if (this.dirty && this.current) {
+        this.dirty = false;
+        void attendanceStore.upsert(this.current);
+      }
+    }, PERSIST_DEBOUNCE_MS);
+  }
+}
+
+export const attendanceRecorder = new AttendanceRecorder();
