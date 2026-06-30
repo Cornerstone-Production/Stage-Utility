@@ -98,6 +98,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "integration-status": "Integration status",
   "wireless-summary": "Wireless summary",
   "people-counter": "People counter",
+  "people-graph": "People graph",
   "brand-logo": "Logo",
   "ndi-video": "NDI video",
   image: "Image",
@@ -117,7 +118,7 @@ const PALETTE_GROUPS: { label: string; types: LayoutObjectType[] }[] = [
   { label: "Mics & RF", types: ["slots-grid", "charger-battery", "wireless-summary"] },
   { label: "Audio (SPL)", types: ["spl-meter"] },
   { label: "Captions", types: ["transcript-strip"] },
-  { label: "People", types: ["people-counter"] },
+  { label: "People", types: ["people-counter", "people-graph"] },
   { label: "OBS", types: ["obs-status"] },
   { label: "Control", types: ["osc-button"] },
   { label: "Status", types: ["integration-status"] },
@@ -166,6 +167,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "integration-status": return { type: "integration-status", integrationId: null, showLabel: true };
     case "wireless-summary": return { type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" };
     case "people-counter": return { type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true };
+    case "people-graph": return { type: "people-graph", metric: "occupancy", showLabel: true, label: "In room" };
     case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
     case "image": return { type: "image", src: "" };
     case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
@@ -193,6 +195,8 @@ function defaultStyle(type: LayoutObjectType): LayoutStyle {
   if (type === "people-counter") return { fontSize: 0.12, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
   // Status / wireless summary read as a compact label-sized pill.
   if (type === "integration-status" || type === "wireless-summary") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
+  // People graph: a glass card; `color` is the sparkline's line/fill color.
+  if (type === "people-graph") return { color: "#5b9cff", ...CARD_PRESETS.neutral };
   return { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 }
 
@@ -2110,6 +2114,21 @@ function Inspector({
           </>
         );
       })()}
+      {c.type === "people-graph" && (
+        <>
+          <Row label="Count">
+            <ButtonGroup>
+              <Button variant={c.metric === "attendance" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, metric: "attendance" })}>Attendance</Button>
+              <Button variant={(c.metric ?? "occupancy") === "occupancy" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, metric: "occupancy" })}>In room</Button>
+            </ButtonGroup>
+          </Row>
+          <Row label="Show value"><Switch checked={c.showLabel ?? true} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} /></Row>
+          {(c.showLabel ?? true) && (
+            <Row label="Label"><Input value={c.label ?? ""} onChange={(e) => onConfig({ ...c, label: e.target.value })} placeholder={c.metric === "attendance" ? "Attendance" : "In room"} className="text-gray-12" /></Row>
+          )}
+          <p className="text-caption2 text-gray-9 leading-snug">Trend builds while the server runs; the line color is the object's text color below.</p>
+        </>
+      )}
       {c.type === "image" && (
         <Row label="URL"><Input value={c.src} onChange={(e) => onConfig({ type: "image", src: e.target.value })} placeholder="https://… or data:" className="text-gray-12" /></Row>
       )}

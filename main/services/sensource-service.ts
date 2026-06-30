@@ -13,7 +13,7 @@
 // the documented client-credentials call and refresh it before expiry. A
 // directly-pasted long-lived token is also accepted (skips the exchange).
 
-import type { PeopleCountDTO, PeopleZoneCount } from "../types/stage.js";
+import type { PeopleCountDTO, PeopleHistoryPoint, PeopleZoneCount } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 
 type ConnState = "connected" | "error" | "disconnected";
@@ -25,6 +25,8 @@ const REQUEST_TIMEOUT_MS = 15000;
 const TOKEN_SKEW_MS = 60_000;
 const DEFAULT_POLL_SECONDS = 45;
 const MIN_POLL_SECONDS = 10;
+/** Rolling trend buffer size (e.g. ~3h at the 45s default cadence). */
+const HISTORY_CAP = 240;
 
 const OFFLINE: PeopleCountDTO = {
   connected: false,
@@ -101,6 +103,8 @@ class SenSourceService {
   private tokenExpiresAt = 0;
 
   private last: PeopleCountDTO = OFFLINE;
+  /** Rolling building-total samples for the people-graph trend object. */
+  private history: PeopleHistoryPoint[] = [];
 
   private onConn: ((state: ConnState, message: string | null) => void) | null = null;
   private reported: ConnState | null = null;
@@ -272,7 +276,15 @@ class SenSourceService {
       const body = await this.apiGet<{ results?: unknown[] }>(`/data/traffic?${params.toString()}`);
       const zones = reduceTraffic(body.results ?? []);
       this.report("connected", `${zones.length} zone(s)`);
-      this.emit(buildDto(zones, new Date().toISOString()));
+      const dto = buildDto(zones, new Date().toISOString());
+      // Append a building-total sample to the rolling trend buffer.
+      this.history.push({
+        t: dto.updatedAt!,
+        attendance: dto.total.attendance ?? 0,
+        occupancy: dto.total.occupancy ?? 0,
+      });
+      if (this.history.length > HISTORY_CAP) this.history.splice(0, this.history.length - HISTORY_CAP);
+      this.emit(dto);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[sensource] poll error:", msg);
@@ -282,8 +294,10 @@ class SenSourceService {
   }
 
   private emit(snapshot: PeopleCountDTO): void {
-    this.last = snapshot;
-    broadcast("people:count", snapshot);
+    // Carry the rolling history on every snapshot (incl. OFFLINE) so the trend
+    // graph holds its shape through a transient disconnect.
+    this.last = { ...snapshot, history: this.history.slice() };
+    broadcast("people:count", this.last);
   }
 }
 

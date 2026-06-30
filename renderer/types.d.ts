@@ -97,11 +97,17 @@ interface PeopleZoneCount {
   attendance: number;
   occupancy: number;
 }
+interface PeopleHistoryPoint {
+  t: string;
+  attendance: number;
+  occupancy: number;
+}
 interface PeopleCountDTO {
   connected: boolean;
   updatedAt: string | null;
   total: { attendance: number | null; occupancy: number | null };
   zones: PeopleZoneCount[];
+  history?: PeopleHistoryPoint[];
 }
 
 interface SplMetricStat {
@@ -372,6 +378,12 @@ type LayoutObjectConfig =
       type: "people-counter";
       metric?: "attendance" | "occupancy";
       zoneId?: string | null;
+      label?: string;
+      showLabel?: boolean;
+    }
+  | {
+      type: "people-graph";
+      metric?: "attendance" | "occupancy";
       label?: string;
       showLabel?: boolean;
     }

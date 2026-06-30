@@ -295,6 +295,15 @@ export type LayoutObjectConfig =
       /** Shrink the text so the whole order fits the object height (no scroll). */
       autoFit?: boolean;
     }
+  // A trend sparkline of the building-total people count over the rolling
+  // in-memory history (people:count `history`). `metric` picks attendance or
+  // occupancy; optional `label` + current value shown when `showLabel`.
+  | {
+      type: "people-graph";
+      metric?: "attendance" | "occupancy";
+      label?: string;
+      showLabel?: boolean;
+    }
   // A styled box that holds other objects. Children are positioned as fractions
   // of THIS container's box (not the canvas), so moving/resizing the container
   // moves/scales its contents as a unit. The box itself is drawn from `style`
@@ -470,12 +479,22 @@ export interface PeopleZoneCount {
   attendance: number;
   occupancy: number;
 }
+/** One sampled point of building-total counts, for the trend sparkline. */
+export interface PeopleHistoryPoint {
+  /** ISO timestamp of the sample. */
+  t: string;
+  attendance: number;
+  occupancy: number;
+}
 export interface PeopleCountDTO {
   connected: boolean;
   /** ISO timestamp of the last successful poll, or null. */
   updatedAt: string | null;
   total: { attendance: number | null; occupancy: number | null };
   zones: PeopleZoneCount[];
+  /** Rolling building-total samples (oldest→newest) for the people-graph object.
+   *  In-memory only — resets when the server restarts. */
+  history?: PeopleHistoryPoint[];
 }
 
 /** Running max/mean of one Smaart metric over an item (e.g. "LAeq 10"). */

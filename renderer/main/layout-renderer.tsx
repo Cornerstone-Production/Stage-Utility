@@ -342,6 +342,8 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         </span>
       );
     }
+    case "people-graph":
+      return <PeopleGraph history={ctx.peopleCount?.history ?? []} metric={c.metric ?? "occupancy"} config={c} ts={ts} H={ctx.H} />;
     case "obs-status": {
       const obs = ctx.obs;
       const connected = obs?.connected ?? false;
@@ -455,6 +457,54 @@ function SplMeterValue({
       {config.peakHold && <span style={{ opacity: 0.6, fontSize: "0.6em" }}> pk</span>}
       {config.showLabel && r && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{` ${r.metricKey}`}</span>}
     </span>
+  );
+}
+
+// A sparkline of the building-total people count over the rolling history.
+// Draws a filled area + line in a 0–100 viewBox stretched to the object box
+// (non-scaling stroke keeps the line crisp at any aspect). Optional current-value
+// label overlaid top-left.
+function PeopleGraph({
+  history,
+  metric,
+  config,
+  ts,
+  H,
+}: {
+  history: PeopleHistoryPoint[];
+  metric: "attendance" | "occupancy";
+  config: Extract<LayoutObjectConfig, { type: "people-graph" }>;
+  ts: CSSProperties;
+  H: number;
+}) {
+  const vals = history.map((h) => (metric === "attendance" ? h.attendance : h.occupancy));
+  if (vals.length < 2) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const range = max - min || 1;
+  const n = vals.length;
+  const line = vals
+    .map((v, i) => `${((i / (n - 1)) * 100).toFixed(2)},${(100 - ((v - min) / range) * 100).toFixed(2)}`)
+    .join(" ");
+  const stroke = ts.color ?? "#ffffff";
+  return (
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: "100%", height: "100%", display: "block" }}>
+        <polygon points={`0,100 ${line} 100,100`} fill={stroke} fillOpacity={0.15} />
+        <polyline points={line} fill="none" stroke={stroke} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+      </svg>
+      {config.showLabel && (
+        <span
+          style={{
+            position: "absolute", top: 0, left: 0, color: stroke,
+            fontSize: `${0.05 * H}px`, fontWeight: 600, lineHeight: 1,
+            padding: `${0.01 * H}px`, opacity: 0.85,
+          }}
+        >
+          {(config.label ? `${config.label} ` : "") + vals[n - 1].toLocaleString()}
+        </span>
+      )}
+    </div>
   );
 }
 
