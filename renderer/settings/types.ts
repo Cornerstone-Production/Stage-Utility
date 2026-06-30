@@ -12,6 +12,7 @@ export type SectionId =
   | "branding"
   | "spl-history"
   | "attendance"
+  | "service-history"
   | "advanced";
 
 export interface SectionItem {

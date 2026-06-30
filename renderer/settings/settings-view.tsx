@@ -22,6 +22,7 @@ import {
   PaletteIcon,
   ActivityIcon,
   UsersIcon,
+  ClockIcon,
   SlidersHorizontalIcon,
   SunIcon,
   MoonIcon,
@@ -41,6 +42,7 @@ import { BrandingSection } from "./sections/branding-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import { SplHistorySection } from "./sections/spl-history-section";
 import { AttendanceHistorySection } from "./sections/attendance-history-section";
+import { ServiceHistorySection } from "./sections/service-history-section";
 import { GettingStarted } from "./getting-started";
 import { BrandHeader } from "./brand-header";
 import { BrandLogo } from "../components/brand-logo";
@@ -147,6 +149,7 @@ const SECTIONS: SectionItem[] = [
   { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4 text-gray-11" /> },
   { id: "spl-history", label: "SPL History", icon: <ActivityIcon className="size-4 text-gray-11" /> },
   { id: "attendance", label: "Attendance", icon: <UsersIcon className="size-4 text-gray-11" /> },
+  { id: "service-history", label: "Service History", icon: <ClockIcon className="size-4 text-gray-11" /> },
   { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
 ];
 
@@ -231,13 +234,20 @@ export function SettingsView() {
   const showAttendance =
     (integrationsData?.states?.some((s) => s.id === "sensource" && s.enabled) ?? false) ||
     (attendanceList?.length ?? 0) > 0;
+  const { data: timelineList } = useQuery({
+    queryKey: ["serviceTimeline:list"],
+    queryFn: () => ipc<ServiceTimeline[]>("serviceTimeline:list"),
+  });
+  const showServiceHistory = (stageState?.pcoConfigured ?? false) || (timelineList?.length ?? 0) > 0;
   const sections = useMemo(
     () =>
       SECTIONS.filter(
         (s) =>
-          (s.id !== "spl-history" || showSplHistory) && (s.id !== "attendance" || showAttendance),
+          (s.id !== "spl-history" || showSplHistory) &&
+          (s.id !== "attendance" || showAttendance) &&
+          (s.id !== "service-history" || showServiceHistory),
       ),
-    [showSplHistory, showAttendance],
+    [showSplHistory, showAttendance, showServiceHistory],
   );
 
   // In-app update status (git-based; surfaced in the Advanced tab).
@@ -1007,6 +1017,12 @@ export function SettingsView() {
         return (
           <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
             <AttendanceHistorySection />
+          </div>
+        );
+      case "service-history":
+        return (
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+            <ServiceHistorySection />
           </div>
         );
       case "advanced":
