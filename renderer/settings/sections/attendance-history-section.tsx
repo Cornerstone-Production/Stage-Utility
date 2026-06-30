@@ -31,6 +31,8 @@ export function AttendanceHistorySection() {
   const [list, setList] = useState<ServiceAttendance[] | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<ServiceAttendance | null>(null);
+  // The matching service-timeline record (same serviceKey) for PCO item markers.
+  const [timeline, setTimeline] = useState<ServiceTimeline | null>(null);
   const [day, setDay] = useState<string | null>(null);
 
   function reload() {
@@ -59,15 +61,29 @@ export function AttendanceHistorySection() {
     });
   }, []);
 
+  // Keep the open service's PCO item markers fresh as items go live.
+  useEffect(() => {
+    return onNotification("service-timeline:history", (p) => {
+      const rec = p as ServiceTimeline | null;
+      if (!rec) return;
+      setTimeline((t) => (selectedKey && rec.serviceKey === selectedKey ? rec : t));
+    });
+  }, [selectedKey]);
+
   useEffect(() => {
     if (!selectedKey) {
       setDetail(null);
+      setTimeline(null);
       return;
     }
     let cancelled = false;
     invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: selectedKey })
       .then((d) => !cancelled && setDetail(d))
       .catch(() => !cancelled && setDetail(null));
+    // Best-effort: the matching timeline record drives PCO plan-item markers.
+    invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: selectedKey })
+      .then((t) => !cancelled && setTimeline(t))
+      .catch(() => !cancelled && setTimeline(null));
     return () => {
       cancelled = true;
     };
@@ -119,6 +135,14 @@ export function AttendanceHistorySection() {
   // ── Detail view: one service's attendance trend + summary. ──
   if (detail) {
     const live = detail.endedAt == null;
+    // PCO plan-item markers (from the matching timeline record) + the service's
+    // mean in-room occupancy, overlaid on the trend.
+    const markers = (timeline?.items ?? [])
+      .filter((it) => it.title && it.startedAt)
+      .map((it) => ({ t: it.startedAt, label: it.title }));
+    const avgOccupancy = detail.samples.length
+      ? Math.round(detail.samples.reduce((s, p) => s + p.occupancy, 0) / detail.samples.length)
+      : null;
     return (
       <div className="flex flex-col gap-4">
         <button className="self-start text-caption1 text-blue-11 hover:underline" onClick={() => setSelectedKey(null)}>
@@ -143,7 +167,7 @@ export function AttendanceHistorySection() {
           <Stat label="Samples" value={detail.samples.length} accent="text-gray-12" />
         </div>
 
-        <AttendanceChart samples={detail.samples} />
+        <AttendanceChart samples={detail.samples} markers={markers} avgOccupancy={avgOccupancy} />
       </div>
     );
   }
@@ -214,8 +238,19 @@ function Stat({ label, value, accent }: { label: string; value: number; accent: 
   );
 }
 
-/** Dependency-free SVG line chart of attendance + in-room occupancy over time. */
-function AttendanceChart({ samples }: { samples: AttendanceSample[] }) {
+/** Dependency-free SVG line chart of attendance + in-room occupancy over time,
+ *  with optional PCO plan-item markers (vertical lines at item start times) and a
+ *  service-average in-room reference line. X is time-based so markers align with
+ *  the curve even though samples aren't perfectly evenly spaced. */
+function AttendanceChart({
+  samples,
+  markers = [],
+  avgOccupancy = null,
+}: {
+  samples: AttendanceSample[];
+  markers?: { t: string; label: string }[];
+  avgOccupancy?: number | null;
+}) {
   if (samples.length < 2) {
     return (
       <div className="rounded-lg border border-dashed border-gray-a5 px-4 py-10 text-center text-caption1 text-gray-9">
@@ -223,32 +258,56 @@ function AttendanceChart({ samples }: { samples: AttendanceSample[] }) {
       </div>
     );
   }
-  const W = 600, H = 240, padL = 40, padR = 12, padT = 12, padB = 26;
+  const W = 600, H = 240, padL = 40, padR = 12, padT = 16, padB = 26;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const n = samples.length;
   const maxV = Math.max(1, ...samples.map((s) => Math.max(s.attendance, s.occupancy)));
-  const x = (i: number) => padL + (i / (n - 1)) * plotW;
+  const t0 = Date.parse(samples[0].t);
+  const t1 = Date.parse(samples[n - 1].t);
+  const span = t1 - t0 || 1;
+  const xt = (iso: string) => padL + ((Date.parse(iso) - t0) / span) * plotW;
   const y = (v: number) => padT + plotH - (v / maxV) * plotH;
   const line = (key: "attendance" | "occupancy") =>
-    samples.map((s, i) => `${x(i).toFixed(1)},${y(s[key]).toFixed(1)}`).join(" ");
-  // Y gridlines at 0, ½, max.
+    samples.map((s) => `${xt(s.t).toFixed(1)},${y(s[key]).toFixed(1)}`).join(" ");
   const yTicks = [0, Math.round(maxV / 2), maxV];
+  const inRange = markers.filter((m) => {
+    const mt = Date.parse(m.t);
+    return Number.isFinite(mt) && mt >= t0 - 1000 && mt <= t1 + 1000;
+  });
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-4 text-caption2">
+      <div className="flex items-center gap-4 text-caption2 flex-wrap">
         <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-blue-9" /> Attendance</span>
         <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-green-9" /> In room</span>
+        {avgOccupancy != null && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-green-9" /> Avg in room {avgOccupancy.toLocaleString()}</span>}
+        {inRange.length > 0 && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-gray-8" /> Plan items</span>}
       </div>
       <div className="overflow-x-auto rounded-lg border border-gray-5 bg-gray-2 p-2">
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 320 }} role="img" aria-label="Attendance over the service">
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 320 }} role="img" aria-label="Attendance and in-room occupancy over the service, with plan-item markers">
           {yTicks.map((t) => (
             <g key={t}>
               <line x1={padL} y1={y(t)} x2={W - padR} y2={y(t)} stroke="var(--gray-a4)" strokeWidth={1} />
               <text x={padL - 6} y={y(t) + 3} textAnchor="end" fontSize={10} fill="var(--gray-9)">{t}</text>
             </g>
           ))}
+          {/* PCO plan-item markers */}
+          {inRange.map((m, i) => {
+            const mx = xt(m.t);
+            return (
+              <g key={`${m.t}-${i}`}>
+                <line x1={mx} y1={padT} x2={mx} y2={padT + plotH} stroke="var(--gray-a6)" strokeWidth={1} strokeDasharray="3 3" />
+                <text x={mx + 2} y={padT + 8} fontSize={9} fill="var(--gray-10)" transform={`rotate(90 ${mx + 2} ${padT + 8})`}>
+                  {m.label.length > 22 ? `${m.label.slice(0, 21)}…` : m.label}
+                </text>
+              </g>
+            );
+          })}
+          {/* service-average in-room reference */}
+          {avgOccupancy != null && (
+            <line x1={padL} y1={y(avgOccupancy)} x2={W - padR} y2={y(avgOccupancy)} stroke="var(--green-9)" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
+          )}
           <text x={padL} y={H - 8} textAnchor="start" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[0].t)}</text>
           <text x={W - padR} y={H - 8} textAnchor="end" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[n - 1].t)}</text>
           <polyline points={line("occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
