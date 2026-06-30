@@ -52,10 +52,17 @@ interface VeaLocation {
   name: string;
 }
 
-/** Sum a day's traffic rows into per-zone attendance/occupancy. Tolerant of both
- *  the detailed (`ins`/`outs`) and grouped (`sumins`/`sumouts`) response shapes,
- *  and of rows that omit the zone name. Exported for unit tests. */
-export function reduceTraffic(rows: unknown[]): PeopleZoneCount[] {
+export interface ReducedTraffic {
+  zones: PeopleZoneCount[];
+  /** Raw building-wide sums across all zones (for the correct total occupancy). */
+  totalIns: number;
+  totalOuts: number;
+}
+
+/** Sum a day's traffic rows into per-zone attendance/occupancy + building totals.
+ *  Tolerant of both the detailed (`ins`/`outs`) and grouped (`sumins`/`sumouts`)
+ *  response shapes, and of rows that omit the zone name. Exported for unit tests. */
+export function reduceTraffic(rows: unknown[]): ReducedTraffic {
   const byZone = new Map<string, { name: string; ins: number; outs: number }>();
   for (const r of rows) {
     if (!r || typeof r !== "object") continue;
@@ -76,22 +83,35 @@ export function reduceTraffic(rows: unknown[]): PeopleZoneCount[] {
     if (name) cur.name = name;
     byZone.set(id, cur);
   }
-  return [...byZone.entries()].map(([id, z]) => ({
-    id,
-    name: z.name,
-    attendance: Math.max(0, Math.round(z.ins)),
-    occupancy: Math.max(0, Math.round(z.ins - z.outs)),
-  }));
+  let totalIns = 0;
+  let totalOuts = 0;
+  const zones = [...byZone.entries()].map(([id, z]) => {
+    totalIns += z.ins;
+    totalOuts += z.outs;
+    return {
+      id,
+      name: z.name,
+      attendance: Math.max(0, Math.round(z.ins)),
+      // Per-zone net (for single-zone objects). The BUILDING total is computed
+      // from raw sums below — NOT by summing these clamped per-zone values, which
+      // would over-count when people enter one door and leave another.
+      occupancy: Math.max(0, Math.round(z.ins - z.outs)),
+    };
+  });
+  return { zones, totalIns, totalOuts };
 }
 
 function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-function buildDto(zones: PeopleZoneCount[], updatedAt: string): PeopleCountDTO {
-  const attendance = zones.reduce((s, z) => s + z.attendance, 0);
-  const occupancy = zones.reduce((s, z) => s + z.occupancy, 0);
-  return { connected: true, updatedAt, total: { attendance, occupancy }, zones };
+function buildDto(reduced: ReducedTraffic, updatedAt: string): PeopleCountDTO {
+  // Building totals from RAW sums: occupancy nets entries against exits across all
+  // zones (so a multi-door room reads ~0 when everyone who entered has left),
+  // clamped ≥0 once at the building level. Attendance = total entries today.
+  const attendance = Math.max(0, Math.round(reduced.totalIns));
+  const occupancy = Math.max(0, Math.round(reduced.totalIns - reduced.totalOuts));
+  return { connected: true, updatedAt, total: { attendance, occupancy }, zones: reduced.zones };
 }
 
 class SenSourceService {
@@ -274,9 +294,9 @@ class SenSourceService {
       else if (this.cfg.locationId) params.set("locationIds", this.cfg.locationId);
 
       const body = await this.apiGet<{ results?: unknown[] }>(`/data/traffic?${params.toString()}`);
-      const zones = reduceTraffic(body.results ?? []);
-      this.report("connected", `${zones.length} zone(s)`);
-      const dto = buildDto(zones, new Date().toISOString());
+      const reduced = reduceTraffic(body.results ?? []);
+      this.report("connected", `${reduced.zones.length} zone(s)`);
+      const dto = buildDto(reduced, new Date().toISOString());
       // Append a building-total sample to the rolling trend buffer.
       this.history.push({
         t: dto.updatedAt!,
