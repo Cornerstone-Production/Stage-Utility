@@ -72,6 +72,8 @@ export interface VeaSpace {
   name: string;
   /** Parent location (spaces DO carry locationId — used to scope by location). */
   locationId: string | null;
+  /** Configured maximum capacity for the space (for the % of capacity metric). */
+  maxCapacity: number | null;
 }
 
 export interface SpaceOccupancy {
@@ -227,7 +229,7 @@ function buildDto(reduced: ReducedTraffic, updatedAt: string): PeopleCountDTO {
   return {
     connected: true,
     updatedAt,
-    total: { attendance, occupancy, peak: null, min: null, avg: null },
+    total: { attendance, occupancy, peak: null, min: null, avg: null, capacity: null },
     zones: reduced.zones,
   };
 }
@@ -406,6 +408,7 @@ class SenSourceService {
         spaceId: String(s.spaceId ?? s.entityId ?? s.id ?? ""),
         name: typeof s.name === "string" && s.name ? s.name : String(s.spaceId ?? ""),
         locationId: typeof s.locationId === "string" ? s.locationId : null,
+        maxCapacity: num(s.maxCapacity) ?? num(s.capacity) ?? null,
       }))
       .filter((s) => s.spaceId);
   }
@@ -564,15 +567,21 @@ class SenSourceService {
           entityType: "space",
           metrics: "occupancy(max),occupancy(min),occupancy(avg)",
         });
+        const allowSpaces = await this.resolveAllowedSpaces();
         const oBody = await this.apiGet<{ results?: unknown[] }>(`/data/occupancy?${oParams.toString()}`);
-        const occ = reduceSpaceOccupancy(oBody.results ?? [], await this.resolveAllowedSpaces());
+        const occ = reduceSpaceOccupancy(oBody.results ?? [], allowSpaces);
         if (occ.spaces > 0) {
+          // Building capacity = Σ maxCapacity over the same (allowed) spaces.
+          const cap = (await this.cachedSpaces())
+            .filter((s) => !allowSpaces || allowSpaces.size === 0 || allowSpaces.has(s.spaceId))
+            .reduce((a, s) => a + (s.maxCapacity ?? 0), 0);
           dto.total = {
             attendance: occ.attendance,
             occupancy: occ.occupancy,
             peak: occ.peak,
             min: occ.min,
             avg: occ.avg,
+            capacity: cap > 0 ? cap : null,
           };
           occSource = `space×${occ.spaces}`;
         }

@@ -115,6 +115,7 @@ interface PeopleCountDTO {
     peak?: number | null;
     min?: number | null;
     avg?: number | null;
+    capacity?: number | null;
   };
   zones: PeopleZoneCount[];
   history?: PeopleHistoryPoint[];
@@ -473,7 +474,7 @@ type LayoutObjectConfig =
     }
   | {
       type: "people-panel";
-      metrics?: ("occupancy" | "peak" | "attendance" | "min" | "avg" | "avgService")[];
+      metrics?: ("occupancy" | "peak" | "attendance" | "min" | "avg" | "avgService" | "capacity" | "vsAverage")[];
       showLabels?: boolean;
       orientation?: "row" | "column";
     }

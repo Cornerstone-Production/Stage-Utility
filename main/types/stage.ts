@@ -311,7 +311,7 @@ export type LayoutObjectConfig =
   // peak occupancy across recorded services (from Attendance history).
   | {
       type: "people-panel";
-      metrics?: ("occupancy" | "peak" | "attendance" | "min" | "avg" | "avgService")[];
+      metrics?: ("occupancy" | "peak" | "attendance" | "min" | "avg" | "avgService" | "capacity" | "vsAverage")[];
       showLabels?: boolean;
       orientation?: "row" | "column";
     }
@@ -518,6 +518,8 @@ export interface PeopleCountDTO {
     peak?: number | null;
     min?: number | null;
     avg?: number | null;
+    /** Configured max capacity across the space(s) — for the % of capacity metric. */
+    capacity?: number | null;
   };
   zones: PeopleZoneCount[];
   /** Rolling building-total samples (oldest→newest) for the people-graph object.

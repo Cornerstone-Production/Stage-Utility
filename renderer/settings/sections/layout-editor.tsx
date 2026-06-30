@@ -2197,8 +2197,8 @@ function Inspector({
         </>
       )}
       {c.type === "people-panel" && (() => {
-        const ORDER = ["occupancy", "peak", "attendance", "avg", "avgService", "min"] as const;
-        const LABEL: Record<string, string> = { occupancy: "In room (now)", peak: "Peak (today)", attendance: "Attendance (entered)", avg: "Average (today)", avgService: "Average / service", min: "Low (today)" };
+        const ORDER = ["occupancy", "peak", "attendance", "capacity", "avg", "avgService", "vsAverage", "min"] as const;
+        const LABEL: Record<string, string> = { occupancy: "In room (now)", peak: "Peak (today)", attendance: "Attendance (entered)", capacity: "% of capacity", avg: "Average (today)", avgService: "Average / service", vsAverage: "vs average (peak vs typical)", min: "Low (today)" };
         const cur = c.metrics ?? ["occupancy", "peak", "attendance"];
         const toggle = (k: (typeof ORDER)[number], on: boolean) => {
           const set = new Set<string>(cur);

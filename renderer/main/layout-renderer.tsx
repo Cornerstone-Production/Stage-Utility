@@ -568,6 +568,8 @@ const PEOPLE_PANEL_LABELS: Record<string, string> = {
   min: "Low",
   avg: "Avg today",
   avgService: "Avg / service",
+  capacity: "Capacity",
+  vsAverage: "vs avg",
 };
 function PeoplePanel({
   config,
@@ -583,11 +585,28 @@ function PeoplePanel({
   const metrics: NonNullable<typeof config.metrics> = config.metrics?.length ? config.metrics : ["occupancy", "peak", "attendance"];
   const showLabels = config.showLabels ?? true;
   const col = config.orientation === "column";
-  const serviceAvg = useServiceAvgOccupancy(metrics.includes("avgService"));
-  const valueOf = (k: string): number | null =>
-    k === "avgService" ? serviceAvg : ((people?.total as Record<string, number | null> | undefined)?.[k] ?? null);
+  const serviceAvg = useServiceAvgOccupancy(metrics.includes("avgService") || metrics.includes("vsAverage"));
+  const t = people?.total;
   const valuePx = parseFloat(String(ts.fontSize)) || 0.12 * H;
   const labelPx = Math.max(8, valuePx * 0.34);
+  // Each tile resolves to a display string + optional color override (vs-average
+  // goes green/red). "—" when the underlying value isn't available.
+  const tile = (k: string): { text: string; color: string } => {
+    const base = String(ts.color ?? "#ffffff");
+    if (k === "capacity") {
+      const cap = t?.capacity ?? null;
+      return { text: cap && t?.occupancy != null ? `${Math.round((t.occupancy / cap) * 100)}%` : "—", color: base };
+    }
+    if (k === "vsAverage") {
+      const peak = t?.peak ?? null;
+      if (peak == null || serviceAvg == null) return { text: "—", color: base };
+      const d = peak - serviceAvg;
+      const sign = d > 0 ? "+" : d < 0 ? "−" : "±";
+      return { text: `${sign}${Math.abs(d).toLocaleString()}`, color: d > 0 ? "var(--green-9)" : d < 0 ? "var(--red-9)" : base };
+    }
+    const v = k === "avgService" ? serviceAvg : ((t as Record<string, number | null> | undefined)?.[k] ?? null);
+    return { text: v == null ? "—" : v.toLocaleString(), color: base };
+  };
   return (
     <div
       style={{
@@ -602,12 +621,10 @@ function PeoplePanel({
       }}
     >
       {metrics.map((k) => {
-        const v = valueOf(k);
+        const { text, color } = tile(k);
         return (
           <div key={k} style={{ display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.05 }}>
-            <span style={{ color: ts.color, fontSize: `${valuePx}px`, fontWeight: ts.fontWeight ?? 700 }}>
-              {v == null ? "—" : v.toLocaleString()}
-            </span>
+            <span style={{ color, fontSize: `${valuePx}px`, fontWeight: ts.fontWeight ?? 700 }}>{text}</span>
             {showLabels && (
               <span style={{ color: ts.color, opacity: 0.6, fontSize: `${labelPx}px`, fontWeight: 500, marginTop: `${labelPx * 0.2}px`, whiteSpace: "nowrap" }}>
                 {PEOPLE_PANEL_LABELS[k]}
