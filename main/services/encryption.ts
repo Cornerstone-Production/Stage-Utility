@@ -56,6 +56,9 @@ async function loadOrCreateKey(): Promise<Buffer> {
     if (key.length !== 32) {
       throw new Error(`[encryption] key at ${keyFile} is ${key.length} bytes; expected 32`);
     }
+    // Best-effort: tighten perms on a key written before mode 0o600 was enforced
+    // (and a no-op on filesystems/OSes that don't honour POSIX modes).
+    void fs.chmod(keyFile, 0o600).catch(() => {});
     return key;
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;

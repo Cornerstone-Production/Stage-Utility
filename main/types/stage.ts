@@ -162,7 +162,10 @@ export interface LayoutStyle {
 export type LayoutObjectConfig =
   | { type: "text"; text: string }
   | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h"; showMeridiem?: boolean }
-  | { type: "countdown-timer" } // PCO Live
+  // PCO Live countdown. `hideWhenIdle` renders nothing (instead of "—") when no
+  // timer is live; `warnSeconds` turns the readout amber once the remaining time
+  // drops to/below that many seconds (it still goes red on overtime).
+  | { type: "countdown-timer"; hideWhenIdle?: boolean; warnSeconds?: number }
   | { type: "current-slide-text" }
   | { type: "next-slide-text" }
   | { type: "current-service-item" }
@@ -214,14 +217,17 @@ export type LayoutObjectConfig =
       showLabel?: boolean;
       thresholds?: { amber: number; red: number } | null;
     }
-  // Live OBS recording indicator (from the OBS integration, `StageState`-adjacent
-  // `obs:status` channel). Turns red while recording. The label texts default to
-  // "OBS: Recording" / "OBS: Standby" / "OBS: Offline". `hideWhenIdle` makes it a
-  // pure tally light (render nothing unless recording); `fillWhenRecording` fills
-  // the whole box red instead of just coloring the text; `showTimecode` appends
-  // the record duration.
+  // Live OBS output indicator (from the OBS integration, `StageState`-adjacent
+  // `obs:status` channel). `mode` picks which output to reflect — recording
+  // (default, back-compat), streaming, or virtual camera. Turns red while that
+  // output is active. The label texts override the per-mode defaults
+  // ("OBS: Recording" / "OBS: Standby" / "OBS: Offline" for recording, etc.).
+  // `hideWhenIdle` makes it a pure tally light (render nothing unless active);
+  // `fillWhenRecording` fills the whole box red instead of just coloring the
+  // text; `showTimecode` appends the record duration (recording mode only).
   | {
       type: "obs-status";
+      mode?: "recording" | "streaming" | "virtualcam";
       recordingText?: string;
       idleText?: string;
       offlineText?: string;

@@ -7,6 +7,7 @@ export { NumberInput, type NumberInputProps } from "./number-input";
 export {
   Select,
   SelectGroup,
+  SelectLabel,
   SelectValue,
   SelectTrigger,
   SelectContent,

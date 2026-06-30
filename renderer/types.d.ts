@@ -301,7 +301,7 @@ interface LayoutStyle {
 type LayoutObjectConfig =
   | { type: "text"; text: string }
   | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h"; showMeridiem?: boolean }
-  | { type: "countdown-timer" }
+  | { type: "countdown-timer"; hideWhenIdle?: boolean; warnSeconds?: number }
   | { type: "current-slide-text" }
   | { type: "next-slide-text" }
   | { type: "current-service-item" }
@@ -337,6 +337,7 @@ type LayoutObjectConfig =
     }
   | {
       type: "obs-status";
+      mode?: "recording" | "streaming" | "virtualcam";
       recordingText?: string;
       idleText?: string;
       offlineText?: string;

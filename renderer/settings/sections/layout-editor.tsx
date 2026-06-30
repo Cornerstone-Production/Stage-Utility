@@ -23,6 +23,7 @@ import {
   LockIcon,
   UnlockIcon,
   PackagePlusIcon,
+  FilterIcon,
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import {
@@ -33,6 +34,8 @@ import {
   SelectTrigger,
   SelectContent,
   SelectItem,
+  SelectGroup,
+  SelectLabel,
   SelectValue,
   ButtonGroup,
   Switch,
@@ -66,6 +69,8 @@ import { useObsState } from "../../main/use-obs-state";
 import { useOscTargets } from "../../main/use-osc-state";
 import { useStageState } from "../../main/use-stage-state";
 import { usePlanItems } from "../../main/use-plan-items";
+import { useEnabledIntegrations } from "../../main/use-integration-states";
+import { OBJECT_INTEGRATION } from "../../main/object-integration";
 import { invoke } from "../../lib/api";
 import { InlineSlotsEditor } from "./inline-slots-editor";
 
@@ -98,12 +103,32 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   shape: "Shape",
   container: "Container",
 };
-const PALETTE: LayoutObjectType[] = [
-  "container", "text", "clock", "countdown-timer", "live-controls", "current-slide-text", "next-slide-text",
-  "current-service-item", "next-service-item", "service-order",
-  "current-slide-notes", "slide-thumbnail", "section-chip", "slots-grid",
-  "transcript-strip", "charger-battery", "spl-meter", "obs-status", "osc-button", "people-counter", "brand-logo", "image", "plan-attachment", "shape",
+// Add-object palette, grouped by domain so the dropdown reads as a short menu of
+// categories instead of one long flat list. Integration-backed types are dimmed
+// (not hidden) in the dropdown when their integration isn't set up — see
+// OBJECT_INTEGRATION + the toolbar's hide toggle.
+const PALETTE_GROUPS: { label: string; types: LayoutObjectType[] }[] = [
+  { label: "Layout", types: ["container", "shape", "image", "brand-logo"] },
+  { label: "Text & time", types: ["text", "clock", "countdown-timer"] },
+  { label: "PCO / service", types: ["live-controls", "current-service-item", "next-service-item", "service-order", "plan-attachment"] },
+  { label: "ProPresenter", types: ["current-slide-text", "next-slide-text", "current-slide-notes", "slide-thumbnail", "section-chip"] },
+  { label: "Mics & RF", types: ["slots-grid", "charger-battery"] },
+  { label: "Audio (SPL)", types: ["spl-meter"] },
+  { label: "Captions", types: ["transcript-strip"] },
+  { label: "People", types: ["people-counter"] },
+  { label: "OBS", types: ["obs-status"] },
+  { label: "Control", types: ["osc-button"] },
 ];
+
+// Object types that have no per-object options — the inspector shows a "styling
+// only" hint for these instead of a blank gap. (They update automatically from
+// their data source; there's nothing meaningful to configure.)
+const NO_CONFIG_TYPES = new Set<LayoutObjectType>([
+  "current-slide-text", "next-slide-text", "current-service-item", "next-service-item",
+  "current-slide-notes", "slide-thumbnail", "live-controls", "ndi-video",
+]);
+
+const HIDE_UNCONFIGURED_KEY = "layout-hide-unconfigured";
 
 // Deepest allowed object depth (top-level = 0). A container holding objects = 1;
 // a container holding containers holding leaves = 2. Keeps the editor sane.
@@ -133,7 +158,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "transcript-strip": return { type: "transcript-strip", mode: "rolling" };
     case "charger-battery": return { type: "charger-battery", bays: [], show: { battery: true, charging: true } };
     case "spl-meter": return { type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null };
-    case "obs-status": return { type: "obs-status", showTimecode: false, hideWhenIdle: false, fillWhenRecording: true };
+    case "obs-status": return { type: "obs-status", mode: "recording", showTimecode: false, hideWhenIdle: false, fillWhenRecording: true };
     case "osc-button": return { type: "osc-button", targetId: null, label: "Button", address: "/", args: [], feedback: null };
     case "people-counter": return { type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true };
     case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
@@ -799,6 +824,21 @@ export function LayoutEditor({
     invoke<LayoutGroup[]>("layoutGroups:list").then(setGroups).catch(() => setGroups([]));
   }, []);
 
+  // Which integrations are set up (enabled) — drives the add-object palette's
+  // setup-aware dimming. Reflects "configured", not live connection.
+  const enabledIntegrations = useEnabledIntegrations();
+  // Opt-in: hide palette objects whose integration isn't set up (default off).
+  const [hideUnconfigured, setHideUnconfigured] = useState(
+    () => localStorage.getItem(HIDE_UNCONFIGURED_KEY) === "1",
+  );
+  const toggleHideUnconfigured = useCallback(() => {
+    setHideUnconfigured((v) => {
+      const next = !v;
+      try { localStorage.setItem(HIDE_UNCONFIGURED_KEY, next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
   // Size the canvas to its own aspect-ratio height, derived from the canvas cell's
   // WIDTH (capped at the viewport). This gives the canvas a definite height — so it
   // can't collapse inside the Radix ScrollArea (whose content-sized wrapper breaks
@@ -1106,11 +1146,41 @@ export function LayoutEditor({
         <Select value="" onValueChange={(t: string) => addObject(t as LayoutObjectType)}>
           <SelectTrigger className="w-40"><SelectValue placeholder="+ Add object" /></SelectTrigger>
           <SelectContent>
-            {PALETTE.map((t) => (
-              <SelectItem key={t} value={t}>{TYPE_LABELS[t]}</SelectItem>
-            ))}
+            {PALETTE_GROUPS.map((g) => {
+              const types = g.types.filter((t) => {
+                const need = OBJECT_INTEGRATION[t];
+                // When the hide toggle is on, drop types whose integration isn't set up.
+                return !(hideUnconfigured && need && !enabledIntegrations.has(need.id));
+              });
+              if (types.length === 0) return null;
+              return (
+                <SelectGroup key={g.label}>
+                  <SelectLabel>{g.label}</SelectLabel>
+                  {types.map((t) => {
+                    const need = OBJECT_INTEGRATION[t];
+                    // Dim (but keep selectable) when the backing integration isn't set up.
+                    const dim = need && !enabledIntegrations.has(need.id);
+                    return (
+                      <SelectItem key={t} value={t} className={dim ? "opacity-50" : undefined}>
+                        {TYPE_LABELS[t]}{dim ? ` · set up ${need!.label}` : ""}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectGroup>
+              );
+            })}
           </SelectContent>
         </Select>
+        <Button
+          variant={hideUnconfigured ? "accent" : "filled"}
+          size="small"
+          iconOnly
+          onClick={toggleHideUnconfigured}
+          aria-label={hideUnconfigured ? "Show all objects" : "Hide objects for integrations that aren't set up"}
+          title={hideUnconfigured ? "Showing all objects" : "Hide objects for integrations that aren't set up"}
+        >
+          <FilterIcon className="size-3.5" />
+        </Button>
         <Button variant={gridOn ? "accent" : "filled"} size="small" onClick={() => setGridOn((v) => !v)} aria-label="Toggle snap grid">
           <Grid3x3Icon className="size-3.5" /> Grid
         </Button>
@@ -1812,18 +1882,50 @@ function Inspector({
           </>
         );
       })()}
-      {c.type === "obs-status" && (
+      {c.type === "obs-status" && (() => {
+        const mode = c.mode ?? "recording";
+        const liveLabel = !obs?.connected
+          ? "Not connected"
+          : (mode === "streaming" ? obs.streaming : mode === "virtualcam" ? obs.virtualCam : obs.recording)
+            ? "Active now"
+            : "Connected · idle";
+        const activePlaceholder = mode === "streaming" ? "OBS: Streaming" : mode === "virtualcam" ? "OBS: Virtual Cam" : "OBS: Recording";
+        const idlePlaceholder = mode === "streaming" ? "OBS: Stream off" : mode === "virtualcam" ? "OBS: Cam off" : "OBS: Standby";
+        return (
+          <>
+            <Row label="Show">
+              <Select value={mode} onValueChange={(v: string) => onConfig({ ...c, mode: v as "recording" | "streaming" | "virtualcam" })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="recording">Recording</SelectItem>
+                  <SelectItem value="streaming">Streaming</SelectItem>
+                  <SelectItem value="virtualcam">Virtual camera</SelectItem>
+                </SelectContent>
+              </Select>
+            </Row>
+            <Row label="OBS"><span className="text-caption2 text-gray-10">{liveLabel}</span></Row>
+            <Row label="Active text"><Input value={c.recordingText ?? ""} onChange={(e) => onConfig({ ...c, recordingText: e.target.value })} placeholder={activePlaceholder} className="text-gray-12" /></Row>
+            <Row label="Idle text"><Input value={c.idleText ?? ""} onChange={(e) => onConfig({ ...c, idleText: e.target.value })} placeholder={idlePlaceholder} className="text-gray-12" /></Row>
+            <Row label="Offline text"><Input value={c.offlineText ?? ""} onChange={(e) => onConfig({ ...c, offlineText: e.target.value })} placeholder="OBS: Offline" className="text-gray-12" /></Row>
+            <Row label="Fill red when active"><Switch checked={c.fillWhenRecording ?? true} onCheckedChange={(v) => onConfig({ ...c, fillWhenRecording: v })} /></Row>
+            {mode === "recording" && (
+              <Row label="Show timecode"><Switch checked={c.showTimecode ?? false} onCheckedChange={(v) => onConfig({ ...c, showTimecode: v })} /></Row>
+            )}
+            <Row label="Hide when idle"><Switch checked={c.hideWhenIdle ?? false} onCheckedChange={(v) => onConfig({ ...c, hideWhenIdle: v })} /></Row>
+          </>
+        );
+      })()}
+      {c.type === "countdown-timer" && (
         <>
-          <Row label="OBS">
-            <span className="text-caption2 text-gray-10">
-              {obs?.connected ? (obs.recording ? "Recording now" : "Connected · idle") : "Not connected"}
-            </span>
+          <Row label="Amber warning">
+            <Switch
+              checked={c.warnSeconds != null}
+              onCheckedChange={(v) => onConfig({ ...c, warnSeconds: v ? 60 : undefined })}
+            />
           </Row>
-          <Row label="Recording text"><Input value={c.recordingText ?? ""} onChange={(e) => onConfig({ ...c, recordingText: e.target.value })} placeholder="OBS: Recording" className="text-gray-12" /></Row>
-          <Row label="Idle text"><Input value={c.idleText ?? ""} onChange={(e) => onConfig({ ...c, idleText: e.target.value })} placeholder="OBS: Standby" className="text-gray-12" /></Row>
-          <Row label="Offline text"><Input value={c.offlineText ?? ""} onChange={(e) => onConfig({ ...c, offlineText: e.target.value })} placeholder="OBS: Offline" className="text-gray-12" /></Row>
-          <Row label="Fill red when recording"><Switch checked={c.fillWhenRecording ?? true} onCheckedChange={(v) => onConfig({ ...c, fillWhenRecording: v })} /></Row>
-          <Row label="Show timecode"><Switch checked={c.showTimecode ?? false} onCheckedChange={(v) => onConfig({ ...c, showTimecode: v })} /></Row>
+          {c.warnSeconds != null && (
+            <Row label="Warn at (s)"><NumberInput value={c.warnSeconds} step={5} min={0} max={3600} onChange={(v) => onConfig({ ...c, warnSeconds: Math.round(v) })} /></Row>
+          )}
           <Row label="Hide when idle"><Switch checked={c.hideWhenIdle ?? false} onCheckedChange={(v) => onConfig({ ...c, hideWhenIdle: v })} /></Row>
         </>
       )}
@@ -1924,6 +2026,9 @@ function Inspector({
       )}
       {c.type === "brand-logo" && (
         <Row label="Empty logo"><Switch checked={c.useEmptySlotLogo ?? false} onCheckedChange={(v) => onConfig({ type: "brand-logo", useEmptySlotLogo: v })} /></Row>
+      )}
+      {NO_CONFIG_TYPES.has(c.type) && (
+        <p className="text-caption2 text-gray-9 leading-snug">Updates automatically — no options. Use the styling controls below.</p>
       )}
 
       <Separator />

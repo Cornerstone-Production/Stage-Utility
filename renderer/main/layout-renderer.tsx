@@ -144,11 +144,14 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       return span(clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h", c.showMeridiem ?? true));
     case "countdown-timer": {
       const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
-      if (!t) return span("—");
-      // Turn red once the timer goes negative (item or service ran over), like
-      // the dashboard; otherwise keep the object's configured color.
+      if (!t) return (c.hideWhenIdle ?? false) ? null : span("—");
+      // Red once the timer goes negative (item or service ran over), like the
+      // dashboard; amber once it drops to/below the configured warning; else keep
+      // the object's configured color.
+      const warning = c.warnSeconds != null && !t.over && t.seconds <= c.warnSeconds;
+      const color = t.over ? "var(--red-10)" : warning ? "var(--yellow-10)" : null;
       return (
-        <span style={t.over ? { ...ts, color: "var(--red-10)" } : ts}>
+        <span style={color ? { ...ts, color } : ts}>
           {fmtDuration(t.seconds)}
         </span>
       );
@@ -341,12 +344,20 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "obs-status": {
       const obs = ctx.obs;
       const connected = obs?.connected ?? false;
-      const recording = obs?.recording ?? false;
-      // Pure tally-light mode: nothing on screen unless OBS is recording.
-      if (!recording && (c.hideWhenIdle ?? false)) return null;
-      if (recording) {
-        const tc = c.showTimecode && obs?.recordTimecode ? ` ${obs.recordTimecode}` : "";
-        const label = `${c.recordingText ?? "OBS: Recording"}${tc}`;
+      const mode = c.mode ?? "recording";
+      const active =
+        mode === "streaming" ? (obs?.streaming ?? false)
+        : mode === "virtualcam" ? (obs?.virtualCam ?? false)
+        : (obs?.recording ?? false);
+      // Pure tally-light mode: nothing on screen unless the chosen output is active.
+      if (!active && (c.hideWhenIdle ?? false)) return null;
+      // Per-mode default labels (overridable via the *Text fields).
+      const activeDefault = mode === "streaming" ? "OBS: Streaming" : mode === "virtualcam" ? "OBS: Virtual Cam" : "OBS: Recording";
+      const idleDefault = mode === "streaming" ? "OBS: Stream off" : mode === "virtualcam" ? "OBS: Cam off" : "OBS: Standby";
+      if (active) {
+        // Timecode is the record duration — only meaningful in recording mode.
+        const tc = mode === "recording" && c.showTimecode && obs?.recordTimecode ? ` ${obs.recordTimecode}` : "";
+        const label = `${c.recordingText ?? activeDefault}${tc}`;
         // Fill the whole box red (a strong room cue) or just color the text.
         if (c.fillWhenRecording ?? true) {
           return (
@@ -357,11 +368,11 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         }
         return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
       }
-      // Not recording: dim when offline so a neutral badge is never mistaken for
-      // "not recording" when OBS is merely unreachable.
+      // Idle: dim when offline so a neutral badge is never mistaken for "not
+      // active" when OBS is merely unreachable.
       return (
         <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
-          {connected ? (c.idleText ?? "OBS: Standby") : (c.offlineText ?? "OBS: Offline")}
+          {connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? "OBS: Offline")}
         </span>
       );
     }

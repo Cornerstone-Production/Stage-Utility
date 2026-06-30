@@ -142,10 +142,12 @@ function scheduleRestart(): void {
   setTimeout(() => process.exit(0), 1200);
 }
 
-// Count of currently-connected Companion-module clients (SSE streams opened with
-// the X-Companion-Module header / ?client=companion marker). Pushed into the
-// integration manager so the "companion" panel can show "N connected".
-let companionClients = 0;
+// Currently-connected Companion-module clients (SSE streams opened with the
+// X-Companion-Module header / ?client=companion marker). A Set keyed by the
+// response means the reported count can't drift (no double-count on a fast
+// reconnect, no under-count if a close fires twice) — `.size` is always exact.
+// Pushed into the integration manager so the "companion" panel shows "N connected".
+const companionClients = new Set<http.ServerResponse>();
 
 function sseWrite(res: http.ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -383,14 +385,14 @@ export class RemoteServer {
         req.headers["x-companion-module"] != null ||
         _url.searchParams.get("client") === "companion";
       if (isCompanion) {
-        companionClients++;
-        integrationManager.setCompanionClients(companionClients);
+        companionClients.add(res);
+        integrationManager.setCompanionClients(companionClients.size);
       }
       req.on("close", () => {
         sseClients.delete(res);
         if (isCompanion) {
-          companionClients = Math.max(0, companionClients - 1);
-          integrationManager.setCompanionClients(companionClients);
+          companionClients.delete(res);
+          integrationManager.setCompanionClients(companionClients.size);
         }
       });
       return;

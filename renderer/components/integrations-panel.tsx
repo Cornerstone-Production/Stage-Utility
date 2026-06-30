@@ -271,7 +271,7 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
                     value={typeof value === "string" ? value : ""}
                     onValueChange={(v: string) => setField(field.key, v)}
                   >
-                    <SelectTrigger className="w-44">
+                    <SelectTrigger className="w-44" aria-label={field.label}>
                       <SelectValue placeholder="Select…" />
                     </SelectTrigger>
                     <SelectContent>
@@ -302,6 +302,7 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setField(field.key, e.target.value)}
                     placeholder={field.placeholder ?? ""}
                     className="w-44"
+                    aria-label={field.label}
                   />
                 )}
               </Field>
