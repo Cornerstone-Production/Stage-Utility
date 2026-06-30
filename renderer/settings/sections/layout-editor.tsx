@@ -99,6 +99,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "wireless-summary": "Wireless summary",
   "people-counter": "People counter",
   "people-graph": "People graph",
+  "baptism-timer": "Baptism timer",
   "brand-logo": "Logo",
   "ndi-video": "NDI video",
   image: "Image",
@@ -119,6 +120,7 @@ const PALETTE_GROUPS: { label: string; types: LayoutObjectType[] }[] = [
   { label: "Audio (SPL)", types: ["spl-meter"] },
   { label: "Transcription", types: ["transcript-strip"] },
   { label: "People", types: ["people-counter", "people-graph"] },
+  { label: "Baptisms", types: ["baptism-timer"] },
   { label: "OBS", types: ["obs-status"] },
   { label: "Control", types: ["osc-button"] },
   { label: "Status", types: ["integration-status"] },
@@ -168,6 +170,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "wireless-summary": return { type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" };
     case "people-counter": return { type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true };
     case "people-graph": return { type: "people-graph", metric: "occupancy", showLabel: true, label: "In room" };
+    case "baptism-timer": return { type: "baptism-timer", field: "live", showLabel: true, label: "" };
     case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
     case "image": return { type: "image", src: "" };
     case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
@@ -193,6 +196,7 @@ function defaultStyle(type: LayoutObjectType): LayoutStyle {
   if (type === "osc-button") return { fontSize: 0.045, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
   // People counter reads as a big bold number.
   if (type === "people-counter") return { fontSize: 0.12, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
+  if (type === "baptism-timer") return { fontSize: 0.14, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
   // Status / wireless summary read as a compact label-sized pill.
   if (type === "integration-status" || type === "wireless-summary") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
   // People graph: a glass card; `color` is the sparkline's line/fill color.
@@ -2187,6 +2191,27 @@ function Inspector({
             <RowText label="Label" value={c.label ?? ""} placeholder={c.metric === "attendance" ? "Attendance" : "In room"} onChange={(v) => onConfig({ ...c, label: v })} />
           )}
           <p className="text-caption2 text-gray-9 leading-snug">Trend builds while the server runs; the line color is the object's text color below.</p>
+        </>
+      )}
+      {c.type === "baptism-timer" && (
+        <>
+          <Row label="Show">
+            <Select value={c.field ?? "live"} onValueChange={(v: string) => onConfig({ ...c, field: v as NonNullable<typeof c.field> })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="live">Live (running clock)</SelectItem>
+                <SelectItem value="count">Count baptized</SelectItem>
+                <SelectItem value="total">Total time</SelectItem>
+                <SelectItem value="average">Average per person</SelectItem>
+                <SelectItem value="last">Last person</SelectItem>
+              </SelectContent>
+            </Select>
+          </Row>
+          <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+          {(c.showLabel ?? true) && (
+            <RowText label="Label" value={c.label ?? ""} placeholder="(auto)" onChange={(v) => onConfig({ ...c, label: v })} />
+          )}
+          <p className="text-caption2 text-gray-9 leading-snug">Driven by the Baptisms tab. &ldquo;Live&rdquo; ticks the current testimony/baptism; others summarize the session.</p>
         </>
       )}
       {c.type === "image" && (

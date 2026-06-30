@@ -6,6 +6,7 @@ import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue } from "./use-people-count-state";
+import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessChannels } from "./use-wireless-channels";
 import { OscButton } from "./osc-button";
@@ -30,6 +31,8 @@ export interface LayoutRenderCtx {
   osc: OscFeedbackDTO | null;
   /** Live SenSource Vea people counts — for the people-counter object. */
   peopleCount: PeopleCountDTO | null;
+  /** Live baptism-timer state — for the baptism-timer object. */
+  baptism: BaptismState | null;
   /** Live integration connection states + friendly labels — for the integration-status object. */
   integrations: IntegrationState[];
   integrationLabels: Record<string, string>;
@@ -346,6 +349,8 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     }
     case "people-graph":
       return <PeopleGraph history={ctx.peopleCount?.history ?? []} metric={c.metric ?? "occupancy"} config={c} ts={ts} H={ctx.H} />;
+    case "baptism-timer":
+      return <BaptismTimer state={ctx.baptism} config={c} ts={ts} now={ctx.now} />;
     case "obs-status": {
       const obs = ctx.obs;
       const connected = obs?.connected ?? false;
@@ -548,6 +553,53 @@ function PeopleGraph({
         </span>
       )}
     </div>
+  );
+}
+
+// A baptism-timer readout. `live` shows the running segment clock (ticking off the
+// shared 1s `now`); the rest are session stats. Optional sub-label.
+function BaptismTimer({
+  state,
+  config,
+  ts,
+  now,
+}: {
+  state: BaptismState | null;
+  config: Extract<LayoutObjectConfig, { type: "baptism-timer" }>;
+  ts: CSSProperties;
+  now: number;
+}) {
+  const field = config.field ?? "live";
+  const sum = summarizeBaptism(state);
+  let value = "—";
+  let fallback = "";
+  if (field === "live") {
+    if (state && state.phase !== "idle" && state.segmentStartedAt) {
+      value = fmtClock(Math.max(0, now - Date.parse(state.segmentStartedAt)));
+      fallback = state.phase === "testimony" ? `Person ${state.personNumber} · testimony` : `Person ${state.personNumber} · baptism`;
+    } else {
+      value = "0:00";
+      fallback = "ready";
+    }
+  } else if (field === "count") {
+    value = String(sum.count);
+    fallback = "baptized";
+  } else if (field === "total") {
+    value = fmtClock(sum.totalMs);
+    fallback = "total time";
+  } else if (field === "average") {
+    value = sum.count ? fmtClock(sum.avgPersonMs) : "—";
+    fallback = "avg per person";
+  } else if (field === "last") {
+    const last = state?.people[state.people.length - 1];
+    value = last ? fmtClock(last.testimonyMs + last.baptizeMs) : "—";
+    fallback = "last person";
+  }
+  return (
+    <span style={ts}>
+      {value}
+      {config.showLabel && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{` ${config.label ?? fallback}`}</span>}
+    </span>
   );
 }
 
@@ -1017,6 +1069,7 @@ export function useLayoutData() {
   const obs = useObsState();
   const osc = useOscState();
   const peopleCount = usePeopleCountState();
+  const baptism = useBaptismState();
   const planItems = usePlanItems();
   const integrationsSnap = useIntegrations();
   const wireless = useWirelessChannels();
@@ -1031,7 +1084,7 @@ export function useLayoutData() {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  return { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, baptism, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -1039,7 +1092,7 @@ export function useLayoutData() {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, integrationsSnap, wireless, now, skewMs } = useLayoutData();
+  const { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, baptism, integrationsSnap, wireless, now, skewMs } = useLayoutData();
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -1083,7 +1136,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // with the window instead of the design canvas.
   const fill = canvas.fit === "fill";
   const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, baptism, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

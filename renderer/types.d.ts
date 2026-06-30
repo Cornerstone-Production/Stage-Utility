@@ -463,6 +463,12 @@ type LayoutObjectConfig =
       showLabel?: boolean;
     }
   | {
+      type: "baptism-timer";
+      field?: "live" | "count" | "total" | "average" | "last";
+      label?: string;
+      showLabel?: boolean;
+    }
+  | {
       type: "service-order";
       noteCategories?: string[] | null;
       showLength?: boolean;

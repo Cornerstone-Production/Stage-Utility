@@ -306,6 +306,15 @@ export type LayoutObjectConfig =
       label?: string;
       showLabel?: boolean;
     }
+  // A readout from the baptism timer (operator stopwatch). `field` picks what to
+  // show: the live phase + running clock, or a session stat. Self-contained — no
+  // integration required.
+  | {
+      type: "baptism-timer";
+      field?: "live" | "count" | "total" | "average" | "last";
+      label?: string;
+      showLabel?: boolean;
+    }
   // A styled box that holds other objects. Children are positioned as fractions
   // of THIS container's box (not the canvas), so moving/resizing the container
   // moves/scales its contents as a unit. The box itself is drawn from `style`
