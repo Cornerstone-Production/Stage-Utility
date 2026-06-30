@@ -474,12 +474,22 @@ function hhmm(iso: string): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+/** A "nice" integer axis step (1 / 2 / 5 × 10ⁿ, minimum 1) for a target interval
+ *  size. Keeps gridline labels round at any scale — 1, 2, 5 … up to thousands. */
+function niceStepInt(target: number): number {
+  const x = target > 1 ? target : 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(x)));
+  const n = x / pow;
+  const m = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+  return Math.max(1, Math.round(m * pow));
+}
+
 // A sparkline of the building-total people count over the rolling history.
 // The filled area + line live in a 0–100 viewBox stretched to the object box
 // (non-scaling stroke keeps the line crisp at any aspect); axis labels are crisp
-// HTML overlays. Y-axis auto-scales to tight integer bounds with headroom (so a
-// spike never clips and the three tick labels are always distinct whole numbers),
-// and x-axis shows the first/last sample time.
+// HTML overlays. Y-axis auto-scales to nice round integer bounds (1/2/5 ×10ⁿ) that
+// expand with the data — no cap, so it grows to thousands — with headroom (so a
+// spike never clips) and three distinct labels; x-axis shows the first/last sample.
 function PeopleGraph({
   history,
   metric,
@@ -498,17 +508,25 @@ function PeopleGraph({
   const n = vals.length;
   const stroke = ts.color ?? "#ffffff";
 
-  // Integer bounds: people counts are whole numbers, so keep the scale tight (small
-  // changes stay visible) but guarantee three DISTINCT integer gridline labels. The
-  // old "nice"-step rounding printed duplicates like "2, 2, 1" on a 0–1 range.
+  // Auto-scaling integer bounds. People counts can be a handful or thousands, so
+  // pick a "nice" integer step (1/2/5 ×10ⁿ) sized to the data and EXPAND to fit —
+  // no cap, so a packed 2,500-seat room scales up on its own. Three DISTINCT round
+  // gridline labels with headroom above the peak (the old fixed rounding could print
+  // duplicates like "2, 2, 1" on a 0–1 range).
   const dataMin = Math.min(...vals);
   const dataMax = Math.max(...vals);
-  const lo = Math.max(0, Math.floor(dataMin));
-  let hi = Math.ceil(dataMax) + 1; // headroom so the peak never sits on the top edge
-  if (hi - lo < 2) hi = lo + 2; // span ≥ 2 → three distinct integer ticks
-  if ((hi - lo) % 2 !== 0) hi += 1; // even span → whole-number midpoint
+  let step = niceStepInt((dataMax - dataMin) / 2);
+  let lo = Math.max(0, Math.floor(dataMin / step) * step);
+  let hi = lo + 2 * step;
+  // Grow the step until the peak fits strictly below the top (keeps the line off the
+  // top edge and the labels round), recomputing lo so it stays on a step boundary.
+  while (hi <= dataMax) {
+    step = niceStepInt(step + 1);
+    lo = Math.max(0, Math.floor(dataMin / step) * step);
+    hi = lo + 2 * step;
+  }
   const range = hi - lo;
-  const mid = lo + range / 2;
+  const mid = lo + step;
 
   // Plot rect inside the 0–100 box: leave room for y labels (left) + x labels (bottom).
   const PADL = 13, PADR = 2, PADT = 9, PADB = 16;
