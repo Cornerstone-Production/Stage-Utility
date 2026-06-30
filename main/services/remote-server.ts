@@ -30,6 +30,7 @@ import { attendanceStore } from "./attendance-store.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
+import { baptismTimerService } from "./baptism-timer-service.js";
 import { stageController } from "./stage-controller.js";
 import { updater } from "./updater.js";
 import { wirelessManager } from "./wireless-manager.js";
@@ -380,6 +381,7 @@ export class RemoteServer {
       sseWrite(res, "spl:history", splRecorder.getCurrent());
       sseWrite(res, "attendance:history", attendanceRecorder.getCurrent());
       sseWrite(res, "service-timeline:history", serviceTimelineRecorder.getCurrent());
+      sseWrite(res, "baptism:state", baptismTimerService.getState());
       sseWrite(res, "obs:status", obsService.getLatest());
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
@@ -523,6 +525,34 @@ export class RemoteServer {
           json(res, { deleted: await serviceTimelineStore.delete(key) });
           return;
         }
+      }
+    }
+
+    // ── Baptism timer ───────────────────────────────────────────────────────
+    if (method === "GET" && pathname === "/api/baptism") {
+      json(res, baptismTimerService.getState());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/baptism/sessions") {
+      json(res, await baptismTimerService.listSessions());
+      return;
+    }
+    if (method === "POST" && pathname.startsWith("/api/baptism/")) {
+      const action = pathname.slice("/api/baptism/".length);
+      switch (action) {
+        case "start": json(res, baptismTimerService.start()); return;
+        case "baptized": json(res, baptismTimerService.baptized()); return;
+        case "next": json(res, baptismTimerService.next()); return;
+        case "undo": json(res, baptismTimerService.undo()); return;
+        case "finish": json(res, baptismTimerService.finish()); return;
+        case "reset": json(res, baptismTimerService.reset()); return;
+      }
+    }
+    {
+      const bapSessionMatch = pathname.match(/^\/api\/baptism\/sessions\/([^/]+)$/);
+      if (bapSessionMatch && method === "DELETE") {
+        json(res, { deleted: await baptismTimerService.deleteSession(decodeURIComponent(bapSessionMatch[1])) });
+        return;
       }
     }
 

@@ -198,6 +198,26 @@ interface ServiceTimeline {
   endedAt: string | null;
   items: ServiceTimelineItem[];
 }
+type BaptismPhase = "idle" | "testimony" | "baptism";
+interface BaptismPerson {
+  testimonyMs: number;
+  baptizeMs: number;
+}
+interface BaptismState {
+  phase: BaptismPhase;
+  personNumber: number;
+  segmentStartedAt: string | null;
+  sessionStartedAt: string | null;
+  finishedAt: string | null;
+  people: BaptismPerson[];
+  pendingTestimonyMs: number | null;
+}
+interface BaptismSession {
+  id: string;
+  startedAt: string;
+  finishedAt: string;
+  people: BaptismPerson[];
+}
 
 interface ServiceTypeDTO {
   id: string;

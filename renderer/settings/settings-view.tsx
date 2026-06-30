@@ -23,6 +23,7 @@ import {
   ActivityIcon,
   UsersIcon,
   ClockIcon,
+  DropletIcon,
   SlidersHorizontalIcon,
   SunIcon,
   MoonIcon,
@@ -43,6 +44,7 @@ import { AdvancedSection } from "./sections/advanced-section";
 import { SplHistorySection } from "./sections/spl-history-section";
 import { AttendanceHistorySection } from "./sections/attendance-history-section";
 import { ServiceHistorySection } from "./sections/service-history-section";
+import { BaptismsSection } from "./sections/baptisms-section";
 import { GettingStarted } from "./getting-started";
 import { BrandHeader } from "./brand-header";
 import { BrandLogo } from "../components/brand-logo";
@@ -150,6 +152,7 @@ const SECTIONS: SectionItem[] = [
   { id: "spl-history", label: "SPL History", icon: <ActivityIcon className="size-4 text-gray-11" /> },
   { id: "attendance", label: "Attendance", icon: <UsersIcon className="size-4 text-gray-11" /> },
   { id: "service-history", label: "Service History", icon: <ClockIcon className="size-4 text-gray-11" /> },
+  { id: "baptisms", label: "Baptisms", icon: <DropletIcon className="size-4 text-gray-11" /> },
   { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
 ];
 
@@ -1023,6 +1026,12 @@ export function SettingsView() {
         return (
           <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
             <ServiceHistorySection />
+          </div>
+        );
+      case "baptisms":
+        return (
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+            <BaptismsSection />
           </div>
         );
       case "advanced":

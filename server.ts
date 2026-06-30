@@ -16,6 +16,7 @@ import * as fs from "fs/promises";
 
 import { getUserDataPath } from "./main/services/app-paths.js";
 import { deviceManager } from "./main/services/device-manager.js";
+import { baptismTimerService } from "./main/services/baptism-timer-service.js";
 import { integrationManager } from "./main/services/integration-manager.js";
 import { livePoller } from "./main/services/live-poller.js";
 import { prodcomService } from "./main/services/prodcom-service.js";
@@ -40,6 +41,7 @@ console.log(`[server] data directory: ${DATA_DIR}`);
 console.log("[server] initialising services...");
 await stageController.init();
 await integrationManager.init();
+await baptismTimerService.init();
 
 // Wire the remote URL into stage state so clients can see it.
 stageController.setRemoteUrl(remoteServer.getLanUrl());

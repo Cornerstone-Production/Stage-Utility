@@ -177,6 +177,27 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return del<T>(`/api/service-timeline/${encodeURIComponent(key)}`);
     }
 
+    case "baptism:get":
+      return apiFetch<T>("/api/baptism");
+    case "baptism:sessions":
+      return apiFetch<T>("/api/baptism/sessions");
+    case "baptism:start":
+      return post<T>("/api/baptism/start");
+    case "baptism:baptized":
+      return post<T>("/api/baptism/baptized");
+    case "baptism:next":
+      return post<T>("/api/baptism/next");
+    case "baptism:undo":
+      return post<T>("/api/baptism/undo");
+    case "baptism:finish":
+      return post<T>("/api/baptism/finish");
+    case "baptism:reset":
+      return post<T>("/api/baptism/reset");
+    case "baptism:deleteSession": {
+      const id = p.id as string;
+      return del<T>(`/api/baptism/sessions/${encodeURIComponent(id)}`);
+    }
+
     case "spl:getVisibleMetrics":
       return apiFetch<T>("/api/spl/visible-metrics");
 

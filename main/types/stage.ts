@@ -628,6 +628,44 @@ export interface ServiceTimeline {
   items: ServiceTimelineItem[];
 }
 
+// ── Baptism timer ───────────────────────────────────────────────────────────
+// An operator stopwatch for baptism services: each person has a testimony phase
+// then a baptism phase. Broadcast live on "baptism:state"; finished sessions are
+// logged for review. Running elapsed is derived client-side from segmentStartedAt.
+
+export type BaptismPhase = "idle" | "testimony" | "baptism";
+
+export interface BaptismPerson {
+  /** Testimony duration (ms). */
+  testimonyMs: number;
+  /** Baptism duration (ms). */
+  baptizeMs: number;
+}
+
+export interface BaptismState {
+  phase: BaptismPhase;
+  /** 1-based number of the person currently being timed (or about to start). */
+  personNumber: number;
+  /** ISO when the current segment (testimony/baptism) started; null when idle. */
+  segmentStartedAt: string | null;
+  /** ISO when the session began; null before the first start. */
+  sessionStartedAt: string | null;
+  /** ISO when the session was finished (totals frozen); null while active. */
+  finishedAt: string | null;
+  /** Completed people (testimony + baptize splits). */
+  people: BaptismPerson[];
+  /** Testimony split captured for the in-progress person (set while in "baptism"). */
+  pendingTestimonyMs: number | null;
+}
+
+/** A finished baptism session, kept for later review. */
+export interface BaptismSession {
+  id: string;
+  startedAt: string;
+  finishedAt: string;
+  people: BaptismPerson[];
+}
+
 export interface ServiceTypeDTO {
   id: string;
   name: string;
