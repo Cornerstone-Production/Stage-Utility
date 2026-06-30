@@ -306,6 +306,15 @@ export type LayoutObjectConfig =
       label?: string;
       showLabel?: boolean;
     }
+  // A multi-metric people summary — several building-wide counts side by side,
+  // each toggleable. `metrics` is the ordered set shown. avgService is the mean
+  // peak occupancy across recorded services (from Attendance history).
+  | {
+      type: "people-panel";
+      metrics?: ("occupancy" | "peak" | "attendance" | "min" | "avg" | "avgService")[];
+      showLabels?: boolean;
+      orientation?: "row" | "column";
+    }
   // A readout from the baptism timer (operator stopwatch). `field` picks what to
   // show: the live phase + running clock, or a session stat. Self-contained — no
   // integration required.

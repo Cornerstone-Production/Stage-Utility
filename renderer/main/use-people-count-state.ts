@@ -31,6 +31,32 @@ export function usePeopleCountState(): PeopleCountDTO | null {
   return people;
 }
 
+/** Mean peak in-room across finished recorded services (the "average service"),
+ *  from Attendance history. Fetched only when `enabled`; refreshes on mount.
+ *  Returns null until loaded / when there are no completed services. */
+export function useServiceAvgOccupancy(enabled: boolean): number | null {
+  const [avg, setAvg] = useState<number | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    invoke<ServiceAttendance[]>("attendance:listHistory")
+      .then((list) => {
+        if (cancelled) return;
+        const finished = (list ?? []).filter((s) => s.endedAt != null && s.peakOccupancy > 0);
+        if (!finished.length) return setAvg(null);
+        const mean = finished.reduce((a, s) => a + s.peakOccupancy, 0) / finished.length;
+        setAvg(Math.round(mean));
+      })
+      .catch(() => {
+        /* ignore */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled]);
+  return avg;
+}
+
 export type PeopleMetric = "attendance" | "occupancy" | "peak" | "min" | "avg";
 
 /** Resolve the value an object should show, by metric + optional zone. Returns

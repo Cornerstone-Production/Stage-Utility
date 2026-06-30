@@ -472,6 +472,12 @@ type LayoutObjectConfig =
       showLabel?: boolean;
     }
   | {
+      type: "people-panel";
+      metrics?: ("occupancy" | "peak" | "attendance" | "min" | "avg" | "avgService")[];
+      showLabels?: boolean;
+      orientation?: "row" | "column";
+    }
+  | {
       type: "baptism-timer";
       field?: "live" | "count" | "total" | "average" | "last";
       label?: string;

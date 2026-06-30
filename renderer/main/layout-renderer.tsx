@@ -5,7 +5,7 @@ import { useDashboardState } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
-import { usePeopleCountState, resolvePeopleValue } from "./use-people-count-state";
+import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy } from "./use-people-count-state";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessChannels } from "./use-wireless-channels";
@@ -349,6 +349,8 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     }
     case "people-graph":
       return <PeopleGraph history={ctx.peopleCount?.history ?? []} metric={c.metric ?? "occupancy"} config={c} ts={ts} H={ctx.H} />;
+    case "people-panel":
+      return <PeoplePanel config={c} people={ctx.peopleCount} ts={ts} H={ctx.H} />;
     case "baptism-timer":
       return <BaptismTimer state={ctx.baptism} config={c} ts={ts} now={ctx.now} />;
     case "obs-status": {
@@ -552,6 +554,68 @@ function PeopleGraph({
           {(config.label ? `${config.label} ` : "") + vals[n - 1].toLocaleString()}
         </span>
       )}
+    </div>
+  );
+}
+
+// A multi-metric people summary: several building-wide counts side by side (or
+// stacked), each value over a small label. All building-level (peak/min/avg are
+// not per-zone). avgService = mean peak across recorded services.
+const PEOPLE_PANEL_LABELS: Record<string, string> = {
+  occupancy: "In room",
+  peak: "Peak",
+  attendance: "Attendance",
+  min: "Low",
+  avg: "Avg today",
+  avgService: "Avg / service",
+};
+function PeoplePanel({
+  config,
+  people,
+  ts,
+  H,
+}: {
+  config: Extract<LayoutObjectConfig, { type: "people-panel" }>;
+  people: PeopleCountDTO | null;
+  ts: CSSProperties;
+  H: number;
+}) {
+  const metrics: NonNullable<typeof config.metrics> = config.metrics?.length ? config.metrics : ["occupancy", "peak", "attendance"];
+  const showLabels = config.showLabels ?? true;
+  const col = config.orientation === "column";
+  const serviceAvg = useServiceAvgOccupancy(metrics.includes("avgService"));
+  const valueOf = (k: string): number | null =>
+    k === "avgService" ? serviceAvg : ((people?.total as Record<string, number | null> | undefined)?.[k] ?? null);
+  const valuePx = parseFloat(String(ts.fontSize)) || 0.12 * H;
+  const labelPx = Math.max(8, valuePx * 0.34);
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: col ? "column" : "row",
+        flexWrap: "wrap",
+        gap: `${0.04 * H}px ${0.06 * H}px`,
+        width: "100%",
+        height: "100%",
+        justifyContent: "space-evenly",
+        alignItems: "center",
+      }}
+    >
+      {metrics.map((k) => {
+        const v = valueOf(k);
+        return (
+          <div key={k} style={{ display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.05 }}>
+            <span style={{ color: ts.color, fontSize: `${valuePx}px`, fontWeight: ts.fontWeight ?? 700 }}>
+              {v == null ? "—" : v.toLocaleString()}
+            </span>
+            {showLabels && (
+              <span style={{ color: ts.color, opacity: 0.6, fontSize: `${labelPx}px`, fontWeight: 500, marginTop: `${labelPx * 0.2}px`, whiteSpace: "nowrap" }}>
+                {PEOPLE_PANEL_LABELS[k]}
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

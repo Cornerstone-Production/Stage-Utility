@@ -99,6 +99,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "wireless-summary": "Wireless summary",
   "people-counter": "People counter",
   "people-graph": "People graph",
+  "people-panel": "People summary",
   "baptism-timer": "Baptism timer",
   "brand-logo": "Logo",
   "ndi-video": "NDI video",
@@ -119,7 +120,7 @@ const PALETTE_GROUPS: { label: string; types: LayoutObjectType[] }[] = [
   { label: "Mics & RF", types: ["slots-grid", "charger-battery", "wireless-summary"] },
   { label: "Audio (SPL)", types: ["spl-meter"] },
   { label: "Transcription", types: ["transcript-strip"] },
-  { label: "People", types: ["people-counter", "people-graph"] },
+  { label: "People", types: ["people-counter", "people-panel", "people-graph"] },
   { label: "Baptisms", types: ["baptism-timer"] },
   { label: "OBS", types: ["obs-status"] },
   { label: "Control", types: ["osc-button"] },
@@ -170,6 +171,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "wireless-summary": return { type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" };
     case "people-counter": return { type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true };
     case "people-graph": return { type: "people-graph", metric: "occupancy", showLabel: true, label: "In room" };
+    case "people-panel": return { type: "people-panel", metrics: ["occupancy", "peak", "attendance"], showLabels: true, orientation: "row" };
     case "baptism-timer": return { type: "baptism-timer", field: "live", showLabel: true, label: "" };
     case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
     case "image": return { type: "image", src: "" };
@@ -197,6 +199,7 @@ function defaultStyle(type: LayoutObjectType): LayoutStyle {
   // People counter reads as a big bold number.
   if (type === "people-counter") return { fontSize: 0.12, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
   if (type === "baptism-timer") return { fontSize: 0.14, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
+  if (type === "people-panel") return { fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
   // Status / wireless summary read as a compact label-sized pill.
   if (type === "integration-status" || type === "wireless-summary") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
   // People graph: a glass card; `color` is the sparkline's line/fill color.
@@ -2193,6 +2196,32 @@ function Inspector({
           <p className="text-caption2 text-gray-9 leading-snug">Trend builds while the server runs; the line color is the object's text color below.</p>
         </>
       )}
+      {c.type === "people-panel" && (() => {
+        const ORDER = ["occupancy", "peak", "attendance", "avg", "avgService", "min"] as const;
+        const LABEL: Record<string, string> = { occupancy: "In room (now)", peak: "Peak (today)", attendance: "Attendance (entered)", avg: "Average (today)", avgService: "Average / service", min: "Low (today)" };
+        const cur = c.metrics ?? ["occupancy", "peak", "attendance"];
+        const toggle = (k: (typeof ORDER)[number], on: boolean) => {
+          const set = new Set<string>(cur);
+          if (on) set.add(k);
+          else set.delete(k);
+          onConfig({ ...c, metrics: ORDER.filter((x) => set.has(x)) });
+        };
+        return (
+          <>
+            <p className="text-caption2 text-gray-9 leading-snug">Building-wide people metrics, shown side by side. Toggle each:</p>
+            {ORDER.map((k) => (
+              <RowSwitch key={k} label={LABEL[k]} checked={cur.includes(k)} onChange={(v) => toggle(k, v)} />
+            ))}
+            <RowToggle
+              label="Layout"
+              value={c.orientation ?? "row"}
+              options={[{ value: "row", label: "Row" }, { value: "column", label: "Stacked" }]}
+              onChange={(v) => onConfig({ ...c, orientation: v as "row" | "column" })}
+            />
+            <RowSwitch label="Show labels" checked={c.showLabels ?? true} onChange={(v) => onConfig({ ...c, showLabels: v })} />
+          </>
+        );
+      })()}
       {c.type === "baptism-timer" && (
         <>
           <Row label="Show">
