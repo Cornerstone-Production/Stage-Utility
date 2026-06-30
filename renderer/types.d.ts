@@ -9,6 +9,7 @@ interface ConfigField {
   type: "text" | "password" | "number" | "select" | "ip-list";
   options?: { value: string; label: string }[];
   placeholder?: string;
+  help?: string;
 }
 
 interface IntegrationDescriptor {
@@ -579,6 +580,7 @@ interface StageState {
   chargerBays: ChargerBayDTO[];
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
+  onboardingDismissed: boolean;
 }
 
 interface ChargerBayDTO {

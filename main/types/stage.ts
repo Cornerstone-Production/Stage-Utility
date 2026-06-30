@@ -736,6 +736,8 @@ export interface StageState {
   chargerBays: ChargerBayDTO[];
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
+  /** Operator dismissed the first-run "Getting started" checklist (machine-wide). */
+  onboardingDismissed: boolean;
 }
 
 /** One battery bay of a Shure SBC charger (derived from charger-kind devices). */

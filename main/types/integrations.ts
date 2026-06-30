@@ -8,6 +8,8 @@ export interface ConfigField {
   type: "text" | "password" | "number" | "select" | "ip-list";
   options?: { value: string; label: string }[];
   placeholder?: string;
+  /** Optional longer explanation shown behind an "i" info popover next to the label. */
+  help?: string;
 }
 
 export interface IntegrationDescriptor {

@@ -58,6 +58,8 @@ export interface SettingsData {
   oscFeedbackPort: number;
   /** Smaart metric keys to surface in the SPL History tab (empty = auto default). */
   splVisibleMetrics: string[];
+  /** Operator dismissed the first-run "Getting started" checklist (machine-wide). */
+  onboardingDismissed: boolean;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -90,6 +92,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
   oscFeedbackPort: 9000,
   splVisibleMetrics: [],
+  onboardingDismissed: false,
 };
 
 const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS);

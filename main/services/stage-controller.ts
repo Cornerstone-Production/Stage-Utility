@@ -155,6 +155,7 @@ export class StageController {
     publicUrl: null,
     captionChannelColors: {},
     autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
+    onboardingDismissed: false,
   };
 
   // Live device statuses keyed by channelId.
@@ -221,6 +222,7 @@ export class StageController {
       publicUrl: settings.publicUrl ?? null,
       captionChannelColors: settings.captionChannelColors ?? {},
       autoUpdate: settings.autoUpdate ?? { enabled: false, dayOfWeek: null, hour: 3 },
+      onboardingDismissed: settings.onboardingDismissed ?? false,
     };
     this.publicUrl = settings.publicUrl ?? null;
     this.applyRemoteUrl();
@@ -795,6 +797,14 @@ export class StageController {
     console.log(`[stage-controller] setShowQr → ${show}`);
     this.state = { ...this.state, showQr: show };
     await settingsStore.patch({ showQr: show });
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Dismiss (or restore) the first-run "Getting started" checklist, machine-wide. */
+  async setOnboardingDismissed(dismissed: boolean): Promise<StageState> {
+    this.state = { ...this.state, onboardingDismissed: dismissed };
+    await settingsStore.patch({ onboardingDismissed: dismissed });
     this.broadcast();
     return this.state;
   }

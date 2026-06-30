@@ -26,6 +26,7 @@ import {
   NumberInput,
   toast,
   SkeletonRows,
+  InfoHint,
 } from "../components/ui";
 import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -261,7 +262,10 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
             return (
               <Field key={field.key} orientation="horizontal">
                 <FieldContent>
-                  <FieldLabel>{field.label}</FieldLabel>
+                  <FieldLabel className="flex items-center gap-1.5">
+                    {field.label}
+                    {field.help && <InfoHint>{field.help}</InfoHint>}
+                  </FieldLabel>
                   {field.placeholder && (
                     <FieldDescription>{field.placeholder}</FieldDescription>
                   )}

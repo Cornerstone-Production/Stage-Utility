@@ -1223,6 +1223,18 @@ export class RemoteServer {
       return;
     }
 
+    // ── Onboarding checklist dismissal ─────────────────────────────────────
+    if (method === "POST" && pathname === "/api/onboarding-dismissed") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.dismissed !== "boolean") {
+        error(res, "body.dismissed (boolean) required");
+        return;
+      }
+      const state = await stageController.setOnboardingDismissed(body.dismissed);
+      json(res, state);
+      return;
+    }
+
     // ── Remote display refresh ──────────────────────────────────────────────
     // POST /api/displays/refresh — reload kiosk pages. Optional body.id targets
     // a single output; omitted/empty reloads all connected displays.

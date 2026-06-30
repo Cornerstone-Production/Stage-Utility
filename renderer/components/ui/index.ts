@@ -31,6 +31,7 @@ export { toast, Toaster } from "./toast";
 export { confirm, ConfirmHost, type ConfirmOptions } from "./confirm-dialog";
 export { EmptyState } from "./empty-state";
 export { Skeleton, SkeletonRows } from "./skeleton";
+export { InfoHint } from "./info-hint";
 export { ScrollArea, ScrollBar } from "./scroll-area";
 export { SplitView } from "./split-view";
 export { Sidebar, SidebarList, SidebarListItem } from "./sidebar";

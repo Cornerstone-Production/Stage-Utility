@@ -39,6 +39,7 @@ import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import { SplHistorySection } from "./sections/spl-history-section";
+import { GettingStarted } from "./getting-started";
 import { BrandHeader } from "./brand-header";
 import { BrandLogo } from "../components/brand-logo";
 
@@ -413,6 +414,21 @@ export function SettingsView() {
     } catch (err) {
       toast.error(`Failed to update QR setting: ${String(err)}`);
     }
+  }
+
+  async function handleDismissOnboarding() {
+    try {
+      const next = await ipc<StageState>("stage:setOnboardingDismissed", { dismissed: true });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to dismiss: ${String(err)}`);
+    }
+  }
+
+  // Jump to another settings section (with the same crossfade as the sidebar).
+  function navigateToSection(id: string) {
+    const sec = sections.find((s) => s.id === id);
+    if (sec) withViewTransition(() => setActiveSection(sec));
   }
 
   async function handleSetPublicUrl(url: string | null) {
@@ -926,13 +942,22 @@ export function SettingsView() {
     switch (activeSection.id) {
       case "plan":
         return (
-          <PlanSection
-            stageState={stageState}
-            serviceTypes={serviceTypes}
-            plans={plans}
-            isRefreshing={isRefreshing}
-            handlers={handlers}
-          />
+          <>
+            {!stageState.onboardingDismissed && (
+              <GettingStarted
+                stageState={stageState}
+                onNavigate={navigateToSection}
+                onDismiss={handleDismissOnboarding}
+              />
+            )}
+            <PlanSection
+              stageState={stageState}
+              serviceTypes={serviceTypes}
+              plans={plans}
+              isRefreshing={isRefreshing}
+              handlers={handlers}
+            />
+          </>
         );
       case "views":
         return (

@@ -28,12 +28,14 @@ const PCO_DESCRIPTOR: IntegrationDescriptor = {
       label: "App ID",
       type: "text",
       placeholder: "your-app-id",
+      help: "Create a Personal Access Token at api.planningcenteronline.com → Developers → Personal Access Tokens. The App ID and Secret are shown there.",
     },
     {
       key: "secret",
       label: "Secret",
       type: "password",
       placeholder: "your-secret",
+      help: "The Secret half of your PCO Personal Access Token. Stored encrypted on this machine.",
     },
     {
       key: "refreshIntervalMin",
@@ -95,6 +97,7 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
       label: "Poll interval (ms)",
       type: "number",
       placeholder: "500 (lower = snappier, more requests)",
+      help: "How often to query ProPresenter over the LAN. 500ms feels instant; raise it to ease network load. The API is under ProPresenter → Preferences → Network.",
     },
   ],
 };
@@ -180,6 +183,7 @@ const OBS_DESCRIPTOR: IntegrationDescriptor = {
       label: "Server Password",
       type: "password",
       placeholder: "(from OBS → Tools → WebSocket Server Settings)",
+      help: "In OBS, open Tools → WebSocket Server Settings, enable the server, and copy the password here. Leave blank if you turned authentication off.",
     },
   ],
 };
@@ -204,15 +208,28 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "SenSource Vea",
   configSchema: [
-    { key: "clientId", label: "API Client ID", type: "text", placeholder: "(from Vea → API clients)" },
+    {
+      key: "clientId",
+      label: "API Client ID",
+      type: "text",
+      placeholder: "(from Vea → API clients)",
+      help: "Create an API client in the Vea web app (Settings → API clients). It gives you an ID + secret — enter both. Stage Utility handles the token exchange for you.",
+    },
     { key: "clientSecret", label: "API Client Secret", type: "password", placeholder: "(from Vea → API clients)" },
     {
       key: "apiToken",
       label: "Static token (optional)",
       type: "password",
       placeholder: "(only if your Vea account issues a long-lived token)",
+      help: "Leave blank in the normal case — the client ID + secret above are all you need. Only fill this if your Vea account issues a long-lived token you'd rather use directly.",
     },
-    { key: "pollSeconds", label: "Poll interval (s)", type: "number", placeholder: "45" },
+    {
+      key: "pollSeconds",
+      label: "Poll interval (s)",
+      type: "number",
+      placeholder: "45",
+      help: "How often to query SenSource. Their counts lag a few minutes server-side, so ~45s is plenty — lower values just add API calls without fresher data.",
+    },
   ],
 };
 
@@ -226,7 +243,13 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
   label: "Ross MultiViewer (TSL UMD)",
   configSchema: [
     { key: "host", label: "Switcher Host", type: "text", placeholder: "192.168.1.60" },
-    { key: "port", label: "TSL Port", type: "number", placeholder: "(TSL UMD input port on the Ross)" },
+    {
+      key: "port",
+      label: "TSL Port",
+      type: "number",
+      placeholder: "(TSL UMD input port on the Ross)",
+      help: "The TSL UMD input port configured on the Ross device (its UMD/TSL setup). The people count is sent here as on-tile text; map a count to a tile's TSL address in the feeds panel below.",
+    },
   ],
 };
 

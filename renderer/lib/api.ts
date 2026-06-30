@@ -154,6 +154,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "stage:setShowQr":
       return post<T>("/api/show-qr", p);
 
+    case "stage:setOnboardingDismissed":
+      return post<T>("/api/onboarding-dismissed", p);
+
     case "stage:setNdiEnabled":
       return post<T>("/api/ndi-enabled", p);
 
