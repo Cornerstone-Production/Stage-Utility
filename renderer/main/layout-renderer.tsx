@@ -5,7 +5,7 @@ import { useDashboardState } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
-import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy } from "./use-people-count-state";
+import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow } from "./use-people-count-state";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessChannels } from "./use-wireless-channels";
@@ -31,6 +31,9 @@ export interface LayoutRenderCtx {
   osc: OscFeedbackDTO | null;
   /** Live SenSource Vea people counts — for the people-counter object. */
   peopleCount: PeopleCountDTO | null;
+  /** Lowest in-room occupancy during the current/most-recent live service — the
+   *  "Low" metric (replaces the useless whole-day minimum). null when none. */
+  serviceLow: number | null;
   /** Live baptism-timer state — for the baptism-timer object. */
   baptism: BaptismState | null;
   /** Live integration connection states + friendly labels — for the integration-status object. */
@@ -332,7 +335,9 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       return <SplMeterValue config={c} spl={ctx.spl} ts={ts} />;
     case "people-counter": {
       const metric = c.metric ?? "attendance";
-      const value = resolvePeopleValue(ctx.peopleCount, metric, c.zoneId);
+      // "min" now means "lowest in-room during the live service" (building-wide),
+      // sourced from the attendance record — not the useless whole-day minimum.
+      const value = metric === "min" ? ctx.serviceLow : resolvePeopleValue(ctx.peopleCount, metric, c.zoneId);
       if (value == null) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
       const fallbackLabel =
         metric === "occupancy" ? "in room" : metric === "peak" ? "peak" : metric === "min" ? "low" : metric === "avg" ? "avg" : "people";
@@ -350,7 +355,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "people-graph":
       return <PeopleGraph history={ctx.peopleCount?.history ?? []} metric={c.metric ?? "occupancy"} config={c} ts={ts} H={ctx.H} />;
     case "people-panel":
-      return <PeoplePanel config={c} people={ctx.peopleCount} ts={ts} H={ctx.H} />;
+      return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} ts={ts} H={ctx.H} />;
     case "baptism-timer":
       return <BaptismTimer state={ctx.baptism} config={c} ts={ts} now={ctx.now} />;
     case "obs-status": {
@@ -587,11 +592,13 @@ const PEOPLE_PANEL_LABELS: Record<string, string> = {
 function PeoplePanel({
   config,
   people,
+  serviceLow,
   ts,
   H,
 }: {
   config: Extract<LayoutObjectConfig, { type: "people-panel" }>;
   people: PeopleCountDTO | null;
+  serviceLow: number | null;
   ts: CSSProperties;
   H: number;
 }) {
@@ -617,7 +624,10 @@ function PeoplePanel({
       const sign = d > 0 ? "+" : d < 0 ? "−" : "±";
       return { text: `${sign}${Math.abs(d).toLocaleString()}`, color: d > 0 ? "var(--green-9)" : d < 0 ? "var(--red-9)" : base };
     }
-    const v = k === "avgService" ? serviceAvg : ((t as Record<string, number | null> | undefined)?.[k] ?? null);
+    // "min" = lowest in-room during the live service (the service "floor"), from
+    // the attendance record — not the whole-day minimum (which is ~always 0).
+    const v =
+      k === "avgService" ? serviceAvg : k === "min" ? serviceLow : ((t as Record<string, number | null> | undefined)?.[k] ?? null);
     return { text: v == null ? "—" : v.toLocaleString(), color: base };
   };
   return (
@@ -1164,6 +1174,7 @@ export function useLayoutData() {
   const obs = useObsState();
   const osc = useOscState();
   const peopleCount = usePeopleCountState();
+  const serviceLow = useLiveServiceLow(true);
   const baptism = useBaptismState();
   const planItems = usePlanItems();
   const integrationsSnap = useIntegrations();
@@ -1179,7 +1190,7 @@ export function useLayoutData() {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  return { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, baptism, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -1187,7 +1198,7 @@ export function useLayoutData() {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, baptism, integrationsSnap, wireless, now, skewMs } = useLayoutData();
+  const { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, integrationsSnap, wireless, now, skewMs } = useLayoutData();
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -1231,7 +1242,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // with the window instead of the design canvas.
   const fill = canvas.fit === "fill";
   const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, baptism, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

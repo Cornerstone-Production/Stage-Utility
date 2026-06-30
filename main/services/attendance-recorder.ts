@@ -55,6 +55,10 @@ class AttendanceRecorder {
         const o = p.total.occupancy;
         this.current.peakAttendance = Math.max(this.current.peakAttendance, a);
         this.current.peakOccupancy = Math.max(this.current.peakOccupancy, o);
+        // Running min "floor" — null until the first reading so an empty-room
+        // moment reads 0 instead of being masked by a 0 initializer (== catches
+        // legacy records persisted before this field existed).
+        this.current.minOccupancy = this.current.minOccupancy == null ? o : Math.min(this.current.minOccupancy, o);
         this.current.lastAttendance = a;
         this.current.lastOccupancy = o;
 
@@ -117,6 +121,7 @@ class AttendanceRecorder {
         samples: [],
         peakAttendance: 0,
         peakOccupancy: 0,
+        minOccupancy: null,
         lastAttendance: 0,
         lastOccupancy: 0,
       };

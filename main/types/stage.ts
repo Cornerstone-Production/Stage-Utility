@@ -604,6 +604,10 @@ export interface ServiceAttendance {
   samples: AttendanceSample[];
   peakAttendance: number;
   peakOccupancy: number;
+  /** Lowest in-room occupancy seen while the service was live (the service
+   *  "floor"). null until the first tick — NOT 0, so an empty-room moment during
+   *  the service still reads 0 rather than being masked by a 0 initializer. */
+  minOccupancy: number | null;
   /** Most recent sampled values (for the summary row). */
   lastAttendance: number;
   lastOccupancy: number;

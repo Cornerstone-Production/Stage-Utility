@@ -160,9 +160,10 @@ export function AttendanceHistorySection() {
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           <Stat label="Peak attendance" value={detail.peakAttendance} accent="text-blue-11" />
           <Stat label="Peak in-room" value={detail.peakOccupancy} accent="text-green-11" />
+          <Stat label="Lowest in-room" value={detail.minOccupancy ?? null} accent="text-amber-11" />
           <Stat label="Latest in-room" value={detail.lastOccupancy} accent="text-gray-12" />
           <Stat label="Samples" value={detail.samples.length} accent="text-gray-12" />
         </div>
@@ -229,11 +230,11 @@ export function AttendanceHistorySection() {
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: number; accent: string }) {
+function Stat({ label, value, accent }: { label: string; value: number | null; accent: string }) {
   return (
     <div className="rounded-lg border border-gray-5 bg-gray-2 px-3 py-2">
       <div className="text-caption2 text-gray-9">{label}</div>
-      <div className={`text-title3 font-semibold tabular-nums ${accent}`}>{value.toLocaleString()}</div>
+      <div className={`text-title3 font-semibold tabular-nums ${accent}`}>{value == null ? "—" : value.toLocaleString()}</div>
     </div>
   );
 }

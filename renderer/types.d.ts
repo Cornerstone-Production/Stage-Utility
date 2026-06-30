@@ -174,6 +174,9 @@ interface ServiceAttendance {
   samples: AttendanceSample[];
   peakAttendance: number;
   peakOccupancy: number;
+  /** Lowest in-room occupancy seen while the service was live (the "floor"); null
+   *  until the first tick. */
+  minOccupancy: number | null;
   lastAttendance: number;
   lastOccupancy: number;
 }

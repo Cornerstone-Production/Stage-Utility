@@ -57,6 +57,37 @@ export function useServiceAvgOccupancy(enabled: boolean): number | null {
   return avg;
 }
 
+/** Lowest in-room occupancy during the current (or most recent) live service —
+ *  the service "floor". Mirrors the in-progress attendance record: hydrates from
+ *  `attendance:getHistoryCurrent` on mount, then stays live on the
+ *  "attendance:history" channel (the recorder broadcasts the open record each
+ *  tick). Returns null when nothing has been recorded yet. Fetched only when
+ *  `enabled`. Note: 0 is a real value (the room emptied mid-service), so it's
+ *  preserved — only null/undefined map to "no data". */
+export function useLiveServiceLow(enabled: boolean): number | null {
+  const [low, setLow] = useState<number | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    invoke<ServiceAttendance | null>("attendance:getHistoryCurrent")
+      .then((rec) => {
+        if (!cancelled) setLow(rec?.minOccupancy ?? null);
+      })
+      .catch(() => {
+        /* ignore */
+      });
+    const off = onNotification("attendance:history", (p) => {
+      const rec = p as ServiceAttendance | null;
+      setLow(rec?.minOccupancy ?? null);
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [enabled]);
+  return low;
+}
+
 export type PeopleMetric = "attendance" | "occupancy" | "peak" | "min" | "avg";
 
 /** Resolve the value an object should show, by metric + optional zone. Returns
