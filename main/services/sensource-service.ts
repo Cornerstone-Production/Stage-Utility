@@ -1,12 +1,20 @@
 // sensource-service.ts — Polls the SenSource Vea people-counter API and
 // broadcasts live counts on "people:count" for the dashboards + custom layouts.
 //
-// SenSource has no real-time endpoint, so we poll today's traffic on an interval
-// (their data also lags a few minutes server-side, so ~30–60s is plenty). For
-// each zone we compute:
-//   attendance = Σ ins today      (how many entered)
-//   occupancy  = Σ ins − Σ outs   (in the room now, clamped ≥0)
-// and a building total across the selected zones.
+// SenSource has no real-time endpoint, so we poll on an interval (their data
+// lags a few minutes server-side, so ~30–60s is plenty).
+//
+// BUILDING TOTAL — from the authoritative "space" occupancy endpoint when a space
+// exists (this is what the Vea dashboard's "Most Recent Occupancy" reflects, and
+// it's inherently scoped to the building so it can't include unrelated zones):
+//   attendance = Σ space.sumins today        (how many entered)
+//   occupancy  = Σ space.(sumins − sumouts)  (in the room now, clamped ≥0)
+// The day-net equals the live occupancy at the same instant (verified against the
+// website), and our poll is fresher than the dashboard tile. If a site has no
+// spaces, we fall back to deriving the same from per-zone traffic.
+//
+// PER-ZONE breakdown — from /data/traffic (entityType=zone), summed per zone and
+// narrowed CLIENT-SIDE to the selected zones (the API has no working zone filter).
 //
 // Auth is transparent to the operator: they enter an API client id + secret
 // (created in the Vea app). We exchange those for a short-lived Bearer token via
@@ -55,8 +63,52 @@ interface VeaLocation {
 export interface VeaZone {
   zoneId: string;
   name: string;
-  /** Parent location, when the API exposes it (field name varies / may be absent). */
+  /** Parent location, resolved via sensor→site→location (zones carry no locationId). */
   locationId: string | null;
+}
+
+export interface VeaSpace {
+  spaceId: string;
+  name: string;
+  /** Parent location (spaces DO carry locationId — used to scope by location). */
+  locationId: string | null;
+}
+
+export interface SpaceOccupancy {
+  /** Building "in the room now" = Σ(sumins − sumouts) over the spaces, clamped ≥0. */
+  occupancy: number;
+  /** Building "entered today" = Σ sumins. */
+  attendance: number;
+  /** Today's peak occupancy across the spaces (Vea's authoritative max). */
+  peak: number;
+  /** How many space rows contributed (0 → caller should fall back to zone traffic). */
+  spaces: number;
+}
+
+/** Net the space-occupancy rows into a building total. `allow` (space ids) scopes
+ *  client-side; empty/undefined sums every returned space. Exported for tests. */
+export function reduceSpaceOccupancy(rows: unknown[], allow?: Set<string> | null): SpaceOccupancy {
+  let ins = 0;
+  let outs = 0;
+  let peak = 0;
+  let spaces = 0;
+  for (const r of rows) {
+    if (!r || typeof r !== "object") continue;
+    const row = r as Record<string, unknown>;
+    const id = typeof row.spaceId === "string" ? row.spaceId : typeof row.entityId === "string" ? row.entityId : null;
+    if (!id) continue;
+    if (allow && allow.size > 0 && !allow.has(id)) continue;
+    ins += num(row.sumins) ?? 0;
+    outs += num(row.sumouts) ?? 0;
+    peak += num(row.maxoccupancy) ?? 0;
+    spaces++;
+  }
+  return {
+    occupancy: Math.max(0, Math.round(ins - outs)),
+    attendance: Math.max(0, Math.round(ins)),
+    peak: Math.max(0, Math.round(peak)),
+    spaces,
+  };
 }
 
 /** Vea's static + occupancy endpoints wrap rows in `{ results: [...] }`, but a few
@@ -164,6 +216,8 @@ class SenSourceService {
   private history: PeopleHistoryPoint[] = [];
   /** Cached /zone listing for location→zone scoping (see cachedZones). */
   private zonesCache: { at: number; zones: VeaZone[] } | null = null;
+  /** Cached /space listing for the authoritative building occupancy. */
+  private spacesCache: { at: number; spaces: VeaSpace[] } | null = null;
 
   private onConn: ((state: ConnState, message: string | null) => void) | null = null;
   private reported: ConnState | null = null;
@@ -189,6 +243,7 @@ class SenSourceService {
     this.tokenExpiresAt = 0;
     this.reported = null;
     this.zonesCache = null;
+    this.spacesCache = null;
     this.restart();
   }
 
@@ -265,16 +320,65 @@ class SenSourceService {
       .filter((l) => l.locationId);
   }
 
-  /** List the zones the client can see (backs the zone multi-select + scoping). */
+  /** List the zones the client can see (backs the zone multi-select + scoping).
+   *  Zones carry no locationId, so resolve it via zone→sensor→site→location.
+   *  The sensor/site joins are best-effort: if either fails, locationId is null
+   *  (the zone still lists; the user can scope it manually). */
   async listZones(): Promise<VeaZone[]> {
-    const data = await this.apiGet<unknown>("/zone");
-    return asRows(data)
-      .map((z) => ({
-        zoneId: String(z.zoneId ?? z.entityId ?? z.id ?? ""),
-        name: typeof z.name === "string" && z.name ? z.name : String(z.zoneId ?? ""),
-        locationId: probeLocationId(z),
-      }))
+    const [zoneData, sensorSite, siteLoc] = await Promise.all([
+      this.apiGet<unknown>("/zone"),
+      this.sensorToSite(),
+      this.siteToLocation(),
+    ]);
+    return asRows(zoneData)
+      .map((z) => {
+        const sensorId = typeof z.sensorId === "string" ? z.sensorId : null;
+        const siteId = sensorId ? sensorSite.get(sensorId) ?? null : null;
+        const locationId = (siteId ? siteLoc.get(siteId) : null) ?? probeLocationId(z);
+        return {
+          zoneId: String(z.zoneId ?? z.entityId ?? z.id ?? ""),
+          name: typeof z.name === "string" && z.name ? z.name : String(z.zoneId ?? ""),
+          locationId,
+        };
+      })
       .filter((z) => z.zoneId);
+  }
+
+  private async sensorToSite(): Promise<Map<string, string>> {
+    const m = new Map<string, string>();
+    try {
+      for (const s of asRows(await this.apiGet<unknown>("/sensor"))) {
+        if (typeof s.sensorId === "string" && typeof s.siteId === "string") m.set(s.sensorId, s.siteId);
+      }
+    } catch (err) {
+      console.warn("[sensource] /sensor join failed (zones won't map to locations):", err);
+    }
+    return m;
+  }
+
+  private async siteToLocation(): Promise<Map<string, string>> {
+    const m = new Map<string, string>();
+    try {
+      for (const s of asRows(await this.apiGet<unknown>("/site"))) {
+        if (typeof s.siteId === "string" && typeof s.locationId === "string") m.set(s.siteId, s.locationId);
+      }
+    } catch (err) {
+      console.warn("[sensource] /site join failed (zones won't map to locations):", err);
+    }
+    return m;
+  }
+
+  /** List the spaces the client can see (spaces back the authoritative building
+   *  occupancy; they carry locationId so they scope cleanly by location). */
+  async listSpaces(): Promise<VeaSpace[]> {
+    const data = await this.apiGet<unknown>("/space");
+    return asRows(data)
+      .map((s) => ({
+        spaceId: String(s.spaceId ?? s.entityId ?? s.id ?? ""),
+        name: typeof s.name === "string" && s.name ? s.name : String(s.spaceId ?? ""),
+        locationId: typeof s.locationId === "string" ? s.locationId : null,
+      }))
+      .filter((s) => s.spaceId);
   }
 
   /** List zones with a given config without disturbing a running poller. */
@@ -322,6 +426,29 @@ class SenSourceService {
       }
     }
     return null;
+  }
+
+  private async cachedSpaces(): Promise<VeaSpace[]> {
+    const now = Date.now();
+    if (this.spacesCache && now - this.spacesCache.at < ZONES_TTL_MS) return this.spacesCache.spaces;
+    const spaces = await this.listSpaces();
+    this.spacesCache = { at: now, spaces };
+    return spaces;
+  }
+
+  /** Which space ids the building total sums — the selected location's spaces, or
+   *  all spaces. Spaces carry locationId, so this scopes cleanly. null = all. */
+  private async resolveAllowedSpaces(): Promise<Set<string> | null> {
+    const cfg = this.cfg;
+    if (!cfg?.locationId) return null;
+    try {
+      const ids = (await this.cachedSpaces())
+        .filter((s) => s.locationId === cfg.locationId)
+        .map((s) => s.spaceId);
+      return ids.length ? new Set(ids) : null;
+    } catch {
+      return null;
+    }
   }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -395,9 +522,31 @@ class SenSourceService {
       const allow = await this.resolveAllowedZones();
       const body = await this.apiGet<{ results?: unknown[] }>(`/data/traffic?${params.toString()}`);
       const reduced = reduceTraffic(body.results ?? [], allow);
-      const scope = allow ? `${reduced.zones.length} of selected zone(s)` : `${reduced.zones.length} zone(s)`;
-      this.report("connected", scope);
       const dto = buildDto(reduced, new Date().toISOString());
+
+      // Override the building total with the authoritative space-occupancy endpoint
+      // (matches the Vea dashboard's live "Most Recent Occupancy"). Falls back to the
+      // zone-derived net already in `dto.total` if a site has no spaces or it fails.
+      let occSource = "zone-net";
+      try {
+        const oParams = new URLSearchParams({
+          relativeDate: "today",
+          dateGroupings: "day",
+          entityType: "space",
+          metrics: "occupancy(max),occupancy(min),occupancy(avg)",
+        });
+        const oBody = await this.apiGet<{ results?: unknown[] }>(`/data/occupancy?${oParams.toString()}`);
+        const occ = reduceSpaceOccupancy(oBody.results ?? [], await this.resolveAllowedSpaces());
+        if (occ.spaces > 0) {
+          dto.total = { attendance: occ.attendance, occupancy: occ.occupancy };
+          occSource = `space×${occ.spaces}`;
+        }
+      } catch (err) {
+        console.warn("[sensource] space occupancy unavailable; using zone-derived total:", err);
+      }
+
+      const scope = allow ? `${reduced.zones.length} of selected zone(s)` : `${reduced.zones.length} zone(s)`;
+      this.report("connected", `${scope}, occ via ${occSource}`);
       // Append a building-total sample to the rolling trend buffer.
       this.history.push({
         t: dto.updatedAt!,
