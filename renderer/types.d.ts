@@ -25,6 +25,9 @@ interface IntegrationState {
   connection: ConnectionState;
   message: string | null;
   config: Record<string, unknown>;
+  /** Operator has set this up (creds/config, or the master toggle for
+   *  wireless/OSC). Independent of the live connection. */
+  configured?: boolean;
 }
 
 interface DeviceStatus {

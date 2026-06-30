@@ -352,7 +352,18 @@ class IntegrationManager {
   }
 
   getStates(): IntegrationState[] {
-    return Array.from(this.states.values());
+    return Array.from(this.states.values()).map((s) => ({ ...s, configured: this.isConfigured(s) }));
+  }
+
+  /** Whether the operator has set an integration up — independent of the live
+   *  connection, so the UI can tell "not configured" apart from "configured but
+   *  currently disconnected". Cred-based integrations are configured once any
+   *  config/secret value is saved; wireless/OSC (no config schema, set up via
+   *  their own connection/target lists) use the master enable toggle. */
+  private isConfigured(state: IntegrationState): boolean {
+    if (state.id === "companion") return true; // inbound — nothing to set up
+    if (state.id === "wireless" || state.id === "osc") return state.enabled;
+    return Object.values(state.config).some((v) => v !== "" && v != null);
   }
 
   /** Live count of connected Companion-module clients (pushed from remote-server

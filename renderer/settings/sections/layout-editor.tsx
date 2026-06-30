@@ -69,7 +69,7 @@ import { useObsState } from "../../main/use-obs-state";
 import { useOscTargets } from "../../main/use-osc-state";
 import { useStageState } from "../../main/use-stage-state";
 import { usePlanItems } from "../../main/use-plan-items";
-import { useEnabledIntegrations, useIntegrations } from "../../main/use-integration-states";
+import { useConfiguredIntegrations, useIntegrations } from "../../main/use-integration-states";
 import { OBJECT_INTEGRATION } from "../../main/object-integration";
 import { invoke } from "../../lib/api";
 import { InlineSlotsEditor } from "./inline-slots-editor";
@@ -913,9 +913,10 @@ export function LayoutEditor({
     invoke<LayoutGroup[]>("layoutGroups:list").then(setGroups).catch(() => setGroups([]));
   }, []);
 
-  // Which integrations are set up (enabled) — drives the add-object palette's
-  // setup-aware dimming. Reflects "configured", not live connection.
-  const enabledIntegrations = useEnabledIntegrations();
+  // Which integrations are set up — drives the add-object palette's setup-aware
+  // dimming. Reflects "configured" (creds/config saved), NOT the live connection,
+  // so a set-up-but-disconnected integration's objects stay available.
+  const configuredIntegrations = useConfiguredIntegrations();
   // Opt-in: hide palette objects whose integration isn't set up (default off).
   const [hideUnconfigured, setHideUnconfigured] = useState(
     () => localStorage.getItem(HIDE_UNCONFIGURED_KEY) === "1",
@@ -1239,7 +1240,7 @@ export function LayoutEditor({
               const types = g.types.filter((t) => {
                 const need = OBJECT_INTEGRATION[t];
                 // When the hide toggle is on, drop types whose integration isn't set up.
-                return !(hideUnconfigured && need && !enabledIntegrations.has(need.id));
+                return !(hideUnconfigured && need && !configuredIntegrations.has(need.id));
               });
               if (types.length === 0) return null;
               return (
@@ -1248,7 +1249,9 @@ export function LayoutEditor({
                   {types.map((t) => {
                     const need = OBJECT_INTEGRATION[t];
                     // Dim (but keep selectable) when the backing integration isn't set up.
-                    const dim = need && !enabledIntegrations.has(need.id);
+                    // Based on "configured", not connection — a set-up-but-offline
+                    // integration's objects stay un-dimmed.
+                    const dim = need && !configuredIntegrations.has(need.id);
                     return (
                       <SelectItem key={t} value={t} className={dim ? "opacity-50" : undefined}>
                         {TYPE_LABELS[t]}{dim ? ` · set up ${need!.label}` : ""}

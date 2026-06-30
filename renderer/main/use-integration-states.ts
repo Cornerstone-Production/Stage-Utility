@@ -3,22 +3,22 @@ import { useEffect, useState } from "react";
 import { invoke, onNotification } from "../lib/api";
 
 /**
- * The set of integration ids that are currently ENABLED (i.e. the operator has
- * set them up). Hydrates from `integrations:list` on mount and stays live via
- * the `integrations:state-changed` channel.
+ * The set of integration ids the operator has set up (creds/config saved, or the
+ * master toggle for wireless/OSC). Hydrates from `integrations:list` on mount and
+ * stays live via the `integrations:state-changed` channel.
  *
- * This reflects "configured", NOT live connection — so consumers (e.g. the
- * layout editor's add-object palette) never treat an object as unavailable just
- * because its integration momentarily disconnects.
+ * Keyed on the server's `configured` flag, NOT the live connection — so the
+ * layout-editor palette can tell "not set up" (dim + "set up X") apart from "set
+ * up but currently disconnected" (stays available).
  */
-export function useEnabledIntegrations(): Set<string> {
-  const [enabled, setEnabled] = useState<Set<string>>(() => new Set());
+export function useConfiguredIntegrations(): Set<string> {
+  const [configured, setConfigured] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     let cancelled = false;
     const apply = (states: IntegrationState[] | undefined) => {
       if (cancelled || !states) return;
-      setEnabled(new Set(states.filter((s) => s.enabled).map((s) => s.id)));
+      setConfigured(new Set(states.filter((s) => s.configured).map((s) => s.id)));
     };
     invoke<{ states: IntegrationState[] }>("integrations:list")
       .then((r) => apply(r?.states))
@@ -33,11 +33,11 @@ export function useEnabledIntegrations(): Set<string> {
   useEffect(() => {
     return onNotification("integrations:state-changed", (p) => {
       const states = p as IntegrationState[];
-      setEnabled(new Set(states.filter((s) => s.enabled).map((s) => s.id)));
+      setConfigured(new Set(states.filter((s) => s.configured).map((s) => s.id)));
     });
   }, []);
 
-  return enabled;
+  return configured;
 }
 
 export interface IntegrationsSnapshot {
