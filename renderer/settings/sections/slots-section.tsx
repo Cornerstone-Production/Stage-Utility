@@ -28,6 +28,7 @@ import {
   Separator,
   Switch,
   toast,
+  confirm,
 } from "../../components/ui";
 import type { SectionHandlers, WirelessChannel } from "../types";
 import { PositionPicker } from "./position-picker";
@@ -746,8 +747,8 @@ function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers:
         variant="transparent"
         size="small"
         iconOnly
-        onClick={() => {
-          if (window.confirm(`Overwrite "${preset.name}" with the current slots?`)) handlers.handleOverwritePreset(preset.id);
+        onClick={async () => {
+          if (await confirm({ title: "Overwrite preset?", message: `Overwrite "${preset.name}" with the current slots?`, confirmLabel: "Overwrite" })) handlers.handleOverwritePreset(preset.id);
         }}
         aria-label={`Overwrite ${preset.name} with current slots`}
         title="Overwrite with current slots"

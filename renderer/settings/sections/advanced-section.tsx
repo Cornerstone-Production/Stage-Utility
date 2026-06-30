@@ -19,6 +19,7 @@ import {
   SelectItem,
   SelectValue,
   toast,
+  confirm,
 } from "../../components/ui";
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import type { SectionProps } from "../types";
@@ -91,19 +92,21 @@ function UpdatesPanel({
   const behind = s?.behind ?? 0;
   const [trackSel, setTrackSel] = useState<string | null>(null);
 
-  function onUpdateNow() {
-    if (window.confirm("Update now? The displays will go blank and reload for a few seconds while the server restarts.")) {
+  async function onUpdateNow() {
+    if (await confirm({ title: "Update now?", message: "The displays will go blank and reload for a few seconds while the server restarts.", confirmLabel: "Update now" })) {
       handlers.handleApplyUpdate();
     }
   }
 
-  function onSwitchTrack() {
+  async function onSwitchTrack() {
     const branch = trackSel ?? s?.branch ?? null;
     if (!branch || branch === s?.branch) return;
     if (
-      window.confirm(
-        `Switch the update track to "${branch}"? The server will reinstall + rebuild and restart (displays go blank for a few seconds), then follow the ${branch} branch.`,
-      )
+      await confirm({
+        title: `Switch to "${branch}"?`,
+        message: `The server will reinstall + rebuild and restart (displays go blank for a few seconds), then follow the ${branch} branch.`,
+        confirmLabel: "Switch track",
+      })
     ) {
       void invoke("update:setTrack", { branch }).catch((e) =>
         window.alert(`Track switch failed: ${e instanceof Error ? e.message : String(e)}`),
@@ -377,7 +380,7 @@ function ConfigSnapshotPanel() {
   }
 
   async function recall(id: string, label: string) {
-    if (!window.confirm(`Recall "${label}"?\n\nThis overwrites the current config (views, integrations, branding, etc.) and restarts the server — displays go blank for a few seconds. Secrets (API keys/passwords) are kept as-is.`)) return;
+    if (!(await confirm({ title: `Recall "${label}"?`, message: "This overwrites the current config (views, integrations, branding, etc.) and restarts the server — displays go blank for a few seconds. Secrets (API keys/passwords) are kept as-is.", confirmLabel: "Recall" }))) return;
     try {
       await invoke("config:recallSnapshot", { id });
       toast.success("Restoring… the server is restarting.");
@@ -387,7 +390,7 @@ function ConfigSnapshotPanel() {
   }
 
   async function remove(id: string) {
-    if (!window.confirm("Delete this snapshot?")) return;
+    if (!(await confirm({ title: "Delete snapshot?", confirmLabel: "Delete", destructive: true }))) return;
     try {
       await invoke("config:deleteSnapshot", { id });
       await refresh();
@@ -401,7 +404,7 @@ function ConfigSnapshotPanel() {
     if (!file) return;
     try {
       const bundle = JSON.parse(await file.text());
-      if (window.confirm(`Restore config from "${file.name}"?\n\nThis overwrites the current config and restarts the server. Secrets aren't included — you'll re-enter API keys/passwords after.`)) {
+      if (await confirm({ title: `Restore from "${file.name}"?`, message: "This overwrites the current config and restarts the server. Secrets aren't included — you'll re-enter API keys/passwords after.", confirmLabel: "Restore" })) {
         await invoke("config:import", { bundle });
         toast.success("Restoring… the server is restarting.");
       }

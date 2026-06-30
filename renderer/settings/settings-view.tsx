@@ -28,6 +28,7 @@ import {
   PanelLeftOpenIcon,
 } from "lucide-react";
 import { useIsMobile } from "../lib/use-media-query";
+import { withViewTransition } from "../lib/view-transition";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SectionItem, WirelessChannel, SectionHandlers } from "./types";
 import { PlanSection } from "./sections/plan-section";
@@ -1015,7 +1016,7 @@ export function SettingsView() {
           <SidebarList
             items={sections}
             selectedItem={activeSection}
-            onSelectedItemChange={setActiveSection}
+            onSelectedItemChange={(s: SectionItem) => withViewTransition(() => setActiveSection(s))}
             getItemKey={(s: SectionItem) => s.id}
           >
             {sections.map((section) => (

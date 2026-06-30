@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "../components/ui/tooltip-provider";
 import { Toaster } from "../components/ui/toast";
+import { ConfirmHost } from "../components/ui/confirm-dialog";
 import { SettingsView } from "./settings-view";
 import "../styles.css";
 
@@ -28,6 +29,7 @@ root.render(
         <SettingsView />
       </TooltipProvider>
       <Toaster />
+      <ConfirmHost />
     </QueryClientProvider>
   </React.StrictMode>,
 );

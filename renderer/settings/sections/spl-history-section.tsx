@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon, Trash2Icon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon, Trash2Icon, Volume2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
+import { confirm, EmptyState } from "../../components/ui";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -129,7 +130,7 @@ export function SplHistorySection() {
   );
 
   async function deleteService(key: string, title: string) {
-    if (!window.confirm(`Delete the SPL recording for "${title}"? This can't be undone.`)) return;
+    if (!(await confirm({ title: "Delete recording?", message: `Delete the SPL recording for "${title}"? This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
     setList((prev) => (prev ? prev.filter((s) => s.serviceKey !== key) : prev));
     if (selectedKey === key) setSelectedKey(null);
     try {
@@ -163,12 +164,12 @@ export function SplHistorySection() {
 
   if (list.length === 0) {
     return (
-      <div className="flex flex-col gap-2 py-8">
-        <p className="text-body text-gray-11">No services recorded yet.</p>
-        <p className="text-caption1 text-gray-9">
-          SPL is recorded per plan item while a service runs in Planning Center Live with the Smaart
-          integration connected.
-        </p>
+      <div className="py-8">
+        <EmptyState
+          icon={<Volume2Icon />}
+          title="No services recorded yet"
+          hint="SPL is recorded per plan item while a service runs in Planning Center Live with the Smaart integration connected."
+        />
       </div>
     );
   }

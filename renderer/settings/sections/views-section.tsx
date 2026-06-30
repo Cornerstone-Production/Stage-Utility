@@ -16,6 +16,7 @@ import {
   Separator,
   Switch,
   Dialog,
+  EmptyState,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import type { SectionProps } from "../types";
@@ -464,7 +465,11 @@ export function ViewsSection({
             handlers={handlers}
           />
         ) : (
-          <p className="text-caption1 text-gray-9">No views yet — create one to get started.</p>
+          <EmptyState
+            icon={<PlusIcon />}
+            title="No views yet"
+            hint="A view defines what a screen shows (mic slots, a dashboard, captions, or a custom layout). Use “Add view” to create your first."
+          />
         )}
       </div>
     </div>
