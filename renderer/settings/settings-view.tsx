@@ -1031,7 +1031,7 @@ export function SettingsView() {
       case "baptisms":
         return (
           <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
-            <BaptismsSection />
+            <BaptismsSection stageState={stageState} />
           </div>
         );
       case "advanced":
