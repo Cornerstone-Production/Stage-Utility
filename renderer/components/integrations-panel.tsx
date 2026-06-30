@@ -395,6 +395,15 @@ function SenSourceLocationPicker({
     }
   }, []);
 
+  // Auto-load the location list on mount when the integration is set up, so a
+  // previously-saved location renders by name. The selection IS persisted in
+  // config — but the <Select> needs the list loaded to show the chosen option,
+  // otherwise it looks unselected after a page refresh / re-opening the tab.
+  useEffect(() => {
+    if (state.configured || current) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function choose(locationId: string) {
     try {
       const next = await invoke<IntegrationState>("integrations:setConfig", {
