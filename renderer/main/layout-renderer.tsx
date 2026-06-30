@@ -469,13 +469,6 @@ function SplMeterValue({
   );
 }
 
-/** A "nice" rounded step for an axis span (1/2/5 × 10ⁿ). */
-function niceStep(span: number): number {
-  const s = span > 0 ? span : 1;
-  const pow = Math.pow(10, Math.floor(Math.log10(s)));
-  const f = s / pow;
-  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
-}
 function hhmm(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -484,8 +477,9 @@ function hhmm(iso: string): string {
 // A sparkline of the building-total people count over the rolling history.
 // The filled area + line live in a 0–100 viewBox stretched to the object box
 // (non-scaling stroke keeps the line crisp at any aspect); axis labels are crisp
-// HTML overlays. Y-axis auto-scales to nice rounded bounds with headroom (so a
-// spike never clips, top or bottom), and x-axis shows the first/last sample time.
+// HTML overlays. Y-axis auto-scales to tight integer bounds with headroom (so a
+// spike never clips and the three tick labels are always distinct whole numbers),
+// and x-axis shows the first/last sample time.
 function PeopleGraph({
   history,
   metric,
@@ -504,14 +498,15 @@ function PeopleGraph({
   const n = vals.length;
   const stroke = ts.color ?? "#ffffff";
 
-  // Nice rounded bounds with headroom so the line never sits on an edge.
+  // Integer bounds: people counts are whole numbers, so keep the scale tight (small
+  // changes stay visible) but guarantee three DISTINCT integer gridline labels. The
+  // old "nice"-step rounding printed duplicates like "2, 2, 1" on a 0–1 range.
   const dataMin = Math.min(...vals);
   const dataMax = Math.max(...vals);
-  const step = niceStep((dataMax - dataMin) / 2);
-  const lo = Math.max(0, Math.floor(dataMin / step) * step);
-  let hi = Math.ceil(dataMax / step) * step;
-  if (hi <= dataMax) hi += step; // guarantee a gap above the peak
-  if (hi === lo) hi = lo + step;
+  const lo = Math.max(0, Math.floor(dataMin));
+  let hi = Math.ceil(dataMax) + 1; // headroom so the peak never sits on the top edge
+  if (hi - lo < 2) hi = lo + 2; // span ≥ 2 → three distinct integer ticks
+  if ((hi - lo) % 2 !== 0) hi += 1; // even span → whole-number midpoint
   const range = hi - lo;
   const mid = lo + range / 2;
 

@@ -135,6 +135,38 @@ export function reduceSpaceOccupancy(rows: unknown[], allow?: Set<string> | null
   };
 }
 
+/** Vea's *live* tracked occupancy = the newest minute bucket per space, summed
+ *  (each clamped ≥0). This matches the Vea dashboard's "Most Recent Occupancy",
+ *  which clamps every sensor at ≥0 — so a door that logs more exits than entries
+ *  never drives the room negative. The day-net Σins−Σouts DOES go negative on such
+ *  a door, under-counting a multi-door room (one room, many entrances). `allow`
+ *  (space ids) scopes client-side. Returns null when no usable minute row exists so
+ *  the caller can fall back to the day-net. Exported for tests. */
+export function latestSpaceOccupancy(rows: unknown[], allow?: Set<string> | null): number | null {
+  // Keep the newest row per space (don't assume the API returns them sorted).
+  const latest = new Map<string, { t: string; occ: number }>();
+  for (const r of rows) {
+    if (!r || typeof r !== "object") continue;
+    const row = r as Record<string, unknown>;
+    const id = typeof row.spaceId === "string" ? row.spaceId : typeof row.entityId === "string" ? row.entityId : null;
+    if (!id) continue;
+    if (allow && allow.size > 0 && !allow.has(id)) continue;
+    const t =
+      typeof row.recordDate_minute_1 === "string"
+        ? row.recordDate_minute_1
+        : typeof row.recordDate === "string"
+          ? row.recordDate
+          : "";
+    const occ = num(row.maxoccupancy) ?? numLoose(row.avgoccupancy) ?? 0;
+    const cur = latest.get(id);
+    if (!cur || t > cur.t) latest.set(id, { t, occ });
+  }
+  if (latest.size === 0) return null;
+  let sum = 0;
+  for (const v of latest.values()) sum += Math.max(0, v.occ);
+  return Math.max(0, Math.round(sum));
+}
+
 /** Vea's static + occupancy endpoints wrap rows in `{ results: [...] }`, but a few
  *  (older /location responses) return a bare array. Tolerate both. */
 function asRows(data: unknown): Record<string, unknown>[] {
@@ -561,29 +593,55 @@ class SenSourceService {
       // zone-derived net already in `dto.total` if a site has no spaces or it fails.
       let occSource = "zone-net";
       try {
+        const allowSpaces = await this.resolveAllowedSpaces();
+        // Day stats: attendance (Σ entries), peak/min/avg occupancy for the day.
         const oParams = new URLSearchParams({
           relativeDate: "today",
           dateGroupings: "day",
           entityType: "space",
           metrics: "occupancy(max),occupancy(min),occupancy(avg)",
         });
-        const allowSpaces = await this.resolveAllowedSpaces();
         const oBody = await this.apiGet<{ results?: unknown[] }>(`/data/occupancy?${oParams.toString()}`);
         const occ = reduceSpaceOccupancy(oBody.results ?? [], allowSpaces);
         if (occ.spaces > 0) {
+          // CURRENT "in the room now" = Vea's live tracked occupancy from the most
+          // recent per-minute bucket (matches the dashboard's "Most Recent Occupancy",
+          // which clamps each sensor ≥0). The day-net Σins−Σouts under-counts a
+          // multi-door room when a door logs more exits than entries. Vea has no
+          // server-side time window (startDate/endDate 500), so we fetch the day's
+          // minute series (occupancy max only) and take the newest bucket per space.
+          // Falls back to the day-net if the minute series is unavailable.
+          let current = occ.occupancy;
+          let curSource = "day-net";
+          try {
+            const mParams = new URLSearchParams({
+              relativeDate: "today",
+              dateGroupings: "minute",
+              entityType: "space",
+              metrics: "occupancy(max)",
+            });
+            const mBody = await this.apiGet<{ results?: unknown[] }>(`/data/occupancy?${mParams.toString()}`);
+            const live = latestSpaceOccupancy(mBody.results ?? [], allowSpaces);
+            if (live != null) {
+              current = live;
+              curSource = "minute";
+            }
+          } catch (err) {
+            console.warn("[sensource] live minute occupancy unavailable; using day-net:", err);
+          }
           // Building capacity = Σ maxCapacity over the same (allowed) spaces.
           const cap = (await this.cachedSpaces())
             .filter((s) => !allowSpaces || allowSpaces.size === 0 || allowSpaces.has(s.spaceId))
             .reduce((a, s) => a + (s.maxCapacity ?? 0), 0);
           dto.total = {
             attendance: occ.attendance,
-            occupancy: occ.occupancy,
+            occupancy: current,
             peak: occ.peak,
             min: occ.min,
             avg: occ.avg,
             capacity: cap > 0 ? cap : null,
           };
-          occSource = `space×${occ.spaces}`;
+          occSource = `space×${occ.spaces}/${curSource}`;
         }
       } catch (err) {
         console.warn("[sensource] space occupancy unavailable; using zone-derived total:", err);
