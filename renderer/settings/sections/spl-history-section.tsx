@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon, Trash2Icon, Volume2Icon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, Trash2Icon, Volume2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
-import { confirm, EmptyState } from "../../components/ui";
+import { confirm, EmptyState, SkeletonRows } from "../../components/ui";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -156,8 +156,8 @@ export function SplHistorySection() {
 
   if (list === null) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <Loader2Icon className="size-6 text-gray-8 animate-spin" />
+      <div className="py-6">
+        <SkeletonRows rows={5} />
       </div>
     );
   }

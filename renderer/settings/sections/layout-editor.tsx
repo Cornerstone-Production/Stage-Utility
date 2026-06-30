@@ -449,17 +449,20 @@ interface DragState {
 // its parent overlay node so nested children resolve correctly. Recurses for a
 // container's children.
 function OverlayNode({
-  o, parentAbs, depth, selectedId, onStart, parentLocked = false,
+  o, parentAbs, depth, selectedId, draggingId = null, onStart, parentLocked = false,
 }: {
   o: LayoutObject;
   parentAbs: FracRect;
   depth: number;
   selectedId: string | null;
+  /** Id of the object currently being dragged, for a "lifting" cue. */
+  draggingId?: string | null;
   onStart: (e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) => void;
   /** True when an ancestor container is locked, so this node is locked too. */
   parentLocked?: boolean;
 }) {
   const sel = o.id === selectedId;
+  const dragging = o.id === draggingId;
   const locked = parentLocked || !!o.locked;
   const abs = depth === 0 ? { x: o.x, y: o.y, w: o.w, h: o.h } : composeRect(parentAbs, o);
   const kids = o.children?.length ? [...o.children].sort((a, b) => a.z - b.z) : null;
@@ -471,8 +474,9 @@ function OverlayNode({
         left: `${o.x * 100}%`, top: `${o.y * 100}%`,
         width: `${o.w * 100}%`, height: `${o.h * 100}%`,
         cursor: locked ? "default" : "move",
-        outline: sel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
+        outline: dragging ? "2px dashed #3b82f6" : sel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
         outlineOffset: 0,
+        opacity: dragging ? 0.7 : 1,
         boxShadow: sel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
       }}
     >
@@ -501,7 +505,7 @@ function OverlayNode({
           return <div key={h} onPointerDown={(e) => onStart(e, o, h, parentAbs, depth)} style={{ ...pos, cursor: handleCursor(h) }} />;
         })}
       {kids?.map((c) => (
-        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} onStart={onStart} parentLocked={locked} />
+        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} draggingId={draggingId} onStart={onStart} parentLocked={locked} />
       ))}
     </div>
   );
@@ -576,6 +580,9 @@ function EditorCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boxW, boxH]);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // The container the dragged object would drop into right now (for the live
+  // highlight). Null when not hovering a valid target.
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   // Latest local geom set during the active drag (so pointerup can hit-test the
   // drop without depending on the parent's async state update).
   const dragGeom = useRef<Pick<LayoutObject, "x" | "y" | "w" | "h"> | null>(null);
@@ -599,6 +606,11 @@ function EditorCanvas({
         geom = gridOn ? snapRectToGrid(g, drag.parentAbs, boxW, boxH, true) : g;
       }
       dragGeom.current = geom;
+      // Live drop-target highlight while moving a reparentable object.
+      if (drag.mode === "move" && drag.canReparent) {
+        const target = findDropContainer(drag.targets, drag.start.config.type === "container", geom.x + geom.w / 2, geom.y + geom.h / 2);
+        setDropTargetId((prev) => (prev === target ? prev : target));
+      }
       onGeom(drag.id, geom);
     };
     const onUp = () => {
@@ -613,6 +625,7 @@ function EditorCanvas({
         if (t) onReparent(drag.id, t.id, { x: g.x, y: g.y, w: g.w, h: g.h }, t.abs);
       }
       dragGeom.current = null;
+      setDropTargetId(null);
       setDrag(null);
     };
     window.addEventListener("pointermove", onMove);
@@ -725,6 +738,24 @@ function EditorCanvas({
               the grid. */}
           {interactive && (
             <div style={{ position: "absolute", top: 0, left: 0, width: boxW, height: boxH }}>
+              {/* Live drop-target highlight: the container the dragged object would
+                  land in, drawn behind the selection boxes. */}
+              {dropTargetId && drag && (() => {
+                const t = drag.targets.find((x) => x.id === dropTargetId);
+                if (!t) return null;
+                return (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: `${t.abs.x * 100}%`, top: `${t.abs.y * 100}%`,
+                      width: `${t.abs.w * 100}%`, height: `${t.abs.h * 100}%`,
+                      borderRadius: 6, pointerEvents: "none",
+                      outline: "2px dashed var(--green-9)", outlineOffset: -2,
+                      background: "rgba(45,212,150,0.12)",
+                    }}
+                  />
+                );
+              })()}
               {sorted.map((o) => (
                 <OverlayNode
                   key={o.id}
@@ -732,6 +763,7 @@ function EditorCanvas({
                   parentAbs={CANVAS_FRAC}
                   depth={0}
                   selectedId={selectedId}
+                  draggingId={drag?.id ?? null}
                   onStart={startDrag}
                 />
               ))}
@@ -1937,6 +1969,7 @@ function Inspector({
               </Select>
             </Row>
             <Row label="Show metric name"><Switch checked={c.showLabel ?? false} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} /></Row>
+            <Row label="Peak hold"><Switch checked={c.peakHold ?? false} onCheckedChange={(v) => onConfig({ ...c, peakHold: v })} /></Row>
             <Row label="Color thresholds">
               <Switch checked={!!t} onCheckedChange={(v) => onConfig({ ...c, thresholds: v ? { amber: 95, red: 100 } : null })} />
             </Row>

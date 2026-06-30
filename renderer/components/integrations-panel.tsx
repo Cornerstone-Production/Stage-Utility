@@ -25,6 +25,7 @@ import {
   Separator,
   NumberInput,
   toast,
+  SkeletonRows,
 } from "../components/ui";
 import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -593,8 +594,8 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
 
   if (isLoading) {
     return (
-      <div className={cn("flex items-center justify-center py-8", className)}>
-        <Loader2Icon className="size-5 text-gray-9 animate-spin" />
+      <div className={cn("py-2", className)}>
+        <SkeletonRows rows={4} />
       </div>
     );
   }

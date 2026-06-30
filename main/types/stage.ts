@@ -218,6 +218,8 @@ export type LayoutObjectConfig =
       metricKey?: string | null;
       showLabel?: boolean;
       thresholds?: { amber: number; red: number } | null;
+      /** Hold the highest value seen (resets on reload / meter change) instead of the live reading. */
+      peakHold?: boolean;
     }
   // Live OBS output indicator (from the OBS integration, `StageState`-adjacent
   // `obs:status` channel). `mode` picks which output to reflect — recording

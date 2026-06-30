@@ -325,19 +325,8 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     }
     case "charger-battery":
       return <ChargerBattery config={c} all={ctx.state.chargerBays ?? []} H={ctx.H} baseStyle={ts} />;
-    case "spl-meter": {
-      const r = resolveSplValue(ctx.spl, c.meterId, c.metricKey);
-      if (!r) return <span style={{ ...ts, opacity: 0.4 }}>— dB</span>;
-      const color = splThresholdColor(r.value, c.thresholds);
-      return (
-        <span style={color ? { ...ts, color } : ts}>
-          {`${Math.round(r.value)} dB`}
-          {c.showLabel && (
-            <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{` ${r.metricKey}`}</span>
-          )}
-        </span>
-      );
-    }
+    case "spl-meter":
+      return <SplMeterValue config={c} spl={ctx.spl} ts={ts} />;
     case "people-counter": {
       const metric = c.metric ?? "attendance";
       const value = resolvePeopleValue(ctx.peopleCount, metric, c.zoneId);
@@ -435,6 +424,38 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     default:
       return null;
   }
+}
+
+// Live SPL readout. With `peakHold`, shows the highest value seen for the
+// selected meter/metric (held in a ref across the ~250ms broadcasts), resetting
+// when the selected meter/metric changes; otherwise shows the live reading.
+function SplMeterValue({
+  config,
+  spl,
+  ts,
+}: {
+  config: Extract<LayoutObjectConfig, { type: "spl-meter" }>;
+  spl: SplMetricsDTO | null;
+  ts: CSSProperties;
+}) {
+  const r = resolveSplValue(spl, config.meterId, config.metricKey);
+  const peak = useRef<number | null>(null);
+  useEffect(() => {
+    peak.current = null; // reset the hold when the source or mode changes
+  }, [config.meterId, config.metricKey, config.peakHold]);
+  if (config.peakHold && r) {
+    peak.current = peak.current == null ? r.value : Math.max(peak.current, r.value);
+  }
+  const shown = config.peakHold ? peak.current : (r?.value ?? null);
+  if (shown == null) return <span style={{ ...ts, opacity: 0.4 }}>— dB</span>;
+  const color = splThresholdColor(shown, config.thresholds);
+  return (
+    <span style={color ? { ...ts, color } : ts}>
+      {`${Math.round(shown)} dB`}
+      {config.peakHold && <span style={{ opacity: 0.6, fontSize: "0.6em" }}> pk</span>}
+      {config.showLabel && r && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{` ${r.metricKey}`}</span>}
+    </span>
+  );
 }
 
 /** Amber/red once the value crosses the configured dB thresholds, else null (keep base color). */

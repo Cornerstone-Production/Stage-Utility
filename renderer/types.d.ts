@@ -334,6 +334,7 @@ type LayoutObjectConfig =
       metricKey?: string | null;
       showLabel?: boolean;
       thresholds?: { amber: number; red: number } | null;
+      peakHold?: boolean;
     }
   | {
       type: "obs-status";
