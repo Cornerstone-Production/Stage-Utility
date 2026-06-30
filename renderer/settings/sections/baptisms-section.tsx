@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, Trash2Icon } from "lucide-react";
+import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, Trash2Icon, ChevronRightIcon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
 import { Button, confirm, toast } from "../../components/ui";
@@ -22,6 +22,7 @@ export function BaptismsSection() {
   const state = useBaptismState();
   const [now, setNow] = useState(() => Date.now());
   const [sessions, setSessions] = useState<BaptismSession[]>([]);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   function reloadSessions() {
@@ -200,28 +201,69 @@ export function BaptismsSection() {
         </div>
       )}
 
-      {/* Past sessions */}
+      {/* Past sessions — click a row to see its per-person splits + averages. */}
       {sessions.length > 0 && (
         <div className="flex flex-col gap-2">
           <span className="text-caption1 font-medium text-gray-11">Past sessions</span>
-          {sessions.map((s) => {
-            const tot = s.people.reduce((a, p) => a + p.testimonyMs + p.baptizeMs, 0);
-            return (
-              <div key={s.id} className="flex items-center gap-1 rounded-lg border border-gray-5 bg-gray-2 pr-1.5">
-                <div className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2">
-                  <span className="text-caption1 text-gray-12 truncate">{fmtDate(s.startedAt)}</span>
-                  <span className="shrink-0 tabular-nums text-caption1 text-gray-9">{s.people.length} baptized · {fmtClock(tot)}</span>
-                </div>
-                <button className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors" onClick={() => void deleteSession(s.id)} aria-label="Delete session" title="Delete session">
-                  <Trash2Icon className="size-4" />
-                </button>
-              </div>
-            );
-          })}
+          {sessions.map((s) => (
+            <PastSession
+              key={s.id}
+              s={s}
+              open={openId === s.id}
+              onToggle={() => setOpenId((id) => (id === s.id ? null : s.id))}
+              onDelete={() => void deleteSession(s.id)}
+            />
+          ))}
         </div>
       )}
 
       <span className="inline-flex items-center gap-1.5 text-caption2 text-gray-8"><DropletIcon className="size-3.5" /> Tip: leave this tab open during baptisms; the timer keeps running even if you navigate away.</span>
+    </div>
+  );
+}
+
+/** One past session row — collapsed shows date + count + total; expanded shows
+ *  per-person testimony/baptism splits and the session averages. */
+function PastSession({ s, open, onToggle, onDelete }: { s: BaptismSession; open: boolean; onToggle: () => void; onDelete: () => void }) {
+  const n = s.people.length;
+  const totT = s.people.reduce((a, p) => a + p.testimonyMs, 0);
+  const totB = s.people.reduce((a, p) => a + p.baptizeMs, 0);
+  const tot = totT + totB;
+  return (
+    <div className="flex flex-col rounded-lg border border-gray-5 bg-gray-2 overflow-hidden">
+      <div className="flex items-center gap-1 pr-1.5">
+        <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2 text-left" onClick={onToggle} aria-expanded={open}>
+          <span className="flex items-center gap-1.5 min-w-0">
+            <ChevronRightIcon className={cn("size-3.5 text-gray-9 shrink-0 transition-transform", open && "rotate-90")} />
+            <span className="text-caption1 text-gray-12 truncate">{fmtDate(s.startedAt)}</span>
+          </span>
+          <span className="shrink-0 tabular-nums text-caption1 text-gray-9">{n} baptized · {fmtClock(tot)}</span>
+        </button>
+        <button className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors" onClick={onDelete} aria-label="Delete session" title="Delete session">
+          <Trash2Icon className="size-4" />
+        </button>
+      </div>
+      {open && (
+        <div className="border-t border-gray-5">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 px-3 py-2 text-caption2 text-gray-9 tabular-nums">
+            <span>Avg testimony <span className="text-blue-11">{fmtClock(n ? totT / n : 0)}</span></span>
+            <span>Avg baptism <span className="text-green-11">{fmtClock(n ? totB / n : 0)}</span></span>
+            <span>Avg / person <span className="text-gray-12">{fmtClock(n ? tot / n : 0)}</span></span>
+          </div>
+          <div className="grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem] gap-2 px-3 py-1 bg-gray-3 text-caption2 font-medium text-gray-10">
+            <span>#</span><span>Person</span><span className="text-right">Testimony</span><span className="text-right">Baptism</span><span className="text-right">Total</span>
+          </div>
+          {s.people.map((p, i) => (
+            <div key={i} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"}`}>
+              <span className="text-gray-9">{i + 1}</span>
+              <span className="text-gray-12">Person {i + 1}</span>
+              <span className="text-right text-blue-11">{fmtClock(p.testimonyMs)}</span>
+              <span className="text-right text-green-11">{fmtClock(p.baptizeMs)}</span>
+              <span className="text-right text-gray-12">{fmtClock(p.testimonyMs + p.baptizeMs)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
