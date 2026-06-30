@@ -24,6 +24,7 @@ import { sensourceService } from "./main/services/sensource-service.js";
 import { tslService } from "./main/services/tsl-service.js";
 import { remoteServer } from "./main/services/remote-server.js";
 import { stageController } from "./main/services/stage-controller.js";
+import { cacheMaintenance } from "./main/services/cache-maintenance.js";
 
 // ── Data directory ────────────────────────────────────────────────────────────
 //
@@ -60,6 +61,9 @@ await deviceManager.start();
 // plan is selected / PCO isn't configured.
 livePoller.start();
 
+// Keep the photo + attachment disk caches from growing unbounded over months.
+cacheMaintenance.start();
+
 console.log(`[server] ready — control panel at ${remoteServer.getLanUrl()}`);
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
@@ -70,6 +74,7 @@ async function shutdown(signal: string): Promise<void> {
   stageController.stopUpdateChecks();
   stageController.stopDeviceStatusUpdates();
   livePoller.stop();
+  cacheMaintenance.stop();
   propresenterService.stop();
   prodcomService.stop();
   sensourceService.stop();

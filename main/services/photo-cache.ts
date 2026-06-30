@@ -6,6 +6,11 @@ import * as fs from "fs/promises";
 import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
+import { pruneCacheDir } from "./cache-prune.js";
+
+// Photos are small; keep ~90 days of them, capped at 250 MB.
+const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+const MAX_BYTES = 250 * 1024 * 1024;
 
 let cacheDir: string | null = null;
 
@@ -50,6 +55,15 @@ export async function getPhotoPath(photoUrl: string): Promise<string | null> {
   } catch (err) {
     console.error("[photo-cache] Error caching photo:", err);
     return null;
+  }
+}
+
+/** Evict stale/oversized cached photos. Safe — pruned photos re-fetch on demand. */
+export async function prunePhotoCache(): Promise<void> {
+  const dir = await getCacheDir();
+  const r = await pruneCacheDir(dir, { maxAgeMs: MAX_AGE_MS, maxBytes: MAX_BYTES });
+  if (r.removed > 0) {
+    console.log(`[photo-cache] pruned ${r.removed} file(s), freed ${(r.freedBytes / 1e6).toFixed(1)} MB`);
   }
 }
 
