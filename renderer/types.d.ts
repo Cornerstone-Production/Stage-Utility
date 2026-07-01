@@ -6,7 +6,7 @@ type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
 interface ConfigField {
   key: string;
   label: string;
-  type: "text" | "password" | "number" | "select" | "ip-list" | "text-list";
+  type: "text" | "password" | "number" | "select" | "ip-list";
   options?: { value: string; label: string }[];
   placeholder?: string;
   help?: string;

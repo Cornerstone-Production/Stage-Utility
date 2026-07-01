@@ -17,22 +17,8 @@ const EMPTY_DEVICE: SlotDevice = {
 };
 
 function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
-  // An offline/manual device (a networkless PSM/mic) is EXPECTED to be offline —
-  // render its name as a calm label (status "none"), not a red error like a real
-  // device that dropped off the network.
-  const manual = ds.deviceType === "manual";
   if (!ds.online) {
-    return {
-      status: manual ? "none" : "error",
-      rf: null,
-      battery: null,
-      freq: manual ? null : ds.frequencyLabel,
-      audioLevel: null,
-      charge: null,
-      iemCharge: null,
-      label: manual ? ds.name : null,
-      iemLabel: null,
-    };
+    return { status: "error", rf: null, battery: null, freq: ds.frequencyLabel, audioLevel: null, charge: null, iemCharge: null, label: null, iemLabel: null };
   }
   let status: SlotDevice["status"] = "ok";
   if (ds.rfBars !== null && ds.rfBars <= 1) status = "warn";
@@ -51,24 +37,13 @@ function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
   };
 }
 
-// Resolve the IEM/PSM pack battery for a slot's optional second device binding.
-// IEM packs are a vocalist thing, so this only resolves for vocal slots; other
-// roles never get a second bar even if an iemBinding lingers. Independent of the
-// primary mic; only shows while that device is online.
-// Resolve the IEM's second bar (live battery) AND a static label for an offline/
-// manual IEM. A live pack shows its battery %; an offline/manual pack (or a
-// per-slot label override) shows a headphones-icon label with no bar.
-function resolveIem(
-  slot: Slot,
-  deviceStatuses: Map<string, DeviceStatus>,
-  isVocal: boolean,
-): { battery: number | null; label: string | null } {
-  if (!isVocal || !slot.iemBinding) return { battery: null, label: null };
-  const override = slot.iemLabel?.trim() || null;
+// Resolve the IEM/PSM pack battery for a slot's optional second (live) device
+// binding. Vocal slots only; independent of the primary mic; only shows while
+// that device is online. (Offline IEM labels are separate — see slot.iemLabel.)
+function resolveIem(slot: Slot, deviceStatuses: Map<string, DeviceStatus>, isVocal: boolean): number | null {
+  if (!isVocal || !slot.iemBinding) return null;
   const ds = deviceStatuses.get(slot.iemBinding.channelId);
-  if (ds && ds.online) return { battery: ds.battery, label: null };
-  const manualName = ds && ds.deviceType === "manual" ? (ds.name ?? null) : null;
-  return { battery: null, label: override ?? manualName };
+  return ds && ds.online ? ds.battery : null;
 }
 
 // A slot counts as a vocalist when its (configured or matched) position is a
@@ -162,14 +137,13 @@ export function resolveSlots(
         const ds = deviceStatuses.get(slot.deviceBinding.channelId);
         if (ds) device = deviceStatusToSlotDevice(ds);
       }
-      const iem = resolveIem(slot, deviceStatuses, false);
-      const deviceLabel = slot.deviceLabel?.trim() || null;
       device = {
         ...device,
         charge: resolveCharge(slot, device, deviceStatuses),
-        iemCharge: iem.battery,
-        label: device.label !== null ? (deviceLabel ?? device.label) : null,
-        iemLabel: iem.label,
+        iemCharge: resolveIem(slot, deviceStatuses, false),
+        // Per-slot offline labels ("" = Offline picked but unlabeled → still a pill).
+        label: slot.deviceLabel ?? null,
+        iemLabel: null,
       };
       return { ...slot, device };
     }
@@ -188,14 +162,13 @@ export function resolveSlots(
         slot.link.matchBy === "position" &&
         isVocalPosition(slot.link.teamPositionName)) ||
       isVocalPosition(member?.teamPositionName);
-    const iem = resolveIem(slot, deviceStatuses, isVocal);
-    const deviceLabel = slot.deviceLabel?.trim() || null;
     device = {
       ...device,
       charge: resolveCharge(slot, device, deviceStatuses),
-      iemCharge: iem.battery,
-      label: deviceLabel ?? device.label,
-      iemLabel: iem.label,
+      iemCharge: resolveIem(slot, deviceStatuses, isVocal),
+      // Per-slot offline labels ("" = Offline picked but unlabeled → still a pill).
+      label: slot.deviceLabel ?? null,
+      iemLabel: isVocal ? (slot.iemLabel ?? null) : null,
     };
 
     return {

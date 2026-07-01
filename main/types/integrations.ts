@@ -5,7 +5,7 @@ export type ConnectionState = "disconnected" | "connecting" | "connected" | "err
 export interface ConfigField {
   key: string;
   label: string;
-  type: "text" | "password" | "number" | "select" | "ip-list" | "text-list";
+  type: "text" | "password" | "number" | "select" | "ip-list";
   options?: { value: string; label: string }[];
   placeholder?: string;
   /** Optional longer explanation shown behind an "i" info popover next to the label. */

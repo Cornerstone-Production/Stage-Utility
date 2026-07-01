@@ -68,9 +68,7 @@ export class DeviceManager {
     // Determine which connection ids should be active.
     const enabledWithDriver = new Set<string>();
     for (const conn of connections) {
-      // Offline/manual devices have nothing to connect to — treat as always active.
-      const active = conn.enabled || conn.providerId === "offline-manual";
-      if (active && providerRegistry.hasDriver(conn.providerId)) {
+      if (conn.enabled && providerRegistry.hasDriver(conn.providerId)) {
         enabledWithDriver.add(conn.id);
       }
     }
@@ -90,7 +88,7 @@ export class DeviceManager {
 
     // Connect new/updated enabled connections.
     for (const conn of connections) {
-      if (!conn.enabled && conn.providerId !== "offline-manual") {
+      if (!conn.enabled) {
         // Disabled — ensure disconnected (already handled above if it was active).
         conn.connection = "disconnected";
         conn.message = null;
@@ -105,25 +103,14 @@ export class DeviceManager {
         continue;
       }
 
-      // Real driver — check if already connected.
+      // Real driver — check if already connected with the same config.
       const existing = this.entries.get(conn.id);
-      // Offline/manual devices are stateless (no socket) and their channels come
-      // straight from config, so tear down + recreate on every apply to pick up
-      // edited names and re-emit their labels. Live drivers keep their socket.
-      if (existing && conn.providerId !== "offline-manual") {
+      if (existing) {
         // Already connected; update name in case it changed.
         existing.connectionName = conn.name;
         conn.connection = existing.provider.getConnectionState();
         conn.message = null;
         continue;
-      }
-      if (existing) {
-        try {
-          await existing.provider.disconnect();
-        } catch {
-          /* ignore */
-        }
-        this.entries.delete(conn.id);
       }
 
       // New connection — create a fresh provider instance and connect.

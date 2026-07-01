@@ -101,21 +101,25 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
   }
 
   function setDeviceBinding(channelId: string) {
-    // "__none__" is the sentinel for the "None" option — Radix Select forbids an
-    // empty-string item value (it throws and crashes the settings tree), so map
-    // the sentinel back to clearing the binding.
-    if (!channelId || channelId === "__none__") {
-      onChange({ ...slot, deviceBinding: null });
+    // "__none__" clears; "__offline__" switches to a per-slot manual label (no
+    // live binding); anything else binds a live wireless channel. (Radix Select
+    // forbids empty-string values, hence the sentinels.)
+    if (channelId === "__offline__") {
+      onChange({ ...slot, deviceBinding: null, deviceLabel: slot.deviceLabel ?? "" });
+    } else if (!channelId || channelId === "__none__") {
+      onChange({ ...slot, deviceBinding: null, deviceLabel: null });
     } else {
-      onChange({ ...slot, deviceBinding: { providerId: "wireless", channelId } });
+      onChange({ ...slot, deviceBinding: { providerId: "wireless", channelId }, deviceLabel: null });
     }
   }
 
   function setIemBinding(channelId: string) {
-    if (!channelId || channelId === "__none__") {
-      onChange({ ...slot, iemBinding: null });
+    if (channelId === "__offline__") {
+      onChange({ ...slot, iemBinding: null, iemLabel: slot.iemLabel ?? "" });
+    } else if (!channelId || channelId === "__none__") {
+      onChange({ ...slot, iemBinding: null, iemLabel: null });
     } else {
-      onChange({ ...slot, iemBinding: { providerId: "wireless", channelId } });
+      onChange({ ...slot, iemBinding: { providerId: "wireless", channelId }, iemLabel: null });
     }
   }
 
@@ -125,7 +129,9 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
   // operator doesn't have to expand every slot to see its wiring.
   const optionParts: string[] = [];
   if (slot.deviceBinding) optionParts.push("mic");
+  else if (slot.deviceLabel != null) optionParts.push("offline mic");
   if (slot.iemBinding) optionParts.push("IEM");
+  else if (slot.iemLabel != null) optionParts.push("offline IEM");
   if ((slot.chargeSource ?? "mic") === "charger") optionParts.push("charger");
   else if (slot.chargeSource === "off") optionParts.push("no charge");
   if (slot.hideRf) optionParts.push("RF hidden");
@@ -410,71 +416,65 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
           Everything after the PCO position/notes assignment lives in here. */}
       {!isEmpty && (
         <Collapsible label="Options" summary={optionsSummary} className="pl-4 sm:pl-9">
-          {/* Device binding */}
-          {wirelessChannels.length > 0 && (
+          {/* Device channel — a live wireless channel, or "Offline" for a manual
+              label (a networkless mic/pack, e.g. a PSM 900). Picking Offline
+              reveals the label field; on the display it shows a pill in place of
+              the RF pill. */}
+          <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+            <span className="text-caption1 text-gray-9 shrink-0">Device channel:</span>
+            <Select
+              value={slot.deviceBinding?.channelId ?? (slot.deviceLabel != null ? "__offline__" : "__none__")}
+              onValueChange={setDeviceBinding}
+            >
+              <SelectTrigger className="w-full sm:w-40"><SelectValue placeholder="None" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">None</SelectItem>
+                <SelectItem value="__offline__">Offline (manual label)</SelectItem>
+                {wirelessChannels.map((ch) => (
+                  <SelectItem key={ch.id} value={ch.id}>{ch.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {slot.deviceLabel != null && (
             <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="text-caption1 text-gray-9 shrink-0">Device channel:</span>
-              <Select value={slot.deviceBinding?.channelId ?? "__none__"} onValueChange={setDeviceBinding}>
-                <SelectTrigger className="w-full sm:w-40">
-                  <SelectValue placeholder="None" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  {wirelessChannels.map((ch) => (
-                    <SelectItem key={ch.id} value={ch.id}>
-                      {ch.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {/* Offline/manual mic label override — only meaningful for a bound
-              offline device (live mics show telemetry instead). */}
-          {slot.deviceBinding && (
-            <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="text-caption1 text-gray-9 shrink-0">Mic label:</span>
+              <span className="text-caption1 text-gray-9 shrink-0">Offline label:</span>
               <Input
-                value={slot.deviceLabel ?? ""}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => onChange({ ...slot, deviceLabel: e.target.value || null })}
-                placeholder="Offline devices only"
+                value={slot.deviceLabel}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => onChange({ ...slot, deviceLabel: e.target.value })}
+                placeholder="e.g. PSM 900 — Lead"
                 className="w-full sm:w-40"
               />
             </div>
           )}
 
-          {/* Optional second device (IEM/PSM pack) — adds a second battery bar
-              beneath the primary. Vocalists only (handheld + IEM). */}
-          {isVocalSlot && wirelessChannels.length > 0 && (
+          {/* IEM pack — a live channel (second battery bar) or "Offline" for a
+              manual label. Vocalists only (handheld + IEM). */}
+          {isVocalSlot && (
             <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
               <span className="text-caption1 text-gray-9 shrink-0">IEM pack:</span>
-              <Select value={slot.iemBinding?.channelId ?? "__none__"} onValueChange={setIemBinding}>
-                <SelectTrigger className="w-full sm:w-40">
-                  <SelectValue placeholder="None" />
-                </SelectTrigger>
+              <Select
+                value={slot.iemBinding?.channelId ?? (slot.iemLabel != null ? "__offline__" : "__none__")}
+                onValueChange={setIemBinding}
+              >
+                <SelectTrigger className="w-full sm:w-40"><SelectValue placeholder="None" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">None</SelectItem>
+                  <SelectItem value="__offline__">Offline (manual label)</SelectItem>
                   {wirelessChannels.map((ch) => (
-                    <SelectItem key={ch.id} value={ch.id}>
-                      {ch.label}
-                    </SelectItem>
+                    <SelectItem key={ch.id} value={ch.id}>{ch.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <span className="text-caption2 text-gray-8">Adds a second battery bar (headphones icon) for the pack.</span>
             </div>
           )}
-
-          {/* Offline/manual IEM label override — shows a headphones-icon label
-              when the IEM pack is an offline device (e.g. a PSM 900). */}
-          {isVocalSlot && slot.iemBinding && (
+          {isVocalSlot && slot.iemLabel != null && (
             <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="text-caption1 text-gray-9 shrink-0">IEM label:</span>
+              <span className="text-caption1 text-gray-9 shrink-0">Offline IEM label:</span>
               <Input
-                value={slot.iemLabel ?? ""}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => onChange({ ...slot, iemLabel: e.target.value || null })}
-                placeholder="Offline devices only"
+                value={slot.iemLabel}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => onChange({ ...slot, iemLabel: e.target.value })}
+                placeholder="e.g. PSM 900 — Lead"
                 className="w-full sm:w-40"
               />
             </div>
