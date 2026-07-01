@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { UserRoundIcon } from "lucide-react";
+import { UserRoundIcon, MicIcon, HeadphonesIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { StatusStrip } from "./status-strip";
 import { BrandLogo } from "./brand-logo";
@@ -200,6 +200,29 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             )}
           </div>
 
+          {/* Offline / manual device labels — a separate label (icon + name, no
+              bars), shown only when an offline device is assigned to this slot's
+              mic and/or IEM. Kept out of the RF telemetry pill on purpose. */}
+          {(slot.device.label || slot.device.iemLabel) && (
+            <div
+              className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-white/70"
+              style={{ fontSize: "clamp(0.66rem, 7cqi, 1.4rem)" }}
+            >
+              {slot.device.label && (
+                <span className="inline-flex items-center gap-1 min-w-0">
+                  <MicIcon className="shrink-0" style={{ width: "1em", height: "1em" }} />
+                  <span className="truncate">{slot.device.label}</span>
+                </span>
+              )}
+              {slot.device.iemLabel && (
+                <span className="inline-flex items-center gap-1 min-w-0">
+                  <HeadphonesIcon className="shrink-0" style={{ width: "1em", height: "1em" }} />
+                  <span className="truncate">{slot.device.iemLabel}</span>
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Status strip — only when it has something to show: RF will be
               visible (a mic is bound and RF isn't hidden), OR a charge level
               resolved (mic battery / charger bay / IEM). A mic bound but offline
@@ -207,9 +230,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
               strip entirely rather than render an empty pill. */}
           {((slot.device.status !== "none" && !slot.hideRf) ||
             slot.device.charge !== null ||
-            slot.device.iemCharge !== null ||
-            slot.device.label !== null ||
-            slot.device.iemLabel !== null) && (
+            slot.device.iemCharge !== null) && (
             <StatusStrip device={slot.device} hideRf={slot.hideRf} />
           )}
         </div>

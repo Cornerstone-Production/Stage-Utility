@@ -96,13 +96,12 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
   const charge = device.charge;
   const iemCharge = device.iemCharge;
   const hasIem = iemCharge !== null;
-  // Offline/manual devices carry a static label (a name) instead of live bars.
-  const hasMicLabel = device.label !== null;
-  const hasIemLabel = device.iemLabel !== null;
 
-  // Nothing to show (no RF, no charge, no IEM, no offline label) — render nothing
-  // rather than an empty pill. slot-panel gates on the same condition.
-  if (!showRf && charge === null && iemCharge === null && !hasMicLabel && !hasIemLabel) return null;
+  // Nothing to show (no RF, no charge, no IEM) — render nothing rather than an
+  // empty pill. slot-panel gates on the same condition, so this is a safety net.
+  // (Offline/manual device labels render as a SEPARATE label in slot-panel, not
+  // in this telemetry pill.)
+  if (!showRf && charge === null && iemCharge === null) return null;
 
   const statusColor =
     device.status === "ok"
@@ -200,29 +199,6 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
             </div>
           </>
         )
-      )}
-
-      {/* ── Offline/manual device labels — a name with no bars (e.g. a PSM 900
-          IEM with no network). Mic label sits where a receiver would; the IEM
-          label gets the headphones icon. ── */}
-      {(hasMicLabel || hasIemLabel) && (
-        <>
-          {(showRf || charge !== null || iemCharge !== null) && <Divider />}
-          <div className="flex flex-col justify-center min-w-0" style={{ gap: "calc(var(--rf) * 0.18)" }}>
-            {hasMicLabel && (
-              <div className="flex items-center min-w-0" style={{ gap: "calc(var(--rf) * 0.25)" }}>
-                <MicIcon className="shrink-0 text-white/60" style={{ width: "calc(var(--rf) * 0.95)", height: "calc(var(--rf) * 0.95)" }} />
-                <span className="font-semibold truncate leading-none text-white/85" style={valueTextStyle}>{device.label}</span>
-              </div>
-            )}
-            {hasIemLabel && (
-              <div className="flex items-center min-w-0" style={{ gap: "calc(var(--rf) * 0.25)" }}>
-                <HeadphonesIcon className="shrink-0 text-white/60" style={{ width: "calc(var(--rf) * 0.95)", height: "calc(var(--rf) * 0.95)" }} />
-                <span className="font-semibold truncate leading-none text-white/85" style={valueTextStyle}>{device.iemLabel}</span>
-              </div>
-            )}
-          </div>
-        </>
       )}
     </div>
   );

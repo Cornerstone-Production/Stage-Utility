@@ -149,6 +149,9 @@ interface ConnectionCardProps {
 
 function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardProps) {
   const provider = providers.find((p) => p.id === conn.providerId) ?? null;
+  // Offline/manual devices have no live connection — always active, so hide the
+  // enable toggle, status badge, and Test row.
+  const isOffline = conn.providerId === "offline-manual";
 
   // Local config mirrors conn.config but tracks in-progress edits for password masking
   const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(() => {
@@ -337,6 +340,22 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
           {provider.configSchema.map((field) => {
             const value = localConfig[field.key];
 
+            // A list of names reads better full-width (label on top) than squeezed
+            // into the narrow horizontal label column (which wraps badly).
+            if (field.type === "text-list") {
+              return (
+                <div key={field.key} className="flex flex-col gap-1.5 px-3 py-2.5 bg-gray-1">
+                  <FieldLabel>{field.label}</FieldLabel>
+                  <IpListField
+                    value={Array.isArray(value) ? (value as string[]) : []}
+                    onChange={(v) => handleIpListChange(field.key, v)}
+                    placeholder={field.placeholder}
+                    addLabel="Add device"
+                  />
+                </div>
+              );
+            }
+
             return (
               <Field key={field.key} orientation="horizontal">
                 <FieldContent>
@@ -362,12 +381,11 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
                       ))}
                     </SelectContent>
                   </Select>
-                ) : field.type === "ip-list" || field.type === "text-list" ? (
+                ) : field.type === "ip-list" ? (
                   <IpListField
                     value={Array.isArray(value) ? (value as string[]) : []}
                     onChange={(v) => handleIpListChange(field.key, v)}
                     placeholder={field.placeholder}
-                    addLabel={field.type === "text-list" ? "Add device" : undefined}
                   />
                 ) : field.type === "number" ? (
                   <NumberInput
@@ -440,13 +458,18 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
 
         <div className="flex-1 min-w-0" />
 
-        <WirelessConnectionBadge connection={conn.connection} message={conn.message} />
-
-        <Switch
-          checked={conn.enabled}
-          onCheckedChange={handleEnabledChange}
-          aria-label={`Enable ${conn.name}`}
-        />
+        {isOffline ? (
+          <span className="text-caption1 text-gray-9">Always on</span>
+        ) : (
+          <>
+            <WirelessConnectionBadge connection={conn.connection} message={conn.message} />
+            <Switch
+              checked={conn.enabled}
+              onCheckedChange={handleEnabledChange}
+              aria-label={`Enable ${conn.name}`}
+            />
+          </>
+        )}
 
         <Button
           variant="transparent"
@@ -469,33 +492,35 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
           {/* Type-specific config */}
           {renderConfigFields()}
 
-          {/* Test row */}
-          <div className="flex items-center gap-2">
-            <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting}>
-              {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
-              Test
-            </Button>
-            {testResult !== null && (
-              <span
-                className={cn(
-                  "text-caption1 flex items-center gap-1",
-                  testResult.ok ? "text-green-10" : "text-red-10",
-                )}
-              >
-                {testResult.ok ? (
-                  <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />
-                ) : (
-                  <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
-                )}
-                {testResult.ok
-                  ? (testResult.message ?? "OK")
-                  : (testResult.message ?? "Failed")}
-              </span>
-            )}
-            {conn.message && !testResult && (
-              <span className="text-caption1 text-gray-9">{conn.message}</span>
-            )}
-          </div>
+          {/* Test row — not shown for offline/manual devices (nothing to test). */}
+          {!isOffline && (
+            <div className="flex items-center gap-2">
+              <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting}>
+                {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
+                Test
+              </Button>
+              {testResult !== null && (
+                <span
+                  className={cn(
+                    "text-caption1 flex items-center gap-1",
+                    testResult.ok ? "text-green-10" : "text-red-10",
+                  )}
+                >
+                  {testResult.ok ? (
+                    <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />
+                  ) : (
+                    <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
+                  )}
+                  {testResult.ok
+                    ? (testResult.message ?? "OK")
+                    : (testResult.message ?? "Failed")}
+                </span>
+              )}
+              {conn.message && !testResult && (
+                <span className="text-caption1 text-gray-9">{conn.message}</span>
+              )}
+            </div>
+          )}
         </>
       ) : (
         summary && <span className="pl-9 text-caption2 text-gray-9">{summary}</span>

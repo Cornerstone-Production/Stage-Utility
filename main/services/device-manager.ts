@@ -68,7 +68,9 @@ export class DeviceManager {
     // Determine which connection ids should be active.
     const enabledWithDriver = new Set<string>();
     for (const conn of connections) {
-      if (conn.enabled && providerRegistry.hasDriver(conn.providerId)) {
+      // Offline/manual devices have nothing to connect to — treat as always active.
+      const active = conn.enabled || conn.providerId === "offline-manual";
+      if (active && providerRegistry.hasDriver(conn.providerId)) {
         enabledWithDriver.add(conn.id);
       }
     }
@@ -88,7 +90,7 @@ export class DeviceManager {
 
     // Connect new/updated enabled connections.
     for (const conn of connections) {
-      if (!conn.enabled) {
+      if (!conn.enabled && conn.providerId !== "offline-manual") {
         // Disabled — ensure disconnected (already handled above if it was active).
         conn.connection = "disconnected";
         conn.message = null;
