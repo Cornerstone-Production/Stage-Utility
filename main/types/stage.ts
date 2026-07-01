@@ -798,6 +798,13 @@ export interface SlotDevice {
   /** Resolved battery for a second device (e.g. a vocalist's IEM/PSM pack),
    *  shown as a second bar beneath the primary. Null when no IEM is bound. */
   iemCharge: number | null;
+  /** Static label for the primary device when it has no live telemetry — i.e. an
+   *  OFFLINE/manual device (a networkless PSM/mic) or a per-slot label override.
+   *  Shown as text with no bars. Null for live devices. */
+  label: string | null;
+  /** Static label for the second (IEM) device when offline/manual, shown with a
+   *  headphones icon and no bar. Null for live or unbound IEMs. */
+  iemLabel: string | null;
 }
 
 export interface Slot {
@@ -816,6 +823,12 @@ export interface Slot {
   /** Optional second device whose battery shows as a second bar beneath the
    *  primary charge bar — e.g. a vocalist who also wears an IEM/PSM pack. */
   iemBinding?: { providerId: string; channelId: string } | null;
+  /** Optional custom label override for the primary (mic) device, shown when it's
+   *  an offline/manual device with no telemetry. Defaults to the device's name. */
+  deviceLabel?: string | null;
+  /** Optional custom label override for the IEM device (offline/manual). Defaults
+   *  to the device's name. */
+  iemLabel?: string | null;
   displayName?: string | null;
   photoUrl?: string | null;
   device: SlotDevice;

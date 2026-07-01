@@ -27,6 +27,7 @@ import {
   ButtonGroup,
   Separator,
   Switch,
+  Collapsible,
   toast,
   confirm,
 } from "../../components/ui";
@@ -119,6 +120,16 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
   }
 
   const currentMode: "pco" | "static" | "empty" = isPco ? "pco" : isStatic ? "static" : "empty";
+
+  // Collapsed-state hint for the "Options" drop-down — surfaces what's set so an
+  // operator doesn't have to expand every slot to see its wiring.
+  const optionParts: string[] = [];
+  if (slot.deviceBinding) optionParts.push("mic");
+  if (slot.iemBinding) optionParts.push("IEM");
+  if ((slot.chargeSource ?? "mic") === "charger") optionParts.push("charger");
+  else if (slot.chargeSource === "off") optionParts.push("no charge");
+  if (slot.hideRf) optionParts.push("RF hidden");
+  const optionsSummary = optionParts.length ? optionParts.join(" · ") : null;
 
   // Spacers are a horizontal gap for charger alignment — width + remove, plus an
   // optional empty-slot image centered in the gap.
@@ -395,97 +406,127 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
         </div>
       )}
 
-      {/* Device binding (optional, not shown for empty slots) */}
-      {!isEmpty && wirelessChannels.length > 0 && (
-        <div className="flex flex-col items-stretch gap-1.5 pl-4 sm:pl-9 sm:flex-row sm:items-center sm:gap-2">
-          <span className="text-caption1 text-gray-9 shrink-0">Device channel:</span>
-          <Select value={slot.deviceBinding?.channelId ?? "__none__"} onValueChange={setDeviceBinding}>
-            <SelectTrigger className="w-full sm:w-40">
-              <SelectValue placeholder="None" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">None</SelectItem>
-              {wirelessChannels.map((ch) => (
-                <SelectItem key={ch.id} value={ch.id}>
-                  {ch.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
+      {/* Extended options — collapsed by default so the row stays scannable.
+          Everything after the PCO position/notes assignment lives in here. */}
+      {!isEmpty && (
+        <Collapsible label="Options" summary={optionsSummary} className="pl-4 sm:pl-9">
+          {/* Device binding */}
+          {wirelessChannels.length > 0 && (
+            <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+              <span className="text-caption1 text-gray-9 shrink-0">Device channel:</span>
+              <Select value={slot.deviceBinding?.channelId ?? "__none__"} onValueChange={setDeviceBinding}>
+                <SelectTrigger className="w-full sm:w-40">
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {wirelessChannels.map((ch) => (
+                    <SelectItem key={ch.id} value={ch.id}>
+                      {ch.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
-      {/* Optional second device (IEM/PSM pack) — adds a second battery bar beneath
-          the primary. Vocalists only, since they're the ones on a handheld + IEM. */}
-      {isVocalSlot && wirelessChannels.length > 0 && (
-        <div className="flex flex-col items-stretch gap-1.5 pl-4 sm:pl-9 sm:flex-row sm:items-center sm:gap-2">
-          <span className="text-caption1 text-gray-9 shrink-0">IEM pack:</span>
-          <Select value={slot.iemBinding?.channelId ?? "__none__"} onValueChange={setIemBinding}>
-            <SelectTrigger className="w-full sm:w-40">
-              <SelectValue placeholder="None" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">None</SelectItem>
-              {wirelessChannels.map((ch) => (
-                <SelectItem key={ch.id} value={ch.id}>
-                  {ch.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="text-caption2 text-gray-8">Adds a second battery bar (headphones icon) for the pack.</span>
-        </div>
-      )}
+          {/* Offline/manual mic label override — only meaningful for a bound
+              offline device (live mics show telemetry instead). */}
+          {slot.deviceBinding && (
+            <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+              <span className="text-caption1 text-gray-9 shrink-0">Mic label:</span>
+              <Input
+                value={slot.deviceLabel ?? ""}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => onChange({ ...slot, deviceLabel: e.target.value || null })}
+                placeholder="Offline devices only"
+                className="w-full sm:w-40"
+              />
+            </div>
+          )}
 
-      {/* Charge bar source (not for spacer/empty): the bound mic's battery, a
-          specific SBC charger bay, or off — plus a hide-RF (charge-only) toggle. */}
-      {!isEmpty && !isSpacer && (
-        <div className="flex flex-col items-stretch gap-1.5 pl-4 sm:pl-9 sm:flex-row sm:items-center sm:gap-2">
-          <span className="text-caption1 text-gray-9 shrink-0">Charge bar:</span>
-          <Select
-            value={slot.chargeSource ?? "mic"}
-            onValueChange={(v: string) =>
-              onChange({
-                ...slot,
-                chargeSource: v as "mic" | "charger" | "off",
-                chargeBayId: v === "charger" ? (slot.chargeBayId ?? null) : null,
-              })
-            }
-          >
-            <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="mic">Mic battery (transmitter)</SelectItem>
-              <SelectItem value="charger">Charger bay</SelectItem>
-              <SelectItem value="off">Off</SelectItem>
-            </SelectContent>
-          </Select>
-          {slot.chargeSource === "charger" && (
-            <Select value={slot.chargeBayId ?? "__none__"} onValueChange={(v: string) => onChange({ ...slot, chargeBayId: v === "__none__" ? null : v })}>
-              <SelectTrigger className="w-full sm:w-48"><SelectValue placeholder="Pick a bay" /></SelectTrigger>
+          {/* Optional second device (IEM/PSM pack) — adds a second battery bar
+              beneath the primary. Vocalists only (handheld + IEM). */}
+          {isVocalSlot && wirelessChannels.length > 0 && (
+            <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+              <span className="text-caption1 text-gray-9 shrink-0">IEM pack:</span>
+              <Select value={slot.iemBinding?.channelId ?? "__none__"} onValueChange={setIemBinding}>
+                <SelectTrigger className="w-full sm:w-40">
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {wirelessChannels.map((ch) => (
+                    <SelectItem key={ch.id} value={ch.id}>
+                      {ch.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-caption2 text-gray-8">Adds a second battery bar (headphones icon) for the pack.</span>
+            </div>
+          )}
+
+          {/* Offline/manual IEM label override — shows a headphones-icon label
+              when the IEM pack is an offline device (e.g. a PSM 900). */}
+          {isVocalSlot && slot.iemBinding && (
+            <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+              <span className="text-caption1 text-gray-9 shrink-0">IEM label:</span>
+              <Input
+                value={slot.iemLabel ?? ""}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => onChange({ ...slot, iemLabel: e.target.value || null })}
+                placeholder="Offline devices only"
+                className="w-full sm:w-40"
+              />
+            </div>
+          )}
+
+          {/* Charge bar source: the bound mic's battery, a specific SBC charger
+              bay, or off — plus a hide-RF (charge-only) toggle. */}
+          <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+            <span className="text-caption1 text-gray-9 shrink-0">Charge bar:</span>
+            <Select
+              value={slot.chargeSource ?? "mic"}
+              onValueChange={(v: string) =>
+                onChange({
+                  ...slot,
+                  chargeSource: v as "mic" | "charger" | "off",
+                  chargeBayId: v === "charger" ? (slot.chargeBayId ?? null) : null,
+                })
+              }
+            >
+              <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="__none__">None</SelectItem>
-                {chargerBays.map((b) => (
-                  <SelectItem key={b.id} value={b.id}>
-                    {`${b.connectionName ?? `Charger ${b.chargerIndex}`} · Bay ${b.bay}${b.battery != null ? ` (${b.battery}%)` : ""}`}
-                  </SelectItem>
-                ))}
+                <SelectItem value="mic">Mic battery (transmitter)</SelectItem>
+                <SelectItem value="charger">Charger bay</SelectItem>
+                <SelectItem value="off">Off</SelectItem>
               </SelectContent>
             </Select>
-          )}
-          <label className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0">
-            <Switch checked={slot.hideRf ?? false} onCheckedChange={(v: boolean) => onChange({ ...slot, hideRf: v })} />
-            Hide RF
-          </label>
-        </div>
-      )}
-      {!isEmpty && !isSpacer && (
-        <p className="pl-4 sm:pl-9 text-caption2 text-gray-8">
-          {slot.chargeSource === "off"
-            ? "Charge bar hidden. The pill shows RF only."
-            : slot.chargeSource === "charger"
-              ? "Battery reads from the chosen SBC charger bay. Leave Hide RF off to show RF bars and the charge level together in one pill."
-              : "Battery reads from the bound transmitter (e.g. the Axient handheld). Leave Hide RF off to show RF and battery together in one pill."}
-        </p>
+            {slot.chargeSource === "charger" && (
+              <Select value={slot.chargeBayId ?? "__none__"} onValueChange={(v: string) => onChange({ ...slot, chargeBayId: v === "__none__" ? null : v })}>
+                <SelectTrigger className="w-full sm:w-48"><SelectValue placeholder="Pick a bay" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {chargerBays.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {`${b.connectionName ?? `Charger ${b.chargerIndex}`} · Bay ${b.bay}${b.battery != null ? ` (${b.battery}%)` : ""}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <label className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0">
+              <Switch checked={slot.hideRf ?? false} onCheckedChange={(v: boolean) => onChange({ ...slot, hideRf: v })} />
+              Hide RF
+            </label>
+          </div>
+          <p className="text-caption2 text-gray-8">
+            {slot.chargeSource === "off"
+              ? "Charge bar hidden. The pill shows RF only."
+              : slot.chargeSource === "charger"
+                ? "Battery reads from the chosen SBC charger bay. Leave Hide RF off to show RF bars and the charge level together in one pill."
+                : "Battery reads from the bound transmitter (e.g. the Axient handheld). Leave Hide RF off to show RF and battery together in one pill."}
+          </p>
+        </Collapsible>
       )}
     </div>
   );

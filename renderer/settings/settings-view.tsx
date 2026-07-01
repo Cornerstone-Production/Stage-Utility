@@ -566,7 +566,7 @@ export function SettingsView() {
       deviceBinding: null,
       displayName: null,
       photoUrl: null,
-      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null },
+      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null, label: null, iemLabel: null },
     };
     setLocalSlots((prev) => [...prev, newSlot]);
     setSlotsDirty(true);
@@ -582,7 +582,7 @@ export function SettingsView() {
       deviceBinding: null,
       displayName: null,
       photoUrl: null,
-      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null },
+      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null, label: null, iemLabel: null },
     };
     setLocalSlots((prev) => [...prev, newSlot]);
     setSlotsDirty(true);

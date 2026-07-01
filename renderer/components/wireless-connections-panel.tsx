@@ -50,9 +50,11 @@ interface IpListFieldProps {
   value: string[];
   onChange: (v: string[]) => void;
   placeholder?: string;
+  /** Label for the add button (default "Add IP"). */
+  addLabel?: string;
 }
 
-function IpListField({ value, onChange, placeholder }: IpListFieldProps) {
+function IpListField({ value, onChange, placeholder, addLabel }: IpListFieldProps) {
   function update(idx: number, v: string) {
     const next = [...value];
     next[idx] = v;
@@ -88,7 +90,7 @@ function IpListField({ value, onChange, placeholder }: IpListFieldProps) {
       ))}
       <Button variant="transparent" size="small" onClick={add} className="self-start">
         <PlusIcon className="size-3.5 text-gray-9" />
-        Add IP
+        {addLabel ?? "Add IP"}
       </Button>
     </div>
   );
@@ -360,11 +362,12 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
                       ))}
                     </SelectContent>
                   </Select>
-                ) : field.type === "ip-list" ? (
+                ) : field.type === "ip-list" || field.type === "text-list" ? (
                   <IpListField
                     value={Array.isArray(value) ? (value as string[]) : []}
                     onChange={(v) => handleIpListChange(field.key, v)}
                     placeholder={field.placeholder}
+                    addLabel={field.type === "text-list" ? "Add device" : undefined}
                   />
                 ) : field.type === "number" ? (
                   <NumberInput

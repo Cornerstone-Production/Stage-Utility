@@ -207,7 +207,9 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
               strip entirely rather than render an empty pill. */}
           {((slot.device.status !== "none" && !slot.hideRf) ||
             slot.device.charge !== null ||
-            slot.device.iemCharge !== null) && (
+            slot.device.iemCharge !== null ||
+            slot.device.label !== null ||
+            slot.device.iemLabel !== null) && (
             <StatusStrip device={slot.device} hideRf={slot.hideRf} />
           )}
         </div>

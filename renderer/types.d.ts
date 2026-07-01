@@ -6,7 +6,7 @@ type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
 interface ConfigField {
   key: string;
   label: string;
-  type: "text" | "password" | "number" | "select" | "ip-list";
+  type: "text" | "password" | "number" | "select" | "ip-list" | "text-list";
   options?: { value: string; label: string }[];
   placeholder?: string;
   help?: string;
@@ -306,6 +306,11 @@ interface SlotDevice {
   /** Resolved battery for a second device (e.g. IEM/PSM pack), shown as a
    *  second bar beneath the primary. Null when no IEM is bound. */
   iemCharge: number | null;
+  /** Static label for an offline/manual primary device (no telemetry), or a
+   *  per-slot override. Shown as text, no bars. Null for live devices. */
+  label: string | null;
+  /** Static label for an offline/manual IEM device (headphones icon, no bar). */
+  iemLabel: string | null;
 }
 
 interface Slot {
@@ -322,6 +327,10 @@ interface Slot {
   hideRf?: boolean;
   /** Optional second device (e.g. IEM/PSM pack) whose battery shows as a second bar. */
   iemBinding?: { providerId: string; channelId: string } | null;
+  /** Optional custom label override for an offline/manual primary (mic) device. */
+  deviceLabel?: string | null;
+  /** Optional custom label override for an offline/manual IEM device. */
+  iemLabel?: string | null;
   displayName?: string | null;
   photoUrl?: string | null;
   device: SlotDevice;

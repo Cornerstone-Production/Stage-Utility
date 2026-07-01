@@ -15,6 +15,7 @@ export {
 } from "./select";
 export { Switch } from "./switch";
 export { Separator } from "./separator";
+export { Collapsible } from "./collapsible";
 export {
   Dialog,
   DialogTrigger,

@@ -4,6 +4,7 @@
 import type { DeviceProvider } from "../types/devices.js";
 import type { ConfigField, IntegrationDescriptor } from "../types/integrations.js";
 import { NoneProvider } from "./wireless/none-provider.js";
+import { OfflineManualProvider } from "./wireless/offline-manual.js";
 import { ShureAxient } from "./wireless/shure-axient.js";
 import { ShureCharger } from "./wireless/shure-charger.js";
 import { ShurePsm } from "./wireless/shure-psm.js";
@@ -34,13 +35,30 @@ function shureFields(channelsPlaceholder: string): ConfigField[] {
 }
 
 // Provider ids that have a real driver implementation.
-const DRIVER_IDS = new Set<string>(["none", "shure-ulxd", "shure-axient", "shure-psm", "shure-charger"]);
+const DRIVER_IDS = new Set<string>(["none", "offline-manual", "shure-ulxd", "shure-axient", "shure-psm", "shure-charger"]);
 
 // All provider descriptors — shown in the UI dropdown.
 const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
   [
     "none",
     { id: "none", kind: "wireless", label: "None", configSchema: [] },
+  ],
+  [
+    "offline-manual",
+    {
+      id: "offline-manual",
+      kind: "wireless",
+      label: "Offline / Manual devices",
+      configSchema: [
+        {
+          key: "names",
+          label: "Device names",
+          type: "text-list",
+          placeholder: "e.g. PSM 900 — Lead",
+          help: 'Non-networked gear (e.g. PSM 900 IEM packs). Each name becomes a device you can assign to a slot’s mic or IEM; it shows as a label with no live RF/battery. Stays "Disconnected" — there’s nothing to connect to.',
+        },
+      ],
+    },
   ],
   [
     "shure-axient",
@@ -98,6 +116,8 @@ export class ProviderRegistry {
     switch (id) {
       case "none":
         return new NoneProvider();
+      case "offline-manual":
+        return new OfflineManualProvider();
       case "shure-ulxd":
         return new ShureUlxd();
       case "shure-axient":

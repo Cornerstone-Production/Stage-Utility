@@ -12,7 +12,7 @@ import type { WirelessChannel } from "../types";
 function freshSlotId(): string {
   return `slot-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
-const EMPTY_DEVICE: SlotDevice = { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null };
+const EMPTY_DEVICE: SlotDevice = { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null, label: null, iemLabel: null };
 
 /**
  * The full mic-slots editor for an INLINE `slots-grid` layout object, rendered

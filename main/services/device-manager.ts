@@ -103,14 +103,25 @@ export class DeviceManager {
         continue;
       }
 
-      // Real driver — check if already connected with the same config.
+      // Real driver — check if already connected.
       const existing = this.entries.get(conn.id);
-      if (existing) {
+      // Offline/manual devices are stateless (no socket) and their channels come
+      // straight from config, so tear down + recreate on every apply to pick up
+      // edited names and re-emit their labels. Live drivers keep their socket.
+      if (existing && conn.providerId !== "offline-manual") {
         // Already connected; update name in case it changed.
         existing.connectionName = conn.name;
         conn.connection = existing.provider.getConnectionState();
         conn.message = null;
         continue;
+      }
+      if (existing) {
+        try {
+          await existing.provider.disconnect();
+        } catch {
+          /* ignore */
+        }
+        this.entries.delete(conn.id);
       }
 
       // New connection — create a fresh provider instance and connect.
