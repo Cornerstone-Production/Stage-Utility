@@ -5,6 +5,7 @@ import type { DeviceProvider } from "../types/devices.js";
 import type { ConfigField, IntegrationDescriptor } from "../types/integrations.js";
 import { NoneProvider } from "./wireless/none-provider.js";
 import { OfflineManualProvider } from "./wireless/offline-manual.js";
+import { SennheiserEwG4 } from "./wireless/sennheiser-ewg4.js";
 import { ShureAxient } from "./wireless/shure-axient.js";
 import { ShureCharger } from "./wireless/shure-charger.js";
 import { ShurePsm } from "./wireless/shure-psm.js";
@@ -35,7 +36,7 @@ function shureFields(channelsPlaceholder: string): ConfigField[] {
 }
 
 // Provider ids that have a real driver implementation.
-const DRIVER_IDS = new Set<string>(["none", "offline-manual", "shure-ulxd", "shure-axient", "shure-psm", "shure-charger"]);
+const DRIVER_IDS = new Set<string>(["none", "offline-manual", "shure-ulxd", "shure-axient", "shure-psm", "shure-charger", "sennheiser-ewg4"]);
 
 // All provider descriptors — shown in the UI dropdown.
 const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
@@ -96,6 +97,25 @@ const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
       configSchema: shureFields("2"),
     },
   ],
+  [
+    "sennheiser-ewg4",
+    {
+      id: "sennheiser-ewg4",
+      kind: "wireless",
+      label: "Sennheiser ewG4 (SSC)",
+      configSchema: [
+        { key: "host", label: "Device IP / Hostname", type: "text", placeholder: "192.168.1.120" },
+        { key: "port", label: "SSC Port", type: "number", placeholder: "45" },
+        {
+          key: "channels",
+          label: "Number of Channels",
+          type: "number",
+          placeholder: "2",
+          help: "Sennheiser SSC (Sound Control) over TCP. Best-effort — validate against your hardware; set SENNHEISER_DEBUG=1 to log raw frames if values read blank.",
+        },
+      ],
+    },
+  ],
 ]);
 
 export class ProviderRegistry {
@@ -126,6 +146,8 @@ export class ProviderRegistry {
         return new ShurePsm();
       case "shure-charger":
         return new ShureCharger();
+      case "sennheiser-ewg4":
+        return new SennheiserEwG4();
       default:
         return null;
     }
