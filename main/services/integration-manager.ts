@@ -8,7 +8,7 @@ import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
 import { oscManager } from "./osc-manager.js";
 import { prodcomService } from "./prodcom-service.js";
-import { propresenterService } from "./propresenter-service.js";
+import { propresenterService, propresenterManager, type PropInstanceConfig } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
 import { type SenSourceConfig, sensourceService } from "./sensource-service.js";
 import { settingsStore } from "./settings-store.js";
@@ -81,6 +81,13 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
   label: "ProPresenter",
   configSchema: [
     {
+      key: "name",
+      label: "Name",
+      type: "text",
+      placeholder: "Main (e.g. Auditorium 1)",
+      help: "Display name for this ProPresenter, shown when a layout object picks which instance to read. Add more auditoriums below.",
+    },
+    {
       key: "host",
       label: "ProPresenter Host",
       type: "text",
@@ -101,6 +108,31 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
     },
   ],
 };
+
+/** Parse the ProPresenter `config.instances` array (extra auditoriums) into typed
+ *  configs, tolerating loosely-shaped stored JSON. */
+function parsePropInstances(raw: unknown): PropInstanceConfig[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PropInstanceConfig[] = [];
+  for (const r of raw) {
+    if (!r || typeof r !== "object") continue;
+    const o = r as Record<string, unknown>;
+    if (typeof o.id !== "string" || !o.id) continue;
+    const portNum =
+      typeof o.port === "number" ? o.port : typeof o.port === "string" ? parseInt(o.port, 10) : NaN;
+    const pollNum =
+      typeof o.pollMs === "number" ? o.pollMs : typeof o.pollMs === "string" ? parseInt(o.pollMs, 10) : NaN;
+    out.push({
+      id: o.id,
+      name: typeof o.name === "string" && o.name.trim() ? o.name : o.id,
+      host: typeof o.host === "string" ? o.host.trim() : "",
+      port: Number.isFinite(portNum) ? portNum : 0,
+      pollMs: Number.isFinite(pollNum) ? pollNum : undefined,
+      enabled: o.enabled !== false,
+    });
+  }
+  return out;
+}
 
 // ProdCom integration — subscribes to the live transcription feed from ProdCom's
 // HTTP Application API (default port 24480). Powers the transcription display.
@@ -286,6 +318,7 @@ class IntegrationManager {
 
   async init(): Promise<void> {
     console.log("[integration-manager] init");
+    propresenterManager.init();
     const settings = await settingsStore.load();
 
     for (const descriptor of DESCRIPTORS) {
@@ -720,6 +753,11 @@ class IntegrationManager {
       propresenterService.stop();
       this.setConnectionState("propresenter", "disconnected", null);
     }
+
+    // Extra ProPresenter instances (additional auditoriums) — only while enabled.
+    const cfg = this.states.get("propresenter")?.config ?? {};
+    const defaultName = typeof cfg.name === "string" ? cfg.name : null;
+    propresenterManager.apply(defaultName, enabled ? parsePropInstances(cfg.instances) : []);
   }
 
   private getProdcomTarget(): { host: string | null; port: number | null } {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, type CSSProperties } from "react";
 import { BrandLogo } from "../components/brand-logo";
 import { SlotsColumns } from "../components/slots-columns";
-import { useDashboardState } from "./use-dashboard-state";
+import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
@@ -23,6 +23,9 @@ export interface LayoutRenderCtx {
   state: StageState;
   propresenter: ProPresenterStatusDTO | null;
   pcoLive: PcoLiveDTO | null;
+  /** All configured ProPresenter instances + their status — for per-object
+   *  instance selection (two-auditorium setups). null until loaded. */
+  propInstances: PropInstancesDTO | null;
   /** Current PCO plan rundown (items + note categories) — for the service-order object. */
   planItems: PlanItemsDTO | null;
   transcript: TranscriptLineDTO[];
@@ -169,27 +172,38 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         </span>
       );
     }
-    case "current-slide-text":
-      return span(ctx.propresenter?.currentSlideText ?? ctx.propresenter?.currentItem ?? "");
-    case "next-slide-text":
-      return span(ctx.propresenter?.nextSlideText ?? ctx.propresenter?.nextItem ?? "");
-    case "current-service-item":
+    case "current-slide-text": {
+      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      return span(pro?.currentSlideText ?? pro?.currentItem ?? "");
+    }
+    case "next-slide-text": {
+      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      return span(pro?.nextSlideText ?? pro?.nextItem ?? "");
+    }
+    case "current-service-item": {
       // Follow the PCO plan order (authoritative); fall back to ProPresenter's
       // active playlist only when PCO has no current item.
-      return span(ctx.pcoLive?.currentItemTitle ?? ctx.propresenter?.currentServiceItem ?? "");
-    case "next-service-item":
-      return span(ctx.pcoLive?.nextItemTitle ?? ctx.propresenter?.nextServiceItem ?? "");
+      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      return span(ctx.pcoLive?.currentItemTitle ?? pro?.currentServiceItem ?? "");
+    }
+    case "next-service-item": {
+      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      return span(ctx.pcoLive?.nextItemTitle ?? pro?.nextServiceItem ?? "");
+    }
     case "service-order":
       return <ServiceOrderObject o={o} config={c} ctx={ctx} />;
-    case "current-slide-notes":
-      return span(ctx.propresenter?.currentNotes ?? "");
+    case "current-slide-notes": {
+      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      return span(pro?.currentNotes ?? "");
+    }
     case "section-chip": {
+      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
       const sec =
         c.which === "next"
-          ? ctx.propresenter?.nextSection
+          ? pro?.nextSection
           : c.which === "nextArrangement"
-            ? ctx.propresenter?.nextArrangementSection
-            : ctx.propresenter?.currentSection;
+            ? pro?.nextArrangementSection
+            : pro?.currentSection;
       if (!sec) return null;
       return (
         <span
@@ -207,11 +221,16 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       );
     }
     case "slide-thumbnail": {
-      const key = ctx.propresenter?.slidePreviewKey;
+      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const key = pro?.slidePreviewKey;
       if (!key) return null;
+      const inst =
+        c.propresenterInstanceId && c.propresenterInstanceId !== "default"
+          ? `&i=${encodeURIComponent(c.propresenterInstanceId)}`
+          : "";
       return (
         <img
-          src={`/api/propresenter/thumbnail?k=${encodeURIComponent(key)}`}
+          src={`/api/propresenter/thumbnail?k=${encodeURIComponent(key)}${inst}`}
           alt="Slide preview"
           className="w-full h-full object-contain"
           draggable={false}
@@ -1175,6 +1194,7 @@ export function useLayoutData() {
   const osc = useOscState();
   const peopleCount = usePeopleCountState();
   const serviceLow = useLiveServiceLow(true);
+  const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();
   const integrationsSnap = useIntegrations();
@@ -1190,7 +1210,7 @@ export function useLayoutData() {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  return { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -1198,7 +1218,7 @@ export function useLayoutData() {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, integrationsSnap, wireless, now, skewMs } = useLayoutData();
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, integrationsSnap, wireless, now, skewMs } = useLayoutData();
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -1242,7 +1262,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // with the window instead of the design canvas.
   const fill = canvas.fit === "fill";
   const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

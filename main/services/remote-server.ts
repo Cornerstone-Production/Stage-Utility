@@ -21,7 +21,7 @@ import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { oscManager } from "./osc-manager.js";
 import { prodcomService } from "./prodcom-service.js";
-import { propresenterService, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
+import { propresenterService, propresenterManager, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
 import { sensourceService } from "./sensource-service.js";
 import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
@@ -377,6 +377,7 @@ export class RemoteServer {
       // channels otherwise only broadcast on change, leaving a fresh client blank.
       sseWrite(res, "stage:state-changed", stageController.getState());
       sseWrite(res, "propresenter:status", propresenterService.getStatus());
+      sseWrite(res, "propresenter:instances", propresenterManager.getInstancesDto());
       sseWrite(res, "spl:metrics", smaartService.getLatest());
       sseWrite(res, "spl:history", splRecorder.getCurrent());
       sseWrite(res, "attendance:history", attendanceRecorder.getCurrent());
@@ -409,6 +410,10 @@ export class RemoteServer {
     // Hydrate-on-connect endpoints (the live channels only broadcast on change).
     if (method === "GET" && pathname === "/api/propresenter/status") {
       json(res, propresenterService.getStatus());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/propresenter/instances") {
+      json(res, propresenterManager.getInstancesDto());
       return;
     }
     if (method === "GET" && pathname === "/api/pco/live") {
@@ -650,7 +655,8 @@ export class RemoteServer {
     // ?k=<slidePreviewKey> param just cache-busts per slide — the source is the
     // service's current target. 21.3 returns real image/jpeg, so no decode.
     if (method === "GET" && pathname === "/api/propresenter/thumbnail") {
-      const target = propresenterService.getThumbnailTarget();
+      // `?i=` selects which ProPresenter instance ("default"/absent = primary).
+      const target = propresenterManager.getThumbnailTarget(_url.searchParams.get("i"));
       if (!target) {
         res.writeHead(503);
         res.end("ProPresenter not connected / no active slide");

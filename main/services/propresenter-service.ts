@@ -13,7 +13,7 @@
 
 import * as http from "http";
 
-import type { ProPresenterStatusDTO, ProSection, ProTimer } from "../types/stage.js";
+import type { ProPresenterStatusDTO, ProSection, ProTimer, PropInstancesDTO, PropInstanceMeta } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 
 const POLL_INTERVAL_MS = 500;
@@ -218,8 +218,25 @@ class ProPresenterService {
   private playlistUuid: string | null = null;
   private playlistItems: { name: string; index: number }[] = [];
 
+  readonly id: string;
+  private readonly channel: string;
+  private onEmitCb: (() => void) | null = null;
+
+  constructor(id = "default") {
+    this.id = id;
+    // The primary instance keeps the original channel so built-in views + existing
+    // consumers are untouched; extra instances get a per-id channel.
+    this.channel = id === "default" ? "propresenter:status" : `propresenter:status:${id}`;
+  }
+
   setConnectionListener(cb: (state: ProConnState, message: string | null) => void): void {
     this.onConn = cb;
+  }
+
+  /** Notified after this instance's status changes — the manager uses it to
+   *  rebuild + broadcast the combined `propresenter:instances` payload. */
+  setEmitListener(cb: () => void): void {
+    this.onEmitCb = cb;
   }
 
   /** Latest polled status — lets a freshly-loaded dashboard hydrate immediately
@@ -483,8 +500,85 @@ class ProPresenterService {
     const json = JSON.stringify(status);
     if (json === this.lastJson) return;
     this.lastJson = json;
-    broadcast("propresenter:status", status);
+    broadcast(this.channel, status);
+    this.onEmitCb?.();
   }
 }
 
-export const propresenterService = new ProPresenterService();
+export const propresenterService = new ProPresenterService("default");
+
+// ── Multi-instance manager ────────────────────────────────────────────────────
+// The church runs two auditoriums, each with its own ProPresenter machine. The
+// PRIMARY instance stays `propresenterService` (channel "propresenter:status",
+// unchanged for built-in views); EXTRA instances are managed here, each on its
+// own channel. A combined snapshot (all instances + their status) is broadcast on
+// "propresenter:instances" so a custom layout object can pick which one it reads.
+
+export interface PropInstanceConfig {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  pollMs?: number;
+  enabled?: boolean;
+}
+
+class ProPresenterManager {
+  private extras = new Map<string, ProPresenterService>();
+  private names = new Map<string, string>(); // id → display name (incl. "default")
+  private defaultName = "Main";
+
+  init(): void {
+    propresenterService.setEmitListener(() => this.broadcastCombined());
+  }
+
+  /** Reconcile the extra instances to `extras`; `defaultName` names the primary.
+   *  Pass an empty `extras` list to tear them all down (integration disabled). */
+  apply(defaultName: string | null, extras: PropInstanceConfig[]): void {
+    this.defaultName = defaultName?.trim() || "Main";
+    const wanted = new Set(extras.map((e) => e.id));
+    for (const [id, svc] of this.extras) {
+      if (!wanted.has(id)) {
+        svc.stop();
+        this.extras.delete(id);
+        this.names.delete(id);
+      }
+    }
+    for (const e of extras) {
+      let svc = this.extras.get(e.id);
+      if (!svc) {
+        svc = new ProPresenterService(e.id);
+        svc.setEmitListener(() => this.broadcastCombined());
+        this.extras.set(e.id, svc);
+      }
+      this.names.set(e.id, e.name?.trim() || e.id);
+      if (e.enabled !== false && e.host && e.port > 0) svc.configure(e.host, e.port, e.pollMs);
+      else svc.stop();
+    }
+    this.broadcastCombined();
+  }
+
+  private broadcastCombined(): void {
+    broadcast("propresenter:instances", this.getInstancesDto());
+  }
+
+  getInstancesDto(): PropInstancesDTO {
+    const list: PropInstanceMeta[] = [
+      { id: "default", name: this.defaultName },
+      ...[...this.extras.keys()].map((id) => ({ id, name: this.names.get(id) ?? id })),
+    ];
+    const status: Record<string, ProPresenterStatusDTO> = {
+      default: propresenterService.getStatus(),
+    };
+    for (const [id, svc] of this.extras) status[id] = svc.getStatus();
+    return { list, status };
+  }
+
+  /** Thumbnail target for a given instance ("default"/empty → primary). */
+  getThumbnailTarget(id: string | null | undefined) {
+    if (!id || id === "default") return propresenterService.getThumbnailTarget();
+    return this.extras.get(id)?.getThumbnailTarget() ?? null;
+  }
+}
+
+export const propresenterManager = new ProPresenterManager();

@@ -297,6 +297,10 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
         <RossTslFeedsPanel state={state} onStateChange={onStateChange} />
       )}
 
+      {descriptor.id === "propresenter" && (
+        <ProPresenterInstancesPanel state={state} onStateChange={onStateChange} />
+      )}
+
       {/* Actions row */}
       <div className="flex items-center gap-2">
         <Button variant="filled" size="small" onClick={handleSave} disabled={isSaving}>
@@ -618,6 +622,90 @@ function RossTslFeedsPanel({
         </Button>
         <Button variant="filled" size="small" onClick={save} disabled={saving}>
           {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : null} Save feeds
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---- ProPresenter extra instances -------------------------------------------
+
+interface PropInstanceRow {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  pollMs?: number;
+}
+
+// Extra ProPresenter machines beyond the primary (e.g. a second auditorium).
+// Stored as non-secret config.instances; a layout object then picks which one to
+// read. The primary is the host/port fields above (instance id "default").
+function ProPresenterInstancesPanel({
+  state,
+  onStateChange,
+}: {
+  state: IntegrationState;
+  onStateChange: (next: IntegrationState) => void;
+}) {
+  const initial = Array.isArray(state.config.instances) ? (state.config.instances as PropInstanceRow[]) : [];
+  const [rows, setRows] = useState<PropInstanceRow[]>(initial);
+  const [saving, setSaving] = useState(false);
+
+  function update(idx: number, patch: Partial<PropInstanceRow>) {
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+  function remove(idx: number) {
+    setRows((prev) => prev.filter((_, i) => i !== idx));
+  }
+  function add() {
+    setRows((prev) => [...prev, { id: feedId(), name: `Auditorium ${prev.length + 2}`, host: "", port: 1025 }]);
+  }
+  async function save() {
+    setSaving(true);
+    try {
+      const next = await invoke<IntegrationState>("integrations:setConfig", {
+        id: "propresenter",
+        config: { instances: rows },
+      });
+      onStateChange(next);
+      toast.success("ProPresenter instances saved.");
+    } catch (err) {
+      toast.error(`Could not save instances: ${String(err)}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">
+        Additional instances (auditoriums)
+      </span>
+      {rows.length === 0 && (
+        <span className="text-caption2 text-gray-9">
+          Add another ProPresenter machine to read it in a custom view. A layout object then picks which instance it shows.
+        </span>
+      )}
+      {rows.map((r, i) => (
+        <div key={r.id} className="flex flex-wrap items-center gap-1.5">
+          <Input value={r.name} onChange={(e: ChangeEvent<HTMLInputElement>) => update(i, { name: e.target.value })} placeholder="Name" className="w-32" />
+          <Input value={r.host} onChange={(e: ChangeEvent<HTMLInputElement>) => update(i, { host: e.target.value })} placeholder="192.168.1.101" className="w-40" />
+          <div className="flex items-center gap-1">
+            <span className="text-caption2 text-gray-9">Port</span>
+            <NumberInput value={r.port} step={1} min={1} max={65535} onChange={(v) => update(i, { port: Math.round(v) })} className="w-20" />
+          </div>
+          <Button variant="transparent" size="small" iconOnly onClick={() => remove(i)} aria-label="Remove instance">
+            <TrashIcon className="size-3.5" />
+          </Button>
+        </div>
+      ))}
+      <div className="flex items-center gap-2">
+        <Button variant="transparent" size="small" onClick={add}>
+          <PlusIcon className="size-3.5" /> Add instance
+        </Button>
+        <Button variant="filled" size="small" onClick={save} disabled={saving}>
+          {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : null} Save instances
         </Button>
       </div>
     </div>

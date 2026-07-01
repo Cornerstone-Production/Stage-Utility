@@ -405,13 +405,13 @@ type LayoutObjectConfig =
   | { type: "text"; text: string }
   | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h"; showMeridiem?: boolean }
   | { type: "countdown-timer"; hideWhenIdle?: boolean; warnSeconds?: number }
-  | { type: "current-slide-text" }
-  | { type: "next-slide-text" }
-  | { type: "current-service-item" }
-  | { type: "next-service-item" }
-  | { type: "current-slide-notes" }
-  | { type: "slide-thumbnail" }
-  | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }
+  | { type: "current-slide-text"; propresenterInstanceId?: string | null }
+  | { type: "next-slide-text"; propresenterInstanceId?: string | null }
+  | { type: "current-service-item"; propresenterInstanceId?: string | null }
+  | { type: "next-service-item"; propresenterInstanceId?: string | null }
+  | { type: "current-slide-notes"; propresenterInstanceId?: string | null }
+  | { type: "slide-thumbnail"; propresenterInstanceId?: string | null }
+  | { type: "section-chip"; which: "current" | "next" | "nextArrangement"; propresenterInstanceId?: string | null }
   | { type: "slots-grid"; source?: "view" | "inline"; sourceViewId?: string | null; slotsLayout?: SlotsLayout | null }
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number; hideChannels?: string[] }
   | { type: "live-controls" }
@@ -628,6 +628,15 @@ interface ProPresenterStatusDTO {
   nextServiceItem: string | null;
   timers: ProTimer[];
   slidePreviewKey: string | null;
+}
+
+interface PropInstanceMeta {
+  id: string;
+  name: string;
+}
+interface PropInstancesDTO {
+  list: PropInstanceMeta[];
+  status: Record<string, ProPresenterStatusDTO>;
 }
 
 interface StageState {

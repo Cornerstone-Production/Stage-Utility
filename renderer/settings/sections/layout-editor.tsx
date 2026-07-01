@@ -69,6 +69,7 @@ import { useObsState } from "../../main/use-obs-state";
 import { useOscTargets } from "../../main/use-osc-state";
 import { useStageState } from "../../main/use-stage-state";
 import { usePlanItems } from "../../main/use-plan-items";
+import { usePropInstances } from "../../main/use-dashboard-state";
 import { useConfiguredIntegrations, useIntegrations } from "../../main/use-integration-states";
 import { OBJECT_INTEGRATION } from "../../main/object-integration";
 import { invoke } from "../../lib/api";
@@ -839,6 +840,22 @@ function RowToggle<T extends string>({
           </Button>
         ))}
       </ButtonGroup>
+    </Row>
+  );
+}
+
+/** A labelled dropdown row (for when there are more options than fit a toggle). */
+function RowSelect({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
+  return (
+    <Row label={label}>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {options.map((o) => (
+            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </Row>
   );
 }
@@ -1722,6 +1739,17 @@ function PlanAttachmentConfig({
   );
 }
 
+/** Object types fed by ProPresenter — they get the per-object instance picker. */
+const PROP_OBJECT_TYPES = new Set<LayoutObjectConfig["type"]>([
+  "current-slide-text",
+  "next-slide-text",
+  "current-service-item",
+  "next-service-item",
+  "current-slide-notes",
+  "slide-thumbnail",
+  "section-chip",
+]);
+
 function Inspector({
   o, canvas, parentW, parentH, nested, locked, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
 }: {
@@ -1756,6 +1784,7 @@ function Inspector({
   const peopleCount = usePeopleCountState();
   const oscTargets = useOscTargets();
   const planItems = usePlanItems();
+  const propInstances = usePropInstances();
   const integrationsSnap = useIntegrations();
   const captionChannels = Object.keys(useStageState().state?.captionChannelColors ?? {});
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
@@ -1784,6 +1813,17 @@ function Inspector({
         <Button variant="filled" size="small" onClick={onReparentOut}>
           <CornerLeftUpIcon className="size-3.5" /> Move out of container
         </Button>
+      )}
+
+      {/* ProPresenter instance picker — only when >1 instance is configured
+          (two-auditorium setups); otherwise everything reads the primary. */}
+      {PROP_OBJECT_TYPES.has(c.type) && propInstances && propInstances.list.length > 1 && (
+        <RowSelect
+          label="ProPresenter"
+          value={(c as { propresenterInstanceId?: string | null }).propresenterInstanceId ?? "default"}
+          options={propInstances.list.map((i) => ({ value: i.id, label: i.name }))}
+          onChange={(v) => onConfig({ ...c, propresenterInstanceId: v === "default" ? null : v } as LayoutObjectConfig)}
+        />
       )}
 
       {/* Binding */}

@@ -47,3 +47,21 @@ export function useDashboardState(): UseDashboardStateResult {
 
   return { state, isLoading, error, pcoLive, propresenter };
 }
+
+/**
+ * All configured ProPresenter instances + their live status (for custom layouts
+ * that pick which auditorium an object reads from). Hydrates once, then stays
+ * live on the "propresenter:instances" channel. Always includes id "default".
+ */
+export function usePropInstances(): PropInstancesDTO | null {
+  const [instances, setInstances] = useState<PropInstancesDTO | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    invoke<PropInstancesDTO>("propresenter:getInstances")
+      .then((d) => { if (!cancelled && d) setInstances(d); })
+      .catch(() => { /* not configured yet — ignore */ });
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => onNotification("propresenter:instances", (p) => setInstances(p as PropInstancesDTO)), []);
+  return instances;
+}

@@ -166,13 +166,16 @@ export type LayoutObjectConfig =
   // timer is live; `warnSeconds` turns the readout amber once the remaining time
   // drops to/below that many seconds (it still goes red on overtime).
   | { type: "countdown-timer"; hideWhenIdle?: boolean; warnSeconds?: number }
-  | { type: "current-slide-text" }
-  | { type: "next-slide-text" }
-  | { type: "current-service-item" }
-  | { type: "next-service-item" }
-  | { type: "current-slide-notes" }
-  | { type: "slide-thumbnail" }
-  | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }
+  // ProPresenter-fed objects. `propresenterInstanceId` picks which configured
+  // instance to read (omitted / "default" = the primary) — lets separate custom
+  // views per auditorium point at different ProPresenter machines.
+  | { type: "current-slide-text"; propresenterInstanceId?: string | null }
+  | { type: "next-slide-text"; propresenterInstanceId?: string | null }
+  | { type: "current-service-item"; propresenterInstanceId?: string | null }
+  | { type: "next-service-item"; propresenterInstanceId?: string | null }
+  | { type: "current-slide-notes"; propresenterInstanceId?: string | null }
+  | { type: "slide-thumbnail"; propresenterInstanceId?: string | null }
+  | { type: "section-chip"; which: "current" | "next" | "nextArrangement"; propresenterInstanceId?: string | null }
   // Mic-slots grid. `source: "view"` embeds an existing slots-View's grid by
   // `sourceViewId`; `source: "inline"` defines its own slot set, stored per service
   // type keyed by this object's id (resolved into `StageState.slotsByLayoutObject`),
@@ -455,6 +458,19 @@ export interface ProPresenterStatusDTO {
   timers: ProTimer[];
   /** "<activeUuid>:<index>" — changes on slide change so the preview <img> refetches. */
   slidePreviewKey: string | null;
+}
+
+/** Metadata for one configured ProPresenter instance (id + display name). */
+export interface PropInstanceMeta {
+  id: string;
+  name: string;
+}
+
+/** All ProPresenter instances + their latest status, keyed by id. The primary
+ *  instance is always present as id "default". Broadcast on "propresenter:instances". */
+export interface PropInstancesDTO {
+  list: PropInstanceMeta[];
+  status: Record<string, ProPresenterStatusDTO>;
 }
 
 /** One Smaart SPL meter (a calibrated device/channel) and its latest values. */
