@@ -1,7 +1,7 @@
 import { invoke, onNotification } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
 import { usePeopleCountState } from "../main/use-people-count-state";
-import { useState, useEffect, useCallback, type ChangeEvent } from "react";
+import { useState, useEffect, useCallback, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { OscTargetsPanel } from "./osc-targets-panel";
@@ -22,7 +22,7 @@ import {
   SelectValue,
   Switch,
   Status,
-  Separator,
+  Collapsible,
   NumberInput,
   toast,
   SkeletonRows,
@@ -167,7 +167,6 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isTogglingEnabled, setIsTogglingEnabled] = useState(false);
 
   function setField(key: string, value: unknown) {
     setLocalConfig((prev) => ({ ...prev, [key]: value }));
@@ -225,34 +224,8 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
     }
   }
 
-  async function handleToggleEnabled(enabled: boolean) {
-    setIsTogglingEnabled(true);
-    try {
-      const next = await ipc<IntegrationState>("integrations:setEnabled", { id: descriptor.id, enabled });
-      onStateChange(next);
-    } catch (err) {
-      toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${String(err)}`);
-    } finally {
-      setIsTogglingEnabled(false);
-    }
-  }
-
   return (
     <div className="flex flex-col gap-3">
-      {/* Header row: label + enabled switch + connection badge */}
-      <div className="flex items-center gap-3">
-        <span className="text-headline font-semibold text-gray-12 flex-1 min-w-0 truncate">
-          {descriptor.label}
-        </span>
-        <ConnectionBadge state={state} />
-        <Switch
-          checked={state.enabled}
-          onCheckedChange={handleToggleEnabled}
-          disabled={isTogglingEnabled}
-          aria-label={`Enable ${descriptor.label}`}
-        />
-      </div>
-
       {/* Schema-driven form */}
       <FieldSet>
         <FieldGroup>
@@ -651,6 +624,67 @@ function RossTslFeedsPanel({
   );
 }
 
+// ---- collapsible row + categories -------------------------------------------
+
+// Groups the growing integration list by purpose so the page stays scannable.
+const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
+  { title: "Service & plan", ids: ["planning-center", "prodcom"] },
+  { title: "Presentation", ids: ["propresenter"] },
+  { title: "Audio", ids: ["smaart"] },
+  { title: "People", ids: ["sensource"] },
+  { title: "Wireless", ids: ["wireless"] },
+  { title: "Control & output", ids: ["obs", "osc", "ross-tsl"] },
+];
+
+/** One integration as a collapsible card: header (name · status · enable) that
+ *  expands to the config body. Configured integrations start collapsed; ones that
+ *  still need setup start open, so the page opens on what needs attention. */
+function IntegrationRow({
+  descriptor,
+  state,
+  onStateChange,
+  body,
+}: {
+  descriptor: IntegrationDescriptor;
+  state: IntegrationState;
+  onStateChange: (s: IntegrationState) => void;
+  body: ReactNode;
+}) {
+  const [toggling, setToggling] = useState(false);
+  async function toggleEnabled(enabled: boolean) {
+    setToggling(true);
+    try {
+      const next = await ipc<IntegrationState>("integrations:setEnabled", { id: descriptor.id, enabled });
+      onStateChange(next);
+    } catch (err) {
+      toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${String(err)}`);
+    } finally {
+      setToggling(false);
+    }
+  }
+  return (
+    <div className="rounded-lg border border-gray-a4 bg-gray-1 px-3 py-2">
+      <Collapsible
+        defaultOpen={!state.configured}
+        label={<span className="text-callout font-semibold text-gray-12 truncate">{descriptor.label}</span>}
+        right={
+          <div className="flex items-center gap-3 shrink-0">
+            <ConnectionBadge state={state} />
+            <Switch
+              checked={state.enabled}
+              onCheckedChange={toggleEnabled}
+              disabled={toggling}
+              aria-label={`Enable ${descriptor.label}`}
+            />
+          </div>
+        }
+      >
+        <div className="pt-1">{body}</div>
+      </Collapsible>
+    </div>
+  );
+}
+
 // ---- main export ------------------------------------------------------------
 
 interface IntegrationsPanelProps {
@@ -721,44 +755,61 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   const stateMap = new Map(states.map((s) => [s.id, s]));
   // Companion lives on the Advanced tab — there's nothing to configure here.
   const descriptors = allDescriptors.filter((d) => d.id !== "companion");
+  const byId = new Map(descriptors.map((d) => [d.id, d]));
+
+  // The body content for one integration: a bespoke panel (wireless/osc) or the
+  // generic schema form (+ caption colors under ProdCom).
+  const bodyFor = (descriptor: IntegrationDescriptor, state: IntegrationState): ReactNode => {
+    if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
+    if (descriptor.id === "osc") return <OscTargetsPanel />;
+    return (
+      <>
+        <IntegrationCard
+          descriptor={descriptor}
+          state={state}
+          onStateChange={handleStateChange}
+          lastRefreshedAt={stageState?.lastRefreshedAt ?? null}
+        />
+        {descriptor.id === "prodcom" && <CaptionColorsPanel />}
+      </>
+    );
+  };
+
+  // Summary strip + category groups (uncategorized descriptors fall into "Other").
+  const connectedCount = descriptors.filter((d) => stateMap.get(d.id)?.connection === "connected").length;
+  const needsSetup = descriptors.filter((d) => stateMap.get(d.id)?.configured === false).length;
+  const categorized = new Set(CATEGORY_ORDER.flatMap((c) => c.ids));
+  const groups = [
+    ...CATEGORY_ORDER.map((c) => ({
+      title: c.title,
+      items: c.ids.map((id) => byId.get(id)).filter((d): d is IntegrationDescriptor => !!d),
+    })),
+    { title: "Other", items: descriptors.filter((d) => !categorized.has(d.id)) },
+  ].filter((g) => g.items.length > 0);
 
   return (
-    <div className={cn("flex flex-col gap-0", className)}>
-      {descriptors.map((descriptor, idx) => {
-        const state = stateMap.get(descriptor.id);
-        if (!state) return null;
-        return (
-          <div key={descriptor.id}>
-            {idx > 0 && <Separator className="my-4" />}
-            {descriptor.kind === "wireless" ? (
-              <div className="flex flex-col gap-3">
-                <span className="text-headline font-semibold text-gray-12">
-                  {descriptor.label}
-                </span>
-                <WirelessConnectionsPanel />
-              </div>
-            ) : descriptor.id === "osc" ? (
-              <div className="flex flex-col gap-3">
-                <span className="text-headline font-semibold text-gray-12">
-                  {descriptor.label}
-                </span>
-                <OscTargetsPanel />
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                <IntegrationCard
-                  descriptor={descriptor}
-                  state={state}
-                  onStateChange={handleStateChange}
-                  lastRefreshedAt={stageState?.lastRefreshedAt ?? null}
-                />
-                {/* Per-channel caption colors, tucked under the ProdCom card. */}
-                {descriptor.id === "prodcom" && <CaptionColorsPanel />}
-              </div>
-            )}
-          </div>
-        );
-      })}
+    <div className={cn("flex flex-col gap-5", className)}>
+      <p className="text-caption1 text-gray-9">
+        {connectedCount} connected{needsSetup > 0 ? ` · ${needsSetup} to set up` : ""}
+      </p>
+      {groups.map((g) => (
+        <div key={g.title} className="flex flex-col gap-2">
+          <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">{g.title}</span>
+          {g.items.map((descriptor) => {
+            const state = stateMap.get(descriptor.id);
+            if (!state) return null;
+            return (
+              <IntegrationRow
+                key={descriptor.id}
+                descriptor={descriptor}
+                state={state}
+                onStateChange={handleStateChange}
+                body={bodyFor(descriptor, state)}
+              />
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
