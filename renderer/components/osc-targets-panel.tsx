@@ -8,6 +8,7 @@ import {
   Status,
   Separator,
   NumberInput,
+  InfoHint,
   toast,
 } from "../components/ui";
 import {
@@ -130,6 +131,11 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
           aria-label="Subscribe address"
         />
         <NumberInput value={subSec} onChange={setSubSec} onCommit={() => patchConfig({ subscribeIntervalSec: subSec })} min={1} max={60} suffix="s" className="w-20" aria-label="Subscribe interval seconds" />
+        <InfoHint>
+          Optional. Some gear (e.g. Behringer/Midas) only sends feedback while it keeps hearing from a
+          subscriber — enter the address it expects (like /xremote) and how often to send it. Leave blank
+          if your device pushes state on its own.
+        </InfoHint>
       </div>
 
       <div className="flex items-center gap-2 pl-1">

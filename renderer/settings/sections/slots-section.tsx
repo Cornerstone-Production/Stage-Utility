@@ -28,6 +28,7 @@ import {
   Separator,
   Switch,
   Collapsible,
+  InfoHint,
   toast,
   confirm,
 } from "../../components/ui";
@@ -340,11 +341,22 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
                 className="flex-1 min-w-0"
               />
             )}
+            <InfoHint className="self-center">
+              How this slot fills from Planning Center. By position: uses whoever holds that team position this
+              week (roster-driven, updates automatically). By person ID: locks to one individual. Use &quot;Notes
+              starts with&quot; to pick between multiple people in the same position.
+            </InfoHint>
           </div>
           {/* Notes starts-with filter — only shown for "by position" */}
           {(slot.link as { kind: "pco"; matchBy: string }).matchBy === "position" && (
             <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="text-caption1 text-gray-9 shrink-0 sm:w-32">Notes starts with:</span>
+              <span className="flex items-center gap-1 text-caption1 text-gray-9 shrink-0 sm:w-32">
+                Notes starts with:
+                <InfoHint>
+                  Narrows a &quot;by position&quot; match using each person&apos;s note in PCO. E.g. &quot;1&quot; picks the one
+                  noted 1, &quot;HH&quot; a handheld. Leave blank to take the first person in the position.
+                </InfoHint>
+              </span>
               <Input
                 value={
                   (slot.link as { kind: "pco"; matchBy: "position"; notesStartsWith?: string })
@@ -415,7 +427,14 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
               reveals the label field; on the display it shows a pill in place of
               the RF pill. */}
           <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-            <span className="text-caption1 text-gray-9 shrink-0">Device channel:</span>
+            <span className="flex items-center gap-1 text-caption1 text-gray-9 shrink-0">
+              Device channel:
+              <InfoHint>
+                Bind this slot&apos;s mic to a live wireless channel (shows RF + battery), or pick Offline to
+                just show a typed label for a networkless mic/pack. Offline shows a name pill in place of the
+                RF bars.
+              </InfoHint>
+            </span>
             <Select
               value={slot.deviceBinding?.channelId ?? (slot.deviceLabel != null ? "__offline__" : "__none__")}
               onValueChange={setDeviceBinding}
@@ -445,7 +464,13 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
           {/* IEM pack — a live channel (second battery bar) or "Offline" for a
               manual label. Available on any slot (vocalist, musician, etc.). */}
           <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-            <span className="text-caption1 text-gray-9 shrink-0">IEM pack:</span>
+            <span className="flex items-center gap-1 text-caption1 text-gray-9 shrink-0">
+              IEM pack:
+              <InfoHint>
+                Adds a second battery bar for an in-ear pack. Pick a live channel, or Offline for a typed
+                label. Available on any slot, not just vocals.
+              </InfoHint>
+            </span>
             <Select
               value={slot.iemBinding?.channelId ?? (slot.iemLabel != null ? "__offline__" : "__none__")}
               onValueChange={setIemBinding}
@@ -510,6 +535,10 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
               <Switch checked={slot.hideRf ?? false} onCheckedChange={(v: boolean) => onChange({ ...slot, hideRf: v })} />
               Hide RF
             </label>
+            <InfoHint className="self-center">
+              Hide the RF signal bars and show only the battery/charge level. Use for charge-only or IEM
+              slots, or RF-silent setups.
+            </InfoHint>
           </div>
           <p className="text-caption2 text-gray-8">
             {slot.chargeSource === "off"

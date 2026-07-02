@@ -18,18 +18,21 @@ function shureFields(channelsPlaceholder: string): ConfigField[] {
       label: "Device IP / Hostname",
       type: "text",
       placeholder: "192.168.1.100",
+      help: "IP or hostname of the Shure receiver/charger on the network. Give the device a static IP (in its network settings) so it stays reachable.",
     },
     {
       key: "port",
       label: "TCP Port",
       type: "number",
       placeholder: "2202",
+      help: "The device's control/telemetry TCP port — 2202 for most Shure networked gear (ULX-D, Axient, PSM). Change only if your device uses a non-standard port.",
     },
     {
       key: "channels",
       label: "Number of Channels",
       type: "number",
       placeholder: channelsPlaceholder,
+      help: "How many RF channels this device exposes (e.g. 4 for a quad ULX-D, 2 for a PSM transmitter). Sets how many channels appear in the slot pickers.",
     },
   ];
 }

@@ -436,7 +436,14 @@ function SenSourceScopePicker({
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-2">
-          <span className="text-caption1 text-gray-11 w-44 shrink-0">Location</span>
+          <span className="flex w-44 shrink-0 items-center gap-1.5 text-caption1 text-gray-11">
+            Location
+            <InfoHint>
+              Optional convenience — narrows the zone list below to one location. Vea doesn&apos;t always
+              expose a zone-to-location link; if it can&apos;t match, every zone is listed and you pick the
+              ones you want. The zone selection is what actually scopes the count.
+            </InfoHint>
+          </span>
           <Select value={current} onValueChange={(v: string) => void save({ locationId: v })}>
             <SelectTrigger className="w-44">
               <SelectValue placeholder={locations.length ? "All locations" : "Load to choose"} />
@@ -581,8 +588,13 @@ function RossTslFeedsPanel({
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">
+      <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-gray-9">
         Multiviewer feeds
+        <InfoHint>
+          Each feed drives one multiviewer tile. Pick the metric (Attendance = total counted; In room =
+          occupancy) and a zone (or building total), set TSL # to the tile&apos;s UMD address on the Ross
+          (0–126, must match the tile), and optional prefix/suffix wrap the number (e.g. &quot;In room: &quot; … &quot; ppl&quot;).
+        </InfoHint>
       </span>
       {feeds.length === 0 && (
         <span className="text-caption2 text-gray-9">
@@ -679,8 +691,13 @@ function ProPresenterInstancesPanel({
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">
+      <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-gray-9">
         Additional instances (auditoriums)
+        <InfoHint>
+          Each row is another ProPresenter machine (the primary is the Host/Port fields above). Give it a
+          Name, its IP, and API port (default 1025). A custom-layout object can then pick which instance it
+          reads from — handy when two rooms run separate ProPresenters.
+        </InfoHint>
       </span>
       {rows.length === 0 && (
         <span className="text-caption2 text-gray-9">

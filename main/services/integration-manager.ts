@@ -42,6 +42,7 @@ const PCO_DESCRIPTOR: IntegrationDescriptor = {
       label: "Refresh interval",
       type: "select",
       placeholder: "How often to pull the latest plan from PCO.",
+      help: "How often Stage Utility re-syncs the plan, team roster, and photos from Planning Center. The live on-air countdown updates continuously regardless of this setting.",
       options: [
         { value: "5", label: "5 minutes" },
         { value: "15", label: "15 minutes" },
@@ -92,12 +93,14 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
       label: "ProPresenter Host",
       type: "text",
       placeholder: "192.168.1.100",
+      help: "IP or hostname of the machine running ProPresenter, on the same network as this server.",
     },
     {
       key: "port",
       label: "API Port",
       type: "number",
       placeholder: "1025",
+      help: "ProPresenter's network API port. Turn the API on and find the port under ProPresenter → Preferences → Network (default 1025).",
     },
     {
       key: "pollMs",
@@ -146,18 +149,21 @@ const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
       label: "ProdCom Host",
       type: "text",
       placeholder: "192.168.1.201",
+      help: "IP or hostname of the machine running ProdCom, on the same network as this server.",
     },
     {
       key: "port",
       label: "API Port",
       type: "number",
       placeholder: "24480",
+      help: "ProdCom's HTTP Application API port. Enable the Application API in ProdCom's settings (default 24480).",
     },
     {
       key: "apiKey",
       label: "API Key",
       type: "password",
       placeholder: "(only if Require Authentication is on)",
+      help: "Only needed if ProdCom's API has 'Require Authentication' turned on — paste the key from ProdCom's API settings. Leave blank otherwise. Stored encrypted on this machine.",
     },
   ],
 };
@@ -174,18 +180,21 @@ const SMAART_DESCRIPTOR: IntegrationDescriptor = {
       label: "Smaart Host",
       type: "text",
       placeholder: "192.168.1.50",
+      help: "IP or hostname of the machine running Smaart, on the same network. Requires Smaart 8.3+ (the modern JSON API).",
     },
     {
       key: "port",
       label: "API Port",
       type: "number",
       placeholder: "26000",
+      help: "Smaart's API port. Enable the API in Smaart's API/IO settings (default 26000).",
     },
     {
       key: "password",
       label: "API Password",
       type: "password",
       placeholder: "(only if the Smaart API requires authentication)",
+      help: "Only needed if Smaart's API is set to require authentication; otherwise leave blank. Stored encrypted on this machine.",
     },
   ],
 };
@@ -203,12 +212,14 @@ const OBS_DESCRIPTOR: IntegrationDescriptor = {
       label: "OBS Host",
       type: "text",
       placeholder: "192.168.1.50",
+      help: "IP or hostname of the machine running OBS, on the same network as this server.",
     },
     {
       key: "port",
       label: "WebSocket Port",
       type: "number",
       placeholder: "4455",
+      help: "The obs-websocket server port. Enable the server under OBS → Tools → WebSocket Server Settings (default 4455).",
     },
     {
       key: "password",
@@ -247,7 +258,13 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       placeholder: "(from Vea → API clients)",
       help: "Create an API client in the Vea web app (Settings → API clients). It gives you an ID + secret — enter both. Stage Utility handles the token exchange for you.",
     },
-    { key: "clientSecret", label: "API Client Secret", type: "password", placeholder: "(from Vea → API clients)" },
+    {
+      key: "clientSecret",
+      label: "API Client Secret",
+      type: "password",
+      placeholder: "(from Vea → API clients)",
+      help: "The Secret half of the Vea API client (created alongside the Client ID in Vea → API clients). Stored encrypted on this machine.",
+    },
     {
       key: "apiToken",
       label: "Static token (optional)",
@@ -274,7 +291,13 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "Ross MultiViewer (TSL UMD)",
   configSchema: [
-    { key: "host", label: "Switcher Host", type: "text", placeholder: "192.168.1.60" },
+    {
+      key: "host",
+      label: "Switcher Host",
+      type: "text",
+      placeholder: "192.168.1.60",
+      help: "IP or hostname of the Ross multiviewer/switcher receiving the TSL UMD data, on the same network as this server.",
+    },
     {
       key: "port",
       label: "TSL Port",

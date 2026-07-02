@@ -46,6 +46,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
+  InfoHint,
 } from "../../components/ui";
 import { ObjectContent, boxStyle, useLayoutData, loadProcessedAttachment, type LayoutRenderCtx } from "../../main/layout-renderer";
 import {
@@ -789,10 +790,13 @@ function EditorCanvas({
 
 // ── small inspector row helpers ──────────────────────────────────────────────
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-caption2 text-gray-9 w-20 shrink-0">{label}</span>
+      <span className="text-caption2 text-gray-9 w-24 shrink-0 flex items-center gap-1">
+        <span className="truncate">{label}</span>
+        {hint && <InfoHint className="shrink-0">{hint}</InfoHint>}
+      </span>
       <div className="flex-1 min-w-0 flex items-center gap-1">{children}</div>
     </div>
   );
@@ -803,36 +807,38 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 // of options and every control is laid out consistently. Bespoke controls
 // (live-data selects, list editors) still use <Row> directly.
 
-function RowSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return <Row label={label}><Switch checked={checked} onCheckedChange={onChange} /></Row>;
+function RowSwitch({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return <Row label={label} hint={hint}><Switch checked={checked} onCheckedChange={onChange} /></Row>;
 }
 
-function RowText({ label, value, placeholder, onChange }: { label: string; value: string; placeholder?: string; onChange: (v: string) => void }) {
+function RowText({ label, hint, value, placeholder, onChange }: { label: string; hint?: string; value: string; placeholder?: string; onChange: (v: string) => void }) {
   return (
-    <Row label={label}>
+    <Row label={label} hint={hint}>
       <Input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className="text-gray-12" />
     </Row>
   );
 }
 
-function RowNumber({ label, value, step, min, max, onChange }: { label: string; value: number; step?: number; min?: number; max?: number; onChange: (v: number) => void }) {
-  return <Row label={label}><NumberInput value={value} step={step} min={min} max={max} onChange={onChange} /></Row>;
+function RowNumber({ label, hint, value, step, min, max, onChange }: { label: string; hint?: string; value: number; step?: number; min?: number; max?: number; onChange: (v: number) => void }) {
+  return <Row label={label} hint={hint}><NumberInput value={value} step={step} min={min} max={max} onChange={onChange} /></Row>;
 }
 
 /** A segmented (accent/filled) button toggle — the most repeated inspector control. */
 function RowToggle<T extends string>({
   label,
+  hint,
   value,
   options,
   onChange,
 }: {
   label: string;
+  hint?: string;
   value: T;
   options: { value: T; label: string }[];
   onChange: (v: T) => void;
 }) {
   return (
-    <Row label={label}>
+    <Row label={label} hint={hint}>
       <ButtonGroup>
         {options.map((o) => (
           <Button key={o.value} variant={value === o.value ? "accent" : "filled"} size="small" onClick={() => onChange(o.value)}>
@@ -845,9 +851,9 @@ function RowToggle<T extends string>({
 }
 
 /** A labelled dropdown row (for when there are more options than fit a toggle). */
-function RowSelect({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
+function RowSelect({ label, hint, value, options, onChange }: { label: string; hint?: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
   return (
-    <Row label={label}>
+    <Row label={label} hint={hint}>
       <Select value={value} onValueChange={onChange}>
         <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
@@ -1679,7 +1685,7 @@ function PlanAttachmentConfig({
 
   return (
     <>
-      <Row label="Match">
+      <Row label="Match" hint="Substring of the PCO attachment's filename to show (e.g. 'stage plot'). It auto-picks any matching PDF/image on the live plan, so it keeps working each week if you name files consistently.">
         <Input
           value={c.match ?? "stage plot"}
           onChange={(e) => onConfig({ ...c, match: e.target.value })}
@@ -1820,6 +1826,7 @@ function Inspector({
       {PROP_OBJECT_TYPES.has(c.type) && propInstances && propInstances.list.length > 1 && (
         <RowSelect
           label="ProPresenter"
+          hint="Which ProPresenter machine this object reads from — for multi-auditorium setups. Defaults to the primary instance; pick another to point this object at a second room's ProPresenter."
           value={(c as { propresenterInstanceId?: string | null }).propresenterInstanceId ?? "default"}
           options={propInstances.list.map((i) => ({ value: i.id, label: i.name }))}
           onChange={(v) => onConfig({ ...c, propresenterInstanceId: v === "default" ? null : v } as LayoutObjectConfig)}
@@ -1845,7 +1852,7 @@ function Inspector({
         </>
       )}
       {c.type === "section-chip" && (
-        <Row label="Which">
+        <Row label="Which" hint="Which ProPresenter section to show. Current/Next follow the presentation's sections; Next section skips arrangement breaks to the next actual song/item.">
           <Select value={c.which} onValueChange={(v: string) => onConfig({ type: "section-chip", which: v as "current" | "next" | "nextArrangement" })}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -1860,6 +1867,7 @@ function Inspector({
         <>
           <RowToggle
             label="Scroll"
+            hint="Follow live: the list auto-scrolls to keep the on-air item in view. Static: the list stays put (the operator scrolls it)."
             value={c.scroll ?? "auto"}
             options={[{ value: "auto", label: "Follow live" }, { value: "static", label: "Static" }]}
             onChange={(v) => onConfig({ ...c, scroll: v })}
@@ -1945,7 +1953,7 @@ function Inspector({
         const states = integrationsSnap.states;
         return (
           <>
-            <Row label="Integration">
+            <Row label="Integration" hint="Which integration's connection status to show. First available shows any that's online; pick a specific one to lock this object to it.">
               <Select value={c.integrationId ?? ""} onValueChange={(v: string) => onConfig({ ...c, integrationId: v || null })}>
                 <SelectTrigger><SelectValue placeholder={states.length ? "First available" : "No integrations"} /></SelectTrigger>
                 <SelectContent>
@@ -2048,7 +2056,7 @@ function Inspector({
         const t = c.thresholds;
         return (
           <>
-            <Row label="Meter">
+            <Row label="Meter" hint="Which Smaart SPL meter/channel to read. Auto uses the first one detected — pick a specific device/channel if Smaart exposes more than one.">
               <Select value={c.meterId ?? ""} onValueChange={(v: string) => onConfig({ ...c, meterId: v || null })}>
                 <SelectTrigger><SelectValue placeholder={meterIds.length ? "Auto (first)" : "No meters detected"} /></SelectTrigger>
                 <SelectContent>
@@ -2059,7 +2067,7 @@ function Inspector({
                 </SelectContent>
               </Select>
             </Row>
-            <Row label="Metric">
+            <Row label="Metric" hint="Which value from the meter to display (e.g. an SPL weighting/response like A-Slow or C-Fast, or Leq). Auto shows the meter's default. Options fill in once Smaart is reporting.">
               <Select value={c.metricKey ?? ""} onValueChange={(v: string) => onConfig({ ...c, metricKey: v || null })}>
                 <SelectTrigger><SelectValue placeholder={metricKeys.length ? "Auto" : "No data yet"} /></SelectTrigger>
                 <SelectContent>
@@ -2069,7 +2077,7 @@ function Inspector({
               </Select>
             </Row>
             <RowSwitch label="Show metric name" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-            <RowSwitch label="Peak hold" checked={c.peakHold ?? false} onChange={(v) => onConfig({ ...c, peakHold: v })} />
+            <RowSwitch label="Peak hold" hint="Also show the highest reading seen, held on screen — useful for catching transient peaks during loud moments." checked={c.peakHold ?? false} onChange={(v) => onConfig({ ...c, peakHold: v })} />
             <RowSwitch label="Color thresholds" checked={!!t} onChange={(v) => onConfig({ ...c, thresholds: v ? { amber: 95, red: 100 } : null })} />
             {t && (
               <>
@@ -2132,7 +2140,7 @@ function Inspector({
         }
         return (
           <>
-            <Row label="Target">
+            <Row label="Target" hint="The OSC device this button sends to — mixer, lighting board, etc. Set these up under Integrations → OSC.">
               <Select value={c.targetId ?? ""} onValueChange={(v: string) => onConfig({ ...c, targetId: v || null })}>
                 <SelectTrigger><SelectValue placeholder={oscTargets.length ? "Select target" : "No OSC targets"} /></SelectTrigger>
                 <SelectContent>
@@ -2141,9 +2149,16 @@ function Inspector({
               </Select>
             </Row>
             <RowText label="Label" value={c.label ?? ""} placeholder="Button" onChange={(v) => onConfig({ ...c, label: v })} />
-            <RowText label="Address" value={c.address} placeholder="/ch/01/mix/on" onChange={(v) => onConfig({ ...c, address: v })} />
+            <RowText label="Address" hint="The OSC path to send when tapped, e.g. /ch/01/mix/on — copy it from your device's OSC documentation. No spaces." value={c.address} placeholder="/ch/01/mix/on" onChange={(v) => onConfig({ ...c, address: v })} />
             <div className="flex flex-col gap-1.5">
-              <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Arguments</span>
+              <span className="flex items-center gap-1 text-caption2 font-semibold uppercase tracking-wider text-gray-9">
+                Arguments
+                <InfoHint>
+                  Values sent with the OSC message, in order. Pick each type — int (whole number), float
+                  (decimal), string (text), or true/false (booleans, no value needed). Many on/off commands
+                  need one int of 1 or 0; leave empty if your command takes none.
+                </InfoHint>
+              </span>
               {args.map((a, i) => (
                 <div key={i} className="flex items-center gap-1">
                   <Select value={a.type} onValueChange={(v: string) => setArg(i, { type: v as OscArg["type"] })}>
@@ -2164,7 +2179,7 @@ function Inspector({
               ))}
               <Button variant="transparent" size="small" className="self-start" onClick={() => onConfig({ ...c, args: [...args, { type: "i", value: "1" }] })}>Add argument</Button>
             </div>
-            <RowSwitch label="Feedback" checked={!!fb} onChange={(v) => onConfig({ ...c, feedback: v ? { address: c.address || "/", equals: 1 } : null })} />
+            <RowSwitch label="Feedback" hint="Reflect the device's state on the button: watch a return OSC address and recolor the button when its value matches (e.g. light up when the channel is live)." checked={!!fb} onChange={(v) => onConfig({ ...c, feedback: v ? { address: c.address || "/", equals: 1 } : null })} />
             {fb && (
               <>
                 <RowText label="Watch address" value={fb.address} placeholder="/ch/01/mix/on" onChange={(v) => onConfig({ ...c, feedback: { ...fb, address: v } })} />

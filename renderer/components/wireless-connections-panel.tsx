@@ -19,6 +19,7 @@ import {
   Status,
   Separator,
   NumberInput,
+  InfoHint,
   toast,
 } from "../components/ui";
 import {
@@ -338,7 +339,10 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
             return (
               <Field key={field.key} orientation="horizontal">
                 <FieldContent>
-                  <FieldLabel>{field.label}</FieldLabel>
+                  <FieldLabel className="flex items-center gap-1.5">
+                    {field.label}
+                    {field.help && <InfoHint>{field.help}</InfoHint>}
+                  </FieldLabel>
                   {field.placeholder && (
                     <FieldDescription>{field.placeholder}</FieldDescription>
                   )}
