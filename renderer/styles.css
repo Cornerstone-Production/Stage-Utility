@@ -18,6 +18,10 @@
 @import "@radix-ui/colors/yellow-dark.css";
 @import "@radix-ui/colors/orange.css";
 @import "@radix-ui/colors/orange-dark.css";
+@import "@radix-ui/colors/amber.css";
+@import "@radix-ui/colors/amber-dark.css";
+@import "@radix-ui/colors/amber-alpha.css";
+@import "@radix-ui/colors/amber-dark-alpha.css";
 
 /* ── Tailwind source paths for class scanning ── */
 @source "./main/**/*.{ts,tsx}";
@@ -122,6 +126,32 @@
   --color-orange-10: var(--orange-10);
   --color-orange-11: var(--orange-11);
   --color-orange-12: var(--orange-12);
+
+  /* Amber scale (1–12 + alpha) — the "unsaved / caution" accent */
+  --color-amber-1:   var(--amber-1);
+  --color-amber-2:   var(--amber-2);
+  --color-amber-3:   var(--amber-3);
+  --color-amber-4:   var(--amber-4);
+  --color-amber-5:   var(--amber-5);
+  --color-amber-6:   var(--amber-6);
+  --color-amber-7:   var(--amber-7);
+  --color-amber-8:   var(--amber-8);
+  --color-amber-9:   var(--amber-9);
+  --color-amber-10:  var(--amber-10);
+  --color-amber-11:  var(--amber-11);
+  --color-amber-12:  var(--amber-12);
+  --color-amber-a1:  var(--amber-a1);
+  --color-amber-a2:  var(--amber-a2);
+  --color-amber-a3:  var(--amber-a3);
+  --color-amber-a4:  var(--amber-a4);
+  --color-amber-a5:  var(--amber-a5);
+  --color-amber-a6:  var(--amber-a6);
+  --color-amber-a7:  var(--amber-a7);
+  --color-amber-a8:  var(--amber-a8);
+  --color-amber-a9:  var(--amber-a9);
+  --color-amber-a10: var(--amber-a10);
+  --color-amber-a11: var(--amber-a11);
+  --color-amber-a12: var(--amber-a12);
 }
 
 /* ── Brand title face (self-hosted, no CDN — kiosks run on a closed LAN) ── */
