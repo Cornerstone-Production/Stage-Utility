@@ -204,30 +204,28 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
   );
 }
 
-// A pill for an OFFLINE (manually-assigned) device — mic and/or IEM label, no
-// bars. Styled to match the StatusStrip pill so it sits in the same spot and
-// reads as "this slot's device info", just without live telemetry.
+// A pill for an OFFLINE (manually-assigned) device — the mic and/or IEM label(s),
+// no icons, no bars. Styled to match the StatusStrip pill so it sits in the same
+// spot and reads as "this slot's device info", just without live telemetry. Each
+// label is centered; with both mic + IEM set they stack as two centered rows.
 export function OfflinePill({ micLabel, iemLabel, className }: { micLabel: string | null; iemLabel: string | null; className?: string }) {
   if (micLabel === null && iemLabel === null) return null;
   const valueTextStyle = { fontSize: "calc(var(--rf) * 1.05)" };
-  const iconStyle = { width: "calc(var(--rf) * 1)", height: "calc(var(--rf) * 1)" };
+  const labels = [micLabel, iemLabel].filter((l): l is string => l !== null);
   return (
     <div
-      className={cn("relative mx-2 mb-2 flex items-center rounded-2xl overflow-hidden glass-dark", className)}
-      style={{ ["--rf" as string]: RF_UNIT, padding: "calc(var(--rf) * 0.55) calc(var(--rf) * 0.7)", gap: "calc(var(--rf) * 0.5)" }}
+      className={cn("relative mx-2 mb-2 flex flex-col items-center justify-center rounded-2xl overflow-hidden glass-dark", className)}
+      style={{ ["--rf" as string]: RF_UNIT, padding: "calc(var(--rf) * 0.55) calc(var(--rf) * 0.7)", gap: "calc(var(--rf) * 0.2)" }}
     >
-      {micLabel !== null && (
-        <span className="flex min-w-0 items-center text-white/85" style={{ gap: "calc(var(--rf) * 0.3)" }}>
-          <MicIcon className="shrink-0" style={iconStyle} />
-          <span className="font-semibold truncate leading-none" style={valueTextStyle}>{micLabel || "Offline"}</span>
+      {labels.map((label, i) => (
+        <span
+          key={i}
+          className="max-w-full truncate text-center font-semibold leading-none text-white/85"
+          style={valueTextStyle}
+        >
+          {label || "Offline"}
         </span>
-      )}
-      {iemLabel !== null && (
-        <span className="flex min-w-0 items-center text-white/85" style={{ gap: "calc(var(--rf) * 0.3)" }}>
-          <HeadphonesIcon className="shrink-0" style={iconStyle} />
-          <span className="font-semibold truncate leading-none" style={valueTextStyle}>{iemLabel || "Offline"}</span>
-        </span>
-      )}
+      ))}
     </div>
   );
 }

@@ -57,12 +57,6 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
   const isStatic = slot.link.kind === "static";
   const isEmpty = slot.link.kind === "empty";
   const isSpacer = slot.link.kind === "spacer";
-  // IEM packs are a vocalist thing — only offer the second-bar picker on slots
-  // bound to a Vocals position (matches the resolver's vocal gate).
-  const isVocalSlot =
-    slot.link.kind === "pco" &&
-    slot.link.matchBy === "position" &&
-    slot.link.teamPositionName.replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase().includes("vocal");
   const chargerBays = useStageState().state?.chargerBays ?? [];
 
   function setChannel(channel: string) {
@@ -449,26 +443,24 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
           )}
 
           {/* IEM pack — a live channel (second battery bar) or "Offline" for a
-              manual label. Vocalists only (handheld + IEM). */}
-          {isVocalSlot && (
-            <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="text-caption1 text-gray-9 shrink-0">IEM pack:</span>
-              <Select
-                value={slot.iemBinding?.channelId ?? (slot.iemLabel != null ? "__offline__" : "__none__")}
-                onValueChange={setIemBinding}
-              >
-                <SelectTrigger className="w-full sm:w-40"><SelectValue placeholder="None" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  <SelectItem value="__offline__">Offline (manual label)</SelectItem>
-                  {wirelessChannels.map((ch) => (
-                    <SelectItem key={ch.id} value={ch.id}>{ch.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          {isVocalSlot && slot.iemLabel != null && (
+              manual label. Available on any slot (vocalist, musician, etc.). */}
+          <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+            <span className="text-caption1 text-gray-9 shrink-0">IEM pack:</span>
+            <Select
+              value={slot.iemBinding?.channelId ?? (slot.iemLabel != null ? "__offline__" : "__none__")}
+              onValueChange={setIemBinding}
+            >
+              <SelectTrigger className="w-full sm:w-40"><SelectValue placeholder="None" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">None</SelectItem>
+                <SelectItem value="__offline__">Offline (manual label)</SelectItem>
+                {wirelessChannels.map((ch) => (
+                  <SelectItem key={ch.id} value={ch.id}>{ch.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {slot.iemLabel != null && (
             <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
               <span className="text-caption1 text-gray-9 shrink-0">Offline IEM label:</span>
               <Input
