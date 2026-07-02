@@ -756,6 +756,14 @@ export class StageController {
 
   /** Legacy alias — `target` is an output id (or empty for primary); routes to
    *  that output's View. Kept for the /api/slots endpoint + phone control page. */
+  /** Resolve raw draft slots against the current team + device state WITHOUT
+   *  persisting or broadcasting. Powers the Views page live draft preview: the
+   *  settings UI resolves in-progress (unsaved) edits so the preview matches what
+   *  the kiosk would show, exactly as recomputeResolved() does for saved slots. */
+  resolveSlotsPreview(slots: Slot[]): Slot[] {
+    return resolveSlots(slots, this.teamMembers, this.deviceStatuses);
+  }
+
   async setSlots(target: string, slots: Slot[]): Promise<StageState> {
     return this.setViewSlots(this.viewIdForTarget(target), slots);
   }

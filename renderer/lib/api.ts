@@ -353,6 +353,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>(`/api/views/${encodeURIComponent(id)}/slots`, { slots: p.slots });
     }
 
+    case "views:resolveSlots":
+      // Resolve draft slots against live team + device state WITHOUT saving —
+      // powers the Views live draft preview. Returns resolved Slot[].
+      return post<T>("/api/views/resolve-slots", { slots: p.slots });
+
     case "layoutObjects:setSlots": {
       const id = p.id as string;
       return post<T>(`/api/layout-objects/${encodeURIComponent(id)}/slots`, { slots: p.slots });

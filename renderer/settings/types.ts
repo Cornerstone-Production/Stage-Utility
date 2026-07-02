@@ -60,6 +60,8 @@ export interface SectionHandlers {
   addSpacer: () => void;
   removeSlot: (idx: number) => void;
   saveSlots: () => Promise<void>;
+  /** Drop unsaved slot edits and revert the editor + preview to saved state. */
+  discardSlots: () => void;
   handleSetViewSlotsLayout: (id: string, slotsLayout: SlotsLayout | null) => Promise<void>;
   // Views (content)
   handleAddView: (name: string, kind: ViewKind) => Promise<void>;
@@ -106,6 +108,8 @@ export interface SectionProps {
   localSlots: Slot[];
   slotsDirty: boolean;
   isSavingSlots: boolean;
+  /** Draft slots resolved server-side (no save) for the live preview; null when clean. */
+  resolvedDraftSlots: Slot[] | null;
   isRefreshing: boolean;
   slotPresets: SlotPreset[];
   updateStatus: UpdateStatus | null;

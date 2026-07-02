@@ -47,6 +47,7 @@ import {
   DialogDescription,
   DialogFooter,
   InfoHint,
+  UnsavedBanner,
 } from "../../components/ui";
 import { ObjectContent, boxStyle, useLayoutData, loadProcessedAttachment, type LayoutRenderCtx } from "../../main/layout-renderer";
 import {
@@ -1250,6 +1251,17 @@ export function LayoutEditor({
 
   return (
     <div className="flex flex-col gap-3 @container h-full min-h-0">
+      {/* Unsaved-changes banner — the canvas below already reflects the edits;
+          this makes clear they aren't saved and offers Save / Discard. */}
+      {dirty && (
+        <UnsavedBanner
+          message="Unsaved layout changes — shown here, but not saved yet."
+          saving={saving}
+          onSave={() => void save()}
+          onDiscard={discardChanges}
+        />
+      )}
+
       {/* View-only bar — a custom view opens as a clean preview until "Edit". */}
       {!isEditing && (
         <div className="flex items-center gap-2">

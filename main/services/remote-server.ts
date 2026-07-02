@@ -891,6 +891,20 @@ export class RemoteServer {
       return;
     }
 
+    // POST /api/views/resolve-slots — { slots } → resolved Slot[] (no persist).
+    // Powers the Views page live draft preview: resolves in-progress edits against
+    // the current team + device state so the preview matches the kiosk, without
+    // saving. Must precede the /api/views/:id/slots matcher.
+    if (method === "POST" && pathname === "/api/views/resolve-slots") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.slots)) {
+        error(res, "body.slots (array) required");
+        return;
+      }
+      json(res, stageController.resolveSlotsPreview(body.slots as Slot[]));
+      return;
+    }
+
     // POST /api/views/:id/slots — { slots }
     const viewSlotsMatch = pathname.match(/^\/api\/views\/([^/]+)\/slots$/);
     if (method === "POST" && viewSlotsMatch) {

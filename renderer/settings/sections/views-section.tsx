@@ -17,6 +17,7 @@ import {
   Switch,
   Dialog,
   EmptyState,
+  UnsavedBanner,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import type { SectionProps } from "../types";
@@ -129,13 +130,14 @@ function ViewDetail({
   localSlots,
   slotsDirty,
   isSavingSlots,
+  resolvedDraftSlots,
   slotPresets,
   layoutTemplates,
   canDelete,
   handlers,
 }: Pick<
   SectionProps,
-  "stageState" | "wirelessChannels" | "teamPositions" | "localSlots" | "slotsDirty" | "isSavingSlots" | "slotPresets" | "layoutTemplates" | "handlers"
+  "stageState" | "wirelessChannels" | "teamPositions" | "localSlots" | "slotsDirty" | "isSavingSlots" | "resolvedDraftSlots" | "slotPresets" | "layoutTemplates" | "handlers"
 > & { view: View; canDelete: boolean }) {
   // Parent remounts this component on view change (key={view.id}), so local
   // field state initializes fresh per view.
@@ -156,6 +158,17 @@ function ViewDetail({
     // Custom views fill the available height so the editor fits without page scroll;
     // other kinds keep their natural height and let the page scroll (long slot lists).
     <div className={cn("flex flex-col gap-5", view.kind === "custom" && "flex-1 min-h-0")}>
+      {/* Unsaved-slots banner — the preview below shows the draft live; this makes
+          clear it isn't saved yet and offers Save / Discard. (Custom views get
+          their own banner inside the layout editor.) */}
+      {view.kind === "slots" && slotsDirty && (
+        <UnsavedBanner
+          saving={isSavingSlots}
+          onSave={() => void handlers.saveSlots()}
+          onDiscard={handlers.discardSlots}
+        />
+      )}
+
       {/* Header: name + kind dropdown + actions */}
       <div className="flex flex-wrap items-center gap-2">
         <Input
@@ -221,7 +234,11 @@ function ViewDetail({
               </SelectContent>
             </Select>
           </div>
-          <ViewPreview viewId={view.id} aspect={previewAspect} />
+          <ViewPreview
+            viewId={view.id}
+            aspect={previewAspect}
+            draftSlots={view.kind === "slots" && slotsDirty ? resolvedDraftSlots : null}
+          />
         </div>
       )}
 
@@ -304,6 +321,7 @@ export function ViewsSection({
   localSlots,
   slotsDirty,
   isSavingSlots,
+  resolvedDraftSlots,
   slotPresets,
   handlers,
 }: Pick<
@@ -317,6 +335,7 @@ export function ViewsSection({
   | "localSlots"
   | "slotsDirty"
   | "isSavingSlots"
+  | "resolvedDraftSlots"
   | "slotPresets"
   | "handlers"
 >) {
@@ -459,6 +478,7 @@ export function ViewsSection({
             localSlots={localSlots}
             slotsDirty={slotsDirty}
             isSavingSlots={isSavingSlots}
+            resolvedDraftSlots={resolvedDraftSlots}
             slotPresets={slotPresets}
             layoutTemplates={layoutTemplates}
             canDelete={views.length > 1}

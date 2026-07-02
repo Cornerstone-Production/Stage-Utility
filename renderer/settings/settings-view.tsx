@@ -331,6 +331,29 @@ export function SettingsView() {
     setLocalSlots([...viewSlots].sort((a, b) => a.order - b.order));
   }, [stageState, selectedViewId, slotsDirty]);
 
+  // Live draft preview: while slots are dirty, resolve the in-progress edits
+  // server-side (no save) so the preview iframe can show the draft exactly as the
+  // kiosk would. Debounced to avoid a request per keystroke; cleared when clean.
+  const [resolvedDraftSlots, setResolvedDraftSlots] = useState<Slot[] | null>(null);
+  useEffect(() => {
+    if (!slotsDirty) {
+      setResolvedDraftSlots(null);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      ipc<Slot[]>("views:resolveSlots", { slots: localSlots.map((s, i) => ({ ...s, order: i })) })
+        .then((resolved) => {
+          if (!cancelled) setResolvedDraftSlots(resolved);
+        })
+        .catch((err) => console.error("[settings:resolveDraftSlots]", err));
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [slotsDirty, localSlots]);
+
   // Subscribe to live state changes from backend
   useEffect(() => {
     const unsub = onNotification("stage:state-changed", (payload: unknown) => {
@@ -614,6 +637,12 @@ export function SettingsView() {
     } finally {
       setIsSavingSlots(false);
     }
+  }
+
+  // Drop unsaved slot edits: clearing dirty lets the mirror effect re-seed
+  // localSlots from the saved server state, and the preview clears its draft.
+  function discardSlots() {
+    setSlotsDirty(false);
   }
 
   // ── Views (content) ──────────────────────────────────────────────────
@@ -926,6 +955,7 @@ export function SettingsView() {
     addSpacer,
     removeSlot,
     saveSlots,
+    discardSlots,
     handleSetViewSlotsLayout,
     handleAddView,
     handleRenameView,
@@ -998,6 +1028,7 @@ export function SettingsView() {
             localSlots={localSlots}
             slotsDirty={slotsDirty}
             isSavingSlots={isSavingSlots}
+            resolvedDraftSlots={resolvedDraftSlots}
             slotPresets={slotPresets}
             handlers={handlers}
           />
