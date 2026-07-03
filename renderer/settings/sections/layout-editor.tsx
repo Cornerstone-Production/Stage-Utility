@@ -337,7 +337,7 @@ function dashboardTemplate(): LayoutObject[] {
   ];
 }
 
-const GRID = 48; // snap steps across the canvas
+const GRID = 96; // snap steps across the canvas (finer grid = ~half-size cells)
 const MIN = 0.03;
 
 // Canvas aspect presets. Resolution is irrelevant (the renderer scales the design
