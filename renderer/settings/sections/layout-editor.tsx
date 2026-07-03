@@ -179,6 +179,20 @@ const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
   outline: { background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015, cornerRadius: 0.0148, boxShadow: 0 },
 };
 
+// One consolidated list of preset "looks" for the Style dropdown — each entry is a
+// complete style patch (surface look, optionally color-tinted), so there's a single
+// control instead of separate color + surface rows with duplicate labels.
+const STYLE_PRESETS: { value: string; label: string; style: LayoutStyle }[] = [
+  { value: "flat", label: "Flat", style: SURFACE_PRESETS.flat },
+  { value: "glass", label: "Glass", style: SURFACE_PRESETS.glass },
+  { value: "glass-green", label: "Glass · Green", style: CARD_PRESETS.green },
+  { value: "glass-red", label: "Glass · Red", style: CARD_PRESETS.red },
+  { value: "glass-amber", label: "Glass · Amber", style: CARD_PRESETS.amber },
+  { value: "elevated", label: "Elevated", style: SURFACE_PRESETS.elevated },
+  { value: "solid", label: "Solid", style: SURFACE_PRESETS.solid },
+  { value: "outline", label: "Outline", style: SURFACE_PRESETS.outline },
+];
+
 // Nearest labeled stop for the single Elevation slider (None/Low/Med/High).
 function elevationLabel(v: number): string {
   if (v <= 0.175) return "None";
@@ -1324,16 +1338,19 @@ export function LayoutEditor({
   const layerRows = flattenLayers(objects);
 
   return (
-    <div className="flex flex-col gap-3 @container h-full min-h-0">
-      {/* Unsaved-changes banner — the canvas below already reflects the edits;
-          this makes clear they aren't saved and offers Save / Discard. */}
+    <div className="relative flex flex-col gap-3 @container h-full min-h-0">
+      {/* Unsaved-changes banner — floats as a compact pill (absolute overlay) so it
+          doesn't reserve layout space / shift the editor down when it appears. The
+          canvas already reflects the edits; this offers Save / Discard. */}
       {dirty && (
-        <UnsavedBanner
-          message="Unsaved layout changes — shown here, but not saved yet."
-          saving={saving}
-          onSave={() => void save()}
-          onDiscard={discardChanges}
-        />
+        <div className="absolute top-1 right-1 z-30">
+          <UnsavedBanner
+            compact
+            saving={saving}
+            onSave={() => void save()}
+            onDiscard={discardChanges}
+          />
+        </div>
       )}
 
       {/* View-only bar — a custom view opens as a clean preview until "Edit". */}
@@ -2480,22 +2497,15 @@ function Inspector({
 
       <Separator />
 
-      {/* Card style presets — one-click dashboard "glass tile" look on any object,
-          and "Flat" to clear it back. Just writes the shared style fields below. */}
-      <Row label="Card" hint="Color accent — a tinted glass fill. Combine with a Surface look below.">
-        <div className="flex flex-wrap gap-1">
-          {([["neutral", "Glass"], ["green", "Green"], ["red", "Red"], ["amber", "Amber"], ["flat", "Flat"]] as [CardAccent, string][]).map(([a, label]) => (
-            <Button key={a} variant="filled" size="small" onClick={() => onStyle(CARD_PRESETS[a])}>{label}</Button>
-          ))}
-        </div>
-      </Row>
-      {/* Surface/elevation "style type" — one-click fill+border+shadow look. */}
-      <Row label="Surface" hint="A one-click look: Flat (none), Glass (frosted), Elevated (glass + shadow), Solid (opaque), Outline (border only). Fine-tune with Fill / Border / Elevation below.">
-        <div className="flex flex-wrap gap-1">
-          {([["flat", "Flat"], ["glass", "Glass"], ["elevated", "Elevated"], ["solid", "Solid"], ["outline", "Outline"]] as [SurfaceKind, string][]).map(([k, label]) => (
-            <Button key={k} variant="filled" size="small" onClick={() => onStyle(SURFACE_PRESETS[k])}>{label}</Button>
-          ))}
-        </div>
+      {/* Style preset — one dropdown of complete "looks" (surface + optional tint).
+          Applies the shared style fields below; fine-tune with Fill / Border / Elevation. */}
+      <Row label="Style" hint="Apply a preset look — surface (Flat/Glass/Elevated/Solid/Outline) with an optional color tint. Fine-tune with Fill, Border, and Elevation below.">
+        <Select value="" onValueChange={(v: string) => { const p = STYLE_PRESETS.find((x) => x.value === v); if (p) onStyle(p.style); }}>
+          <SelectTrigger><SelectValue placeholder="Apply a look…" /></SelectTrigger>
+          <SelectContent>
+            {STYLE_PRESETS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </Row>
 
       {/* Style */}
@@ -2542,9 +2552,7 @@ function Inspector({
           className="flex-1 min-w-0 accent-blue-9"
           aria-label="Opacity"
         />
-        <div className="w-16 shrink-0">
-          <NumberField value={Math.round((s.opacity ?? 1) * 100)} step={1} min={0} max={100} suffix="%" onChange={(v) => onStyle({ opacity: clamp(v / 100, 0, 1) })} />
-        </div>
+        <span className="w-9 shrink-0 text-right tabular-nums text-caption2 text-gray-11">{Math.round((s.opacity ?? 1) * 100)}%</span>
       </Row>
       <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
       <Row label="Padding"><NumberField value={pxOf(s.padding, 0)} step={1} min={0} max={Math.round(0.3 * canvas.height)} suffix="px" onChange={(px) => onStyle({ padding: px / canvas.height })} /></Row>
