@@ -1,6 +1,7 @@
 import { invoke, onNotification } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
 import { usePeopleCountState } from "../main/use-people-count-state";
+import { usePropInstances } from "../main/use-dashboard-state";
 import { useState, useEffect, useCallback, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
@@ -95,8 +96,8 @@ function IpListField({ value, onChange, placeholder }: IpListFieldProps) {
 
 // ---- connection badge -------------------------------------------------------
 
-function ConnectionBadge({ state }: { state: IntegrationState }) {
-  if (state.connection === "connected") {
+function ConnectionBadge({ connection, message }: { connection: ConnectionState; message?: string | null }) {
+  if (connection === "connected") {
     return (
       <span className="flex items-center gap-1">
         <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />
@@ -104,7 +105,7 @@ function ConnectionBadge({ state }: { state: IntegrationState }) {
       </span>
     );
   }
-  if (state.connection === "connecting") {
+  if (connection === "connecting") {
     return (
       <span className="flex items-center gap-1">
         <Loader2Icon className="size-3.5 text-blue-10 animate-spin shrink-0" />
@@ -112,11 +113,11 @@ function ConnectionBadge({ state }: { state: IntegrationState }) {
       </span>
     );
   }
-  if (state.connection === "error") {
+  if (connection === "error") {
     return (
       <span className="flex items-center gap-1">
         <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
-        <span className="text-caption1 text-red-10">{state.message ?? "Error"}</span>
+        <span className="text-caption1 text-red-10">{message ?? "Error"}</span>
       </span>
     );
   }
@@ -650,9 +651,29 @@ interface PropInstanceRow {
   pollMs?: number;
 }
 
+// Per-instance connection status. Driven by the live `propresenter:instances`
+// snapshot, which now carries the same connected/connecting/error/disconnected
+// state the primary uses — so we delegate to the very same ConnectionBadge for a
+// pixel-identical line. Rows not yet saved aren't known to the backend → "Not saved".
+function InstanceStatusBadge({ conn, saved }: { conn: PropInstanceConn | undefined; saved: boolean }) {
+  if (!saved || !conn) {
+    return (
+      <span className="flex items-center gap-1">
+        <Status variant="neutral" />
+        <span className="text-caption1 text-gray-9">Not saved</span>
+      </span>
+    );
+  }
+  return <ConnectionBadge connection={conn.state} message={conn.message} />;
+}
+
 // Extra ProPresenter machines beyond the primary (e.g. a second auditorium).
 // Stored as non-secret config.instances; a layout object then picks which one to
 // read. The primary is the host/port fields above (instance id "default").
+//
+// Each instance renders with the same field layout as the main ProPresenter card
+// (Name / Host / API Port / Poll interval as horizontal Fields) plus a live
+// connection badge, so the two read identically.
 function ProPresenterInstancesPanel({
   state,
   onStateChange,
@@ -663,6 +684,10 @@ function ProPresenterInstancesPanel({
   const initial = Array.isArray(state.config.instances) ? (state.config.instances as PropInstanceRow[]) : [];
   const [rows, setRows] = useState<PropInstanceRow[]>(initial);
   const [saving, setSaving] = useState(false);
+  // Live per-instance status from the backend (keyed by instance id).
+  const propInstances = usePropInstances();
+  // Ids the backend currently knows about — i.e. rows that have been saved.
+  const savedIds = new Set((state.config.instances as PropInstanceRow[] | undefined)?.map((r) => r.id) ?? []);
 
   function update(idx: number, patch: Partial<PropInstanceRow>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -694,7 +719,7 @@ function ProPresenterInstancesPanel({
       <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-gray-9">
         Additional instances (auditoriums)
         <InfoHint>
-          Each row is another ProPresenter machine (the primary is the Host/Port fields above). Give it a
+          Each card is another ProPresenter machine (the primary is the Host/Port fields above). Give it a
           Name, its IP, and API port (default 1025). A custom-layout object can then pick which instance it
           reads from — handy when two rooms run separate ProPresenters.
         </InfoHint>
@@ -704,19 +729,93 @@ function ProPresenterInstancesPanel({
           Add another ProPresenter machine to read it in a custom view. A layout object then picks which instance it shows.
         </span>
       )}
-      {rows.map((r, i) => (
-        <div key={r.id} className="flex flex-wrap items-center gap-1.5">
-          <Input value={r.name} onChange={(e: ChangeEvent<HTMLInputElement>) => update(i, { name: e.target.value })} placeholder="Name" className="w-32" />
-          <Input value={r.host} onChange={(e: ChangeEvent<HTMLInputElement>) => update(i, { host: e.target.value })} placeholder="192.168.1.101" className="w-40" />
-          <div className="flex items-center gap-1">
-            <span className="text-caption2 text-gray-9">Port</span>
-            <NumberInput value={r.port} step={1} min={1} max={65535} onChange={(v) => update(i, { port: Math.round(v) })} className="w-20" />
+      {rows.map((r, i) => {
+        const saved = savedIds.has(r.id);
+        const conn = propInstances?.conn?.[r.id];
+        return (
+          <div key={r.id} className="flex flex-col gap-2 rounded-lg border border-gray-5 p-3">
+            {/* Header: live status + remove, mirroring the main card's header */}
+            <div className="flex items-center justify-between gap-2">
+              <InstanceStatusBadge conn={conn} saved={saved} />
+              <Button variant="transparent" size="small" iconOnly onClick={() => remove(i)} aria-label="Remove instance">
+                <TrashIcon className="size-3.5 text-gray-9" />
+              </Button>
+            </div>
+            <FieldSet>
+              <FieldGroup>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel className="flex items-center gap-1.5">
+                      Name
+                      <InfoHint>Display name for this ProPresenter, shown when a layout object picks which instance to read.</InfoHint>
+                    </FieldLabel>
+                    <FieldDescription>SA (e.g. Auditorium 2)</FieldDescription>
+                  </FieldContent>
+                  <Input
+                    value={r.name}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => update(i, { name: e.target.value })}
+                    placeholder="Auditorium 2"
+                    className="w-44"
+                    aria-label="Instance name"
+                  />
+                </Field>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel className="flex items-center gap-1.5">
+                      ProPresenter Host
+                      <InfoHint>IP or hostname of the machine running ProPresenter, on the same network as this server.</InfoHint>
+                    </FieldLabel>
+                    <FieldDescription>192.168.1.101</FieldDescription>
+                  </FieldContent>
+                  <Input
+                    value={r.host}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => update(i, { host: e.target.value })}
+                    placeholder="192.168.1.101"
+                    className="w-44"
+                    aria-label="Instance host"
+                  />
+                </Field>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel className="flex items-center gap-1.5">
+                      API Port
+                      <InfoHint>ProPresenter's network API port. Turn the API on and find the port under ProPresenter → Preferences → Network (default 1025).</InfoHint>
+                    </FieldLabel>
+                    <FieldDescription>1025</FieldDescription>
+                  </FieldContent>
+                  <NumberInput
+                    value={r.port}
+                    step={1}
+                    min={1}
+                    max={65535}
+                    onChange={(v) => update(i, { port: Math.round(v) })}
+                    className="w-44"
+                    aria-label="Instance API port"
+                  />
+                </Field>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel className="flex items-center gap-1.5">
+                      Poll interval (ms)
+                      <InfoHint>How often to query this ProPresenter over the LAN. 500ms feels instant; raise it to ease network load. Leave blank to use the default.</InfoHint>
+                    </FieldLabel>
+                    <FieldDescription>500 (lower = snappier, more requests)</FieldDescription>
+                  </FieldContent>
+                  <NumberInput
+                    value={r.pollMs ?? 500}
+                    step={100}
+                    min={200}
+                    max={10000}
+                    onChange={(v) => update(i, { pollMs: Math.round(v) })}
+                    className="w-44"
+                    aria-label="Instance poll interval"
+                  />
+                </Field>
+              </FieldGroup>
+            </FieldSet>
           </div>
-          <Button variant="transparent" size="small" iconOnly onClick={() => remove(i)} aria-label="Remove instance">
-            <TrashIcon className="size-3.5" />
-          </Button>
-        </div>
-      ))}
+        );
+      })}
       <div className="flex items-center gap-2">
         <Button variant="transparent" size="small" onClick={add}>
           <PlusIcon className="size-3.5" /> Add instance
@@ -774,7 +873,7 @@ function IntegrationRow({
         label={<span className="text-callout font-semibold text-gray-12 truncate">{descriptor.label}</span>}
         right={
           <div className="flex items-center gap-3 shrink-0">
-            <ConnectionBadge state={state} />
+            <ConnectionBadge connection={state.connection} message={state.message} />
             <Switch
               checked={state.enabled}
               onCheckedChange={toggleEnabled}

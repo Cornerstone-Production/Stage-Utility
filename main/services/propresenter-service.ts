@@ -13,7 +13,7 @@
 
 import * as http from "http";
 
-import type { ProPresenterStatusDTO, ProSection, ProTimer, PropInstancesDTO, PropInstanceMeta } from "../types/stage.js";
+import type { ProPresenterStatusDTO, ProSection, ProTimer, PropInstancesDTO, PropInstanceMeta, PropInstanceConn } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 
 const POLL_INTERVAL_MS = 500;
@@ -526,6 +526,7 @@ export interface PropInstanceConfig {
 class ProPresenterManager {
   private extras = new Map<string, ProPresenterService>();
   private names = new Map<string, string>(); // id → display name (incl. "default")
+  private conn = new Map<string, PropInstanceConn>(); // id → reachability (extras only)
   private defaultName = "Main";
 
   init(): void {
@@ -542,6 +543,7 @@ class ProPresenterManager {
         svc.stop();
         this.extras.delete(id);
         this.names.delete(id);
+        this.conn.delete(id);
       }
     }
     for (const e of extras) {
@@ -549,11 +551,22 @@ class ProPresenterManager {
       if (!svc) {
         svc = new ProPresenterService(e.id);
         svc.setEmitListener(() => this.broadcastCombined());
+        // Surface reachability the same way the primary does (connecting → the
+        // service's listener flips it to connected/error on the first tick).
+        svc.setConnectionListener((state, message) => {
+          this.conn.set(e.id, { state, message });
+          this.broadcastCombined();
+        });
         this.extras.set(e.id, svc);
       }
       this.names.set(e.id, e.name?.trim() || e.id);
-      if (e.enabled !== false && e.host && e.port > 0) svc.configure(e.host, e.port, e.pollMs);
-      else svc.stop();
+      if (e.enabled !== false && e.host && e.port > 0) {
+        this.conn.set(e.id, { state: "connecting", message: `Polling ${e.host}:${e.port}` });
+        svc.configure(e.host, e.port, e.pollMs);
+      } else {
+        svc.stop();
+        this.conn.set(e.id, { state: "disconnected", message: null });
+      }
     }
     this.broadcastCombined();
   }
@@ -571,7 +584,18 @@ class ProPresenterManager {
       default: propresenterService.getStatus(),
     };
     for (const [id, svc] of this.extras) status[id] = svc.getStatus();
-    return { list, status };
+    // The primary's rich state lives on its integration card; here we derive it
+    // from the polled status so the map is complete. Extras carry their own state.
+    const conn: Record<string, PropInstanceConn> = {
+      default: {
+        state: propresenterService.getStatus().connected ? "connected" : "disconnected",
+        message: null,
+      },
+    };
+    for (const id of this.extras.keys()) {
+      conn[id] = this.conn.get(id) ?? { state: "disconnected", message: null };
+    }
+    return { list, status, conn };
   }
 
   /** Thumbnail target for a given instance ("default"/empty → primary). */

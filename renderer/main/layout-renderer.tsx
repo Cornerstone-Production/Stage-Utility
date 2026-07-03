@@ -12,6 +12,7 @@ import { useWirelessChannels } from "./use-wireless-channels";
 import { OscButton } from "./osc-button";
 import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
+import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
@@ -39,6 +40,9 @@ export interface LayoutRenderCtx {
   serviceLow: number | null;
   /** Live baptism-timer state — for the baptism-timer object. */
   baptism: BaptismState | null;
+  /** In-progress service timeline (planned vs actual item timing) — for the
+   *  service-pacing object's whole-service scope. null when not recording. */
+  serviceTimeline: ServiceTimeline | null;
   /** Live integration connection states + friendly labels — for the integration-status object. */
   integrations: IntegrationState[];
   integrationLabels: Record<string, string>;
@@ -78,6 +82,13 @@ export function boxStyle(o: LayoutObject, H: number): CSSProperties {
   if (s.cornerRadius != null) css.borderRadius = `${s.cornerRadius * H}px`;
   // Clamp so a stray/legacy width can't swell into a solid fill.
   if (s.borderColor && s.borderWidth) css.border = `${Math.min(s.borderWidth, 0.04) * H}px solid ${s.borderColor}`;
+  // Box elevation: a soft two-layer drop shadow scaled by strength + canvas height,
+  // so stacked cards read as layered. Mirrors the textShadow approach; drawn outside
+  // the border-box so it never affects layout.
+  if (s.boxShadow) {
+    const a = Math.min(1, s.boxShadow);
+    css.boxShadow = `0 ${0.006 * a * H}px ${0.02 * a * H}px rgba(0,0,0,${0.45 * a}), 0 ${0.02 * a * H}px ${0.05 * a * H}px rgba(0,0,0,${0.30 * a})`;
+  }
   if (o.config.type === "shape" && o.config.shape === "ellipse") css.borderRadius = "50%";
   return css;
 }
@@ -148,6 +159,19 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
 }
 
 /** Render one object's inner content (the positioned box wraps this). */
+// Format a signed pacing delta — over plan reads "+M:SS", under reads "−M:SS".
+function fmtSignedDuration(sec: number): string {
+  const s = Math.round(sec);
+  if (s === 0) return "0:00";
+  return `${s > 0 ? "+" : "−"}${fmtDuration(Math.abs(s))}`;
+}
+
+// 0–5 RF bars as filled/empty blocks, for the wireless-channel tile.
+function rfBarsGlyph(bars: number): string {
+  const n = Math.max(0, Math.min(5, Math.round(bars)));
+  return "▮".repeat(n) + "▯".repeat(5 - n);
+}
+
 export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   const c = o.config;
   const ts = textStyle(o, ctx.H);
@@ -169,6 +193,42 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       return (
         <span style={color ? { ...ts, color } : ts}>
           {fmtDuration(t.seconds)}
+        </span>
+      );
+    }
+    case "service-pacing": {
+      const scope = c.scope ?? "item";
+      const tol = 3; // within ±3s of plan reads "On time"
+      let deltaSec: number | null = null;
+      if (scope === "service") {
+        // Sum actual-vs-planned across completed items, plus the live item's delta.
+        let sum = 0;
+        let any = false;
+        for (const it of ctx.serviceTimeline?.items ?? []) {
+          if (it.actualDurationSec != null && it.plannedLengthSec != null) {
+            sum += it.actualDurationSec - it.plannedLengthSec;
+            any = true;
+          }
+        }
+        const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
+        if (t && t.mode === "item" && !t.countUp) {
+          sum += -t.seconds; // remaining<0 ⇒ over ⇒ positive delta
+          any = true;
+        }
+        deltaSec = any ? sum : null;
+      } else {
+        const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
+        if (t && t.mode === "item" && !t.countUp) deltaSec = -t.seconds;
+      }
+      if (deltaSec == null) return (c.hideWhenIdle ?? false) ? null : <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      const over = deltaSec > tol;
+      const under = deltaSec < -tol;
+      const color = over ? "var(--red-10)" : under ? "var(--green-10)" : null;
+      const text = !over && !under ? "On time" : fmtSignedDuration(deltaSec);
+      return (
+        <span style={color ? { ...ts, color } : ts}>
+          {text}
+          {(c.showLabel ?? false) && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{scope === "service" ? " service" : " item"}</span>}
         </span>
       );
     }
@@ -217,6 +277,51 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
           }}
         >
           {sec.name}
+        </span>
+      );
+    }
+    case "pp-timer": {
+      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const timers = pro?.timers ?? [];
+      const timer = c.timerName ? timers.find((t) => t.name === c.timerName) : timers[0];
+      if (!timer) return (c.hideWhenIdle ?? false) ? null : <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      // Color only on clearly-expired states; unknown/other states stay neutral.
+      const state = (timer.state ?? "").toLowerCase();
+      const danger = state.includes("over") || state.includes("expire");
+      const color = (c.warnStates ?? true) && danger ? "var(--red-10)" : null;
+      return (
+        <span style={color ? { ...ts, color } : ts}>
+          {(c.showLabel ?? true) && timer.name && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{`${timer.name} `}</span>}
+          {timer.time}
+        </span>
+      );
+    }
+    case "slide-progress": {
+      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const idx = pro?.slideIndex ?? null;
+      const count = pro?.slideCount ?? null;
+      const remaining = pro?.slidesRemaining ?? null;
+      const display = c.display ?? "fraction";
+      if (display === "bar") {
+        if (idx == null || !count) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+        const pct = Math.min(100, Math.round((idx / count) * 100));
+        return (
+          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center" }}>
+            <div style={{ width: "100%", height: `${0.02 * ctx.H}px`, background: "rgba(255,255,255,0.15)", borderRadius: 999, overflow: "hidden" }}>
+              <div style={{ width: `${pct}%`, height: "100%", background: ts.color ?? "#fff", borderRadius: 999 }} />
+            </div>
+          </div>
+        );
+      }
+      let text: string;
+      if (display === "remaining") text = remaining != null ? `${remaining} left` : "—";
+      else if (display === "percent") text = count && count > 0 && idx != null ? `${Math.round((idx / count) * 100)}%` : "—";
+      else text = idx != null && count != null ? `${idx} / ${count}` : "—";
+      const dim = text === "—";
+      return (
+        <span style={dim ? { ...ts, opacity: 0.4 } : ts}>
+          {text}
+          {(c.showLabel ?? false) && !dim && <span style={{ opacity: 0.6, fontSize: "0.6em" }}> slides</span>}
         </span>
       );
     }
@@ -454,6 +559,22 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
             <span style={{ color: batteryColor(lowest) }}>{lowest}%</span>
           )}
         </span>
+      );
+    }
+    case "wireless-channel": {
+      const d = c.channelId ? ctx.wireless.find((x) => x.channelId === c.channelId) : ctx.wireless[0];
+      if (!d) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      const show = c.show ?? { rf: true, battery: true, frequency: true };
+      return (
+        <div style={{ ...ts, opacity: d.online ? 1 : 0.4, display: "flex", flexDirection: "column", justifyContent: "center", width: "100%", height: "100%" }}>
+          {(c.showLabel ?? true) && <span style={{ fontSize: "0.55em", opacity: 0.65 }}>{d.name ?? d.channelId}</span>}
+          <span style={{ display: "inline-flex", gap: "0.5em", alignItems: "baseline", flexWrap: "wrap" }}>
+            {show.rf && d.rfBars != null && <span>{rfBarsGlyph(d.rfBars)}</span>}
+            {show.battery && d.battery != null && <span style={{ color: batteryColor(d.battery) }}>{d.battery}%</span>}
+            {show.frequency && d.frequencyLabel && <span style={{ opacity: 0.7 }}>{d.frequencyLabel}</span>}
+            {show.audio && d.audioLevel != null && <span style={{ opacity: 0.7 }}>{Math.round(d.audioLevel)} dB</span>}
+          </span>
+        </div>
       );
     }
     default:
@@ -1197,6 +1318,7 @@ export function useLayoutData() {
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();
+  const serviceTimeline = useServiceTimeline();
   const integrationsSnap = useIntegrations();
   const wireless = useWirelessChannels();
 
@@ -1210,7 +1332,7 @@ export function useLayoutData() {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -1218,7 +1340,7 @@ export function useLayoutData() {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, integrationsSnap, wireless, now, skewMs } = useLayoutData();
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData();
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -1262,7 +1384,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // with the window instead of the design canvas.
   const fill = canvas.fit === "fill";
   const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

@@ -398,6 +398,7 @@ interface LayoutStyle {
   borderColor?: string | null;
   borderWidth?: number; // fraction of canvas height
   textShadow?: number; // 0..1
+  boxShadow?: number; // 0..1 box elevation
   lineClamp?: number | null;
 }
 
@@ -405,6 +406,9 @@ type LayoutObjectConfig =
   | { type: "text"; text: string }
   | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h"; showMeridiem?: boolean }
   | { type: "countdown-timer"; hideWhenIdle?: boolean; warnSeconds?: number }
+  | { type: "service-pacing"; scope?: "item" | "service"; hideWhenIdle?: boolean; showLabel?: boolean }
+  | { type: "pp-timer"; timerName?: string | null; propresenterInstanceId?: string | null; warnStates?: boolean; hideWhenIdle?: boolean; showLabel?: boolean }
+  | { type: "slide-progress"; propresenterInstanceId?: string | null; display?: "fraction" | "remaining" | "percent" | "bar"; showLabel?: boolean }
   | { type: "current-slide-text"; propresenterInstanceId?: string | null }
   | { type: "next-slide-text"; propresenterInstanceId?: string | null }
   | { type: "current-service-item"; propresenterInstanceId?: string | null }
@@ -469,6 +473,12 @@ type LayoutObjectConfig =
       showOnline?: boolean;
       showBattery?: boolean;
       label?: string;
+      showLabel?: boolean;
+    }
+  | {
+      type: "wireless-channel";
+      channelId?: string | null;
+      show?: { rf?: boolean; battery?: boolean; frequency?: boolean; audio?: boolean };
       showLabel?: boolean;
     }
   | {
@@ -634,9 +644,14 @@ interface PropInstanceMeta {
   id: string;
   name: string;
 }
+interface PropInstanceConn {
+  state: ConnectionState;
+  message: string | null;
+}
 interface PropInstancesDTO {
   list: PropInstanceMeta[];
   status: Record<string, ProPresenterStatusDTO>;
+  conn: Record<string, PropInstanceConn>;
 }
 
 interface StageState {

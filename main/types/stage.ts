@@ -1,6 +1,7 @@
 // Shared stage types — frontend mirrors these shapes exactly.
 
 import type { OscArg, OscFeedbackBind } from "./osc.js";
+import type { ConnectionState } from "./integrations.js";
 
 /**
  * What a View renders: slot grid (default), dashboard, stage, transcription, or
@@ -155,6 +156,9 @@ export interface LayoutStyle {
   borderWidth?: number; // fraction of canvas height
   /** Drop-shadow strength 0..1 for legibility over video/photos. */
   textShadow?: number;
+  /** Box elevation 0..1 — a soft drop shadow under the object's box, so stacked
+   *  cards read as layered. 0 = none. */
+  boxShadow?: number;
   lineClamp?: number | null;
 }
 
@@ -166,6 +170,11 @@ export type LayoutObjectConfig =
   // timer is live; `warnSeconds` turns the readout amber once the remaining time
   // drops to/below that many seconds (it still goes red on overtime).
   | { type: "countdown-timer"; hideWhenIdle?: boolean; warnSeconds?: number }
+  // Service pacing — how far ahead/behind the plan we are right now. `scope: "item"`
+  // compares the current live item's elapsed time to its planned length (from
+  // pco:live); `scope: "service"` sums actual-vs-planned across the recorded service
+  // timeline for a running whole-service total. Over plan reads red, under reads green.
+  | { type: "service-pacing"; scope?: "item" | "service"; hideWhenIdle?: boolean; showLabel?: boolean }
   // ProPresenter-fed objects. `propresenterInstanceId` picks which configured
   // instance to read (omitted / "default" = the primary) — lets separate custom
   // views per auditorium point at different ProPresenter machines.
@@ -176,6 +185,13 @@ export type LayoutObjectConfig =
   | { type: "current-slide-notes"; propresenterInstanceId?: string | null }
   | { type: "slide-thumbnail"; propresenterInstanceId?: string | null }
   | { type: "section-chip"; which: "current" | "next" | "nextArrangement"; propresenterInstanceId?: string | null }
+  // A timer running INSIDE ProPresenter (its stage/countdown timers) — distinct from
+  // the PCO countdown. `timerName` picks one by name (blank = the first reported);
+  // `warnStates` colors the readout when the timer's state reads as overrun/expired.
+  | { type: "pp-timer"; timerName?: string | null; propresenterInstanceId?: string | null; warnStates?: boolean; hideWhenIdle?: boolean; showLabel?: boolean }
+  // ProPresenter slide position within the current presentation. `display`: "fraction"
+  // ("3 / 12"), "remaining" ("9 left"), "percent", or a progress "bar".
+  | { type: "slide-progress"; propresenterInstanceId?: string | null; display?: "fraction" | "remaining" | "percent" | "bar"; showLabel?: boolean }
   // Mic-slots grid. `source: "view"` embeds an existing slots-View's grid by
   // `sourceViewId`; `source: "inline"` defines its own slot set, stored per service
   // type keyed by this object's id (resolved into `StageState.slotsByLayoutObject`),
@@ -272,6 +288,15 @@ export type LayoutObjectConfig =
       showOnline?: boolean;
       showBattery?: boolean;
       label?: string;
+      showLabel?: boolean;
+    }
+  // A focused single wireless channel readout (e.g. a "Pastor's mic" tile). `channelId`
+  // is the namespaced device channel; `show` toggles which metrics appear. Reads the
+  // same live wireless data as the slots/summary.
+  | {
+      type: "wireless-channel";
+      channelId?: string | null;
+      show?: { rf?: boolean; battery?: boolean; frequency?: boolean; audio?: boolean };
       showLabel?: boolean;
     }
   // A live people count from the SenSource Vea integration ("people:count"
@@ -466,11 +491,20 @@ export interface PropInstanceMeta {
   name: string;
 }
 
+/** Live connection state for one instance, mirroring an integration card's badge
+ *  (connected / connecting / error / disconnected) plus an optional detail message. */
+export interface PropInstanceConn {
+  state: ConnectionState;
+  message: string | null;
+}
+
 /** All ProPresenter instances + their latest status, keyed by id. The primary
  *  instance is always present as id "default". Broadcast on "propresenter:instances". */
 export interface PropInstancesDTO {
   list: PropInstanceMeta[];
   status: Record<string, ProPresenterStatusDTO>;
+  /** Per-instance reachability, keyed by id — drives the settings status line. */
+  conn: Record<string, PropInstanceConn>;
 }
 
 /** One Smaart SPL meter (a calibrated device/channel) and its latest values. */

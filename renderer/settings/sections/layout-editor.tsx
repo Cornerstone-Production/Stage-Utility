@@ -7,6 +7,8 @@ import {
   EyeOffIcon,
   ChevronUpIcon,
   ChevronDownIcon,
+  ChevronsUpIcon,
+  ChevronsDownIcon,
   Grid3x3Icon,
   SaveIcon,
   DownloadIcon,
@@ -66,6 +68,7 @@ import {
   type FracRect,
 } from "../../main/layout-tree";
 import { useSplState } from "../../main/use-spl-state";
+import { useWirelessChannels } from "../../main/use-wireless-channels";
 import { usePeopleCountState } from "../../main/use-people-count-state";
 import { useObsState } from "../../main/use-obs-state";
 import { useOscTargets } from "../../main/use-osc-state";
@@ -82,7 +85,11 @@ import { InlineSlotsEditor } from "./inline-slots-editor";
 const TYPE_LABELS: Record<LayoutObjectType, string> = {
   text: "Text",
   clock: "Clock",
-  "countdown-timer": "Countdown timer",
+  "countdown-timer": "PCO countdown",
+  "service-pacing": "Service pacing",
+  "pp-timer": "ProPresenter timer",
+  "slide-progress": "Slide progress",
+  "wireless-channel": "Mic channel",
   "current-slide-text": "Current slide",
   "next-slide-text": "Next slide",
   "current-service-item": "Current item",
@@ -118,9 +125,9 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
 const PALETTE_GROUPS: { label: string; types: LayoutObjectType[] }[] = [
   { label: "Layout", types: ["container", "shape", "image", "brand-logo"] },
   { label: "Text & time", types: ["text", "clock", "countdown-timer"] },
-  { label: "PCO / service", types: ["live-controls", "current-service-item", "next-service-item", "service-order", "plan-attachment"] },
-  { label: "ProPresenter", types: ["current-slide-text", "next-slide-text", "current-slide-notes", "slide-thumbnail", "section-chip"] },
-  { label: "Mics & RF", types: ["slots-grid", "charger-battery", "wireless-summary"] },
+  { label: "PCO / service", types: ["live-controls", "current-service-item", "next-service-item", "service-order", "service-pacing", "plan-attachment"] },
+  { label: "ProPresenter", types: ["current-slide-text", "next-slide-text", "current-slide-notes", "slide-thumbnail", "section-chip", "pp-timer", "slide-progress"] },
+  { label: "Mics & RF", types: ["slots-grid", "charger-battery", "wireless-summary", "wireless-channel"] },
   { label: "Audio (SPL)", types: ["spl-meter"] },
   { label: "Transcription", types: ["transcript-strip"] },
   { label: "People", types: ["people-counter", "people-panel", "people-graph"] },
@@ -159,6 +166,27 @@ const CARD_PRESETS: Record<CardAccent, LayoutStyle> = {
   flat: { background: null, borderColor: null, borderWidth: 0, cornerRadius: 0, padding: 0 },
 };
 
+// Surface/elevation presets — a "style type" picker. Orthogonal to the color
+// accents above: these set fill/border/elevation as a one-click "look" and leave
+// the text color alone. They write the shared style fields, so the Fill / Border /
+// Elevation controls still fine-tune afterward.
+type SurfaceKind = "flat" | "glass" | "elevated" | "solid" | "outline";
+const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
+  flat: { background: null, borderColor: null, borderWidth: 0, boxShadow: 0 },
+  glass: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0 },
+  elevated: { background: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0.6 },
+  solid: { background: "var(--gray-2)", borderColor: null, borderWidth: 0, cornerRadius: 0.0148, boxShadow: 0.35 },
+  outline: { background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015, cornerRadius: 0.0148, boxShadow: 0 },
+};
+
+// Nearest labeled stop for the single Elevation slider (None/Low/Med/High).
+function elevationLabel(v: number): string {
+  if (v <= 0.175) return "None";
+  if (v <= 0.5) return "Low";
+  if (v <= 0.825) return "Med";
+  return "High";
+}
+
 function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
   switch (type) {
     case "text": return { type: "text", text: "Text" };
@@ -172,6 +200,10 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "osc-button": return { type: "osc-button", targetId: null, label: "Button", address: "/", args: [], feedback: null };
     case "integration-status": return { type: "integration-status", integrationId: null, showLabel: true };
     case "wireless-summary": return { type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" };
+    case "wireless-channel": return { type: "wireless-channel", channelId: null, show: { rf: true, battery: true, frequency: true, audio: false }, showLabel: true };
+    case "service-pacing": return { type: "service-pacing", scope: "item", hideWhenIdle: false, showLabel: false };
+    case "pp-timer": return { type: "pp-timer", timerName: null, propresenterInstanceId: null, warnStates: true, hideWhenIdle: false, showLabel: true };
+    case "slide-progress": return { type: "slide-progress", propresenterInstanceId: null, display: "fraction", showLabel: false };
     case "people-counter": return { type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true };
     case "people-graph": return { type: "people-graph", metric: "occupancy", showLabel: true, label: "In room" };
     case "people-panel": return { type: "people-panel", metrics: ["occupancy", "peak", "attendance"], showLabels: true, orientation: "row" };
@@ -202,6 +234,10 @@ function defaultStyle(type: LayoutObjectType): LayoutStyle {
   // People counter reads as a big bold number.
   if (type === "people-counter") return { fontSize: 0.12, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
   if (type === "baptism-timer") return { fontSize: 0.14, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
+  // ProPresenter timer + service pacing read as big bold tabular numbers, like the clock/countdown.
+  if (type === "pp-timer" || type === "service-pacing") return { fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
+  // A single mic channel reads as a compact glass tile.
+  if (type === "wireless-channel") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
   if (type === "people-panel") return { fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
   // Status / wireless summary read as a compact label-sized pill.
   if (type === "integration-status" || type === "wireless-summary") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
@@ -681,21 +717,29 @@ function EditorCanvas({
   // previews here so editing can't fire real PCO commands.
   const fullCtx: LayoutRenderCtx = { ...ctx, H: fill ? boxH : canvas.height, ndiSource, interactive: false };
 
-  // Grid is drawn as its own overlay layer (below) that shares the EXACT box of the
-  // scaled content layer — so cells and object coords line up regardless of the
-  // canvas box's 1px border / border-box sizing. SQUARE cells (same px on both
-  // axes) so the lines match the snap step exactly on any canvas shape.
-  const cellPx = boxW / GRID;
+  // The grid lives INSIDE the content layer (see below) so it shares the object's
+  // EXACT box + transform. In letterbox mode that means the grid is drawn once in
+  // fixed design-space px and only the transform scale changes on resize (GPU
+  // composited, no per-frame reflow) — and Safari can't rasterize the grid on a
+  // different pixel grid than the objects. The old sibling boxW×boxH layer used
+  // CSS background tiling in screen px while objects were transform-scaled, so the
+  // two diverged in Safari (objects off the grid) and jittered while resizing.
+  // Cells are SQUARE (same px on both axes) so lines match the snap step exactly.
+  const contentW = fill ? boxW : canvas.width;
+  const contentH = fill ? boxH : canvas.height;
+  const contentCell = contentW / GRID;
+  // Keep lines ~1px on screen after the letterbox transform scales the layer down.
+  const gridLine = fill || scale <= 0 ? 1 : 1 / scale;
   const gridLayer: CSSProperties = {
     position: "absolute",
     top: 0,
     left: 0,
-    width: boxW,
-    height: boxH,
+    width: contentW,
+    height: contentH,
     pointerEvents: "none",
     backgroundImage:
-      "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)",
-    backgroundSize: `${cellPx}px ${cellPx}px`,
+      `linear-gradient(rgba(255,255,255,0.06) ${gridLine}px, transparent ${gridLine}px), linear-gradient(90deg, rgba(255,255,255,0.06) ${gridLine}px, transparent ${gridLine}px)`,
+    backgroundSize: `${contentCell}px ${contentCell}px`,
   };
 
   return (
@@ -723,9 +767,10 @@ function EditorCanvas({
           }}
           onPointerDown={interactive ? () => onSelect(null) : undefined}
         >
-          {gridOn && <div style={gridLayer} />}
           {/* Content layer (visual only). Letterbox: design dims scaled. Fill: the
-              layer IS the box (objects positioned by % of the live box). */}
+              layer IS the box (objects positioned by % of the live box). The grid
+              is the first child so it shares this layer's exact box + transform —
+              objects can never drift off it, in any browser. */}
           <div
             style={
               fill
@@ -737,6 +782,7 @@ function EditorCanvas({
                   }
             }
           >
+            {gridOn && <div style={gridLayer} />}
             {sorted.map((o) => (
               <EditorObject key={o.id} o={o} ctx={fullCtx} />
             ))}
@@ -920,6 +966,8 @@ export function LayoutEditor({
   const [canvas, setCanvas] = useState<LayoutCanvas>(initial.canvas);
   const [objects, setObjects] = useState<LayoutObject[]>(initial.objects);
   const [selectedId, setSelectedId] = useState<string | null>(initial.objects[0]?.id ?? null);
+  // Layers-panel drag-to-reorder: the row currently being hovered as a drop target.
+  const [dragLayerOver, setDragLayerOver] = useState<string | null>(null);
   const [history, setHistory] = useState<LayoutObject[][]>([]);
   const [dirty, setDirty] = useState(false);
   const [gridOn, setGridOn] = useState(true);
@@ -1221,6 +1269,32 @@ export function LayoutEditor({
         : reorderScope(prev);
     });
   }
+
+  // Drag-to-reorder in the Layers panel: move `id` to `targetId`'s slot, but only
+  // within the same sibling scope (a cross-parent drop is ignored, keeping z sane).
+  function moveLayer(id: string, targetId: string) {
+    if (id === targetId) return;
+    const pa = getParentOf(objects, id);
+    const pb = getParentOf(objects, targetId);
+    if ((pa?.id ?? null) !== (pb?.id ?? null)) return; // different scopes — no-op
+    pushHistory();
+    const reindex = (list: LayoutObject[]): LayoutObject[] => {
+      const sorted = [...list].sort((a, b) => a.z - b.z);
+      const from = sorted.findIndex((o) => o.id === id);
+      const to = sorted.findIndex((o) => o.id === targetId);
+      if (from === -1 || to === -1) return list;
+      const [moved] = sorted.splice(from, 1);
+      const insertAt = sorted.findIndex((o) => o.id === targetId);
+      sorted.splice(insertAt, 0, moved);
+      return sorted.map((o, i) => ({ ...o, z: i + 1 }));
+    };
+    setObjects((prev) => {
+      const parent = getParentOf(prev, id);
+      return parent
+        ? mapById(prev, parent.id, (p) => ({ ...p, children: reindex(p.children ?? []) }))
+        : reindex(prev);
+    });
+  }
   function undo() {
     setHistory((h) => {
       if (h.length === 0) return h;
@@ -1433,9 +1507,14 @@ export function LayoutEditor({
               <button
                 key={o.id}
                 type="button"
+                draggable
                 onClick={() => setSelectedId(o.id)}
+                onDragStart={(e) => { e.dataTransfer.setData("text/plain", o.id); e.dataTransfer.effectAllowed = "move"; }}
+                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragLayerOver !== o.id) setDragLayerOver(o.id); }}
+                onDragLeave={() => setDragLayerOver((cur) => (cur === o.id ? null : cur))}
+                onDrop={(e) => { e.preventDefault(); const src = e.dataTransfer.getData("text/plain"); setDragLayerOver(null); if (src) moveLayer(src, o.id); }}
                 style={{ paddingLeft: 8 + depth * 14 }}
-                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left ${o.id === selectedId ? "bg-gray-a4" : "hover:bg-gray-a3"}`}
+                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${o.id === selectedId ? "bg-gray-a4" : "hover:bg-gray-a3"} ${dragLayerOver === o.id ? "ring-1 ring-blue-9" : ""}`}
               >
                 <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">
                   {o.config.type === "container" ? `${TYPE_LABELS[o.config.type]} (${o.children?.length ?? 0})` : TYPE_LABELS[o.config.type]}
@@ -1766,6 +1845,8 @@ const PROP_OBJECT_TYPES = new Set<LayoutObjectConfig["type"]>([
   "current-slide-notes",
   "slide-thumbnail",
   "section-chip",
+  "pp-timer",
+  "slide-progress",
 ]);
 
 function Inspector({
@@ -1798,6 +1879,7 @@ function Inspector({
   const c = o.config;
   const chargerBays = useStageState().state?.chargerBays ?? [];
   const spl = useSplState();
+  const wirelessChannels = useWirelessChannels();
   const obs = useObsState();
   const peopleCount = usePeopleCountState();
   const oscTargets = useOscTargets();
@@ -1821,8 +1903,10 @@ function Inspector({
         <Button variant="transparent" size="small" iconOnly onClick={onToggleLock} aria-label={o.locked ? "Unlock" : "Lock"}>
           {o.locked ? <LockIcon className="size-3.5 text-amber-10" /> : <UnlockIcon className="size-3.5 text-gray-9" />}
         </Button>
-        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("up")} aria-label="Bring forward"><ChevronUpIcon className="size-3.5" /></Button>
-        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("down")} aria-label="Send backward"><ChevronDownIcon className="size-3.5" /></Button>
+        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("front")} aria-label="Bring to front" title="Bring to front"><ChevronsUpIcon className="size-3.5" /></Button>
+        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("up")} aria-label="Bring forward" title="Bring forward"><ChevronUpIcon className="size-3.5" /></Button>
+        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("down")} aria-label="Send backward" title="Send backward"><ChevronDownIcon className="size-3.5" /></Button>
+        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("back")} aria-label="Send to back" title="Send to back"><ChevronsDownIcon className="size-3.5" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={onDuplicate} aria-label="Duplicate"><CopyIcon className="size-3.5 text-gray-9" /></Button>
         <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onRemove} aria-label="Delete"><Trash2Icon className={`size-3.5 ${locked ? "text-gray-7" : "text-red-10"}`} /></Button>
       </div>
@@ -1874,6 +1958,38 @@ function Inspector({
             </SelectContent>
           </Select>
         </Row>
+      )}
+      {c.type === "pp-timer" && (
+        <>
+          <RowText
+            label="Timer name"
+            hint="Exact name of a timer running INSIDE ProPresenter — distinct from the PCO countdown. Leave blank to show the first timer ProPresenter reports."
+            value={c.timerName ?? ""}
+            placeholder="First timer"
+            onChange={(v) => onConfig({ ...c, timerName: v.trim() || null })}
+          />
+          <RowSwitch label="Color on overrun" checked={c.warnStates ?? true} onChange={(v) => onConfig({ ...c, warnStates: v })} />
+          <RowSwitch label="Show timer name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+          <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
+        </>
+      )}
+      {c.type === "slide-progress" && (
+        <>
+          <RowToggle
+            label="Display"
+            value={c.display ?? "fraction"}
+            options={[
+              { value: "fraction", label: "3 / 12" },
+              { value: "remaining", label: "Left" },
+              { value: "percent", label: "%" },
+              { value: "bar", label: "Bar" },
+            ]}
+            onChange={(v) => onConfig({ ...c, display: v })}
+          />
+          {(c.display ?? "fraction") !== "bar" && (
+            <RowSwitch label="Show 'slides' label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+          )}
+        </>
       )}
       {c.type === "service-order" && (
         <>
@@ -1989,6 +2105,37 @@ function Inspector({
           {(c.showLabel ?? false) && (
             <RowText label="Label" value={c.label ?? ""} placeholder="Mics" onChange={(v) => onConfig({ ...c, label: v })} />
           )}
+        </>
+      )}
+      {c.type === "wireless-channel" && (
+        <>
+          <Row label="Channel" hint="Which wireless channel this tile shows. Auto uses the first one detected.">
+            <Select value={c.channelId ?? ""} onValueChange={(v: string) => onConfig({ ...c, channelId: v || null })}>
+              <SelectTrigger><SelectValue placeholder={wirelessChannels.length ? "Auto (first)" : "No channels detected"} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Auto (first)</SelectItem>
+                {wirelessChannels.map((d) => <SelectItem key={d.channelId} value={d.channelId}>{d.name ?? d.channelId}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Row>
+          <RowSwitch label="RF signal" checked={c.show?.rf ?? true} onChange={(v) => onConfig({ ...c, show: { ...c.show, rf: v } })} />
+          <RowSwitch label="Battery %" checked={c.show?.battery ?? true} onChange={(v) => onConfig({ ...c, show: { ...c.show, battery: v } })} />
+          <RowSwitch label="Frequency" checked={c.show?.frequency ?? true} onChange={(v) => onConfig({ ...c, show: { ...c.show, frequency: v } })} />
+          <RowSwitch label="Audio level" checked={c.show?.audio ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, audio: v } })} />
+          <RowSwitch label="Show channel name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+        </>
+      )}
+      {c.type === "service-pacing" && (
+        <>
+          <RowToggle
+            label="Scope"
+            hint="Current item compares the live item's elapsed time to its planned length. Whole service sums how far ahead/behind the entire service is running (needs a service timeline recording)."
+            value={c.scope ?? "item"}
+            options={[{ value: "item", label: "Current item" }, { value: "service", label: "Whole service" }]}
+            onChange={(v) => onConfig({ ...c, scope: v })}
+          />
+          <RowSwitch label="Show scope label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+          <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
         </>
       )}
       {c.type === "slots-grid" && (() => {
@@ -2335,10 +2482,18 @@ function Inspector({
 
       {/* Card style presets — one-click dashboard "glass tile" look on any object,
           and "Flat" to clear it back. Just writes the shared style fields below. */}
-      <Row label="Card">
+      <Row label="Card" hint="Color accent — a tinted glass fill. Combine with a Surface look below.">
         <div className="flex flex-wrap gap-1">
           {([["neutral", "Glass"], ["green", "Green"], ["red", "Red"], ["amber", "Amber"], ["flat", "Flat"]] as [CardAccent, string][]).map(([a, label]) => (
             <Button key={a} variant="filled" size="small" onClick={() => onStyle(CARD_PRESETS[a])}>{label}</Button>
+          ))}
+        </div>
+      </Row>
+      {/* Surface/elevation "style type" — one-click fill+border+shadow look. */}
+      <Row label="Surface" hint="A one-click look: Flat (none), Glass (frosted), Elevated (glass + shadow), Solid (opaque), Outline (border only). Fine-tune with Fill / Border / Elevation below.">
+        <div className="flex flex-wrap gap-1">
+          {([["flat", "Flat"], ["glass", "Glass"], ["elevated", "Elevated"], ["solid", "Solid"], ["outline", "Outline"]] as [SurfaceKind, string][]).map(([k, label]) => (
+            <Button key={k} variant="filled" size="small" onClick={() => onStyle(SURFACE_PRESETS[k])}>{label}</Button>
           ))}
         </div>
       </Row>
@@ -2409,6 +2564,28 @@ function Inspector({
           suffix="px"
           onChange={(px) => onStyle({ borderWidth: px / canvas.height, borderColor: s.borderColor ?? "#ffffff" })}
         />
+      </Row>
+      {/* Elevation: one slider with labeled None/Low/Med/High stops (ticks), fine
+          values allowed in between. Drives the box's drop shadow for layered depth. */}
+      <Row label="Elevation" hint="Soft drop shadow under this object's box — lifts it above whatever it overlaps. Snaps toward None/Low/Med/High; drag for in-between.">
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={s.boxShadow ?? 0}
+          onChange={(e) => onStyle({ boxShadow: parseFloat(e.target.value) })}
+          list="elevation-stops"
+          className="flex-1 min-w-0 accent-blue-9"
+          aria-label="Elevation"
+        />
+        <datalist id="elevation-stops">
+          <option value="0" />
+          <option value="0.35" />
+          <option value="0.65" />
+          <option value="1" />
+        </datalist>
+        <span className="w-10 shrink-0 text-caption2 text-gray-9 text-right tabular-nums">{elevationLabel(s.boxShadow ?? 0)}</span>
       </Row>
 
       <Separator />
