@@ -857,7 +857,7 @@ export class StageController {
   private startUpdateChecks(): void {
     if (this.updateCheckTimer) clearInterval(this.updateCheckTimer);
     // Initial check shortly after boot, then hourly.
-    setTimeout(() => void this.updateCheckTick(), 30_000);
+    setTimeout(() => void this.updateCheckTick(), 3_000);
     this.updateCheckTimer = setInterval(() => void this.updateCheckTick(), 60 * 60 * 1000);
   }
 

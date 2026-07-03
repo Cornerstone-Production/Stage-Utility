@@ -244,6 +244,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "update:setTrack":
       return post<T>("/api/update/track", p);
 
+    case "update:restart":
+      return post<T>("/api/update/restart");
+
     // ── Config snapshot (backup / restore) ───────────────────────────────
     case "config:listSnapshots":
       return apiFetch<T>("/api/config/snapshots");

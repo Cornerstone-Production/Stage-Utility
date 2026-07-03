@@ -1425,6 +1425,14 @@ export class RemoteServer {
       }
       return;
     }
+    if (method === "POST" && pathname === "/api/update/restart") {
+      try {
+        json(res, updater.restart());
+      } catch (err) {
+        error(res, String(err instanceof Error ? err.message : err));
+      }
+      return;
+    }
     if (method === "POST" && pathname === "/api/update/auto") {
       const body = await readBody(req) as Record<string, unknown>;
       const partial: { enabled?: boolean; dayOfWeek?: number | null; hour?: number } = {};

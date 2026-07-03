@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon } from "lucide-react";
+import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon } from "lucide-react";
 import { invoke, onNotification } from "../../lib/api";
 import { CompanionInfoPanel } from "../../components/companion-info-panel";
 import {
@@ -98,6 +98,14 @@ function UpdatesPanel({
     }
   }
 
+  async function onRestart() {
+    if (await confirm({ title: "Restart the server?", message: "The displays will go blank and reload for a few seconds while the server restarts. No update is installed.", confirmLabel: "Restart" })) {
+      void invoke("update:restart").catch((e) =>
+        window.alert(`Restart failed: ${e instanceof Error ? e.message : String(e)}`),
+      );
+    }
+  }
+
   async function onSwitchTrack() {
     const branch = trackSel ?? s?.branch ?? null;
     if (!branch || branch === s?.branch) return;
@@ -114,8 +122,11 @@ function UpdatesPanel({
     }
   }
 
-  // Not a git checkout → can't self-update.
-  if (s && !s.isGitRepo) {
+  // Not a git checkout → can't self-update. Only show this once a check has
+  // actually confirmed it (lastCheckedAt set) — otherwise a freshly-restarted
+  // server briefly serves the default `isGitRepo:false` and flashes this banner
+  // before the first check runs.
+  if (s && !s.isGitRepo && s.lastCheckedAt) {
     return (
       <FieldSet title="Updates">
         <FieldGroup>
@@ -219,6 +230,10 @@ function UpdatesPanel({
             <Button variant="accent" size="small" onClick={onUpdateNow} disabled={updating || behind === 0}>
               {updating ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
               {updating ? "Updating…" : "Update now"}
+            </Button>
+            <Button variant="filled" size="small" onClick={onRestart} disabled={updating}>
+              <RotateCwIcon className="size-3.5 text-gray-9" />
+              Restart
             </Button>
           </div>
         </Field>

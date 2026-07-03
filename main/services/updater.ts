@@ -221,6 +221,21 @@ class Updater {
     return this.launch(branch, true);
   }
 
+  /**
+   * Restart the server process (no git needed). Relies on the service manager
+   * (systemd/launchd/NSSM) to relaunch it — the same mechanism the post-update
+   * kill depends on. Flags "restarting" so the UI shows the reload step, then
+   * exits after the HTTP response has flushed.
+   */
+  restart(): UpdateStatus {
+    if (this.status.phase === "updating") throw new Error("An update is already running.");
+    console.log("[updater] manual restart requested — exiting for the service manager to relaunch");
+    this.status = { ...this.status, phase: "updating", step: "restarting" };
+    this.broadcast();
+    setTimeout(() => process.exit(0), 600);
+    return this.getStatus();
+  }
+
   /** Spawn the detached update/switch script and enter the "updating" phase. */
   private launch(branch: string, checkout: boolean): UpdateStatus {
     const isWin = process.platform === "win32";
