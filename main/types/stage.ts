@@ -1,5 +1,8 @@
 // Shared stage types — frontend mirrors these shapes exactly.
 
+import type { OscArg, OscFeedbackBind } from "./osc.js";
+import type { ConnectionState } from "./integrations.js";
+
 /**
  * What a View renders: slot grid (default), dashboard, stage, transcription, or
  * a "custom" free-form layout authored with the visual editor (see {@link LayoutDTO}).
@@ -122,6 +125,13 @@ export interface LayoutCanvas {
   height: number;
   /** Solid background behind all objects (under NDI). "#rrggbb[aa]" or null. */
   background?: string | null;
+  /**
+   * How the layout fits its display/editor area:
+   * - "contain" (default): letterbox the design aspect (bars on mismatched screens).
+   * - "fill": fill the whole window — objects (fractional) reflow to the window's
+   *   shape, fonts scale by window height; no bars, no distortion.
+   */
+  fit?: "contain" | "fill";
 }
 
 export type LayoutHAlign = "left" | "center" | "right";
@@ -146,6 +156,9 @@ export interface LayoutStyle {
   borderWidth?: number; // fraction of canvas height
   /** Drop-shadow strength 0..1 for legibility over video/photos. */
   textShadow?: number;
+  /** Box elevation 0..1 — a soft drop shadow under the object's box, so stacked
+   *  cards read as layered. 0 = none. */
+  boxShadow?: number;
   lineClamp?: number | null;
 }
 
@@ -153,21 +166,41 @@ export interface LayoutStyle {
 export type LayoutObjectConfig =
   | { type: "text"; text: string }
   | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h"; showMeridiem?: boolean }
-  | { type: "countdown-timer" } // PCO Live
-  | { type: "current-slide-text" }
-  | { type: "next-slide-text" }
-  | { type: "current-service-item" }
-  | { type: "next-service-item" }
-  | { type: "current-slide-notes" }
-  | { type: "slide-thumbnail" }
-  | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }
+  // PCO Live countdown. `hideWhenIdle` renders nothing (instead of "—") when no
+  // timer is live; `warnSeconds` turns the readout amber once the remaining time
+  // drops to/below that many seconds (it still goes red on overtime).
+  | { type: "countdown-timer"; hideWhenIdle?: boolean; warnSeconds?: number }
+  // Service pacing — how far ahead/behind the plan we are right now. `scope: "item"`
+  // compares the current live item's elapsed time to its planned length (from
+  // pco:live); `scope: "service"` sums actual-vs-planned across the recorded service
+  // timeline for a running whole-service total. Over plan reads red, under reads green.
+  | { type: "service-pacing"; scope?: "item" | "service"; hideWhenIdle?: boolean; showLabel?: boolean }
+  // ProPresenter-fed objects. `propresenterInstanceId` picks which configured
+  // instance to read (omitted / "default" = the primary) — lets separate custom
+  // views per auditorium point at different ProPresenter machines.
+  | { type: "current-slide-text"; propresenterInstanceId?: string | null }
+  | { type: "next-slide-text"; propresenterInstanceId?: string | null }
+  | { type: "current-service-item"; propresenterInstanceId?: string | null }
+  | { type: "next-service-item"; propresenterInstanceId?: string | null }
+  | { type: "current-slide-notes"; propresenterInstanceId?: string | null }
+  | { type: "slide-thumbnail"; propresenterInstanceId?: string | null }
+  | { type: "section-chip"; which: "current" | "next" | "nextArrangement"; propresenterInstanceId?: string | null }
+  // A timer running INSIDE ProPresenter (its stage/countdown timers) — distinct from
+  // the PCO countdown. `timerName` picks one by name (blank = the first reported);
+  // `warnStates` colors the readout when the timer's state reads as overrun/expired.
+  | { type: "pp-timer"; timerName?: string | null; propresenterInstanceId?: string | null; warnStates?: boolean; hideWhenIdle?: boolean; showLabel?: boolean }
+  // ProPresenter slide position within the current presentation. `display`: "fraction"
+  // ("3 / 12"), "remaining" ("9 left"), "percent", or a progress "bar".
+  | { type: "slide-progress"; propresenterInstanceId?: string | null; display?: "fraction" | "remaining" | "percent" | "bar"; showLabel?: boolean }
   // Mic-slots grid. `source: "view"` embeds an existing slots-View's grid by
   // `sourceViewId`; `source: "inline"` defines its own slot set, stored per service
   // type keyed by this object's id (resolved into `StageState.slotsByLayoutObject`),
   // with `slotsLayout` holding its physical-inch alignment. Missing `source` ==
   // "view" (back-compat with existing objects).
   | { type: "slots-grid"; source?: "view" | "inline"; sourceViewId?: string | null; slotsLayout?: SlotsLayout | null }
-  | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
+  // `hideChannels` drops lines from the named ProdCom channels (by channel name)
+  // so a strip can show only the channels you care about.
+  | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number; hideChannels?: string[] }
   | { type: "live-controls" } // PCO Services Live Prev/Next buttons (interactive)
   // Shure SBC charger bay battery levels. `bays` lists which bays to show (by
   // ChargerBay id) with an optional custom label; `show` toggles each metric.
@@ -204,8 +237,121 @@ export type LayoutObjectConfig =
       metricKey?: string | null;
       showLabel?: boolean;
       thresholds?: { amber: number; red: number } | null;
+      /** Hold the highest value seen (resets on reload / meter change) instead of the live reading. */
+      peakHold?: boolean;
+    }
+  // Live OBS output indicator (from the OBS integration, `StageState`-adjacent
+  // `obs:status` channel). `mode` picks which output to reflect — recording
+  // (default, back-compat), streaming, or virtual camera. Turns red while that
+  // output is active. The label texts override the per-mode defaults
+  // ("OBS: Recording" / "OBS: Standby" / "OBS: Offline" for recording, etc.).
+  // `hideWhenIdle` makes it a pure tally light (render nothing unless active);
+  // `fillWhenRecording` fills the whole box red instead of just coloring the
+  // text; `showTimecode` appends the record duration (recording mode only).
+  | {
+      type: "obs-status";
+      mode?: "recording" | "streaming" | "virtualcam";
+      recordingText?: string;
+      idleText?: string;
+      offlineText?: string;
+      showTimecode?: boolean;
+      hideWhenIdle?: boolean;
+      fillWhenRecording?: boolean;
+    }
+  // An OSC control button. Tapping it (on a real display / operator surface, never
+  // in the editor) sends `address` + `args` to the chosen OSC target. `feedback`
+  // optionally lights the button from incoming OSC. Send-only if no feedback bind.
+  | {
+      type: "osc-button";
+      targetId?: string | null;
+      label?: string;
+      address: string;
+      args?: OscArg[];
+      feedback?: OscFeedbackBind | null;
     }
   | { type: "shape"; shape: "rect" | "ellipse" }
+  // A connection-status light for any integration, driven by the
+  // "integrations:state-changed" channel. `integrationId` selects which (null =
+  // first). Dot color reflects the live connection (green/amber/red/grey);
+  // `label` overrides the integration's friendly name.
+  | {
+      type: "integration-status";
+      integrationId?: string | null;
+      label?: string;
+      showLabel?: boolean;
+    }
+  // A compact wireless fleet summary computed from all configured connections'
+  // channels: `showOnline` → "online/total", `showBattery` → the lowest live
+  // battery % (colored). Optional `label` prefix when `showLabel`.
+  | {
+      type: "wireless-summary";
+      showOnline?: boolean;
+      showBattery?: boolean;
+      label?: string;
+      showLabel?: boolean;
+    }
+  // A focused single wireless channel readout (e.g. a "Pastor's mic" tile). `channelId`
+  // is the namespaced device channel; `show` toggles which metrics appear. Reads the
+  // same live wireless data as the slots/summary.
+  | {
+      type: "wireless-channel";
+      channelId?: string | null;
+      show?: { rf?: boolean; battery?: boolean; frequency?: boolean; audio?: boolean };
+      showLabel?: boolean;
+    }
+  // A live people count from the SenSource Vea integration ("people:count"
+  // channel). `metric` picks attendance (Σins today) or occupancy (in-room now);
+  // `zoneId` null = building total, else a single zone. Optional `label` shown
+  // when `showLabel`.
+  | {
+      type: "people-counter";
+      // attendance (Σins) / occupancy (in-room now) resolve per-zone or building;
+      // peak/min/avg (today, from the space endpoint) are building-only.
+      metric?: "attendance" | "occupancy" | "peak" | "min" | "avg";
+      zoneId?: string | null;
+      label?: string;
+      showLabel?: boolean;
+    }
+  // The current PCO service order as a full list. Highlights the live item and
+  // shows each item's notes (e.g. vocal parts). `noteCategories`: null = all
+  // present, [] = none, [..] = chosen. `scroll`: "auto" keeps the live item in
+  // view; "static" renders in place. Reuses the cached plan-items pipeline.
+  | {
+      type: "service-order";
+      noteCategories?: string[] | null;
+      showLength?: boolean;
+      highlightLive?: boolean;
+      scroll?: "auto" | "static";
+      /** Shrink the text so the whole order fits the object height (no scroll). */
+      autoFit?: boolean;
+    }
+  // A trend sparkline of the building-total people count over the rolling
+  // in-memory history (people:count `history`). `metric` picks attendance or
+  // occupancy; optional `label` + current value shown when `showLabel`.
+  | {
+      type: "people-graph";
+      metric?: "attendance" | "occupancy";
+      label?: string;
+      showLabel?: boolean;
+    }
+  // A multi-metric people summary — several building-wide counts side by side,
+  // each toggleable. `metrics` is the ordered set shown. avgService is the mean
+  // peak occupancy across recorded services (from Attendance history).
+  | {
+      type: "people-panel";
+      metrics?: ("occupancy" | "peak" | "attendance" | "min" | "avg" | "avgService" | "capacity" | "vsAverage")[];
+      showLabels?: boolean;
+      orientation?: "row" | "column";
+    }
+  // A readout from the baptism timer (operator stopwatch). `field` picks what to
+  // show: the live phase + running clock, or a session stat. Self-contained — no
+  // integration required.
+  | {
+      type: "baptism-timer";
+      field?: "live" | "count" | "total" | "average" | "last";
+      label?: string;
+      showLabel?: boolean;
+    }
   // A styled box that holds other objects. Children are positioned as fractions
   // of THIS container's box (not the canvas), so moving/resizing the container
   // moves/scales its contents as a unit. The box itself is drawn from `style`
@@ -225,6 +371,9 @@ export interface LayoutObject {
   /** Paint order WITHIN the object's sibling scope; higher = front. */
   z: number;
   hidden?: boolean;
+  /** When true, the editor won't move/resize/reparent/delete this object — and,
+   *  for a container, anything nested inside it — until it's unlocked. */
+  locked?: boolean;
   style?: LayoutStyle;
   config: LayoutObjectConfig;
   /** Nested objects, positioned relative to this object's box. Only meaningful
@@ -244,6 +393,15 @@ export interface LayoutTemplate {
   id: string;
   name: string;
   layout: LayoutDTO;
+  createdAt: string;
+}
+
+/** A named, reusable single object (typically a container + its children) that can
+ *  be inserted into any custom View — a "group" in the editor. */
+export interface LayoutGroup {
+  id: string;
+  name: string;
+  object: LayoutObject;
   createdAt: string;
 }
 
@@ -286,6 +444,14 @@ export interface PcoLiveDTO {
   targetAt: string | null;
   /** Server clock at send time (ISO) so the client can correct for skew. */
   serverNow: string;
+  /** Current item title from the PCO PLAN order (authoritative), or null. */
+  currentItemTitle: string | null;
+  /** Next non-header item title from the PCO PLAN order, or null. */
+  nextItemTitle: string | null;
+  /** PCO "service" plan_time id for this occurrence (9am vs 11am) — keys SPL recording. */
+  serviceTimeId: string | null;
+  /** ISO start of the chosen service occurrence (also the preservice target). */
+  serviceTimeStartsAt: string | null;
 }
 
 /** Live ProPresenter status (pushed on "propresenter:status"). */
@@ -319,6 +485,28 @@ export interface ProPresenterStatusDTO {
   slidePreviewKey: string | null;
 }
 
+/** Metadata for one configured ProPresenter instance (id + display name). */
+export interface PropInstanceMeta {
+  id: string;
+  name: string;
+}
+
+/** Live connection state for one instance, mirroring an integration card's badge
+ *  (connected / connecting / error / disconnected) plus an optional detail message. */
+export interface PropInstanceConn {
+  state: ConnectionState;
+  message: string | null;
+}
+
+/** All ProPresenter instances + their latest status, keyed by id. The primary
+ *  instance is always present as id "default". Broadcast on "propresenter:instances". */
+export interface PropInstancesDTO {
+  list: PropInstanceMeta[];
+  status: Record<string, ProPresenterStatusDTO>;
+  /** Per-instance reachability, keyed by id — drives the settings status line. */
+  conn: Record<string, PropInstanceConn>;
+}
+
 /** One Smaart SPL meter (a calibrated device/channel) and its latest values. */
 export interface SplMeterDTO {
   deviceName: string;
@@ -337,15 +525,79 @@ export interface SplMetricsDTO {
   meters: Record<string, SplMeterDTO>;
 }
 
+/** Live OBS Studio output state (pushed on "obs:status"). `connected` is the
+ *  obs-websocket link; the rest reflect OBS's outputs. v1 surfaces recording for
+ *  the layout object, but streaming/virtual-cam are carried for future objects. */
+export interface ObsStatusDTO {
+  connected: boolean;
+  recording: boolean;
+  recordPaused: boolean;
+  streaming: boolean;
+  virtualCam: boolean;
+  /** "HH:MM:SS" record duration while recording, else null. */
+  recordTimecode: string | null;
+}
+
+/** Live people counts from the SenSource Vea integration (pushed on
+ *  "people:count"). Counts are polled (SenSource has no real-time endpoint) and
+ *  computed from today's traffic: attendance = Σins, occupancy = Σins − Σouts
+ *  (clamped ≥0). `zones` is the per-zone breakdown; `total` sums the selected
+ *  zones. `null` numbers mean "no data yet". */
+export interface PeopleZoneCount {
+  id: string;
+  name: string;
+  attendance: number;
+  occupancy: number;
+}
+/** One sampled point of building-total counts, for the trend sparkline. */
+export interface PeopleHistoryPoint {
+  /** ISO timestamp of the sample. */
+  t: string;
+  attendance: number;
+  occupancy: number;
+}
+export interface PeopleCountDTO {
+  connected: boolean;
+  /** ISO timestamp of the last successful poll, or null. */
+  updatedAt: string | null;
+  total: {
+    attendance: number | null;
+    occupancy: number | null;
+    /** Today's peak/lowest/mean occupancy (from the authoritative space endpoint;
+     *  null when no space exists — building-wide only, not per-zone). */
+    peak?: number | null;
+    min?: number | null;
+    avg?: number | null;
+    /** Configured max capacity across the space(s) — for the % of capacity metric. */
+    capacity?: number | null;
+  };
+  zones: PeopleZoneCount[];
+  /** Rolling building-total samples (oldest→newest) for the people-graph object.
+   *  In-memory only — resets when the server restarts. */
+  history?: PeopleHistoryPoint[];
+}
+
+/** Running max/mean of one Smaart metric over an item (e.g. "LAeq 10"). */
+export interface SplMetricStat {
+  max: number | null;
+  avg: number | null;
+  count: number;
+}
+
 /** Per-item recorded SPL across one service. */
 export interface SplItemHistory {
   itemId: string;
   title: string;
   /** Order within the service (incrementing as items go live). */
   sequence: number;
-  /** Peak recorded value of the chosen metric (dB), or null if never sampled. */
+  /**
+   * Per-metric max/mean for EVERY metric the meter reported (peak, LAeq, LCeq, …),
+   * keyed by Smaart metric name. The History tab chooses which to surface.
+   */
+  metrics: Record<string, SplMetricStat>;
+  /** Legacy single-metric peak (dB) — kept populated for back-compat reads. */
   maxSpl: number | null;
-  /** Running mean of the chosen metric (dB), or null if never sampled. */
+  /** Legacy single-metric running mean (dB) — kept populated for back-compat reads. */
   avgSpl: number | null;
   sampleCount: number;
   startedAt: string;
@@ -354,7 +606,7 @@ export interface SplItemHistory {
 
 /** SPL recording for one service occurrence, keyed by serviceKey. */
 export interface ServiceSplHistory {
-  /** `${serviceTypeId}:${planId}:${YYYY-MM-DD}`. */
+  /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */
   serviceKey: string;
   serviceTypeId: string | null;
   planId: string | null;
@@ -362,12 +614,147 @@ export interface ServiceSplHistory {
   seriesTitle: string | null;
   /** Local date the recording started (YYYY-MM-DD). */
   serviceDate: string;
-  /** Which Smaart meter + metric the levels were recorded from. */
+  /** PCO "service" plan_time id for this occurrence (null when unknown). */
+  serviceTimeId: string | null;
+  /** ISO start of this service occurrence (for the title, e.g. "9:00 AM"). */
+  serviceTimeStartsAt: string | null;
+  /** Which Smaart meter the levels were recorded from. */
   meterId: string | null;
+  /** Legacy "primary" metric key (first preferred) — for back-compat display. */
   metricKey: string | null;
   startedAt: string;
   endedAt: string | null;
   items: SplItemHistory[];
+}
+
+/** One sampled point of building-total people counts during a service. */
+export interface AttendanceSample {
+  /** ISO timestamp of the sample. */
+  t: string;
+  attendance: number;
+  occupancy: number;
+}
+
+/** Recorded attendance/occupancy trend for one service occurrence, keyed by
+ *  serviceKey (same scheme as ServiceSplHistory). */
+export interface ServiceAttendance {
+  /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */
+  serviceKey: string;
+  serviceTypeId: string | null;
+  planId: string | null;
+  planTitle: string | null;
+  seriesTitle: string | null;
+  /** Local date the recording started (YYYY-MM-DD). */
+  serviceDate: string;
+  serviceTimeId: string | null;
+  serviceTimeStartsAt: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  /** Down-sampled building-total samples across the service (oldest→newest). */
+  samples: AttendanceSample[];
+  peakAttendance: number;
+  peakOccupancy: number;
+  /** Lowest in-room occupancy seen while the service was live (the service
+   *  "floor"). null until the first tick — NOT 0, so an empty-room moment during
+   *  the service still reads 0 rather than being masked by a 0 initializer. */
+  minOccupancy: number | null;
+  /** Most recent sampled values (for the summary row). */
+  lastAttendance: number;
+  lastOccupancy: number;
+}
+
+/** One plan item's planned-vs-actual timing within a recorded service. */
+export interface ServiceTimelineItem {
+  itemId: string;
+  title: string;
+  sequence: number;
+  /** Planned length from PCO (seconds), or null if unset. Snapshotted at record time. */
+  plannedLengthSec: number | null;
+  /** ISO when the item went live (PCO live_start_at, else first seen). */
+  startedAt: string;
+  /** ISO when the next item went live / the service ended (null while live). */
+  endedAt: string | null;
+  /** Actual elapsed seconds (endedAt − startedAt), null while still live. */
+  actualDurationSec: number | null;
+}
+
+/** Recorded ACTUAL service rundown timing for one occurrence — when each item
+ *  really went live and how long it ran vs its planned length. Captured from PCO
+ *  Live independent of Smaart/SPL. Keyed like the SPL + attendance records, so the
+ *  three line up per service occurrence. Late-start and per-item overrun are
+ *  derived from these fields (not stored). */
+export interface ServiceTimeline {
+  /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */
+  serviceKey: string;
+  serviceTypeId: string | null;
+  planId: string | null;
+  planTitle: string | null;
+  seriesTitle: string | null;
+  /** Local date the recording started (YYYY-MM-DD). */
+  serviceDate: string;
+  serviceTimeId: string | null;
+  /** Scheduled service start (PCO service-time occurrence). */
+  serviceTimeStartsAt: string | null;
+  /** ISO when recording began (first live item seen). */
+  startedAt: string;
+  /** ISO when recording ended / service finalized. */
+  endedAt: string | null;
+  items: ServiceTimelineItem[];
+}
+
+// ── Baptism timer ───────────────────────────────────────────────────────────
+// An operator stopwatch for baptism services: each person has a testimony phase
+// then a baptism phase. Broadcast live on "baptism:state"; finished sessions are
+// logged for review. Running elapsed is derived client-side from segmentStartedAt.
+
+export type BaptismPhase = "idle" | "testimony" | "baptism";
+
+/** "per-person": testimony→baptism for each person in turn. "grouped": time every
+ *  testimony first, then every baptism (a separate testimony section + baptism section). */
+export type BaptismMode = "per-person" | "grouped";
+
+export interface BaptismPerson {
+  /** Testimony duration (ms). */
+  testimonyMs: number;
+  /** Baptism duration (ms). */
+  baptizeMs: number;
+}
+
+export interface BaptismState {
+  /** Workflow: per-person vs grouped (all testimonies, then all baptisms). */
+  mode: BaptismMode;
+  phase: BaptismPhase;
+  /** 1-based number of the person currently being timed (or about to start). */
+  personNumber: number;
+  /** Grouped baptism pass: 0-based index of the person currently being baptized. */
+  baptismIndex: number;
+  /** ISO when the current segment (testimony/baptism) started; null when idle. */
+  segmentStartedAt: string | null;
+  /** ISO when the session began; null before the first start. */
+  sessionStartedAt: string | null;
+  /** ISO when the session was finished (totals frozen); null while active. */
+  finishedAt: string | null;
+  /** Completed people (testimony + baptize splits). */
+  people: BaptismPerson[];
+  /** Testimony split captured for the in-progress person (set while in "baptism"). */
+  pendingTestimonyMs: number | null;
+  /** PCO service context snapshotted when the session started — names the session
+   *  and lets Service History cross-link it. Null if no plan was active. */
+  serviceTitle: string | null;
+  serviceTypeId: string | null;
+  planId: string | null;
+}
+
+/** A finished baptism session, kept for later review. */
+export interface BaptismSession {
+  id: string;
+  startedAt: string;
+  finishedAt: string;
+  people: BaptismPerson[];
+  /** Service/plan title active when the session started (for the label). */
+  title: string | null;
+  serviceTypeId: string | null;
+  planId: string | null;
 }
 
 export interface ServiceTypeDTO {
@@ -461,6 +848,13 @@ export interface SlotDevice {
   /** Resolved battery for a second device (e.g. a vocalist's IEM/PSM pack),
    *  shown as a second bar beneath the primary. Null when no IEM is bound. */
   iemCharge: number | null;
+  /** Static label for the primary device when it has no live telemetry — i.e. an
+   *  OFFLINE/manual device (a networkless PSM/mic) or a per-slot label override.
+   *  Shown as text with no bars. Null for live devices. */
+  label: string | null;
+  /** Static label for the second (IEM) device when offline/manual, shown with a
+   *  headphones icon and no bar. Null for live or unbound IEMs. */
+  iemLabel: string | null;
 }
 
 export interface Slot {
@@ -479,6 +873,12 @@ export interface Slot {
   /** Optional second device whose battery shows as a second bar beneath the
    *  primary charge bar — e.g. a vocalist who also wears an IEM/PSM pack. */
   iemBinding?: { providerId: string; channelId: string } | null;
+  /** Optional custom label override for the primary (mic) device, shown when it's
+   *  an offline/manual device with no telemetry. Defaults to the device's name. */
+  deviceLabel?: string | null;
+  /** Optional custom label override for the IEM device (offline/manual). Defaults
+   *  to the device's name. */
+  iemLabel?: string | null;
   displayName?: string | null;
   photoUrl?: string | null;
   device: SlotDevice;
@@ -559,6 +959,8 @@ export interface StageState {
   chargerBays: ChargerBayDTO[];
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
+  /** Operator dismissed the first-run "Getting started" checklist (machine-wide). */
+  onboardingDismissed: boolean;
 }
 
 /** One battery bay of a Shure SBC charger (derived from charger-kind devices). */

@@ -113,9 +113,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "propresenter:getStatus":
       return apiFetch<T>("/api/propresenter/status");
+    case "propresenter:getInstances":
+      return apiFetch<T>("/api/propresenter/instances");
 
     case "spl:getMetrics":
       return apiFetch<T>("/api/spl/metrics");
+
+    case "obs:getStatus":
+      return apiFetch<T>("/api/obs/status");
 
     case "spl:getHistoryCurrent":
       return apiFetch<T>("/api/spl/history/current");
@@ -123,16 +128,96 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "spl:listHistory":
       return apiFetch<T>("/api/spl/history");
 
+    case "people:getCount":
+      return apiFetch<T>("/api/people/count");
+
+    case "sensource:listLocations":
+      return apiFetch<T>("/api/sensource/locations");
+
+    case "sensource:listZones":
+      return apiFetch<T>("/api/sensource/zones");
+
     case "spl:getHistory": {
       const key = p.serviceKey as string;
       return apiFetch<T>(`/api/spl/history/${encodeURIComponent(key)}`);
     }
+
+    case "spl:deleteHistory": {
+      const key = p.serviceKey as string;
+      return del<T>(`/api/spl/history/${encodeURIComponent(key)}`);
+    }
+
+    case "attendance:getHistoryCurrent":
+      return apiFetch<T>("/api/attendance/history/current");
+
+    case "attendance:listHistory":
+      return apiFetch<T>("/api/attendance/history");
+
+    case "attendance:getHistory": {
+      const key = p.serviceKey as string;
+      return apiFetch<T>(`/api/attendance/history/${encodeURIComponent(key)}`);
+    }
+
+    case "attendance:deleteHistory": {
+      const key = p.serviceKey as string;
+      return del<T>(`/api/attendance/history/${encodeURIComponent(key)}`);
+    }
+
+    case "serviceTimeline:getCurrent":
+      return apiFetch<T>("/api/service-timeline/current");
+
+    case "serviceTimeline:list":
+      return apiFetch<T>("/api/service-timeline");
+
+    case "serviceTimeline:get": {
+      const key = p.serviceKey as string;
+      return apiFetch<T>(`/api/service-timeline/${encodeURIComponent(key)}`);
+    }
+
+    case "serviceTimeline:delete": {
+      const key = p.serviceKey as string;
+      return del<T>(`/api/service-timeline/${encodeURIComponent(key)}`);
+    }
+
+    case "baptism:get":
+      return apiFetch<T>("/api/baptism");
+    case "baptism:sessions":
+      return apiFetch<T>("/api/baptism/sessions");
+    case "baptism:start":
+      return post<T>("/api/baptism/start");
+    case "baptism:baptized":
+      return post<T>("/api/baptism/baptized");
+    case "baptism:startBaptisms":
+      return post<T>("/api/baptism/start-baptisms");
+    case "baptism:next":
+      return post<T>("/api/baptism/next");
+    case "baptism:setMode":
+      return post<T>("/api/baptism/mode", { mode: p.mode });
+    case "baptism:undo":
+      return post<T>("/api/baptism/undo");
+    case "baptism:finish":
+      return post<T>("/api/baptism/finish");
+    case "baptism:reset":
+      return post<T>("/api/baptism/reset");
+    case "baptism:deleteSession": {
+      const id = p.id as string;
+      return del<T>(`/api/baptism/sessions/${encodeURIComponent(id)}`);
+    }
+
+    case "spl:getVisibleMetrics":
+      return apiFetch<T>("/api/spl/visible-metrics");
+
+    case "spl:setVisibleMetrics":
+      return post<T>("/api/spl/visible-metrics", p);
 
     case "stage:setAllowedServiceTypes":
       return post<T>("/api/allowed-service-types", p);
 
     case "stage:setShowQr":
       return post<T>("/api/show-qr", p);
+
+    case "stage:setOnboardingDismissed":
+      return post<T>("/api/onboarding-dismissed", p);
 
     case "stage:setNdiEnabled":
       return post<T>("/api/ndi-enabled", p);
@@ -158,6 +243,26 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "update:setTrack":
       return post<T>("/api/update/track", p);
+
+    // ── Config snapshot (backup / restore) ───────────────────────────────
+    case "config:listSnapshots":
+      return apiFetch<T>("/api/config/snapshots");
+
+    case "config:saveSnapshot":
+      return post<T>("/api/config/snapshots", { name: p.name });
+
+    case "config:recallSnapshot": {
+      const id = p.id as string;
+      return post<T>(`/api/config/snapshots/${encodeURIComponent(id)}/recall`);
+    }
+
+    case "config:deleteSnapshot": {
+      const id = p.id as string;
+      return del<T>(`/api/config/snapshots/${encodeURIComponent(id)}`);
+    }
+
+    case "config:import":
+      return post<T>("/api/config/import", { bundle: p.bundle });
 
     case "displays:refresh":
       return post<T>("/api/displays/refresh", p);
@@ -248,6 +353,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>(`/api/views/${encodeURIComponent(id)}/slots`, { slots: p.slots });
     }
 
+    case "views:resolveSlots":
+      // Resolve draft slots against live team + device state WITHOUT saving —
+      // powers the Views live draft preview. Returns resolved Slot[].
+      return post<T>("/api/views/resolve-slots", { slots: p.slots });
+
     case "layoutObjects:setSlots": {
       const id = p.id as string;
       return post<T>(`/api/layout-objects/${encodeURIComponent(id)}/slots`, { slots: p.slots });
@@ -289,6 +399,18 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "layoutTemplates:delete": {
       const id = p.id as string;
       return del<T>(`/api/layout-templates/${encodeURIComponent(id)}`);
+    }
+
+    // ── Layout groups (reusable object/container library) ──────────────────
+    case "layoutGroups:list":
+      return apiFetch<T>("/api/layout-groups");
+
+    case "layoutGroups:save":
+      return post<T>("/api/layout-groups", { name: p.name, object: p.object });
+
+    case "layoutGroups:delete": {
+      const id = p.id as string;
+      return del<T>(`/api/layout-groups/${encodeURIComponent(id)}`);
     }
 
     // ── Outputs (physical screens + routing) ──────────────────────────────
@@ -397,6 +519,40 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "wireless:setMeterRate":
       return post<T>("/api/wireless/meter-rate", p);
+
+    // ── OSC ──────────────────────────────────────────────────────────────
+    case "osc:listTargets":
+      return apiFetch<T>("/api/osc/targets");
+
+    case "osc:addTarget":
+      return post<T>("/api/osc/targets", p);
+
+    case "osc:updateTarget": {
+      const id = p.id as string;
+      return patch<T>(`/api/osc/targets/${encodeURIComponent(id)}`, { patch: p.patch });
+    }
+
+    case "osc:removeTarget": {
+      const id = p.id as string;
+      return del<T>(`/api/osc/targets/${encodeURIComponent(id)}`);
+    }
+
+    case "osc:testTarget": {
+      const id = p.id as string;
+      return post<T>(`/api/osc/targets/${encodeURIComponent(id)}/test`);
+    }
+
+    case "osc:send":
+      return post<T>("/api/osc/send", p);
+
+    case "osc:getFeedback":
+      return apiFetch<T>("/api/osc/feedback");
+
+    case "osc:getFeedbackPort":
+      return apiFetch<T>("/api/osc/feedback-port");
+
+    case "osc:setFeedbackPort":
+      return post<T>("/api/osc/feedback-port", p);
 
     // ── Window / app ───────────────────────────────────────────────────
     case "window:closeSettings":

@@ -99,6 +99,8 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
 
   // Nothing to show (no RF, no charge, no IEM) — render nothing rather than an
   // empty pill. slot-panel gates on the same condition, so this is a safety net.
+  // (Offline/manual device labels render as a SEPARATE label in slot-panel, not
+  // in this telemetry pill.)
   if (!showRf && charge === null && iemCharge === null) return null;
 
   const statusColor =
@@ -198,6 +200,32 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
           </>
         )
       )}
+    </div>
+  );
+}
+
+// A pill for an OFFLINE (manually-assigned) device — the mic and/or IEM label(s),
+// no icons, no bars. Styled to match the StatusStrip pill so it sits in the same
+// spot and reads as "this slot's device info", just without live telemetry. Each
+// label is centered; with both mic + IEM set they stack as two centered rows.
+export function OfflinePill({ micLabel, iemLabel, className }: { micLabel: string | null; iemLabel: string | null; className?: string }) {
+  if (micLabel === null && iemLabel === null) return null;
+  const valueTextStyle = { fontSize: "calc(var(--rf) * 1.05)" };
+  const labels = [micLabel, iemLabel].filter((l): l is string => l !== null);
+  return (
+    <div
+      className={cn("relative mx-2 mb-2 flex flex-col items-center justify-center rounded-2xl overflow-hidden glass-dark", className)}
+      style={{ ["--rf" as string]: RF_UNIT, padding: "calc(var(--rf) * 0.55) calc(var(--rf) * 0.7)", gap: "calc(var(--rf) * 0.2)" }}
+    >
+      {labels.map((label, i) => (
+        <span
+          key={i}
+          className="max-w-full truncate text-center font-semibold leading-none text-white/85"
+          style={valueTextStyle}
+        >
+          {label || "Offline"}
+        </span>
+      ))}
     </div>
   );
 }

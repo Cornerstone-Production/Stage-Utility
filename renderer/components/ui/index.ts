@@ -7,6 +7,7 @@ export { NumberInput, type NumberInputProps } from "./number-input";
 export {
   Select,
   SelectGroup,
+  SelectLabel,
   SelectValue,
   SelectTrigger,
   SelectContent,
@@ -14,6 +15,7 @@ export {
 } from "./select";
 export { Switch } from "./switch";
 export { Separator } from "./separator";
+export { Collapsible } from "./collapsible";
 export {
   Dialog,
   DialogTrigger,
@@ -27,6 +29,11 @@ export {
   DialogFooter,
 } from "./dialog";
 export { toast, Toaster } from "./toast";
+export { confirm, ConfirmHost, type ConfirmOptions } from "./confirm-dialog";
+export { EmptyState } from "./empty-state";
+export { Skeleton, SkeletonRows } from "./skeleton";
+export { InfoHint } from "./info-hint";
+export { UnsavedBanner } from "./unsaved-banner";
 export { ScrollArea, ScrollBar } from "./scroll-area";
 export { SplitView } from "./split-view";
 export { Sidebar, SidebarList, SidebarListItem } from "./sidebar";

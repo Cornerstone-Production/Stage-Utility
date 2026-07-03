@@ -7,6 +7,11 @@ import * as fs from "fs/promises";
 import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
+import { pruneCacheDir } from "./cache-prune.js";
+
+// Attachments (PDFs/images) are larger but rarely change; keep ~90 days, 500 MB.
+const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+const MAX_BYTES = 500 * 1024 * 1024;
 
 let cacheDir: string | null = null;
 
@@ -28,6 +33,15 @@ function extFor(contentType: string | null, filename: string): string {
   if (ct.includes("webp")) return "webp";
   const m = filename.match(/\.(\w{2,5})$/);
   return m ? m[1].toLowerCase() : "bin";
+}
+
+/** Evict stale/oversized cached attachments. Safe — pruned files re-download on demand. */
+export async function pruneAttachmentCache(): Promise<void> {
+  const dir = await getCacheDir();
+  const r = await pruneCacheDir(dir, { maxAgeMs: MAX_AGE_MS, maxBytes: MAX_BYTES });
+  if (r.removed > 0) {
+    console.log(`[attachment-cache] pruned ${r.removed} file(s), freed ${(r.freedBytes / 1e6).toFixed(1)} MB`);
+  }
 }
 
 /** MIME type to serve a cached attachment with, from its extension. */

@@ -1,4 +1,4 @@
-import { Component, useEffect } from "react";
+import { Component, useEffect, useState } from "react";
 import type { ReactNode, ErrorInfo } from "react";
 import { onNotification } from "../lib/api";
 import { SlotPanel } from "../components/slot-panel";
@@ -264,11 +264,42 @@ function KioskError({ message }: { message: string }) {
   );
 }
 
+// ---- live draft preview bridge ----------------------------------------------
+// The settings Views page posts UNSAVED, already-resolved slot edits into this
+// preview iframe so the preview reflects drafts live. Only "/preview-<id>"
+// contexts honor these messages — a real display never sets previewViewId, so it
+// ignores them entirely. Same-origin is enforced.
+const PREVIEW_DRAFT_MSG = "stage-utility:preview-draft";
+const PREVIEW_READY_MSG = "stage-utility:preview-ready";
+
+function usePreviewDraftSlots(previewViewId: string | null): Slot[] | null {
+  const [draft, setDraft] = useState<Slot[] | null>(null);
+  useEffect(() => {
+    if (!previewViewId) return;
+    function onMessage(e: MessageEvent) {
+      if (e.origin !== window.location.origin) return;
+      const data = e.data as { type?: string; viewId?: string; slots?: Slot[] | null } | null;
+      if (data?.type === PREVIEW_DRAFT_MSG && data.viewId === previewViewId) {
+        setDraft(Array.isArray(data.slots) ? data.slots : null);
+      }
+    }
+    window.addEventListener("message", onMessage);
+    // Tell the parent our listener is live, so it (re)posts the current draft.
+    window.parent?.postMessage({ type: PREVIEW_READY_MSG, viewId: previewViewId }, window.location.origin);
+    return () => window.removeEventListener("message", onMessage);
+  }, [previewViewId]);
+  return previewViewId ? draft : null;
+}
+
 // ---- main view --------------------------------------------------------------
 
 export function StageView() {
   const { state, isLoading, error } = useStageState();
   const displayId = getDisplayId();
+  // Preview slug → view id (null on a real display). Computed before any early
+  // return so the draft-bridge hook is called unconditionally.
+  const previewViewId = displayId.startsWith("preview-") ? displayId.slice("preview-".length) : null;
+  const previewDraftSlots = usePreviewDraftSlots(previewViewId);
 
   // Keep the browser tab title in sync with the brand + this display's name, so
   // renaming a display (Settings) updates its kiosk tab too.
@@ -297,9 +328,7 @@ export function StageView() {
 
   // Preview mode: a "/preview-<viewId>" slug renders a View's content directly,
   // regardless of any output routing (used by the settings live preview).
-  const previewViewId = displayId.startsWith("preview-")
-    ? displayId.slice("preview-".length)
-    : null;
+  // previewViewId is computed above (before the early returns).
   const previewView = previewViewId
     ? (state.views?.find((v) => v.id === previewViewId) ?? null)
     : null;
@@ -413,9 +442,11 @@ export function StageView() {
   }
 
   // Slots-kind: a preview reads the View's slots directly; a real output reads
-  // its own routed slots (no fallback to the primary display).
+  // its own routed slots (no fallback to the primary display). In preview mode,
+  // an unsaved draft pushed from the Views editor (already resolved) takes
+  // precedence so edits show live; null draft falls back to saved state.
   const displaySlots = previewViewId
-    ? (state.slotsByView?.[previewViewId] ?? [])
+    ? (previewDraftSlots ?? state.slotsByView?.[previewViewId] ?? [])
     : (state.slotsByDisplay?.[displayId] ?? []);
   const sortedSlots = [...displaySlots].sort((a, b) => a.order - b.order);
 

@@ -12,15 +12,25 @@ import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
-import type { DisplayKind, LayoutDTO, Slot, SlotsLayout } from "../types/stage.js";
+import type { DisplayKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../types/stage.js";
+import type { OscArg } from "../types/osc.js";
 import { addBroadcastListener } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
+import { configSnapshot } from "./config-snapshot.js";
 import { integrationManager } from "./integration-manager.js";
+import { obsService } from "./obs-service.js";
+import { oscManager } from "./osc-manager.js";
 import { prodcomService } from "./prodcom-service.js";
-import { propresenterService, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
+import { propresenterService, propresenterManager, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
+import { sensourceService } from "./sensource-service.js";
 import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { splRecorder } from "./spl-recorder.js";
+import { attendanceStore } from "./attendance-store.js";
+import { attendanceRecorder } from "./attendance-recorder.js";
+import { serviceTimelineStore } from "./service-timeline-store.js";
+import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
+import { baptismTimerService } from "./baptism-timer-service.js";
 import { stageController } from "./stage-controller.js";
 import { updater } from "./updater.js";
 import { wirelessManager } from "./wireless-manager.js";
@@ -125,10 +135,24 @@ async function readBody(req: http.IncomingMessage): Promise<unknown> {
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();
 
-// Count of currently-connected Companion-module clients (SSE streams opened with
-// the X-Companion-Module header / ?client=companion marker). Pushed into the
-// integration manager so the "companion" panel can show "N connected".
-let companionClients = 0;
+// Small FIFO cache of ProPresenter slide thumbnails, keyed by the per-slide
+// cache-bust token. Lets multiple displays showing the same slide share one
+// upstream fetch instead of each hitting ProPresenter.
+const thumbnailCache = new Map<string, { buf: Buffer; contentType: string }>();
+
+// Exit so the service manager (systemd/launchd/NSSM Restart=always) relaunches us
+// — used after restoring a config snapshot so every integration re-initializes
+// from the restored files. The HTTP response is flushed first.
+function scheduleRestart(): void {
+  setTimeout(() => process.exit(0), 1200);
+}
+
+// Currently-connected Companion-module clients (SSE streams opened with the
+// X-Companion-Module header / ?client=companion marker). A Set keyed by the
+// response means the reported count can't drift (no double-count on a fast
+// reconnect, no under-count if a close fires twice) — `.size` is always exact.
+// Pushed into the integration manager so the "companion" panel shows "N connected".
+const companionClients = new Set<http.ServerResponse>();
 
 function sseWrite(res: http.ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -353,8 +377,15 @@ export class RemoteServer {
       // channels otherwise only broadcast on change, leaving a fresh client blank.
       sseWrite(res, "stage:state-changed", stageController.getState());
       sseWrite(res, "propresenter:status", propresenterService.getStatus());
+      sseWrite(res, "propresenter:instances", propresenterManager.getInstancesDto());
       sseWrite(res, "spl:metrics", smaartService.getLatest());
       sseWrite(res, "spl:history", splRecorder.getCurrent());
+      sseWrite(res, "attendance:history", attendanceRecorder.getCurrent());
+      sseWrite(res, "service-timeline:history", serviceTimelineRecorder.getCurrent());
+      sseWrite(res, "baptism:state", baptismTimerService.getState());
+      sseWrite(res, "obs:status", obsService.getLatest());
+      sseWrite(res, "osc:feedback", oscManager.getFeedback());
+      sseWrite(res, "people:count", sensourceService.getLatest());
       sseClients.add(res);
       // A Companion module marks its event stream so we can show a live
       // connected-client count in the integration panel. Re-broadcast the
@@ -363,14 +394,14 @@ export class RemoteServer {
         req.headers["x-companion-module"] != null ||
         _url.searchParams.get("client") === "companion";
       if (isCompanion) {
-        companionClients++;
-        integrationManager.setCompanionClients(companionClients);
+        companionClients.add(res);
+        integrationManager.setCompanionClients(companionClients.size);
       }
       req.on("close", () => {
         sseClients.delete(res);
         if (isCompanion) {
-          companionClients = Math.max(0, companionClients - 1);
-          integrationManager.setCompanionClients(companionClients);
+          companionClients.delete(res);
+          integrationManager.setCompanionClients(companionClients.size);
         }
       });
       return;
@@ -381,12 +412,44 @@ export class RemoteServer {
       json(res, propresenterService.getStatus());
       return;
     }
+    if (method === "GET" && pathname === "/api/propresenter/instances") {
+      json(res, propresenterManager.getInstancesDto());
+      return;
+    }
     if (method === "GET" && pathname === "/api/pco/live") {
       json(res, await stageController.fetchLive());
       return;
     }
     if (method === "GET" && pathname === "/api/spl/metrics") {
       json(res, smaartService.getLatest());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/obs/status") {
+      json(res, obsService.getLatest());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/osc/feedback") {
+      json(res, oscManager.getFeedback());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/people/count") {
+      json(res, sensourceService.getLatest());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/sensource/locations") {
+      try {
+        json(res, await integrationManager.getSensourceLocations());
+      } catch (err) {
+        json(res, { error: err instanceof Error ? err.message : String(err) }, 502);
+      }
+      return;
+    }
+    if (method === "GET" && pathname === "/api/sensource/zones") {
+      try {
+        json(res, await integrationManager.getSensourceZones());
+      } catch (err) {
+        json(res, { error: err instanceof Error ? err.message : String(err) }, 502);
+      }
       return;
     }
     if (method === "GET" && pathname === "/api/spl/history/current") {
@@ -397,10 +460,109 @@ export class RemoteServer {
       json(res, await splHistoryStore.list());
       return;
     }
+    if (method === "GET" && pathname === "/api/spl/visible-metrics") {
+      json(res, { metrics: await splHistoryStore.getVisibleMetrics() });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/spl/visible-metrics") {
+      const body = (await readBody(req)) as Record<string, unknown>;
+      const metrics = Array.isArray(body.metrics) ? (body.metrics as unknown[]) : [];
+      json(res, { metrics: await splHistoryStore.setVisibleMetrics(metrics as string[]) });
+      return;
+    }
     {
       const histMatch = pathname.match(/^\/api\/spl\/history\/([^/]+)$/);
-      if (method === "GET" && histMatch && histMatch[1] !== "current") {
-        json(res, await splHistoryStore.get(decodeURIComponent(histMatch[1])));
+      if (histMatch && histMatch[1] !== "current") {
+        const key = decodeURIComponent(histMatch[1]);
+        if (method === "GET") {
+          json(res, await splHistoryStore.get(key));
+          return;
+        }
+        if (method === "DELETE") {
+          json(res, { deleted: await splHistoryStore.delete(key) });
+          return;
+        }
+      }
+    }
+
+    // ── Attendance history (mirrors the SPL history routes) ─────────────────
+    if (method === "GET" && pathname === "/api/attendance/history/current") {
+      json(res, attendanceRecorder.getCurrent());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/attendance/history") {
+      json(res, await attendanceStore.list());
+      return;
+    }
+    {
+      const attMatch = pathname.match(/^\/api\/attendance\/history\/([^/]+)$/);
+      if (attMatch && attMatch[1] !== "current") {
+        const key = decodeURIComponent(attMatch[1]);
+        if (method === "GET") {
+          json(res, await attendanceStore.get(key));
+          return;
+        }
+        if (method === "DELETE") {
+          json(res, { deleted: await attendanceStore.delete(key) });
+          return;
+        }
+      }
+    }
+
+    // ── Service timeline (actual rundown timing; mirrors the SPL/attendance routes) ──
+    if (method === "GET" && pathname === "/api/service-timeline/current") {
+      json(res, serviceTimelineRecorder.getCurrent());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/service-timeline") {
+      json(res, await serviceTimelineStore.list());
+      return;
+    }
+    {
+      const tlMatch = pathname.match(/^\/api\/service-timeline\/([^/]+)$/);
+      if (tlMatch && tlMatch[1] !== "current") {
+        const key = decodeURIComponent(tlMatch[1]);
+        if (method === "GET") {
+          json(res, await serviceTimelineStore.get(key));
+          return;
+        }
+        if (method === "DELETE") {
+          json(res, { deleted: await serviceTimelineStore.delete(key) });
+          return;
+        }
+      }
+    }
+
+    // ── Baptism timer ───────────────────────────────────────────────────────
+    if (method === "GET" && pathname === "/api/baptism") {
+      json(res, baptismTimerService.getState());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/baptism/sessions") {
+      json(res, await baptismTimerService.listSessions());
+      return;
+    }
+    if (method === "POST" && pathname.startsWith("/api/baptism/")) {
+      const action = pathname.slice("/api/baptism/".length);
+      switch (action) {
+        case "start": json(res, baptismTimerService.start()); return;
+        case "baptized": json(res, baptismTimerService.baptized()); return;
+        case "start-baptisms": json(res, baptismTimerService.startBaptisms()); return;
+        case "next": json(res, baptismTimerService.next()); return;
+        case "undo": json(res, baptismTimerService.undo()); return;
+        case "finish": json(res, baptismTimerService.finish()); return;
+        case "reset": json(res, baptismTimerService.reset()); return;
+        case "mode": {
+          const body = (await readBody(req)) as Record<string, unknown>;
+          json(res, baptismTimerService.setMode(body.mode === "grouped" ? "grouped" : "per-person"));
+          return;
+        }
+      }
+    }
+    {
+      const bapSessionMatch = pathname.match(/^\/api\/baptism\/sessions\/([^/]+)$/);
+      if (bapSessionMatch && method === "DELETE") {
+        json(res, { deleted: await baptismTimerService.deleteSession(decodeURIComponent(bapSessionMatch[1])) });
         return;
       }
     }
@@ -493,10 +655,21 @@ export class RemoteServer {
     // ?k=<slidePreviewKey> param just cache-busts per slide — the source is the
     // service's current target. 21.3 returns real image/jpeg, so no decode.
     if (method === "GET" && pathname === "/api/propresenter/thumbnail") {
-      const target = propresenterService.getThumbnailTarget();
+      // `?i=` selects which ProPresenter instance ("default"/absent = primary).
+      const target = propresenterManager.getThumbnailTarget(_url.searchParams.get("i"));
       if (!target) {
         res.writeHead(503);
         res.end("ProPresenter not connected / no active slide");
+        return;
+      }
+      // Cache the fetched image so N displays showing the same slide don't each
+      // hit ProPresenter. Key on the client's cache-bust token (`?k=` = the
+      // slidePreviewKey, which changes per slide), else the slide's uuid:index.
+      const cacheKey = _url.searchParams.get("k") || `${target.uuid}:${target.index}`;
+      const hit = thumbnailCache.get(cacheKey);
+      if (hit) {
+        res.writeHead(200, { "Content-Type": hit.contentType, "Cache-Control": "no-store" });
+        res.end(hit.buf);
         return;
       }
       const path = `/v1/presentation/${target.uuid}/thumbnail/${target.index}?quality=${PROPRESENTER_THUMBNAIL_QUALITY}`;
@@ -507,11 +680,20 @@ export class RemoteServer {
           res.end(`ProPresenter thumbnail HTTP ${up.statusCode}`);
           return;
         }
-        res.writeHead(200, {
-          "Content-Type": up.headers["content-type"] ?? "image/jpeg",
-          "Cache-Control": "no-store",
+        const contentType = up.headers["content-type"] ?? "image/jpeg";
+        const chunks: Buffer[] = [];
+        up.on("data", (c: Buffer) => chunks.push(c));
+        up.on("end", () => {
+          const buf = Buffer.concat(chunks);
+          // Bound the cache (FIFO) — slide keys are short-lived, a few is plenty.
+          if (thumbnailCache.size >= 16) {
+            const firstKey = thumbnailCache.keys().next().value;
+            if (firstKey !== undefined) thumbnailCache.delete(firstKey);
+          }
+          thumbnailCache.set(cacheKey, { buf, contentType });
+          res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-store" });
+          res.end(buf);
         });
-        up.pipe(res);
       });
       upstream.on("timeout", () => upstream.destroy(new Error("timeout")));
       upstream.on("error", (e) => {
@@ -709,6 +891,20 @@ export class RemoteServer {
       return;
     }
 
+    // POST /api/views/resolve-slots — { slots } → resolved Slot[] (no persist).
+    // Powers the Views page live draft preview: resolves in-progress edits against
+    // the current team + device state so the preview matches the kiosk, without
+    // saving. Must precede the /api/views/:id/slots matcher.
+    if (method === "POST" && pathname === "/api/views/resolve-slots") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.slots)) {
+        error(res, "body.slots (array) required");
+        return;
+      }
+      json(res, stageController.resolveSlotsPreview(body.slots as Slot[]));
+      return;
+    }
+
     // POST /api/views/:id/slots — { slots }
     const viewSlotsMatch = pathname.match(/^\/api\/views\/([^/]+)\/slots$/);
     if (method === "POST" && viewSlotsMatch) {
@@ -829,6 +1025,30 @@ export class RemoteServer {
     const tplDeleteMatch = pathname.match(/^\/api\/layout-templates\/([^/]+)$/);
     if (method === "DELETE" && tplDeleteMatch) {
       const list = await stageController.deleteLayoutTemplate(tplDeleteMatch[1]);
+      json(res, list);
+      return;
+    }
+
+    // ── Layout groups (reusable object/container library) ─────────────────
+    if (method === "GET" && pathname === "/api/layout-groups") {
+      json(res, await stageController.listLayoutGroups());
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/layout-groups") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.name !== "string" || body.object == null || typeof body.object !== "object") {
+        error(res, "body.name (string) and body.object (object) required");
+        return;
+      }
+      const list = await stageController.saveLayoutGroup(body.name, body.object as LayoutObject);
+      json(res, list, 201);
+      return;
+    }
+
+    const grpDeleteMatch = pathname.match(/^\/api\/layout-groups\/([^/]+)$/);
+    if (method === "DELETE" && grpDeleteMatch) {
+      const list = await stageController.deleteLayoutGroup(grpDeleteMatch[1]);
       json(res, list);
       return;
     }
@@ -994,6 +1214,81 @@ export class RemoteServer {
       return;
     }
 
+    // ── OSC ────────────────────────────────────────────────────────────────
+    if (method === "GET" && pathname === "/api/osc/targets") {
+      json(res, oscManager.listTargets());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/osc/targets") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const name = typeof body.name === "string" ? body.name : undefined;
+      const targets = await oscManager.addTarget({ name });
+      integrationManager.refreshOscSummary();
+      json(res, targets, 201);
+      return;
+    }
+    // POST /api/osc/send — { targetId, address, args? }
+    if (method === "POST" && pathname === "/api/osc/send") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.targetId !== "string" || typeof body.address !== "string") {
+        error(res, "body.targetId (string) and body.address (string) required");
+        return;
+      }
+      const args = Array.isArray(body.args) ? (body.args as OscArg[]) : [];
+      try {
+        const result = await oscManager.send(body.targetId, body.address, args);
+        json(res, result);
+      } catch (err) {
+        error(res, err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+    if (method === "GET" && pathname === "/api/osc/feedback-port") {
+      json(res, { port: oscManager.getFeedbackPort() });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/osc/feedback-port") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const port = typeof body.port === "number" ? body.port : parseInt(String(body.port), 10);
+      if (!Number.isFinite(port)) {
+        error(res, "body.port (number) required");
+        return;
+      }
+      json(res, await oscManager.setFeedbackPort(port));
+      return;
+    }
+    // POST /api/osc/targets/:id/test
+    const oscTestMatch = pathname.match(/^\/api\/osc\/targets\/([^/]+)\/test$/);
+    if (method === "POST" && oscTestMatch) {
+      const result = await oscManager.testTarget({ id: oscTestMatch[1] });
+      json(res, result);
+      return;
+    }
+    // PATCH or POST /api/osc/targets/:id
+    const oscTargetMatch = pathname.match(/^\/api\/osc\/targets\/([^/]+)$/);
+    if ((method === "PATCH" || method === "POST") && oscTargetMatch) {
+      const id = oscTargetMatch[1];
+      const body = await readBody(req) as Record<string, unknown>;
+      const rawPatch = (body.patch ?? body) as Record<string, unknown>;
+      const patch: { name?: string; enabled?: boolean; config?: Record<string, unknown> } = {};
+      if (typeof rawPatch.name === "string") patch.name = rawPatch.name;
+      if (typeof rawPatch.enabled === "boolean") patch.enabled = rawPatch.enabled;
+      if (typeof rawPatch.config === "object" && rawPatch.config !== null) {
+        patch.config = rawPatch.config as Record<string, unknown>;
+      }
+      const targets = await oscManager.updateTarget({ id, patch });
+      integrationManager.refreshOscSummary();
+      json(res, targets);
+      return;
+    }
+    // DELETE /api/osc/targets/:id
+    if (method === "DELETE" && oscTargetMatch) {
+      const targets = await oscManager.removeTarget({ id: oscTargetMatch[1] });
+      integrationManager.refreshOscSummary();
+      json(res, targets);
+      return;
+    }
+
     // POST /api/integrations/:id/config
     const configMatch = pathname.match(/^\/api\/integrations\/([^/]+)\/config$/);
     if (method === "POST" && configMatch) {
@@ -1042,6 +1337,18 @@ export class RemoteServer {
         return;
       }
       const state = await stageController.setShowQr(body.show);
+      json(res, state);
+      return;
+    }
+
+    // ── Onboarding checklist dismissal ─────────────────────────────────────
+    if (method === "POST" && pathname === "/api/onboarding-dismissed") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.dismissed !== "boolean") {
+        error(res, "body.dismissed (boolean) required");
+        return;
+      }
+      const state = await stageController.setOnboardingDismissed(body.dismissed);
       json(res, state);
       return;
     }
@@ -1126,6 +1433,63 @@ export class RemoteServer {
       if (typeof body.hour === "number") partial.hour = body.hour;
       const state = await stageController.setAutoUpdate(partial);
       json(res, state);
+      return;
+    }
+
+    // ── Config snapshot (backup / restore) ──────────────────────────────────
+    // Download the full config (secrets excluded) as a .json file.
+    if (method === "GET" && pathname === "/api/config/export") {
+      const bundle = await configSnapshot.build();
+      const fname = `stage-utility-config-${new Date().toISOString().slice(0, 10)}.json`;
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Content-Disposition": `attachment; filename="${fname}"`,
+      });
+      res.end(JSON.stringify(bundle, null, 2));
+      return;
+    }
+    // Restore an uploaded config bundle, then restart to apply.
+    if (method === "POST" && pathname === "/api/config/import") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const bundle = "bundle" in body ? body.bundle : body;
+      try {
+        const applied = await configSnapshot.apply(bundle);
+        json(res, { ok: true, applied, restarting: true });
+        scheduleRestart();
+      } catch (err) {
+        error(res, String(err instanceof Error ? err.message : err));
+      }
+      return;
+    }
+    // List saved snapshots.
+    if (method === "GET" && pathname === "/api/config/snapshots") {
+      json(res, await configSnapshot.list());
+      return;
+    }
+    // Save the current config as a named snapshot.
+    if (method === "POST" && pathname === "/api/config/snapshots") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const name = typeof body.name === "string" ? body.name : "";
+      json(res, await configSnapshot.save(name), 201);
+      return;
+    }
+    // Recall a saved snapshot (apply + restart).
+    const snapRecallMatch = pathname.match(/^\/api\/config\/snapshots\/([^/]+)\/recall$/);
+    if (method === "POST" && snapRecallMatch) {
+      try {
+        const applied = await configSnapshot.recall(snapRecallMatch[1]);
+        json(res, { ok: true, applied, restarting: true });
+        scheduleRestart();
+      } catch (err) {
+        error(res, String(err instanceof Error ? err.message : err));
+      }
+      return;
+    }
+    // Delete a saved snapshot.
+    const snapDeleteMatch = pathname.match(/^\/api\/config\/snapshots\/([^/]+)$/);
+    if (method === "DELETE" && snapDeleteMatch) {
+      await configSnapshot.delete(snapDeleteMatch[1]);
+      json(res, { ok: true });
       return;
     }
 

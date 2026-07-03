@@ -21,6 +21,9 @@ import {
   QrCodeIcon,
   PaletteIcon,
   ActivityIcon,
+  UsersIcon,
+  ClockIcon,
+  DropletIcon,
   SlidersHorizontalIcon,
   SunIcon,
   MoonIcon,
@@ -28,6 +31,7 @@ import {
   PanelLeftOpenIcon,
 } from "lucide-react";
 import { useIsMobile } from "../lib/use-media-query";
+import { withViewTransition } from "../lib/view-transition";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SectionItem, WirelessChannel, SectionHandlers } from "./types";
 import { PlanSection } from "./sections/plan-section";
@@ -38,6 +42,10 @@ import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import { SplHistorySection } from "./sections/spl-history-section";
+import { AttendanceHistorySection } from "./sections/attendance-history-section";
+import { ServiceHistorySection } from "./sections/service-history-section";
+import { BaptismsSection } from "./sections/baptisms-section";
+import { GettingStarted } from "./getting-started";
 import { BrandHeader } from "./brand-header";
 import { BrandLogo } from "../components/brand-logo";
 
@@ -142,6 +150,9 @@ const SECTIONS: SectionItem[] = [
   { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4 text-gray-11" /> },
   { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4 text-gray-11" /> },
   { id: "spl-history", label: "SPL History", icon: <ActivityIcon className="size-4 text-gray-11" /> },
+  { id: "attendance", label: "Attendance", icon: <UsersIcon className="size-4 text-gray-11" /> },
+  { id: "service-history", label: "Service History", icon: <ClockIcon className="size-4 text-gray-11" /> },
+  { id: "baptisms", label: "Baptisms", icon: <DropletIcon className="size-4 text-gray-11" /> },
   { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
 ];
 
@@ -219,9 +230,27 @@ export function SettingsView() {
   const showSplHistory =
     (integrationsData?.states?.some((s) => s.id === "smaart" && s.enabled) ?? false) ||
     (splHistoryList?.length ?? 0) > 0;
+  const { data: attendanceList } = useQuery({
+    queryKey: ["attendance:listHistory"],
+    queryFn: () => ipc<ServiceAttendance[]>("attendance:listHistory"),
+  });
+  const showAttendance =
+    (integrationsData?.states?.some((s) => s.id === "sensource" && s.enabled) ?? false) ||
+    (attendanceList?.length ?? 0) > 0;
+  const { data: timelineList } = useQuery({
+    queryKey: ["serviceTimeline:list"],
+    queryFn: () => ipc<ServiceTimeline[]>("serviceTimeline:list"),
+  });
+  const showServiceHistory = (stageState?.pcoConfigured ?? false) || (timelineList?.length ?? 0) > 0;
   const sections = useMemo(
-    () => SECTIONS.filter((s) => s.id !== "spl-history" || showSplHistory),
-    [showSplHistory],
+    () =>
+      SECTIONS.filter(
+        (s) =>
+          (s.id !== "spl-history" || showSplHistory) &&
+          (s.id !== "attendance" || showAttendance) &&
+          (s.id !== "service-history" || showServiceHistory),
+      ),
+    [showSplHistory, showAttendance, showServiceHistory],
   );
 
   // In-app update status (git-based; surfaced in the Advanced tab).
@@ -301,6 +330,29 @@ export function SettingsView() {
     const viewSlots = stageState.slotsByView?.[selectedViewId] ?? [];
     setLocalSlots([...viewSlots].sort((a, b) => a.order - b.order));
   }, [stageState, selectedViewId, slotsDirty]);
+
+  // Live draft preview: while slots are dirty, resolve the in-progress edits
+  // server-side (no save) so the preview iframe can show the draft exactly as the
+  // kiosk would. Debounced to avoid a request per keystroke; cleared when clean.
+  const [resolvedDraftSlots, setResolvedDraftSlots] = useState<Slot[] | null>(null);
+  useEffect(() => {
+    if (!slotsDirty) {
+      setResolvedDraftSlots(null);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      ipc<Slot[]>("views:resolveSlots", { slots: localSlots.map((s, i) => ({ ...s, order: i })) })
+        .then((resolved) => {
+          if (!cancelled) setResolvedDraftSlots(resolved);
+        })
+        .catch((err) => console.error("[settings:resolveDraftSlots]", err));
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [slotsDirty, localSlots]);
 
   // Subscribe to live state changes from backend
   useEffect(() => {
@@ -414,6 +466,21 @@ export function SettingsView() {
     }
   }
 
+  async function handleDismissOnboarding() {
+    try {
+      const next = await ipc<StageState>("stage:setOnboardingDismissed", { dismissed: true });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to dismiss: ${String(err)}`);
+    }
+  }
+
+  // Jump to another settings section (with the same crossfade as the sidebar).
+  function navigateToSection(id: string) {
+    const sec = sections.find((s) => s.id === id);
+    if (sec) withViewTransition(() => setActiveSection(sec));
+  }
+
   async function handleSetPublicUrl(url: string | null) {
     try {
       const next = await ipc<StageState>("stage:setPublicUrl", { url });
@@ -522,7 +589,7 @@ export function SettingsView() {
       deviceBinding: null,
       displayName: null,
       photoUrl: null,
-      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null },
+      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null, label: null, iemLabel: null },
     };
     setLocalSlots((prev) => [...prev, newSlot]);
     setSlotsDirty(true);
@@ -538,7 +605,7 @@ export function SettingsView() {
       deviceBinding: null,
       displayName: null,
       photoUrl: null,
-      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null },
+      device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null, charge: null, iemCharge: null, label: null, iemLabel: null },
     };
     setLocalSlots((prev) => [...prev, newSlot]);
     setSlotsDirty(true);
@@ -570,6 +637,12 @@ export function SettingsView() {
     } finally {
       setIsSavingSlots(false);
     }
+  }
+
+  // Drop unsaved slot edits: clearing dirty lets the mirror effect re-seed
+  // localSlots from the saved server state, and the preview clears its draft.
+  function discardSlots() {
+    setSlotsDirty(false);
   }
 
   // ── Views (content) ──────────────────────────────────────────────────
@@ -882,6 +955,7 @@ export function SettingsView() {
     addSpacer,
     removeSlot,
     saveSlots,
+    discardSlots,
     handleSetViewSlotsLayout,
     handleAddView,
     handleRenameView,
@@ -925,13 +999,22 @@ export function SettingsView() {
     switch (activeSection.id) {
       case "plan":
         return (
-          <PlanSection
-            stageState={stageState}
-            serviceTypes={serviceTypes}
-            plans={plans}
-            isRefreshing={isRefreshing}
-            handlers={handlers}
-          />
+          <>
+            {!stageState.onboardingDismissed && (
+              <GettingStarted
+                stageState={stageState}
+                onNavigate={navigateToSection}
+                onDismiss={handleDismissOnboarding}
+              />
+            )}
+            <PlanSection
+              stageState={stageState}
+              serviceTypes={serviceTypes}
+              plans={plans}
+              isRefreshing={isRefreshing}
+              handlers={handlers}
+            />
+          </>
         );
       case "views":
         return (
@@ -945,6 +1028,7 @@ export function SettingsView() {
             localSlots={localSlots}
             slotsDirty={slotsDirty}
             isSavingSlots={isSavingSlots}
+            resolvedDraftSlots={resolvedDraftSlots}
             slotPresets={slotPresets}
             handlers={handlers}
           />
@@ -961,6 +1045,24 @@ export function SettingsView() {
         return (
           <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
             <SplHistorySection />
+          </div>
+        );
+      case "attendance":
+        return (
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+            <AttendanceHistorySection />
+          </div>
+        );
+      case "service-history":
+        return (
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+            <ServiceHistorySection />
+          </div>
+        );
+      case "baptisms":
+        return (
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+            <BaptismsSection stageState={stageState} />
           </div>
         );
       case "advanced":
@@ -1015,7 +1117,7 @@ export function SettingsView() {
           <SidebarList
             items={sections}
             selectedItem={activeSection}
-            onSelectedItemChange={setActiveSection}
+            onSelectedItemChange={(s: SectionItem) => withViewTransition(() => setActiveSection(s))}
             getItemKey={(s: SectionItem) => s.id}
           >
             {sections.map((section) => (

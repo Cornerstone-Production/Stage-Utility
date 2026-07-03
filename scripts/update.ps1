@@ -18,6 +18,10 @@ $progress = if ($env:STAGE_UPDATE_PROGRESS) { $env:STAGE_UPDATE_PROGRESS } else 
 
 Set-Location $repo
 $log = New-TemporaryFile
+# Commit before the pull — lets us diff what changed and skip the (slow) reinstall
+# / rebuild when an update doesn't touch them.
+$oldRev = (git rev-parse HEAD 2>$null)
+if (-not $oldRev) { $oldRev = "none" }
 
 function Write-Result($ok) {
   $logText = ""
@@ -46,14 +50,40 @@ try {
     "[update] git pull --ff-only origin $branch" | Out-File -Append $log
     git pull --ff-only origin $branch *>> $log; if ($LASTEXITCODE -ne 0) { throw "git pull failed" }
   }
-  Write-Progress-Step "install"
-  # --include=dev: the service runs with NODE_ENV=production, under which npm omits
-  # devDependencies — but the build tooling (vite, etc.) lives there. Force them in.
-  "[update] npm ci --include=dev" | Out-File -Append $log
-  npm ci --include=dev *>> $log;        if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
-  Write-Progress-Step "build"
-  "[update] npm run build" | Out-File -Append $log
-  npm run build *>> $log; if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
+  # Decide what's actually needed. The backend runs via tsx (no build), so a
+  # backend-only update just needs a restart. Reinstall only when the lockfile
+  # changed; rebuild only when renderer/build inputs changed. Default to doing the
+  # work whenever we can't tell (no OLD rev, or build/ missing).
+  $newRev = (git rev-parse HEAD 2>$null); if (-not $newRev) { $newRev = "none" }
+  $needInstall = $true
+  $needBuild = $true
+  if ($oldRev -ne "none" -and $newRev -ne "none" -and (Test-Path "build")) {
+    $changed = (git diff --name-only $oldRev $newRev 2>$null)
+    "[update] changed files:" | Out-File -Append $log
+    ($changed | ForEach-Object { "[update]   $_" }) | Out-File -Append $log
+    $needInstall = $false
+    $needBuild = $false
+    if ($changed -match '^package-lock\.json$') { $needInstall = $true; $needBuild = $true }
+    if ($changed -match '^(renderer/|index\.html|vite\.config|tailwind\.config|postcss\.config|package\.json|tsconfig)') { $needBuild = $true }
+  }
+
+  if ($needInstall) {
+    Write-Progress-Step "install"
+    # --include=dev: the service runs with NODE_ENV=production, under which npm omits
+    # devDependencies — but the build tooling (vite, etc.) lives there. Force them in.
+    "[update] npm ci --include=dev" | Out-File -Append $log
+    npm ci --include=dev *>> $log;        if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+  } else {
+    "[update] dependencies unchanged — skipping npm ci" | Out-File -Append $log
+  }
+
+  if ($needBuild) {
+    Write-Progress-Step "build"
+    "[update] npm run build" | Out-File -Append $log
+    npm run build *>> $log; if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
+  } else {
+    "[update] no renderer changes — skipping npm run build (backend runs via tsx)" | Out-File -Append $log
+  }
 } catch {
   $_ | Out-File -Append $log
   Write-Result $false

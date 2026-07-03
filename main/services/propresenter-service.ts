@@ -13,7 +13,7 @@
 
 import * as http from "http";
 
-import type { ProPresenterStatusDTO, ProSection, ProTimer } from "../types/stage.js";
+import type { ProPresenterStatusDTO, ProSection, ProTimer, PropInstancesDTO, PropInstanceMeta, PropInstanceConn } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 
 const POLL_INTERVAL_MS = 500;
@@ -202,6 +202,7 @@ function playOrderSections(active: unknown): { name: string; colorHex: string }[
 class ProPresenterService {
   private host: string | null = null;
   private port: number | null = null;
+  private pollMs = POLL_INTERVAL_MS;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private last: ProPresenterStatusDTO = OFFLINE;
@@ -217,8 +218,25 @@ class ProPresenterService {
   private playlistUuid: string | null = null;
   private playlistItems: { name: string; index: number }[] = [];
 
+  readonly id: string;
+  private readonly channel: string;
+  private onEmitCb: (() => void) | null = null;
+
+  constructor(id = "default") {
+    this.id = id;
+    // The primary instance keeps the original channel so built-in views + existing
+    // consumers are untouched; extra instances get a per-id channel.
+    this.channel = id === "default" ? "propresenter:status" : `propresenter:status:${id}`;
+  }
+
   setConnectionListener(cb: (state: ProConnState, message: string | null) => void): void {
     this.onConn = cb;
+  }
+
+  /** Notified after this instance's status changes — the manager uses it to
+   *  rebuild + broadcast the combined `propresenter:instances` payload. */
+  setEmitListener(cb: () => void): void {
+    this.onEmitCb = cb;
   }
 
   /** Latest polled status — lets a freshly-loaded dashboard hydrate immediately
@@ -233,9 +251,11 @@ class ProPresenterService {
     this.onConn?.(state, message);
   }
 
-  configure(host: string, port: number): void {
+  configure(host: string, port: number, pollMs?: number): void {
     this.host = host?.trim() || null;
     this.port = port > 0 ? Math.floor(port) : null;
+    // Clamp to a sane floor so a bad setting can't hammer ProPresenter.
+    this.pollMs = pollMs && pollMs >= 200 ? Math.floor(pollMs) : POLL_INTERVAL_MS;
     this.reported = null;
     this.restart();
   }
@@ -255,6 +275,10 @@ class ProPresenterService {
     }
     this.activeUuid = null;
     this.slideIdxZero = null;
+    // Drop the playlist-items cache too, so a reconnect to a different (or edited)
+    // service can't leak a stale "next item" from the previous playlist.
+    this.playlistUuid = null;
+    this.playlistItems = [];
     if (this.last.connected) this.emit(OFFLINE);
   }
 
@@ -306,7 +330,7 @@ class ProPresenterService {
 
       this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
       this.report("connected", `Connected to ${host}:${port}`);
-      this.schedule(POLL_INTERVAL_MS);
+      this.schedule(this.pollMs);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[propresenter] poll error:", msg);
@@ -476,8 +500,109 @@ class ProPresenterService {
     const json = JSON.stringify(status);
     if (json === this.lastJson) return;
     this.lastJson = json;
-    broadcast("propresenter:status", status);
+    broadcast(this.channel, status);
+    this.onEmitCb?.();
   }
 }
 
-export const propresenterService = new ProPresenterService();
+export const propresenterService = new ProPresenterService("default");
+
+// ── Multi-instance manager ────────────────────────────────────────────────────
+// The church runs two auditoriums, each with its own ProPresenter machine. The
+// PRIMARY instance stays `propresenterService` (channel "propresenter:status",
+// unchanged for built-in views); EXTRA instances are managed here, each on its
+// own channel. A combined snapshot (all instances + their status) is broadcast on
+// "propresenter:instances" so a custom layout object can pick which one it reads.
+
+export interface PropInstanceConfig {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  pollMs?: number;
+  enabled?: boolean;
+}
+
+class ProPresenterManager {
+  private extras = new Map<string, ProPresenterService>();
+  private names = new Map<string, string>(); // id → display name (incl. "default")
+  private conn = new Map<string, PropInstanceConn>(); // id → reachability (extras only)
+  private defaultName = "Main";
+
+  init(): void {
+    propresenterService.setEmitListener(() => this.broadcastCombined());
+  }
+
+  /** Reconcile the extra instances to `extras`; `defaultName` names the primary.
+   *  Pass an empty `extras` list to tear them all down (integration disabled). */
+  apply(defaultName: string | null, extras: PropInstanceConfig[]): void {
+    this.defaultName = defaultName?.trim() || "Main";
+    const wanted = new Set(extras.map((e) => e.id));
+    for (const [id, svc] of this.extras) {
+      if (!wanted.has(id)) {
+        svc.stop();
+        this.extras.delete(id);
+        this.names.delete(id);
+        this.conn.delete(id);
+      }
+    }
+    for (const e of extras) {
+      let svc = this.extras.get(e.id);
+      if (!svc) {
+        svc = new ProPresenterService(e.id);
+        svc.setEmitListener(() => this.broadcastCombined());
+        // Surface reachability the same way the primary does (connecting → the
+        // service's listener flips it to connected/error on the first tick).
+        svc.setConnectionListener((state, message) => {
+          this.conn.set(e.id, { state, message });
+          this.broadcastCombined();
+        });
+        this.extras.set(e.id, svc);
+      }
+      this.names.set(e.id, e.name?.trim() || e.id);
+      if (e.enabled !== false && e.host && e.port > 0) {
+        this.conn.set(e.id, { state: "connecting", message: `Polling ${e.host}:${e.port}` });
+        svc.configure(e.host, e.port, e.pollMs);
+      } else {
+        svc.stop();
+        this.conn.set(e.id, { state: "disconnected", message: null });
+      }
+    }
+    this.broadcastCombined();
+  }
+
+  private broadcastCombined(): void {
+    broadcast("propresenter:instances", this.getInstancesDto());
+  }
+
+  getInstancesDto(): PropInstancesDTO {
+    const list: PropInstanceMeta[] = [
+      { id: "default", name: this.defaultName },
+      ...[...this.extras.keys()].map((id) => ({ id, name: this.names.get(id) ?? id })),
+    ];
+    const status: Record<string, ProPresenterStatusDTO> = {
+      default: propresenterService.getStatus(),
+    };
+    for (const [id, svc] of this.extras) status[id] = svc.getStatus();
+    // The primary's rich state lives on its integration card; here we derive it
+    // from the polled status so the map is complete. Extras carry their own state.
+    const conn: Record<string, PropInstanceConn> = {
+      default: {
+        state: propresenterService.getStatus().connected ? "connected" : "disconnected",
+        message: null,
+      },
+    };
+    for (const id of this.extras.keys()) {
+      conn[id] = this.conn.get(id) ?? { state: "disconnected", message: null };
+    }
+    return { list, status, conn };
+  }
+
+  /** Thumbnail target for a given instance ("default"/empty → primary). */
+  getThumbnailTarget(id: string | null | undefined) {
+    if (!id || id === "default") return propresenterService.getThumbnailTarget();
+    return this.extras.get(id)?.getThumbnailTarget() ?? null;
+  }
+}
+
+export const propresenterManager = new ProPresenterManager();

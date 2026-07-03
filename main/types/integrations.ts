@@ -8,6 +8,8 @@ export interface ConfigField {
   type: "text" | "password" | "number" | "select" | "ip-list";
   options?: { value: string; label: string }[];
   placeholder?: string;
+  /** Optional longer explanation shown behind an "i" info popover next to the label. */
+  help?: string;
 }
 
 export interface IntegrationDescriptor {
@@ -24,4 +26,9 @@ export interface IntegrationState {
   message: string | null;
   /** Non-secret config values; secret fields masked as "••••" */
   config: Record<string, unknown>;
+  /** Whether the operator has actually set this integration up (creds/config or,
+   *  for wireless/OSC, the master toggle). Independent of the live connection, so
+   *  consumers can tell "not set up" apart from "set up but disconnected".
+   *  Computed in getStates(); stored entries omit it. */
+  configured?: boolean;
 }

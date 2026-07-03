@@ -160,6 +160,26 @@ export function forEachWithRect(
   }
 }
 
+/** True when the object with `id`, or ANY of its ancestor containers, is `locked`.
+ *  The single gate the editor checks before moving/resizing/deleting an object so a
+ *  locked container also protects everything nested inside it. */
+export function isLockedInTree(nodes: LayoutObject[], id: string): boolean {
+  let result: boolean | null = null;
+  const walk = (list: LayoutObject[], ancestorLocked: boolean): boolean => {
+    for (const n of list) {
+      const locked = ancestorLocked || !!n.locked;
+      if (n.id === id) {
+        result = locked;
+        return true;
+      }
+      if (n.children?.length && walk(n.children, locked)) return true;
+    }
+    return false;
+  };
+  walk(nodes, false);
+  return result ?? false;
+}
+
 /** Deep-clone an object (and its whole subtree), minting a fresh id at every
  *  depth via `uid`. Copies `style`/`config`/`children` so no references are shared
  *  with the source — required when duplicating objects or loading templates. */

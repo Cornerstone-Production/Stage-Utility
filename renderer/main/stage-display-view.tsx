@@ -159,9 +159,11 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
                 ? "Planning Center Live"
                 : timer.mode === "preservice"
                   ? "Service starts in"
-                  : over
-                    ? "PCO Live · over"
-                    : "PCO Live · remaining"
+                  : timer.countUp
+                    ? "PCO Live · elapsed"
+                    : over
+                      ? "PCO Live · over"
+                      : "PCO Live · remaining"
             }
             accent={timer ? (over ? "red" : "green") : "none"}
           >
@@ -229,13 +231,13 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
         <div className="grid grid-cols-2 gap-2.5 h-[15%] min-h-0 shrink-0">
           <Cell label="Current service item" align="start">
             <span className="text-[clamp(1rem,3.2vmin,1.7rem)] font-medium leading-tight truncate w-full">
-              {pro?.currentServiceItem ?? "—"}
+              {pcoLive?.currentItemTitle ?? pro?.currentServiceItem ?? "—"}
             </span>
           </Cell>
           <Cell label="Next service item" align="start" accent="amber">
             <div className="flex items-center justify-between gap-3 w-full">
               <span className="text-[clamp(1rem,3.2vmin,1.7rem)] font-medium leading-tight truncate text-amber-10">
-                {pro?.nextServiceItem ?? "—"}
+                {pcoLive?.nextItemTitle ?? pro?.nextServiceItem ?? "—"}
               </span>
               {runningTimers.length > 0 && (
                 <span className="flex items-center gap-2 shrink-0">

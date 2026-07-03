@@ -54,6 +54,12 @@ export interface SettingsData {
   captionChannelColors: Record<string, string>;
   /** Scheduled in-app auto-update window. */
   autoUpdate: { enabled: boolean; dayOfWeek: number | null; hour: number };
+  /** Local UDP port the OSC integration listens on for device feedback. */
+  oscFeedbackPort: number;
+  /** Smaart metric keys to surface in the SPL History tab (empty = auto default). */
+  splVisibleMetrics: string[];
+  /** Operator dismissed the first-run "Getting started" checklist (machine-wide). */
+  onboardingDismissed: boolean;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -84,6 +90,9 @@ const DEFAULT_SETTINGS: SettingsData = {
   publicUrl: null,
   captionChannelColors: {},
   autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
+  oscFeedbackPort: 9000,
+  splVisibleMetrics: [],
+  onboardingDismissed: false,
 };
 
 const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS);

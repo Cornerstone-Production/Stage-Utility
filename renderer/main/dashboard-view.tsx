@@ -147,9 +147,11 @@ export function DashboardView({ displayId }: DashboardViewProps) {
               ? "Service timer"
               : timer.mode === "preservice"
                 ? "Service starts in"
-                : over
-                  ? "Live · item over"
-                  : "Live · item remaining"
+                : timer.countUp
+                  ? "Live · elapsed"
+                  : over
+                    ? "Live · item over"
+                    : "Live · item remaining"
           }
           accent={timer ? (over ? "red" : "green") : "none"}
         >

@@ -27,3 +27,7 @@ npm-debug.log*
 
 # Claude Code local config
 .claude/
+
+# Local SenSource API diagnostic captures (contain org names/addresses/MACs — never commit)
+sensource-capture*.json
+sensource-probe*.json

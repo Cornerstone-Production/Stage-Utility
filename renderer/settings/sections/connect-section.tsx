@@ -6,8 +6,10 @@ import {
   FieldLabel,
   FieldDescription,
   Switch,
+  toast,
 } from "../../components/ui";
 import { QrHint } from "../../components/qr-hint";
+import { copyText } from "../../lib/clipboard";
 import type { SectionProps } from "../types";
 
 export function ConnectSection({ stageState, handlers }: Pick<SectionProps, "stageState" | "handlers">) {
@@ -33,6 +35,18 @@ export function ConnectSection({ stageState, handlers }: Pick<SectionProps, "sta
                   Scan this code or open the address on a phone on the same network to control the
                   display remotely.
                 </FieldDescription>
+                <button
+                  type="button"
+                  className="mt-1.5 self-start text-left text-[11px] font-mono text-gray-a9 hover:text-gray-11 transition-colors truncate max-w-full"
+                  title="Click to copy URL"
+                  onClick={async () => {
+                    const ok = await copyText(stageState.remoteUrl!);
+                    if (ok) toast.success("URL copied");
+                    else toast.error("Couldn't copy — select the address manually");
+                  }}
+                >
+                  {stageState.remoteUrl}
+                </button>
               </FieldContent>
               <QrHint url={stageState.remoteUrl} />
             </Field>

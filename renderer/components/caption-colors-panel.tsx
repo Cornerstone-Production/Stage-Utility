@@ -3,11 +3,11 @@ import { invoke } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
 import { useTranscript } from "../main/use-transcript";
 import { channelColor } from "../main/channel-color";
-import { Button, toast } from "./ui";
+import { Button, InfoHint, toast } from "./ui";
 import { ChevronRightIcon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 
-// Collapsible "Caption colors" disclosure shown under the ProdCom integration.
+// Collapsible "Transcription colors" disclosure shown under the ProdCom integration.
 // Lists every channel seen in the transcript (plus any already assigned) and lets
 // the user pick a color per channel. ProdCom doesn't send colors, so this is the
 // way to control them; a pick overrides the otherwise-automatic per-channel color.
@@ -38,15 +38,21 @@ export function CaptionColorsPanel() {
 
   return (
     <div className="flex flex-col">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 py-1 text-caption1 font-medium text-gray-11 hover:text-gray-12 transition-colors self-start"
-        aria-expanded={open}
-      >
-        <ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
-        Caption colors
-      </button>
+      <div className="flex items-center gap-1.5 self-start">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-1.5 py-1 text-caption1 font-medium text-gray-11 hover:text-gray-12 transition-colors"
+          aria-expanded={open}
+        >
+          <ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
+          Transcription colors
+        </button>
+        <InfoHint>
+          Override the auto-assigned color for each transcription channel (speaker/mic). ProdCom doesn't
+          send colors, so this is where you set them; leave a channel on "auto" to keep its default.
+        </InfoHint>
+      </div>
 
       {open && (
         <div className="mt-1.5 flex flex-col gap-1.5">

@@ -13,13 +13,14 @@ import {
   SelectValue,
   toast,
 } from "../../components/ui";
+import { copyText } from "../../lib/clipboard";
 import type { SectionProps } from "../types";
 
 const KIND_LABELS: Record<ViewKind, string> = {
   slots: "Mic Slots",
   dashboard: "Dashboard",
   stage: "Stage",
-  transcription: "Captions",
+  transcription: "Transcription",
   custom: "Custom Layout",
   script: "Script",
   "spl-rundown": "SPL Rundown",
@@ -135,7 +136,7 @@ function OutputRow({ output, views, baseUrl, isFirst, canRemove, onRename, onSet
           type="button"
           className="text-left text-[11px] text-gray-a9 hover:text-gray-11 font-mono truncate transition-colors min-w-0"
           title="Click to copy URL"
-          onClick={() => navigator.clipboard.writeText(outputUrl).then(() => toast.success("URL copied"))}
+          onClick={async () => { if (await copyText(outputUrl)) toast.success("URL copied"); else toast.error("Couldn't copy — select the URL manually"); }}
         >
           {outputUrl}
         </button>

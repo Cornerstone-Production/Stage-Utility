@@ -4,7 +4,21 @@
 import type { PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
-const CACHE_TTL_MS = 30_000;
+// Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
+// everything, which re-pulled it constantly (the live timer polls every 1–4s and
+// the auto-advance check reads plan times every tick). Split by volatility:
+//   LONG   — effectively static within a service day (service types, note
+//            categories, team positions, plan service times).
+//   MEDIUM — plan content that can still be edited up to service time (plan list,
+//            plan items, team members, attachments).
+//   getLive() stays UNCACHED — it's the live timer and must be real-time.
+const CACHE_TTL_MS = 30_000; // default / fallback
+const TTL_LONG_MS = 15 * 60_000;
+const TTL_MEDIUM_MS = 3 * 60_000;
+/** Short-lived cache for attachment `open` signed URLs (PCO issues ~1h links). */
+const ATTACH_OPEN_TTL_MS = 10 * 60_000;
+/** Retry budget for transient PCO failures (429 / 5xx / network). */
+const MAX_RETRIES = 3;
 
 /** True for PCO's auto-generated "initials" placeholder avatar (served at
  *  …/uploads/initials/AB.png when a person has no uploaded photo). Real photos
@@ -30,6 +44,36 @@ function highResAvatar(url: string): string {
 interface CacheEntry<T> {
   value: T;
   expiresAt: number;
+}
+
+/** A plan's "service" plan_time — one per service occurrence (e.g. 9am, 11am). */
+interface ServiceTime {
+  id: string;
+  startsAt: string;
+  endsAt: string | null;
+}
+
+/**
+ * Current + next item titles from the PLAN order (the authoritative rundown),
+ * given the live item id. "next" skips header rows; with no live item yet it's the
+ * first non-header item. Drives the Current/Next display blocks from PCO, so an
+ * off-plan ProPresenter playlist can't leak an item that isn't in today's plan.
+ */
+export function resolvePlanCurrentNext(
+  items: PlanItemDTO[],
+  currentItemId: string | null,
+): { currentItemTitle: string | null; nextItemTitle: string | null } {
+  if (items.length === 0) return { currentItemTitle: null, nextItemTitle: null };
+  const idx = currentItemId ? items.findIndex((i) => i.id === currentItemId) : -1;
+  const current = idx >= 0 ? items[idx] : null;
+  let next: PlanItemDTO | null = null;
+  for (let i = idx + 1; i < items.length; i++) {
+    if (items[i].itemType !== "header") {
+      next = items[i];
+      break;
+    }
+  }
+  return { currentItemTitle: current?.title ?? null, nextItemTitle: next?.title ?? null };
 }
 
 // Generic JSON:API node from PCO
@@ -58,13 +102,21 @@ class PcoService {
     return entry.value as T;
   }
 
-  private cacheSet<T>(key: string, value: T): void {
+  private cacheSet<T>(key: string, value: T, ttlMs: number = CACHE_TTL_MS): void {
     // Bound cache to 200 entries to avoid unbounded growth.
     if (this.cache.size >= 200) {
       const firstKey = this.cache.keys().next().value;
       if (firstKey !== undefined) this.cache.delete(firstKey);
     }
-    this.cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+    this.cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+  }
+
+  /** Invalidate every cache entry scoped to one plan (its items, team, service
+   *  times, attachments). Used for targeted refresh instead of nuking the lot. */
+  clearPlanCache(planId: string): void {
+    for (const key of [...this.cache.keys()]) {
+      if (key.includes(`:${planId}`) || key.endsWith(planId)) this.cache.delete(key);
+    }
   }
 
   clearCache(): void {
@@ -76,30 +128,60 @@ class PcoService {
     return `Basic ${creds}`;
   }
 
+  private sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  /** Backoff for a transient failure on attempt N (0-based). Honors PCO's
+   *  Retry-After header when present, else exponential (1s, 2s, 4s) + jitter. */
+  private backoffMs(attempt: number, retryAfter: string | null): number {
+    const ra = retryAfter ? parseInt(retryAfter, 10) : NaN;
+    if (Number.isFinite(ra) && ra > 0) return Math.min(ra * 1000, 15_000);
+    return Math.min(1000 * 2 ** attempt, 8000) + Math.floor(Math.random() * 250);
+  }
+
   private async request<T extends PcoNode = PcoNode>(
     url: string,
     appId: string,
     secret: string,
   ): Promise<PcoResponse<T>> {
     console.log(`[pco] GET ${url}`);
-    const response = await fetch(url, {
-      headers: {
-        Authorization: this.makeAuthHeader(appId, secret),
-        "Content-Type": "application/json",
-      },
-    });
+    // Retry transient failures (429 rate-limit, 5xx, network) with backoff. PCO
+    // allows ~100 req / 20s per app; a burst (many displays + a refresh) can 429,
+    // which previously threw and dropped data. 401/other-4xx fail fast.
+    for (let attempt = 0; ; attempt++) {
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          headers: {
+            Authorization: this.makeAuthHeader(appId, secret),
+            "Content-Type": "application/json",
+          },
+        });
+      } catch (err) {
+        if (attempt >= MAX_RETRIES) throw err;
+        await this.sleep(this.backoffMs(attempt, null));
+        continue;
+      }
 
-    if (response.status === 401) {
-      throw new Error("PCO auth failed — check App ID/Secret in Integrations settings");
-    }
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new Error(`PCO API error ${response.status}: ${body || response.statusText}`);
-    }
+      if (response.status === 401) {
+        throw new Error("PCO auth failed — check App ID/Secret in Integrations settings");
+      }
+      if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
+        const wait = this.backoffMs(attempt, response.headers.get("Retry-After"));
+        console.warn(`[pco] ${response.status} on ${url} — retrying in ${wait}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await this.sleep(wait);
+        continue;
+      }
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(`PCO API error ${response.status}: ${body || response.statusText}`);
+      }
 
-    const json = await response.json() as PcoResponse<T>;
-    console.log(`[pco] OK ${url} (${Array.isArray(json.data) ? (json.data as T[]).length : 1} items)`);
-    return json;
+      const json = await response.json() as PcoResponse<T>;
+      console.log(`[pco] OK ${url} (${Array.isArray(json.data) ? (json.data as T[]).length : 1} items)`);
+      return json;
+    }
   }
 
   // POST a Services Live controller action (no JSON body; PCO returns the updated
@@ -116,9 +198,16 @@ class PcoService {
     if (response.status === 401) {
       throw new Error("PCO auth failed — check App ID/Secret in Integrations settings");
     }
+    if (response.status === 403) {
+      // Almost always: no Live session is actually running for this plan, or the
+      // connected Planning Center account isn't a permitted Live controller.
+      throw new Error(
+        "Can't control PCO Live — start a Live session for this plan in Planning Center, and make sure the connected account can control Live for this service type.",
+      );
+    }
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`PCO live control error ${response.status}: ${body || response.statusText}`);
+      throw new Error(`PCO live control failed (${response.status}). ${response.statusText || body}`);
     }
   }
 
@@ -242,7 +331,7 @@ class PcoService {
       url = typeof next === "string" && next ? next : null;
     }
 
-    this.cacheSet(cacheKey, out);
+    this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
     return out;
   }
 
@@ -259,6 +348,12 @@ class PcoService {
     planId: string,
     attachmentId: string,
   ): Promise<{ url: string; contentType: string | null }> {
+    // Cache the signed URL briefly so N kiosks showing the same plan file don't
+    // each POST an `open` (PCO links last ~1h; we keep ours well under that).
+    const cacheKey = `attach-open:${attachmentId}`;
+    const cached = this.cacheGet<{ url: string; contentType: string | null }>(cacheKey);
+    if (cached) return cached;
+
     // `all_attachments/{id}/open` is the uniform open action for every attachable
     // type (plan file, service-type file, item/arrangement chart).
     const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/all_attachments/${attachmentId}/open`;
@@ -270,7 +365,9 @@ class PcoService {
       throw new Error("PCO did not return a download URL for this attachment");
     }
     const ct = a.content_type;
-    return { url: dl, contentType: typeof ct === "string" && ct ? ct : null };
+    const result = { url: dl, contentType: typeof ct === "string" && ct ? ct : null };
+    this.cacheSet(cacheKey, result, ATTACH_OPEN_TTL_MS);
+    return result;
   }
 
   async listServiceTypes(appId: string, secret: string): Promise<ServiceTypeDTO[]> {
@@ -287,7 +384,7 @@ class PcoService {
       name: String(item.attributes.name ?? "Unknown"),
     }));
 
-    this.cacheSet(cacheKey, result);
+    this.cacheSet(cacheKey, result, TTL_LONG_MS);
     return result;
   }
 
@@ -314,7 +411,7 @@ class PcoService {
       dates: item.attributes.dates != null ? String(item.attributes.dates) : null,
     }));
 
-    this.cacheSet(cacheKey, result);
+    this.cacheSet(cacheKey, result, TTL_MEDIUM_MS);
     return result;
   }
 
@@ -340,7 +437,7 @@ class PcoService {
       .sort((a, b) => a.sequence - b.sequence)
       .map((c) => c.name);
 
-    this.cacheSet(cacheKey, result);
+    this.cacheSet(cacheKey, result, TTL_LONG_MS);
     return result;
   }
 
@@ -402,7 +499,7 @@ class PcoService {
     }
 
     out.sort((a, b) => a.sequence - b.sequence);
-    this.cacheSet(cacheKey, out);
+    this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
     return out;
   }
 
@@ -502,7 +599,7 @@ class PcoService {
       return s !== "D" && s !== "DECLINED";
     });
 
-    this.cacheSet(cacheKey, attending);
+    this.cacheSet(cacheKey, attending, TTL_MEDIUM_MS);
     return attending;
   }
 
@@ -515,29 +612,50 @@ class PcoService {
     const cached = this.cacheGet<TeamPositionDTO[]>(cacheKey);
     if (cached) return cached;
 
-    // Fetch all teams for this service type.
-    const teamsUrl = `${PCO_BASE}/service_types/${serviceTypeId}/teams?per_page=100`;
+    // One compound request: teams + their positions via `include=team_positions`
+    // (was 1 + N: a teams call, then a positions call PER team). Falls back to the
+    // per-team loop if this PCO endpoint doesn't honor the include.
+    const teamsUrl = `${PCO_BASE}/service_types/${serviceTypeId}/teams?include=team_positions&per_page=100`;
     const teamsJson = await this.request(teamsUrl, appId, secret);
     const teams = Array.isArray(teamsJson.data) ? teamsJson.data : [teamsJson.data];
 
-    // Fetch positions for each team in parallel.
-    const allPositions: TeamPositionDTO[] = [];
-    await Promise.all(
-      teams.map(async (team) => {
-        const posUrl = `${PCO_BASE}/service_types/${serviceTypeId}/teams/${team.id}/team_positions?per_page=100`;
-        const posJson = await this.request(posUrl, appId, secret);
-        const positions = Array.isArray(posJson.data) ? posJson.data : [posJson.data];
-        for (const pos of positions) {
-          allPositions.push({
-            teamId: team.id,
-            teamName: String(team.attributes.name ?? "Unknown"),
-            positionName: String(pos.attributes.name ?? "Unknown"),
-          });
-        }
-      }),
-    );
+    const positionsById = new Map<string, PcoNode>();
+    for (const n of teamsJson.included ?? []) {
+      if (n.type === "TeamPosition") positionsById.set(n.id, n);
+    }
 
-    this.cacheSet(cacheKey, allPositions);
+    const allPositions: TeamPositionDTO[] = [];
+    if (positionsById.size > 0) {
+      for (const team of teams) {
+        const teamName = String(team.attributes.name ?? "Unknown");
+        const rel = team.relationships?.team_positions?.data;
+        const refs = Array.isArray(rel) ? rel : rel ? [rel] : [];
+        for (const ref of refs) {
+          const pos = positionsById.get(ref.id);
+          if (pos) {
+            allPositions.push({ teamId: team.id, teamName, positionName: String(pos.attributes.name ?? "Unknown") });
+          }
+        }
+      }
+    } else {
+      // Fallback: include not honored — fetch positions per team in parallel.
+      await Promise.all(
+        teams.map(async (team) => {
+          const posUrl = `${PCO_BASE}/service_types/${serviceTypeId}/teams/${team.id}/team_positions?per_page=100`;
+          const posJson = await this.request(posUrl, appId, secret);
+          const positions = Array.isArray(posJson.data) ? posJson.data : [posJson.data];
+          for (const pos of positions) {
+            allPositions.push({
+              teamId: team.id,
+              teamName: String(team.attributes.name ?? "Unknown"),
+              positionName: String(pos.attributes.name ?? "Unknown"),
+            });
+          }
+        }),
+      );
+    }
+
+    this.cacheSet(cacheKey, allPositions, TTL_LONG_MS);
     return allPositions;
   }
 
@@ -560,6 +678,15 @@ class PcoService {
     const live = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
     const included = json.included ?? [];
 
+    // The chosen "service" plan_time occurrence (e.g. 9am vs 11am). Resolved in
+    // EVERY mode (cached LONG) so it can (a) supply the pre-service countdown target
+    // and (b) let SPL history separate back-to-back services that share one plan.
+    const serviceTime = this.pickServiceTime(
+      await this.getServiceTimes(appId, secret, serviceTypeId, planId),
+    );
+    const serviceTimeId = serviceTime?.id ?? null;
+    const serviceTimeStartsAt = serviceTime?.startsAt ?? null;
+
     // ── "item" mode: a plan item is currently live. ──
     // (current_item_time must resolve to one of THIS plan's items — its item is in
     // the `items` include. A session whose item isn't ours, or no session at all,
@@ -572,6 +699,12 @@ class PcoService {
     const itemId = itemRef && !Array.isArray(itemRef) ? itemRef.id : null;
     const itemNode =
       itemId ? included.find((n) => n.type === "Item" && n.id === itemId) : null;
+
+    // Current/next item titles follow the PCO PLAN order (authoritative), not the
+    // ProPresenter playlist — so an off-plan presentation can't leak a wrong "next".
+    // listPlanItems is cached, so this is essentially free on most live ticks.
+    const planItems = await this.listPlanItems(appId, secret, serviceTypeId, planId).catch(() => []);
+    const { currentItemTitle, nextItemTitle } = resolvePlanCurrentNext(planItems, itemId);
 
     if (it && typeof liveStartAt === "string" && liveStartAt && itemNode) {
       // "Full Item Length" = the *plan item's* length (ItemTime.length is often 0)
@@ -589,39 +722,60 @@ class PcoService {
         liveStartAt,
         targetAt: null,
         serverNow,
+        currentItemTitle,
+        nextItemTitle,
+        serviceTimeId,
+        serviceTimeStartsAt,
       };
     }
 
     // ── "preservice" mode: count down to the service start (PCO's pre-service timer). ──
-    const startAt = await this.getServiceStart(appId, secret, serviceTypeId, planId);
-    if (startAt) {
+    if (serviceTimeStartsAt) {
       return {
         mode: "preservice",
         currentItemId: null,
         label: "Service starts",
         lengthSec: null,
         liveStartAt: null,
-        targetAt: startAt,
+        targetAt: serviceTimeStartsAt,
         serverNow,
+        currentItemTitle,
+        nextItemTitle,
+        serviceTimeId,
+        serviceTimeStartsAt,
       };
     }
 
-    return { mode: "none", currentItemId: null, label: null, lengthSec: null, liveStartAt: null, targetAt: null, serverNow };
+    return {
+      mode: "none",
+      currentItemId: null,
+      label: null,
+      lengthSec: null,
+      liveStartAt: null,
+      targetAt: null,
+      serverNow,
+      currentItemTitle,
+      nextItemTitle,
+      serviceTimeId,
+      serviceTimeStartsAt,
+    };
   }
 
   /**
-   * The plan's service start time (ISO) — the soonest "service" plan_time whose
-   * end is still in the future, else the latest. Cached (~30s) since it's static.
+   * Fetch + cache a plan's "service" plan_times ONCE (start countdown and
+   * auto-rollover end both derive from this). Previously start + end each made a
+   * separate request to the identical /plan_times URL; this collapses them to one
+   * call per plan, cached LONG since service times are effectively static day-of.
    */
-  private async getServiceStart(
+  private async getServiceTimes(
     appId: string,
     secret: string,
     serviceTypeId: string,
     planId: string,
-  ): Promise<string | null> {
-    const cacheKey = `plan-start:${planId}`;
-    const cached = this.cacheGet<string | null>(cacheKey);
-    if (cached !== null) return cached;
+  ): Promise<ServiceTime[]> {
+    const cacheKey = `plan-times:${planId}`;
+    const cached = this.cacheGet<ServiceTime[]>(cacheKey);
+    if (cached) return cached;
 
     const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times`;
     const json = await this.request(url, appId, secret).catch(() => null);
@@ -629,54 +783,35 @@ class PcoService {
     const services = times
       .filter((t) => t.attributes.time_type === "service")
       .map((t) => ({
+        id: t.id,
         startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
         endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
       }))
-      .filter((t): t is { startsAt: string; endsAt: string } => !!t.startsAt);
+      .filter((t): t is ServiceTime => !!t.startsAt);
 
+    this.cacheSet(cacheKey, services, TTL_LONG_MS);
+    return services;
+  }
+
+  /** Choose the relevant "service" time: the soonest whose end is still in the
+   *  future, else the latest. (Same selection start + end always shared.) */
+  private pickServiceTime(services: ServiceTime[]): ServiceTime | null {
     const now = Date.now();
     const upcoming = services
       .filter((t) => (t.endsAt ? Date.parse(t.endsAt) > now : true))
       .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
-    const chosen = upcoming ?? services.sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt))[0];
-    const result = chosen?.startsAt ?? null;
-    this.cacheSet(cacheKey, result);
-    return result;
+    return upcoming ?? services.slice().sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt))[0] ?? null;
   }
 
-  /**
-   * The current plan's service END time (ISO), choosing the same "service"
-   * plan_time getServiceStart would — used by auto-mode rollover. Cached (~30s).
-   */
+  /** The current plan's service END time (ISO) — used by auto-mode rollover. */
   async getServiceEnd(
     appId: string,
     secret: string,
     serviceTypeId: string,
     planId: string,
   ): Promise<string | null> {
-    const cacheKey = `plan-end:${planId}`;
-    const cached = this.cacheGet<string | null>(cacheKey);
-    if (cached !== null) return cached;
-
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const times = json && Array.isArray(json.data) ? json.data : [];
-    const services = times
-      .filter((t) => t.attributes.time_type === "service")
-      .map((t) => ({
-        startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
-        endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
-      }))
-      .filter((t): t is { startsAt: string; endsAt: string } => !!t.startsAt);
-
-    const now = Date.now();
-    const upcoming = services
-      .filter((t) => (t.endsAt ? Date.parse(t.endsAt) > now : true))
-      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
-    const chosen = upcoming ?? services.sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt))[0];
-    const result = chosen?.endsAt ?? null;
-    this.cacheSet(cacheKey, result);
-    return result;
+    const chosen = this.pickServiceTime(await this.getServiceTimes(appId, secret, serviceTypeId, planId));
+    return chosen?.endsAt ?? null;
   }
 }
 

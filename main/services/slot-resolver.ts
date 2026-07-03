@@ -12,11 +12,13 @@ const EMPTY_DEVICE: SlotDevice = {
   audioLevel: null,
   charge: null,
   iemCharge: null,
+  label: null,
+  iemLabel: null,
 };
 
 function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
   if (!ds.online) {
-    return { status: "error", rf: null, battery: null, freq: ds.frequencyLabel, audioLevel: null, charge: null, iemCharge: null };
+    return { status: "error", rf: null, battery: null, freq: ds.frequencyLabel, audioLevel: null, charge: null, iemCharge: null, label: null, iemLabel: null };
   }
   let status: SlotDevice["status"] = "ok";
   if (ds.rfBars !== null && ds.rfBars <= 1) status = "warn";
@@ -30,23 +32,19 @@ function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
     audioLevel: ds.audioLevel,
     charge: ds.battery,
     iemCharge: null,
+    label: null,
+    iemLabel: null,
   };
 }
 
-// Resolve the IEM/PSM pack battery for a slot's optional second device binding.
-// IEM packs are a vocalist thing, so this only resolves for vocal slots; other
-// roles never get a second bar even if an iemBinding lingers. Independent of the
-// primary mic; only shows while that device is online.
-function resolveIem(slot: Slot, deviceStatuses: Map<string, DeviceStatus>, isVocal: boolean): number | null {
-  if (!isVocal || !slot.iemBinding) return null;
+// Resolve the IEM/PSM pack battery for a slot's optional second (live) device
+// binding. Any slot may carry an IEM (vocalist, musician, etc.); independent of
+// the primary mic; only shows while that device is online. (Offline IEM labels
+// are separate — see slot.iemLabel.)
+function resolveIem(slot: Slot, deviceStatuses: Map<string, DeviceStatus>): number | null {
+  if (!slot.iemBinding) return null;
   const ds = deviceStatuses.get(slot.iemBinding.channelId);
   return ds && ds.online ? ds.battery : null;
-}
-
-// A slot counts as a vocalist when its (configured or matched) position is a
-// "Vocals" role — "Vocals", "Vocals (BGVs)", "Lead Vocal", etc.
-function isVocalPosition(name: string | null | undefined): boolean {
-  return normalizePosition(name).includes("vocal");
 }
 
 // Resolve the charge-bar level for a slot from its configured source. Defaults
@@ -134,7 +132,14 @@ export function resolveSlots(
         const ds = deviceStatuses.get(slot.deviceBinding.channelId);
         if (ds) device = deviceStatusToSlotDevice(ds);
       }
-      device = { ...device, charge: resolveCharge(slot, device, deviceStatuses), iemCharge: resolveIem(slot, deviceStatuses, false) };
+      device = {
+        ...device,
+        charge: resolveCharge(slot, device, deviceStatuses),
+        iemCharge: resolveIem(slot, deviceStatuses),
+        // Per-slot offline labels ("" = Offline picked but unlabeled → still a pill).
+        label: slot.deviceLabel ?? null,
+        iemLabel: slot.iemLabel ?? null,
+      };
       return { ...slot, device };
     }
 
@@ -145,14 +150,14 @@ export function resolveSlots(
       const ds = deviceStatuses.get(slot.deviceBinding.channelId);
       if (ds) device = deviceStatusToSlotDevice(ds);
     }
-    // Vocalist if the slot is configured as a Vocals position, or the matched
-    // member's position is a vocal role (covers person-matched vocalists too).
-    const isVocal =
-      (slot.link.kind === "pco" &&
-        slot.link.matchBy === "position" &&
-        isVocalPosition(slot.link.teamPositionName)) ||
-      isVocalPosition(member?.teamPositionName);
-    device = { ...device, charge: resolveCharge(slot, device, deviceStatuses), iemCharge: resolveIem(slot, deviceStatuses, isVocal) };
+    device = {
+      ...device,
+      charge: resolveCharge(slot, device, deviceStatuses),
+      iemCharge: resolveIem(slot, deviceStatuses),
+      // Per-slot offline labels ("" = Offline picked but unlabeled → still a pill).
+      label: slot.deviceLabel ?? null,
+      iemLabel: slot.iemLabel ?? null,
+    };
 
     return {
       ...slot,

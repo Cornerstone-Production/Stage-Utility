@@ -9,6 +9,7 @@ interface ConfigField {
   type: "text" | "password" | "number" | "select" | "ip-list";
   options?: { value: string; label: string }[];
   placeholder?: string;
+  help?: string;
 }
 
 interface IntegrationDescriptor {
@@ -24,6 +25,9 @@ interface IntegrationState {
   connection: ConnectionState;
   message: string | null;
   config: Record<string, unknown>;
+  /** Operator has set this up (creds/config, or the master toggle for
+   *  wireless/OSC). Independent of the live connection. */
+  configured?: boolean;
 }
 
 interface DeviceStatus {
@@ -53,10 +57,81 @@ interface SplMetricsDTO {
   meters: Record<string, SplMeterDTO>;
 }
 
+interface ObsStatusDTO {
+  connected: boolean;
+  recording: boolean;
+  recordPaused: boolean;
+  streaming: boolean;
+  virtualCam: boolean;
+  recordTimecode: string | null;
+}
+
+interface OscArg {
+  type: "i" | "f" | "s" | "T" | "F";
+  value?: number | string;
+}
+
+interface OscFeedbackBind {
+  address: string;
+  equals?: number | string | boolean;
+  activeColor?: string;
+}
+
+interface OscTarget {
+  id: string;
+  name: string;
+  enabled: boolean;
+  connection: ConnectionState;
+  message: string | null;
+  config: {
+    host?: string;
+    port?: number;
+    subscribeAddress?: string;
+    subscribeIntervalSec?: number;
+  };
+}
+
+interface OscFeedbackDTO {
+  values: Record<string, number | string | boolean>;
+}
+
+interface PeopleZoneCount {
+  id: string;
+  name: string;
+  attendance: number;
+  occupancy: number;
+}
+interface PeopleHistoryPoint {
+  t: string;
+  attendance: number;
+  occupancy: number;
+}
+interface PeopleCountDTO {
+  connected: boolean;
+  updatedAt: string | null;
+  total: {
+    attendance: number | null;
+    occupancy: number | null;
+    peak?: number | null;
+    min?: number | null;
+    avg?: number | null;
+    capacity?: number | null;
+  };
+  zones: PeopleZoneCount[];
+  history?: PeopleHistoryPoint[];
+}
+
+interface SplMetricStat {
+  max: number | null;
+  avg: number | null;
+  count: number;
+}
+
 interface SplItemHistory {
   itemId: string;
   title: string;
   sequence: number;
+  metrics: Record<string, SplMetricStat>;
   maxSpl: number | null;
   avgSpl: number | null;
   sampleCount: number;
@@ -71,11 +146,90 @@ interface ServiceSplHistory {
   planTitle: string | null;
   seriesTitle: string | null;
   serviceDate: string;
+  serviceTimeId: string | null;
+  serviceTimeStartsAt: string | null;
   meterId: string | null;
   metricKey: string | null;
   startedAt: string;
   endedAt: string | null;
   items: SplItemHistory[];
+}
+
+interface AttendanceSample {
+  t: string;
+  attendance: number;
+  occupancy: number;
+}
+interface ServiceAttendance {
+  serviceKey: string;
+  serviceTypeId: string | null;
+  planId: string | null;
+  planTitle: string | null;
+  seriesTitle: string | null;
+  serviceDate: string;
+  serviceTimeId: string | null;
+  serviceTimeStartsAt: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  samples: AttendanceSample[];
+  peakAttendance: number;
+  peakOccupancy: number;
+  /** Lowest in-room occupancy seen while the service was live (the "floor"); null
+   *  until the first tick. */
+  minOccupancy: number | null;
+  lastAttendance: number;
+  lastOccupancy: number;
+}
+interface ServiceTimelineItem {
+  itemId: string;
+  title: string;
+  sequence: number;
+  plannedLengthSec: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  actualDurationSec: number | null;
+}
+interface ServiceTimeline {
+  serviceKey: string;
+  serviceTypeId: string | null;
+  planId: string | null;
+  planTitle: string | null;
+  seriesTitle: string | null;
+  serviceDate: string;
+  serviceTimeId: string | null;
+  serviceTimeStartsAt: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  items: ServiceTimelineItem[];
+}
+type BaptismPhase = "idle" | "testimony" | "baptism";
+type BaptismMode = "per-person" | "grouped";
+interface BaptismPerson {
+  testimonyMs: number;
+  baptizeMs: number;
+}
+interface BaptismState {
+  mode: BaptismMode;
+  phase: BaptismPhase;
+  personNumber: number;
+  baptismIndex: number;
+  segmentStartedAt: string | null;
+  sessionStartedAt: string | null;
+  finishedAt: string | null;
+  people: BaptismPerson[];
+  pendingTestimonyMs: number | null;
+  serviceTitle: string | null;
+  serviceTypeId: string | null;
+  planId: string | null;
+}
+interface BaptismSession {
+  id: string;
+  startedAt: string;
+  finishedAt: string;
+  people: BaptismPerson[];
+  title: string | null;
+  serviceTypeId: string | null;
+  planId: string | null;
 }
 
 interface ServiceTypeDTO {
@@ -152,6 +306,11 @@ interface SlotDevice {
   /** Resolved battery for a second device (e.g. IEM/PSM pack), shown as a
    *  second bar beneath the primary. Null when no IEM is bound. */
   iemCharge: number | null;
+  /** Static label for an offline/manual primary device (no telemetry), or a
+   *  per-slot override. Shown as text, no bars. Null for live devices. */
+  label: string | null;
+  /** Static label for an offline/manual IEM device (headphones icon, no bar). */
+  iemLabel: string | null;
 }
 
 interface Slot {
@@ -168,6 +327,10 @@ interface Slot {
   hideRf?: boolean;
   /** Optional second device (e.g. IEM/PSM pack) whose battery shows as a second bar. */
   iemBinding?: { providerId: string; channelId: string } | null;
+  /** Optional custom label override for an offline/manual primary (mic) device. */
+  deviceLabel?: string | null;
+  /** Optional custom label override for an offline/manual IEM device. */
+  iemLabel?: string | null;
   displayName?: string | null;
   photoUrl?: string | null;
   device: SlotDevice;
@@ -213,6 +376,7 @@ interface LayoutCanvas {
   width: number;
   height: number;
   background?: string | null;
+  fit?: "contain" | "fill";
 }
 
 type LayoutHAlign = "left" | "center" | "right";
@@ -234,22 +398,26 @@ interface LayoutStyle {
   borderColor?: string | null;
   borderWidth?: number; // fraction of canvas height
   textShadow?: number; // 0..1
+  boxShadow?: number; // 0..1 box elevation
   lineClamp?: number | null;
 }
 
 type LayoutObjectConfig =
   | { type: "text"; text: string }
   | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h"; showMeridiem?: boolean }
-  | { type: "countdown-timer" }
-  | { type: "current-slide-text" }
-  | { type: "next-slide-text" }
-  | { type: "current-service-item" }
-  | { type: "next-service-item" }
-  | { type: "current-slide-notes" }
-  | { type: "slide-thumbnail" }
-  | { type: "section-chip"; which: "current" | "next" | "nextArrangement" }
+  | { type: "countdown-timer"; hideWhenIdle?: boolean; warnSeconds?: number }
+  | { type: "service-pacing"; scope?: "item" | "service"; hideWhenIdle?: boolean; showLabel?: boolean }
+  | { type: "pp-timer"; timerName?: string | null; propresenterInstanceId?: string | null; warnStates?: boolean; hideWhenIdle?: boolean; showLabel?: boolean }
+  | { type: "slide-progress"; propresenterInstanceId?: string | null; display?: "fraction" | "remaining" | "percent" | "bar"; showLabel?: boolean }
+  | { type: "current-slide-text"; propresenterInstanceId?: string | null }
+  | { type: "next-slide-text"; propresenterInstanceId?: string | null }
+  | { type: "current-service-item"; propresenterInstanceId?: string | null }
+  | { type: "next-service-item"; propresenterInstanceId?: string | null }
+  | { type: "current-slide-notes"; propresenterInstanceId?: string | null }
+  | { type: "slide-thumbnail"; propresenterInstanceId?: string | null }
+  | { type: "section-chip"; which: "current" | "next" | "nextArrangement"; propresenterInstanceId?: string | null }
   | { type: "slots-grid"; source?: "view" | "inline"; sourceViewId?: string | null; slotsLayout?: SlotsLayout | null }
-  | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number }
+  | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number; hideChannels?: string[] }
   | { type: "live-controls" }
   | {
       type: "charger-battery";
@@ -273,8 +441,79 @@ type LayoutObjectConfig =
       metricKey?: string | null;
       showLabel?: boolean;
       thresholds?: { amber: number; red: number } | null;
+      peakHold?: boolean;
+    }
+  | {
+      type: "obs-status";
+      mode?: "recording" | "streaming" | "virtualcam";
+      recordingText?: string;
+      idleText?: string;
+      offlineText?: string;
+      showTimecode?: boolean;
+      hideWhenIdle?: boolean;
+      fillWhenRecording?: boolean;
+    }
+  | {
+      type: "osc-button";
+      targetId?: string | null;
+      label?: string;
+      address: string;
+      args?: OscArg[];
+      feedback?: OscFeedbackBind | null;
     }
   | { type: "shape"; shape: "rect" | "ellipse" }
+  | {
+      type: "integration-status";
+      integrationId?: string | null;
+      label?: string;
+      showLabel?: boolean;
+    }
+  | {
+      type: "wireless-summary";
+      showOnline?: boolean;
+      showBattery?: boolean;
+      label?: string;
+      showLabel?: boolean;
+    }
+  | {
+      type: "wireless-channel";
+      channelId?: string | null;
+      show?: { rf?: boolean; battery?: boolean; frequency?: boolean; audio?: boolean };
+      showLabel?: boolean;
+    }
+  | {
+      type: "people-counter";
+      metric?: "attendance" | "occupancy" | "peak" | "min" | "avg";
+      zoneId?: string | null;
+      label?: string;
+      showLabel?: boolean;
+    }
+  | {
+      type: "people-graph";
+      metric?: "attendance" | "occupancy";
+      label?: string;
+      showLabel?: boolean;
+    }
+  | {
+      type: "people-panel";
+      metrics?: ("occupancy" | "peak" | "attendance" | "min" | "avg" | "avgService" | "capacity" | "vsAverage")[];
+      showLabels?: boolean;
+      orientation?: "row" | "column";
+    }
+  | {
+      type: "baptism-timer";
+      field?: "live" | "count" | "total" | "average" | "last";
+      label?: string;
+      showLabel?: boolean;
+    }
+  | {
+      type: "service-order";
+      noteCategories?: string[] | null;
+      showLength?: boolean;
+      highlightLive?: boolean;
+      scroll?: "auto" | "static";
+      autoFit?: boolean;
+    }
   | { type: "container" };
 
 type LayoutObjectType = LayoutObjectConfig["type"];
@@ -287,6 +526,7 @@ interface LayoutObject {
   h: number;
   z: number;
   hidden?: boolean;
+  locked?: boolean;
   style?: LayoutStyle;
   config: LayoutObjectConfig;
   children?: LayoutObject[];
@@ -303,6 +543,14 @@ interface LayoutTemplate {
   id: string;
   name: string;
   layout: LayoutDTO;
+  createdAt: string;
+}
+
+/** A named, reusable single object (container + children) — a "group". */
+interface LayoutGroup {
+  id: string;
+  name: string;
+  object: LayoutObject;
   createdAt: string;
 }
 
@@ -365,6 +613,10 @@ interface PcoLiveDTO {
   liveStartAt: string | null;
   targetAt: string | null;
   serverNow: string;
+  currentItemTitle: string | null;
+  nextItemTitle: string | null;
+  serviceTimeId: string | null;
+  serviceTimeStartsAt: string | null;
 }
 
 /** Live ProPresenter status (SSE "propresenter:status"). */
@@ -386,6 +638,20 @@ interface ProPresenterStatusDTO {
   nextServiceItem: string | null;
   timers: ProTimer[];
   slidePreviewKey: string | null;
+}
+
+interface PropInstanceMeta {
+  id: string;
+  name: string;
+}
+interface PropInstanceConn {
+  state: ConnectionState;
+  message: string | null;
+}
+interface PropInstancesDTO {
+  list: PropInstanceMeta[];
+  status: Record<string, ProPresenterStatusDTO>;
+  conn: Record<string, PropInstanceConn>;
 }
 
 interface StageState {
@@ -446,6 +712,7 @@ interface StageState {
   chargerBays: ChargerBayDTO[];
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
+  onboardingDismissed: boolean;
 }
 
 interface ChargerBayDTO {

@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -12,6 +12,7 @@ import { resolveSlots } from "./slot-resolver.js";
 import { settingsStore } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
+import { layoutGroupsStore } from "./layout-groups-store.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { updater } from "./updater.js";
 
@@ -90,7 +91,7 @@ function defaultViewName(kind: ViewKind): string {
   switch (kind) {
     case "dashboard": return "Dashboard";
     case "stage": return "Stage";
-    case "transcription": return "Captions";
+    case "transcription": return "Transcription";
     case "custom": return "Custom";
     default: return "Slots";
   }
@@ -154,6 +155,7 @@ export class StageController {
     publicUrl: null,
     captionChannelColors: {},
     autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
+    onboardingDismissed: false,
   };
 
   // Live device statuses keyed by channelId.
@@ -220,6 +222,7 @@ export class StageController {
       publicUrl: settings.publicUrl ?? null,
       captionChannelColors: settings.captionChannelColors ?? {},
       autoUpdate: settings.autoUpdate ?? { enabled: false, dayOfWeek: null, hour: 3 },
+      onboardingDismissed: settings.onboardingDismissed ?? false,
     };
     this.publicUrl = settings.publicUrl ?? null;
     this.applyRemoteUrl();
@@ -644,18 +647,23 @@ export class StageController {
         // ended more than the grace window ago and take the first still-upcoming one.
         // Without this, auto-mode "advances" right back onto the finished plan (its
         // sort_date is the earliest in `future`) and never reaches the real next one.
+        // Resolve every candidate plan's service end concurrently (each is a
+        // cached /plan_times lookup) instead of awaiting them one-by-one.
+        const ends = await Promise.all(
+          plans.map((p) =>
+            pcoService.getServiceEnd(this.pcoAppId!, this.pcoSecret!, type.id, p.id).catch(() => null),
+          ),
+        );
         let nearest: PlanDTO | null = null;
-        for (const p of plans) {
-          const endIso = await pcoService
-            .getServiceEnd(this.pcoAppId!, this.pcoSecret!, type.id, p.id)
-            .catch(() => null);
+        for (let i = 0; i < plans.length; i++) {
+          const endIso = ends[i];
           if (endIso) {
             const end = Date.parse(endIso);
             if (Number.isFinite(end) && Date.now() > end + StageController.ROLLOVER_GRACE_MS) {
               continue; // finished plan still lingering in filter=future — skip it
             }
           }
-          nearest = p; // service still upcoming / within grace, or end unknown
+          nearest = plans[i]; // service still upcoming / within grace, or end unknown
           break;
         }
         if (!nearest) continue; // every future plan for this type has already ended
@@ -748,6 +756,14 @@ export class StageController {
 
   /** Legacy alias — `target` is an output id (or empty for primary); routes to
    *  that output's View. Kept for the /api/slots endpoint + phone control page. */
+  /** Resolve raw draft slots against the current team + device state WITHOUT
+   *  persisting or broadcasting. Powers the Views page live draft preview: the
+   *  settings UI resolves in-progress (unsaved) edits so the preview matches what
+   *  the kiosk would show, exactly as recomputeResolved() does for saved slots. */
+  resolveSlotsPreview(slots: Slot[]): Slot[] {
+    return resolveSlots(slots, this.teamMembers, this.deviceStatuses);
+  }
+
   async setSlots(target: string, slots: Slot[]): Promise<StageState> {
     return this.setViewSlots(this.viewIdForTarget(target), slots);
   }
@@ -789,6 +805,14 @@ export class StageController {
     console.log(`[stage-controller] setShowQr → ${show}`);
     this.state = { ...this.state, showQr: show };
     await settingsStore.patch({ showQr: show });
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Dismiss (or restore) the first-run "Getting started" checklist, machine-wide. */
+  async setOnboardingDismissed(dismissed: boolean): Promise<StageState> {
+    this.state = { ...this.state, onboardingDismissed: dismissed };
+    await settingsStore.patch({ onboardingDismissed: dismissed });
     this.broadcast();
     return this.state;
   }
@@ -1114,6 +1138,37 @@ export class StageController {
     const list = await layoutTemplatesStore.load();
     const updated = list.filter((t) => t.id !== id);
     await layoutTemplatesStore.save(updated);
+    return updated;
+  }
+
+  // ── Layout groups (reusable object/container library) ───────────────────
+  // Like templates, but a single object subtree the operator inserts into a view
+  // rather than a whole-layout replace. (Inline mic-slot data is per-object/
+  // per-service-type and is NOT carried — same as templates; re-pick slots after.)
+
+  async listLayoutGroups(): Promise<LayoutGroup[]> {
+    return layoutGroupsStore.load();
+  }
+
+  async saveLayoutGroup(name: string, object: LayoutObject): Promise<LayoutGroup[]> {
+    const list = await layoutGroupsStore.load();
+    const group: LayoutGroup = {
+      id: randomUUID(),
+      name: name.trim() || "Group",
+      object: cloneLayoutObject(object), // fresh ids so the library copy is isolated
+      createdAt: new Date().toISOString(),
+    };
+    console.log(`[stage-controller] saveLayoutGroup "${group.name}" (${(group.object.children?.length ?? 0)} children)`);
+    const updated = [...list, group];
+    await layoutGroupsStore.save(updated);
+    return updated;
+  }
+
+  async deleteLayoutGroup(id: string): Promise<LayoutGroup[]> {
+    console.log(`[stage-controller] deleteLayoutGroup ${id}`);
+    const list = await layoutGroupsStore.load();
+    const updated = list.filter((g) => g.id !== id);
+    await layoutGroupsStore.save(updated);
     return updated;
   }
 
@@ -1523,9 +1578,14 @@ export class StageController {
 
   // ── Refresh ───────────────────────────────────────────────────────────
 
-  async refresh(): Promise<StageState> {
-    console.log("[stage-controller] refresh");
-    pcoService.clearCache();
+  async refresh(full = true): Promise<StageState> {
+    console.log(`[stage-controller] refresh (${full ? "full" : "targeted"})`);
+    // Manual "Refresh now" (full) drops the whole cache for a clean re-pull. The
+    // unattended periodic tick only invalidates the active plan, so static
+    // metadata (service types, note categories, team positions, other plans'
+    // service times) stays cached instead of being re-fetched every interval.
+    if (full) pcoService.clearCache();
+    else if (this.state.planId) pcoService.clearPlanCache(this.state.planId);
 
     if (this.state.planMode === "auto") {
       await this.selectGlobalNextPlan();
@@ -1565,7 +1625,7 @@ export class StageController {
     this.isRefreshing = true;
     try {
       console.log("[stage-controller] auto-refresh tick");
-      await this.refresh();
+      await this.refresh(false);
     } catch (err) {
       console.error("[stage-controller] auto-refresh failed:", err);
     } finally {
@@ -1741,12 +1801,18 @@ export class StageController {
       slotsByView[view.id] = resolveSlots(raw, this.teamMembers, this.deviceStatuses);
     }
 
-    // Inline mic-slots objects on custom layouts — resolved by object id.
+    // Inline mic-slots objects on custom layouts — resolved by object id. We
+    // resolve every object that has raw slots, not just those already saved into a
+    // persisted view, so a freshly-added inline grid shows its slots immediately
+    // after "Save slots" (before the layout itself is saved). Orphaned ids are
+    // pruned from rawSlotsByObject when the layout is next saved (setViewLayout).
     const slotsByLayoutObject: Record<string, Slot[]> = {};
-    forEachInlineSlotsGrid(this.state.views, (oid) => {
+    const resolveObjectSlots = (oid: string) => {
       const raw = this.rawSlotsByObject.get(oid) ?? [];
       slotsByLayoutObject[oid] = resolveSlots(raw, this.teamMembers, this.deviceStatuses);
-    });
+    };
+    forEachInlineSlotsGrid(this.state.views, resolveObjectSlots);
+    for (const oid of this.rawSlotsByObject.keys()) if (!(oid in slotsByLayoutObject)) resolveObjectSlots(oid);
 
     const resolvedByOutput: Record<string, ResolvedOutput> = {};
     const slotsByDisplay: Record<string, Slot[]> = {};

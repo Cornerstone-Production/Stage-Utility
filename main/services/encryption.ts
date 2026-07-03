@@ -1,8 +1,20 @@
-// encryption.ts — AES-256-GCM encryption backed by a key file in the data dir.
+// encryption.ts — AES-256-GCM encryption backed by a 32-byte key.
 //
-// The key is a 32-byte random value stored at $DATA_DIR/encryption.key
-// (mode 0o600), generated automatically on first use. All secret storage goes
-// through getEncryptionBackend(); callers never touch crypto or key material.
+// The key is resolved from the first of these sources that is set (the default
+// keeps every existing install working with no migration):
+//   1. $STAGE_UTILITY_KEY      — a raw 32-byte key as base64 or hex. Used
+//      directly; NO key file is read or written. Lets the key live in a systemd
+//      unit, secrets manager, or Docker secret, never on the data disk.
+//   2. $STAGE_UTILITY_KEY_FILE — absolute path to a key file outside the data
+//      dir. Read if present, else generated + written there (mode 0o600). Keeps
+//      the key out of a backed-up/synced data dir.
+//   3. (default)               — $DATA_DIR/encryption.key (mode 0o600),
+//      generated automatically on first use.
+//
+// Whatever the source, the running service must be able to read the key
+// unattended at boot, so it shares the service user's trust domain — see
+// SECURITY.md for the threat model. All secret storage goes through
+// getEncryptionBackend(); callers never touch crypto or key material.
 //
 // Ciphertext layout: [ 12-byte IV ][ 16-byte authTag ][ encrypted bytes ]
 
@@ -30,12 +42,23 @@ function getKey(): Promise<Buffer> {
 }
 
 async function loadOrCreateKey(): Promise<Buffer> {
-  const keyFile = path.join(getUserDataPath(), "encryption.key");
+  // 1. Inline key from the environment — used directly, never written to disk.
+  const inline = process.env.STAGE_UTILITY_KEY?.trim();
+  if (inline) return parseInlineKey(inline);
+
+  // 2. Operator-chosen key file (outside the data dir), else 3. the default.
+  const keyFile = process.env.STAGE_UTILITY_KEY_FILE?.trim()
+    ? path.resolve(process.env.STAGE_UTILITY_KEY_FILE.trim())
+    : path.join(getUserDataPath(), "encryption.key");
+
   try {
     const key = await fs.readFile(keyFile);
     if (key.length !== 32) {
       throw new Error(`[encryption] key at ${keyFile} is ${key.length} bytes; expected 32`);
     }
+    // Best-effort: tighten perms on a key written before mode 0o600 was enforced
+    // (and a no-op on filesystems/OSes that don't honour POSIX modes).
+    void fs.chmod(keyFile, 0o600).catch(() => {});
     return key;
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
@@ -45,6 +68,20 @@ async function loadOrCreateKey(): Promise<Buffer> {
     console.log(`[encryption] generated new key → ${keyFile}`);
     return key;
   }
+}
+
+// Decode a $STAGE_UTILITY_KEY value (base64 or hex) into a 32-byte key.
+function parseInlineKey(value: string): Buffer {
+  // Try hex first when it looks like hex (64 chars, hex alphabet), else base64.
+  const isHex = value.length === 64 && /^[0-9a-fA-F]+$/.test(value);
+  const key = Buffer.from(value, isHex ? "hex" : "base64");
+  if (key.length !== 32) {
+    throw new Error(
+      `[encryption] $STAGE_UTILITY_KEY must decode to 32 bytes (got ${key.length}); ` +
+        `provide a 32-byte key as base64 (e.g. \`openssl rand -base64 32\`) or hex (64 chars).`,
+    );
+  }
+  return key;
 }
 
 const backend: EncryptionBackend = {

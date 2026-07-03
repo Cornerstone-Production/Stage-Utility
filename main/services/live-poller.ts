@@ -9,6 +9,8 @@
 import type { PcoLiveDTO } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { splRecorder } from "./spl-recorder.js";
+import { attendanceRecorder } from "./attendance-recorder.js";
+import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { stageController } from "./stage-controller.js";
 
 const LIVE_INTERVAL_MS = 1000;
@@ -56,6 +58,10 @@ class LivePoller {
       broadcast("pco:live", live);
       // Fold the current SPL reading into the live item's running max/avg.
       void splRecorder.onLiveTick(live);
+      // Sample the live attendance/occupancy into the service's trend.
+      void attendanceRecorder.onLiveTick(live);
+      // Record the actual rundown timing (item starts/durations vs planned).
+      void serviceTimelineRecorder.onLiveTick(live);
     }
 
     // Auto mode: roll to the next event once the current one ended (+1h grace).

@@ -16,12 +16,16 @@ import * as fs from "fs/promises";
 
 import { getUserDataPath } from "./main/services/app-paths.js";
 import { deviceManager } from "./main/services/device-manager.js";
+import { baptismTimerService } from "./main/services/baptism-timer-service.js";
 import { integrationManager } from "./main/services/integration-manager.js";
 import { livePoller } from "./main/services/live-poller.js";
 import { prodcomService } from "./main/services/prodcom-service.js";
 import { propresenterService } from "./main/services/propresenter-service.js";
+import { sensourceService } from "./main/services/sensource-service.js";
+import { tslService } from "./main/services/tsl-service.js";
 import { remoteServer } from "./main/services/remote-server.js";
 import { stageController } from "./main/services/stage-controller.js";
+import { cacheMaintenance } from "./main/services/cache-maintenance.js";
 
 // ── Data directory ────────────────────────────────────────────────────────────
 //
@@ -37,6 +41,7 @@ console.log(`[server] data directory: ${DATA_DIR}`);
 console.log("[server] initialising services...");
 await stageController.init();
 await integrationManager.init();
+await baptismTimerService.init();
 
 // Wire the remote URL into stage state so clients can see it.
 stageController.setRemoteUrl(remoteServer.getLanUrl());
@@ -58,6 +63,9 @@ await deviceManager.start();
 // plan is selected / PCO isn't configured.
 livePoller.start();
 
+// Keep the photo + attachment disk caches from growing unbounded over months.
+cacheMaintenance.start();
+
 console.log(`[server] ready — control panel at ${remoteServer.getLanUrl()}`);
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
@@ -68,8 +76,11 @@ async function shutdown(signal: string): Promise<void> {
   stageController.stopUpdateChecks();
   stageController.stopDeviceStatusUpdates();
   livePoller.stop();
+  cacheMaintenance.stop();
   propresenterService.stop();
   prodcomService.stop();
+  sensourceService.stop();
+  tslService.stop();
   await remoteServer.stop();
   await deviceManager.stop();
   console.log("[server] shutdown complete");

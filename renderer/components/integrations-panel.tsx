@@ -1,8 +1,11 @@
 import { invoke, onNotification } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
-import { useState, useEffect, useCallback, type ChangeEvent } from "react";
+import { usePeopleCountState } from "../main/use-people-count-state";
+import { usePropInstances } from "../main/use-dashboard-state";
+import { useState, useEffect, useCallback, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
+import { OscTargetsPanel } from "./osc-targets-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
 import {
   Button,
@@ -20,9 +23,11 @@ import {
   SelectValue,
   Switch,
   Status,
-  Separator,
+  Collapsible,
   NumberInput,
   toast,
+  SkeletonRows,
+  InfoHint,
 } from "../components/ui";
 import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -91,8 +96,8 @@ function IpListField({ value, onChange, placeholder }: IpListFieldProps) {
 
 // ---- connection badge -------------------------------------------------------
 
-function ConnectionBadge({ state }: { state: IntegrationState }) {
-  if (state.connection === "connected") {
+function ConnectionBadge({ connection, message }: { connection: ConnectionState; message?: string | null }) {
+  if (connection === "connected") {
     return (
       <span className="flex items-center gap-1">
         <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />
@@ -100,7 +105,7 @@ function ConnectionBadge({ state }: { state: IntegrationState }) {
       </span>
     );
   }
-  if (state.connection === "connecting") {
+  if (connection === "connecting") {
     return (
       <span className="flex items-center gap-1">
         <Loader2Icon className="size-3.5 text-blue-10 animate-spin shrink-0" />
@@ -108,11 +113,11 @@ function ConnectionBadge({ state }: { state: IntegrationState }) {
       </span>
     );
   }
-  if (state.connection === "error") {
+  if (connection === "error") {
     return (
       <span className="flex items-center gap-1">
         <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
-        <span className="text-caption1 text-red-10">{state.message ?? "Error"}</span>
+        <span className="text-caption1 text-red-10">{message ?? "Error"}</span>
       </span>
     );
   }
@@ -163,7 +168,6 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isTogglingEnabled, setIsTogglingEnabled] = useState(false);
 
   function setField(key: string, value: unknown) {
     setLocalConfig((prev) => ({ ...prev, [key]: value }));
@@ -221,34 +225,8 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
     }
   }
 
-  async function handleToggleEnabled(enabled: boolean) {
-    setIsTogglingEnabled(true);
-    try {
-      const next = await ipc<IntegrationState>("integrations:setEnabled", { id: descriptor.id, enabled });
-      onStateChange(next);
-    } catch (err) {
-      toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${String(err)}`);
-    } finally {
-      setIsTogglingEnabled(false);
-    }
-  }
-
   return (
     <div className="flex flex-col gap-3">
-      {/* Header row: label + enabled switch + connection badge */}
-      <div className="flex items-center gap-3">
-        <span className="text-headline font-semibold text-gray-12 flex-1 min-w-0 truncate">
-          {descriptor.label}
-        </span>
-        <ConnectionBadge state={state} />
-        <Switch
-          checked={state.enabled}
-          onCheckedChange={handleToggleEnabled}
-          disabled={isTogglingEnabled}
-          aria-label={`Enable ${descriptor.label}`}
-        />
-      </div>
-
       {/* Schema-driven form */}
       <FieldSet>
         <FieldGroup>
@@ -258,7 +236,10 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
             return (
               <Field key={field.key} orientation="horizontal">
                 <FieldContent>
-                  <FieldLabel>{field.label}</FieldLabel>
+                  <FieldLabel className="flex items-center gap-1.5">
+                    {field.label}
+                    {field.help && <InfoHint>{field.help}</InfoHint>}
+                  </FieldLabel>
                   {field.placeholder && (
                     <FieldDescription>{field.placeholder}</FieldDescription>
                   )}
@@ -269,7 +250,7 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
                     value={typeof value === "string" ? value : ""}
                     onValueChange={(v: string) => setField(field.key, v)}
                   >
-                    <SelectTrigger className="w-44">
+                    <SelectTrigger className="w-44" aria-label={field.label}>
                       <SelectValue placeholder="Select…" />
                     </SelectTrigger>
                     <SelectContent>
@@ -300,6 +281,7 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setField(field.key, e.target.value)}
                     placeholder={field.placeholder ?? ""}
                     className="w-44"
+                    aria-label={field.label}
                   />
                 )}
               </Field>
@@ -307,6 +289,18 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
           })}
         </FieldGroup>
       </FieldSet>
+
+      {descriptor.id === "sensource" && (
+        <SenSourceScopePicker state={state} onStateChange={onStateChange} />
+      )}
+
+      {descriptor.id === "ross-tsl" && (
+        <RossTslFeedsPanel state={state} onStateChange={onStateChange} />
+      )}
+
+      {descriptor.id === "propresenter" && (
+        <ProPresenterInstancesPanel state={state} onStateChange={onStateChange} />
+      )}
 
       {/* Actions row */}
       <div className="flex items-center gap-2">
@@ -345,6 +339,552 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---- SenSource scope picker -------------------------------------------------
+
+interface VeaZone {
+  zoneId: string;
+  name: string;
+  locationId: string | null;
+}
+
+// Scopes the people count. The Vea /data/traffic endpoint has NO working
+// server-side location/zone filter (confirmed against the public API + every
+// reference client), so the *reliable* filter is an explicit zone selection that
+// the backend enforces client-side. Location is an optional convenience: it
+// narrows which zones are offered (when the API exposes a zone→location link)
+// and the backend will map it to its zones when no zones are picked. With nothing
+// selected, every visible zone is counted. Persists locationId + zoneIds as
+// non-secret config.
+function SenSourceScopePicker({
+  state,
+  onStateChange,
+}: {
+  state: IntegrationState;
+  onStateChange: (next: IntegrationState) => void;
+}) {
+  const [locations, setLocations] = useState<{ locationId: string; name: string }[]>([]);
+  const [zones, setZones] = useState<VeaZone[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [zonesLoading, setZonesLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const current = typeof state.config.locationId === "string" ? state.config.locationId : "";
+  const selectedZoneIds = Array.isArray(state.config.zoneIds)
+    ? (state.config.zoneIds as unknown[]).filter((z): z is string => typeof z === "string")
+    : [];
+
+  const loadLocations = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setLocations(await invoke<{ locationId: string; name: string }[]>("sensource:listLocations"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadZones = useCallback(async () => {
+    setZonesLoading(true);
+    setError(null);
+    try {
+      setZones(await invoke<VeaZone[]>("sensource:listZones"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setZonesLoading(false);
+    }
+  }, []);
+
+  // Auto-load lists on mount when the integration is set up, so a previously-saved
+  // location/zone selection renders by name (the dropdowns need the lists loaded
+  // to show the chosen options after a refresh / re-opening the tab).
+  useEffect(() => {
+    if (state.configured || current || selectedZoneIds.length) {
+      void loadLocations();
+      void loadZones();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function save(patch: Record<string, unknown>) {
+    try {
+      const next = await invoke<IntegrationState>("integrations:setConfig", { id: "sensource", config: patch });
+      onStateChange(next);
+    } catch (err) {
+      toast.error(`Could not save: ${String(err)}`);
+    }
+  }
+
+  function toggleZone(zoneId: string) {
+    const set = new Set(selectedZoneIds);
+    if (set.has(zoneId)) set.delete(zoneId);
+    else set.add(zoneId);
+    void save({ zoneIds: [...set] });
+  }
+
+  // When zones expose their parent location, offer only the selected location's
+  // zones; otherwise (no mapping) offer all and let the operator pick directly.
+  const mappedToLocation = current ? zones.filter((z) => z.locationId === current) : [];
+  const offered = current && mappedToLocation.length ? mappedToLocation : zones;
+  const mappingMissing = !!current && zones.length > 0 && mappedToLocation.length === 0;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2">
+          <span className="flex w-44 shrink-0 items-center gap-1.5 text-caption1 text-gray-11">
+            Location
+            <InfoHint>
+              Optional convenience — narrows the zone list below to one location. Vea doesn&apos;t always
+              expose a zone-to-location link; if it can&apos;t match, every zone is listed and you pick the
+              ones you want. The zone selection is what actually scopes the count.
+            </InfoHint>
+          </span>
+          <Select value={current} onValueChange={(v: string) => void save({ locationId: v })}>
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder={locations.length ? "All locations" : "Load to choose"} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All locations</SelectItem>
+              {locations.map((l) => (
+                <SelectItem key={l.locationId} value={l.locationId}>{l.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button variant="transparent" size="small" onClick={loadLocations} disabled={loading}>
+            {loading ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : <RefreshCwIcon className="size-3.5 text-gray-9" />}
+            Load
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="text-caption1 text-gray-11">Zones</span>
+            <InfoHint>
+              The reliable way to scope the count. Vea&apos;s API ignores server-side location filters, so the count is summed from exactly the zones you select here (enforced in-app). Leave all unchecked to count every visible zone.
+            </InfoHint>
+          </div>
+          <div className="flex items-center gap-1">
+            {selectedZoneIds.length > 0 && (
+              <Button variant="transparent" size="small" onClick={() => void save({ zoneIds: [] })}>Clear</Button>
+            )}
+            <Button variant="transparent" size="small" onClick={loadZones} disabled={zonesLoading}>
+              {zonesLoading ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : <RefreshCwIcon className="size-3.5 text-gray-9" />}
+              {zones.length ? "Reload" : "Load zones"}
+            </Button>
+          </div>
+        </div>
+
+        {offered.length > 0 ? (
+          <div className="flex flex-col gap-0.5 max-h-48 overflow-y-auto rounded-lg border border-gray-5 bg-gray-2 p-1">
+            {offered.map((z) => {
+              const on = selectedZoneIds.includes(z.zoneId);
+              return (
+                <button
+                  key={z.zoneId}
+                  type="button"
+                  onClick={() => toggleZone(z.zoneId)}
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-gray-3 transition-colors"
+                >
+                  {on ? (
+                    <CheckCircle2Icon className="size-4 shrink-0 text-blue-9" />
+                  ) : (
+                    <span className="size-4 shrink-0 rounded-full border border-gray-6" />
+                  )}
+                  <span className={cn("text-caption1 truncate", on ? "text-gray-12" : "text-gray-11")}>{z.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <span className="text-caption2 text-gray-9">
+            {zonesLoading ? "Loading zones…" : "Load zones to choose which ones to count."}
+          </span>
+        )}
+
+        {mappingMissing && (
+          <span className="text-caption2 text-amber-11">
+            This location&apos;s zones couldn&apos;t be matched automatically — all zones are listed; pick the ones for this location.
+          </span>
+        )}
+        <span className="text-caption2 text-gray-9">
+          {selectedZoneIds.length === 0
+            ? "Counting all visible zones. Select specific zones to scope the count to your room."
+            : `Counting ${selectedZoneIds.length} selected zone${selectedZoneIds.length === 1 ? "" : "s"}.`}
+        </span>
+      </div>
+      {error && <span className="text-caption2 text-red-10">{error}</span>}
+    </div>
+  );
+}
+
+// ---- Ross TSL feeds editor --------------------------------------------------
+
+interface TslFeed {
+  id: string;
+  metric: "attendance" | "occupancy";
+  zoneId: string | null;
+  displayIndex: number;
+  prefix?: string;
+  suffix?: string;
+}
+
+// crypto.randomUUID needs a secure context (kiosk runs plain HTTP) — fall back.
+function feedId(): string {
+  const c = globalThis.crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  return `feed-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Maps each people count (attendance/occupancy, building total or a zone) to a
+// TSL display address on the Ross multiviewer. Stored as non-secret config.feeds.
+function RossTslFeedsPanel({
+  state,
+  onStateChange,
+}: {
+  state: IntegrationState;
+  onStateChange: (next: IntegrationState) => void;
+}) {
+  const people = usePeopleCountState();
+  const zones = people?.zones ?? [];
+  const initial = Array.isArray(state.config.feeds) ? (state.config.feeds as TslFeed[]) : [];
+  const [feeds, setFeeds] = useState<TslFeed[]>(initial);
+  const [saving, setSaving] = useState(false);
+
+  function update(idx: number, patch: Partial<TslFeed>) {
+    setFeeds((prev) => prev.map((f, i) => (i === idx ? { ...f, ...patch } : f)));
+  }
+  function remove(idx: number) {
+    setFeeds((prev) => prev.filter((_, i) => i !== idx));
+  }
+  function add() {
+    setFeeds((prev) => [
+      ...prev,
+      { id: feedId(), metric: "attendance", zoneId: null, displayIndex: prev.length, prefix: "", suffix: "" },
+    ]);
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      const next = await invoke<IntegrationState>("integrations:setConfig", {
+        id: "ross-tsl",
+        config: { feeds },
+      });
+      onStateChange(next);
+      toast.success("TSL feeds saved.");
+    } catch (err) {
+      toast.error(`Could not save feeds: ${String(err)}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-gray-9">
+        Multiviewer feeds
+        <InfoHint>
+          Each feed drives one multiviewer tile. Pick the metric (Attendance = total counted; In room =
+          occupancy) and a zone (or building total), set TSL # to the tile&apos;s UMD address on the Ross
+          (0–126, must match the tile), and optional prefix/suffix wrap the number (e.g. &quot;In room: &quot; … &quot; ppl&quot;).
+        </InfoHint>
+      </span>
+      {feeds.length === 0 && (
+        <span className="text-caption2 text-gray-9">
+          Add a feed to drive a multiviewer tile&apos;s text. Set the same TSL address on the Ross tile.
+        </span>
+      )}
+      {feeds.map((f, i) => (
+        <div key={f.id} className="flex flex-wrap items-center gap-1.5">
+          <Select value={f.metric} onValueChange={(v: string) => update(i, { metric: v as TslFeed["metric"] })}>
+            <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="attendance">Attendance</SelectItem>
+              <SelectItem value="occupancy">In room</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={f.zoneId ?? ""} onValueChange={(v: string) => update(i, { zoneId: v || null })}>
+            <SelectTrigger className="w-36"><SelectValue placeholder="Building total" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">Building total</SelectItem>
+              {zones.map((z) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-1">
+            <span className="text-caption2 text-gray-9">TSL #</span>
+            <NumberInput value={f.displayIndex} step={1} min={0} max={126} onChange={(v) => update(i, { displayIndex: Math.round(v) })} className="w-16" />
+          </div>
+          <Input value={f.prefix ?? ""} onChange={(e: ChangeEvent<HTMLInputElement>) => update(i, { prefix: e.target.value })} placeholder="prefix" className="w-20" />
+          <Input value={f.suffix ?? ""} onChange={(e: ChangeEvent<HTMLInputElement>) => update(i, { suffix: e.target.value })} placeholder="suffix" className="w-20" />
+          <Button variant="transparent" size="small" iconOnly onClick={() => remove(i)} aria-label="Remove feed">
+            <TrashIcon className="size-3.5" />
+          </Button>
+        </div>
+      ))}
+      <div className="flex items-center gap-2">
+        <Button variant="transparent" size="small" onClick={add}>
+          <PlusIcon className="size-3.5" /> Add feed
+        </Button>
+        <Button variant="filled" size="small" onClick={save} disabled={saving}>
+          {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : null} Save feeds
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---- ProPresenter extra instances -------------------------------------------
+
+interface PropInstanceRow {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  pollMs?: number;
+}
+
+// Per-instance connection status. Driven by the live `propresenter:instances`
+// snapshot, which now carries the same connected/connecting/error/disconnected
+// state the primary uses — so we delegate to the very same ConnectionBadge for a
+// pixel-identical line. Rows not yet saved aren't known to the backend → "Not saved".
+function InstanceStatusBadge({ conn, saved }: { conn: PropInstanceConn | undefined; saved: boolean }) {
+  if (!saved || !conn) {
+    return (
+      <span className="flex items-center gap-1">
+        <Status variant="neutral" />
+        <span className="text-caption1 text-gray-9">Not saved</span>
+      </span>
+    );
+  }
+  return <ConnectionBadge connection={conn.state} message={conn.message} />;
+}
+
+// Extra ProPresenter machines beyond the primary (e.g. a second auditorium).
+// Stored as non-secret config.instances; a layout object then picks which one to
+// read. The primary is the host/port fields above (instance id "default").
+//
+// Each instance renders with the same field layout as the main ProPresenter card
+// (Name / Host / API Port / Poll interval as horizontal Fields) plus a live
+// connection badge, so the two read identically.
+function ProPresenterInstancesPanel({
+  state,
+  onStateChange,
+}: {
+  state: IntegrationState;
+  onStateChange: (next: IntegrationState) => void;
+}) {
+  const initial = Array.isArray(state.config.instances) ? (state.config.instances as PropInstanceRow[]) : [];
+  const [rows, setRows] = useState<PropInstanceRow[]>(initial);
+  const [saving, setSaving] = useState(false);
+  // Live per-instance status from the backend (keyed by instance id).
+  const propInstances = usePropInstances();
+  // Ids the backend currently knows about — i.e. rows that have been saved.
+  const savedIds = new Set((state.config.instances as PropInstanceRow[] | undefined)?.map((r) => r.id) ?? []);
+
+  function update(idx: number, patch: Partial<PropInstanceRow>) {
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+  function remove(idx: number) {
+    setRows((prev) => prev.filter((_, i) => i !== idx));
+  }
+  function add() {
+    setRows((prev) => [...prev, { id: feedId(), name: `Auditorium ${prev.length + 2}`, host: "", port: 1025 }]);
+  }
+  async function save() {
+    setSaving(true);
+    try {
+      const next = await invoke<IntegrationState>("integrations:setConfig", {
+        id: "propresenter",
+        config: { instances: rows },
+      });
+      onStateChange(next);
+      toast.success("ProPresenter instances saved.");
+    } catch (err) {
+      toast.error(`Could not save instances: ${String(err)}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-gray-9">
+        Additional instances (auditoriums)
+        <InfoHint>
+          Each card is another ProPresenter machine (the primary is the Host/Port fields above). Give it a
+          Name, its IP, and API port (default 1025). A custom-layout object can then pick which instance it
+          reads from — handy when two rooms run separate ProPresenters.
+        </InfoHint>
+      </span>
+      {rows.length === 0 && (
+        <span className="text-caption2 text-gray-9">
+          Add another ProPresenter machine to read it in a custom view. A layout object then picks which instance it shows.
+        </span>
+      )}
+      {rows.map((r, i) => {
+        const saved = savedIds.has(r.id);
+        const conn = propInstances?.conn?.[r.id];
+        return (
+          <div key={r.id} className="flex flex-col gap-2 rounded-lg border border-gray-5 p-3">
+            {/* Header: live status + remove, mirroring the main card's header */}
+            <div className="flex items-center justify-between gap-2">
+              <InstanceStatusBadge conn={conn} saved={saved} />
+              <Button variant="transparent" size="small" iconOnly onClick={() => remove(i)} aria-label="Remove instance">
+                <TrashIcon className="size-3.5 text-gray-9" />
+              </Button>
+            </div>
+            <FieldSet>
+              <FieldGroup>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel className="flex items-center gap-1.5">
+                      Name
+                      <InfoHint>Display name for this ProPresenter, shown when a layout object picks which instance to read.</InfoHint>
+                    </FieldLabel>
+                    <FieldDescription>SA (e.g. Auditorium 2)</FieldDescription>
+                  </FieldContent>
+                  <Input
+                    value={r.name}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => update(i, { name: e.target.value })}
+                    placeholder="Auditorium 2"
+                    className="w-44"
+                    aria-label="Instance name"
+                  />
+                </Field>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel className="flex items-center gap-1.5">
+                      ProPresenter Host
+                      <InfoHint>IP or hostname of the machine running ProPresenter, on the same network as this server.</InfoHint>
+                    </FieldLabel>
+                    <FieldDescription>192.168.1.101</FieldDescription>
+                  </FieldContent>
+                  <Input
+                    value={r.host}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => update(i, { host: e.target.value })}
+                    placeholder="192.168.1.101"
+                    className="w-44"
+                    aria-label="Instance host"
+                  />
+                </Field>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel className="flex items-center gap-1.5">
+                      API Port
+                      <InfoHint>ProPresenter's network API port. Turn the API on and find the port under ProPresenter → Preferences → Network (default 1025).</InfoHint>
+                    </FieldLabel>
+                    <FieldDescription>1025</FieldDescription>
+                  </FieldContent>
+                  <NumberInput
+                    value={r.port}
+                    step={1}
+                    min={1}
+                    max={65535}
+                    onChange={(v) => update(i, { port: Math.round(v) })}
+                    className="w-44"
+                    aria-label="Instance API port"
+                  />
+                </Field>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel className="flex items-center gap-1.5">
+                      Poll interval (ms)
+                      <InfoHint>How often to query this ProPresenter over the LAN. 500ms feels instant; raise it to ease network load. Leave blank to use the default.</InfoHint>
+                    </FieldLabel>
+                    <FieldDescription>500 (lower = snappier, more requests)</FieldDescription>
+                  </FieldContent>
+                  <NumberInput
+                    value={r.pollMs ?? 500}
+                    step={100}
+                    min={200}
+                    max={10000}
+                    onChange={(v) => update(i, { pollMs: Math.round(v) })}
+                    className="w-44"
+                    aria-label="Instance poll interval"
+                  />
+                </Field>
+              </FieldGroup>
+            </FieldSet>
+          </div>
+        );
+      })}
+      <div className="flex items-center gap-2">
+        <Button variant="transparent" size="small" onClick={add}>
+          <PlusIcon className="size-3.5" /> Add instance
+        </Button>
+        <Button variant="filled" size="small" onClick={save} disabled={saving}>
+          {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : null} Save instances
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---- collapsible row + categories -------------------------------------------
+
+// Groups the growing integration list by purpose so the page stays scannable.
+const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
+  { title: "Service & plan", ids: ["planning-center", "prodcom"] },
+  { title: "Presentation", ids: ["propresenter"] },
+  { title: "Audio", ids: ["smaart"] },
+  { title: "People", ids: ["sensource"] },
+  { title: "Wireless", ids: ["wireless"] },
+  { title: "Control & output", ids: ["obs", "osc", "ross-tsl"] },
+];
+
+/** One integration as a collapsible card: header (name · status · enable) that
+ *  expands to the config body. Configured integrations start collapsed; ones that
+ *  still need setup start open, so the page opens on what needs attention. */
+function IntegrationRow({
+  descriptor,
+  state,
+  onStateChange,
+  body,
+}: {
+  descriptor: IntegrationDescriptor;
+  state: IntegrationState;
+  onStateChange: (s: IntegrationState) => void;
+  body: ReactNode;
+}) {
+  const [toggling, setToggling] = useState(false);
+  async function toggleEnabled(enabled: boolean) {
+    setToggling(true);
+    try {
+      const next = await ipc<IntegrationState>("integrations:setEnabled", { id: descriptor.id, enabled });
+      onStateChange(next);
+    } catch (err) {
+      toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${String(err)}`);
+    } finally {
+      setToggling(false);
+    }
+  }
+  return (
+    <div className="rounded-lg border border-gray-a4 bg-gray-1 px-3 py-2">
+      <Collapsible
+        defaultOpen={!state.configured}
+        label={<span className="text-callout font-semibold text-gray-12 truncate">{descriptor.label}</span>}
+        right={
+          <div className="flex items-center gap-3 shrink-0">
+            <ConnectionBadge connection={state.connection} message={state.message} />
+            <Switch
+              checked={state.enabled}
+              onCheckedChange={toggleEnabled}
+              disabled={toggling}
+              aria-label={`Enable ${descriptor.label}`}
+            />
+          </div>
+        }
+      >
+        <div className="pt-1">{body}</div>
+      </Collapsible>
     </div>
   );
 }
@@ -401,8 +941,8 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
 
   if (isLoading) {
     return (
-      <div className={cn("flex items-center justify-center py-8", className)}>
-        <Loader2Icon className="size-5 text-gray-9 animate-spin" />
+      <div className={cn("py-2", className)}>
+        <SkeletonRows rows={4} />
       </div>
     );
   }
@@ -419,37 +959,61 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   const stateMap = new Map(states.map((s) => [s.id, s]));
   // Companion lives on the Advanced tab — there's nothing to configure here.
   const descriptors = allDescriptors.filter((d) => d.id !== "companion");
+  const byId = new Map(descriptors.map((d) => [d.id, d]));
+
+  // The body content for one integration: a bespoke panel (wireless/osc) or the
+  // generic schema form (+ caption colors under ProdCom).
+  const bodyFor = (descriptor: IntegrationDescriptor, state: IntegrationState): ReactNode => {
+    if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
+    if (descriptor.id === "osc") return <OscTargetsPanel />;
+    return (
+      <>
+        <IntegrationCard
+          descriptor={descriptor}
+          state={state}
+          onStateChange={handleStateChange}
+          lastRefreshedAt={stageState?.lastRefreshedAt ?? null}
+        />
+        {descriptor.id === "prodcom" && <CaptionColorsPanel />}
+      </>
+    );
+  };
+
+  // Summary strip + category groups (uncategorized descriptors fall into "Other").
+  const connectedCount = descriptors.filter((d) => stateMap.get(d.id)?.connection === "connected").length;
+  const needsSetup = descriptors.filter((d) => stateMap.get(d.id)?.configured === false).length;
+  const categorized = new Set(CATEGORY_ORDER.flatMap((c) => c.ids));
+  const groups = [
+    ...CATEGORY_ORDER.map((c) => ({
+      title: c.title,
+      items: c.ids.map((id) => byId.get(id)).filter((d): d is IntegrationDescriptor => !!d),
+    })),
+    { title: "Other", items: descriptors.filter((d) => !categorized.has(d.id)) },
+  ].filter((g) => g.items.length > 0);
 
   return (
-    <div className={cn("flex flex-col gap-0", className)}>
-      {descriptors.map((descriptor, idx) => {
-        const state = stateMap.get(descriptor.id);
-        if (!state) return null;
-        return (
-          <div key={descriptor.id}>
-            {idx > 0 && <Separator className="my-4" />}
-            {descriptor.kind === "wireless" ? (
-              <div className="flex flex-col gap-3">
-                <span className="text-headline font-semibold text-gray-12">
-                  {descriptor.label}
-                </span>
-                <WirelessConnectionsPanel />
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                <IntegrationCard
-                  descriptor={descriptor}
-                  state={state}
-                  onStateChange={handleStateChange}
-                  lastRefreshedAt={stageState?.lastRefreshedAt ?? null}
-                />
-                {/* Per-channel caption colors, tucked under the ProdCom card. */}
-                {descriptor.id === "prodcom" && <CaptionColorsPanel />}
-              </div>
-            )}
-          </div>
-        );
-      })}
+    <div className={cn("flex flex-col gap-5", className)}>
+      <p className="text-caption1 text-gray-9">
+        {connectedCount} connected{needsSetup > 0 ? ` · ${needsSetup} to set up` : ""}
+      </p>
+      {groups.map((g) => (
+        <div key={g.title} className="flex flex-col gap-2">
+          <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">{g.title}</span>
+          {g.items.map((descriptor) => {
+            const state = stateMap.get(descriptor.id);
+            if (!state) return null;
+            return (
+              <IntegrationRow
+                key={descriptor.id}
+                descriptor={descriptor}
+                state={state}
+                onStateChange={handleStateChange}
+                body={bodyFor(descriptor, state)}
+              />
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }

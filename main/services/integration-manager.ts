@@ -3,13 +3,18 @@
 // secrets via secretsStore; broadcasts "integrations:state-changed".
 
 import type { IntegrationDescriptor, IntegrationState } from "../types/integrations.js";
-import { broadcast } from "./broadcaster.js";
+import type { PeopleCountDTO } from "../types/stage.js";
+import { addBroadcastListener, broadcast } from "./broadcaster.js";
+import { obsService } from "./obs-service.js";
+import { oscManager } from "./osc-manager.js";
 import { prodcomService } from "./prodcom-service.js";
-import { propresenterService } from "./propresenter-service.js";
+import { propresenterService, propresenterManager, type PropInstanceConfig } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
+import { type SenSourceConfig, sensourceService } from "./sensource-service.js";
 import { settingsStore } from "./settings-store.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
+import { type TslFeed, tslService } from "./tsl-service.js";
 import { wirelessManager } from "./wireless-manager.js";
 
 // PCO integration descriptor.
@@ -23,18 +28,21 @@ const PCO_DESCRIPTOR: IntegrationDescriptor = {
       label: "App ID",
       type: "text",
       placeholder: "your-app-id",
+      help: "Create a Personal Access Token at api.planningcenteronline.com → Developers → Personal Access Tokens. The App ID and Secret are shown there.",
     },
     {
       key: "secret",
       label: "Secret",
       type: "password",
       placeholder: "your-secret",
+      help: "The Secret half of your PCO Personal Access Token. Stored encrypted on this machine.",
     },
     {
       key: "refreshIntervalMin",
       label: "Refresh interval",
       type: "select",
       placeholder: "How often to pull the latest plan from PCO.",
+      help: "How often Stage Utility re-syncs the plan, team roster, and photos from Planning Center. The live on-air countdown updates continuously regardless of this setting.",
       options: [
         { value: "5", label: "5 minutes" },
         { value: "15", label: "15 minutes" },
@@ -74,19 +82,60 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
   label: "ProPresenter",
   configSchema: [
     {
+      key: "name",
+      label: "Name",
+      type: "text",
+      placeholder: "Main (e.g. Auditorium 1)",
+      help: "Display name for this ProPresenter, shown when a layout object picks which instance to read. Add more auditoriums below.",
+    },
+    {
       key: "host",
       label: "ProPresenter Host",
       type: "text",
       placeholder: "192.168.1.100",
+      help: "IP or hostname of the machine running ProPresenter, on the same network as this server.",
     },
     {
       key: "port",
       label: "API Port",
       type: "number",
       placeholder: "1025",
+      help: "ProPresenter's network API port. Turn the API on and find the port under ProPresenter → Preferences → Network (default 1025).",
+    },
+    {
+      key: "pollMs",
+      label: "Poll interval (ms)",
+      type: "number",
+      placeholder: "500 (lower = snappier, more requests)",
+      help: "How often to query ProPresenter over the LAN. 500ms feels instant; raise it to ease network load. The API is under ProPresenter → Preferences → Network.",
     },
   ],
 };
+
+/** Parse the ProPresenter `config.instances` array (extra auditoriums) into typed
+ *  configs, tolerating loosely-shaped stored JSON. */
+function parsePropInstances(raw: unknown): PropInstanceConfig[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PropInstanceConfig[] = [];
+  for (const r of raw) {
+    if (!r || typeof r !== "object") continue;
+    const o = r as Record<string, unknown>;
+    if (typeof o.id !== "string" || !o.id) continue;
+    const portNum =
+      typeof o.port === "number" ? o.port : typeof o.port === "string" ? parseInt(o.port, 10) : NaN;
+    const pollNum =
+      typeof o.pollMs === "number" ? o.pollMs : typeof o.pollMs === "string" ? parseInt(o.pollMs, 10) : NaN;
+    out.push({
+      id: o.id,
+      name: typeof o.name === "string" && o.name.trim() ? o.name : o.id,
+      host: typeof o.host === "string" ? o.host.trim() : "",
+      port: Number.isFinite(portNum) ? portNum : 0,
+      pollMs: Number.isFinite(pollNum) ? pollNum : undefined,
+      enabled: o.enabled !== false,
+    });
+  }
+  return out;
+}
 
 // ProdCom integration — subscribes to the live transcription feed from ProdCom's
 // HTTP Application API (default port 24480). Powers the transcription display.
@@ -100,18 +149,21 @@ const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
       label: "ProdCom Host",
       type: "text",
       placeholder: "192.168.1.201",
+      help: "IP or hostname of the machine running ProdCom, on the same network as this server.",
     },
     {
       key: "port",
       label: "API Port",
       type: "number",
       placeholder: "24480",
+      help: "ProdCom's HTTP Application API port. Enable the Application API in ProdCom's settings (default 24480).",
     },
     {
       key: "apiKey",
       label: "API Key",
       type: "password",
       placeholder: "(only if Require Authentication is on)",
+      help: "Only needed if ProdCom's API has 'Require Authentication' turned on — paste the key from ProdCom's API settings. Leave blank otherwise. Stored encrypted on this machine.",
     },
   ],
 };
@@ -128,18 +180,130 @@ const SMAART_DESCRIPTOR: IntegrationDescriptor = {
       label: "Smaart Host",
       type: "text",
       placeholder: "192.168.1.50",
+      help: "IP or hostname of the machine running Smaart, on the same network. Requires Smaart 8.3+ (the modern JSON API).",
     },
     {
       key: "port",
       label: "API Port",
       type: "number",
       placeholder: "26000",
+      help: "Smaart's API port. Enable the API in Smaart's API/IO settings (default 26000).",
     },
     {
       key: "password",
       label: "API Password",
       type: "password",
       placeholder: "(only if the Smaart API requires authentication)",
+      help: "Only needed if Smaart's API is set to require authentication; otherwise leave blank. Stored encrypted on this machine.",
+    },
+  ],
+};
+
+// OBS Studio integration — connects to OBS's built-in obs-websocket v5 server
+// (Tools → WebSocket Server Settings; default port 4455) for live output state
+// (e.g. recording) shown by the custom-layout "OBS status" object.
+const OBS_DESCRIPTOR: IntegrationDescriptor = {
+  id: "obs",
+  kind: "control",
+  label: "OBS Studio",
+  configSchema: [
+    {
+      key: "host",
+      label: "OBS Host",
+      type: "text",
+      placeholder: "192.168.1.50",
+      help: "IP or hostname of the machine running OBS, on the same network as this server.",
+    },
+    {
+      key: "port",
+      label: "WebSocket Port",
+      type: "number",
+      placeholder: "4455",
+      help: "The obs-websocket server port. Enable the server under OBS → Tools → WebSocket Server Settings (default 4455).",
+    },
+    {
+      key: "password",
+      label: "Server Password",
+      type: "password",
+      placeholder: "(from OBS → Tools → WebSocket Server Settings)",
+      help: "In OBS, open Tools → WebSocket Server Settings, enable the server, and copy the password here. Leave blank if you turned authentication off.",
+    },
+  ],
+};
+
+// OSC integration — sends OSC to LAN gear from custom-layout buttons and reflects
+// device state back. Targets are managed as a separate list (like wireless), so
+// the descriptor itself carries no config fields.
+const OSC_DESCRIPTOR: IntegrationDescriptor = {
+  id: "osc",
+  kind: "control",
+  label: "OSC",
+  configSchema: [],
+};
+
+// SenSource Vea people-counter integration — polls the Vea API for live people
+// counts (attendance / occupancy), shown by the custom-layout "People counter"
+// object. The operator enters an API client id + secret (created in the Vea
+// app); a directly-issued long-lived token can be pasted instead. Location/zone
+// selection is handled by a dedicated picker (saved as non-secret config).
+const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
+  id: "sensource",
+  kind: "control",
+  label: "SenSource Vea",
+  configSchema: [
+    {
+      key: "clientId",
+      label: "API Client ID",
+      type: "text",
+      placeholder: "(from Vea → API clients)",
+      help: "Create an API client in the Vea web app (Settings → API clients). It gives you an ID + secret — enter both. Stage Utility handles the token exchange for you.",
+    },
+    {
+      key: "clientSecret",
+      label: "API Client Secret",
+      type: "password",
+      placeholder: "(from Vea → API clients)",
+      help: "The Secret half of the Vea API client (created alongside the Client ID in Vea → API clients). Stored encrypted on this machine.",
+    },
+    {
+      key: "apiToken",
+      label: "Static token (optional)",
+      type: "password",
+      placeholder: "(only if your Vea account issues a long-lived token)",
+      help: "Leave blank in the normal case — the client ID + secret above are all you need. Only fill this if your Vea account issues a long-lived token you'd rather use directly.",
+    },
+    {
+      key: "pollSeconds",
+      label: "Poll interval (s)",
+      type: "number",
+      placeholder: "45",
+      help: "How often to query SenSource. Their counts lag a few minutes server-side, so ~45s is plenty — lower values just add API calls without fresher data.",
+    },
+  ],
+};
+
+// Ross MultiViewer (TSL UMD) integration — pushes a people count to a Ross
+// multiviewer tile as on-tile text via TSL UMD 3.1 over TCP. Which count drives
+// which tile is configured as "feeds" (a custom panel), saved as non-secret
+// config; the descriptor schema carries just the switcher host + TSL port.
+const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
+  id: "ross-tsl",
+  kind: "control",
+  label: "Ross MultiViewer (TSL UMD)",
+  configSchema: [
+    {
+      key: "host",
+      label: "Switcher Host",
+      type: "text",
+      placeholder: "192.168.1.60",
+      help: "IP or hostname of the Ross multiviewer/switcher receiving the TSL UMD data, on the same network as this server.",
+    },
+    {
+      key: "port",
+      label: "TSL Port",
+      type: "number",
+      placeholder: "(TSL UMD input port on the Ross)",
+      help: "The TSL UMD input port configured on the Ross device (its UMD/TSL setup). The people count is sent here as on-tile text; map a count to a tile's TSL address in the feeds panel below.",
     },
   ],
 };
@@ -151,6 +315,10 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   PROPRESENTER_DESCRIPTOR,
   PRODCOM_DESCRIPTOR,
   SMAART_DESCRIPTOR,
+  OBS_DESCRIPTOR,
+  OSC_DESCRIPTOR,
+  SENSOURCE_DESCRIPTOR,
+  ROSS_TSL_DESCRIPTOR,
 ];
 
 // Keys that are secrets for each integration id.
@@ -161,6 +329,9 @@ const SECRET_KEYS: Record<string, string[]> = {
   propresenter: [],
   prodcom: ["apiKey"],
   smaart: ["password"],
+  obs: ["password"],
+  sensource: ["clientSecret", "apiToken"],
+  "ross-tsl": [],
 };
 
 class IntegrationManager {
@@ -170,6 +341,7 @@ class IntegrationManager {
 
   async init(): Promise<void> {
     console.log("[integration-manager] init");
+    propresenterManager.init();
     const settings = await settingsStore.load();
 
     for (const descriptor of DESCRIPTORS) {
@@ -210,6 +382,19 @@ class IntegrationManager {
     void this.applyProdcom();
     // Start the Smaart SPL connection if enabled + configured.
     await this.applySmaart();
+    // Start the OBS connection if enabled + configured.
+    await this.applyObs();
+    // Start the OSC manager (UDP send + feedback listener; per-target enable).
+    await oscManager.init();
+    this.refreshOscSummary();
+    // Start the SenSource Vea poller if it's enabled + has credentials.
+    await this.applySensource();
+    // Forward live people counts to the Ross TSL sender (it ignores them when
+    // disconnected), then start it if enabled + configured.
+    addBroadcastListener((channel, payload) => {
+      if (channel === "people:count") tslService.onPeopleCount(payload as PeopleCountDTO);
+    });
+    await this.applyRossTsl();
 
     console.log("[integration-manager] init complete", {
       integrations: Array.from(this.states.keys()),
@@ -223,7 +408,18 @@ class IntegrationManager {
   }
 
   getStates(): IntegrationState[] {
-    return Array.from(this.states.values());
+    return Array.from(this.states.values()).map((s) => ({ ...s, configured: this.isConfigured(s) }));
+  }
+
+  /** Whether the operator has set an integration up — independent of the live
+   *  connection, so the UI can tell "not configured" apart from "configured but
+   *  currently disconnected". Cred-based integrations are configured once any
+   *  config/secret value is saved; wireless/OSC (no config schema, set up via
+   *  their own connection/target lists) use the master enable toggle. */
+  private isConfigured(state: IntegrationState): boolean {
+    if (state.id === "companion") return true; // inbound — nothing to set up
+    if (state.id === "wireless" || state.id === "osc") return state.enabled;
+    return Object.values(state.config).some((v) => v !== "" && v != null);
   }
 
   /** Live count of connected Companion-module clients (pushed from remote-server
@@ -325,6 +521,18 @@ class IntegrationManager {
       await this.applySmaart();
     }
 
+    if (id === "obs") {
+      await this.applyObs();
+    }
+
+    if (id === "sensource") {
+      await this.applySensource();
+    }
+
+    if (id === "ross-tsl") {
+      await this.applyRossTsl();
+    }
+
     this.broadcastStates();
     return this.states.get(id)!;
   }
@@ -361,6 +569,18 @@ class IntegrationManager {
 
     if (id === "smaart") {
       await this.applySmaart();
+    }
+
+    if (id === "obs") {
+      await this.applyObs();
+    }
+
+    if (id === "sensource") {
+      await this.applySensource();
+    }
+
+    if (id === "ross-tsl") {
+      await this.applyRossTsl();
     }
 
     this.broadcastStates();
@@ -449,6 +669,40 @@ class IntegrationManager {
         return result;
       }
 
+      if (id === "obs") {
+        const { host, port } = this.getObsTarget();
+        if (!host || !port) {
+          return { ok: false, message: "Host and Port are required" };
+        }
+        const secrets = await secretsStore.getSecrets("obs");
+        const result = await obsService.test(host, port, secrets.password ?? null);
+        this.setConnectionState("obs", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "sensource") {
+        const cfg = await this.getSensourceConfig();
+        if (!cfg.apiToken && (!cfg.clientId || !cfg.clientSecret)) {
+          return { ok: false, message: "Client ID and Secret (or a static token) are required" };
+        }
+        const result = await sensourceService.test(cfg);
+        this.setConnectionState("sensource", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "ross-tsl") {
+        const { host, port } = this.getRossTslConfig();
+        if (!host || !port) {
+          return { ok: false, message: "Switcher Host and TSL Port are required" };
+        }
+        const result = await tslService.test(host, port);
+        this.setConnectionState("ross-tsl", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
       return { ok: false, message: `No test available for integration: ${id}` };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -478,7 +732,7 @@ class IntegrationManager {
     return Number.isFinite(min) && min > 0 ? min * 60 * 1000 : 60 * 60 * 1000;
   }
 
-  private getPropresenterTarget(): { host: string | null; port: number | null } {
+  private getPropresenterTarget(): { host: string | null; port: number | null; pollMs: number | null } {
     const cfg = this.states.get("propresenter")?.config ?? {};
     const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
     const rawPort = cfg.port;
@@ -488,7 +742,18 @@ class IntegrationManager {
         : typeof rawPort === "string" && rawPort.trim()
           ? parseInt(rawPort, 10)
           : NaN;
-    return { host, port: Number.isFinite(port) && port > 0 ? port : null };
+    const rawPoll = cfg.pollMs;
+    const pollMs =
+      typeof rawPoll === "number"
+        ? rawPoll
+        : typeof rawPoll === "string" && rawPoll.trim()
+          ? parseInt(rawPoll, 10)
+          : NaN;
+    return {
+      host,
+      port: Number.isFinite(port) && port > 0 ? port : null,
+      pollMs: Number.isFinite(pollMs) && pollMs > 0 ? pollMs : null,
+    };
   }
 
   /** Start/stop the ProPresenter poller to match enabled + configured state. */
@@ -501,16 +766,21 @@ class IntegrationManager {
     });
 
     const enabled = this.states.get("propresenter")?.enabled ?? false;
-    const { host, port } = this.getPropresenterTarget();
+    const { host, port, pollMs } = this.getPropresenterTarget();
     if (enabled && host && port) {
       // configure() starts polling; the listener flips this to connected/error
       // on the first tick.
       this.setConnectionState("propresenter", "connecting", `Polling ${host}:${port}`);
-      propresenterService.configure(host, port);
+      propresenterService.configure(host, port, pollMs ?? undefined);
     } else {
       propresenterService.stop();
       this.setConnectionState("propresenter", "disconnected", null);
     }
+
+    // Extra ProPresenter instances (additional auditoriums) — only while enabled.
+    const cfg = this.states.get("propresenter")?.config ?? {};
+    const defaultName = typeof cfg.name === "string" ? cfg.name : null;
+    propresenterManager.apply(defaultName, enabled ? parsePropInstances(cfg.instances) : []);
   }
 
   private getProdcomTarget(): { host: string | null; port: number | null } {
@@ -578,6 +848,132 @@ class IntegrationManager {
     }
   }
 
+  private getObsTarget(): { host: string | null; port: number | null } {
+    const cfg = this.states.get("obs")?.config ?? {};
+    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
+    const rawPort = cfg.port;
+    const port =
+      typeof rawPort === "number"
+        ? rawPort
+        : typeof rawPort === "string" && rawPort.trim()
+          ? parseInt(rawPort, 10)
+          : NaN;
+    // Default to obs-websocket's standard port when only a host is given.
+    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 4455 : null };
+  }
+
+  /** Start/stop the OBS connection to match enabled + configured state. */
+  private async applyObs(): Promise<void> {
+    obsService.setConnectionListener((state, message) => {
+      this.setConnectionState("obs", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("obs")?.enabled ?? false;
+    const { host, port } = this.getObsTarget();
+    if (enabled && host && port) {
+      const secrets = await secretsStore.getSecrets("obs");
+      this.setConnectionState("obs", "connecting", `Connecting ${host}:${port}`);
+      obsService.configure(host, port, secrets.password ?? null);
+    } else {
+      obsService.stop();
+      this.setConnectionState("obs", "disconnected", null);
+    }
+  }
+
+  /** Resolve the SenSource config from non-secret state + the secrets store. */
+  private async getSensourceConfig(): Promise<SenSourceConfig> {
+    const cfg = this.states.get("sensource")?.config ?? {};
+    const secrets = await secretsStore.getSecrets("sensource");
+    const rawPoll = cfg.pollSeconds;
+    const pollSeconds =
+      typeof rawPoll === "number"
+        ? rawPoll
+        : typeof rawPoll === "string" && rawPoll.trim()
+          ? parseInt(rawPoll, 10)
+          : NaN;
+    return {
+      clientId: typeof cfg.clientId === "string" && cfg.clientId.trim() ? cfg.clientId.trim() : null,
+      clientSecret: secrets.clientSecret || null,
+      apiToken: secrets.apiToken || null,
+      pollSeconds: Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : 45,
+      locationId:
+        typeof cfg.locationId === "string" && cfg.locationId.trim() ? cfg.locationId.trim() : null,
+      zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.filter((z): z is string => typeof z === "string") : [],
+    };
+  }
+
+  /** List Vea locations for the settings picker (uses the saved credentials). */
+  async getSensourceLocations(): Promise<{ locationId: string; name: string }[]> {
+    const cfg = await this.getSensourceConfig();
+    if (!cfg.apiToken && (!cfg.clientId || !cfg.clientSecret)) {
+      throw new Error("Enter and save SenSource credentials first");
+    }
+    return sensourceService.listLocationsWith(cfg);
+  }
+
+  /** List Vea zones for the settings picker — the reliable scoping mechanism
+   *  (the API has no working server-side location/zone filter). */
+  async getSensourceZones(): Promise<{ zoneId: string; name: string; locationId: string | null }[]> {
+    const cfg = await this.getSensourceConfig();
+    if (!cfg.apiToken && (!cfg.clientId || !cfg.clientSecret)) {
+      throw new Error("Enter and save SenSource credentials first");
+    }
+    return sensourceService.listZonesWith(cfg);
+  }
+
+  /** Start/stop the SenSource poller to match enabled + credentialed state. */
+  private async applySensource(): Promise<void> {
+    sensourceService.setConnectionListener((state, message) => {
+      this.setConnectionState("sensource", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("sensource")?.enabled ?? false;
+    const cfg = await this.getSensourceConfig();
+    const hasCreds = !!cfg.apiToken || (!!cfg.clientId && !!cfg.clientSecret);
+    if (enabled && hasCreds) {
+      this.setConnectionState("sensource", "connecting", "Authenticating with SenSource Vea");
+      sensourceService.configure(cfg);
+    } else {
+      sensourceService.stop();
+      this.setConnectionState("sensource", "disconnected", null);
+    }
+  }
+
+  /** Resolve the Ross TSL config (host/port + the feed→display-index mappings). */
+  private getRossTslConfig(): { host: string | null; port: number | null; feeds: TslFeed[] } {
+    const cfg = this.states.get("ross-tsl")?.config ?? {};
+    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
+    const rawPort = cfg.port;
+    const port =
+      typeof rawPort === "number"
+        ? rawPort
+        : typeof rawPort === "string" && rawPort.trim()
+          ? parseInt(rawPort, 10)
+          : NaN;
+    const feeds = Array.isArray(cfg.feeds) ? (cfg.feeds as TslFeed[]) : [];
+    return { host, port: Number.isFinite(port) && port > 0 ? port : null, feeds };
+  }
+
+  /** Start/stop the Ross TSL sender to match enabled + configured state. */
+  private async applyRossTsl(): Promise<void> {
+    tslService.setConnectionListener((state, message) => {
+      this.setConnectionState("ross-tsl", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("ross-tsl")?.enabled ?? false;
+    const { host, port, feeds } = this.getRossTslConfig();
+    if (enabled && host && port) {
+      this.setConnectionState("ross-tsl", "connecting", `Connecting ${host}:${port}`);
+      tslService.configure(host, port, feeds);
+    } else {
+      tslService.stop();
+      this.setConnectionState("ross-tsl", "disconnected", null);
+    }
+  }
+
   private async getPcoAppId(): Promise<string | null> {
     const settings = await settingsStore.load();
     return String(settings.integrationConfigs["planning-center"]?.appId ?? "") || null;
@@ -615,6 +1011,17 @@ class IntegrationManager {
       );
     } else {
       this.setConnectionState("wireless", "disconnected", null);
+    }
+  }
+
+  /** Reflect an aggregated summary of OSC targets on the master "osc" state. */
+  refreshOscSummary(): void {
+    const targets = oscManager.listTargets();
+    const enabled = targets.filter((t) => t.enabled).length;
+    if (enabled > 0) {
+      this.setConnectionState("osc", "connected", `${enabled} target(s) active`);
+    } else {
+      this.setConnectionState("osc", "disconnected", targets.length ? `${targets.length} target(s)` : null);
     }
   }
 
