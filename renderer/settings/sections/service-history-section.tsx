@@ -228,6 +228,24 @@ export function ServiceHistorySection() {
   // Which Overview metrics to show (persisted), and whether the picker is open.
   const [overviewMetrics, setOverviewMetrics] = useState<string[]>(loadOverviewMetrics);
   const [customizing, setCustomizing] = useState(false);
+  const [sparklinesOn, setSparklinesOn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("history:overviewSparklines") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  function toggleSparklines() {
+    setSparklinesOn((v) => {
+      const n = !v;
+      try {
+        localStorage.setItem("history:overviewSparklines", n ? "1" : "0");
+      } catch {
+        /* best-effort */
+      }
+      return n;
+    });
+  }
   const [dragMetric, setDragMetric] = useState<string | null>(null);
   const persistOverview = (next: string[]) => {
     try {
@@ -388,6 +406,28 @@ export function ServiceHistorySection() {
       shortest: { value: shortest ? fmtDur(shortest.s.actual) : "—", sub: shortest ? shortDay(shortest.t.serviceDate) : undefined, accent: "text-gray-12" },
       avgOverrun: { value: avgOverrun != null ? fmtDelta(avgOverrun) : "—", accent: avgOverrun != null && avgOverrun > 0 ? "text-red-11" : "text-gray-12" },
     } as Record<string, { value: string; sub?: string; accent: string }>;
+  }, [list, attList, day, typeFilter]);
+
+  // Per-service series (chronological, last ~16) behind the average tiles — the
+  // trend the average summarizes. Same scope as `overview` (type filter + as-of).
+  const sparkSeries = useMemo(() => {
+    const asOf = day;
+    const inScope = (typeId: string | null, date: string, ended: unknown) =>
+      ended != null && (!typeFilter || typeId === typeFilter) && (!asOf || date <= asOf);
+    const tl = (list ?? [])
+      .filter((t) => inScope(t.serviceTypeId, t.serviceDate, t.endedAt))
+      .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+    const att = attList
+      .filter((a) => inScope(a.serviceTypeId, a.serviceDate, a.endedAt))
+      .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+    const tail = <T,>(a: T[]) => a.slice(-16);
+    return {
+      avgLength: tail(tl.map((t) => summarize(t).actual).filter((v) => v > 0)),
+      avgStart: tail(tl.map((t) => summarize(t).lateStartSec).filter((v): v is number => v != null)),
+      avgOverrun: tail(tl.map((t) => { const s = summarize(t); return s.planned != null ? s.actual - s.planned : null; }).filter((v): v is number => v != null)),
+      avgInRoom: tail(att.map((a) => a.peakOccupancy).filter((v) => v > 0)),
+      avgAttendance: tail(att.map((a) => a.peakAttendance).filter((v) => v > 0)),
+    } as Record<string, number[]>;
   }, [list, attList, day, typeFilter]);
 
   async function deleteService(key: string, title: string) {
@@ -621,12 +661,20 @@ export function ServiceHistorySection() {
             <span className="text-caption2 text-gray-9">
               Overview{day ? ` · through ${fmtDay(day)}` : " · all time"}
             </span>
-            <button
-              className="text-caption2 text-gray-10 hover:text-gray-12 transition-colors"
-              onClick={() => setCustomizing((v) => !v)}
-            >
-              {customizing ? "Done" : "Customize"}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                className={`text-caption2 transition-colors ${sparklinesOn ? "text-blue-11 hover:text-blue-10" : "text-gray-10 hover:text-gray-12"}`}
+                onClick={toggleSparklines}
+              >
+                Sparklines {sparklinesOn ? "on" : "off"}
+              </button>
+              <button
+                className="text-caption2 text-gray-10 hover:text-gray-12 transition-colors"
+                onClick={() => setCustomizing((v) => !v)}
+              >
+                {customizing ? "Done" : "Customize"}
+              </button>
+            </div>
           </div>
           {customizing && (
             <div className="flex flex-wrap gap-1.5 mb-3">
@@ -656,6 +704,7 @@ export function ServiceHistorySection() {
                           value={d.value}
                           sub={d.sub}
                           accent={d.accent}
+                          series={sparklinesOn ? sparkSeries[key] : undefined}
                           onDragStart={() => setDragMetric(key)}
                           onDragEnd={() => setDragMetric(null)}
                           onDrop={() => moveOverviewMetric(dragMetric, key)}
@@ -723,14 +772,34 @@ function TypeChip({ active, onClick, children }: { active: boolean; onClick: () 
   );
 }
 
-/** A KPI tile for the Overview dashboard: icon + label, big value, context sub.
- *  Bordered + packed so a few metrics don't float in empty space; draggable to
- *  reorder within its group. */
+/** Minimal dependency-free sparkline — normalizes a series to a tiny SVG polyline.
+ *  Inherits stroke from currentColor (set via className to the tile's accent). */
+function Sparkline({ data, className }: { data: number[]; className?: string }) {
+  if (data.length < 2) return null;
+  const w = 100;
+  const h = 24;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const pts = data
+    .map((v, i) => `${((i / (data.length - 1)) * w).toFixed(1)},${(h - ((v - min) / range) * h).toFixed(1)}`)
+    .join(" ");
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className={`w-full ${className ?? ""}`} style={{ height: "1.1rem" }} aria-hidden="true">
+      <polyline points={pts} fill="none" stroke="currentColor" strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" opacity={0.8} />
+    </svg>
+  );
+}
+
+/** A KPI tile for the Overview dashboard: icon + label, big value, context sub, and
+ *  an optional trend sparkline. Bordered + packed so a few metrics don't float in
+ *  empty space; draggable to reorder within its group. */
 function KpiTile({
   def,
   value,
   sub,
   accent,
+  series,
   onDragStart,
   onDragEnd,
   onDrop,
@@ -739,6 +808,7 @@ function KpiTile({
   value: string;
   sub?: string;
   accent: string;
+  series?: number[];
   onDragStart: () => void;
   onDragEnd: () => void;
   onDrop: () => void;
@@ -759,6 +829,7 @@ function KpiTile({
       </div>
       <div className={`text-title3 font-semibold tabular-nums leading-tight ${accent}`}>{value}</div>
       {sub && <div className="text-caption2 text-gray-9 truncate">{sub}</div>}
+      {series && series.length >= 2 && <Sparkline data={series} className={accent} />}
     </div>
   );
 }
