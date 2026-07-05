@@ -456,6 +456,7 @@ export class RemoteServer {
       // Send initial snapshots so the client is immediately in sync — these
       // channels otherwise only broadcast on change, leaving a fresh client blank.
       sseWrite(res, "stage:state-changed", stageController.getState());
+      sseWrite(res, "pco:live", stageController.getLastLive());
       sseWrite(res, "propresenter:status", propresenterService.getStatus());
       sseWrite(res, "propresenter:instances", propresenterManager.getInstancesDto());
       sseWrite(res, "spl:metrics", smaartService.getLatest());
