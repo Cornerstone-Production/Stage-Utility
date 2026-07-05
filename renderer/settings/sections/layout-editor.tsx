@@ -193,6 +193,17 @@ const STYLE_PRESETS: { value: string; label: string; style: LayoutStyle }[] = [
   { value: "outline", label: "Outline", style: SURFACE_PRESETS.outline },
 ];
 
+// Which preset (if any) the current style matches — so the Style dropdown reflects
+// the applied look and reads as "custom" (placeholder) once fields are hand-tweaked.
+// A preset matches when every field IT sets equals the object's value.
+function matchStylePreset(s: LayoutStyle): string {
+  for (const p of STYLE_PRESETS) {
+    const keys = Object.keys(p.style) as (keyof LayoutStyle)[];
+    if (keys.every((k) => (s[k] ?? null) === (p.style[k] ?? null))) return p.value;
+  }
+  return "";
+}
+
 // Nearest labeled stop for the single Elevation slider (None/Low/Med/High).
 function elevationLabel(v: number): string {
   if (v <= 0.175) return "None";
@@ -1474,11 +1485,9 @@ export function LayoutEditor({
         </Dialog>
 
         <div className="flex-1" />
-        {dirty && (
-          <Button variant="accent" size="small" onClick={save} disabled={saving}>
-            {saving ? "Saving…" : "Save layout"}
-          </Button>
-        )}
+        {/* Save/Discard live in the floating unsaved pill when dirty — no separate
+            toolbar Save button (it duplicated the pill's Save). "Done" exits (and
+            prompts to save if there are unsaved changes). */}
         <Button variant="filled" size="small" onClick={leaveEditMode}>
           <CheckIcon className="size-3.5" /> Done
         </Button>
@@ -2504,7 +2513,7 @@ function Inspector({
       {/* Style preset — one dropdown of complete "looks" (surface + optional tint).
           Applies the shared style fields below; fine-tune with Fill / Border / Elevation. */}
       <Row label="Style" hint="Apply a preset look — surface (Flat/Glass/Elevated/Solid/Outline) with an optional color tint. Fine-tune with Fill, Border, and Elevation below.">
-        <Select value="" onValueChange={(v: string) => { const p = STYLE_PRESETS.find((x) => x.value === v); if (p) onStyle(p.style); }}>
+        <Select value={matchStylePreset(s)} onValueChange={(v: string) => { const p = STYLE_PRESETS.find((x) => x.value === v); if (p) onStyle(p.style); }}>
           <SelectTrigger><SelectValue placeholder="Apply a look…" /></SelectTrigger>
           <SelectContent>
             {STYLE_PRESETS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
