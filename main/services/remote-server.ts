@@ -103,6 +103,21 @@ function error(res: http.ServerResponse, message: string, status = 400): void {
   json(res, { error: message }, status);
 }
 
+/** Whether a live service / active recording is in progress, and why. Used to lock
+ *  self-updates (which restart the process and would interrupt a service mid-flight
+ *  and drop the last un-persisted samples) unless the operator explicitly overrides. */
+function serviceActivity(): { active: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+  if (stageController.getLastLive()?.mode === "item") reasons.push("A PCO service is live");
+  const spl = splRecorder.getCurrent();
+  if (spl && !spl.endedAt) reasons.push("SPL is recording");
+  const att = attendanceRecorder.getCurrent();
+  if (att && !att.endedAt) reasons.push("Attendance is recording");
+  const tl = serviceTimelineRecorder.getCurrent();
+  if (tl && !tl.endedAt) reasons.push("Service history is recording");
+  return { active: reasons.length > 0, reasons };
+}
+
 function isDisplayKind(v: unknown): v is DisplayKind {
   return (
     v === "slots" ||
@@ -1450,7 +1465,17 @@ export class RemoteServer {
       json(res, await updater.checkForUpdate());
       return;
     }
+    if (method === "GET" && pathname === "/api/update/lock") {
+      json(res, serviceActivity());
+      return;
+    }
     if (method === "POST" && pathname === "/api/update/apply") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const lock = serviceActivity();
+      if (lock.active && body.override !== true) {
+        json(res, { error: "locked", locked: true, reasons: lock.reasons }, 409);
+        return;
+      }
       try {
         json(res, await updater.applyUpdate());
       } catch (err) {
@@ -1462,6 +1487,11 @@ export class RemoteServer {
       const body = await readBody(req) as Record<string, unknown>;
       if (typeof body.branch !== "string") {
         error(res, "body.branch (string) required");
+        return;
+      }
+      const lock = serviceActivity();
+      if (lock.active && body.override !== true) {
+        json(res, { error: "locked", locked: true, reasons: lock.reasons }, 409);
         return;
       }
       try {

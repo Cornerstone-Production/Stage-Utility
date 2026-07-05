@@ -236,7 +236,10 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/update/check");
 
     case "update:apply":
-      return post<T>("/api/update/apply");
+      return post<T>("/api/update/apply", p);
+
+    case "update:lock":
+      return apiFetch<T>("/api/update/lock");
 
     case "update:setAuto":
       return post<T>("/api/update/auto", p);

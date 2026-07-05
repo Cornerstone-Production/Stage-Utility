@@ -432,6 +432,11 @@ export class StageController {
     return this.lastLive != null && this.lastLive.mode !== "none";
   }
 
+  /** Latest PCO live snapshot (null if none fetched yet) — for the update-lock guard. */
+  getLastLive(): PcoLiveDTO | null {
+    return this.lastLive;
+  }
+
   /**
    * Advance / rewind the PCO Services Live timer (same as PCO's own next/previous
    * item controls). Throws when PCO isn't configured, no plan is selected, or PCO

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon } from "lucide-react";
+import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon } from "lucide-react";
 import { invoke, onNotification } from "../../lib/api";
 import { CompanionInfoPanel } from "../../components/companion-info-panel";
 import {
@@ -91,8 +91,40 @@ function UpdatesPanel({
   const updating = s?.phase === "updating";
   const behind = s?.behind ?? 0;
   const [trackSel, setTrackSel] = useState<string | null>(null);
+  // Update lock — a live service / active recording blocks self-updates (which
+  // restart the process) unless overridden. Re-checked whenever a service goes
+  // live/idle or a recorder opens/closes so the indicator stays fresh.
+  const [lock, setLock] = useState<{ active: boolean; reasons: string[] } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () =>
+      invoke<{ active: boolean; reasons: string[] }>("update:lock")
+        .then((l) => !cancelled && setLock(l))
+        .catch(() => {});
+    refresh();
+    const offs = ["pco:live", "spl:history", "attendance:history", "service-timeline:history"].map((ch) =>
+      onNotification(ch, refresh),
+    );
+    return () => {
+      cancelled = true;
+      offs.forEach((off) => off());
+    };
+  }, []);
 
   async function onUpdateNow() {
+    if (lock?.active) {
+      if (
+        await confirm({
+          title: "Service in progress",
+          message: `Updating restarts the server and would interrupt: ${lock.reasons.join(", ")}. It's safest to wait until the service is over.`,
+          confirmLabel: "Override & update anyway",
+          destructive: true,
+        })
+      ) {
+        handlers.handleApplyUpdate(true);
+      }
+      return;
+    }
     if (await confirm({ title: "Update now?", message: "The displays will go blank and reload for a few seconds while the server restarts.", confirmLabel: "Update now" })) {
       handlers.handleApplyUpdate();
     }
@@ -109,14 +141,23 @@ function UpdatesPanel({
   async function onSwitchTrack() {
     const branch = trackSel ?? s?.branch ?? null;
     if (!branch || branch === s?.branch) return;
-    if (
-      await confirm({
-        title: `Switch to "${branch}"?`,
-        message: `The server will reinstall + rebuild and restart (displays go blank for a few seconds), then follow the ${branch} branch.`,
-        confirmLabel: "Switch track",
-      })
-    ) {
-      void invoke("update:setTrack", { branch }).catch((e) =>
+    const locked = lock?.active ?? false;
+    const ok = await confirm(
+      locked
+        ? {
+            title: "Service in progress",
+            message: `Switching tracks reinstalls, rebuilds, and restarts the server, interrupting: ${lock!.reasons.join(", ")}. It's safest to wait until the service is over.`,
+            confirmLabel: "Override & switch",
+            destructive: true,
+          }
+        : {
+            title: `Switch to "${branch}"?`,
+            message: `The server will reinstall + rebuild and restart (displays go blank for a few seconds), then follow the ${branch} branch.`,
+            confirmLabel: "Switch track",
+          },
+    );
+    if (ok) {
+      void invoke("update:setTrack", { branch, override: locked }).catch((e) =>
         window.alert(`Track switch failed: ${e instanceof Error ? e.message : String(e)}`),
       );
     }
@@ -218,6 +259,11 @@ function UpdatesPanel({
             {!justUpdated && s && behind === 0 && !updating && (!s.lastResult || s.lastResult.ok) ? (
               <p className="mt-1 flex items-center gap-1.5 text-caption2 text-green-10">
                 <CheckCircle2Icon className="size-3.5" /> You're on the latest version.
+              </p>
+            ) : null}
+            {lock?.active && !updating ? (
+              <p className="mt-1 flex items-center gap-1.5 text-caption2 text-amber-11">
+                <LockIcon className="size-3.5" /> Update locked — {lock.reasons.join(" · ")}. Finish the service, or override in the dialog.
               </p>
             ) : null}
           </FieldContent>

@@ -504,9 +504,9 @@ export function SettingsView() {
     }
   }
 
-  async function handleApplyUpdate() {
+  async function handleApplyUpdate(override = false) {
     try {
-      const status = await ipc<UpdateStatus>("update:apply");
+      const status = await ipc<UpdateStatus>("update:apply", { override });
       queryClient.setQueryData(["update:status"], status);
       // Remember the version we're updating FROM, so the server:hello after the
       // restart (carrying a new version) tells us the apply finished — then we

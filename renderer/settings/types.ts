@@ -38,7 +38,7 @@ export interface SectionHandlers {
   handleSetPublicUrl: (url: string | null) => Promise<void>;
   // In-app self-update
   handleCheckUpdates: () => Promise<void>;
-  handleApplyUpdate: () => Promise<void>;
+  handleApplyUpdate: (override?: boolean) => Promise<void>;
   handleSetAutoUpdate: (partial: { enabled?: boolean; dayOfWeek?: number | null; hour?: number }) => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {
