@@ -275,6 +275,7 @@ class SenSourceService {
   private tokenExpiresAt = 0;
 
   private last: PeopleCountDTO = OFFLINE;
+  private lastCountSig: string | null = null;
   /** Rolling building-total samples for the people-graph trend object. */
   private history: PeopleHistoryPoint[] = [];
   /** Cached /zone listing for location→zone scoping (see cachedZones). */
@@ -669,6 +670,12 @@ class SenSourceService {
     // Carry the rolling history on every snapshot (incl. OFFLINE) so the trend
     // graph holds its shape through a transient disconnect.
     this.last = { ...snapshot, history: this.history.slice() };
+    // Skip re-broadcasting when the substantive counts are unchanged (updatedAt
+    // ticks every poll but the count often doesn't, especially when idle). The next
+    // real change carries the full history, so the trend graph still catches up.
+    const sig = JSON.stringify([snapshot.connected, snapshot.total, snapshot.zones]);
+    if (sig === this.lastCountSig) return;
+    this.lastCountSig = sig;
     broadcast("people:count", this.last);
   }
 }

@@ -23,3 +23,15 @@ export function broadcast(channel: string, payload: unknown): void {
     }
   }
 }
+
+// Lets a producer skip work when nothing is listening to its channel. The transport
+// (remote-server) registers the real check over its connected clients; until then we
+// assume "watched" so producers never wrongly idle (tests / before server start).
+let subscriberCheck: ((channel: string) => boolean) | null = null;
+export function setSubscriberCheck(fn: (channel: string) => boolean): void {
+  subscriberCheck = fn;
+}
+/** True if any connected client is subscribed to (or unfiltered on) this channel. */
+export function channelHasSubscribers(channel: string): boolean {
+  return subscriberCheck ? subscriberCheck(channel) : true;
+}

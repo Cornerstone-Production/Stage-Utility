@@ -14,7 +14,7 @@ import { fileURLToPath } from "url";
 
 import type { DisplayKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../types/stage.js";
 import type { OscArg } from "../types/osc.js";
-import { addBroadcastListener } from "./broadcaster.js";
+import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
 import { configSnapshot } from "./config-snapshot.js";
 import { integrationManager } from "./integration-manager.js";
@@ -309,6 +309,17 @@ export class RemoteServer {
 
     // Push state to SSE clients on every broadcast so the phone page can use
     // EventSource instead of polling.
+    // Let producers idle when nothing is watching their channel: true if any client
+    // is subscribed to it, or any client hasn't reported a filter yet (wants all).
+    setSubscriberCheck((channel) => {
+      for (const client of sseClients) {
+        const cid = resCid.get(client);
+        const chans = cid ? clientChannels.get(cid) : undefined;
+        if (!chans || chans.has(channel)) return true;
+      }
+      return false;
+    });
+
     addBroadcastListener((channel, payload) => {
       let frame: string | null = null; // serialize at most once, only if a client wants it
       for (const client of sseClients) {

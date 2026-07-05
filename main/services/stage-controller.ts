@@ -1880,7 +1880,15 @@ export class StageController {
       .sort((a, b) => a.chargerIndex - b.chargerIndex || a.bay - b.bay);
   }
 
+  private lastBroadcastSig: string | null = null;
   private broadcast(): void {
+    // Skip when nothing actually changed — a setter called with its current value
+    // (same mode, unchanged settings save) still runs the mutating method. State is
+    // change-driven and fires rarely, so a full-record delta protocol isn't worth its
+    // client-merge risk; this dedupe removes the redundant full-state pushes cheaply.
+    const sig = JSON.stringify(this.state);
+    if (sig === this.lastBroadcastSig) return;
+    this.lastBroadcastSig = sig;
     broadcast("stage:state-changed", this.state);
   }
 }
