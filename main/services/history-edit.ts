@@ -16,10 +16,16 @@ import { broadcast } from "./broadcaster.js";
  *  samples, so it's left as-is. */
 function recomputeAttendance(att: ServiceAttendance): void {
   const s = att.samples;
-  att.peakAttendance = s.reduce((m, x) => Math.max(m, x.attendance), 0);
+  // Per-service attendance = value − first sample (the count when this window began),
+  // so a service not reset off the prior one reads its own count; on a trim, the new
+  // first in-window sample re-baselines automatically.
+  const base = s.length ? s[0].attendance : 0;
+  const perSvc = (v: number) => Math.max(0, v - base);
+  att.attendanceBaseline = base;
+  att.peakAttendance = s.reduce((m, x) => Math.max(m, perSvc(x.attendance)), 0);
   att.peakOccupancy = s.reduce((m, x) => Math.max(m, x.occupancy), 0);
   att.minOccupancy = s.length ? s.reduce((m, x) => Math.min(m, x.occupancy), s[0].occupancy) : null;
-  att.lastAttendance = s.length ? s[s.length - 1].attendance : 0;
+  att.lastAttendance = s.length ? perSvc(s[s.length - 1].attendance) : 0;
   att.lastOccupancy = s.length ? s[s.length - 1].occupancy : 0;
 }
 

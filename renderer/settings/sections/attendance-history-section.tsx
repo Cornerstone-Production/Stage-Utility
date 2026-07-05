@@ -62,6 +62,24 @@ function loadVisibleMetrics(): string[] {
  * grouped by day with prev/next-day navigation. The detail view graphs attendance
  * and in-room occupancy throughout the service.
  */
+
+/** Per-service attendance for a sample series: value minus the first sample (the
+ *  count when this service's recording began). Robust whether samples were stored
+ *  raw-cumulative or already-baselined (first ≈ 0), so a service that wasn't reset
+ *  off the prior service still reads its own count. */
+export function perServiceAttendance(v: number, samples: AttendanceSample[]): number {
+  return Math.max(0, v - (samples[0]?.attendance ?? 0));
+}
+/** Per-service PEAK attendance from a record's samples (max − first). Falls back to
+ *  the stored field when there are no samples. */
+export function servicePeakAttendance(rec: ServiceAttendance): number {
+  const s = rec.samples;
+  if (!s || s.length === 0) return rec.peakAttendance;
+  let max = s[0].attendance;
+  for (const x of s) if (x.attendance > max) max = x.attendance;
+  return perServiceAttendance(max, s);
+}
+
 export function AttendanceHistorySection() {
   const [list, setList] = useState<ServiceAttendance[] | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -228,7 +246,7 @@ export function AttendanceHistorySection() {
                 </span>
               </div>
               <span className="shrink-0 tabular-nums text-caption1 text-right">
-                <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">peak </span><span className="text-blue-11">{s.peakAttendance.toLocaleString()}</span></span>
+                <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">peak </span><span className="text-blue-11">{servicePeakAttendance(s).toLocaleString()}</span></span>
                 <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">room </span><span className="text-green-11">{s.peakOccupancy.toLocaleString()}</span></span>
               </span>
             </button>
@@ -272,8 +290,11 @@ export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendan
   const avgOccupancy = detail.samples.length
     ? Math.round(detail.samples.reduce((s, p) => s + p.occupancy, 0) / detail.samples.length)
     : null;
+  // Attendance is cumulative; show it per-service (each sample minus the first) so a
+  // service not reset off the prior one still reads its own count on the chart + peak.
+  const attSamples = detail.samples.map((s) => ({ t: s.t, attendance: perServiceAttendance(s.attendance, detail.samples), occupancy: s.occupancy }));
   const statValues: Record<string, { value: number | null; accent: string }> = {
-    peak: { value: detail.peakAttendance, accent: "text-blue-11" },
+    peak: { value: servicePeakAttendance(detail), accent: "text-blue-11" },
     dayTotal: { value: detail.totalAttendance ?? null, accent: "text-blue-11" },
     peakRoom: { value: detail.peakOccupancy, accent: "text-green-11" },
     lowest: { value: detail.minOccupancy ?? null, accent: "text-amber-11" },
@@ -297,7 +318,7 @@ export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendan
         </div>
       )}
       <AttendanceChart
-        samples={detail.samples}
+        samples={attSamples}
         markers={shows("markers") ? markers : []}
         avgOccupancy={shows("avg") ? avgOccupancy : null}
         showAttendance={shows("attendance")}

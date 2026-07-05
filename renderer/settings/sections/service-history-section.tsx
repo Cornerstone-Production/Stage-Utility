@@ -5,7 +5,7 @@ import { invoke, onNotification } from "../../lib/api";
 import { confirm, EmptyState, SkeletonRows, Button, toast } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { HistoryCalendar } from "../../components/history-calendar";
-import { AttendanceDetail } from "./attendance-history-section";
+import { AttendanceDetail, servicePeakAttendance } from "./attendance-history-section";
 import { SplDetail } from "./spl-history-section";
 
 function fmtDate(iso: string): string {
@@ -184,7 +184,7 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
   if (att) {
     const avgOcc = att.samples.length ? Math.round(att.samples.reduce((s, p) => s + p.occupancy, 0) / att.samples.length) : null;
     L.push("", "ATTENDANCE");
-    L.push(`Peak attendance ${att.peakAttendance.toLocaleString()} · Peak in-room ${att.peakOccupancy.toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
+    L.push(`Peak attendance ${servicePeakAttendance(att).toLocaleString()} · Peak in-room ${att.peakOccupancy.toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
   }
   if (spl && spl.items.length) {
     L.push("", "AUDIO — peak SPL (dB)");
@@ -385,7 +385,7 @@ export function ServiceHistorySection() {
     const punct = sums.map((x) => x.s.lateStartSec).filter((v): v is number => v != null);
     const overruns = sums.map((x) => (x.s.planned != null ? x.s.actual - x.s.planned : null)).filter((v): v is number => v != null);
     const occ = att.filter((a) => a.peakOccupancy > 0);
-    const pk = att.filter((a) => a.peakAttendance > 0);
+    const pk = att.map((a) => servicePeakAttendance(a)).filter((v) => v > 0);
     const maxOcc = occ.length ? occ.reduce((m, a) => (a.peakOccupancy > m.peakOccupancy ? a : m)) : null;
     const minOcc = occ.length ? occ.reduce((m, a) => (a.peakOccupancy < m.peakOccupancy ? a : m)) : null;
     const longest = lens.length ? lens.reduce((m, x) => (x.s.actual > m.s.actual ? x : m)) : null;
@@ -399,7 +399,7 @@ export function ServiceHistorySection() {
       avgLength: { value: fmtDur(mean(lens.map((x) => x.s.actual))), accent: "text-blue-11" },
       avgStart: { value: avgPunct != null ? startFmt(avgPunct) : "—", accent: avgPunct != null && avgPunct > 60 ? "text-amber-11" : "text-gray-12" },
       avgInRoom: { value: num(mean(occ.map((a) => a.peakOccupancy))), accent: "text-green-11" },
-      avgAttendance: { value: num(mean(pk.map((a) => a.peakAttendance))), accent: "text-blue-11" },
+      avgAttendance: { value: num(mean(pk)), accent: "text-blue-11" },
       highestAttended: { value: maxOcc ? maxOcc.peakOccupancy.toLocaleString() : "—", sub: maxOcc ? shortDay(maxOcc.serviceDate) : undefined, accent: "text-green-11" },
       lowestAttended: { value: minOcc ? minOcc.peakOccupancy.toLocaleString() : "—", sub: minOcc ? shortDay(minOcc.serviceDate) : undefined, accent: "text-amber-11" },
       longest: { value: longest ? fmtDur(longest.s.actual) : "—", sub: longest ? shortDay(longest.t.serviceDate) : undefined, accent: "text-gray-12" },
@@ -426,7 +426,7 @@ export function ServiceHistorySection() {
       avgStart: tail(tl.map((t) => summarize(t).lateStartSec).filter((v): v is number => v != null)),
       avgOverrun: tail(tl.map((t) => { const s = summarize(t); return s.planned != null ? s.actual - s.planned : null; }).filter((v): v is number => v != null)),
       avgInRoom: tail(att.map((a) => a.peakOccupancy).filter((v) => v > 0)),
-      avgAttendance: tail(att.map((a) => a.peakAttendance).filter((v) => v > 0)),
+      avgAttendance: tail(att.map((a) => servicePeakAttendance(a)).filter((v) => v > 0)),
     } as Record<string, number[]>;
   }, [list, attList, day, typeFilter]);
 
