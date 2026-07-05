@@ -96,10 +96,26 @@ function isBufferItem(title: string | null | undefined): boolean {
   return (title ?? "").toUpperCase().includes("BUFFER");
 }
 
+/** Pre-service items (Doors, Pre-roll, …) — anything that went live BEFORE the
+ *  scheduled service time. Excluded from timing so a mis-fired/forgotten Doors item
+ *  can't skew the service length; kept listed. */
+function isPreServiceItem(it: ServiceTimelineItem, rec: ServiceTimeline): boolean {
+  if (!rec.serviceTimeStartsAt || !it.startedAt) return false;
+  const s = Date.parse(it.startedAt);
+  const svc = Date.parse(rec.serviceTimeStartsAt);
+  return Number.isFinite(s) && Number.isFinite(svc) && s < svc;
+}
+
+/** Whether an item counts toward the service timers (not buffer, not pre-service). */
+function isCountedItem(it: ServiceTimelineItem, rec: ServiceTimeline): boolean {
+  return !isBufferItem(it.title) && !isPreServiceItem(it, rec);
+}
+
 /** Derived service-level timing from a record. */
 function summarize(rec: ServiceTimeline) {
-  const items = rec.items;
-  const firstStart = items[0]?.startedAt ?? rec.startedAt;
+  const counted = rec.items.filter((it) => isCountedItem(it, rec));
+  // "Started" = when the service proper began (first counted item), not doors.
+  const firstStart = counted[0]?.startedAt ?? rec.items[0]?.startedAt ?? rec.startedAt;
   const scheduled = rec.serviceTimeStartsAt;
   let lateStartSec: number | null = null;
   if (scheduled && firstStart) {
@@ -109,8 +125,7 @@ function summarize(rec: ServiceTimeline) {
   let planned = 0;
   let actual = 0;
   let plannedKnown = false;
-  for (const it of items) {
-    if (isBufferItem(it.title)) continue; // post-service padding — never counted in timing
+  for (const it of counted) {
     if (it.plannedLengthSec != null) { planned += it.plannedLengthSec; plannedKnown = true; }
     if (it.actualDurationSec != null) actual += it.actualDurationSec;
   }
@@ -121,7 +136,7 @@ function summarize(rec: ServiceTimeline) {
  *  planned and actual times. */
 function overrunStats(tl: ServiceTimeline) {
   const deltas = tl.items
-    .filter((it) => !isBufferItem(it.title) && it.plannedLengthSec != null && it.actualDurationSec != null)
+    .filter((it) => isCountedItem(it, tl) && it.plannedLengthSec != null && it.actualDurationSec != null)
     .map((it) => (it.actualDurationSec as number) - (it.plannedLengthSec as number));
   if (!deltas.length) return { avg: null as number | null, over: 0, total: 0 };
   return { avg: deltas.reduce((a, b) => a + b, 0) / deltas.length, over: deltas.filter((d) => d > 0).length, total: deltas.length };
@@ -207,16 +222,28 @@ export function ServiceHistorySection() {
   // Which Overview metrics to show (persisted), and whether the picker is open.
   const [overviewMetrics, setOverviewMetrics] = useState<string[]>(loadOverviewMetrics);
   const [customizing, setCustomizing] = useState(false);
+  const [dragMetric, setDragMetric] = useState<string | null>(null);
+  const persistOverview = (next: string[]) => {
+    try {
+      localStorage.setItem(OVERVIEW_STORE_KEY, JSON.stringify(next));
+    } catch {
+      /* best-effort */
+    }
+    return next;
+  };
   function toggleOverviewMetric(key: string) {
+    setOverviewMetrics((prev) => persistOverview(prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+  // Drag a metric card onto another to reorder (order = display order, persisted).
+  function moveOverviewMetric(from: string | null, to: string) {
+    if (!from || from === to) return;
     setOverviewMetrics((prev) => {
-      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
-      try {
-        localStorage.setItem(OVERVIEW_STORE_KEY, JSON.stringify(next));
-      } catch {
-        /* best-effort */
-      }
-      return next;
+      const arr = prev.filter((k) => k !== from);
+      const idx = arr.indexOf(to);
+      arr.splice(idx < 0 ? arr.length : idx, 0, from);
+      return persistOverview(arr);
     });
+    setDragMetric(null);
   }
 
   function reload() {
@@ -394,8 +421,8 @@ export function ServiceHistorySection() {
       sum.planned != null && Number.isFinite(firstStartMs)
         ? new Date(firstStartMs + sum.planned * 1000).toISOString()
         : null;
-    // Actual end excludes the trailing buffer — the service really ended at the last counted item.
-    const actualEnd = [...detail.items].reverse().find((it) => !isBufferItem(it.title) && it.endedAt)?.endedAt ?? detail.endedAt ?? null;
+    // Actual end = the last COUNTED item's end (excludes trailing buffer / pre-service).
+    const actualEnd = [...detail.items].reverse().find((it) => isCountedItem(it, detail) && it.endedAt)?.endedAt ?? detail.endedAt ?? null;
     const actualSub = [
       totalDelta != null ? `${fmtDelta(totalDelta)} vs plan` : null,
       actualEnd ? `ended ${fmtTime(actualEnd)}` : null,
@@ -494,20 +521,20 @@ export function ServiceHistorySection() {
           </div>
           {detail.items.map((it, i) => {
             const itemLive = it.endedAt == null;
-            const buffer = isBufferItem(it.title); // shown, but not counted in totals
+            const counted = isCountedItem(it, detail); // buffer + pre-service shown but not totaled
             const delta = it.plannedLengthSec != null && it.actualDurationSec != null ? it.actualDurationSec - it.plannedLengthSec : null;
             const deltaColor = delta == null ? "text-gray-9" : delta > 30 ? "text-red-11" : delta < -30 ? "text-blue-11" : "text-gray-11";
             return (
-              <div key={it.itemId} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${buffer ? "opacity-55" : ""}`}>
+              <div key={it.itemId} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${counted ? "" : "opacity-55"}`}>
                 <span className="text-gray-9">{i + 1}</span>
                 <span className="text-gray-12 truncate">
                   {it.title || "—"}
                   {itemLive && <span className="ml-1.5 text-[10px] text-red-11">live</span>}
-                  {buffer && <span className="ml-1.5 text-[10px] italic text-gray-9">not counted</span>}
+                  {!counted && <span className="ml-1.5 text-[10px] italic text-gray-9">not counted</span>}
                 </span>
-                <span className="text-right text-gray-10">{buffer ? "—" : fmtDur(it.plannedLengthSec)}</span>
+                <span className="text-right text-gray-10">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
                 <span className="text-right text-gray-12">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
-                <span className={`text-right ${deltaColor}`}>{buffer || itemLive ? "" : fmtDelta(delta)}</span>
+                <span className={`text-right ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
                 <span className="text-right text-gray-9 whitespace-nowrap">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
               </div>
             );
@@ -583,9 +610,23 @@ export function ServiceHistorySection() {
             </div>
           )}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 flex-1 content-center">
-            {OVERVIEW_METRICS.filter((m) => overviewMetrics.includes(m.key)).map((m) => {
-              const d = overview[m.key];
-              return <OStat key={m.key} label={m.label} value={d.value} accent={d.accent} sub={d.sub} />;
+            {overviewMetrics.map((key) => {
+              const m = OVERVIEW_METRICS.find((x) => x.key === key);
+              const d = overview[key];
+              if (!m || !d) return null;
+              return (
+                <div
+                  key={key}
+                  draggable
+                  onDragStart={() => setDragMetric(key)}
+                  onDragEnd={() => setDragMetric(null)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => moveOverviewMetric(dragMetric, key)}
+                  className="cursor-grab active:cursor-grabbing"
+                >
+                  <OStat label={m.label} value={d.value} accent={d.accent} sub={d.sub} />
+                </div>
+              );
             })}
             {overviewMetrics.length === 0 && <span className="text-caption1 text-gray-9 col-span-full">No metrics selected — hit Customize.</span>}
           </div>
