@@ -21,6 +21,41 @@ function fmtDay(day: string): string {
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 }
 
+// Which chart series/overlays and summary cards to surface, mirroring the SPL
+// tab's metric picker. Attendance has a fixed, small set (not arbitrary per-item
+// columns), so the keys are enumerated here and grouped for the picker UI. The
+// chart "attendance" series is the per-service (baselined) value stored in each
+// sample; the day total is a scalar summary card, not a drawable series.
+const CHART_METRICS = [
+  { key: "attendance", label: "Attendance" },
+  { key: "occupancy", label: "In room" },
+  { key: "avg", label: "Avg in room" },
+  { key: "markers", label: "Plan items" },
+] as const;
+const STAT_METRICS = [
+  { key: "peak", label: "Peak attendance" },
+  { key: "dayTotal", label: "Day total" },
+  { key: "peakRoom", label: "Peak in-room" },
+  { key: "lowest", label: "Lowest in-room" },
+  { key: "latest", label: "Latest in-room" },
+  { key: "samples", label: "Samples" },
+] as const;
+const ALL_METRIC_KEYS = [...CHART_METRICS.map((m) => m.key), ...STAT_METRICS.map((m) => m.key)];
+const METRICS_STORAGE_KEY = "attendance:visibleMetrics";
+
+function loadVisibleMetrics(): string[] {
+  try {
+    const raw = localStorage.getItem(METRICS_STORAGE_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return arr.filter((k) => ALL_METRIC_KEYS.includes(k));
+    }
+  } catch {
+    /* fall through to default */
+  }
+  return ALL_METRIC_KEYS.slice(); // default: everything visible
+}
+
 /**
  * Attendance — browse past services and their recorded attendance/occupancy
  * trend. One record per PCO service-time occurrence (same scheme as SPL History),
@@ -34,6 +69,19 @@ export function AttendanceHistorySection() {
   // The matching service-timeline record (same serviceKey) for PCO item markers.
   const [timeline, setTimeline] = useState<ServiceTimeline | null>(null);
   const [day, setDay] = useState<string | null>(null);
+  const [visible, setVisible] = useState<string[]>(loadVisibleMetrics);
+  const shows = (k: string) => visible.includes(k);
+  function toggleMetric(key: string) {
+    setVisible((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      try {
+        localStorage.setItem(METRICS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        /* best-effort persist */
+      }
+      return next;
+    });
+  }
 
   function reload() {
     invoke<ServiceAttendance[]>("attendance:listHistory")
@@ -160,24 +208,43 @@ export function AttendanceHistorySection() {
           </span>
         </div>
 
+        <MetricPicker visible={visible} onToggle={toggleMetric} />
+
         {(() => {
-          // "Day total" = running attendance across ALL of the day's services; only
-          // meaningful (and shown) when it exceeds this service's own peak — i.e. a
-          // later service carrying earlier services' entries.
-          const showTotal = (detail.totalAttendance ?? 0) > detail.peakAttendance;
+          // "Day total" = running attendance across ALL of the day's services (a
+          // later service carries earlier ones' entries). Each card's visibility is
+          // driven by the picker; the grid tracks how many are shown.
+          const statValues: Record<string, { value: number | null; accent: string }> = {
+            peak: { value: detail.peakAttendance, accent: "text-blue-11" },
+            dayTotal: { value: detail.totalAttendance ?? null, accent: "text-blue-11" },
+            peakRoom: { value: detail.peakOccupancy, accent: "text-green-11" },
+            lowest: { value: detail.minOccupancy ?? null, accent: "text-amber-11" },
+            latest: { value: detail.lastOccupancy, accent: "text-gray-12" },
+            samples: { value: detail.samples.length, accent: "text-gray-12" },
+          };
+          const shownStats = STAT_METRICS.filter((m) => shows(m.key));
+          if (shownStats.length === 0) return null;
+          const colClass =
+            shownStats.length >= 6 ? "sm:grid-cols-6"
+            : shownStats.length === 5 ? "sm:grid-cols-5"
+            : shownStats.length === 4 ? "sm:grid-cols-4"
+            : "sm:grid-cols-3";
           return (
-            <div className={`grid grid-cols-2 gap-2 ${showTotal ? "sm:grid-cols-6" : "sm:grid-cols-5"}`}>
-              <Stat label="Peak attendance" value={detail.peakAttendance} accent="text-blue-11" />
-              {showTotal && <Stat label="Day total" value={detail.totalAttendance} accent="text-blue-11" />}
-              <Stat label="Peak in-room" value={detail.peakOccupancy} accent="text-green-11" />
-              <Stat label="Lowest in-room" value={detail.minOccupancy ?? null} accent="text-amber-11" />
-              <Stat label="Latest in-room" value={detail.lastOccupancy} accent="text-gray-12" />
-              <Stat label="Samples" value={detail.samples.length} accent="text-gray-12" />
+            <div className={`grid grid-cols-2 gap-2 ${colClass}`}>
+              {shownStats.map((m) => (
+                <Stat key={m.key} label={m.label} value={statValues[m.key].value} accent={statValues[m.key].accent} />
+              ))}
             </div>
           );
         })()}
 
-        <AttendanceChart samples={detail.samples} markers={markers} avgOccupancy={avgOccupancy} />
+        <AttendanceChart
+          samples={detail.samples}
+          markers={shows("markers") ? markers : []}
+          avgOccupancy={shows("avg") ? avgOccupancy : null}
+          showAttendance={shows("attendance")}
+          showOccupancy={shows("occupancy")}
+        />
       </div>
     );
   }
@@ -239,6 +306,41 @@ export function AttendanceHistorySection() {
   );
 }
 
+/** Toggle chips for which chart series/overlays and summary cards to surface —
+ *  mirrors the SPL tab's picker. Persisted per-browser (view preference, not a
+ *  live-display setting), grouped so the two kinds read distinctly. */
+function MetricPicker({ visible, onToggle }: { visible: string[]; onToggle: (key: string) => void }) {
+  const Chip = ({ k, label }: { k: string; label: string }) => {
+    const on = visible.includes(k);
+    return (
+      <button
+        onClick={() => onToggle(k)}
+        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${
+          on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"
+        }`}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1.5">
+        <span className="text-caption2 text-gray-9">Chart</span>
+        <div className="flex flex-wrap gap-1.5">
+          {CHART_METRICS.map((m) => <Chip key={m.key} k={m.key} label={m.label} />)}
+        </div>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-caption2 text-gray-9">Summary</span>
+        <div className="flex flex-wrap gap-1.5">
+          {STAT_METRICS.map((m) => <Chip key={m.key} k={m.key} label={m.label} />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Stat({ label, value, accent }: { label: string; value: number | null; accent: string }) {
   return (
     <div className="rounded-lg border border-gray-5 bg-gray-2 px-3 py-2">
@@ -256,10 +358,14 @@ function AttendanceChart({
   samples,
   markers = [],
   avgOccupancy = null,
+  showAttendance = true,
+  showOccupancy = true,
 }: {
   samples: AttendanceSample[];
   markers?: { t: string; label: string }[];
   avgOccupancy?: number | null;
+  showAttendance?: boolean;
+  showOccupancy?: boolean;
 }) {
   if (samples.length < 2) {
     return (
@@ -272,7 +378,7 @@ function AttendanceChart({
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const n = samples.length;
-  const dataMax = Math.max(1, ...samples.map((s) => Math.max(s.attendance, s.occupancy)));
+  const dataMax = Math.max(1, ...samples.map((s) => Math.max(showAttendance ? s.attendance : 0, showOccupancy ? s.occupancy : 0)));
   // Nice round y-axis (0 / mid / top) in 1·2·5×10ⁿ steps with headroom — matches the
   // custom-layout people-graph so the two charts read consistently (0/500/1000, not
   // 0/531/1062).
@@ -304,8 +410,8 @@ function AttendanceChart({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-4 text-caption2 flex-wrap text-gray-11">
-        <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-blue-9" /> Attendance</span>
-        <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-green-9" /> In room</span>
+        {showAttendance && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-blue-9" /> Attendance</span>}
+        {showOccupancy && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-green-9" /> In room</span>}
         {avgOccupancy != null && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-green-9" /> Avg in room {avgOccupancy.toLocaleString()}</span>}
         {inRange.length > 0 && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-gray-8" /> Plan items</span>}
       </div>
@@ -341,16 +447,16 @@ function AttendanceChart({
             );
           })}
           {/* filled areas (attendance sits above occupancy, so paint it first/behind) */}
-          <polygon points={area("attendance")} fill="url(#attFill)" />
-          <polygon points={area("occupancy")} fill="url(#occFill)" />
+          {showAttendance && <polygon points={area("attendance")} fill="url(#attFill)" />}
+          {showOccupancy && <polygon points={area("occupancy")} fill="url(#occFill)" />}
           {/* service-average in-room reference */}
           {avgOccupancy != null && (
             <line x1={padL} y1={y(avgOccupancy)} x2={W - padR} y2={y(avgOccupancy)} stroke="var(--green-9)" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} vectorEffect="non-scaling-stroke" />
           )}
           <text x={padL} y={H - 8} textAnchor="start" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[0].t)}</text>
           <text x={W - padR} y={H - 8} textAnchor="end" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[n - 1].t)}</text>
-          <polyline points={line("occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
-          <polyline points={line("attendance")} fill="none" stroke="var(--blue-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+          {showOccupancy && <polyline points={line("occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />}
+          {showAttendance && <polyline points={line("attendance")} fill="none" stroke="var(--blue-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />}
         </svg>
       </div>
     </div>
