@@ -98,7 +98,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
   return (
     <div
       className={cn(
-        "relative flex flex-col flex-1 min-w-0 p-1.5 select-none",
+        "relative flex flex-col flex-1 min-w-0 p-1.5 select-none [container-type:inline-size]",
         className,
       )}
     >
