@@ -57,11 +57,14 @@ async function main(): Promise<void> {
   const pt = await get(`/plan_times?per_page=100`);
   console.log(`\n--- plan_times ---`);
   const times = (pt.data ?? []).map((t: any) => ({
+    id: t.id,
     type: t.attributes?.time_type,
     startsAt: t.attributes?.starts_at,
     endsAt: t.attributes?.ends_at,
   }));
-  for (const t of times) console.log(`  [${t.type}] starts ${fmt(t.startsAt)}  ends ${fmt(t.endsAt)}`);
+  for (const t of times) console.log(`  id ${t.id}  [${t.type}] starts ${fmt(t.startsAt)}  ends ${fmt(t.endsAt)}`);
+  const svcCount = times.filter((t: any) => t.type === "service").length;
+  console.log(`  → ${svcCount} service-type plan_time(s). ${svcCount > 1 ? "Distinct ids per service → keys DON'T collide." : "ONE service time → back-to-back services share a serviceKey (COLLISION)."}`);
   const serviceTimes = times.filter((t: any) => t.type === "service" && t.startsAt).sort((a: any, b: any) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
   const earliestAny = times.filter((t: any) => t.startsAt).sort((a: any, b: any) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
 
