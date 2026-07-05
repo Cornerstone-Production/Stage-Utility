@@ -24,7 +24,7 @@ export function HistoryCalendar({
 }) {
   const today = useMemo(() => {
     const d = new Date();
-    return { y: d.getFullYear(), m: d.getMonth() };
+    return { y: d.getFullYear(), m: d.getMonth(), str: ymd(d.getFullYear(), d.getMonth(), d.getDate()) };
   }, []);
 
   // Displayed month — follows the selected day; defaults to today.
@@ -67,62 +67,66 @@ export function HistoryCalendar({
   for (let i = 0; i < firstDow; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
-  const shade = (count: number): string =>
-    count >= 3 ? "bg-blue-10 text-white" : count === 2 ? "bg-blue-8 text-white" : "bg-blue-6 text-white";
-
   return (
-    <div className="rounded-lg border border-gray-5 bg-gray-2 p-3">
+    <div className="rounded-xl border border-gray-5 bg-gray-2 p-3 w-full max-w-[20rem]">
       <div className="flex items-center justify-between gap-2 mb-2">
-        <span className="text-body font-medium text-gray-12">Recorded services</span>
-        <div className="flex items-center gap-1">
-          <button
-            className="rounded-md p-1 text-gray-11 enabled:hover:bg-gray-4 disabled:opacity-30"
-            disabled={!canPrev}
-            onClick={() => step(-1)}
-            aria-label="Previous month"
-          >
-            <ChevronLeftIcon className="size-4" />
-          </button>
-          <span className="text-caption1 font-medium text-gray-11 tabular-nums w-32 text-center">
-            {MONTHS[view.m]} {view.y}
-          </span>
-          <button
-            className="rounded-md p-1 text-gray-11 enabled:hover:bg-gray-4 disabled:opacity-30"
-            disabled={!canNext}
-            onClick={() => step(1)}
-            aria-label="Next month"
-          >
-            <ChevronRightIcon className="size-4" />
-          </button>
-        </div>
+        <button
+          className="rounded-md p-1 text-gray-11 enabled:hover:bg-gray-4 disabled:opacity-30"
+          disabled={!canPrev}
+          onClick={() => step(-1)}
+          aria-label="Previous month"
+        >
+          <ChevronLeftIcon className="size-4" />
+        </button>
+        <span className="text-caption1 font-semibold text-gray-12 tabular-nums">
+          {MONTHS[view.m]} {view.y}
+        </span>
+        <button
+          className="rounded-md p-1 text-gray-11 enabled:hover:bg-gray-4 disabled:opacity-30"
+          disabled={!canNext}
+          onClick={() => step(1)}
+          aria-label="Next month"
+        >
+          <ChevronRightIcon className="size-4" />
+        </button>
       </div>
-      <div className="grid grid-cols-7 gap-1 text-center">
+      <div className="grid grid-cols-7 gap-y-0.5 text-center">
         {DOW.map((d) => (
-          <div key={d} className="text-caption2 text-gray-9 py-0.5">{d}</div>
+          <div key={d} className="text-[10px] text-gray-9 pb-1">{d}</div>
         ))}
         {cells.map((d, i) => {
           if (d == null) return <div key={`b${i}`} />;
           const dateStr = ymd(view.y, view.m, d);
           const count = counts.get(dateStr) ?? 0;
           const isSel = selected === dateStr;
+          const isToday = today.str === dateStr;
           const hasData = count > 0;
           return (
-            <button
-              key={dateStr}
-              type="button"
-              disabled={!hasData}
-              onClick={() => onPick(dateStr)}
-              title={hasData ? `${count} service${count === 1 ? "" : "s"}` : undefined}
-              className={`aspect-square rounded-md text-caption1 tabular-nums flex items-center justify-center transition-colors ${
-                isSel ? "ring-2 ring-blue-9" : ""
-              } ${
-                hasData
-                  ? `${shade(count)} cursor-pointer hover:brightness-110`
-                  : "text-gray-8 cursor-default"
-              }`}
-            >
-              {d}
-            </button>
+            <div key={dateStr} className="flex justify-center">
+              <button
+                type="button"
+                disabled={!hasData}
+                onClick={() => onPick(dateStr)}
+                title={hasData ? `${count} service${count === 1 ? "" : "s"}` : undefined}
+                className={`relative flex size-8 items-center justify-center rounded-full text-caption1 tabular-nums transition-colors ${
+                  isSel
+                    ? "bg-blue-9 text-white font-medium"
+                    : isToday
+                      ? "ring-1 ring-inset ring-blue-8 text-gray-12"
+                      : hasData
+                        ? "text-gray-12 hover:bg-gray-4"
+                        : "text-gray-8"
+                } ${hasData ? "cursor-pointer" : "cursor-default"}`}
+              >
+                {d}
+                {hasData && (
+                  <span
+                    className={`absolute bottom-1 size-1 rounded-full ${isSel ? "bg-white/80" : "bg-blue-9"}`}
+                    aria-hidden="true"
+                  />
+                )}
+              </button>
+            </div>
           );
         })}
       </div>
