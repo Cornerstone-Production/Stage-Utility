@@ -198,6 +198,10 @@ interface ServiceTimelineItem {
   startedAt: string;
   endedAt: string | null;
   actualDurationSec: number | null;
+  /** Auto: recorded above the plan's SERVICE START header (pre-service). */
+  preService?: boolean;
+  /** User override for counting this item toward the service timers. */
+  counted?: boolean;
 }
 interface ServiceTimeline {
   serviceKey: string;
@@ -635,6 +639,8 @@ interface PcoLiveDTO {
   serviceTimeStartsAt: string | null;
   /** True once the live controller reached the plan's "SERVICE END" marker. */
   serviceEnded?: boolean;
+  /** True while the current live item is above the plan's "SERVICE START" header. */
+  beforeServiceStart?: boolean;
 }
 
 /** Live ProPresenter status (SSE "propresenter:status"). */

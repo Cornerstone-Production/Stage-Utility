@@ -460,6 +460,10 @@ export interface PcoLiveDTO {
    *  the service is over (recording should finalize) even though an item is still
    *  "live". Only set when the plan has an explicit end header. */
   serviceEnded?: boolean;
+  /** True while the current live item is ABOVE the plan's "SERVICE START" header —
+   *  a pre-service item (doors, pre-roll). Position-based, so early/late starts
+   *  don't misclassify it. Only set when the plan has a start header. */
+  beforeServiceStart?: boolean;
 }
 
 /** Live ProPresenter status (pushed on "propresenter:status"). */
@@ -700,6 +704,12 @@ export interface ServiceTimelineItem {
   endedAt: string | null;
   /** Actual elapsed seconds (endedAt − startedAt), null while still live. */
   actualDurationSec: number | null;
+  /** Auto: item was above the plan's SERVICE START header when recorded (pre-service).
+   *  Drives the default "not counted" state. Absent on older records. */
+  preService?: boolean;
+  /** User override for whether this item counts toward the service timers. When set,
+   *  it wins over the auto (buffer/pre-service) default; absent = use the default. */
+  counted?: boolean;
 }
 
 /** Recorded ACTUAL service rundown timing for one occurrence — when each item

@@ -17,7 +17,7 @@ import type { DisplayKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "..
 import type { OscArg } from "../types/osc.js";
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { getLogLines } from "./log-buffer.js";
-import { editServiceWindow, recalcAttendance } from "./history-edit.js";
+import { editServiceWindow, recalcAttendance, setItemCounted } from "./history-edit.js";
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
 import { deviceManager } from "./device-manager.js";
 import { configSnapshot } from "./config-snapshot.js";
@@ -744,6 +744,16 @@ export class RemoteServer {
         return;
       }
       await recalcAttendance(body.serviceKey);
+      json(res, { ok: true });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/history/item-counted") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      if (typeof body.serviceKey !== "string" || typeof body.itemId !== "string" || typeof body.counted !== "boolean") {
+        error(res, "body.serviceKey, body.itemId (strings) + body.counted (boolean) required");
+        return;
+      }
+      await setItemCounted(body.serviceKey, body.itemId, body.counted);
       json(res, { ok: true });
       return;
     }

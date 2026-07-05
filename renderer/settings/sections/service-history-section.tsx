@@ -96,18 +96,21 @@ function isBufferItem(title: string | null | undefined): boolean {
   return (title ?? "").toUpperCase().includes("BUFFER");
 }
 
-/** Pre-service items (Doors, Pre-roll, …) — anything that went live BEFORE the
- *  scheduled service time. Excluded from timing so a mis-fired/forgotten Doors item
- *  can't skew the service length; kept listed. */
+/** Pre-service items (Doors, Pre-roll, …). Prefers the recorder's position-based
+ *  flag (above the SERVICE START header — robust to early/late/storm-delayed starts);
+ *  falls back to "went live before the scheduled time" for records made before it. */
 function isPreServiceItem(it: ServiceTimelineItem, rec: ServiceTimeline): boolean {
+  if (typeof it.preService === "boolean") return it.preService;
   if (!rec.serviceTimeStartsAt || !it.startedAt) return false;
   const s = Date.parse(it.startedAt);
   const svc = Date.parse(rec.serviceTimeStartsAt);
   return Number.isFinite(s) && Number.isFinite(svc) && s < svc;
 }
 
-/** Whether an item counts toward the service timers (not buffer, not pre-service). */
+/** Whether an item counts toward the service timers. A per-item user override (the
+ *  checkbox) wins; otherwise the auto default excludes buffer + pre-service items. */
 function isCountedItem(it: ServiceTimelineItem, rec: ServiceTimeline): boolean {
+  if (typeof it.counted === "boolean") return it.counted;
   return !isBufferItem(it.title) && !isPreServiceItem(it, rec);
 }
 
@@ -463,6 +466,14 @@ export function ServiceHistorySection() {
         toast.error("Recalculate failed");
       }
     }
+    async function toggleCounted(item: ServiceTimelineItem) {
+      // Broadcasts service-timeline:history → detail refreshes via the SSE handler.
+      try {
+        await invoke("history:setItemCounted", { serviceKey: det.serviceKey, itemId: item.itemId, counted: !isCountedItem(item, det) });
+      } catch {
+        toast.error("Couldn't update");
+      }
+    }
     return (
       <div className="flex flex-col gap-4">
         <button className="self-start text-caption1 text-blue-11 hover:underline" onClick={() => setSelectedKey(null)}>
@@ -516,8 +527,8 @@ export function ServiceHistorySection() {
         </div>
 
         <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
-          <div className="grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem] gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10">
-            <span>#</span><span>Item</span><span className="text-right">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right">Ended</span>
+          <div className="grid grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_4.5rem] gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10">
+            <span className="text-center" title="Count toward the service timers">✓</span><span>#</span><span>Item</span><span className="text-right">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right">Ended</span>
           </div>
           {detail.items.map((it, i) => {
             const itemLive = it.endedAt == null;
@@ -525,7 +536,14 @@ export function ServiceHistorySection() {
             const delta = it.plannedLengthSec != null && it.actualDurationSec != null ? it.actualDurationSec - it.plannedLengthSec : null;
             const deltaColor = delta == null ? "text-gray-9" : delta > 30 ? "text-red-11" : delta < -30 ? "text-blue-11" : "text-gray-11";
             return (
-              <div key={it.itemId} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${counted ? "" : "opacity-55"}`}>
+              <div key={it.itemId} className={`grid grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_4.5rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums items-center ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${counted ? "" : "opacity-55"}`}>
+                <input
+                  type="checkbox"
+                  checked={counted}
+                  onChange={() => toggleCounted(it)}
+                  className="justify-self-center cursor-pointer"
+                  title={counted ? "Counted in service timers — click to exclude" : "Not counted — click to include"}
+                />
                 <span className="text-gray-9">{i + 1}</span>
                 <span className="text-gray-12 truncate">
                   {it.title || "—"}

@@ -79,6 +79,18 @@ export async function editServiceWindow(
   }
 }
 
+/** Set a per-item override for whether it counts toward the service timers (wins
+ *  over the auto buffer/pre-service default). */
+export async function setItemCounted(serviceKey: string, itemId: string, counted: boolean): Promise<void> {
+  const tl = await serviceTimelineStore.get(serviceKey);
+  if (!tl) return;
+  const it = tl.items.find((x) => x.itemId === itemId);
+  if (!it) return;
+  it.counted = counted;
+  await serviceTimelineStore.upsert(tl);
+  broadcast("service-timeline:history", tl);
+}
+
 /** Re-derive attendance aggregates from the current samples (no window change) —
  *  for when the stored peak/min look stale but the samples are fine. */
 export async function recalcAttendance(serviceKey: string): Promise<void> {

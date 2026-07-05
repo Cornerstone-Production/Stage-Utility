@@ -146,6 +146,7 @@ class ServiceTimelineRecorder {
       startedAt: live.liveStartAt ?? new Date().toISOString(),
       endedAt: null,
       actualDurationSec: null,
+      preService: live.beforeServiceStart === true, // pre-service default (position-based)
     });
   }
 

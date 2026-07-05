@@ -742,8 +742,12 @@ class PcoService {
       // like "Stream Buffer"/"End of Service"), the service is over. Only trip on an
       // explicit end header — plans without one keep the normal "left item mode" end.
       const endIdx = planItems.findIndex((p) => p.itemType === "header" && isServiceEndHeader(p.title));
+      const startIdx = planItems.findIndex((p) => p.itemType === "header" && isServiceStartHeader(p.title));
       const curIdx = planItems.findIndex((p) => p.id === itemId);
       const serviceEnded = endIdx >= 0 && curIdx >= 0 && curIdx >= endIdx;
+      // Position-based (not time-based): items above the SERVICE START header are
+      // pre-service (doors, pre-roll) — robust against early/late/storm-delayed starts.
+      const beforeServiceStart = startIdx >= 0 && curIdx >= 0 && curIdx < startIdx;
       return {
         mode: "item",
         currentItemId: itemId,
@@ -757,6 +761,7 @@ class PcoService {
         serviceTimeId,
         serviceTimeStartsAt,
         serviceEnded,
+        beforeServiceStart,
       };
     }
 
