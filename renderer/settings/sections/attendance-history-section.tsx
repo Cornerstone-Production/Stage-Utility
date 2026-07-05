@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, Trash2Icon, UsersIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
@@ -391,6 +391,9 @@ function AttendanceChart({
   showAttendance?: boolean;
   showOccupancy?: boolean;
 }) {
+  // Hover tooltip state — declared before the early return (Rules of Hooks).
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [hover, setHover] = useState<number | null>(null);
   if (samples.length < 2) {
     return (
       <div className="rounded-lg border border-dashed border-gray-a5 px-4 py-10 text-center text-caption1 text-gray-9">
@@ -431,6 +434,24 @@ function AttendanceChart({
     return Number.isFinite(mt) && mt >= t0 - 1000 && mt <= t1 + 1000;
   });
 
+  // Hover tooltip: map the pointer to the nearest sample and show its values + time.
+  function onMove(e: React.PointerEvent<SVGSVGElement>) {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const r = svg.getBoundingClientRect();
+    const vbX = ((e.clientX - r.left) / r.width) * W;
+    const targetT = t0 + ((vbX - padL) / plotW) * span;
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = Math.abs(Date.parse(samples[i].t) - targetT);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    setHover(best);
+  }
+  const hs = hover != null ? samples[hover] : null;
+  const hx = hs ? xt(hs.t) : 0;
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-4 text-caption2 flex-wrap text-gray-11">
@@ -440,7 +461,7 @@ function AttendanceChart({
         {inRange.length > 0 && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-gray-8" /> Plan items</span>}
       </div>
       <div className="overflow-x-auto rounded-lg border border-gray-5 bg-gray-2 p-2">
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 320 }} role="img" aria-label="Attendance and in-room occupancy over the service, with plan-item markers">
+        <svg ref={svgRef} onPointerMove={onMove} onPointerLeave={() => setHover(null)} viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 320 }} role="img" aria-label="Attendance and in-room occupancy over the service, with plan-item markers">
           <defs>
             <linearGradient id="attFill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="var(--blue-9)" stopOpacity={0.22} />
@@ -465,7 +486,7 @@ function AttendanceChart({
               <g key={`${m.t}-${i}`}>
                 <line x1={mx} y1={padT} x2={mx} y2={padT + plotH} stroke="var(--gray-a6)" strokeWidth={1} strokeDasharray="3 3" />
                 <text x={mx + 2} y={padT + 8} fontSize={9} fill="var(--gray-10)" transform={`rotate(90 ${mx + 2} ${padT + 8})`}>
-                  {m.label.length > 22 ? `${m.label.slice(0, 21)}…` : m.label}
+                  {fmtTime(m.t)}  {m.label.length > 18 ? `${m.label.slice(0, 17)}…` : m.label}
                 </text>
               </g>
             );
@@ -481,6 +502,29 @@ function AttendanceChart({
           <text x={W - padR} y={H - 8} textAnchor="end" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[n - 1].t)}</text>
           {showOccupancy && <polyline points={line("occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />}
           {showAttendance && <polyline points={line("attendance")} fill="none" stroke="var(--blue-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />}
+          {/* hover crosshair + tooltip */}
+          {hs && (
+            <g pointerEvents="none">
+              <line x1={hx} y1={padT} x2={hx} y2={padT + plotH} stroke="var(--gray-a7)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+              {showOccupancy && <circle cx={hx} cy={y(hs.occupancy)} r={3} fill="var(--green-9)" />}
+              {showAttendance && <circle cx={hx} cy={y(hs.attendance)} r={3} fill="var(--blue-9)" />}
+              {(() => {
+                const rows = [fmtTime(hs.t)];
+                if (showOccupancy) rows.push(`Attendance ${hs.occupancy.toLocaleString()}`);
+                if (showAttendance) rows.push(`Entries ${hs.attendance.toLocaleString()}`);
+                const boxW = 96, boxH = 6 + rows.length * 12;
+                const bx = Math.min(Math.max(hx + 6, padL), W - padR - boxW);
+                return (
+                  <g>
+                    <rect x={bx} y={padT + 2} width={boxW} height={boxH} rx={4} fill="var(--gray-1)" stroke="var(--gray-6)" opacity={0.97} />
+                    {rows.map((ln, i) => (
+                      <text key={i} x={bx + 6} y={padT + 14 + i * 12} fontSize={9} fill={i === 0 ? "var(--gray-9)" : "var(--gray-12)"}>{ln}</text>
+                    ))}
+                  </g>
+                );
+              })()}
+            </g>
+          )}
         </svg>
       </div>
     </div>
