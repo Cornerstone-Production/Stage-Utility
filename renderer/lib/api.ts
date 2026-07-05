@@ -583,18 +583,49 @@ interface SseListener {
 let eventSource: EventSource | null = null;
 const sseListeners: SseListener[] = [];
 
+// Stable per-context client id, sent on the SSE URL so the server can scope this
+// stream's channel filter to us. crypto.randomUUID is unavailable in an insecure
+// context (prod is plain HTTP), so guard it and fall back.
+function genClientId(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch {
+    /* insecure context — fall through */
+  }
+  return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+const CLIENT_ID = genClientId();
+
+// Tell the server exactly which channels this client renders so it can skip the
+// rest (e.g. a mic display never gets the 4 Hz spl:metrics firehose). Debounced to
+// batch the burst of subscribes when a view mounts. A failed report just means the
+// server keeps sending everything — filtering is an optimization, never required.
+let reportTimer: ReturnType<typeof setTimeout> | null = null;
+function reportChannels(): void {
+  if (reportTimer) return;
+  reportTimer = setTimeout(() => {
+    reportTimer = null;
+    const channels = [...new Set(sseListeners.map((l) => l.channel))];
+    void post("/api/events/subscribe", { cid: CLIENT_ID, channels }).catch(() => {});
+  }, 200);
+}
+
 function ensureEventSource(): EventSource {
   if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
     return eventSource;
   }
 
   console.log("[api] (re)connecting SSE at /api/events");
-  eventSource = new EventSource("/api/events");
+  eventSource = new EventSource(`/api/events?cid=${encodeURIComponent(CLIENT_ID)}`);
 
   // Re-attach all registered listeners on reconnect.
   for (const entry of sseListeners) {
     eventSource.addEventListener(entry.channel, entry.handler);
   }
+
+  // (Re)report our channel set on every (re)connect — the server drops the filter
+  // when a stream closes, so a transparent reconnect needs a fresh report.
+  eventSource.onopen = () => reportChannels();
 
   eventSource.onerror = (e) => {
     console.warn("[api] SSE error — browser will auto-reconnect", e);
@@ -624,10 +655,12 @@ export function onNotification(
 
   const es = ensureEventSource();
   es.addEventListener(channel, handler);
+  reportChannels(); // our channel set grew — tell the server
 
   return () => {
     const idx = sseListeners.indexOf(entry);
     if (idx !== -1) sseListeners.splice(idx, 1);
     eventSource?.removeEventListener(channel, handler);
+    reportChannels(); // our channel set shrank — tell the server
   };
 }

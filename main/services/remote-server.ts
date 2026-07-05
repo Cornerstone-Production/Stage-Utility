@@ -158,6 +158,13 @@ const SSE_HEARTBEAT_MS = 20_000;
 // gone). Drop it rather than let its backlog grow server memory without bound — the
 // broadcast loop has no backpressure otherwise.
 const SSE_MAX_BUFFER_BYTES = 2_000_000;
+// Per-connection channel filter. A client reports the exact channel set it renders
+// (POST /api/events/subscribe, keyed by its cid); the fan-out then skips channels a
+// client didn't ask for — so a mic display never receives the 4 Hz spl:metrics
+// firehose it discards anyway. Absent entry = no report yet → send everything (safe
+// fallback; filtering is a pure optimization, never a correctness dependency).
+const resCid = new WeakMap<http.ServerResponse, string>();
+const clientChannels = new Map<string, Set<string>>();
 
 // Small FIFO cache of ProPresenter slide thumbnails, keyed by the per-slide
 // cache-bust token. Lets multiple displays showing the same slide share one
@@ -182,15 +189,21 @@ const companionClients = new Set<http.ServerResponse>();
  *  (buffered bytes over the cap) that it should be dropped — callers remove + destroy
  *  it. This is the only backpressure guard on the fan-out, so a slow/dead client
  *  can't buffer unboundedly in server memory. */
-function sseWrite(res: http.ServerResponse, event: string, data: unknown): boolean {
-  if (res.writableEnded || res.destroyed) return false;
-  if (res.writableLength > SSE_MAX_BUFFER_BYTES) return false;
+function sseHealthy(res: http.ServerResponse): boolean {
+  return !res.writableEnded && !res.destroyed && res.writableLength <= SSE_MAX_BUFFER_BYTES;
+}
+/** Write a pre-built SSE frame; returns false if the client is gone or backed up. */
+function sseWriteFrame(res: http.ServerResponse, frame: string): boolean {
+  if (!sseHealthy(res)) return false;
   try {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    res.write(frame);
     return true;
   } catch {
     return false;
   }
+}
+function sseWrite(res: http.ServerResponse, event: string, data: unknown): boolean {
+  return sseWriteFrame(res, `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
 export class RemoteServer {
@@ -297,9 +310,15 @@ export class RemoteServer {
     // Push state to SSE clients on every broadcast so the phone page can use
     // EventSource instead of polling.
     addBroadcastListener((channel, payload) => {
+      let frame: string | null = null; // serialize at most once, only if a client wants it
       for (const client of sseClients) {
-        if (!sseWrite(client, channel, payload)) {
+        const cid = resCid.get(client);
+        const chans = cid ? clientChannels.get(cid) : undefined;
+        if (chans && !chans.has(channel)) continue; // client filtered this channel out
+        if (frame === null) frame = `event: ${channel}\ndata: ${JSON.stringify(payload)}\n\n`;
+        if (!sseWriteFrame(client, frame)) {
           sseClients.delete(client);
+          if (cid) clientChannels.delete(cid);
           client.destroy();
         }
       }
@@ -448,6 +467,10 @@ export class RemoteServer {
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
       sseClients.add(res);
+      // Correlate this stream to its client id so POST /api/events/subscribe can set
+      // its channel filter. No cid (or no report yet) → the fan-out sends everything.
+      const cid = _url.searchParams.get("cid");
+      if (cid) resCid.set(res, cid);
       // A Companion module marks its event stream so we can show a live
       // connected-client count in the integration panel. Re-broadcast the
       // integration states so the count updates everywhere immediately.
@@ -460,11 +483,22 @@ export class RemoteServer {
       }
       req.on("close", () => {
         sseClients.delete(res);
+        if (cid) clientChannels.delete(cid);
         if (isCompanion) {
           companionClients.delete(res);
           integrationManager.setCompanionClients(companionClients.size);
         }
       });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/events/subscribe") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const cid = typeof body.cid === "string" ? body.cid : null;
+      const channels = Array.isArray(body.channels)
+        ? body.channels.filter((c): c is string => typeof c === "string")
+        : null;
+      if (cid && channels) clientChannels.set(cid, new Set(channels));
+      json(res, { ok: cid != null && channels != null });
       return;
     }
 
