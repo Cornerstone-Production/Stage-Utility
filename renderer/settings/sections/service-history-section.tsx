@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Trash2Icon, ClockIcon, CopyIcon } from "lucide-react";
+import { Trash2Icon, ClockIcon, CopyIcon, TimerIcon, TrendingUpIcon, TrendingDownIcon, GaugeIcon, UsersIcon, CalendarDaysIcon, type LucideIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { confirm, EmptyState, SkeletonRows, Button, toast } from "../../components/ui";
@@ -30,20 +30,23 @@ function shortDay(day: string): string {
   return Number.isNaN(d.getTime()) ? day : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-// Selectable Overview metrics (the operator picks which to show; persisted per-browser).
-const OVERVIEW_METRICS = [
-  { key: "services", label: "Services" },
-  { key: "avgLength", label: "Avg length" },
-  { key: "avgStart", label: "Avg start" },
-  { key: "avgInRoom", label: "Avg in-room" },
-  { key: "avgAttendance", label: "Avg attendance" },
-  { key: "highestAttended", label: "Highest attended" },
-  { key: "lowestAttended", label: "Lowest attended" },
-  { key: "longest", label: "Longest service" },
-  { key: "shortest", label: "Shortest service" },
-  { key: "avgOverrun", label: "Avg overrun" },
-] as const;
-const OVERVIEW_KEYS = OVERVIEW_METRICS.map((m) => m.key) as string[];
+// Selectable Overview metrics — grouped (Timing / Attendance) with an icon each.
+type OverviewGroup = "timing" | "attendance";
+interface OverviewMetricDef { key: string; label: string; group: OverviewGroup; Icon: LucideIcon }
+const OVERVIEW_METRICS: OverviewMetricDef[] = [
+  { key: "services", label: "Services", group: "timing", Icon: CalendarDaysIcon },
+  { key: "avgLength", label: "Avg length", group: "timing", Icon: TimerIcon },
+  { key: "avgStart", label: "Avg start", group: "timing", Icon: ClockIcon },
+  { key: "longest", label: "Longest service", group: "timing", Icon: TrendingUpIcon },
+  { key: "shortest", label: "Shortest service", group: "timing", Icon: TrendingDownIcon },
+  { key: "avgOverrun", label: "Avg overrun", group: "timing", Icon: GaugeIcon },
+  { key: "avgInRoom", label: "Avg in-room", group: "attendance", Icon: UsersIcon },
+  { key: "avgAttendance", label: "Avg attendance", group: "attendance", Icon: UsersIcon },
+  { key: "highestAttended", label: "Highest attended", group: "attendance", Icon: TrendingUpIcon },
+  { key: "lowestAttended", label: "Lowest attended", group: "attendance", Icon: TrendingDownIcon },
+];
+const OVERVIEW_KEYS = OVERVIEW_METRICS.map((m) => m.key);
+const OVERVIEW_GROUP_LABEL: Record<OverviewGroup, string> = { timing: "Timing", attendance: "Attendance" };
 const OVERVIEW_STORE_KEY = "history:overviewMetrics";
 function loadOverviewMetrics(): string[] {
   try {
@@ -238,8 +241,15 @@ export function ServiceHistorySection() {
     setOverviewMetrics((prev) => persistOverview(prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   }
   // Drag a metric card onto another to reorder (order = display order, persisted).
+  // Only within the same group — cross-group drops are ignored.
   function moveOverviewMetric(from: string | null, to: string) {
     if (!from || from === to) return;
+    const gf = OVERVIEW_METRICS.find((m) => m.key === from)?.group;
+    const gt = OVERVIEW_METRICS.find((m) => m.key === to)?.group;
+    if (gf !== gt) {
+      setDragMetric(null);
+      return;
+    }
     setOverviewMetrics((prev) => {
       const arr = prev.filter((k) => k !== from);
       const idx = arr.indexOf(to);
@@ -627,26 +637,36 @@ export function ServiceHistorySection() {
               ))}
             </div>
           )}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 flex-1 content-center">
-            {overviewMetrics.map((key) => {
-              const m = OVERVIEW_METRICS.find((x) => x.key === key);
-              const d = overview[key];
-              if (!m || !d) return null;
+          <div className="flex flex-col gap-3 flex-1 justify-center">
+            {(["timing", "attendance"] as OverviewGroup[]).map((group) => {
+              const keys = overviewMetrics.filter((k) => OVERVIEW_METRICS.find((m) => m.key === k)?.group === group);
+              if (keys.length === 0) return null;
               return (
-                <div
-                  key={key}
-                  draggable
-                  onDragStart={() => setDragMetric(key)}
-                  onDragEnd={() => setDragMetric(null)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => moveOverviewMetric(dragMetric, key)}
-                  className="cursor-grab active:cursor-grabbing"
-                >
-                  <OStat label={m.label} value={d.value} accent={d.accent} sub={d.sub} />
+                <div key={group} className="flex flex-col gap-1.5">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-gray-9">{OVERVIEW_GROUP_LABEL[group]}</span>
+                  <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(8.5rem, 1fr))" }}>
+                    {keys.map((key) => {
+                      const m = OVERVIEW_METRICS.find((x) => x.key === key)!;
+                      const d = overview[key];
+                      if (!d) return null;
+                      return (
+                        <KpiTile
+                          key={key}
+                          def={m}
+                          value={d.value}
+                          sub={d.sub}
+                          accent={d.accent}
+                          onDragStart={() => setDragMetric(key)}
+                          onDragEnd={() => setDragMetric(null)}
+                          onDrop={() => moveOverviewMetric(dragMetric, key)}
+                        />
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
-            {overviewMetrics.length === 0 && <span className="text-caption1 text-gray-9 col-span-full">No metrics selected — hit Customize.</span>}
+            {overviewMetrics.length === 0 && <span className="text-caption1 text-gray-9">No metrics selected — hit Customize.</span>}
           </div>
         </div>
       </div>
@@ -703,12 +723,41 @@ function TypeChip({ active, onClick, children }: { active: boolean; onClick: () 
   );
 }
 
-/** Compact label/value for the Overview card (no border — the card frames them). */
-function OStat({ label, value, accent, sub }: { label: string; value: string; accent: string; sub?: string }) {
+/** A KPI tile for the Overview dashboard: icon + label, big value, context sub.
+ *  Bordered + packed so a few metrics don't float in empty space; draggable to
+ *  reorder within its group. */
+function KpiTile({
+  def,
+  value,
+  sub,
+  accent,
+  onDragStart,
+  onDragEnd,
+  onDrop,
+}: {
+  def: OverviewMetricDef;
+  value: string;
+  sub?: string;
+  accent: string;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDrop: () => void;
+}) {
+  const Icon = def.Icon;
   return (
-    <div className="flex flex-col">
-      <div className="text-caption2 text-gray-9">{label}</div>
-      <div className={`text-title3 font-semibold tabular-nums ${accent}`}>{value}</div>
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={onDrop}
+      className="flex flex-col gap-1 rounded-lg border border-gray-5 bg-gray-1 px-3 py-2.5 cursor-grab active:cursor-grabbing hover:border-gray-7 transition-colors"
+    >
+      <div className="flex items-center gap-1.5 text-caption2 text-gray-9 min-w-0">
+        <Icon className="size-3.5 shrink-0" />
+        <span className="truncate">{def.label}</span>
+      </div>
+      <div className={`text-title3 font-semibold tabular-nums leading-tight ${accent}`}>{value}</div>
       {sub && <div className="text-caption2 text-gray-9 truncate">{sub}</div>}
     </div>
   );
