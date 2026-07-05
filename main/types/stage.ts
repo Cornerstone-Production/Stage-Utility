@@ -333,6 +333,11 @@ export type LayoutObjectConfig =
       metric?: "attendance" | "occupancy";
       label?: string;
       showLabel?: boolean;
+      source?: "live" | "recorded";
+      recordedServiceKey?: string | null;
+      showMarkers?: boolean;
+      showTooltip?: boolean;
+      kioskToggle?: boolean;
     }
   // A multi-metric people summary — several building-wide counts side by side,
   // each toggleable. `metrics` is the ordered set shown. avgService is the mean

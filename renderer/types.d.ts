@@ -509,6 +509,16 @@ type LayoutObjectConfig =
       metric?: "attendance" | "occupancy";
       label?: string;
       showLabel?: boolean;
+      /** "live" = real-time rolling window; "recorded" = a past service's curve. */
+      source?: "live" | "recorded";
+      /** Which recorded service to show (null = most recent) when source = recorded. */
+      recordedServiceKey?: string | null;
+      /** Overlay PCO plan-item markers (with times). */
+      showMarkers?: boolean;
+      /** Hover/tap tooltip showing the value + time at a point. */
+      showTooltip?: boolean;
+      /** Show an on-screen live/recorded toggle so a kiosk viewer can switch. */
+      kioskToggle?: boolean;
     }
   | {
       type: "people-panel";

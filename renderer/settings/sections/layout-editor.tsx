@@ -985,6 +985,66 @@ function RowSelect({ label, hint, value, options, onChange }: { label: string; h
   );
 }
 
+const RECORDED_LATEST = "__latest__";
+
+/** Inspector controls for the people-graph object: live vs. a recorded service,
+ *  PCO markers, hover tooltip, and a kiosk-visible live/recorded toggle. */
+function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, { type: "people-graph" }>; onConfig: (c: LayoutObjectConfig) => void }) {
+  const source = c.source ?? "live";
+  const [services, setServices] = useState<{ value: string; label: string }[]>([]);
+  useEffect(() => {
+    if (source !== "recorded") return;
+    invoke<ServiceAttendance[]>("attendance:listHistory")
+      .then((list) =>
+        setServices(
+          (list ?? [])
+            .filter((s) => s.endedAt)
+            .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
+            .map((s) => {
+              const d = new Date(s.startedAt);
+              const when = `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+              return { value: s.serviceKey, label: s.serviceTypeName ? `${when} — ${s.serviceTypeName}` : when };
+            }),
+        ),
+      )
+      .catch(() => setServices([]));
+  }, [source]);
+
+  return (
+    <>
+      <RowToggle
+        label="Count"
+        value={c.metric ?? "occupancy"}
+        options={[{ value: "attendance", label: "Attendance" }, { value: "occupancy", label: "In room" }]}
+        onChange={(v) => onConfig({ ...c, metric: v })}
+      />
+      <RowSwitch label="Show value" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+      {(c.showLabel ?? true) && (
+        <RowText label="Label" value={c.label ?? ""} placeholder={c.metric === "attendance" ? "Attendance" : "In room"} onChange={(v) => onConfig({ ...c, label: v })} />
+      )}
+      <RowToggle
+        label="Source"
+        value={source}
+        options={[{ value: "live", label: "Live" }, { value: "recorded", label: "Recorded" }]}
+        onChange={(v) => onConfig({ ...c, source: v as "live" | "recorded" })}
+      />
+      {source === "recorded" && (
+        <RowSelect
+          label="Service"
+          hint="Which past service's curve to show. 'Most recent' auto-follows the latest finished service."
+          value={c.recordedServiceKey || RECORDED_LATEST}
+          options={[{ value: RECORDED_LATEST, label: "Most recent" }, ...services]}
+          onChange={(v) => onConfig({ ...c, recordedServiceKey: v === RECORDED_LATEST ? null : v })}
+        />
+      )}
+      <RowSwitch label="Plan-item markers" hint="Overlay a dashed line + time where each PCO item started." checked={c.showMarkers ?? true} onChange={(v) => onConfig({ ...c, showMarkers: v })} />
+      <RowSwitch label="Hover tooltip" hint="Show the value + time at the pointer." checked={c.showTooltip ?? true} onChange={(v) => onConfig({ ...c, showTooltip: v })} />
+      <RowSwitch label="Kiosk live/recorded toggle" hint="Show an on-screen pill so a viewer can flip between live and the last recorded service." checked={c.kioskToggle ?? false} onChange={(v) => onConfig({ ...c, kioskToggle: v })} />
+      <p className="text-caption2 text-gray-9 leading-snug">Live builds a rolling trend while the server runs; Recorded replays a finished service. Line color is the object's text color below.</p>
+    </>
+  );
+}
+
 /** Thin wrappers over the shared themed NumberInput (kept so existing call sites
  *  and PixelField don't change). */
 function NumberField({ value, onChange, step = 1, min, max, suffix }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number; suffix?: string }) {
@@ -2476,21 +2536,7 @@ function Inspector({
           </>
         );
       })()}
-      {c.type === "people-graph" && (
-        <>
-          <RowToggle
-            label="Count"
-            value={c.metric ?? "occupancy"}
-            options={[{ value: "attendance", label: "Attendance" }, { value: "occupancy", label: "In room" }]}
-            onChange={(v) => onConfig({ ...c, metric: v })}
-          />
-          <RowSwitch label="Show value" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-          {(c.showLabel ?? true) && (
-            <RowText label="Label" value={c.label ?? ""} placeholder={c.metric === "attendance" ? "Attendance" : "In room"} onChange={(v) => onConfig({ ...c, label: v })} />
-          )}
-          <p className="text-caption2 text-gray-9 leading-snug">Trend builds while the server runs; the line color is the object's text color below.</p>
-        </>
-      )}
+      {c.type === "people-graph" && <PeopleGraphInspector c={c} onConfig={onConfig} />}
       {c.type === "people-panel" && (() => {
         const ORDER = ["occupancy", "peak", "serviceAttendance", "attendance", "capacity", "avg", "avgService", "vsAverage", "min"] as const;
         const LABEL: Record<string, string> = { occupancy: "In room", peak: "Peak att.", serviceAttendance: "Entries (svc)", attendance: "Entries (day)", capacity: "% capacity", avg: "Avg att.", avgService: "Avg / service", vsAverage: "vs average", min: "Lowest att." };

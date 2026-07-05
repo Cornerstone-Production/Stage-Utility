@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import { invoke } from "../lib/api";
 import { BrandLogo } from "../components/brand-logo";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
@@ -525,7 +526,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       );
     }
     case "people-graph":
-      return <PeopleGraph history={ctx.peopleCount?.history ?? []} metric={c.metric ?? "occupancy"} config={c} ts={ts} H={ctx.H} />;
+      return <PeopleGraphObject ctx={ctx} config={c} ts={ts} />;
     case "people-panel":
       return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} ts={ts} H={ctx.H} />;
     case "baptism-timer":
@@ -683,21 +684,89 @@ function niceStepInt(target: number): number {
 // HTML overlays. Y-axis auto-scales to nice round integer bounds (1/2/5 ×10ⁿ) that
 // expand with the data — no cap, so it grows to thousands — with headroom (so a
 // spike never clips) and three distinct labels; x-axis shows the first/last sample.
+/** Fetch a recorded service's per-service curve + PCO markers for the people-graph
+ *  "recorded" mode. serviceKey null → most recent finished service. */
+function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefined) {
+  const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[] } | null>(null);
+  useEffect(() => {
+    if (!enabled) { setData(null); return; }
+    let cancelled = false;
+    void (async () => {
+      let key = serviceKey ?? null;
+      if (!key) {
+        const list = await invoke<ServiceAttendance[]>("attendance:listHistory").catch(() => [] as ServiceAttendance[]);
+        key = (list ?? []).filter((s) => s.endedAt).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0]?.serviceKey ?? null;
+      }
+      if (!key) { if (!cancelled) setData({ points: [], markers: [] }); return; }
+      const [att, tl] = await Promise.all([
+        invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: key }).catch(() => null),
+        invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: key }).catch(() => null),
+      ]);
+      if (cancelled) return;
+      const base = att?.samples?.[0]?.attendance ?? 0; // per-service anchor
+      const points: PeopleHistoryPoint[] = (att?.samples ?? []).map((s) => ({ t: s.t, attendance: Math.max(0, s.attendance - base), occupancy: s.occupancy }));
+      const markers = (tl?.items ?? []).filter((it) => it.title && it.startedAt).map((it) => ({ t: it.startedAt, label: it.title }));
+      setData({ points, markers });
+    })();
+    return () => { cancelled = true; };
+  }, [enabled, serviceKey]);
+  return data;
+}
+
+/** People-graph object: live rolling window or a recorded service's curve, with a
+ *  kiosk live/recorded toggle, PCO-item markers, and a hover tooltip. */
+function PeopleGraphObject({ ctx, config, ts }: { ctx: LayoutRenderCtx; config: Extract<LayoutObjectConfig, { type: "people-graph" }>; ts: CSSProperties }) {
+  const cfgSource = config.source ?? "live";
+  const [mode, setMode] = useState<"live" | "recorded">(cfgSource);
+  useEffect(() => setMode(cfgSource), [cfgSource]);
+  const recorded = useRecordedGraph(mode === "recorded", config.recordedServiceKey);
+  const liveMarkers = (ctx.serviceTimeline?.items ?? []).filter((it) => it.title && it.startedAt).map((it) => ({ t: it.startedAt, label: it.title }));
+  const points = mode === "recorded" ? (recorded?.points ?? []) : (ctx.peopleCount?.history ?? []);
+  const markers = mode === "recorded" ? (recorded?.markers ?? []) : liveMarkers;
+  return (
+    <PeopleGraph
+      history={points}
+      metric={config.metric ?? "occupancy"}
+      config={config}
+      markers={config.showMarkers !== false ? markers : []}
+      showTooltip={config.showTooltip !== false}
+      ts={ts}
+      H={ctx.H}
+      toggle={config.kioskToggle && ctx.interactive ? { mode, onToggle: () => setMode((m) => (m === "live" ? "recorded" : "live")) } : null}
+    />
+  );
+}
+
 function PeopleGraph({
   history,
   metric,
   config,
+  markers = [],
+  showTooltip = true,
+  toggle = null,
   ts,
   H,
 }: {
   history: PeopleHistoryPoint[];
   metric: "attendance" | "occupancy";
   config: Extract<LayoutObjectConfig, { type: "people-graph" }>;
+  markers?: { t: string; label: string }[];
+  showTooltip?: boolean;
+  toggle?: { mode: "live" | "recorded"; onToggle: () => void } | null;
   ts: CSSProperties;
   H: number;
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<number | null>(null);
   const vals = history.map((h) => (metric === "attendance" ? h.attendance : h.occupancy));
-  if (vals.length < 2) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+  if (vals.length < 2) {
+    return (
+      <div style={{ position: "relative", width: "100%", height: "100%" }}>
+        <span style={{ ...ts, opacity: 0.4 }}>{toggle?.mode === "recorded" ? "no recorded data" : "—"}</span>
+        {toggle && <GraphToggle mode={toggle.mode} onToggle={toggle.onToggle} stroke={ts.color ?? "#fff"} H={H} />}
+      </div>
+    );
+  }
   const n = vals.length;
   const stroke = ts.color ?? "#ffffff";
 
@@ -734,8 +803,38 @@ function PeopleGraph({
   });
   const yTop = `${PADT}%`, yMidPct = `${PADT + (100 - PADT - PADB) / 2}%`, yBot = `${100 - PADB}%`;
 
+  // PCO markers: snap each item's time to the nearest sample index, then to plot X.
+  const times = history.map((h) => Date.parse(h.t));
+  const t0 = times[0], tN = times[n - 1];
+  const nearestIdx = (ms: number): number => {
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < n; i++) { const d = Math.abs(times[i] - ms); if (d < bd) { bd = d; best = i; } }
+    return best;
+  };
+  const markerPts = markers
+    .map((m) => ({ label: m.label, ms: Date.parse(m.t), t: m.t }))
+    .filter((m) => Number.isFinite(m.ms) && m.ms >= t0 - 1000 && m.ms <= tN + 1000)
+    .map((m) => { const idx = nearestIdx(m.ms); return { ...m, idx, x: px(idx) }; });
+
+  // Hover: map pointer X (over the full-width box) back to the nearest sample index.
+  function onMove(e: React.PointerEvent<HTMLDivElement>) {
+    const el = wrapRef.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0) return;
+    const vbX = ((e.clientX - r.left) / r.width) * 100;
+    const frac = (vbX - PADL) / (100 - PADL - PADR);
+    setHover(Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1)))));
+  }
+  const hoverX = hover != null ? px(hover) : 0;
+  const nearMarker = hover != null ? markerPts.find((m) => m.idx === hover) : undefined;
+
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
+    <div
+      ref={wrapRef}
+      style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}
+      onPointerMove={showTooltip ? onMove : undefined}
+      onPointerLeave={showTooltip ? () => setHover(null) : undefined}
+    >
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: "100%", height: "100%", display: "block" }}>
         {/* gridlines at lo / mid / hi */}
         {[PADT, PADT + (100 - PADT - PADB) / 2, 100 - PADB].map((y, i) => (
@@ -743,6 +842,17 @@ function PeopleGraph({
         ))}
         <polygon points={`${PADL},${100 - PADB} ${line} ${100 - PADR},${100 - PADB}`} fill={stroke} fillOpacity={0.13} />
         <polyline points={line} fill="none" stroke={stroke} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+        {/* PCO plan-item markers */}
+        {markerPts.map((m, i) => (
+          <line key={i} x1={m.x} y1={PADT} x2={m.x} y2={100 - PADB} stroke={stroke} strokeOpacity={0.4} strokeWidth={0.75} strokeDasharray="2 2" vectorEffect="non-scaling-stroke" />
+        ))}
+        {/* hover crosshair + point */}
+        {hover != null && (
+          <>
+            <line x1={hoverX} y1={PADT} x2={hoverX} y2={100 - PADB} stroke={stroke} strokeOpacity={0.55} strokeWidth={0.75} vectorEffect="non-scaling-stroke" />
+            <circle cx={hoverX} cy={py(vals[hover])} r={1.6} fill={stroke} vectorEffect="non-scaling-stroke" />
+          </>
+        )}
       </svg>
 
       {/* y-axis value labels (crisp HTML overlays) */}
@@ -760,7 +870,57 @@ function PeopleGraph({
           {(config.label ? `${config.label} ` : "") + vals[n - 1].toLocaleString()}
         </span>
       )}
+
+      {/* PCO marker time labels (crisp HTML, above the plot) */}
+      {markerPts.map((m, i) => (
+        <span
+          key={i}
+          style={{ position: "absolute", left: `${m.x}%`, top: `${PADT}%`, transform: "translate(-50%, -105%)", color: stroke, opacity: 0.65, fontSize: `${fontPx * 0.85}px`, lineHeight: 1, fontWeight: 600, whiteSpace: "nowrap", pointerEvents: "none" }}
+        >
+          {hhmm(m.t)}
+        </span>
+      ))}
+
+      {/* hover tooltip */}
+      {showTooltip && hover != null && (
+        <div
+          style={{
+            position: "absolute", left: `${hoverX}%`, top: `${PADT}%`,
+            transform: hoverX > 60 ? "translate(-102%, 0)" : "translate(2%, 0)",
+            background: "rgba(0,0,0,0.78)", color: stroke, borderRadius: `${0.01 * H}px`,
+            padding: `${0.008 * H}px ${0.012 * H}px`, fontSize: `${fontPx}px`, lineHeight: 1.25,
+            fontWeight: 600, pointerEvents: "none", whiteSpace: "nowrap", zIndex: 2,
+          }}
+        >
+          <div style={{ opacity: 0.75 }}>{hhmm(history[hover].t)}</div>
+          <div>{vals[hover].toLocaleString()}</div>
+          {nearMarker && <div style={{ opacity: 0.85, maxWidth: `${0.35 * H}px`, overflow: "hidden", textOverflow: "ellipsis" }}>{nearMarker.label}</div>}
+        </div>
+      )}
+
+      {toggle && <GraphToggle mode={toggle.mode} onToggle={toggle.onToggle} stroke={stroke} H={H} />}
     </div>
+  );
+}
+
+/** Small live/recorded pill for kiosk viewers to flip a people-graph object. */
+function GraphToggle({ mode, onToggle, stroke, H }: { mode: "live" | "recorded"; onToggle: () => void; stroke: string; H: number }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      title={mode === "live" ? "Showing live — click for last recorded service" : "Showing recorded service — click for live"}
+      style={{
+        position: "absolute", top: `${0.008 * H}px`, left: `${0.008 * H}px`,
+        display: "inline-flex", alignItems: "center", gap: `${0.004 * H}px`,
+        background: "rgba(0,0,0,0.55)", color: stroke, border: `1px solid ${stroke}`,
+        borderRadius: `${0.02 * H}px`, padding: `${0.004 * H}px ${0.01 * H}px`,
+        fontSize: `${Math.max(7, 0.028 * H)}px`, fontWeight: 700, lineHeight: 1,
+        cursor: "pointer", opacity: 0.85, zIndex: 3,
+      }}
+    >
+      <span style={{ width: `${0.014 * H}px`, height: `${0.014 * H}px`, borderRadius: "50%", background: mode === "live" ? "#22c55e" : "#f59e0b" }} />
+      {mode === "live" ? "LIVE" : "REC"}
+    </button>
   );
 }
 
