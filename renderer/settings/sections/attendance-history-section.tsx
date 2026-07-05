@@ -263,15 +263,30 @@ function AttendanceChart({
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const n = samples.length;
-  const maxV = Math.max(1, ...samples.map((s) => Math.max(s.attendance, s.occupancy)));
+  const dataMax = Math.max(1, ...samples.map((s) => Math.max(s.attendance, s.occupancy)));
+  // Nice round y-axis (0 / mid / top) in 1·2·5×10ⁿ steps with headroom — matches the
+  // custom-layout people-graph so the two charts read consistently (0/500/1000, not
+  // 0/531/1062).
+  const niceStep = (target: number) => {
+    const x = target > 1 ? target : 1;
+    const pow = Math.pow(10, Math.floor(Math.log10(x)));
+    const nn = x / pow;
+    const m = nn <= 1 ? 1 : nn <= 2 ? 2 : nn <= 5 ? 5 : 10;
+    return Math.max(1, Math.round(m * pow));
+  };
+  let step = niceStep(dataMax / 2);
+  let hi = 2 * step;
+  while (hi <= dataMax) { step = niceStep(step + 1); hi = 2 * step; }
+  const yTicks = [0, step, hi];
   const t0 = Date.parse(samples[0].t);
   const t1 = Date.parse(samples[n - 1].t);
   const span = t1 - t0 || 1;
   const xt = (iso: string) => padL + ((Date.parse(iso) - t0) / span) * plotW;
-  const y = (v: number) => padT + plotH - (v / maxV) * plotH;
+  const y = (v: number) => padT + plotH - (v / hi) * plotH;
   const line = (key: "attendance" | "occupancy") =>
     samples.map((s) => `${xt(s.t).toFixed(1)},${y(s[key]).toFixed(1)}`).join(" ");
-  const yTicks = [0, Math.round(maxV / 2), maxV];
+  const area = (key: "attendance" | "occupancy") =>
+    `${padL},${padT + plotH} ${line(key)} ${W - padR},${padT + plotH}`;
   const inRange = markers.filter((m) => {
     const mt = Date.parse(m.t);
     return Number.isFinite(mt) && mt >= t0 - 1000 && mt <= t1 + 1000;
@@ -287,10 +302,21 @@ function AttendanceChart({
       </div>
       <div className="overflow-x-auto rounded-lg border border-gray-5 bg-gray-2 p-2">
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 320 }} role="img" aria-label="Attendance and in-room occupancy over the service, with plan-item markers">
+          <defs>
+            <linearGradient id="attFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--blue-9)" stopOpacity={0.22} />
+              <stop offset="100%" stopColor="var(--blue-9)" stopOpacity={0.02} />
+            </linearGradient>
+            <linearGradient id="occFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--green-9)" stopOpacity={0.20} />
+              <stop offset="100%" stopColor="var(--green-9)" stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          {/* nice round gridlines */}
           {yTicks.map((t) => (
             <g key={t}>
-              <line x1={padL} y1={y(t)} x2={W - padR} y2={y(t)} stroke="var(--gray-a4)" strokeWidth={1} />
-              <text x={padL - 6} y={y(t) + 3} textAnchor="end" fontSize={10} fill="var(--gray-9)">{t}</text>
+              <line x1={padL} y1={y(t)} x2={W - padR} y2={y(t)} stroke="var(--gray-a4)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+              <text x={padL - 6} y={y(t) + 3} textAnchor="end" fontSize={10} fill="var(--gray-9)">{t.toLocaleString()}</text>
             </g>
           ))}
           {/* PCO plan-item markers */}
@@ -305,14 +331,17 @@ function AttendanceChart({
               </g>
             );
           })}
+          {/* filled areas (attendance sits above occupancy, so paint it first/behind) */}
+          <polygon points={area("attendance")} fill="url(#attFill)" />
+          <polygon points={area("occupancy")} fill="url(#occFill)" />
           {/* service-average in-room reference */}
           {avgOccupancy != null && (
-            <line x1={padL} y1={y(avgOccupancy)} x2={W - padR} y2={y(avgOccupancy)} stroke="var(--green-9)" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
+            <line x1={padL} y1={y(avgOccupancy)} x2={W - padR} y2={y(avgOccupancy)} stroke="var(--green-9)" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} vectorEffect="non-scaling-stroke" />
           )}
           <text x={padL} y={H - 8} textAnchor="start" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[0].t)}</text>
           <text x={W - padR} y={H - 8} textAnchor="end" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[n - 1].t)}</text>
-          <polyline points={line("occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-          <polyline points={line("attendance")} fill="none" stroke="var(--blue-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+          <polyline points={line("occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+          <polyline points={line("attendance")} fill="none" stroke="var(--blue-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
         </svg>
       </div>
     </div>

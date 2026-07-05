@@ -2445,7 +2445,17 @@ function Inspector({
       )}
       {c.type === "people-panel" && (() => {
         const ORDER = ["occupancy", "peak", "attendance", "capacity", "avg", "avgService", "vsAverage", "min"] as const;
-        const LABEL: Record<string, string> = { occupancy: "In room (now)", peak: "Peak (today)", attendance: "Attendance (entered)", capacity: "% of capacity", avg: "Average (today)", avgService: "Average / service", vsAverage: "vs average (peak vs typical)", min: "Lowest (service)" };
+        const LABEL: Record<string, string> = { occupancy: "In room", peak: "Peak", attendance: "Attendance", capacity: "% capacity", avg: "Average", avgService: "Avg / service", vsAverage: "vs average", min: "Lowest" };
+        const HINT: Record<string, string> = {
+          occupancy: "People currently in the room right now (entries minus exits).",
+          peak: "Highest in-room count reached today.",
+          attendance: "Total people who entered today — cumulative, so it never decreases (usually higher than peak in-room).",
+          capacity: "In-room now as a percentage of the configured building capacity.",
+          avg: "Average in-room across today.",
+          avgService: "Average peak attendance across your past recorded services (a typical-service baseline).",
+          vsAverage: "How this service's peak compares to your typical service (peak vs the service average).",
+          min: "Lowest in-room during the current or most-recent live service — the service 'floor'.",
+        };
         const cur = c.metrics ?? ["occupancy", "peak", "attendance"];
         const toggle = (k: (typeof ORDER)[number], on: boolean) => {
           const set = new Set<string>(cur);
@@ -2457,7 +2467,7 @@ function Inspector({
           <>
             <p className="text-caption2 text-gray-9 leading-snug">Building-wide people metrics, shown side by side. Toggle each:</p>
             {ORDER.map((k) => (
-              <RowSwitch key={k} label={LABEL[k]} checked={cur.includes(k)} onChange={(v) => toggle(k, v)} />
+              <RowSwitch key={k} label={LABEL[k]} hint={HINT[k]} checked={cur.includes(k)} onChange={(v) => toggle(k, v)} />
             ))}
             <RowToggle
               label="Layout"
