@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, type CSSProperties } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import { BrandLogo } from "../components/brand-logo";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
@@ -1357,22 +1357,45 @@ function ServiceOrderObject({
   );
 }
 
-/** Live data + tickers shared by the kiosk renderer and the settings editor. */
-export function useLayoutData() {
+/** Collect the set of object `config.type`s present in a layout (recursing into
+ *  container children) so live-data hooks can be gated to only the channels the
+ *  layout actually renders. */
+function collectLayoutTypes(objects: LayoutObject[] | undefined, into: Set<string>): void {
+  for (const o of objects ?? []) {
+    if (o.config?.type) into.add(o.config.type);
+    if (o.children?.length) collectLayoutTypes(o.children, into);
+  }
+}
+
+/** Live data + tickers shared by the kiosk renderer and the settings editor.
+ *  When a `layout` is passed (kiosk display), the optional/high-frequency data
+ *  hooks are gated to the object types the layout contains — so a clock-only
+ *  display doesn't subscribe to (or re-render on) SPL/transcript/wireless/etc.
+ *  Called with no arg (editor) → every hook is enabled so previews always show data. */
+export function useLayoutData(layout?: LayoutDTO) {
+  const types = useMemo(() => {
+    if (!layout) return null; // editor / unknown → enable everything
+    const s = new Set<string>();
+    collectLayoutTypes(layout.objects, s);
+    return s;
+  }, [layout]);
+  const want = (kinds: string[]) => types === null || kinds.some((k) => types.has(k));
+  const peopleWanted = want(["people-counter", "people-graph", "people-panel"]);
+
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
-  const transcript = useTranscript();
-  const spl = useSplState();
-  const obs = useObsState();
-  const osc = useOscState();
-  const peopleCount = usePeopleCountState();
-  const serviceLow = useLiveServiceLow(true);
-  const serviceAttendance = useLiveServiceAttendance(true);
+  const transcript = useTranscript(want(["transcript-strip"]));
+  const spl = useSplState(want(["spl-meter"]));
+  const obs = useObsState(want(["obs-status"]));
+  const osc = useOscState(want(["osc-button"]));
+  const peopleCount = usePeopleCountState(peopleWanted);
+  const serviceLow = useLiveServiceLow(peopleWanted);
+  const serviceAttendance = useLiveServiceAttendance(peopleWanted);
+  const wireless = useWirelessChannels(want(["wireless-summary", "wireless-channel"]));
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();
   const serviceTimeline = useServiceTimeline();
   const integrationsSnap = useIntegrations();
-  const wireless = useWirelessChannels();
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -1392,7 +1415,7 @@ export function useLayoutData() {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData();
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).

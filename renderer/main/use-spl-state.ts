@@ -7,10 +7,11 @@ import { invoke, onNotification } from "../lib/api";
  * on mount (the channel only broadcasts on change) then stays live. Shared by the
  * dashboard SPL card and the custom-layout SPL object.
  */
-export function useSplState(): SplMetricsDTO | null {
+export function useSplState(enabled = true): SplMetricsDTO | null {
   const [spl, setSpl] = useState<SplMetricsDTO | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     invoke<SplMetricsDTO>("spl:getMetrics")
       .then((s) => {
@@ -22,11 +23,12 @@ export function useSplState(): SplMetricsDTO | null {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     return onNotification("spl:metrics", (p) => setSpl(p as SplMetricsDTO));
-  }, []);
+  }, [enabled]);
 
   return spl;
 }

@@ -7,10 +7,11 @@ import { invoke, onNotification } from "../lib/api";
  * whole rolling buffer). Oldest → newest. Used by the transcription display and
  * the dashboard/stage transcript tile.
  */
-export function useTranscript(): TranscriptLineDTO[] {
+export function useTranscript(enabled = true): TranscriptLineDTO[] {
   const [lines, setLines] = useState<TranscriptLineDTO[]>([]);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     invoke<TranscriptLineDTO[]>("prodcom:getTranscript")
       .then((b) => {
@@ -26,7 +27,7 @@ export function useTranscript(): TranscriptLineDTO[] {
       cancelled = true;
       unsub();
     };
-  }, []);
+  }, [enabled]);
 
   return lines;
 }

@@ -7,10 +7,11 @@ import { invoke, onNotification } from "../lib/api";
  * Hydrates once on mount (the channel only broadcasts on poll) then stays live.
  * Shared by the custom-layout "People counter" object and its editor inspector.
  */
-export function usePeopleCountState(): PeopleCountDTO | null {
+export function usePeopleCountState(enabled = true): PeopleCountDTO | null {
   const [people, setPeople] = useState<PeopleCountDTO | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     invoke<PeopleCountDTO>("people:getCount")
       .then((s) => {
@@ -22,11 +23,12 @@ export function usePeopleCountState(): PeopleCountDTO | null {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     return onNotification("people:count", (p) => setPeople(p as PeopleCountDTO));
-  }, []);
+  }, [enabled]);
 
   return people;
 }
