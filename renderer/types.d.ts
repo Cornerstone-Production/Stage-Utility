@@ -489,7 +489,7 @@ type LayoutObjectConfig =
     }
   | {
       type: "people-counter";
-      metric?: "attendance" | "occupancy" | "peak" | "min" | "avg";
+      metric?: "attendance" | "serviceAttendance" | "occupancy" | "peak" | "min" | "avg";
       zoneId?: string | null;
       label?: string;
       showLabel?: boolean;
@@ -502,7 +502,7 @@ type LayoutObjectConfig =
     }
   | {
       type: "people-panel";
-      metrics?: ("occupancy" | "peak" | "attendance" | "min" | "avg" | "avgService" | "capacity" | "vsAverage")[];
+      metrics?: ("occupancy" | "peak" | "attendance" | "serviceAttendance" | "min" | "avg" | "avgService" | "capacity" | "vsAverage")[];
       showLabels?: boolean;
       orientation?: "row" | "column";
     }

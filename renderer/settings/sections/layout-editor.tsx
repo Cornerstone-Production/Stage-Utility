@@ -2401,7 +2401,8 @@ function Inspector({
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="occupancy">In room (now)</SelectItem>
-                  <SelectItem value="attendance">Attendance (today)</SelectItem>
+                  <SelectItem value="serviceAttendance">Attendance (this service)</SelectItem>
+                  <SelectItem value="attendance">Attendance (day total)</SelectItem>
                   <SelectItem value="peak">Peak (today)</SelectItem>
                   <SelectItem value="min">Lowest (service)</SelectItem>
                   <SelectItem value="avg">Average (today)</SelectItem>
@@ -2444,12 +2445,13 @@ function Inspector({
         </>
       )}
       {c.type === "people-panel" && (() => {
-        const ORDER = ["occupancy", "peak", "attendance", "capacity", "avg", "avgService", "vsAverage", "min"] as const;
-        const LABEL: Record<string, string> = { occupancy: "In room", peak: "Peak", attendance: "Attendance", capacity: "% capacity", avg: "Average", avgService: "Avg / service", vsAverage: "vs average", min: "Lowest" };
+        const ORDER = ["occupancy", "peak", "serviceAttendance", "attendance", "capacity", "avg", "avgService", "vsAverage", "min"] as const;
+        const LABEL: Record<string, string> = { occupancy: "In room", peak: "Peak", serviceAttendance: "Service att.", attendance: "Day total", capacity: "% capacity", avg: "Average", avgService: "Avg / service", vsAverage: "vs average", min: "Lowest" };
         const HINT: Record<string, string> = {
           occupancy: "People currently in the room right now (entries minus exits).",
           peak: "Highest in-room count reached today.",
-          attendance: "Total people who entered today — cumulative, so it never decreases (usually higher than peak in-room).",
+          serviceAttendance: "People who entered THIS service — reset per service (baselined), so a second service in the same plan starts from 0.",
+          attendance: "Total people who entered today across ALL services — cumulative, never decreases (the day total).",
           capacity: "In-room now as a percentage of the configured building capacity.",
           avg: "Average in-room across today.",
           avgService: "Average peak attendance across your past recorded services (a typical-service baseline).",
