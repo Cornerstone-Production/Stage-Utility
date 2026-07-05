@@ -33,7 +33,15 @@ export class DataStore<T> {
   private async writeRaw(data: T): Promise<void> {
     this.cache = data;
     const filePath = await this.getFilePath();
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+    // Atomic write: serialize to a sibling temp file, then rename over the target.
+    // rename(2) is atomic on a single filesystem, so a reader never observes a
+    // partial file and an interrupted write (crash / shutdown / in-app update)
+    // leaves the previous file fully intact. A plain writeFile truncates in place
+    // first, which could corrupt the store mid-write and, on the next load, look
+    // like an empty file — silently destroying history.
+    const tmp = `${filePath}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf-8");
+    await fs.rename(tmp, filePath);
   }
 
   private async getFilePath(): Promise<string> {
@@ -47,13 +55,32 @@ export class DataStore<T> {
 
   async load(): Promise<T> {
     if (this.cache !== null) return this.cache;
+    const filePath = await this.getFilePath();
+    let raw: string;
     try {
-      const filePath = await this.getFilePath();
-      const data = await fs.readFile(filePath, "utf-8");
-      this.cache = JSON.parse(data) as T;
-      return this.cache;
+      raw = await fs.readFile(filePath, "utf-8");
     } catch {
-      // File doesn't exist yet — return defaults.
+      // File doesn't exist yet (first run) — safe to start from defaults.
+      this.cache = this.defaultValue;
+      return this.cache;
+    }
+    try {
+      this.cache = JSON.parse(raw) as T;
+      return this.cache;
+    } catch (err) {
+      // The file EXISTS but won't parse — corruption (e.g. a truncated write from a
+      // crash). Do NOT silently fall back to defaults and then overwrite it, which
+      // would destroy the data permanently. Preserve the bytes for recovery and log
+      // loudly before continuing from defaults. (Atomic writes above make this rare.)
+      try {
+        await fs.rename(filePath, `${filePath}.corrupt-${Date.now()}`);
+      } catch {
+        /* best-effort backup */
+      }
+      console.error(
+        `[data-store] ${this.filename} could not be parsed (corrupt). Backed up to ${this.filename}.corrupt-* and starting fresh — recover history from that copy.`,
+        err,
+      );
       this.cache = this.defaultValue;
       return this.cache;
     }
