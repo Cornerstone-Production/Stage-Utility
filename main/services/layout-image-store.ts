@@ -8,7 +8,11 @@ import * as crypto from "node:crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 
+import type { LayoutObject } from "../types/stage.js";
 import { getUserDataPath } from "./app-paths.js";
+import { viewsStore } from "./views-store.js";
+import { layoutTemplatesStore } from "./layout-templates-store.js";
+import { layoutGroupsStore } from "./layout-groups-store.js";
 
 const EXT_BY_MIME: Record<string, string> = {
   "image/png": "png",
@@ -47,6 +51,57 @@ export async function saveLayoutImage(dataUrl: string): Promise<string> {
   await fs.mkdir(d, { recursive: true });
   await fs.writeFile(path.join(d, file), bytes);
   return `/layout-images/${file}`;
+}
+
+// Don't reap a file newer than this — an image can be uploaded and referenced only
+// in the editor draft before the layout is saved, so recent files may not yet appear
+// in any store.
+const PRUNE_GRACE_MS = 6 * 60 * 60 * 1000;
+
+/** Collect referenced "/layout-images/<file>" names from a layout's objects (recursive). */
+function collectRefs(objs: LayoutObject[] | undefined, into: Set<string>): void {
+  for (const o of objs ?? []) {
+    const cfg = o.config as { type?: string; src?: string };
+    if (cfg?.type === "image" && typeof cfg.src === "string") {
+      const m = /\/layout-images\/([^/?#]+)/.exec(cfg.src);
+      if (m) into.add(m[1]);
+    }
+    if (o.children?.length) collectRefs(o.children, into);
+  }
+}
+
+/** Delete stored images no longer referenced by any View / layout template / group
+ *  (and older than the grace window). Returns how many were removed. */
+export async function pruneLayoutImages(): Promise<number> {
+  const refs = new Set<string>();
+  try {
+    for (const v of await viewsStore.load()) collectRefs(v.layout?.objects, refs);
+    for (const t of await layoutTemplatesStore.load()) collectRefs(t.layout?.objects, refs);
+    for (const g of await layoutGroupsStore.load()) collectRefs(g.object ? [g.object] : [], refs);
+  } catch {
+    return 0; // couldn't read a store — never risk deleting a referenced image
+  }
+  let files: string[];
+  try {
+    files = await fs.readdir(dir());
+  } catch {
+    return 0; // no dir yet
+  }
+  const now = Date.now();
+  let removed = 0;
+  for (const f of files) {
+    if (refs.has(f)) continue;
+    try {
+      const st = await fs.stat(path.join(dir(), f));
+      if (now - st.mtimeMs < PRUNE_GRACE_MS) continue; // recent (maybe unsaved) — keep
+      await fs.rm(path.join(dir(), f), { force: true });
+      removed++;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (removed) console.log(`[layout-images] pruned ${removed} orphaned image(s)`);
+  return removed;
 }
 
 /** Read a stored layout image for serving. Only our hashed names are accepted (no
