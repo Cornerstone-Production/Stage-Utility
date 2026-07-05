@@ -90,6 +90,12 @@ function fmtDelta(sec: number | null): string {
   return `${sign}${Math.floor(a / 60)}:${String(a % 60).padStart(2, "0")}`;
 }
 
+/** Trailing "Stream Buffer"-type padding items — post-service, often left running
+ *  long, so they're excluded from all timing math (kept visible but not counted). */
+function isBufferItem(title: string | null | undefined): boolean {
+  return (title ?? "").toUpperCase().includes("BUFFER");
+}
+
 /** Derived service-level timing from a record. */
 function summarize(rec: ServiceTimeline) {
   const items = rec.items;
@@ -104,6 +110,7 @@ function summarize(rec: ServiceTimeline) {
   let actual = 0;
   let plannedKnown = false;
   for (const it of items) {
+    if (isBufferItem(it.title)) continue; // post-service padding — never counted in timing
     if (it.plannedLengthSec != null) { planned += it.plannedLengthSec; plannedKnown = true; }
     if (it.actualDurationSec != null) actual += it.actualDurationSec;
   }
@@ -114,7 +121,7 @@ function summarize(rec: ServiceTimeline) {
  *  planned and actual times. */
 function overrunStats(tl: ServiceTimeline) {
   const deltas = tl.items
-    .filter((it) => it.plannedLengthSec != null && it.actualDurationSec != null)
+    .filter((it) => !isBufferItem(it.title) && it.plannedLengthSec != null && it.actualDurationSec != null)
     .map((it) => (it.actualDurationSec as number) - (it.plannedLengthSec as number));
   if (!deltas.length) return { avg: null as number | null, over: 0, total: 0 };
   return { avg: deltas.reduce((a, b) => a + b, 0) / deltas.length, over: deltas.filter((d) => d > 0).length, total: deltas.length };
@@ -387,7 +394,8 @@ export function ServiceHistorySection() {
       sum.planned != null && Number.isFinite(firstStartMs)
         ? new Date(firstStartMs + sum.planned * 1000).toISOString()
         : null;
-    const actualEnd = detail.endedAt ?? [...detail.items].reverse().find((it) => it.endedAt)?.endedAt ?? null;
+    // Actual end excludes the trailing buffer — the service really ended at the last counted item.
+    const actualEnd = [...detail.items].reverse().find((it) => !isBufferItem(it.title) && it.endedAt)?.endedAt ?? detail.endedAt ?? null;
     const actualSub = [
       totalDelta != null ? `${fmtDelta(totalDelta)} vs plan` : null,
       actualEnd ? `ended ${fmtTime(actualEnd)}` : null,
@@ -486,15 +494,20 @@ export function ServiceHistorySection() {
           </div>
           {detail.items.map((it, i) => {
             const itemLive = it.endedAt == null;
+            const buffer = isBufferItem(it.title); // shown, but not counted in totals
             const delta = it.plannedLengthSec != null && it.actualDurationSec != null ? it.actualDurationSec - it.plannedLengthSec : null;
             const deltaColor = delta == null ? "text-gray-9" : delta > 30 ? "text-red-11" : delta < -30 ? "text-blue-11" : "text-gray-11";
             return (
-              <div key={it.itemId} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"}`}>
+              <div key={it.itemId} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${buffer ? "opacity-55" : ""}`}>
                 <span className="text-gray-9">{i + 1}</span>
-                <span className="text-gray-12 truncate">{it.title || "—"}{itemLive && <span className="ml-1.5 text-[10px] text-red-11">live</span>}</span>
-                <span className="text-right text-gray-10">{fmtDur(it.plannedLengthSec)}</span>
+                <span className="text-gray-12 truncate">
+                  {it.title || "—"}
+                  {itemLive && <span className="ml-1.5 text-[10px] text-red-11">live</span>}
+                  {buffer && <span className="ml-1.5 text-[10px] italic text-gray-9">not counted</span>}
+                </span>
+                <span className="text-right text-gray-10">{buffer ? "—" : fmtDur(it.plannedLengthSec)}</span>
                 <span className="text-right text-gray-12">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
-                <span className={`text-right ${deltaColor}`}>{itemLive ? "" : fmtDelta(delta)}</span>
+                <span className={`text-right ${deltaColor}`}>{buffer || itemLive ? "" : fmtDelta(delta)}</span>
                 <span className="text-right text-gray-9 whitespace-nowrap">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
               </div>
             );
