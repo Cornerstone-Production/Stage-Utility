@@ -47,6 +47,7 @@ class ServiceTimelineRecorder {
       if (live.mode === "item" && live.currentItemId && isLiveServiceToday(live)) {
         await this.ensureRecord(live);
         if (!this.current) return;
+        if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
         // Only mutate on an item transition — between transitions nothing changes.
         if (live.currentItemId !== this.lastItemId) {
           this.finalizePrevItem(); // close the OUTGOING item (this.lastItemId)
@@ -55,6 +56,14 @@ class ServiceTimelineRecorder {
           broadcast("service-timeline:history", this.current);
           this.schedulePersist();
         }
+      } else if (this.current && !this.current.endedAt) {
+        // Left "item" mode — service ended or the next service's preservice began.
+        // Close the open record so consumers stop showing it as live. Self-healing:
+        // an item going live above reopens it.
+        this.finalizeRecord();
+        this.lastItemId = null;
+        await serviceTimelineStore.upsert(this.current);
+        broadcast("service-timeline:history", this.current);
       }
     } finally {
       this.busy = false;

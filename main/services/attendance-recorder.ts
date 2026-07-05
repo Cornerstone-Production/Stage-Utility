@@ -48,6 +48,7 @@ class AttendanceRecorder {
       if (live.mode === "item" && live.currentItemId && isLiveServiceToday(live)) {
         await this.ensureRecord(live);
         if (!this.current) return;
+        if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
 
         const p = sensourceService.getLatest();
         if (!p.connected || p.total.attendance == null || p.total.occupancy == null) return;
@@ -75,6 +76,13 @@ class AttendanceRecorder {
           this.lastSampleAt = now;
           this.schedulePersist();
         }
+        broadcast("attendance:history", this.current);
+      } else if (this.current && !this.current.endedAt) {
+        // Left "item" mode — service ended or the next service's preservice began.
+        // Close the open record so the Attendance tab stops showing it as live.
+        // Self-healing: an item going live above reopens it.
+        this.finalizeRecord();
+        await attendanceStore.upsert(this.current);
         broadcast("attendance:history", this.current);
       }
     } finally {

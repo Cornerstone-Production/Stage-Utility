@@ -82,6 +82,7 @@ class SplRecorder {
       if (live.mode === "item" && live.currentItemId && isLiveServiceToday(live)) {
         await this.ensureRecord(live);
         if (!this.current) return;
+        if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
         if (live.currentItemId !== this.lastItemId) {
           this.finalizePrevItem();
           this.lastItemId = live.currentItemId;
@@ -89,9 +90,15 @@ class SplRecorder {
         this.recordSample(live.currentItemId, live.label, pickMeter(smaartService.getLatest()));
         broadcast("spl:history", this.current);
         this.schedulePersist();
+      } else if (this.current && !this.current.endedAt) {
+        // Left "item" mode — the service ended (mode "none") or the next service's
+        // preservice countdown began. Close the open record so the History tab stops
+        // showing it as live. Self-healing: an item going live above reopens it.
+        this.finalizeRecord();
+        this.lastItemId = null;
+        await splHistoryStore.upsert(this.current);
+        broadcast("spl:history", this.current);
       }
-      // Non-item modes (preservice/none) don't finalize: a plan change or
-      // auto-advance rollover (a new serviceKey) closes the record in ensureRecord.
     } finally {
       this.busy = false;
     }
