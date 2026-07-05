@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, Trash2Icon, ClockIcon, CopyIcon } from "lucide-react";
+import { Trash2Icon, ClockIcon, CopyIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { confirm, EmptyState, SkeletonRows, Button, toast } from "../../components/ui";
@@ -339,29 +339,10 @@ export function ServiceHistorySection() {
   }
 
   // ── List view: services for the selected day. ──
-  const dayIdx = day ? days.indexOf(day) : -1;
   return (
     <div className="flex flex-col gap-3">
       <HistoryCalendar counts={dateCounts} selected={day} onPick={setDay} />
-      <div className="flex items-center justify-between gap-2">
-        <button
-          className="rounded-md border border-gray-5 p-1.5 text-gray-11 enabled:hover:bg-gray-3 disabled:opacity-40"
-          disabled={dayIdx < 0 || dayIdx >= days.length - 1}
-          onClick={() => setDay(days[dayIdx + 1])}
-          aria-label="Earlier day"
-        >
-          <ChevronLeftIcon className="size-4" />
-        </button>
-        <span className="text-body font-medium text-gray-12">{day ? fmtDay(day) : "—"}</span>
-        <button
-          className="rounded-md border border-gray-5 p-1.5 text-gray-11 enabled:hover:bg-gray-3 disabled:opacity-40"
-          disabled={dayIdx <= 0}
-          onClick={() => setDay(days[dayIdx - 1])}
-          aria-label="Later day"
-        >
-          <ChevronRightIcon className="size-4" />
-        </button>
-      </div>
+      {day && <span className="text-body font-medium text-gray-12">{fmtDay(day)}</span>}
 
       <div className="flex flex-col gap-2">
         {dayServices.map((s) => {

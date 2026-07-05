@@ -1,97 +1,130 @@
-import { Fragment, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
-/** GitHub-style contribution grid for service records: one cell per day over a
- *  rolling window, shaded by how many services that day has, click to jump. Gives
- *  an at-a-glance overview of which past dates have data without paging day-by-day.
- *  `counts` maps a local "YYYY-MM-DD" to that day's record count (0/absent = empty). */
+/** A month calendar for browsing recorded services: days with recordings get a
+ *  filled dot (shaded by count), click to jump; arrows page month-to-month. Suits
+ *  sparse weekly data far better than a year-long contribution grid — a few marked
+ *  Sundays in a familiar month grid reads as intentional. `counts` maps a local
+ *  "YYYY-MM-DD" to that day's record count. */
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
+function ymd(y: number, m: number, d: number): string {
+  return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
 export function HistoryCalendar({
   counts,
   selected,
   onPick,
-  months = 12,
 }: {
   counts: Map<string, number>;
   selected: string | null;
   onPick: (date: string) => void;
-  months?: number;
 }) {
-  const weeks = useMemo(() => {
-    const ymd = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const start = new Date(today);
-    start.setMonth(start.getMonth() - months);
-    start.setDate(start.getDate() - start.getDay()); // back to Sunday
-    const out: { str: string; count: number; future: boolean; month: number }[][] = [];
-    const cur = new Date(start);
-    while (cur <= today) {
-      const week: { str: string; count: number; future: boolean; month: number }[] = [];
-      for (let i = 0; i < 7; i++) {
-        const future = cur > today;
-        const s = ymd(cur);
-        week.push({ str: s, count: counts.get(s) ?? 0, future, month: cur.getMonth() });
-        cur.setDate(cur.getDate() + 1);
-      }
-      out.push(week);
-    }
-    return out;
-  }, [counts, months]);
+  const today = useMemo(() => {
+    const d = new Date();
+    return { y: d.getFullYear(), m: d.getMonth() };
+  }, []);
 
-  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  // Label the column where a month first appears (compared to the prior week).
-  const label = (wi: number): string => {
-    const m = weeks[wi]?.[0]?.month;
-    const prev = wi > 0 ? weeks[wi - 1]?.[0]?.month : -1;
-    return m != null && m !== prev ? MONTHS[m] : "";
+  // Displayed month — follows the selected day; defaults to today.
+  const [view, setView] = useState<{ y: number; m: number }>(() => {
+    if (selected) {
+      const p = new Date(`${selected}T00:00:00`);
+      if (!Number.isNaN(p.getTime())) return { y: p.getFullYear(), m: p.getMonth() };
+    }
+    return today;
+  });
+  useEffect(() => {
+    if (!selected) return;
+    const p = new Date(`${selected}T00:00:00`);
+    if (!Number.isNaN(p.getTime())) setView({ y: p.getFullYear(), m: p.getMonth() });
+  }, [selected]);
+
+  // Bound navigation to [earliest recorded month … current month].
+  const earliest = useMemo(() => {
+    let min: { y: number; m: number } | null = null;
+    for (const key of counts.keys()) {
+      const [y, m] = key.split("-").map(Number);
+      if (!Number.isFinite(y) || !Number.isFinite(m)) continue;
+      const cand = { y, m: m - 1 };
+      if (!min || cand.y < min.y || (cand.y === min.y && cand.m < min.m)) min = cand;
+    }
+    return min ?? today;
+  }, [counts, today]);
+
+  const idx = (v: { y: number; m: number }) => v.y * 12 + v.m;
+  const canPrev = idx(view) > idx(earliest);
+  const canNext = idx(view) < idx(today);
+  const step = (delta: number) => {
+    const n = idx(view) + delta;
+    setView({ y: Math.floor(n / 12), m: ((n % 12) + 12) % 12 });
   };
-  const shade = (count: number, future: boolean): string => {
-    if (future) return "bg-transparent";
-    if (count <= 0) return "bg-gray-a3";
-    if (count === 1) return "bg-blue-7";
-    if (count === 2) return "bg-blue-9";
-    return "bg-blue-11";
-  };
+
+  const firstDow = new Date(view.y, view.m, 1).getDay();
+  const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const shade = (count: number): string =>
+    count >= 3 ? "bg-blue-10 text-white" : count === 2 ? "bg-blue-8 text-white" : "bg-blue-6 text-white";
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="overflow-x-auto pb-1">
-        <div
-          className="grid w-max"
-          style={{ gridAutoFlow: "column", gridTemplateRows: "0.75rem repeat(7, 0.7rem)", gap: "3px" }}
-        >
-          {weeks.map((week, wi) => (
-            <Fragment key={wi}>
-              <div className="text-[9px] leading-3 text-gray-9 whitespace-nowrap">{label(wi)}</div>
-              {week.map((cell) =>
-                cell.future ? (
-                  <div key={cell.str} style={{ width: "0.7rem", height: "0.7rem" }} />
-                ) : (
-                  <button
-                    key={cell.str}
-                    type="button"
-                    disabled={cell.count <= 0}
-                    onClick={() => onPick(cell.str)}
-                    title={`${cell.str}${cell.count > 0 ? ` — ${cell.count} service${cell.count === 1 ? "" : "s"}` : ""}`}
-                    aria-label={`${cell.str}${cell.count > 0 ? `, ${cell.count} services` : ", no services"}`}
-                    className={`rounded-[2px] ${shade(cell.count, cell.future)} ${
-                      cell.count > 0 ? "cursor-pointer hover:ring-1 hover:ring-blue-8" : "cursor-default"
-                    } ${selected === cell.str ? "ring-2 ring-blue-9" : ""}`}
-                    style={{ width: "0.7rem", height: "0.7rem" }}
-                  />
-                ),
-              )}
-            </Fragment>
-          ))}
+    <div className="rounded-lg border border-gray-5 bg-gray-2 p-3">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className="text-body font-medium text-gray-12">Recorded services</span>
+        <div className="flex items-center gap-1">
+          <button
+            className="rounded-md p-1 text-gray-11 enabled:hover:bg-gray-4 disabled:opacity-30"
+            disabled={!canPrev}
+            onClick={() => step(-1)}
+            aria-label="Previous month"
+          >
+            <ChevronLeftIcon className="size-4" />
+          </button>
+          <span className="text-caption1 font-medium text-gray-11 tabular-nums w-32 text-center">
+            {MONTHS[view.m]} {view.y}
+          </span>
+          <button
+            className="rounded-md p-1 text-gray-11 enabled:hover:bg-gray-4 disabled:opacity-30"
+            disabled={!canNext}
+            onClick={() => step(1)}
+            aria-label="Next month"
+          >
+            <ChevronRightIcon className="size-4" />
+          </button>
         </div>
       </div>
-      <div className="flex items-center gap-1.5 text-caption2 text-gray-9">
-        <span>Less</span>
-        <span className="rounded-[2px] bg-gray-a3" style={{ width: "0.7rem", height: "0.7rem" }} />
-        <span className="rounded-[2px] bg-blue-7" style={{ width: "0.7rem", height: "0.7rem" }} />
-        <span className="rounded-[2px] bg-blue-9" style={{ width: "0.7rem", height: "0.7rem" }} />
-        <span className="rounded-[2px] bg-blue-11" style={{ width: "0.7rem", height: "0.7rem" }} />
-        <span>More</span>
+      <div className="grid grid-cols-7 gap-1 text-center">
+        {DOW.map((d) => (
+          <div key={d} className="text-caption2 text-gray-9 py-0.5">{d}</div>
+        ))}
+        {cells.map((d, i) => {
+          if (d == null) return <div key={`b${i}`} />;
+          const dateStr = ymd(view.y, view.m, d);
+          const count = counts.get(dateStr) ?? 0;
+          const isSel = selected === dateStr;
+          const hasData = count > 0;
+          return (
+            <button
+              key={dateStr}
+              type="button"
+              disabled={!hasData}
+              onClick={() => onPick(dateStr)}
+              title={hasData ? `${count} service${count === 1 ? "" : "s"}` : undefined}
+              className={`aspect-square rounded-md text-caption1 tabular-nums flex items-center justify-center transition-colors ${
+                isSel ? "ring-2 ring-blue-9" : ""
+              } ${
+                hasData
+                  ? `${shade(count)} cursor-pointer hover:brightness-110`
+                  : "text-gray-8 cursor-default"
+              }`}
+            >
+              {d}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
