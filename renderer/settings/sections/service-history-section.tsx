@@ -249,6 +249,18 @@ export function ServiceHistorySection() {
     const sum = summarize(detail);
     const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
     const over = overrunStats(detail);
+    // Projected end = actual start + planned length; actual end = the record's
+    // finalized end (else the last item that closed). Shown as card subscripts.
+    const firstStartMs = Date.parse(sum.firstStart);
+    const projectedEnd =
+      sum.planned != null && Number.isFinite(firstStartMs)
+        ? new Date(firstStartMs + sum.planned * 1000).toISOString()
+        : null;
+    const actualEnd = detail.endedAt ?? [...detail.items].reverse().find((it) => it.endedAt)?.endedAt ?? null;
+    const actualSub = [
+      totalDelta != null ? `${fmtDelta(totalDelta)} vs plan` : null,
+      actualEnd ? `ended ${fmtTime(actualEnd)}` : null,
+    ].filter(Boolean).join(" · ") || undefined;
     const det = detail; // narrow for the async handler
     const linkedBap = linkedBaptisms(baptisms, detail);
     const bapTot = baptismTotals(linkedBap);
@@ -281,26 +293,27 @@ export function ServiceHistorySection() {
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat label="Started" value={fmtTime(sum.firstStart)} accent={sum.lateStartSec != null && sum.lateStartSec > 60 ? "text-amber-11" : "text-gray-12"} sub={sum.lateStartSec != null ? (sum.lateStartSec >= 0 ? `${fmtDelta(sum.lateStartSec)} late` : `${fmtDelta(sum.lateStartSec)} early`) : undefined} />
-          <Stat label="Planned" value={fmtDur(sum.planned)} accent="text-gray-12" />
-          <Stat label="Actual" value={fmtDur(sum.actual)} accent="text-blue-11" sub={totalDelta != null ? `${fmtDelta(totalDelta)} vs plan` : undefined} />
+          <Stat label="Planned" value={fmtDur(sum.planned)} accent="text-gray-12" sub={projectedEnd ? `ends ${fmtTime(projectedEnd)}` : undefined} />
+          <Stat label="Actual" value={fmtDur(sum.actual)} accent="text-blue-11" sub={actualSub} />
           <Stat label="Avg overrun" value={over.avg != null ? fmtDelta(over.avg) : "—"} accent={over.avg != null && over.avg > 0 ? "text-red-11" : "text-gray-12"} sub={over.total ? `${over.over} of ${over.total} over` : undefined} />
         </div>
 
         <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
-          <div className="grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem] gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10">
-            <span>#</span><span>Item</span><span className="text-right">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span>
+          <div className="grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem] gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10">
+            <span>#</span><span>Item</span><span className="text-right">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right">Ended</span>
           </div>
           {detail.items.map((it, i) => {
             const itemLive = it.endedAt == null;
             const delta = it.plannedLengthSec != null && it.actualDurationSec != null ? it.actualDurationSec - it.plannedLengthSec : null;
             const deltaColor = delta == null ? "text-gray-9" : delta > 30 ? "text-red-11" : delta < -30 ? "text-blue-11" : "text-gray-11";
             return (
-              <div key={it.itemId} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"}`}>
+              <div key={it.itemId} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"}`}>
                 <span className="text-gray-9">{i + 1}</span>
                 <span className="text-gray-12 truncate">{it.title || "—"}{itemLive && <span className="ml-1.5 text-[10px] text-red-11">live</span>}</span>
                 <span className="text-right text-gray-10">{fmtDur(it.plannedLengthSec)}</span>
                 <span className="text-right text-gray-12">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
                 <span className={`text-right ${deltaColor}`}>{itemLive ? "" : fmtDelta(delta)}</span>
+                <span className="text-right text-gray-9 whitespace-nowrap">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
               </div>
             );
           })}
