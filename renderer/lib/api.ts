@@ -610,6 +610,49 @@ function reportChannels(): void {
   }, 200);
 }
 
+// ── Optional shared-worker SSE relay ────────────────────────────────────────
+// One EventSource shared across all this machine's tabs (fixes the ~6-connection
+// HTTP/1.1 limit on multi-window machines). Opt-in and off by default so untested
+// concurrency can't regress live displays; the direct path below stays the default.
+//   Enable:  localStorage.setItem("stage:sharedSse", "1")  (then reload)
+let sharedSse = (() => {
+  try {
+    return typeof SharedWorker !== "undefined" && localStorage.getItem("stage:sharedSse") === "1";
+  } catch {
+    return false;
+  }
+})();
+const workerHandlers = new Map<string, Set<(payload: unknown) => void>>();
+let sseWorker: SharedWorker | null = null;
+
+function ensureWorker(): boolean {
+  if (sseWorker) return true;
+  try {
+    sseWorker = new SharedWorker(new URL("./sse-shared-worker.ts", import.meta.url), { type: "module" });
+    sseWorker.port.onmessage = (ev: MessageEvent) => {
+      const { channel, data } = ev.data as { channel: string; data: unknown };
+      const set = workerHandlers.get(channel);
+      if (set) for (const cb of set) {
+        try { cb(data); } catch (err) { console.error(`[api] SSE handler error for "${channel}":`, err); }
+      }
+    };
+    sseWorker.port.start();
+    addEventListener("pagehide", () => {
+      try { sseWorker?.port.postMessage({ type: "bye" }); } catch { /* ignore */ }
+    });
+    return true;
+  } catch (err) {
+    console.warn("[api] SharedWorker SSE unavailable — falling back to direct EventSource", err);
+    sseWorker = null;
+    sharedSse = false; // permanent fallback for this session
+    return false;
+  }
+}
+
+function workerReport(): void {
+  sseWorker?.port.postMessage({ type: "subscribe", channels: [...workerHandlers.keys()] });
+}
+
 function ensureEventSource(): EventSource {
   if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
     return eventSource;
@@ -642,6 +685,23 @@ export function onNotification(
   channel: string,
   cb: (payload: unknown) => void,
 ): () => void {
+  // Shared-worker path: register the callback and let the worker deliver parsed
+  // payloads. Falls through to the direct path if the worker can't be created.
+  if (sharedSse && ensureWorker()) {
+    let set = workerHandlers.get(channel);
+    if (!set) {
+      set = new Set();
+      workerHandlers.set(channel, set);
+    }
+    set.add(cb);
+    workerReport();
+    return () => {
+      set!.delete(cb);
+      if (set!.size === 0) workerHandlers.delete(channel);
+      workerReport();
+    };
+  }
+
   const handler = (e: MessageEvent) => {
     try {
       cb(JSON.parse(e.data));
