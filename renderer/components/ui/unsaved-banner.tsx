@@ -34,7 +34,7 @@ export function UnsavedBanner({
     return (
       <div
         className={cn(
-          "flex items-center gap-1.5 rounded-full border border-amber-6 bg-amber-2/90 py-1 pl-3 pr-1.5 shadow-lg backdrop-blur-xl",
+          "flex items-center gap-2.5 rounded-full border border-amber-6 bg-amber-2/90 py-1 pl-3.5 pr-2 shadow-lg backdrop-blur-xl",
           className,
         )}
       >

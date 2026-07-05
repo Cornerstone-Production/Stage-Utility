@@ -1485,7 +1485,10 @@ export function LayoutEditor({
       </div>
       )}
 
-      <div className="flex gap-3 @max-4xl:flex-col min-h-0">
+      {/* Fill the editor height so the side panel can use the full window height —
+          except while editing an inline slots-grid, where the row stays preview-tall
+          so the InlineSlotsEditor below it stays reachable without a huge gap. */}
+      <div className={`flex gap-3 @max-4xl:flex-col min-h-0 ${!inlineGrid ? "flex-1" : ""}`}>
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
@@ -1512,10 +1515,11 @@ export function LayoutEditor({
           )}
         </div>
 
-        {/* Side panel: layers + inspector (edit mode only). Capped to the canvas
-            height so it scrolls beside the preview instead of stretching the row. */}
+        {/* Side panel: layers + inspector (edit mode only). Fills the full window
+            height (scrolls internally); only capped to the preview height while an
+            inline slots-grid is selected, so its editor below stays reachable. */}
         {isEditing && (
-        <div className="w-64 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: canvasH ?? undefined }}>
+        <div className="w-64 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: inlineGrid ? (canvasH ?? undefined) : undefined }}>
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Layers</span>

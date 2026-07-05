@@ -172,6 +172,46 @@ function rfBarsGlyph(bars: number): string {
   return "▮".repeat(n) + "▯".repeat(5 - n);
 }
 
+// Shrinks the font so `text` fits its box (width + height) instead of clipping —
+// used by single-value text objects (current/next item) where a long title would
+// otherwise overflow. Converges in a pass or two by back-deriving the natural size
+// from the live scroll size (same approach as ServiceOrderObject's auto-fit).
+function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign?: LayoutVAlign }) {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const elRef = useRef<HTMLSpanElement | null>(null);
+  const [scale, setScale] = useState(1);
+  const scaleRef = useRef(1);
+  scaleRef.current = scale;
+  const basePx = parseFloat(String(ts.fontSize)) || 16;
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const el = elRef.current;
+    if (!wrap || !el) return;
+    const measure = () => {
+      const availW = wrap.clientWidth;
+      const availH = wrap.clientHeight;
+      if (availW <= 1 || availH <= 1) return;
+      const cur = scaleRef.current;
+      const natW = el.scrollWidth / cur;
+      const natH = el.scrollHeight / cur;
+      if (natW <= 0 || natH <= 0) return;
+      const desired = Math.max(0.3, Math.min(1, Math.min(availW / natW, availH / natH)));
+      if (Math.abs(desired - cur) > 0.01) setScale(desired);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, [text, basePx, ts.fontWeight]);
+  const justify = vAlign === "top" ? "flex-start" : vAlign === "bottom" ? "flex-end" : "center";
+  const align = ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center";
+  return (
+    <div ref={wrapRef} style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: justify, alignItems: align, overflow: "hidden" }}>
+      <span ref={elRef} style={{ ...ts, width: undefined, maxWidth: "100%", display: "inline-block", fontSize: `${basePx * scale}px` }}>{text}</span>
+    </div>
+  );
+}
+
 export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   const c = o.config;
   const ts = textStyle(o, ctx.H);
@@ -242,13 +282,14 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     }
     case "current-service-item": {
       // Follow the PCO plan order (authoritative); fall back to ProPresenter's
-      // active playlist only when PCO has no current item.
+      // active playlist only when PCO has no current item. Auto-fit so a long title
+      // shrinks to the box instead of clipping.
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
-      return span(ctx.pcoLive?.currentItemTitle ?? pro?.currentServiceItem ?? "");
+      return <FitText text={ctx.pcoLive?.currentItemTitle ?? pro?.currentServiceItem ?? ""} ts={ts} vAlign={o.style?.vAlign} />;
     }
     case "next-service-item": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
-      return span(ctx.pcoLive?.nextItemTitle ?? pro?.nextServiceItem ?? "");
+      return <FitText text={ctx.pcoLive?.nextItemTitle ?? pro?.nextServiceItem ?? ""} ts={ts} vAlign={o.style?.vAlign} />;
     }
     case "service-order":
       return <ServiceOrderObject o={o} config={c} ctx={ctx} />;
