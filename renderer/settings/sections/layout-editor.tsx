@@ -2448,11 +2448,11 @@ function Inspector({
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="occupancy">In room (now)</SelectItem>
-                  <SelectItem value="serviceAttendance">Attendance (this service)</SelectItem>
-                  <SelectItem value="attendance">Attendance (day total)</SelectItem>
-                  <SelectItem value="peak">Peak (today)</SelectItem>
-                  <SelectItem value="min">Lowest (service)</SelectItem>
-                  <SelectItem value="avg">Average (today)</SelectItem>
+                  <SelectItem value="peak">Peak attendance (today)</SelectItem>
+                  <SelectItem value="min">Lowest attendance (today)</SelectItem>
+                  <SelectItem value="avg">Avg attendance (today)</SelectItem>
+                  <SelectItem value="serviceAttendance">Total entries (this service)</SelectItem>
+                  <SelectItem value="attendance">Total entries (day)</SelectItem>
                 </SelectContent>
               </Select>
             </Row>
@@ -2493,17 +2493,17 @@ function Inspector({
       )}
       {c.type === "people-panel" && (() => {
         const ORDER = ["occupancy", "peak", "serviceAttendance", "attendance", "capacity", "avg", "avgService", "vsAverage", "min"] as const;
-        const LABEL: Record<string, string> = { occupancy: "In room", peak: "Peak", serviceAttendance: "Service att.", attendance: "Day total", capacity: "% capacity", avg: "Average", avgService: "Avg / service", vsAverage: "vs average", min: "Lowest" };
+        const LABEL: Record<string, string> = { occupancy: "In room", peak: "Peak att.", serviceAttendance: "Entries (svc)", attendance: "Entries (day)", capacity: "% capacity", avg: "Avg att.", avgService: "Avg / service", vsAverage: "vs average", min: "Lowest att." };
         const HINT: Record<string, string> = {
           occupancy: "People currently in the room right now (entries minus exits).",
-          peak: "Highest in-room count reached today.",
-          serviceAttendance: "People who entered THIS service — reset per service (baselined), so a second service in the same plan starts from 0.",
-          attendance: "Total people who entered today across ALL services — cumulative, never decreases (the day total).",
+          peak: "Peak attendance — the highest number of people in the room today.",
+          serviceAttendance: "Total entries THIS service — cumulative door count (double-counts re-entries), reset per service.",
+          attendance: "Total entries today across ALL services — cumulative door count, double-counts re-entries.",
           capacity: "In-room now as a percentage of the configured building capacity.",
-          avg: "Average in-room across today.",
+          avg: "Average attendance (in-room) across today.",
           avgService: "Average peak attendance across your past recorded services (a typical-service baseline).",
-          vsAverage: "How this service's peak compares to your typical service (peak vs the service average).",
-          min: "Lowest in-room during the current or most-recent live service — the service 'floor'.",
+          vsAverage: "How this service's peak attendance compares to your typical service.",
+          min: "Lowest attendance (in-room) during the current or most-recent live service — the 'floor'.",
         };
         const cur = c.metrics ?? ["occupancy", "peak", "attendance"];
         const toggle = (k: (typeof ORDER)[number], on: boolean) => {

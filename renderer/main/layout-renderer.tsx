@@ -512,7 +512,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         : resolvePeopleValue(ctx.peopleCount, metric, c.zoneId);
       if (value == null) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
       const fallbackLabel =
-        metric === "occupancy" ? "in room" : metric === "peak" ? "peak" : metric === "min" ? "low" : metric === "avg" ? "avg" : metric === "serviceAttendance" ? "this service" : "people";
+        metric === "occupancy" ? "in room" : metric === "peak" ? "peak att." : metric === "min" ? "low" : metric === "avg" ? "avg att." : metric === "serviceAttendance" ? "svc entries" : "entries";
       return (
         <span style={ts}>
           {value.toLocaleString()}
@@ -769,11 +769,11 @@ function PeopleGraph({
 // not per-zone). avgService = mean peak across recorded services.
 const PEOPLE_PANEL_LABELS: Record<string, string> = {
   occupancy: "In room",
-  peak: "Peak",
-  attendance: "Day total",
-  serviceAttendance: "Service",
+  peak: "Peak att.",
+  attendance: "Entries (day)",
+  serviceAttendance: "Entries (svc)",
   min: "Low",
-  avg: "Avg today",
+  avg: "Avg att.",
   avgService: "Avg / service",
   capacity: "Capacity",
   vsAverage: "vs avg",

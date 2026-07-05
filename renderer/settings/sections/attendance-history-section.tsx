@@ -26,18 +26,19 @@ function fmtDay(day: string): string {
 // columns), so the keys are enumerated here and grouped for the picker UI. The
 // chart "attendance" series is the per-service (baselined) value stored in each
 // sample; the day total is a scalar summary card, not a drawable series.
+// "Attendance" = people in the room (occupancy series/peak — the real count).
+// "Total entries" = the cumulative door count (double-counts re-entries).
 const CHART_METRICS = [
-  { key: "attendance", label: "Attendance" },
-  { key: "occupancy", label: "In room" },
-  { key: "avg", label: "Avg in room" },
+  { key: "occupancy", label: "Attendance" },
+  { key: "attendance", label: "Total entries" },
+  { key: "avg", label: "Avg attendance" },
   { key: "markers", label: "Plan items" },
 ] as const;
 const STAT_METRICS = [
   { key: "peak", label: "Peak attendance" },
-  { key: "dayTotal", label: "Day total" },
-  { key: "peakRoom", label: "Peak in-room" },
-  { key: "lowest", label: "Lowest in-room" },
-  { key: "latest", label: "Latest in-room" },
+  { key: "lowest", label: "Lowest attendance" },
+  { key: "entries", label: "Total entries" },
+  { key: "dayTotal", label: "Total entries (day)" },
   { key: "samples", label: "Samples" },
 ] as const;
 const ALL_METRIC_KEYS = [...CHART_METRICS.map((m) => m.key), ...STAT_METRICS.map((m) => m.key)];
@@ -53,7 +54,9 @@ function loadVisibleMetrics(): string[] {
   } catch {
     /* fall through to default */
   }
-  return ALL_METRIC_KEYS.slice(); // default: everything visible
+  // Default: the real attendance (in-room) + avg + plan markers, and Peak/Lowest
+  // attendance + samples. "Total entries" (cumulative) stays off unless picked.
+  return ["occupancy", "avg", "markers", "peak", "lowest", "samples"];
 }
 
 /**
@@ -294,11 +297,10 @@ export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendan
   // service not reset off the prior one still reads its own count on the chart + peak.
   const attSamples = detail.samples.map((s) => ({ t: s.t, attendance: perServiceAttendance(s.attendance, detail.samples), occupancy: s.occupancy }));
   const statValues: Record<string, { value: number | null; accent: string }> = {
-    peak: { value: servicePeakAttendance(detail), accent: "text-blue-11" },
-    dayTotal: { value: detail.totalAttendance ?? null, accent: "text-blue-11" },
-    peakRoom: { value: detail.peakOccupancy, accent: "text-green-11" },
+    peak: { value: detail.peakOccupancy, accent: "text-green-11" }, // peak people in the room = real attendance
     lowest: { value: detail.minOccupancy ?? null, accent: "text-amber-11" },
-    latest: { value: detail.lastOccupancy, accent: "text-gray-12" },
+    entries: { value: servicePeakAttendance(detail), accent: "text-blue-11" }, // cumulative door count
+    dayTotal: { value: detail.totalAttendance ?? null, accent: "text-blue-11" },
     samples: { value: detail.samples.length, accent: "text-gray-12" },
   };
   const shownStats = STAT_METRICS.filter((m) => shows(m.key));
@@ -432,9 +434,9 @@ function AttendanceChart({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-4 text-caption2 flex-wrap text-gray-11">
-        {showAttendance && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-blue-9" /> Attendance</span>}
-        {showOccupancy && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-green-9" /> In room</span>}
-        {avgOccupancy != null && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-green-9" /> Avg in room {avgOccupancy.toLocaleString()}</span>}
+        {showOccupancy && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-green-9" /> Attendance</span>}
+        {showAttendance && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-blue-9" /> Total entries</span>}
+        {avgOccupancy != null && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-green-9" /> Avg attendance {avgOccupancy.toLocaleString()}</span>}
         {inRange.length > 0 && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-gray-8" /> Plan items</span>}
       </div>
       <div className="overflow-x-auto rounded-lg border border-gray-5 bg-gray-2 p-2">

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Trash2Icon, ClockIcon, CopyIcon, TimerIcon, TrendingUpIcon, TrendingDownIcon, GaugeIcon, UsersIcon, CalendarDaysIcon, type LucideIcon } from "lucide-react";
+import { Trash2Icon, ClockIcon, CopyIcon, TimerIcon, TrendingUpIcon, TrendingDownIcon, GaugeIcon, UsersIcon, CalendarDaysIcon, DoorOpenIcon, type LucideIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { confirm, EmptyState, SkeletonRows, Button, toast } from "../../components/ui";
@@ -40,10 +40,11 @@ const OVERVIEW_METRICS: OverviewMetricDef[] = [
   { key: "longest", label: "Longest service", group: "timing", Icon: TrendingUpIcon },
   { key: "shortest", label: "Shortest service", group: "timing", Icon: TrendingDownIcon },
   { key: "avgOverrun", label: "Avg overrun", group: "timing", Icon: GaugeIcon },
-  { key: "avgInRoom", label: "Avg in-room", group: "attendance", Icon: UsersIcon },
   { key: "avgAttendance", label: "Avg attendance", group: "attendance", Icon: UsersIcon },
   { key: "highestAttended", label: "Highest attended", group: "attendance", Icon: TrendingUpIcon },
   { key: "lowestAttended", label: "Lowest attended", group: "attendance", Icon: TrendingDownIcon },
+  { key: "dayAttendance", label: "Day attendance", group: "attendance", Icon: CalendarDaysIcon },
+  { key: "avgEntries", label: "Avg entries", group: "attendance", Icon: DoorOpenIcon },
 ];
 const OVERVIEW_KEYS = OVERVIEW_METRICS.map((m) => m.key);
 const OVERVIEW_GROUP_LABEL: Record<OverviewGroup, string> = { timing: "Timing", attendance: "Attendance" };
@@ -58,7 +59,7 @@ function loadOverviewMetrics(): string[] {
   } catch {
     /* default */
   }
-  return ["services", "avgLength", "avgStart", "avgInRoom"];
+  return ["services", "avgLength", "avgStart", "avgAttendance"];
 }
 
 /** ISO → local "HH:MM" for a <input type="time">, or "" if absent/invalid. */
@@ -384,8 +385,10 @@ export function ServiceHistorySection() {
     const lens = sums.filter((x) => x.s.actual > 0);
     const punct = sums.map((x) => x.s.lateStartSec).filter((v): v is number => v != null);
     const overruns = sums.map((x) => (x.s.planned != null ? x.s.actual - x.s.planned : null)).filter((v): v is number => v != null);
+    // "Attendance" = peak people in the room (peakOccupancy); "entries" = cumulative
+    // door count (double-counts re-entries) via servicePeakAttendance.
     const occ = att.filter((a) => a.peakOccupancy > 0);
-    const pk = att.map((a) => servicePeakAttendance(a)).filter((v) => v > 0);
+    const entries = att.map((a) => servicePeakAttendance(a)).filter((v) => v > 0);
     const maxOcc = occ.length ? occ.reduce((m, a) => (a.peakOccupancy > m.peakOccupancy ? a : m)) : null;
     const minOcc = occ.length ? occ.reduce((m, a) => (a.peakOccupancy < m.peakOccupancy ? a : m)) : null;
     const longest = lens.length ? lens.reduce((m, x) => (x.s.actual > m.s.actual ? x : m)) : null;
@@ -394,14 +397,18 @@ export function ServiceHistorySection() {
     const avgPunct = mean(punct);
     const avgOverrun = mean(overruns);
     const num = (n: number | null) => (n != null ? n.toLocaleString() : "—");
+    // Day attendance: the SELECTED day's services' peak in-room, summed (both services).
+    const dayOcc = asOf ? att.filter((a) => a.serviceDate === asOf).reduce((s, a) => s + a.peakOccupancy, 0) : 0;
+    const dayCount = asOf ? att.filter((a) => a.serviceDate === asOf).length : 0;
     return {
       services: { value: tl.length.toLocaleString(), accent: "text-gray-12" },
       avgLength: { value: fmtDur(mean(lens.map((x) => x.s.actual))), accent: "text-blue-11" },
       avgStart: { value: avgPunct != null ? startFmt(avgPunct) : "—", accent: avgPunct != null && avgPunct > 60 ? "text-amber-11" : "text-gray-12" },
-      avgInRoom: { value: num(mean(occ.map((a) => a.peakOccupancy))), accent: "text-green-11" },
-      avgAttendance: { value: num(mean(pk)), accent: "text-blue-11" },
+      avgAttendance: { value: num(mean(occ.map((a) => a.peakOccupancy))), accent: "text-green-11" },
+      avgEntries: { value: num(mean(entries)), accent: "text-blue-11" },
       highestAttended: { value: maxOcc ? maxOcc.peakOccupancy.toLocaleString() : "—", sub: maxOcc ? shortDay(maxOcc.serviceDate) : undefined, accent: "text-green-11" },
       lowestAttended: { value: minOcc ? minOcc.peakOccupancy.toLocaleString() : "—", sub: minOcc ? shortDay(minOcc.serviceDate) : undefined, accent: "text-amber-11" },
+      dayAttendance: { value: dayCount ? dayOcc.toLocaleString() : "—", sub: dayCount ? `${dayCount} service${dayCount === 1 ? "" : "s"}` : undefined, accent: "text-green-11" },
       longest: { value: longest ? fmtDur(longest.s.actual) : "—", sub: longest ? shortDay(longest.t.serviceDate) : undefined, accent: "text-gray-12" },
       shortest: { value: shortest ? fmtDur(shortest.s.actual) : "—", sub: shortest ? shortDay(shortest.t.serviceDate) : undefined, accent: "text-gray-12" },
       avgOverrun: { value: avgOverrun != null ? fmtDelta(avgOverrun) : "—", accent: avgOverrun != null && avgOverrun > 0 ? "text-red-11" : "text-gray-12" },
@@ -425,8 +432,8 @@ export function ServiceHistorySection() {
       avgLength: tail(tl.map((t) => summarize(t).actual).filter((v) => v > 0)),
       avgStart: tail(tl.map((t) => summarize(t).lateStartSec).filter((v): v is number => v != null)),
       avgOverrun: tail(tl.map((t) => { const s = summarize(t); return s.planned != null ? s.actual - s.planned : null; }).filter((v): v is number => v != null)),
-      avgInRoom: tail(att.map((a) => a.peakOccupancy).filter((v) => v > 0)),
-      avgAttendance: tail(att.map((a) => servicePeakAttendance(a)).filter((v) => v > 0)),
+      avgAttendance: tail(att.map((a) => a.peakOccupancy).filter((v) => v > 0)),
+      avgEntries: tail(att.map((a) => servicePeakAttendance(a)).filter((v) => v > 0)),
     } as Record<string, number[]>;
   }, [list, attList, day, typeFilter]);
 
