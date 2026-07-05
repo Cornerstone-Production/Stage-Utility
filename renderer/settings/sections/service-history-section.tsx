@@ -524,6 +524,10 @@ export function ServiceHistorySection() {
         toast.error("Couldn't update");
       }
     }
+    // The include/exclude checkbox column only shows while editing times.
+    const gridCols = editingTimes
+      ? "grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_4.5rem]"
+      : "grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem]";
     return (
       <div className="flex flex-col gap-4">
         <button className="self-start text-caption1 text-blue-11 hover:underline" onClick={() => setSelectedKey(null)}>
@@ -577,8 +581,9 @@ export function ServiceHistorySection() {
         </div>
 
         <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
-          <div className="grid grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_4.5rem] gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10">
-            <span className="text-center" title="Count toward the service timers">✓</span><span>#</span><span>Item</span><span className="text-right">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right">Ended</span>
+          <div className={`grid ${gridCols} gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10`}>
+            {editingTimes && <span className="text-center" title="Count toward the service timers">✓</span>}
+            <span>#</span><span>Item</span><span className="text-right">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right">Ended</span>
           </div>
           {detail.items.map((it, i) => {
             const itemLive = it.endedAt == null;
@@ -586,14 +591,16 @@ export function ServiceHistorySection() {
             const delta = it.plannedLengthSec != null && it.actualDurationSec != null ? it.actualDurationSec - it.plannedLengthSec : null;
             const deltaColor = delta == null ? "text-gray-9" : delta > 30 ? "text-red-11" : delta < -30 ? "text-blue-11" : "text-gray-11";
             return (
-              <div key={it.itemId} className={`grid grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_4.5rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums items-center ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${counted ? "" : "opacity-55"}`}>
-                <input
-                  type="checkbox"
-                  checked={counted}
-                  onChange={() => toggleCounted(it)}
-                  className="justify-self-center cursor-pointer"
-                  title={counted ? "Counted in service timers — click to exclude" : "Not counted — click to include"}
-                />
+              <div key={it.itemId} className={`grid ${gridCols} gap-2 px-3 py-1.5 text-caption1 tabular-nums items-center ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${counted ? "" : "opacity-55"}`}>
+                {editingTimes && (
+                  <input
+                    type="checkbox"
+                    checked={counted}
+                    onChange={() => toggleCounted(it)}
+                    className="justify-self-center cursor-pointer"
+                    title={counted ? "Counted in service timers — click to exclude" : "Not counted — click to include"}
+                  />
+                )}
                 <span className="text-gray-9">{i + 1}</span>
                 <span className="text-gray-12 truncate">
                   {it.title || "—"}
