@@ -665,7 +665,7 @@ function SplMeterValue({
 
 function hhmm(iso: string): string {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 /** A "nice" integer axis step (1 / 2 / 5 × 10ⁿ, minimum 1) for a target interval
@@ -815,6 +815,9 @@ function PeopleGraph({
     .map((m) => ({ label: m.label, ms: Date.parse(m.t), t: m.t }))
     .filter((m) => Number.isFinite(m.ms) && m.ms >= t0 - 1000 && m.ms <= tN + 1000)
     .map((m) => { const idx = nearestIdx(m.ms); return { ...m, idx, x: px(idx) }; });
+  // Autosize marker labels: full size up to ~6 markers, then scale down (floored)
+  // so a busy plan's rotated times stay legible without overlapping.
+  const markerFont = Math.max(6, fontPx * 0.85 * (markerPts.length > 6 ? 6 / markerPts.length : 1));
 
   // Hover: map pointer X (over the full-width box) back to the nearest sample index.
   function onMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -871,11 +874,17 @@ function PeopleGraph({
         </span>
       )}
 
-      {/* PCO marker time labels (crisp HTML, above the plot) */}
+      {/* PCO marker time labels — rotated vertical so they don't crowd, and
+          shrunk as markers get dense (denser plan → smaller type, floored). */}
       {markerPts.map((m, i) => (
         <span
           key={i}
-          style={{ position: "absolute", left: `${m.x}%`, top: `${PADT}%`, transform: "translate(-50%, -105%)", color: stroke, opacity: 0.65, fontSize: `${fontPx * 0.85}px`, lineHeight: 1, fontWeight: 600, whiteSpace: "nowrap", pointerEvents: "none" }}
+          style={{
+            position: "absolute", left: `${m.x}%`, top: `${PADT}%`,
+            transform: "translate(-50%, -50%) rotate(-90deg)", transformOrigin: "center",
+            color: stroke, opacity: 0.7, fontSize: `${markerFont}px`, lineHeight: 1,
+            fontWeight: 600, whiteSpace: "nowrap", pointerEvents: "none",
+          }}
         >
           {hhmm(m.t)}
         </span>
