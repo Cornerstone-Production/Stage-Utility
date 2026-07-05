@@ -87,6 +87,7 @@ export interface SectionHandlers {
   handleAddOutput: () => Promise<void>;
   handleRenameOutput: (id: string, name: string) => Promise<void>;
   handleSetOutputView: (id: string, viewId: string | null) => Promise<void>;
+  handleSetOutputLocked: (id: string, locked: boolean) => Promise<void>;
   handleRemoveOutput: (id: string) => Promise<void>;
   handleReorderOutputs: (ids: string[]) => Promise<void>;
   handleOpenOutputWindow: (id: string) => Promise<void>;

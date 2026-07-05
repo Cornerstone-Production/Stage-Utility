@@ -567,6 +567,9 @@ interface Output {
   viewId: string | null;
   /** When true, the screen renders a full black blackout regardless of its View. */
   blackout?: boolean;
+  /** When true, this display's top bar hides its nav escape hatches (QR/settings +
+   *  home logo) so a handed-out link can't leave the display. */
+  locked?: boolean;
 }
 
 /** Per-output render descriptor (output id → routed view's kind/ndi/name). */
@@ -576,6 +579,7 @@ interface ResolvedOutput {
   ndiSource: string | null;
   viewName: string | null;
   blackout: boolean;
+  locked: boolean;
 }
 
 /** A live transcript line from ProdCom (SSE "prodcom:transcript"). */

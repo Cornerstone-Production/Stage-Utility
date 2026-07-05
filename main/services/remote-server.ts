@@ -1236,14 +1236,16 @@ export class RemoteServer {
       const hasViewId = "viewId" in body
         && (typeof body.viewId === "string" || body.viewId === null);
       const hasBlackout = typeof body.blackout === "boolean";
-      if (!hasName && !hasViewId && !hasBlackout) {
-        error(res, "body.name (string), body.viewId (string|null), or body.blackout (boolean) required");
+      const hasLocked = typeof body.locked === "boolean";
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), or body.locked (boolean) required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameOutput(id, body.name as string);
       if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null);
       if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
+      if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
       json(res, state);
       return;
     }

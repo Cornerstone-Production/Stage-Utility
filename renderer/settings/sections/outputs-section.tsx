@@ -2,7 +2,7 @@ import { useState, useEffect, type ChangeEvent, type CSSProperties } from "react
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, GripVerticalIcon, RefreshCwIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, GripVerticalIcon, RefreshCwIcon, LockIcon } from "lucide-react";
 import {
   Button,
   Input,
@@ -11,6 +11,7 @@ import {
   SelectContent,
   SelectItem,
   SelectValue,
+  Switch,
   toast,
 } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
@@ -37,12 +38,13 @@ interface OutputRowProps {
   canRemove: boolean;
   onRename: (name: string) => void;
   onSetView: (viewId: string | null) => void;
+  onSetLocked: (locked: boolean) => void;
   onOpenWindow: () => void;
   onRefresh: () => void;
   onRemove: () => void;
 }
 
-function OutputRow({ output, views, baseUrl, isFirst, canRemove, onRename, onSetView, onOpenWindow, onRefresh, onRemove }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, isFirst, canRemove, onRename, onSetView, onSetLocked, onOpenWindow, onRefresh, onRemove }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: output.id,
@@ -140,6 +142,14 @@ function OutputRow({ output, views, baseUrl, isFirst, canRemove, onRename, onSet
         >
           {outputUrl}
         </button>
+        <label
+          className="flex items-center gap-1.5 shrink-0 text-caption1 text-gray-9 sm:ml-auto cursor-pointer"
+          title="Hide the settings/QR link and home logo on this display so a handed-out link can't navigate away"
+        >
+          <LockIcon className="size-3.5 text-gray-9" />
+          <span>Locked</span>
+          <Switch checked={output.locked ?? false} onCheckedChange={onSetLocked} aria-label={`Lock display ${output.name}`} />
+        </label>
       </div>
     </div>
   );
@@ -183,6 +193,7 @@ export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "sta
                 canRemove={outputs.length > 1}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
+                onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
                 onOpenWindow={() => handlers.handleOpenOutputWindow(output.id)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}

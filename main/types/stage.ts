@@ -414,6 +414,9 @@ export interface Output {
   /** When true, this screen renders a full black "blackout" regardless of its
    *  routed View. Toggling it off restores the View instantly. */
   blackout?: boolean;
+  /** When true, this display's top bar hides its nav escape hatches (QR/settings +
+   *  home logo) so a handed-out link can't navigate away from the display. */
+  locked?: boolean;
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */
@@ -423,6 +426,7 @@ export interface ResolvedOutput {
   ndiSource: string | null;
   viewName: string | null;
   blackout: boolean;
+  locked: boolean;
 }
 
 /**

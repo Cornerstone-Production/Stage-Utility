@@ -433,6 +433,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { viewId: p.viewId });
     }
 
+    case "outputs:setLocked": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { locked: p.locked });
+    }
+
     case "outputs:remove": {
       const id = p.id as string;
       return del<T>(`/api/outputs/${encodeURIComponent(id)}`);

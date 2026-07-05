@@ -878,6 +878,21 @@ export function SettingsView() {
     }
   }
 
+  async function handleSetOutputLocked(id: string, locked: boolean) {
+    const prev = queryClient.getQueryData<StageState>(["stage:getState"]);
+    if (prev) {
+      const outputs = prev.outputs.map((o) => (o.id === id ? { ...o, locked } : o));
+      queryClient.setQueryData(["stage:getState"], { ...prev, outputs });
+    }
+    try {
+      const next = await ipc<StageState>("outputs:setLocked", { id, locked });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      if (prev) queryClient.setQueryData(["stage:getState"], prev);
+      toast.error(`Failed to update display lock: ${String(err)}`);
+    }
+  }
+
   async function handleRemoveOutput(id: string) {
     try {
       const next = await ipc<StageState>("outputs:remove", { id });
@@ -959,6 +974,7 @@ export function SettingsView() {
     handleAddOutput,
     handleRenameOutput,
     handleSetOutputView,
+    handleSetOutputLocked,
     handleRemoveOutput,
     handleReorderOutputs,
     handleOpenOutputWindow,
