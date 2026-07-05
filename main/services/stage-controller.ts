@@ -175,6 +175,7 @@ export class StageController {
 
   // PCO credentials (set by IntegrationManager after config saves).
   private pcoAppId: string | null = null;
+  private pcoCountdownTarget: "plan-start" | "service-time" = "plan-start";
   private pcoSecret: string | null = null;
 
   // Latest PCO live state (set by fetchLive) — used by the auto-update guard.
@@ -291,9 +292,10 @@ export class StageController {
 
   // ── PCO credentials ───────────────────────────────────────────────────
 
-  setPcoCredentials(appId: string | null, secret: string | null): void {
+  setPcoCredentials(appId: string | null, secret: string | null, countdownTarget?: "plan-start" | "service-time"): void {
     this.pcoAppId = appId;
     this.pcoSecret = secret;
+    if (countdownTarget) this.pcoCountdownTarget = countdownTarget;
     this.state = { ...this.state, pcoConfigured: !!(appId && secret) };
     // No broadcast here — called as part of IntegrationManager's setConfig which broadcasts separately.
   }
@@ -418,6 +420,7 @@ export class StageController {
       this.pcoSecret,
       this.state.serviceTypeId,
       this.state.planId,
+      this.pcoCountdownTarget,
     );
     // Remembered for the auto-update guard (don't update mid-service).
     this.lastLive = live;

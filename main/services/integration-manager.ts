@@ -51,6 +51,16 @@ const PCO_DESCRIPTOR: IntegrationDescriptor = {
         { value: "120", label: "2 hours" },
       ],
     },
+    {
+      key: "countdownTarget",
+      label: "Pre-service countdown",
+      type: "select",
+      help: "What the countdown counts down to before a service is live. \"Plan start\" matches PCO's green timer (the top of the plan / doors) by counting to the service time minus any pre-service items above a \"service start\"-type header; if no such header exists it uses the service time. \"Service start time\" always counts to the PCO service time.",
+      options: [
+        { value: "plan-start", label: "Plan start (matches PCO)" },
+        { value: "service-time", label: "Service start time" },
+      ],
+    },
   ],
 };
 
@@ -987,7 +997,9 @@ class IntegrationManager {
   private async applyPcoCredentials(): Promise<void> {
     const appId = await this.getPcoAppId();
     const secret = await this.getPcoSecret();
-    stageController.setPcoCredentials(appId, secret);
+    const settings = await settingsStore.load();
+    const target = settings.integrationConfigs["planning-center"]?.countdownTarget === "service-time" ? "service-time" : "plan-start";
+    stageController.setPcoCredentials(appId, secret, target);
 
     if (appId && secret) {
       this.setConnectionState("planning-center", "connected", "Credentials configured");

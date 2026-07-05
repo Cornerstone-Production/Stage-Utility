@@ -53,6 +53,15 @@ interface ServiceTime {
   endsAt: string | null;
 }
 
+/** True when a header title marks the start of the service (the anchor the "service
+ *  time" sits at), so items above it are pre-service. Matches common phrasings
+ *  case-insensitively — PCO exposes no explicit anchor, so this header is the signal.
+ *  Deliberately narrow (won't match "pre-service", "service order", etc.). */
+export function isServiceStartHeader(title: string): boolean {
+  const t = (title ?? "").toUpperCase().replace(/[^A-Z ]+/g, " ").replace(/\s+/g, " ").trim();
+  return t === "SERVICE START" || t.includes("SERVICE START") || t.includes("START OF SERVICE") || t.includes("SERVICE BEGIN");
+}
+
 /**
  * Current + next item titles from the PLAN order (the authoritative rundown),
  * given the live item id. "next" skips header rows; with no live item yet it's the
@@ -671,6 +680,7 @@ class PcoService {
     secret: string,
     serviceTypeId: string,
     planId: string,
+    countdownTarget: "plan-start" | "service-time" = "plan-start",
   ): Promise<PcoLiveDTO> {
     const serverNow = new Date().toISOString();
     const base = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}`;
@@ -730,19 +740,22 @@ class PcoService {
     }
 
     // ── "preservice" mode: count down like PCO's green timer. ──
-    // PCO counts to the TOP of the plan (the first item), not the service-start
-    // anchor. The plan's "service time" is anchored at the "SERVICE START" header,
-    // so items above it (Doors, pre-roll, …) run BEFORE the anchor — shift the
-    // target earlier by their total length so we match PCO exactly. Falls back to
-    // the anchor itself when there's no such header.
+    // PCO's timer counts to the TOP of the plan (the first item), not the service
+    // time — the "service time" is anchored at the service-start item, so pre-service
+    // items above it (doors, pre-roll, …) run BEFORE it. When countdownTarget is
+    // "plan-start" (default) we find a "service start"-type header and shift the
+    // target earlier by the length of items above it, matching PCO. If there's no
+    // such header (or countdownTarget is "service-time"), we count to the service
+    // time. PCO's API exposes no per-item scheduled time or explicit anchor, so a
+    // marker header is the only in-plan signal for where the service begins.
     if (serviceTimeStartsAt) {
-      const startIdx = planItems.findIndex(
-        (p) => p.itemType === "header" && p.title.trim().toUpperCase() === "SERVICE START",
-      );
       let targetAt = serviceTimeStartsAt;
-      if (startIdx > 0) {
-        const preSec = planItems.slice(0, startIdx).reduce((sum, p) => sum + (p.lengthSec || 0), 0);
-        if (preSec > 0) targetAt = new Date(Date.parse(serviceTimeStartsAt) - preSec * 1000).toISOString();
+      if (countdownTarget === "plan-start") {
+        const startIdx = planItems.findIndex((p) => p.itemType === "header" && isServiceStartHeader(p.title));
+        if (startIdx > 0) {
+          const preSec = planItems.slice(0, startIdx).reduce((sum, p) => sum + (p.lengthSec || 0), 0);
+          if (preSec > 0) targetAt = new Date(Date.parse(serviceTimeStartsAt) - preSec * 1000).toISOString();
+        }
       }
       return {
         mode: "preservice",
