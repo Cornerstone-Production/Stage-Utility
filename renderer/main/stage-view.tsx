@@ -55,6 +55,18 @@ class StageErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundar
 
 // ---- kiosk top bar ----------------------------------------------------------
 
+// A "locked" kiosk (shared-link with ?kiosk=1) keeps the top bar for consistency
+// but strips the escape hatches — the QR/settings link and the clickable home
+// logo — so a handed-out link can't navigate away to settings or other displays.
+// Soft by design (a savvy user could edit the URL); it's a guardrail, not auth.
+function kioskLocked(): boolean {
+  try {
+    return new URLSearchParams(window.location.search).get("kiosk") === "1";
+  } catch {
+    return false;
+  }
+}
+
 interface KioskTopBarProps {
   serviceTypeName: string | null;
   planSeriesTitle: string | null;
@@ -87,6 +99,27 @@ function KioskTopBar({
       ? `${service} - ${planSeriesTitle}`
       : service;
   const contextLabel = `${lead}: ${event}`;
+  const locked = kioskLocked();
+
+  // Brand logo + name; a link home only when unlocked (locked → plain, no navigation).
+  const brandInner = (
+    <>
+      {appLogo && (
+        <BrandLogo
+          logo={appLogo}
+          monochrome={appLogoMonochrome}
+          className="rounded select-none shrink-0"
+          style={{ width: "1.55em", height: "1.55em" }}
+        />
+      )}
+      <span
+        className="font-title select-none truncate"
+        style={{ fontSize: "1em", letterSpacing: "0.02em" }}
+      >
+        {appName}
+      </span>
+    </>
+  );
 
   return (
     <div
@@ -106,28 +139,21 @@ function KioskTopBar({
       {/* Brand + display name — one centered row so logo, name, divider and
           display name all share the same vertical center. */}
       <div className="shrink-0 flex items-center relative z-10" style={{ marginLeft: "1em", gap: "0.7em" }}>
-        <a
-          href="/"
-          className="flex items-center text-white/70 rounded hover:opacity-80 transition-opacity"
-          style={{ gap: "0.55em" }}
-          title="Back to home"
-          aria-label="Back to home"
-        >
-          {appLogo && (
-            <BrandLogo
-              logo={appLogo}
-              monochrome={appLogoMonochrome}
-              className="rounded select-none shrink-0"
-              style={{ width: "1.55em", height: "1.55em" }}
-            />
-          )}
-          <span
-            className="font-title select-none truncate"
-            style={{ fontSize: "1em", letterSpacing: "0.02em" }}
+        {locked ? (
+          <div className="flex items-center text-white/70" style={{ gap: "0.55em" }}>
+            {brandInner}
+          </div>
+        ) : (
+          <a
+            href="/"
+            className="flex items-center text-white/70 rounded hover:opacity-80 transition-opacity"
+            style={{ gap: "0.55em" }}
+            title="Back to home"
+            aria-label="Back to home"
           >
-            {appName}
-          </span>
-        </a>
+            {brandInner}
+          </a>
+        )}
         {displayName && (
           <>
             <span className="w-px bg-white/15 shrink-0" style={{ height: "1.3em" }} aria-hidden="true" />
@@ -150,7 +176,7 @@ function KioskTopBar({
         </span>
       </div>
 
-      {showQr && remoteUrl && (
+      {showQr && remoteUrl && !locked && (
         <a
           href="/settings"
           target="_blank"
