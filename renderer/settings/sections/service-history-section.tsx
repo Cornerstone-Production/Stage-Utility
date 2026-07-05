@@ -139,6 +139,8 @@ export function ServiceHistorySection() {
   const [spl, setSpl] = useState<ServiceSplHistory | null>(null);
   // Baptism sessions (cross-linked to a service by time overlap).
   const [baptisms, setBaptisms] = useState<BaptismSession[]>([]);
+  // Attendance records for all services — for the Overview card's avg in-room.
+  const [attList, setAttList] = useState<ServiceAttendance[]>([]);
   const [day, setDay] = useState<string | null>(null);
 
   function reload() {
@@ -148,6 +150,9 @@ export function ServiceHistorySection() {
   }
   useEffect(() => {
     reload();
+    invoke<ServiceAttendance[]>("attendance:listHistory")
+      .then((a) => setAttList(a ?? []))
+      .catch(() => setAttList([]));
   }, []);
 
   // Live updates while a service is recording — refresh the open detail/list.
@@ -211,6 +216,19 @@ export function ServiceHistorySection() {
     for (const s of list ?? []) m.set(s.serviceDate, (m.get(s.serviceDate) ?? 0) + 1);
     return m;
   }, [list]);
+
+  // Overview stats, cumulative THROUGH the selected day (serviceDate <= day) so
+  // picking a past date shows how things looked as of then. Finished records only.
+  const overview = useMemo(() => {
+    const asOf = day;
+    const tl = (list ?? []).filter((t) => t.endedAt != null && (!asOf || t.serviceDate <= asOf));
+    const att = attList.filter((a) => a.endedAt != null && (!asOf || a.serviceDate <= asOf));
+    const mean = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
+    const lens = tl.map((t) => summarize(t).actual).filter((v) => v > 0);
+    const punct = tl.map((t) => summarize(t).lateStartSec).filter((v): v is number => v != null);
+    const occ = att.map((a) => a.peakOccupancy).filter((v) => v > 0);
+    return { count: tl.length, avgLen: mean(lens), avgPunct: mean(punct), avgOcc: mean(occ) };
+  }, [list, attList, day]);
 
   async function deleteService(key: string, title: string) {
     if (!(await confirm({ title: "Delete recording?", message: `Delete the service-timing recording for "${title}"? This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
@@ -354,7 +372,30 @@ export function ServiceHistorySection() {
   // ── List view: services for the selected day. ──
   return (
     <div className="flex flex-col gap-3">
-      <HistoryCalendar counts={dateCounts} selected={day} onPick={setDay} />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+        <HistoryCalendar counts={dateCounts} selected={day} onPick={setDay} />
+        <div className="flex-1 min-w-0 rounded-xl border border-gray-5 bg-gray-2 p-3 flex flex-col">
+          <div className="text-caption2 text-gray-9 mb-3">
+            Overview{day ? ` · through ${fmtDay(day)}` : " · all time"}
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 flex-1 content-center">
+            <OStat label="Services" value={overview.count.toLocaleString()} accent="text-gray-12" />
+            <OStat label="Avg length" value={fmtDur(overview.avgLen)} accent="text-blue-11" />
+            <OStat
+              label="Avg start"
+              value={
+                overview.avgPunct == null
+                  ? "—"
+                  : overview.avgPunct >= 0
+                    ? `${fmtDur(overview.avgPunct)} late`
+                    : `${fmtDur(-overview.avgPunct)} early`
+              }
+              accent={overview.avgPunct != null && overview.avgPunct > 60 ? "text-amber-11" : "text-gray-12"}
+            />
+            <OStat label="Avg in-room" value={overview.avgOcc != null ? overview.avgOcc.toLocaleString() : "—"} accent="text-green-11" />
+          </div>
+        </div>
+      </div>
       {day && <span className="text-body font-medium text-gray-12">{fmtDay(day)}</span>}
 
       <div className="flex flex-col gap-2">
@@ -390,6 +431,16 @@ export function ServiceHistorySection() {
         })}
         {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
       </div>
+    </div>
+  );
+}
+
+/** Compact label/value for the Overview card (no border — the card frames them). */
+function OStat({ label, value, accent }: { label: string; value: string; accent: string }) {
+  return (
+    <div className="flex flex-col">
+      <div className="text-caption2 text-gray-9">{label}</div>
+      <div className={`text-title3 font-semibold tabular-nums ${accent}`}>{value}</div>
     </div>
   );
 }
