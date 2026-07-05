@@ -160,13 +160,22 @@ export function AttendanceHistorySection() {
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-          <Stat label="Peak attendance" value={detail.peakAttendance} accent="text-blue-11" />
-          <Stat label="Peak in-room" value={detail.peakOccupancy} accent="text-green-11" />
-          <Stat label="Lowest in-room" value={detail.minOccupancy ?? null} accent="text-amber-11" />
-          <Stat label="Latest in-room" value={detail.lastOccupancy} accent="text-gray-12" />
-          <Stat label="Samples" value={detail.samples.length} accent="text-gray-12" />
-        </div>
+        {(() => {
+          // "Day total" = running attendance across ALL of the day's services; only
+          // meaningful (and shown) when it exceeds this service's own peak — i.e. a
+          // later service carrying earlier services' entries.
+          const showTotal = (detail.totalAttendance ?? 0) > detail.peakAttendance;
+          return (
+            <div className={`grid grid-cols-2 gap-2 ${showTotal ? "sm:grid-cols-6" : "sm:grid-cols-5"}`}>
+              <Stat label="Peak attendance" value={detail.peakAttendance} accent="text-blue-11" />
+              {showTotal && <Stat label="Day total" value={detail.totalAttendance} accent="text-blue-11" />}
+              <Stat label="Peak in-room" value={detail.peakOccupancy} accent="text-green-11" />
+              <Stat label="Lowest in-room" value={detail.minOccupancy ?? null} accent="text-amber-11" />
+              <Stat label="Latest in-room" value={detail.lastOccupancy} accent="text-gray-12" />
+              <Stat label="Samples" value={detail.samples.length} accent="text-gray-12" />
+            </div>
+          );
+        })()}
 
         <AttendanceChart samples={detail.samples} markers={markers} avgOccupancy={avgOccupancy} />
       </div>

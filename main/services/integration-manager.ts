@@ -55,6 +55,7 @@ const PCO_DESCRIPTOR: IntegrationDescriptor = {
       key: "countdownTarget",
       label: "Pre-service countdown",
       type: "select",
+      default: "plan-start",
       help: "What the countdown counts down to before a service is live. \"Plan start\" matches PCO's green timer (the top of the plan / doors) by counting to the service time minus any pre-service items above a \"service start\"-type header; if no such header exists it uses the service time. \"Service start time\" always counts to the PCO service time.",
       options: [
         { value: "plan-start", label: "Plan start (matches PCO)" },
@@ -287,6 +288,7 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       label: "Poll interval (s)",
       type: "number",
       placeholder: "45",
+      default: 45,
       help: "How often to query SenSource. Their counts lag a few minutes server-side, so ~45s is plenty — lower values just add API calls without fresher data.",
     },
   ],

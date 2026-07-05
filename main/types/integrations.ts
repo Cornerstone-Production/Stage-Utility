@@ -10,6 +10,9 @@ export interface ConfigField {
   placeholder?: string;
   /** Optional longer explanation shown behind an "i" info popover next to the label. */
   help?: string;
+  /** Value pre-filled in the setup form when nothing is saved yet (so e.g. a poll
+   *  interval shows 45 instead of 0/blank). Does not override a saved value. */
+  default?: string | number;
 }
 
 export interface IntegrationDescriptor {

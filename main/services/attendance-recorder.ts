@@ -51,8 +51,15 @@ class AttendanceRecorder {
 
         const p = sensourceService.getLatest();
         if (!p.connected || p.total.attendance == null || p.total.occupancy == null) return;
-        const a = p.total.attendance;
+        const rawA = p.total.attendance; // SenSource Σ-entries — a running DAILY total
         const o = p.total.occupancy;
+        // Baseline on the first sample so attendance is PER-SERVICE: a second service
+        // in the same plan (new serviceTimeId → new record) starts its curve at 0
+        // instead of inheriting the first service's count. The raw daily total is
+        // kept separately as totalAttendance.
+        if (this.current.attendanceBaseline == null) this.current.attendanceBaseline = rawA;
+        const a = Math.max(0, rawA - this.current.attendanceBaseline);
+        this.current.totalAttendance = rawA;
         this.current.peakAttendance = Math.max(this.current.peakAttendance, a);
         this.current.peakOccupancy = Math.max(this.current.peakOccupancy, o);
         // Running min "floor" — null until the first reading so an empty-room
@@ -119,6 +126,8 @@ class AttendanceRecorder {
         startedAt: new Date().toISOString(),
         endedAt: null,
         samples: [],
+        attendanceBaseline: null,
+        totalAttendance: 0,
         peakAttendance: 0,
         peakOccupancy: 0,
         minOccupancy: null,

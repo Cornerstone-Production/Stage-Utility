@@ -10,6 +10,7 @@ interface ConfigField {
   options?: { value: string; label: string }[];
   placeholder?: string;
   help?: string;
+  default?: string | number;
 }
 
 interface IntegrationDescriptor {
@@ -171,7 +172,12 @@ interface ServiceAttendance {
   serviceTimeStartsAt: string | null;
   startedAt: string;
   endedAt: string | null;
+  /** samples.attendance is PER-SERVICE (baselined) so a 2nd service in the same plan starts at 0. */
   samples: AttendanceSample[];
+  /** Raw cumulative attendance at this record's first sample; per-service = raw − baseline. */
+  attendanceBaseline: number | null;
+  /** Latest raw cumulative attendance = running total across all of the day's services. */
+  totalAttendance: number;
   peakAttendance: number;
   peakOccupancy: number;
   /** Lowest in-room occupancy seen while the service was live (the "floor"); null

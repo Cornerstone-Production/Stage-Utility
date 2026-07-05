@@ -160,7 +160,7 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
       if (field.type === "password" && typeof raw === "string" && raw !== "") {
         out[field.key] = MASKED_PASSWORD;
       } else {
-        out[field.key] = raw ?? "";
+        out[field.key] = raw ?? field.default ?? "";
       }
     }
     return out;

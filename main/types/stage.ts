@@ -650,8 +650,18 @@ export interface ServiceAttendance {
   serviceTimeStartsAt: string | null;
   startedAt: string;
   endedAt: string | null;
-  /** Down-sampled building-total samples across the service (oldest→newest). */
+  /** Down-sampled samples across the service (oldest→newest). `attendance` is
+   *  PER-SERVICE (baselined — see attendanceBaseline), so a second service in the
+   *  same plan starts its curve at 0 instead of inheriting the first service's count. */
   samples: AttendanceSample[];
+  /** Raw cumulative attendance (SenSource Σ-entries, a running daily total) captured
+   *  when this record's first sample landed. Per-service attendance = raw − baseline.
+   *  null until the first sample. */
+  attendanceBaseline: number | null;
+  /** Latest raw cumulative attendance = the building's running total across ALL of
+   *  the day's services (kept alongside the per-service figure). */
+  totalAttendance: number;
+  /** Peak PER-SERVICE attendance (baselined). */
   peakAttendance: number;
   peakOccupancy: number;
   /** Lowest in-room occupancy seen while the service was live (the service
