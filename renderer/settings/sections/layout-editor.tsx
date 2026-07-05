@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   UndoIcon,
   Trash2Icon,
@@ -888,6 +888,53 @@ function RowText({ label, hint, value, placeholder, onChange }: { label: string;
     <Row label={label} hint={hint}>
       <Input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className="text-gray-12" />
     </Row>
+  );
+}
+
+/** Image object config: a URL field (external https / existing) plus an upload
+ *  button that stores a local file server-side and sets src to the returned URL —
+ *  so the bytes never live in the layout JSON (which rides in stage:state). */
+function ImageConfig({ src, onChange }: { src: string; onChange: (v: string) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the same file be re-picked later
+    if (!file) return;
+    setErr(null);
+    setBusy(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result));
+        r.onerror = () => reject(new Error("Couldn't read the file"));
+        r.readAsDataURL(file);
+      });
+      const { url } = await invoke<{ url: string }>("layout:uploadImage", { dataUrl });
+      onChange(url);
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <RowText label="URL" value={src} placeholder="https://… or upload →" onChange={onChange} />
+      <Row label="Upload">
+        <div className="flex items-center gap-2 min-w-0">
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+          <Button variant="filled" size="small" onClick={() => fileRef.current?.click()} disabled={busy}>
+            {busy ? "Uploading…" : "Choose image…"}
+          </Button>
+          {src.startsWith("/layout-images/") && <span className="text-caption2 text-green-10 shrink-0">uploaded ✓</span>}
+          {err && <span className="text-caption2 text-red-11 truncate">{err}</span>}
+        </div>
+      </Row>
+    </>
   );
 }
 
@@ -2503,7 +2550,7 @@ function Inspector({
         </>
       )}
       {c.type === "image" && (
-        <RowText label="URL" value={c.src} placeholder="https://… or data:" onChange={(v) => onConfig({ type: "image", src: v })} />
+        <ImageConfig src={c.src} onChange={(v) => onConfig({ type: "image", src: v })} />
       )}
       {c.type === "plan-attachment" && (
         <PlanAttachmentConfig c={c} onConfig={onConfig} o={o} canvas={canvas} onGeom={onGeom} />

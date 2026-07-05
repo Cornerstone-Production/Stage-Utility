@@ -18,6 +18,7 @@ import type { OscArg } from "../types/osc.js";
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { getLogLines } from "./log-buffer.js";
 import { editServiceWindow, recalcAttendance } from "./history-edit.js";
+import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
 import { deviceManager } from "./device-manager.js";
 import { configSnapshot } from "./config-snapshot.js";
 import { integrationManager } from "./integration-manager.js";
@@ -503,6 +504,37 @@ export class RemoteServer {
     _url: URL,
     method: string,
   ): Promise<void> {
+    // ── Uploaded custom-layout images ─────────────────────────────────────
+    // Served before static so the SPA fallback doesn't swallow /layout-images/*.
+    {
+      const imgMatch = pathname.match(/^\/layout-images\/([^/]+)$/);
+      if (method === "GET" && imgMatch) {
+        const img = await readLayoutImage(decodeURIComponent(imgMatch[1]));
+        if (!img) {
+          res.writeHead(404, { "Content-Type": "text/plain" });
+          res.end("Not found");
+          return;
+        }
+        // Content-hashed name → immutable, cache forever.
+        res.writeHead(200, { "Content-Type": img.mime, "Cache-Control": "public, max-age=31536000, immutable" });
+        res.end(img.data);
+        return;
+      }
+    }
+    if (method === "POST" && pathname === "/api/layout-images") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      if (typeof body.dataUrl !== "string") {
+        error(res, "body.dataUrl (base64 data:image/… URL) required");
+        return;
+      }
+      try {
+        json(res, { url: await saveLayoutImage(body.dataUrl) });
+      } catch (err) {
+        error(res, String(err instanceof Error ? err.message : err));
+      }
+      return;
+    }
+
     // ── Server log viewer ─────────────────────────────────────────────────
     // Handled before static serving so the SPA fallback doesn't swallow /log.
     if (method === "GET" && pathname === "/log") {
