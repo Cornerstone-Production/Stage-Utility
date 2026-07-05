@@ -17,6 +17,7 @@ import type { DisplayKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "..
 import type { OscArg } from "../types/osc.js";
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { getLogLines } from "./log-buffer.js";
+import { editServiceWindow, recalcAttendance } from "./history-edit.js";
 import { deviceManager } from "./device-manager.js";
 import { configSnapshot } from "./config-snapshot.js";
 import { integrationManager } from "./integration-manager.js";
@@ -691,6 +692,29 @@ export class RemoteServer {
     }
 
     // ── Attendance history (mirrors the SPL history routes) ─────────────────
+    if (method === "POST" && pathname === "/api/history/window") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      if (typeof body.serviceKey !== "string") {
+        error(res, "body.serviceKey (string) required");
+        return;
+      }
+      await editServiceWindow(body.serviceKey, {
+        startedAt: typeof body.startedAt === "string" ? body.startedAt : undefined,
+        endedAt: typeof body.endedAt === "string" ? body.endedAt : undefined,
+      });
+      json(res, { ok: true });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/history/recalc") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      if (typeof body.serviceKey !== "string") {
+        error(res, "body.serviceKey (string) required");
+        return;
+      }
+      await recalcAttendance(body.serviceKey);
+      json(res, { ok: true });
+      return;
+    }
     if (method === "GET" && pathname === "/api/attendance/history/current") {
       json(res, attendanceRecorder.getCurrent());
       return;

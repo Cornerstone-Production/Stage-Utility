@@ -24,6 +24,20 @@ function fmtDay(day: string): string {
   if (Number.isNaN(d.getTime())) return day;
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 }
+/** ISO → local "HH:MM" for a <input type="time">, or "" if absent/invalid. */
+function toTimeInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+/** Local "HH:MM" on the record's service date → ISO, or undefined if blank/invalid. */
+function fromTimeInput(serviceDate: string, hhmm: string): string | undefined {
+  if (!hhmm) return undefined;
+  const d = new Date(`${serviceDate}T${hhmm}:00`);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
 /** Seconds → "m:ss" (or "h:mm:ss"). */
 function fmtDur(sec: number | null): string {
   if (sec == null) return "—";
@@ -144,6 +158,11 @@ export function ServiceHistorySection() {
   const [day, setDay] = useState<string | null>(null);
   // Active service-type filter (serviceTypeId), or null for all types.
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  // Editing the service window (times) in the detail view.
+  const [editingTimes, setEditingTimes] = useState(false);
+  const [editStart, setEditStart] = useState("");
+  const [editEnd, setEditEnd] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   function reload() {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
@@ -199,7 +218,7 @@ export function ServiceHistorySection() {
     return () => {
       cancelled = true;
     };
-  }, [selectedKey]);
+  }, [selectedKey, reloadKey]);
 
   // Distinct service types present, labeled by their PCO name (a record with the
   // name wins over the bare id fallback). Drives the filter; only shown at 2+ types.
@@ -311,6 +330,34 @@ export function ServiceHistorySection() {
       if (ok) toast.success("Report copied to clipboard");
       else toast.error("Couldn't copy the report");
     }
+    function startEditTimes() {
+      setEditStart(toTimeInput(det.startedAt));
+      setEditEnd(toTimeInput(det.endedAt));
+      setEditingTimes(true);
+    }
+    async function saveTimes() {
+      try {
+        await invoke("history:editWindow", {
+          serviceKey: det.serviceKey,
+          startedAt: fromTimeInput(det.serviceDate, editStart),
+          endedAt: fromTimeInput(det.serviceDate, editEnd),
+        });
+        setEditingTimes(false);
+        setReloadKey((k) => k + 1);
+        toast.success("Service times updated");
+      } catch (e) {
+        toast.error(`Couldn't update times: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    async function recalc() {
+      try {
+        await invoke("history:recalcAttendance", { serviceKey: det.serviceKey });
+        setReloadKey((k) => k + 1);
+        toast.success("Attendance recalculated");
+      } catch {
+        toast.error("Recalculate failed");
+      }
+    }
     return (
       <div className="flex flex-col gap-4">
         <button className="self-start text-caption1 text-blue-11 hover:underline" onClick={() => setSelectedKey(null)}>
@@ -328,10 +375,33 @@ export function ServiceHistorySection() {
               {fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt) ? ` · ${fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt)}` : ""}
             </span>
           </div>
-          <Button variant="filled" size="small" onClick={copyReport} tooltip="Copy a full text report (timing + attendance + audio)">
-            <CopyIcon className="size-3.5 text-gray-9" /> Copy report
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="filled" size="small" onClick={startEditTimes} tooltip="Fix the recorded start/end (trims samples + items outside the window)">
+              <ClockIcon className="size-3.5 text-gray-9" /> Edit times
+            </Button>
+            <Button variant="filled" size="small" onClick={copyReport} tooltip="Copy a full text report (timing + attendance + audio)">
+              <CopyIcon className="size-3.5 text-gray-9" /> Copy report
+            </Button>
+          </div>
         </div>
+        {editingTimes && (
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-5 bg-gray-2 p-3">
+            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+              Start
+              <input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="rounded-md border border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12" />
+            </label>
+            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+              End
+              <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="rounded-md border border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12" />
+            </label>
+            <Button variant="accent" size="small" onClick={saveTimes}>Save</Button>
+            <Button variant="transparent" size="small" onClick={() => setEditingTimes(false)}>Cancel</Button>
+            <Button variant="transparent" size="small" onClick={recalc} tooltip="Re-derive peak/min from samples without changing the window">Recalculate</Button>
+            <span className="text-caption2 text-gray-9 flex-1 min-w-[14rem]">
+              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service.
+            </span>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat label="Started" value={fmtTime(sum.firstStart)} accent={sum.lateStartSec != null && sum.lateStartSec > 60 ? "text-amber-11" : "text-gray-12"} sub={sum.lateStartSec != null ? (sum.lateStartSec >= 0 ? `${fmtDelta(sum.lateStartSec)} late` : `${fmtDelta(sum.lateStartSec)} early`) : undefined} />
