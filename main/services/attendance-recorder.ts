@@ -18,6 +18,8 @@ import { stageController } from "./stage-controller.js";
 const PERSIST_DEBOUNCE_MS = 4000;
 /** Minimum gap between recorded trend points (attendance changes slowly). */
 const SAMPLE_INTERVAL_MS = 30_000;
+/** Max cadence for pushing the (O(n)) live record to trend viewers between samples. */
+const LIVE_BROADCAST_MS = 5_000;
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -31,6 +33,7 @@ class AttendanceRecorder {
   private current: ServiceAttendance | null = null;
   private currentKey: string | null = null;
   private lastSampleAt = 0;
+  private lastBroadcastAt = 0;
   private busy = false;
   private dirty = false;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -71,12 +74,19 @@ class AttendanceRecorder {
         this.current.lastOccupancy = o;
 
         const now = Date.now();
+        let appended = false;
         if (now - this.lastSampleAt >= SAMPLE_INTERVAL_MS) {
           this.current.samples.push({ t: new Date().toISOString(), attendance: a, occupancy: o });
           this.lastSampleAt = now;
           this.schedulePersist();
+          appended = true;
         }
-        broadcast("attendance:history", this.current);
+        // The full record is O(n) and the counts move slowly, so live-trend viewers
+        // don't need it 1x/sec — push on a new sample, else at most every LIVE_BROADCAST_MS.
+        if (appended || now - this.lastBroadcastAt >= LIVE_BROADCAST_MS) {
+          this.lastBroadcastAt = now;
+          broadcast("attendance:history", this.current);
+        }
       } else if (this.current && !this.current.endedAt) {
         // Left "item" mode — service ended or the next service's preservice began.
         // Close the open record so the Attendance tab stops showing it as live.
