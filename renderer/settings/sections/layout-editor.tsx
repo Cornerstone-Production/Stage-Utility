@@ -1350,17 +1350,20 @@ export function LayoutEditor({
 
   return (
     <div className="relative flex flex-col gap-3 @container h-full min-h-0">
-      {/* Unsaved-changes banner — floats as a compact pill (absolute overlay) so it
-          doesn't reserve layout space / shift the editor down when it appears. The
-          canvas already reflects the edits; this offers Save / Discard. */}
+      {/* Unsaved-changes banner — a compact pill in a zero-height, right-aligned
+          STICKY anchor: it stays pinned to the top as the editor scrolls (always
+          visible) yet reserves no layout space, so it never shifts content down.
+          pointer-events pass through the empty anchor; only the pill is clickable. */}
       {dirty && (
-        <div className="absolute top-1 right-1 z-30">
-          <UnsavedBanner
-            compact
-            saving={saving}
-            onSave={() => void save()}
-            onDiscard={discardChanges}
-          />
+        <div className="sticky top-1 z-30 h-0 flex justify-end pr-1 pointer-events-none">
+          <div className="pointer-events-auto">
+            <UnsavedBanner
+              compact
+              saving={saving}
+              onSave={() => void save()}
+              onDiscard={discardChanges}
+            />
+          </div>
         </div>
       )}
 
