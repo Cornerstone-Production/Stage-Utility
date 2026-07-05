@@ -729,15 +729,28 @@ class PcoService {
       };
     }
 
-    // ── "preservice" mode: count down to the service start (PCO's pre-service timer). ──
+    // ── "preservice" mode: count down like PCO's green timer. ──
+    // PCO counts to the TOP of the plan (the first item), not the service-start
+    // anchor. The plan's "service time" is anchored at the "SERVICE START" header,
+    // so items above it (Doors, pre-roll, …) run BEFORE the anchor — shift the
+    // target earlier by their total length so we match PCO exactly. Falls back to
+    // the anchor itself when there's no such header.
     if (serviceTimeStartsAt) {
+      const startIdx = planItems.findIndex(
+        (p) => p.itemType === "header" && p.title.trim().toUpperCase() === "SERVICE START",
+      );
+      let targetAt = serviceTimeStartsAt;
+      if (startIdx > 0) {
+        const preSec = planItems.slice(0, startIdx).reduce((sum, p) => sum + (p.lengthSec || 0), 0);
+        if (preSec > 0) targetAt = new Date(Date.parse(serviceTimeStartsAt) - preSec * 1000).toISOString();
+      }
       return {
         mode: "preservice",
         currentItemId: null,
         label: "Service starts",
         lengthSec: null,
         liveStartAt: null,
-        targetAt: serviceTimeStartsAt,
+        targetAt,
         serverNow,
         currentItemTitle,
         nextItemTitle,

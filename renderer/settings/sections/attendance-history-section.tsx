@@ -279,7 +279,7 @@ function AttendanceChart({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-4 text-caption2 flex-wrap">
+      <div className="flex items-center gap-4 text-caption2 flex-wrap text-gray-11">
         <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-blue-9" /> Attendance</span>
         <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-green-9" /> In room</span>
         {avgOccupancy != null && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-green-9" /> Avg in room {avgOccupancy.toLocaleString()}</span>}
