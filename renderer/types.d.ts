@@ -627,6 +627,8 @@ interface PcoLiveDTO {
   nextItemTitle: string | null;
   serviceTimeId: string | null;
   serviceTimeStartsAt: string | null;
+  /** True once the live controller reached the plan's "SERVICE END" marker. */
+  serviceEnded?: boolean;
 }
 
 /** Live ProPresenter status (SSE "propresenter:status"). */

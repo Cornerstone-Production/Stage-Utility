@@ -456,6 +456,10 @@ export interface PcoLiveDTO {
   serviceTimeId: string | null;
   /** ISO start of the chosen service occurrence (also the preservice target). */
   serviceTimeStartsAt: string | null;
+  /** True once the live controller has reached the plan's "SERVICE END" marker —
+   *  the service is over (recording should finalize) even though an item is still
+   *  "live". Only set when the plan has an explicit end header. */
+  serviceEnded?: boolean;
 }
 
 /** Live ProPresenter status (pushed on "propresenter:status"). */

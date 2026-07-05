@@ -96,6 +96,17 @@ async function main(): Promise<void> {
   const curItemTime = curId ? (live.included ?? []).find((n: any) => n.id === curId) : null;
   console.log(`\n--- /live ---`);
   console.log(`  current_item_time: ${curId ?? "none (pre-service)"}${curItemTime ? `  live_start_at ${fmt(curItemTime.attributes?.live_start_at)}` : ""}`);
+  // Dump the FULL Live object — hunting for a service-end signal (e.g. an ended_at /
+  // series_ended attribute, or the controller parked on an "End of Service" item).
+  console.log(`  Live.attributes: ${JSON.stringify(liveNode?.attributes ?? {}, null, 2)}`);
+  console.log(`  Live.relationships keys: ${Object.keys(liveNode?.relationships ?? {}).join(", ")}`);
+  // What item does current_item_time point at? (title + item_type reveal an "End" item.)
+  if (curItemTime) {
+    const itRef = curItemTime.relationships?.item?.data;
+    const itId = itRef && !Array.isArray(itRef) ? itRef.id : null;
+    console.log(`  current item_time.attributes: ${JSON.stringify(curItemTime.attributes ?? {}, null, 2)}`);
+    console.log(`  → points at item id ${itId}`);
+  }
 
   // ── analysis ──
   const now = Date.now();

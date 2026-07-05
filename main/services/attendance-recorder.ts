@@ -48,7 +48,7 @@ class AttendanceRecorder {
     if (!live || this.busy) return;
     this.busy = true;
     try {
-      if (live.mode === "item" && live.currentItemId && isLiveServiceToday(live)) {
+      if (live.mode === "item" && live.currentItemId && !live.serviceEnded && isLiveServiceToday(live)) {
         await this.ensureRecord(live);
         if (!this.current) return;
         if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull

@@ -65,6 +65,16 @@ export function isServiceStartHeader(title: string): boolean {
   return t === "SERVICE START" || t.includes("SERVICE START") || t.includes("START OF SERVICE") || t.includes("SERVICE BEGIN");
 }
 
+/** True when a header title marks the END of the service — items at/after it are
+ *  post-service (buffer, stream padding, dismissal). When the live controller
+ *  reaches this boundary, the service is over even if PCO still reports an item
+ *  "live" (operators often park on a trailing buffer), so recording should stop.
+ *  Deliberately narrow so it only matches a purpose-placed end marker. */
+export function isServiceEndHeader(title: string): boolean {
+  const t = (title ?? "").toUpperCase().replace(/[^A-Z ]+/g, " ").replace(/\s+/g, " ").trim();
+  return t === "SERVICE END" || t.includes("SERVICE END") || t.includes("END OF SERVICE") || t.includes("SERVICE DISMISS");
+}
+
 /**
  * Current + next item titles from the PLAN order (the authoritative rundown),
  * given the live item id. "next" skips header rows; with no live item yet it's the
@@ -727,6 +737,13 @@ class PcoService {
       const offset =
         typeof it.attributes.length_offset === "number" ? it.attributes.length_offset : 0;
       const adjLen = planLen + offset;
+      // Service-ended: the church marks the end with a "SERVICE END" header; once the
+      // live controller reaches/passes it (operators park on a trailing buffer item
+      // like "Stream Buffer"/"End of Service"), the service is over. Only trip on an
+      // explicit end header — plans without one keep the normal "left item mode" end.
+      const endIdx = planItems.findIndex((p) => p.itemType === "header" && isServiceEndHeader(p.title));
+      const curIdx = planItems.findIndex((p) => p.id === itemId);
+      const serviceEnded = endIdx >= 0 && curIdx >= 0 && curIdx >= endIdx;
       return {
         mode: "item",
         currentItemId: itemId,
@@ -739,6 +756,7 @@ class PcoService {
         nextItemTitle,
         serviceTimeId,
         serviceTimeStartsAt,
+        serviceEnded,
       };
     }
 
