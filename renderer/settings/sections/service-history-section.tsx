@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Trash2Icon, ClockIcon, CopyIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
@@ -142,6 +142,8 @@ export function ServiceHistorySection() {
   // Attendance records for all services — for the Overview card's avg in-room.
   const [attList, setAttList] = useState<ServiceAttendance[]>([]);
   const [day, setDay] = useState<string | null>(null);
+  // Active service-type filter (serviceTypeId), or null for all types.
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
 
   function reload() {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
@@ -199,36 +201,58 @@ export function ServiceHistorySection() {
     };
   }, [selectedKey]);
 
+  // Distinct service types present, labeled by their PCO name (a record with the
+  // name wins over the bare id fallback). Drives the filter; only shown at 2+ types.
+  const typeOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const s of list ?? []) {
+      if (!s.serviceTypeId) continue;
+      if (s.serviceTypeName) byId.set(s.serviceTypeId, s.serviceTypeName);
+      else if (!byId.has(s.serviceTypeId)) byId.set(s.serviceTypeId, s.serviceTypeId);
+    }
+    return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [list]);
+
+  // Records scoped to the active service-type filter (null = all types).
+  const filtered = useMemo(
+    () => (list ?? []).filter((s) => !typeFilter || s.serviceTypeId === typeFilter),
+    [list, typeFilter],
+  );
+
   const days = useMemo(() => {
     const set = new Set<string>();
-    for (const s of list ?? []) set.add(s.serviceDate);
+    for (const s of filtered) set.add(s.serviceDate);
     return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
-  }, [list]);
+  }, [filtered]);
 
+  // Auto-select the newest day; also re-select when the filter drops the current day.
   useEffect(() => {
-    if (day == null && days.length > 0) setDay(days[0]);
+    if (days.length > 0 && (day == null || !days.includes(day))) setDay(days[0]);
   }, [days, day]);
 
-  const dayServices = useMemo(() => (list ?? []).filter((s) => s.serviceDate === day), [list, day]);
-  // Per-day service counts for the calendar heatmap (jump-to-date overview).
+  const dayServices = useMemo(() => filtered.filter((s) => s.serviceDate === day), [filtered, day]);
+  // Per-day service counts for the calendar dots (respects the type filter).
   const dateCounts = useMemo(() => {
     const m = new Map<string, number>();
-    for (const s of list ?? []) m.set(s.serviceDate, (m.get(s.serviceDate) ?? 0) + 1);
+    for (const s of filtered) m.set(s.serviceDate, (m.get(s.serviceDate) ?? 0) + 1);
     return m;
-  }, [list]);
+  }, [filtered]);
 
   // Overview stats, cumulative THROUGH the selected day (serviceDate <= day) so
-  // picking a past date shows how things looked as of then. Finished records only.
+  // picking a past date shows how things looked as of then; scoped to the type
+  // filter so a Youth service's numbers don't blend into Sunday's. Finished only.
   const overview = useMemo(() => {
     const asOf = day;
-    const tl = (list ?? []).filter((t) => t.endedAt != null && (!asOf || t.serviceDate <= asOf));
-    const att = attList.filter((a) => a.endedAt != null && (!asOf || a.serviceDate <= asOf));
+    const inScope = (typeId: string | null, date: string, ended: unknown) =>
+      ended != null && (!typeFilter || typeId === typeFilter) && (!asOf || date <= asOf);
+    const tl = (list ?? []).filter((t) => inScope(t.serviceTypeId, t.serviceDate, t.endedAt));
+    const att = attList.filter((a) => inScope(a.serviceTypeId, a.serviceDate, a.endedAt));
     const mean = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
     const lens = tl.map((t) => summarize(t).actual).filter((v) => v > 0);
     const punct = tl.map((t) => summarize(t).lateStartSec).filter((v): v is number => v != null);
     const occ = att.map((a) => a.peakOccupancy).filter((v) => v > 0);
     return { count: tl.length, avgLen: mean(lens), avgPunct: mean(punct), avgOcc: mean(occ) };
-  }, [list, attList, day]);
+  }, [list, attList, day, typeFilter]);
 
   async function deleteService(key: string, title: string) {
     if (!(await confirm({ title: "Delete recording?", message: `Delete the service-timing recording for "${title}"? This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
@@ -372,6 +396,16 @@ export function ServiceHistorySection() {
   // ── List view: services for the selected day. ──
   return (
     <div className="flex flex-col gap-3">
+      {typeOptions.length >= 2 && (
+        <div className="flex flex-wrap gap-1.5">
+          <TypeChip active={typeFilter === null} onClick={() => setTypeFilter(null)}>All</TypeChip>
+          {typeOptions.map((o) => (
+            <TypeChip key={o.id} active={typeFilter === o.id} onClick={() => setTypeFilter(o.id)}>
+              {o.name}
+            </TypeChip>
+          ))}
+        </div>
+      )}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
         <HistoryCalendar counts={dateCounts} selected={day} onPick={setDay} />
         <div className="flex-1 min-w-0 rounded-xl border border-gray-5 bg-gray-2 p-3 flex flex-col">
@@ -432,6 +466,20 @@ export function ServiceHistorySection() {
         {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
       </div>
     </div>
+  );
+}
+
+/** Service-type filter chip (shown only when 2+ types have recordings). */
+function TypeChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${
+        active ? "border-blue-7 bg-blue-3 text-blue-11" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

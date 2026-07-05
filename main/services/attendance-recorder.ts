@@ -135,6 +135,7 @@ class AttendanceRecorder {
       this.current = {
         serviceKey: key,
         serviceTypeId: st.serviceTypeId,
+        serviceTypeName: st.serviceTypeName ?? null,
         planId: st.planId,
         planTitle: st.planTitle,
         seriesTitle: st.planSeriesTitle ?? null,

@@ -617,6 +617,9 @@ export interface ServiceSplHistory {
   /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */
   serviceKey: string;
   serviceTypeId: string | null;
+  /** PCO service-type name (e.g. "Weekend", "The Salt Company") — labels the
+   *  History service-type filter. Absent on records made before this was added. */
+  serviceTypeName?: string | null;
   planId: string | null;
   planTitle: string | null;
   seriesTitle: string | null;
@@ -649,6 +652,9 @@ export interface ServiceAttendance {
   /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */
   serviceKey: string;
   serviceTypeId: string | null;
+  /** PCO service-type name (e.g. "Weekend", "The Salt Company") — labels the
+   *  History service-type filter. Absent on records made before this was added. */
+  serviceTypeName?: string | null;
   planId: string | null;
   planTitle: string | null;
   seriesTitle: string | null;
@@ -705,6 +711,9 @@ export interface ServiceTimeline {
   /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */
   serviceKey: string;
   serviceTypeId: string | null;
+  /** PCO service-type name (e.g. "Weekend", "The Salt Company") — labels the
+   *  History service-type filter. Absent on records made before this was added. */
+  serviceTypeName?: string | null;
   planId: string | null;
   planTitle: string | null;
   seriesTitle: string | null;

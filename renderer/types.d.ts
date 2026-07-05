@@ -143,6 +143,8 @@ interface SplItemHistory {
 interface ServiceSplHistory {
   serviceKey: string;
   serviceTypeId: string | null;
+  /** PCO service-type name — labels the History service-type filter. */
+  serviceTypeName?: string | null;
   planId: string | null;
   planTitle: string | null;
   seriesTitle: string | null;
@@ -164,6 +166,8 @@ interface AttendanceSample {
 interface ServiceAttendance {
   serviceKey: string;
   serviceTypeId: string | null;
+  /** PCO service-type name — labels the History service-type filter. */
+  serviceTypeName?: string | null;
   planId: string | null;
   planTitle: string | null;
   seriesTitle: string | null;
@@ -198,6 +202,8 @@ interface ServiceTimelineItem {
 interface ServiceTimeline {
   serviceKey: string;
   serviceTypeId: string | null;
+  /** PCO service-type name — labels the History service-type filter. */
+  serviceTypeName?: string | null;
   planId: string | null;
   planTitle: string | null;
   seriesTitle: string | null;
