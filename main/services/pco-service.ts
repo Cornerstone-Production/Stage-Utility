@@ -19,6 +19,9 @@ const TTL_MEDIUM_MS = 3 * 60_000;
 const ATTACH_OPEN_TTL_MS = 10 * 60_000;
 /** Retry budget for transient PCO failures (429 / 5xx / network). */
 const MAX_RETRIES = 3;
+// Per-request PCO logging (~2 lines per uncached /live, ~1 Hz during a service) is
+// off unless STAGE_UTILITY_DEBUG=1 — keeps an unrotated stdout log from ballooning.
+const DEBUG_PCO = process.env.STAGE_UTILITY_DEBUG === "1";
 
 /** True for PCO's auto-generated "initials" placeholder avatar (served at
  *  …/uploads/initials/AB.png when a person has no uploaded photo). Real photos
@@ -154,7 +157,7 @@ class PcoService {
     appId: string,
     secret: string,
   ): Promise<PcoResponse<T>> {
-    console.log(`[pco] GET ${url}`);
+    if (DEBUG_PCO) console.log(`[pco] GET ${url}`);
     // Retry transient failures (429 rate-limit, 5xx, network) with backoff. PCO
     // allows ~100 req / 20s per app; a burst (many displays + a refresh) can 429,
     // which previously threw and dropped data. 401/other-4xx fail fast.
@@ -188,7 +191,7 @@ class PcoService {
       }
 
       const json = await response.json() as PcoResponse<T>;
-      console.log(`[pco] OK ${url} (${Array.isArray(json.data) ? (json.data as T[]).length : 1} items)`);
+      if (DEBUG_PCO) console.log(`[pco] OK ${url} (${Array.isArray(json.data) ? (json.data as T[]).length : 1} items)`);
       return json;
     }
   }

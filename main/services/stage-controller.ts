@@ -5,7 +5,7 @@ import { randomUUID } from "crypto";
 
 import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
-import { broadcast } from "./broadcaster.js";
+import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
@@ -165,6 +165,7 @@ export class StageController {
   private connectionNames = new Map<string, string>();
   // Coalesce timer for device-status updates (see applyDeviceStatus).
   private deviceStatusFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private deviceStatusDirty = false; // device status changed while no client watched
   // Cached team members for the active plan.
   private teamMembers: TeamMemberDTO[] = [];
   // Raw (un-resolved) slot configs per VIEW id for the ACTIVE service type.
@@ -1665,9 +1666,25 @@ export class StageController {
     if (this.deviceStatusFlushTimer !== null) return;
     this.deviceStatusFlushTimer = setTimeout(() => {
       this.deviceStatusFlushTimer = null;
-      this.recomputeResolved();
-      this.broadcast();
+      // Skip the expensive re-resolve + full-state broadcast when no display is
+      // watching (idle). Mark dirty so the next connecting client gets fresh state
+      // via ensureResolvedFresh() before hydration.
+      if (channelHasSubscribers("stage:state-changed")) {
+        this.recomputeResolved();
+        this.broadcast();
+      } else {
+        this.deviceStatusDirty = true;
+      }
     }, DEVICE_STATUS_FLUSH_MS);
+  }
+
+  /** Re-resolve views if device statuses changed while no client was connected, so a
+   *  freshly-connecting display hydrates with current RF/battery state. Called by the
+   *  SSE connect handler before sending the stage:state-changed snapshot. */
+  ensureResolvedFresh(): void {
+    if (!this.deviceStatusDirty) return;
+    this.deviceStatusDirty = false;
+    this.recomputeResolved();
   }
 
   /** Cancel any pending coalesced device-status broadcast (used on shutdown). */
@@ -1889,7 +1906,9 @@ export class StageController {
     const sig = JSON.stringify(this.state);
     if (sig === this.lastBroadcastSig) return;
     this.lastBroadcastSig = sig;
-    broadcast("stage:state-changed", this.state);
+    // Reuse the dedupe serialization as the SSE frame body so the fan-out doesn't
+    // re-stringify the full state (which carries base64 branding blobs).
+    broadcast("stage:state-changed", this.state, sig);
   }
 }
 

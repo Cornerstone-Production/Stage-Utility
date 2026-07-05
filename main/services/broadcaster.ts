@@ -4,7 +4,11 @@
 // clients.  remote-server.ts registers an SSE push as a listener at startup.
 // Multiple listeners are supported should other transports be added later.
 
-type BroadcastListener = (channel: string, payload: unknown) => void;
+// `serialized` (optional) is a caller-provided JSON string of `payload`. When the
+// caller already stringified the payload (e.g. for a dedupe check), it passes it
+// through so the SSE fan-out can reuse it instead of re-serializing — avoids a
+// second stringify of large payloads like the full StageState (base64 branding).
+type BroadcastListener = (channel: string, payload: unknown, serialized?: string) => void;
 
 const listeners: BroadcastListener[] = [];
 
@@ -14,10 +18,10 @@ export function addBroadcastListener(cb: BroadcastListener): void {
 }
 
 /** Broadcast a message to all registered listeners. */
-export function broadcast(channel: string, payload: unknown): void {
+export function broadcast(channel: string, payload: unknown, serialized?: string): void {
   for (const cb of listeners) {
     try {
-      cb(channel, payload);
+      cb(channel, payload, serialized);
     } catch (err) {
       console.error(`[broadcaster] listener error on channel "${channel}":`, err);
     }

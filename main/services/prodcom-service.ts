@@ -14,10 +14,13 @@
 import * as http from "http";
 
 import type { TranscriptLineDTO } from "../types/stage.js";
-import { broadcast } from "./broadcaster.js";
+import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 
 const RECONNECT_MS = 4000;
 const MAX_LINES = 100;
+// Coalesce interim partials (which arrive many/sec while someone speaks) into at most
+// one full-buffer broadcast per this window; finals still push immediately.
+const TRANSCRIPT_THROTTLE_MS = 250;
 
 type ProdComConnState = "connected" | "error" | "disconnected";
 
@@ -65,6 +68,8 @@ class ProdComService {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private seq = 0;
+  private transcriptTimer: ReturnType<typeof setTimeout> | null = null;
+  private transcriptDirty = false;
 
   /** Finalised lines (rolling) + the current partial per channel. */
   private finals: TranscriptLineDTO[] = [];
@@ -264,10 +269,30 @@ class ProdComService {
     if (line.isFinal) {
       this.partials.delete(ch);
       this.addFinal(line);
+      this.flushTranscript(); // finals land immediately
     } else {
       this.partials.set(ch, line);
+      this.scheduleTranscript(); // interim partials arrive many/sec — coalesce them
     }
-    broadcast("prodcom:transcript", this.getBuffer());
+  }
+
+  private flushTranscript(): void {
+    if (this.transcriptTimer) {
+      clearTimeout(this.transcriptTimer);
+      this.transcriptTimer = null;
+    }
+    this.transcriptDirty = false;
+    // Skip the full-buffer spread + push when no transcription display is watching.
+    if (channelHasSubscribers("prodcom:transcript")) broadcast("prodcom:transcript", this.getBuffer());
+  }
+
+  private scheduleTranscript(): void {
+    this.transcriptDirty = true;
+    if (this.transcriptTimer) return;
+    this.transcriptTimer = setTimeout(() => {
+      this.transcriptTimer = null;
+      if (this.transcriptDirty) this.flushTranscript();
+    }, TRANSCRIPT_THROTTLE_MS);
   }
 
   // Append a finalised line, replacing any existing one with the same id (so a

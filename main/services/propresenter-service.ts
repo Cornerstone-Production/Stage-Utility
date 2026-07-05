@@ -14,10 +14,14 @@
 import * as http from "http";
 
 import type { ProPresenterStatusDTO, ProSection, ProTimer, PropInstancesDTO, PropInstanceMeta, PropInstanceConn } from "../types/stage.js";
-import { broadcast } from "./broadcaster.js";
+import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 
-const POLL_INTERVAL_MS = 500;
+const POLL_INTERVAL_MS = 1000; // once/sec is plenty for slide/timer changes (was 500)
 const ERROR_INTERVAL_MS = 5000;
+// When no client is watching this instance's channel, drop to a slow keepalive
+// instead of hammering 6 requests/sec — the badge/data stay fresh enough and refresh
+// immediately when someone connects (hydrated on connect + fast poll resumes).
+const IDLE_INTERVAL_MS = 5000;
 const REQUEST_TIMEOUT_MS = 4000;
 /** Thumbnail width requested from ProPresenter (px). */
 export const THUMBNAIL_QUALITY = 400;
@@ -330,7 +334,8 @@ class ProPresenterService {
 
       this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
       this.report("connected", `Connected to ${host}:${port}`);
-      this.schedule(this.pollMs);
+      // Fast poll only while a display/panel renders this instance; else keepalive.
+      this.schedule(channelHasSubscribers(this.channel) ? this.pollMs : IDLE_INTERVAL_MS);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[propresenter] poll error:", msg);

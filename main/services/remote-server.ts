@@ -10,6 +10,7 @@ import * as http from "http";
 import * as net from "net";
 import * as os from "os";
 import * as path from "path";
+import * as zlib from "node:zlib";
 import { fileURLToPath } from "url";
 
 import type { DisplayKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../types/stage.js";
@@ -206,6 +207,46 @@ function sseWrite(res: http.ServerResponse, event: string, data: unknown): boole
   return sseWriteFrame(res, `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
+// gzip for static text assets — a Pi re-downloads the whole (re-fingerprinted) build
+// on each deploy, and ~736 KB of JS/CSS/HTML collapses to ~217 KB. Immutable
+// /assets/* are content-hashed, so compress once and cache the bytes forever.
+// Per-request logging is off unless STAGE_UTILITY_DEBUG=1 — it's one line per HTTP
+// request and the launchd/systemd stdout log is often unrotated (grows until reboot).
+const DEBUG_HTTP = process.env.STAGE_UTILITY_DEBUG === "1";
+const COMPRESSIBLE = new Set([".html", ".js", ".mjs", ".css", ".svg", ".json", ".webmanifest"]);
+const gzipCache = new Map<string, Buffer>();
+function acceptsGzip(acceptEncoding: string | undefined): boolean {
+  return typeof acceptEncoding === "string" && /\bgzip\b/.test(acceptEncoding);
+}
+function sendStatic(
+  res: http.ServerResponse,
+  data: Buffer,
+  mime: string,
+  cacheControl: string,
+  ext: string,
+  acceptEncoding: string | undefined,
+  cacheKey: string | null, // non-null → immutable, cache the gzipped bytes
+): void {
+  const headers: Record<string, string> = {
+    "Content-Type": mime,
+    "Cache-Control": cacheControl,
+    Vary: "Accept-Encoding",
+  };
+  if (COMPRESSIBLE.has(ext) && data.length > 1024 && acceptsGzip(acceptEncoding)) {
+    let gz = cacheKey ? gzipCache.get(cacheKey) : undefined;
+    if (!gz) {
+      gz = zlib.gzipSync(data);
+      if (cacheKey) gzipCache.set(cacheKey, gz);
+    }
+    headers["Content-Encoding"] = "gzip";
+    res.writeHead(200, headers);
+    res.end(gz);
+  } else {
+    res.writeHead(200, headers);
+    res.end(data);
+  }
+}
+
 export class RemoteServer {
   private server: http.Server | null = null;
   private sockets = new Set<net.Socket>();
@@ -225,7 +266,7 @@ export class RemoteServer {
   private _controlHtmlCandidates: string[] = [];
 
   /** Try to serve a file from the Vite renderer build. Returns true if handled. */
-  private async tryServeStatic(pathname: string, res: http.ServerResponse): Promise<boolean> {
+  private async tryServeStatic(pathname: string, res: http.ServerResponse, acceptEncoding?: string): Promise<boolean> {
     // Clean-URL entry points → built HTML files:
     //   /                     → kiosk (index.html)
     //   /settings             → settings panel (settings-window.html)
@@ -262,11 +303,9 @@ export class RemoteServer {
       // Vite fingerprints everything under /assets/, so cache those forever;
       // everything else (HTML, manifest, icons) must revalidate so a new build is
       // picked up immediately instead of Safari serving a stale page.
-      const cacheControl = urlPath.startsWith("/assets/")
-        ? "public, max-age=31536000, immutable"
-        : "no-cache";
-      res.writeHead(200, { "Content-Type": mime, "Cache-Control": cacheControl });
-      res.end(data);
+      const immutable = urlPath.startsWith("/assets/");
+      const cacheControl = immutable ? "public, max-age=31536000, immutable" : "no-cache";
+      sendStatic(res, data, mime, cacheControl, ext, acceptEncoding, immutable ? candidate : null);
       return true;
     } catch {
       // File not found — fall through
@@ -276,9 +315,8 @@ export class RemoteServer {
     if (!path.extname(urlPath)) {
       const fallback = path.join(RENDERER_BUILD_DIR, "index.html");
       try {
-        const html = await fs.readFile(fallback, "utf-8");
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
-        res.end(html);
+        const html = await fs.readFile(fallback);
+        sendStatic(res, html, "text/html; charset=utf-8", "no-cache", ".html", acceptEncoding, null);
         return true;
       } catch {
         // No renderer build — fall through to legacy control page
@@ -320,13 +358,13 @@ export class RemoteServer {
       return false;
     });
 
-    addBroadcastListener((channel, payload) => {
+    addBroadcastListener((channel, payload, serialized) => {
       let frame: string | null = null; // serialize at most once, only if a client wants it
       for (const client of sseClients) {
         const cid = resCid.get(client);
         const chans = cid ? clientChannels.get(cid) : undefined;
         if (chans && !chans.has(channel)) continue; // client filtered this channel out
-        if (frame === null) frame = `event: ${channel}\ndata: ${JSON.stringify(payload)}\n\n`;
+        if (frame === null) frame = `event: ${channel}\ndata: ${serialized ?? JSON.stringify(payload)}\n\n`;
         if (!sseWriteFrame(client, frame)) {
           sseClients.delete(client);
           if (cid) clientChannels.delete(cid);
@@ -361,7 +399,7 @@ export class RemoteServer {
       const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
       const pathname = url.pathname;
 
-      console.log(`[remote-server] ${req.method} ${pathname}`);
+      if (DEBUG_HTTP) console.log(`[remote-server] ${req.method} ${pathname}`);
 
       // CORS preflight
       if (req.method === "OPTIONS") {
@@ -429,7 +467,7 @@ export class RemoteServer {
     // ── Serve renderer static build (standalone mode) ─────────────────────
     // Serves the Vite-built renderer from build/renderer/ when it exists.
     if (method === "GET" && !pathname.startsWith("/api/") && pathname !== "/photos") {
-      const staticServed = await this.tryServeStatic(pathname, res);
+      const staticServed = await this.tryServeStatic(pathname, res, req.headers["accept-encoding"] as string | undefined);
       if (staticServed) return;
       // Fall through to the phone control page.
     }
@@ -466,6 +504,7 @@ export class RemoteServer {
       sseWrite(res, "server:hello", { version: SERVER_VERSION });
       // Send initial snapshots so the client is immediately in sync — these
       // channels otherwise only broadcast on change, leaving a fresh client blank.
+      stageController.ensureResolvedFresh(); // fold in any device status that changed while idle
       sseWrite(res, "stage:state-changed", stageController.getState());
       sseWrite(res, "pco:live", stageController.getLastLive());
       sseWrite(res, "propresenter:status", propresenterService.getStatus());
