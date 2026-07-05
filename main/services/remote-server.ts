@@ -134,6 +134,15 @@ async function readBody(req: http.IncomingMessage): Promise<unknown> {
 
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();
+// Keep the SSE pipe warm and surface dead clients: EventSource ignores comment
+// lines, but the write itself fails (or backs up) on a half-open socket so we can
+// reap it. Without this, a slept/dropped kiosk lingers forever holding memory and
+// one of the browser's ~6 HTTP/1.1 connection slots.
+const SSE_HEARTBEAT_MS = 20_000;
+// If a client's un-flushed write buffer grows past this, it's stalled (asleep, wifi
+// gone). Drop it rather than let its backlog grow server memory without bound — the
+// broadcast loop has no backpressure otherwise.
+const SSE_MAX_BUFFER_BYTES = 2_000_000;
 
 // Small FIFO cache of ProPresenter slide thumbnails, keyed by the per-slide
 // cache-bust token. Lets multiple displays showing the same slide share one
@@ -154,13 +163,25 @@ function scheduleRestart(): void {
 // Pushed into the integration manager so the "companion" panel shows "N connected".
 const companionClients = new Set<http.ServerResponse>();
 
-function sseWrite(res: http.ServerResponse, event: string, data: unknown): void {
-  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+/** Write one SSE event. Returns false when the client is gone or so far behind
+ *  (buffered bytes over the cap) that it should be dropped — callers remove + destroy
+ *  it. This is the only backpressure guard on the fan-out, so a slow/dead client
+ *  can't buffer unboundedly in server memory. */
+function sseWrite(res: http.ServerResponse, event: string, data: unknown): boolean {
+  if (res.writableEnded || res.destroyed) return false;
+  if (res.writableLength > SSE_MAX_BUFFER_BYTES) return false;
+  try {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export class RemoteServer {
   private server: http.Server | null = null;
   private sockets = new Set<net.Socket>();
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     // Resolve control.html with a multi-candidate fallback so it works whether
@@ -262,13 +283,34 @@ export class RemoteServer {
     // EventSource instead of polling.
     addBroadcastListener((channel, payload) => {
       for (const client of sseClients) {
-        try {
-          sseWrite(client, channel, payload);
-        } catch {
+        if (!sseWrite(client, channel, payload)) {
           sseClients.delete(client);
+          client.destroy();
         }
       }
     });
+
+    // Heartbeat: ping every open stream so idle intermediaries don't drop it and so
+    // half-open/stalled clients get reaped (write fails or backs up → dropped).
+    this.heartbeatTimer = setInterval(() => {
+      for (const client of sseClients) {
+        // ": ..." is an SSE comment line — EventSource ignores it; it just exercises
+        // the write so a half-open or stalled client surfaces and gets reaped.
+        let ok = !client.writableEnded && !client.destroyed && client.writableLength <= SSE_MAX_BUFFER_BYTES;
+        if (ok) {
+          try {
+            client.write(`: ping\n\n`);
+          } catch {
+            ok = false;
+          }
+        }
+        if (!ok) {
+          sseClients.delete(client);
+          client.destroy();
+        }
+      }
+    }, SSE_HEARTBEAT_MS);
+    this.heartbeatTimer.unref?.();
 
     this.server = http.createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
@@ -311,6 +353,10 @@ export class RemoteServer {
 
   async stop(): Promise<void> {
     console.log("[remote-server] stopping");
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
     // Force-close all tracked sockets so the server shuts down promptly.
     for (const socket of this.sockets) {
       socket.destroy();
