@@ -14,6 +14,10 @@
 
 import * as fs from "fs/promises";
 
+import { initLogCapture } from "./main/services/log-buffer.js";
+// Capture logs into the ring buffer (exposed at /log) as early as possible.
+initLogCapture();
+
 import { getUserDataPath } from "./main/services/app-paths.js";
 import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";

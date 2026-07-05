@@ -16,6 +16,7 @@ import { fileURLToPath } from "url";
 import type { DisplayKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../types/stage.js";
 import type { OscArg } from "../types/osc.js";
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
+import { getLogLines } from "./log-buffer.js";
 import { deviceManager } from "./device-manager.js";
 import { configSnapshot } from "./config-snapshot.js";
 import { integrationManager } from "./integration-manager.js";
@@ -102,6 +103,36 @@ function json(res: http.ServerResponse, data: unknown, status = 200): void {
 
 function error(res: http.ServerResponse, message: string, status = 400): void {
   json(res, { error: message }, status);
+}
+
+/** Self-contained /log viewer page — polls /api/log every 2s, filter + autoscroll.
+ *  No framework/build; served directly so it works even if the renderer bundle is
+ *  missing. Carries any ?token through to its fetches. */
+function renderLogPage(): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stage Utility — Server log</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0b0c0e;color:#d6d9de}
+header{position:sticky;top:0;display:flex;gap:.75rem;align-items:center;padding:.6rem .8rem;background:#121418;border-bottom:1px solid #23262c}
+header h1{font:600 14px system-ui;margin:0;color:#e8ebef}.sp{flex:1}
+input,button{font:inherit;background:#1a1d22;color:#d6d9de;border:1px solid #2a2e35;border-radius:6px;padding:.3rem .5rem}button{cursor:pointer}
+#log{padding:.5rem .8rem;white-space:pre-wrap;word-break:break-word}.ln{padding:.5px 0}.t{color:#6b7280}.warn{color:#f5c451}.error{color:#f2777a}.muted{color:#6b7280}
+</style></head><body>
+<header><h1>Server log</h1><span class="muted" id="count"></span><span class="sp"></span>
+<input id="filter" placeholder="filter…" autocomplete="off"><label class="muted"><input type="checkbox" id="auto" checked> auto</label><button id="refresh">refresh</button></header>
+<div id="log"></div>
+<script>
+var token=new URLSearchParams(location.search).get('token');var q=token?('?token='+encodeURIComponent(token)):'';
+var logEl=document.getElementById('log'),filterEl=document.getElementById('filter'),autoEl=document.getElementById('auto'),countEl=document.getElementById('count');var lines=[];
+function esc(s){return String(s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
+function render(){var f=filterEl.value.toLowerCase();var atBottom=(window.innerHeight+window.scrollY)>=(document.body.scrollHeight-40);
+var shown=lines.filter(function(l){return !f||l.msg.toLowerCase().indexOf(f)>=0||l.level.indexOf(f)>=0});
+countEl.textContent=shown.length+' / '+lines.length+' lines';
+logEl.innerHTML=shown.map(function(l){return '<div class="ln '+l.level+'"><span class="t">'+esc(l.t).slice(11,19)+'</span> '+esc(l.msg)+'</div>'}).join('');
+if(autoEl.checked&&atBottom)window.scrollTo(0,document.body.scrollHeight)}
+function load(){fetch('/api/log'+q).then(function(r){return r.json()}).then(function(d){lines=d.lines||[];render()}).catch(function(){})}
+filterEl.oninput=render;document.getElementById('refresh').onclick=load;load();setInterval(function(){if(autoEl.checked)load()},2000);
+</script></body></html>`;
 }
 
 /** Whether a live service / active recording is in progress, and why. Used to lock
@@ -213,6 +244,13 @@ function sseWrite(res: http.ServerResponse, event: string, data: unknown): boole
 // Per-request logging is off unless STAGE_UTILITY_DEBUG=1 — it's one line per HTTP
 // request and the launchd/systemd stdout log is often unrotated (grows until reboot).
 const DEBUG_HTTP = process.env.STAGE_UTILITY_DEBUG === "1";
+// Optional token gate for the /log viewer. The app has no auth (LAN-trusted), so
+// /log is open by default like everything else; set STAGE_UTILITY_LOG_TOKEN to
+// require ?token=… on /log + /api/log (logs can carry internal detail).
+const LOG_TOKEN = process.env.STAGE_UTILITY_LOG_TOKEN || null;
+function logAuthed(url: URL): boolean {
+  return !LOG_TOKEN || url.searchParams.get("token") === LOG_TOKEN;
+}
 const COMPRESSIBLE = new Set([".html", ".js", ".mjs", ".css", ".svg", ".json", ".webmanifest"]);
 const gzipCache = new Map<string, Buffer>();
 function acceptsGzip(acceptEncoding: string | undefined): boolean {
@@ -464,6 +502,27 @@ export class RemoteServer {
     _url: URL,
     method: string,
   ): Promise<void> {
+    // ── Server log viewer ─────────────────────────────────────────────────
+    // Handled before static serving so the SPA fallback doesn't swallow /log.
+    if (method === "GET" && pathname === "/log") {
+      if (!logAuthed(_url)) {
+        res.writeHead(401, { "Content-Type": "text/plain" });
+        res.end("Unauthorized — append ?token=…");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
+      res.end(renderLogPage());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/log") {
+      if (!logAuthed(_url)) {
+        error(res, "unauthorized", 401);
+        return;
+      }
+      json(res, { lines: getLogLines() });
+      return;
+    }
+
     // ── Serve renderer static build (standalone mode) ─────────────────────
     // Serves the Vite-built renderer from build/renderer/ when it exists.
     if (method === "GET" && !pathname.startsWith("/api/") && pathname !== "/photos") {
