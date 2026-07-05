@@ -64,7 +64,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
       // Outer wrapper provides the gap spacing — p-1.5 all sides, last child no right padding handled by gap
       <div
         className={cn(
-          "relative flex flex-col flex-1 min-w-0 p-1.5 select-none",
+          "relative flex flex-col flex-1 min-w-0 p-1.5 select-none [container-type:inline-size]",
           className,
         )}
       >
@@ -72,8 +72,11 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             ring (its crisp 1px border bands visibly on the Pi panels against the
             dark fill); just a soft fill so it reads without an outlined rectangle. */}
         <div
-          className="relative flex flex-col items-center justify-center flex-1 overflow-hidden rounded-3xl [container-type:inline-size]"
-          style={{ background: "rgba(255,255,255,0.02)" }}
+          className="relative flex flex-col items-center justify-center flex-1 overflow-hidden [container-type:inline-size]"
+          // Radius scales with the slot's own width (capped at the old 24px) so a
+          // mirrored slots-grid in a smaller custom-layout object keeps the same
+          // proportional rounding as the full-size standalone display.
+          style={{ background: "rgba(255,255,255,0.02)", borderRadius: "clamp(0.5rem, 6cqi, 1.5rem)" }}
         >
           {emptySlotLogo ? (
             <BrandLogo
@@ -104,7 +107,10 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           so the photo never sits behind the name/RF card. [container-type:inline-size]
           makes every cqi/cqw unit inside resolve against THIS card's width, so
           names/avatar/RF bar stay proportional from preview sliver to 4K column. */}
-      <div className="relative flex flex-col flex-1 overflow-hidden rounded-3xl glass-card [container-type:inline-size]">
+      <div
+        className="relative flex flex-col flex-1 overflow-hidden glass-card [container-type:inline-size]"
+        style={{ borderRadius: "clamp(0.5rem, 6cqi, 1.5rem)" }}
+      >
         {/* ── Photo (top) — fills all the space above the info card and stops at
             its top edge (object-cover crops the photo, never overlapping the
             card). flex-1 so it grows to meet the card no matter the slot height. ── */}
