@@ -69,19 +69,6 @@ export function AttendanceHistorySection() {
   // The matching service-timeline record (same serviceKey) for PCO item markers.
   const [timeline, setTimeline] = useState<ServiceTimeline | null>(null);
   const [day, setDay] = useState<string | null>(null);
-  const [visible, setVisible] = useState<string[]>(loadVisibleMetrics);
-  const shows = (k: string) => visible.includes(k);
-  function toggleMetric(key: string) {
-    setVisible((prev) => {
-      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
-      try {
-        localStorage.setItem(METRICS_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        /* best-effort persist */
-      }
-      return next;
-    });
-  }
 
   function reload() {
     invoke<ServiceAttendance[]>("attendance:listHistory")
@@ -183,14 +170,6 @@ export function AttendanceHistorySection() {
   // ── Detail view: one service's attendance trend + summary. ──
   if (detail) {
     const live = detail.endedAt == null;
-    // PCO plan-item markers (from the matching timeline record) + the service's
-    // mean in-room occupancy, overlaid on the trend.
-    const markers = (timeline?.items ?? [])
-      .filter((it) => it.title && it.startedAt)
-      .map((it) => ({ t: it.startedAt, label: it.title }));
-    const avgOccupancy = detail.samples.length
-      ? Math.round(detail.samples.reduce((s, p) => s + p.occupancy, 0) / detail.samples.length)
-      : null;
     return (
       <div className="flex flex-col gap-4">
         <button className="self-start text-caption1 text-blue-11 hover:underline" onClick={() => setSelectedKey(null)}>
@@ -207,44 +186,7 @@ export function AttendanceHistorySection() {
             {fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt) ? ` · ${fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt)}` : ""}
           </span>
         </div>
-
-        <MetricPicker visible={visible} onToggle={toggleMetric} />
-
-        {(() => {
-          // "Day total" = running attendance across ALL of the day's services (a
-          // later service carries earlier ones' entries). Each card's visibility is
-          // driven by the picker; the grid tracks how many are shown.
-          const statValues: Record<string, { value: number | null; accent: string }> = {
-            peak: { value: detail.peakAttendance, accent: "text-blue-11" },
-            dayTotal: { value: detail.totalAttendance ?? null, accent: "text-blue-11" },
-            peakRoom: { value: detail.peakOccupancy, accent: "text-green-11" },
-            lowest: { value: detail.minOccupancy ?? null, accent: "text-amber-11" },
-            latest: { value: detail.lastOccupancy, accent: "text-gray-12" },
-            samples: { value: detail.samples.length, accent: "text-gray-12" },
-          };
-          const shownStats = STAT_METRICS.filter((m) => shows(m.key));
-          if (shownStats.length === 0) return null;
-          const colClass =
-            shownStats.length >= 6 ? "sm:grid-cols-6"
-            : shownStats.length === 5 ? "sm:grid-cols-5"
-            : shownStats.length === 4 ? "sm:grid-cols-4"
-            : "sm:grid-cols-3";
-          return (
-            <div className={`grid grid-cols-2 gap-2 ${colClass}`}>
-              {shownStats.map((m) => (
-                <Stat key={m.key} label={m.label} value={statValues[m.key].value} accent={statValues[m.key].accent} />
-              ))}
-            </div>
-          );
-        })()}
-
-        <AttendanceChart
-          samples={detail.samples}
-          markers={shows("markers") ? markers : []}
-          avgOccupancy={shows("avg") ? avgOccupancy : null}
-          showAttendance={shows("attendance")}
-          showOccupancy={shows("occupancy")}
-        />
+        <AttendanceDetail detail={detail} timeline={timeline} />
       </div>
     );
   }
@@ -302,6 +244,65 @@ export function AttendanceHistorySection() {
         ))}
         {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
       </div>
+    </div>
+  );
+}
+
+/** The full attendance detail — metric picker + summary cards + trend chart — for
+ *  one service record. Extracted so the unified History tab can embed it directly.
+ *  `timeline` (same serviceKey) supplies the PCO plan-item markers on the chart. */
+export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendance; timeline: ServiceTimeline | null }) {
+  const [visible, setVisible] = useState<string[]>(loadVisibleMetrics);
+  const shows = (k: string) => visible.includes(k);
+  function toggleMetric(key: string) {
+    setVisible((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      try {
+        localStorage.setItem(METRICS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        /* best-effort persist */
+      }
+      return next;
+    });
+  }
+  // PCO plan-item markers + the service's mean in-room occupancy, overlaid on the trend.
+  const markers = (timeline?.items ?? [])
+    .filter((it) => it.title && it.startedAt)
+    .map((it) => ({ t: it.startedAt, label: it.title }));
+  const avgOccupancy = detail.samples.length
+    ? Math.round(detail.samples.reduce((s, p) => s + p.occupancy, 0) / detail.samples.length)
+    : null;
+  const statValues: Record<string, { value: number | null; accent: string }> = {
+    peak: { value: detail.peakAttendance, accent: "text-blue-11" },
+    dayTotal: { value: detail.totalAttendance ?? null, accent: "text-blue-11" },
+    peakRoom: { value: detail.peakOccupancy, accent: "text-green-11" },
+    lowest: { value: detail.minOccupancy ?? null, accent: "text-amber-11" },
+    latest: { value: detail.lastOccupancy, accent: "text-gray-12" },
+    samples: { value: detail.samples.length, accent: "text-gray-12" },
+  };
+  const shownStats = STAT_METRICS.filter((m) => shows(m.key));
+  const colClass =
+    shownStats.length >= 6 ? "sm:grid-cols-6"
+    : shownStats.length === 5 ? "sm:grid-cols-5"
+    : shownStats.length === 4 ? "sm:grid-cols-4"
+    : "sm:grid-cols-3";
+  return (
+    <div className="flex flex-col gap-4">
+      <MetricPicker visible={visible} onToggle={toggleMetric} />
+      {shownStats.length > 0 && (
+        <div className={`grid grid-cols-2 gap-2 ${colClass}`}>
+          {shownStats.map((m) => (
+            <Stat key={m.key} label={m.label} value={statValues[m.key].value} accent={statValues[m.key].accent} />
+          ))}
+        </div>
+      )}
+      <AttendanceChart
+        samples={detail.samples}
+        markers={shows("markers") ? markers : []}
+        avgOccupancy={shows("avg") ? avgOccupancy : null}
+        showAttendance={shows("attendance")}
+        showOccupancy={shows("occupancy")}
+      />
     </div>
   );
 }

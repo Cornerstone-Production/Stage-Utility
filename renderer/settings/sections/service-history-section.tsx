@@ -4,6 +4,9 @@ import { ChevronLeftIcon, ChevronRightIcon, Trash2Icon, ClockIcon, CopyIcon } fr
 import { invoke, onNotification } from "../../lib/api";
 import { confirm, EmptyState, SkeletonRows, Button, toast } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
+import { HistoryCalendar } from "../../components/history-calendar";
+import { AttendanceDetail } from "./attendance-history-section";
+import { SplDetail } from "./spl-history-section";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -202,6 +205,12 @@ export function ServiceHistorySection() {
   }, [days, day]);
 
   const dayServices = useMemo(() => (list ?? []).filter((s) => s.serviceDate === day), [list, day]);
+  // Per-day service counts for the calendar heatmap (jump-to-date overview).
+  const dateCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of list ?? []) m.set(s.serviceDate, (m.get(s.serviceDate) ?? 0) + 1);
+    return m;
+  }, [list]);
 
   async function deleteService(key: string, title: string) {
     if (!(await confirm({ title: "Delete recording?", message: `Delete the service-timing recording for "${title}"? This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
@@ -248,9 +257,6 @@ export function ServiceHistorySection() {
       if (ok) toast.success("Report copied to clipboard");
       else toast.error("Couldn't copy the report");
     }
-    const avgOcc = attendance && attendance.samples.length
-      ? Math.round(attendance.samples.reduce((s, p) => s + p.occupancy, 0) / attendance.samples.length)
-      : null;
     return (
       <div className="flex flex-col gap-4">
         <button className="self-start text-caption1 text-blue-11 hover:underline" onClick={() => setSelectedKey(null)}>
@@ -300,30 +306,24 @@ export function ServiceHistorySection() {
           })}
         </div>
 
-        {/* Combined report: attendance + audio for the same service occurrence. */}
-        {attendance && (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-caption1 font-medium text-gray-11">Attendance</span>
-            <div className="flex flex-wrap gap-2 text-caption1 tabular-nums">
-              <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Peak attendance </span><span className="text-blue-11">{attendance.peakAttendance.toLocaleString()}</span></span>
-              <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Peak in-room </span><span className="text-green-11">{attendance.peakOccupancy.toLocaleString()}</span></span>
-              {avgOcc != null && <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Avg in-room </span><span className="text-gray-12">{avgOcc.toLocaleString()}</span></span>}
-            </div>
-          </div>
-        )}
-        {spl && spl.items.some((it) => it.maxSpl != null) && (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-caption1 font-medium text-gray-11">Audio — peak SPL</span>
-            <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
-              {spl.items.filter((it) => it.maxSpl != null).map((it, i) => (
-                <div key={it.itemId} className={`grid grid-cols-[1fr_5rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"}`}>
-                  <span className="text-gray-12 truncate">{it.title || "—"}</span>
-                  <span className="text-right text-amber-11">{(it.maxSpl as number).toFixed(1)} dB</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Full attendance + audio detail for the same service occurrence — one place
+            for everything about this service (rundown above, the rest folded in here). */}
+        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
+          <span className="text-body font-semibold text-gray-12">Attendance</span>
+          {attendance ? (
+            <AttendanceDetail detail={attendance} timeline={detail} />
+          ) : (
+            <p className="text-caption1 text-gray-9">No attendance recorded for this service.</p>
+          )}
+        </div>
+        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
+          <span className="text-body font-semibold text-gray-12">Audio (SPL)</span>
+          {spl ? (
+            <SplDetail detail={spl} />
+          ) : (
+            <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
+          )}
+        </div>
         {linkedBap.length > 0 && (
           <div className="flex flex-col gap-1.5">
             <span className="text-caption1 font-medium text-gray-11">Baptisms</span>
@@ -342,6 +342,7 @@ export function ServiceHistorySection() {
   const dayIdx = day ? days.indexOf(day) : -1;
   return (
     <div className="flex flex-col gap-3">
+      <HistoryCalendar counts={dateCounts} selected={day} onPick={setDay} />
       <div className="flex items-center justify-between gap-2">
         <button
           className="rounded-md border border-gray-5 p-1.5 text-gray-11 enabled:hover:bg-gray-3 disabled:opacity-40"
