@@ -24,6 +24,40 @@ function fmtDay(day: string): string {
   if (Number.isNaN(d.getTime())) return day;
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 }
+/** Short local date label ("Jul 5") for a YYYY-MM-DD service date. */
+function shortDay(day: string): string {
+  const d = new Date(`${day}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? day : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// Selectable Overview metrics (the operator picks which to show; persisted per-browser).
+const OVERVIEW_METRICS = [
+  { key: "services", label: "Services" },
+  { key: "avgLength", label: "Avg length" },
+  { key: "avgStart", label: "Avg start" },
+  { key: "avgInRoom", label: "Avg in-room" },
+  { key: "avgAttendance", label: "Avg attendance" },
+  { key: "highestAttended", label: "Highest attended" },
+  { key: "lowestAttended", label: "Lowest attended" },
+  { key: "longest", label: "Longest service" },
+  { key: "shortest", label: "Shortest service" },
+  { key: "avgOverrun", label: "Avg overrun" },
+] as const;
+const OVERVIEW_KEYS = OVERVIEW_METRICS.map((m) => m.key) as string[];
+const OVERVIEW_STORE_KEY = "history:overviewMetrics";
+function loadOverviewMetrics(): string[] {
+  try {
+    const raw = localStorage.getItem(OVERVIEW_STORE_KEY);
+    if (raw) {
+      const a = JSON.parse(raw);
+      if (Array.isArray(a)) return a.filter((k) => OVERVIEW_KEYS.includes(k));
+    }
+  } catch {
+    /* default */
+  }
+  return ["services", "avgLength", "avgStart", "avgInRoom"];
+}
+
 /** ISO → local "HH:MM" for a <input type="time">, or "" if absent/invalid. */
 function toTimeInput(iso: string | null): string {
   if (!iso) return "";
@@ -163,6 +197,20 @@ export function ServiceHistorySection() {
   const [editStart, setEditStart] = useState("");
   const [editEnd, setEditEnd] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  // Which Overview metrics to show (persisted), and whether the picker is open.
+  const [overviewMetrics, setOverviewMetrics] = useState<string[]>(loadOverviewMetrics);
+  const [customizing, setCustomizing] = useState(false);
+  function toggleOverviewMetric(key: string) {
+    setOverviewMetrics((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      try {
+        localStorage.setItem(OVERVIEW_STORE_KEY, JSON.stringify(next));
+      } catch {
+        /* best-effort */
+      }
+      return next;
+    });
+  }
 
   function reload() {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
@@ -267,10 +315,32 @@ export function ServiceHistorySection() {
     const tl = (list ?? []).filter((t) => inScope(t.serviceTypeId, t.serviceDate, t.endedAt));
     const att = attList.filter((a) => inScope(a.serviceTypeId, a.serviceDate, a.endedAt));
     const mean = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
-    const lens = tl.map((t) => summarize(t).actual).filter((v) => v > 0);
-    const punct = tl.map((t) => summarize(t).lateStartSec).filter((v): v is number => v != null);
-    const occ = att.map((a) => a.peakOccupancy).filter((v) => v > 0);
-    return { count: tl.length, avgLen: mean(lens), avgPunct: mean(punct), avgOcc: mean(occ) };
+    const sums = tl.map((t) => ({ t, s: summarize(t) }));
+    const lens = sums.filter((x) => x.s.actual > 0);
+    const punct = sums.map((x) => x.s.lateStartSec).filter((v): v is number => v != null);
+    const overruns = sums.map((x) => (x.s.planned != null ? x.s.actual - x.s.planned : null)).filter((v): v is number => v != null);
+    const occ = att.filter((a) => a.peakOccupancy > 0);
+    const pk = att.filter((a) => a.peakAttendance > 0);
+    const maxOcc = occ.length ? occ.reduce((m, a) => (a.peakOccupancy > m.peakOccupancy ? a : m)) : null;
+    const minOcc = occ.length ? occ.reduce((m, a) => (a.peakOccupancy < m.peakOccupancy ? a : m)) : null;
+    const longest = lens.length ? lens.reduce((m, x) => (x.s.actual > m.s.actual ? x : m)) : null;
+    const shortest = lens.length ? lens.reduce((m, x) => (x.s.actual < m.s.actual ? x : m)) : null;
+    const startFmt = (sec: number) => (sec >= 0 ? `${fmtDur(sec)} late` : `${fmtDur(-sec)} early`);
+    const avgPunct = mean(punct);
+    const avgOverrun = mean(overruns);
+    const num = (n: number | null) => (n != null ? n.toLocaleString() : "—");
+    return {
+      services: { value: tl.length.toLocaleString(), accent: "text-gray-12" },
+      avgLength: { value: fmtDur(mean(lens.map((x) => x.s.actual))), accent: "text-blue-11" },
+      avgStart: { value: avgPunct != null ? startFmt(avgPunct) : "—", accent: avgPunct != null && avgPunct > 60 ? "text-amber-11" : "text-gray-12" },
+      avgInRoom: { value: num(mean(occ.map((a) => a.peakOccupancy))), accent: "text-green-11" },
+      avgAttendance: { value: num(mean(pk.map((a) => a.peakAttendance))), accent: "text-blue-11" },
+      highestAttended: { value: maxOcc ? maxOcc.peakOccupancy.toLocaleString() : "—", sub: maxOcc ? shortDay(maxOcc.serviceDate) : undefined, accent: "text-green-11" },
+      lowestAttended: { value: minOcc ? minOcc.peakOccupancy.toLocaleString() : "—", sub: minOcc ? shortDay(minOcc.serviceDate) : undefined, accent: "text-amber-11" },
+      longest: { value: longest ? fmtDur(longest.s.actual) : "—", sub: longest ? shortDay(longest.t.serviceDate) : undefined, accent: "text-gray-12" },
+      shortest: { value: shortest ? fmtDur(shortest.s.actual) : "—", sub: shortest ? shortDay(shortest.t.serviceDate) : undefined, accent: "text-gray-12" },
+      avgOverrun: { value: avgOverrun != null ? fmtDelta(avgOverrun) : "—", accent: avgOverrun != null && avgOverrun > 0 ? "text-red-11" : "text-gray-12" },
+    } as Record<string, { value: string; sub?: string; accent: string }>;
   }, [list, attList, day, typeFilter]);
 
   async function deleteService(key: string, title: string) {
@@ -479,24 +549,32 @@ export function ServiceHistorySection() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
         <HistoryCalendar counts={dateCounts} selected={day} onPick={setDay} />
         <div className="flex-1 min-w-0 rounded-xl border border-gray-5 bg-gray-2 p-3 flex flex-col">
-          <div className="text-caption2 text-gray-9 mb-3">
-            Overview{day ? ` · through ${fmtDay(day)}` : " · all time"}
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <span className="text-caption2 text-gray-9">
+              Overview{day ? ` · through ${fmtDay(day)}` : " · all time"}
+            </span>
+            <button
+              className="text-caption2 text-gray-10 hover:text-gray-12 transition-colors"
+              onClick={() => setCustomizing((v) => !v)}
+            >
+              {customizing ? "Done" : "Customize"}
+            </button>
           </div>
+          {customizing && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {OVERVIEW_METRICS.map((m) => (
+                <TypeChip key={m.key} active={overviewMetrics.includes(m.key)} onClick={() => toggleOverviewMetric(m.key)}>
+                  {m.label}
+                </TypeChip>
+              ))}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 flex-1 content-center">
-            <OStat label="Services" value={overview.count.toLocaleString()} accent="text-gray-12" />
-            <OStat label="Avg length" value={fmtDur(overview.avgLen)} accent="text-blue-11" />
-            <OStat
-              label="Avg start"
-              value={
-                overview.avgPunct == null
-                  ? "—"
-                  : overview.avgPunct >= 0
-                    ? `${fmtDur(overview.avgPunct)} late`
-                    : `${fmtDur(-overview.avgPunct)} early`
-              }
-              accent={overview.avgPunct != null && overview.avgPunct > 60 ? "text-amber-11" : "text-gray-12"}
-            />
-            <OStat label="Avg in-room" value={overview.avgOcc != null ? overview.avgOcc.toLocaleString() : "—"} accent="text-green-11" />
+            {OVERVIEW_METRICS.filter((m) => overviewMetrics.includes(m.key)).map((m) => {
+              const d = overview[m.key];
+              return <OStat key={m.key} label={m.label} value={d.value} accent={d.accent} sub={d.sub} />;
+            })}
+            {overviewMetrics.length === 0 && <span className="text-caption1 text-gray-9 col-span-full">No metrics selected — hit Customize.</span>}
           </div>
         </div>
       </div>
@@ -554,11 +632,12 @@ function TypeChip({ active, onClick, children }: { active: boolean; onClick: () 
 }
 
 /** Compact label/value for the Overview card (no border — the card frames them). */
-function OStat({ label, value, accent }: { label: string; value: string; accent: string }) {
+function OStat({ label, value, accent, sub }: { label: string; value: string; accent: string; sub?: string }) {
   return (
     <div className="flex flex-col">
       <div className="text-caption2 text-gray-9">{label}</div>
       <div className={`text-title3 font-semibold tabular-nums ${accent}`}>{value}</div>
+      {sub && <div className="text-caption2 text-gray-9 truncate">{sub}</div>}
     </div>
   );
 }
