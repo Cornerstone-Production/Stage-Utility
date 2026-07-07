@@ -13,7 +13,7 @@ import * as path from "path";
 import * as zlib from "node:zlib";
 import { fileURLToPath } from "url";
 
-import type { DisplayKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../types/stage.js";
+import type { DisplayKind, LayoutDTO, LayoutObject, ScriptViewLayout, Slot, SlotsLayout } from "../types/stage.js";
 import type { OscArg } from "../types/osc.js";
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { getLogLines } from "./log-buffer.js";
@@ -1021,6 +1021,43 @@ export class RemoteServer {
       }
       const plans = await stageController.listPlans(serviceTypeId);
       json(res, plans);
+      return;
+    }
+
+    // ── ScriptView (in-app ScriptViewer replacement) ─────────────────────────
+    if (method === "GET" && pathname === "/api/scriptview/layouts") {
+      json(res, await stageController.listScriptViewLayouts());
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/scriptview/layouts") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.layouts)) {
+        error(res, "body.layouts (array) required");
+        return;
+      }
+      json(res, await stageController.saveScriptViewLayouts(body.layouts as ScriptViewLayout[]));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/scriptview/note-categories") {
+      const serviceTypeId = _url.searchParams.get("serviceTypeId");
+      if (!serviceTypeId) {
+        error(res, "serviceTypeId query param required");
+        return;
+      }
+      json(res, await stageController.listScriptViewNoteCategories(serviceTypeId));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/scriptview/rundown") {
+      const serviceTypeId = _url.searchParams.get("serviceTypeId");
+      if (!serviceTypeId) {
+        error(res, "serviceTypeId query param required");
+        return;
+      }
+      const planId = _url.searchParams.get("planId");
+      json(res, await stageController.getScriptViewRundown(serviceTypeId, planId));
       return;
     }
 

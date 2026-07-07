@@ -269,6 +269,29 @@ interface PlanItemsDTO {
   noteCategories: string[];
 }
 
+interface ScriptViewLayout {
+  id: string;
+  serviceTypeId: string;
+  name: string;
+  order: number;
+  columns: string[];
+  showClock?: boolean;
+  showLength?: boolean;
+  showTitleMeta?: boolean;
+  accentDepartment?: string | null;
+}
+
+interface ScriptViewRundownDTO {
+  serviceTypeId: string;
+  planId: string | null;
+  planTitle: string | null;
+  planSeriesTitle: string | null;
+  planDates: string | null;
+  items: PlanItemDTO[];
+  noteCategories: string[];
+  isLive: boolean;
+}
+
 interface PlanDTO {
   id: string;
   title: string;

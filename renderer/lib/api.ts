@@ -81,6 +81,24 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "stage:listTeamPositions":
       return apiFetch<T>("/api/team-positions");
 
+    // ── ScriptView (in-app ScriptViewer replacement) ────────────────────
+    case "scriptview:listLayouts":
+      return apiFetch<T>("/api/scriptview/layouts");
+
+    case "scriptview:saveLayouts":
+      return post<T>("/api/scriptview/layouts", { layouts: p.layouts });
+
+    case "scriptview:noteCategories": {
+      const id = p.serviceTypeId as string;
+      return apiFetch<T>(`/api/scriptview/note-categories?serviceTypeId=${encodeURIComponent(id)}`);
+    }
+
+    case "scriptview:rundown": {
+      const id = p.serviceTypeId as string;
+      const qs = p.planId ? `&planId=${encodeURIComponent(p.planId as string)}` : "";
+      return apiFetch<T>(`/api/scriptview/rundown?serviceTypeId=${encodeURIComponent(id)}${qs}`);
+    }
+
     case "stage:setServiceType":
       return post<T>("/api/service-type", p);
 

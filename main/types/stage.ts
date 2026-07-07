@@ -835,6 +835,38 @@ export interface PlanItemsDTO {
   noteCategories: string[];
 }
 
+/** A saved ScriptView layout — a named column preset for one service type (our
+ *  in-app ScriptViewer replacement). Columns reference PCO note categories by name
+ *  so they survive re-fetches. */
+export interface ScriptViewLayout {
+  id: string;
+  serviceTypeId: string;
+  name: string;
+  order: number;
+  /** Ordered note-category names shown as columns. */
+  columns: string[];
+  showClock?: boolean;
+  showLength?: boolean;
+  /** Show the meta line (description / key·BPM) under each title. */
+  showTitleMeta?: boolean;
+  /** Note category whose presence tints the row (department focus), or null. */
+  accentDepartment?: string | null;
+}
+
+/** The resolved rundown for a ScriptView page: the chosen plan's items + columns,
+ *  plus whether this service type is the one currently running live. */
+export interface ScriptViewRundownDTO {
+  serviceTypeId: string;
+  planId: string | null;
+  planTitle: string | null;
+  planSeriesTitle: string | null;
+  planDates: string | null;
+  items: PlanItemDTO[];
+  noteCategories: string[];
+  /** True when this service type is the active/live one (enables live highlight). */
+  isLive: boolean;
+}
+
 /** A file attached to a PCO plan (e.g. a stage plot, chart, or rundown PDF). */
 export interface PcoAttachmentDTO {
   id: string;

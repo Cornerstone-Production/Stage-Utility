@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -13,6 +13,7 @@ import { settingsStore } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
 import { layoutGroupsStore } from "./layout-groups-store.js";
+import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { updater } from "./updater.js";
 
@@ -488,6 +489,65 @@ export class StageController {
     const ordered = categories.filter((c) => used.has(c));
     for (const c of used) if (!ordered.includes(c)) ordered.push(c); // any non-canonical, at end
     return { planId: this.state.planId, items, noteCategories: ordered };
+  }
+
+  // ── ScriptView (in-app ScriptViewer replacement) ────────────────────────
+
+  async listScriptViewLayouts(): Promise<ScriptViewLayout[]> {
+    return scriptViewLayoutsStore.load();
+  }
+
+  /** Bulk replace — the settings UI manages the whole array and saves it. */
+  async saveScriptViewLayouts(layouts: ScriptViewLayout[]): Promise<ScriptViewLayout[]> {
+    await scriptViewLayoutsStore.save(layouts);
+    return layouts;
+  }
+
+  /** All note-category names PCO knows for a service type (drives the column
+   *  picker). Unlike the rundown's `noteCategories`, this is NOT pruned to
+   *  categories currently in use, so authors can pre-add a column. */
+  async listScriptViewNoteCategories(serviceTypeId: string): Promise<string[]> {
+    if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return [];
+    return pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId);
+  }
+
+  /** Resolve the rundown for a ScriptView page. planId picks a specific plan;
+   *  otherwise the live plan (when this IS the active type) or the nearest
+   *  upcoming plan. `isLive` gates the live-item highlight in the renderer. */
+  async getScriptViewRundown(serviceTypeId: string, planId?: string | null): Promise<ScriptViewRundownDTO> {
+    const empty: ScriptViewRundownDTO = {
+      serviceTypeId, planId: null, planTitle: null, planSeriesTitle: null,
+      planDates: null, items: [], noteCategories: [], isLive: false,
+    };
+    if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return empty;
+
+    const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, serviceTypeId);
+    const isActiveType = serviceTypeId === this.state.serviceTypeId;
+    let plan: PlanDTO | null = null;
+    if (planId) plan = plans.find((p) => p.id === planId) ?? null;
+    else if (isActiveType && this.state.planId) plan = plans.find((p) => p.id === this.state.planId) ?? plans[0] ?? null;
+    else plan = plans[0] ?? null;
+    if (!plan) return empty;
+
+    const [items, categories] = await Promise.all([
+      pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
+      pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId),
+    ]);
+    const used = new Set<string>();
+    for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
+    const ordered = categories.filter((c) => used.has(c));
+    for (const c of used) if (!ordered.includes(c)) ordered.push(c);
+
+    return {
+      serviceTypeId,
+      planId: plan.id,
+      planTitle: plan.title,
+      planSeriesTitle: plan.seriesTitle,
+      planDates: plan.dates,
+      items,
+      noteCategories: ordered,
+      isLive: isActiveType && plan.id === this.state.planId,
+    };
   }
 
   /**
