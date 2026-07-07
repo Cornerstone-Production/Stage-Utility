@@ -22,6 +22,7 @@ import {
   PaletteIcon,
   ClockIcon,
   DropletIcon,
+  ListChecksIcon,
   SlidersHorizontalIcon,
   SunIcon,
   MoonIcon,
@@ -40,6 +41,7 @@ import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import { ServiceHistorySection } from "./sections/service-history-section";
+import { ScriptViewSection } from "./sections/scriptview-section";
 import { BaptismsSection } from "./sections/baptisms-section";
 import { GettingStarted } from "./getting-started";
 import { BrandHeader } from "./brand-header";
@@ -141,6 +143,7 @@ function useSidebarCollapsed() {
 const SECTIONS: SectionItem[] = [
   { id: "plan", label: "Plan", icon: <CalendarIcon className="size-4 text-gray-11" /> },
   { id: "views", label: "Views", icon: <LayoutTemplateIcon className="size-4 text-gray-11" /> },
+  { id: "scriptview", label: "ScriptView", icon: <ListChecksIcon className="size-4 text-gray-11" /> },
   { id: "displays", label: "Displays", icon: <MonitorIcon className="size-4 text-gray-11" /> },
   { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4 text-gray-11" /> },
   { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4 text-gray-11" /> },
@@ -1030,6 +1033,8 @@ export function SettingsView() {
             handlers={handlers}
           />
         );
+      case "scriptview":
+        return <ScriptViewSection />;
       case "displays":
         return <OutputsSection stageState={stageState} handlers={handlers} />;
       case "integrations":
