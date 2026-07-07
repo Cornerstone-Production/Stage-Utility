@@ -64,7 +64,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
       // Outer wrapper provides the gap spacing — p-1.5 all sides, last child no right padding handled by gap
       <div
         className={cn(
-          "relative flex flex-col flex-1 min-w-0 p-1.5 select-none",
+          "relative flex flex-col flex-1 min-w-0 p-1.5 select-none [container-type:inline-size]",
           className,
         )}
       >
@@ -72,8 +72,11 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             ring (its crisp 1px border bands visibly on the Pi panels against the
             dark fill); just a soft fill so it reads without an outlined rectangle. */}
         <div
-          className="relative flex flex-col items-center justify-center flex-1 overflow-hidden rounded-3xl [container-type:inline-size]"
-          style={{ background: "rgba(255,255,255,0.02)" }}
+          className="relative flex flex-col items-center justify-center flex-1 overflow-hidden [container-type:inline-size]"
+          // Radius is purely relative to the slot's own width (cqi) so it renders at
+          // the SAME proportion in the editor preview, the live display, and the
+          // standalone view — an absolute clamp broke that in fill mode (no transform).
+          style={{ background: "rgba(255,255,255,0.02)", borderRadius: "7cqi" }}
         >
           {emptySlotLogo ? (
             <BrandLogo
@@ -95,7 +98,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
   return (
     <div
       className={cn(
-        "relative flex flex-col flex-1 min-w-0 p-1.5 select-none",
+        "relative flex flex-col flex-1 min-w-0 p-1.5 select-none [container-type:inline-size]",
         className,
       )}
     >
@@ -104,7 +107,10 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           so the photo never sits behind the name/RF card. [container-type:inline-size]
           makes every cqi/cqw unit inside resolve against THIS card's width, so
           names/avatar/RF bar stay proportional from preview sliver to 4K column. */}
-      <div className="relative flex flex-col flex-1 overflow-hidden rounded-3xl glass-card [container-type:inline-size]">
+      <div
+        className="relative flex flex-col flex-1 overflow-hidden glass-card [container-type:inline-size]"
+        style={{ borderRadius: "7cqi" }}
+      >
         {/* ── Photo (top) — fills all the space above the info card and stops at
             its top edge (object-cover crops the photo, never overlapping the
             card). flex-1 so it grows to meet the card no matter the slot height. ── */}

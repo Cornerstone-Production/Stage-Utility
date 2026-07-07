@@ -6,6 +6,7 @@ import type { useSensors } from "@dnd-kit/core";
 export type SectionId =
   | "plan"
   | "views"
+  | "scriptview"
   | "displays"
   | "integrations"
   | "connect"
@@ -38,7 +39,7 @@ export interface SectionHandlers {
   handleSetPublicUrl: (url: string | null) => Promise<void>;
   // In-app self-update
   handleCheckUpdates: () => Promise<void>;
-  handleApplyUpdate: () => Promise<void>;
+  handleApplyUpdate: (override?: boolean) => Promise<void>;
   handleSetAutoUpdate: (partial: { enabled?: boolean; dayOfWeek?: number | null; hour?: number }) => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {
@@ -87,6 +88,7 @@ export interface SectionHandlers {
   handleAddOutput: () => Promise<void>;
   handleRenameOutput: (id: string, name: string) => Promise<void>;
   handleSetOutputView: (id: string, viewId: string | null) => Promise<void>;
+  handleSetOutputLocked: (id: string, locked: boolean) => Promise<void>;
   handleRemoveOutput: (id: string) => Promise<void>;
   handleReorderOutputs: (ids: string[]) => Promise<void>;
   handleOpenOutputWindow: (id: string) => Promise<void>;

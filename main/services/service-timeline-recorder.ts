@@ -44,9 +44,10 @@ class ServiceTimelineRecorder {
     if (!live || this.busy) return;
     this.busy = true;
     try {
-      if (live.mode === "item" && live.currentItemId && isLiveServiceToday(live)) {
+      if (live.mode === "item" && live.currentItemId && !live.serviceEnded && isLiveServiceToday(live)) {
         await this.ensureRecord(live);
         if (!this.current) return;
+        if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
         // Only mutate on an item transition — between transitions nothing changes.
         if (live.currentItemId !== this.lastItemId) {
           this.finalizePrevItem(); // close the OUTGOING item (this.lastItemId)
@@ -55,6 +56,14 @@ class ServiceTimelineRecorder {
           broadcast("service-timeline:history", this.current);
           this.schedulePersist();
         }
+      } else if (this.current && !this.current.endedAt) {
+        // Left "item" mode — service ended or the next service's preservice began.
+        // Close the open record so consumers stop showing it as live. Self-healing:
+        // an item going live above reopens it.
+        this.finalizeRecord();
+        this.lastItemId = null;
+        await serviceTimelineStore.upsert(this.current);
+        broadcast("service-timeline:history", this.current);
       }
     } finally {
       this.busy = false;
@@ -97,6 +106,7 @@ class ServiceTimelineRecorder {
       this.current = {
         serviceKey: key,
         serviceTypeId: st.serviceTypeId,
+        serviceTypeName: st.serviceTypeName ?? null,
         planId: st.planId,
         planTitle: st.planTitle,
         seriesTitle: st.planSeriesTitle ?? null,
@@ -136,6 +146,7 @@ class ServiceTimelineRecorder {
       startedAt: live.liveStartAt ?? new Date().toISOString(),
       endedAt: null,
       actualDurationSec: null,
+      preService: live.beforeServiceStart === true, // pre-service default (position-based)
     });
   }
 

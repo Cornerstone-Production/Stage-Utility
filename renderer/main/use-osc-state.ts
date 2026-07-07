@@ -8,10 +8,11 @@ import { invoke, onNotification } from "../lib/api";
  * objects to reflect device state. Values are keyed "targetId::address" (with a
  * "*::address" wildcard fallback).
  */
-export function useOscState(): OscFeedbackDTO | null {
+export function useOscState(enabled = true): OscFeedbackDTO | null {
   const [osc, setOsc] = useState<OscFeedbackDTO | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     invoke<OscFeedbackDTO>("osc:getFeedback")
       .then((s) => {
@@ -23,11 +24,12 @@ export function useOscState(): OscFeedbackDTO | null {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     return onNotification("osc:feedback", (p) => setOsc(p as OscFeedbackDTO));
-  }, []);
+  }, [enabled]);
 
   return osc;
 }

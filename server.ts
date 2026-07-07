@@ -14,6 +14,10 @@
 
 import * as fs from "fs/promises";
 
+import { initLogCapture } from "./main/services/log-buffer.js";
+// Capture logs into the ring buffer (exposed at /log) as early as possible.
+initLogCapture();
+
 import { getUserDataPath } from "./main/services/app-paths.js";
 import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";
@@ -26,6 +30,7 @@ import { tslService } from "./main/services/tsl-service.js";
 import { remoteServer } from "./main/services/remote-server.js";
 import { stageController } from "./main/services/stage-controller.js";
 import { cacheMaintenance } from "./main/services/cache-maintenance.js";
+import { reconcileOpenRecords } from "./main/services/reconcile-records.js";
 
 // ── Data directory ────────────────────────────────────────────────────────────
 //
@@ -42,6 +47,10 @@ console.log("[server] initialising services...");
 await stageController.init();
 await integrationManager.init();
 await baptismTimerService.init();
+
+// Close any history record left open by a prior run (crash / restart mid/after a
+// service) before the poller starts — a genuinely-live service reopens on the next tick.
+await reconcileOpenRecords().catch((err) => console.error("[server] reconcile failed:", err));
 
 // Wire the remote URL into stage state so clients can see it.
 stageController.setRemoteUrl(remoteServer.getLanUrl());

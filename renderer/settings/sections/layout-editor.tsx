@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   UndoIcon,
   Trash2Icon,
@@ -179,6 +179,31 @@ const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
   outline: { background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015, cornerRadius: 0.0148, boxShadow: 0 },
 };
 
+// One consolidated list of preset "looks" for the Style dropdown — each entry is a
+// complete style patch (surface look, optionally color-tinted), so there's a single
+// control instead of separate color + surface rows with duplicate labels.
+const STYLE_PRESETS: { value: string; label: string; style: LayoutStyle }[] = [
+  { value: "flat", label: "Flat", style: SURFACE_PRESETS.flat },
+  { value: "glass", label: "Glass", style: SURFACE_PRESETS.glass },
+  { value: "glass-green", label: "Glass · Green", style: CARD_PRESETS.green },
+  { value: "glass-red", label: "Glass · Red", style: CARD_PRESETS.red },
+  { value: "glass-amber", label: "Glass · Amber", style: CARD_PRESETS.amber },
+  { value: "elevated", label: "Elevated", style: SURFACE_PRESETS.elevated },
+  { value: "solid", label: "Solid", style: SURFACE_PRESETS.solid },
+  { value: "outline", label: "Outline", style: SURFACE_PRESETS.outline },
+];
+
+// Which preset (if any) the current style matches — so the Style dropdown reflects
+// the applied look and reads as "custom" (placeholder) once fields are hand-tweaked.
+// A preset matches when every field IT sets equals the object's value.
+function matchStylePreset(s: LayoutStyle): string {
+  for (const p of STYLE_PRESETS) {
+    const keys = Object.keys(p.style) as (keyof LayoutStyle)[];
+    if (keys.every((k) => (s[k] ?? null) === (p.style[k] ?? null))) return p.value;
+  }
+  return "";
+}
+
 // Nearest labeled stop for the single Elevation slider (None/Low/Med/High).
 function elevationLabel(v: number): string {
   if (v <= 0.175) return "None";
@@ -323,7 +348,7 @@ function dashboardTemplate(): LayoutObject[] {
   ];
 }
 
-const GRID = 48; // snap steps across the canvas
+const GRID = 96; // snap steps across the canvas (finer grid = ~half-size cells)
 const MIN = 0.03;
 
 // Canvas aspect presets. Resolution is irrelevant (the renderer scales the design
@@ -866,6 +891,53 @@ function RowText({ label, hint, value, placeholder, onChange }: { label: string;
   );
 }
 
+/** Image object config: a URL field (external https / existing) plus an upload
+ *  button that stores a local file server-side and sets src to the returned URL —
+ *  so the bytes never live in the layout JSON (which rides in stage:state). */
+function ImageConfig({ src, onChange }: { src: string; onChange: (v: string) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the same file be re-picked later
+    if (!file) return;
+    setErr(null);
+    setBusy(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result));
+        r.onerror = () => reject(new Error("Couldn't read the file"));
+        r.readAsDataURL(file);
+      });
+      const { url } = await invoke<{ url: string }>("layout:uploadImage", { dataUrl });
+      onChange(url);
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <RowText label="URL" value={src} placeholder="https://… or upload →" onChange={onChange} />
+      <Row label="Upload">
+        <div className="flex items-center gap-2 min-w-0">
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+          <Button variant="filled" size="small" onClick={() => fileRef.current?.click()} disabled={busy}>
+            {busy ? "Uploading…" : "Choose image…"}
+          </Button>
+          {src.startsWith("/layout-images/") && <span className="text-caption2 text-green-10 shrink-0">uploaded ✓</span>}
+          {err && <span className="text-caption2 text-red-11 truncate">{err}</span>}
+        </div>
+      </Row>
+    </>
+  );
+}
+
 function RowNumber({ label, hint, value, step, min, max, onChange }: { label: string; hint?: string; value: number; step?: number; min?: number; max?: number; onChange: (v: number) => void }) {
   return <Row label={label} hint={hint}><NumberInput value={value} step={step} min={min} max={max} onChange={onChange} /></Row>;
 }
@@ -910,6 +982,66 @@ function RowSelect({ label, hint, value, options, onChange }: { label: string; h
         </SelectContent>
       </Select>
     </Row>
+  );
+}
+
+const RECORDED_LATEST = "__latest__";
+
+/** Inspector controls for the people-graph object: live vs. a recorded service,
+ *  PCO markers, hover tooltip, and a kiosk-visible live/recorded toggle. */
+function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, { type: "people-graph" }>; onConfig: (c: LayoutObjectConfig) => void }) {
+  const source = c.source ?? "live";
+  const [services, setServices] = useState<{ value: string; label: string }[]>([]);
+  useEffect(() => {
+    if (source !== "recorded") return;
+    invoke<ServiceAttendance[]>("attendance:listHistory")
+      .then((list) =>
+        setServices(
+          (list ?? [])
+            .filter((s) => s.endedAt)
+            .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
+            .map((s) => {
+              const d = new Date(s.startedAt);
+              const when = `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+              return { value: s.serviceKey, label: s.serviceTypeName ? `${when} — ${s.serviceTypeName}` : when };
+            }),
+        ),
+      )
+      .catch(() => setServices([]));
+  }, [source]);
+
+  return (
+    <>
+      <RowToggle
+        label="Count"
+        value={c.metric ?? "occupancy"}
+        options={[{ value: "attendance", label: "Attendance" }, { value: "occupancy", label: "In room" }]}
+        onChange={(v) => onConfig({ ...c, metric: v })}
+      />
+      <RowSwitch label="Show value" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+      {(c.showLabel ?? true) && (
+        <RowText label="Label" value={c.label ?? ""} placeholder={c.metric === "attendance" ? "Attendance" : "In room"} onChange={(v) => onConfig({ ...c, label: v })} />
+      )}
+      <RowToggle
+        label="Source"
+        value={source}
+        options={[{ value: "live", label: "Live" }, { value: "recorded", label: "Recorded" }]}
+        onChange={(v) => onConfig({ ...c, source: v as "live" | "recorded" })}
+      />
+      {source === "recorded" && (
+        <RowSelect
+          label="Service"
+          hint="Which past service's curve to show. 'Most recent' auto-follows the latest finished service."
+          value={c.recordedServiceKey || RECORDED_LATEST}
+          options={[{ value: RECORDED_LATEST, label: "Most recent" }, ...services]}
+          onChange={(v) => onConfig({ ...c, recordedServiceKey: v === RECORDED_LATEST ? null : v })}
+        />
+      )}
+      <RowSwitch label="Plan-item markers" hint="Overlay a dashed line + time where each PCO item started." checked={c.showMarkers ?? true} onChange={(v) => onConfig({ ...c, showMarkers: v })} />
+      <RowSwitch label="Hover tooltip" hint="Show the value + time at the pointer." checked={c.showTooltip ?? true} onChange={(v) => onConfig({ ...c, showTooltip: v })} />
+      <RowSwitch label="Kiosk live/recorded toggle" hint="Show an on-screen pill so a viewer can flip between live and the last recorded service." checked={c.kioskToggle ?? false} onChange={(v) => onConfig({ ...c, kioskToggle: v })} />
+      <p className="text-caption2 text-gray-9 leading-snug">Live builds a rolling trend while the server runs; Recorded replays a finished service. Line color is the object's text color below.</p>
+    </>
   );
 }
 
@@ -1324,16 +1456,22 @@ export function LayoutEditor({
   const layerRows = flattenLayers(objects);
 
   return (
-    <div className="flex flex-col gap-3 @container h-full min-h-0">
-      {/* Unsaved-changes banner — the canvas below already reflects the edits;
-          this makes clear they aren't saved and offers Save / Discard. */}
+    <div className="relative flex flex-col gap-3 @container h-full min-h-0">
+      {/* Unsaved-changes banner — a compact pill in a zero-height, right-aligned
+          STICKY anchor: it stays pinned to the top as the editor scrolls (always
+          visible) yet reserves no layout space, so it never shifts content down.
+          pointer-events pass through the empty anchor; only the pill is clickable. */}
       {dirty && (
-        <UnsavedBanner
-          message="Unsaved layout changes — shown here, but not saved yet."
-          saving={saving}
-          onSave={() => void save()}
-          onDiscard={discardChanges}
-        />
+        <div className="sticky top-1 z-30 h-0 flex justify-end pr-1 pointer-events-none">
+          <div className="pointer-events-auto">
+            <UnsavedBanner
+              compact
+              saving={saving}
+              onSave={() => void save()}
+              onDiscard={discardChanges}
+            />
+          </div>
+        </div>
       )}
 
       {/* View-only bar — a custom view opens as a clean preview until "Edit". */}
@@ -1457,18 +1595,19 @@ export function LayoutEditor({
         </Dialog>
 
         <div className="flex-1" />
-        {dirty && (
-          <Button variant="accent" size="small" onClick={save} disabled={saving}>
-            {saving ? "Saving…" : "Save layout"}
-          </Button>
-        )}
+        {/* Save/Discard live in the floating unsaved pill when dirty — no separate
+            toolbar Save button (it duplicated the pill's Save). "Done" exits (and
+            prompts to save if there are unsaved changes). */}
         <Button variant="filled" size="small" onClick={leaveEditMode}>
           <CheckIcon className="size-3.5" /> Done
         </Button>
       </div>
       )}
 
-      <div className="flex gap-3 @max-4xl:flex-col min-h-0">
+      {/* Fill the editor height so the side panel can use the full window height —
+          except while editing an inline slots-grid, where the row stays preview-tall
+          so the InlineSlotsEditor below it stays reachable without a huge gap. */}
+      <div className={`flex gap-3 @max-4xl:flex-col min-h-0 ${!inlineGrid ? "flex-1" : ""}`}>
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
@@ -1495,10 +1634,11 @@ export function LayoutEditor({
           )}
         </div>
 
-        {/* Side panel: layers + inspector (edit mode only). Capped to the canvas
-            height so it scrolls beside the preview instead of stretching the row. */}
+        {/* Side panel: layers + inspector (edit mode only). Fills the full window
+            height (scrolls internally); only capped to the preview height while an
+            inline slots-grid is selected, so its editor below stays reachable. */}
         {isEditing && (
-        <div className="w-64 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: canvasH ?? undefined }}>
+        <div className="w-64 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: inlineGrid ? (canvasH ?? undefined) : undefined }}>
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Layers</span>
@@ -2368,10 +2508,11 @@ function Inspector({
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="occupancy">In room (now)</SelectItem>
-                  <SelectItem value="attendance">Attendance (today)</SelectItem>
-                  <SelectItem value="peak">Peak (today)</SelectItem>
-                  <SelectItem value="min">Lowest (service)</SelectItem>
-                  <SelectItem value="avg">Average (today)</SelectItem>
+                  <SelectItem value="peak">Peak attendance (today)</SelectItem>
+                  <SelectItem value="min">Lowest attendance (today)</SelectItem>
+                  <SelectItem value="avg">Avg attendance (today)</SelectItem>
+                  <SelectItem value="serviceAttendance">Total entries (this service)</SelectItem>
+                  <SelectItem value="attendance">Total entries (day)</SelectItem>
                 </SelectContent>
               </Select>
             </Row>
@@ -2395,24 +2536,21 @@ function Inspector({
           </>
         );
       })()}
-      {c.type === "people-graph" && (
-        <>
-          <RowToggle
-            label="Count"
-            value={c.metric ?? "occupancy"}
-            options={[{ value: "attendance", label: "Attendance" }, { value: "occupancy", label: "In room" }]}
-            onChange={(v) => onConfig({ ...c, metric: v })}
-          />
-          <RowSwitch label="Show value" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-          {(c.showLabel ?? true) && (
-            <RowText label="Label" value={c.label ?? ""} placeholder={c.metric === "attendance" ? "Attendance" : "In room"} onChange={(v) => onConfig({ ...c, label: v })} />
-          )}
-          <p className="text-caption2 text-gray-9 leading-snug">Trend builds while the server runs; the line color is the object's text color below.</p>
-        </>
-      )}
+      {c.type === "people-graph" && <PeopleGraphInspector c={c} onConfig={onConfig} />}
       {c.type === "people-panel" && (() => {
-        const ORDER = ["occupancy", "peak", "attendance", "capacity", "avg", "avgService", "vsAverage", "min"] as const;
-        const LABEL: Record<string, string> = { occupancy: "In room (now)", peak: "Peak (today)", attendance: "Attendance (entered)", capacity: "% of capacity", avg: "Average (today)", avgService: "Average / service", vsAverage: "vs average (peak vs typical)", min: "Lowest (service)" };
+        const ORDER = ["occupancy", "peak", "serviceAttendance", "attendance", "capacity", "avg", "avgService", "vsAverage", "min"] as const;
+        const LABEL: Record<string, string> = { occupancy: "In room", peak: "Peak att.", serviceAttendance: "Entries (svc)", attendance: "Entries (day)", capacity: "% capacity", avg: "Avg att.", avgService: "Avg / service", vsAverage: "vs average", min: "Lowest att." };
+        const HINT: Record<string, string> = {
+          occupancy: "People currently in the room right now (entries minus exits).",
+          peak: "Peak attendance — the highest number of people in the room today.",
+          serviceAttendance: "Total entries THIS service — cumulative door count (double-counts re-entries), reset per service.",
+          attendance: "Total entries today across ALL services — cumulative door count, double-counts re-entries.",
+          capacity: "In-room now as a percentage of the configured building capacity.",
+          avg: "Average attendance (in-room) across today.",
+          avgService: "Average peak attendance across your past recorded services (a typical-service baseline).",
+          vsAverage: "How this service's peak attendance compares to your typical service.",
+          min: "Lowest attendance (in-room) during the current or most-recent live service — the 'floor'.",
+        };
         const cur = c.metrics ?? ["occupancy", "peak", "attendance"];
         const toggle = (k: (typeof ORDER)[number], on: boolean) => {
           const set = new Set<string>(cur);
@@ -2424,7 +2562,7 @@ function Inspector({
           <>
             <p className="text-caption2 text-gray-9 leading-snug">Building-wide people metrics, shown side by side. Toggle each:</p>
             {ORDER.map((k) => (
-              <RowSwitch key={k} label={LABEL[k]} checked={cur.includes(k)} onChange={(v) => toggle(k, v)} />
+              <RowSwitch key={k} label={LABEL[k]} hint={HINT[k]} checked={cur.includes(k)} onChange={(v) => toggle(k, v)} />
             ))}
             <RowToggle
               label="Layout"
@@ -2458,7 +2596,7 @@ function Inspector({
         </>
       )}
       {c.type === "image" && (
-        <RowText label="URL" value={c.src} placeholder="https://… or data:" onChange={(v) => onConfig({ type: "image", src: v })} />
+        <ImageConfig src={c.src} onChange={(v) => onConfig({ type: "image", src: v })} />
       )}
       {c.type === "plan-attachment" && (
         <PlanAttachmentConfig c={c} onConfig={onConfig} o={o} canvas={canvas} onGeom={onGeom} />
@@ -2480,22 +2618,15 @@ function Inspector({
 
       <Separator />
 
-      {/* Card style presets — one-click dashboard "glass tile" look on any object,
-          and "Flat" to clear it back. Just writes the shared style fields below. */}
-      <Row label="Card" hint="Color accent — a tinted glass fill. Combine with a Surface look below.">
-        <div className="flex flex-wrap gap-1">
-          {([["neutral", "Glass"], ["green", "Green"], ["red", "Red"], ["amber", "Amber"], ["flat", "Flat"]] as [CardAccent, string][]).map(([a, label]) => (
-            <Button key={a} variant="filled" size="small" onClick={() => onStyle(CARD_PRESETS[a])}>{label}</Button>
-          ))}
-        </div>
-      </Row>
-      {/* Surface/elevation "style type" — one-click fill+border+shadow look. */}
-      <Row label="Surface" hint="A one-click look: Flat (none), Glass (frosted), Elevated (glass + shadow), Solid (opaque), Outline (border only). Fine-tune with Fill / Border / Elevation below.">
-        <div className="flex flex-wrap gap-1">
-          {([["flat", "Flat"], ["glass", "Glass"], ["elevated", "Elevated"], ["solid", "Solid"], ["outline", "Outline"]] as [SurfaceKind, string][]).map(([k, label]) => (
-            <Button key={k} variant="filled" size="small" onClick={() => onStyle(SURFACE_PRESETS[k])}>{label}</Button>
-          ))}
-        </div>
+      {/* Style preset — one dropdown of complete "looks" (surface + optional tint).
+          Applies the shared style fields below; fine-tune with Fill / Border / Elevation. */}
+      <Row label="Style" hint="Apply a preset look — surface (Flat/Glass/Elevated/Solid/Outline) with an optional color tint. Fine-tune with Fill, Border, and Elevation below.">
+        <Select value={matchStylePreset(s)} onValueChange={(v: string) => { const p = STYLE_PRESETS.find((x) => x.value === v); if (p) onStyle(p.style); }}>
+          <SelectTrigger><SelectValue placeholder="Apply a look…" /></SelectTrigger>
+          <SelectContent>
+            {STYLE_PRESETS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </Row>
 
       {/* Style */}
@@ -2542,9 +2673,7 @@ function Inspector({
           className="flex-1 min-w-0 accent-blue-9"
           aria-label="Opacity"
         />
-        <div className="w-16 shrink-0">
-          <NumberField value={Math.round((s.opacity ?? 1) * 100)} step={1} min={0} max={100} suffix="%" onChange={(v) => onStyle({ opacity: clamp(v / 100, 0, 1) })} />
-        </div>
+        <span className="w-9 shrink-0 text-right tabular-nums text-caption2 text-gray-11">{Math.round((s.opacity ?? 1) * 100)}%</span>
       </Row>
       <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
       <Row label="Padding"><NumberField value={pxOf(s.padding, 0)} step={1} min={0} max={Math.round(0.3 * canvas.height)} suffix="px" onChange={(px) => onStyle({ padding: px / canvas.height })} /></Row>

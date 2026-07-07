@@ -307,6 +307,82 @@ export function SplHistorySection() {
   );
 }
 
+/** The full per-item SPL detail (metric picker + Max/Avg-per-metric table) for one
+ *  service record. Self-contained (owns the surfaced-metric selection, persisted to
+ *  the server) so the unified History tab can embed it. Metric keys come from THIS
+ *  record's items. */
+export function SplDetail({ detail }: { detail: ServiceSplHistory }) {
+  const [visible, setVisible] = useState<string[]>([]);
+  useEffect(() => {
+    invoke<{ metrics: string[] }>("spl:getVisibleMetrics")
+      .then((r) => setVisible(r.metrics ?? []))
+      .catch(() => setVisible([]));
+  }, []);
+  async function toggleMetric(key: string) {
+    const next = visible.includes(key) ? visible.filter((k) => k !== key) : [...visible, key];
+    setVisible(next);
+    try {
+      await invoke("spl:setVisibleMetrics", { metrics: next });
+    } catch {
+      /* best-effort persist */
+    }
+  }
+  const allKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const it of detail.items) if (it.metrics) for (const k of Object.keys(it.metrics)) keys.add(k);
+    if (detail.metricKey) keys.add(detail.metricKey);
+    return Array.from(keys).sort();
+  }, [detail]);
+  const shownMetrics = useMemo(() => {
+    const filtered = visible.filter((k) => allKeys.includes(k));
+    return filtered.length ? filtered : defaultVisible(allKeys);
+  }, [visible, allKeys]);
+  const items = useMemo(() => detail.items.slice().sort((a, b) => a.sequence - b.sequence), [detail]);
+
+  if (!items.length || allKeys.length === 0) {
+    return <p className="text-caption1 text-gray-9">No per-item SPL recorded for this service.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      <MetricPicker allKeys={allKeys} shown={shownMetrics} onToggle={toggleMetric} />
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-caption1">
+          <thead className="text-gray-9 text-left border-b border-gray-5">
+            <tr>
+              <th className="py-1.5 pr-3 font-medium">Item</th>
+              {shownMetrics.map((k) => (
+                <th key={k} className="py-1.5 px-3 font-medium text-right whitespace-nowrap" colSpan={2}>
+                  {k}
+                </th>
+              ))}
+            </tr>
+            <tr className="text-gray-8">
+              <th />
+              {shownMetrics.map((k) => (
+                <Fragment key={k}>
+                  <th className="py-1 px-3 font-normal text-right w-20">Max</th>
+                  <th className="py-1 px-3 font-normal text-right w-20">Avg</th>
+                </Fragment>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it) => (
+              <tr key={it.itemId} className="border-b border-gray-4">
+                <td className="py-1.5 pr-3 text-gray-12 whitespace-nowrap">{it.title || "Untitled"}</td>
+                {shownMetrics.map((k) => {
+                  const st = metricStat(it, k, detail);
+                  return <FragmentCells key={k} max={st?.max ?? null} avg={st?.avg ?? null} />;
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 /** Two right-aligned dB cells (Max, Avg) for one metric. */
 function FragmentCells({ max, avg }: { max: number | null; avg: number | null }) {
   return (

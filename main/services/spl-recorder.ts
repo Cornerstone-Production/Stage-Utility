@@ -15,6 +15,8 @@ import { splHistoryStore } from "./spl-history-store.js";
 import { stageController } from "./stage-controller.js";
 
 const PERSIST_DEBOUNCE_MS = 4000;
+/** Max cadence for pushing the (O(n)) live record to trend viewers between item changes. */
+const LIVE_BROADCAST_MS = 5_000;
 /** Metric preference for the recorded level (A-weighted, slow → broadband). */
 const PREFERRED_METRICS = ["SPL A Slow", "SPL A Fast", "LAeq 10", "SPL Slow", "SPL Fast"];
 
@@ -64,6 +66,7 @@ class SplRecorder {
   private current: ServiceSplHistory | null = null;
   private currentKey: string | null = null;
   private lastItemId: string | null = null;
+  private lastBroadcastAt = 0;
   private nextSequence = 0;
   private busy = false;
   private dirty = false;
@@ -79,19 +82,34 @@ class SplRecorder {
     if (!live || this.busy) return;
     this.busy = true;
     try {
-      if (live.mode === "item" && live.currentItemId && isLiveServiceToday(live)) {
+      if (live.mode === "item" && live.currentItemId && !live.serviceEnded && isLiveServiceToday(live)) {
         await this.ensureRecord(live);
         if (!this.current) return;
+        if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
+        let itemChanged = false;
         if (live.currentItemId !== this.lastItemId) {
           this.finalizePrevItem();
           this.lastItemId = live.currentItemId;
+          itemChanged = true;
         }
         this.recordSample(live.currentItemId, live.label, pickMeter(smaartService.getLatest()));
-        broadcast("spl:history", this.current);
+        // The record is O(n) and item max/avg move slowly — push on an item change,
+        // else at most every LIVE_BROADCAST_MS instead of every tick.
+        const now = Date.now();
+        if (itemChanged || now - this.lastBroadcastAt >= LIVE_BROADCAST_MS) {
+          this.lastBroadcastAt = now;
+          broadcast("spl:history", this.current);
+        }
         this.schedulePersist();
+      } else if (this.current && !this.current.endedAt) {
+        // Left "item" mode — the service ended (mode "none") or the next service's
+        // preservice countdown began. Close the open record so the History tab stops
+        // showing it as live. Self-healing: an item going live above reopens it.
+        this.finalizeRecord();
+        this.lastItemId = null;
+        await splHistoryStore.upsert(this.current);
+        broadcast("spl:history", this.current);
       }
-      // Non-item modes (preservice/none) don't finalize: a plan change or
-      // auto-advance rollover (a new serviceKey) closes the record in ensureRecord.
     } finally {
       this.busy = false;
     }
@@ -138,6 +156,7 @@ class SplRecorder {
       this.current = {
         serviceKey: key,
         serviceTypeId: st.serviceTypeId,
+        serviceTypeName: st.serviceTypeName ?? null,
         planId: st.planId,
         planTitle: st.planTitle,
         seriesTitle: st.planSeriesTitle ?? null,

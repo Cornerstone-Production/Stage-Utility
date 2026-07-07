@@ -10,11 +10,15 @@ import * as http from "http";
 import * as net from "net";
 import * as os from "os";
 import * as path from "path";
+import * as zlib from "node:zlib";
 import { fileURLToPath } from "url";
 
-import type { DisplayKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../types/stage.js";
+import type { DisplayKind, LayoutDTO, LayoutObject, ScriptViewLayout, Slot, SlotsLayout } from "../types/stage.js";
 import type { OscArg } from "../types/osc.js";
-import { addBroadcastListener } from "./broadcaster.js";
+import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
+import { getLogLines } from "./log-buffer.js";
+import { editServiceWindow, recalcAttendance, setItemCounted } from "./history-edit.js";
+import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
 import { deviceManager } from "./device-manager.js";
 import { configSnapshot } from "./config-snapshot.js";
 import { integrationManager } from "./integration-manager.js";
@@ -40,6 +44,14 @@ import { wirelessManager } from "./wireless-manager.js";
 const RENDERER_BUILD_DIR = path.join(process.cwd(), "build", "renderer");
 
 const PORT = Number(process.env.STAGE_UTILITY_PORT) || 8788;
+// "Friendly" port so operators can browse without typing the port. We bind it in
+// ADDITION to PORT (8788 always stays up for Companion + existing links). Default
+// 80; set STAGE_UTILITY_FRIENDLY_PORT=0 to disable. Binding is best-effort — if the
+// process lacks privilege (non-root, no CAP_NET_BIND_SERVICE) or the port is taken,
+// we log and keep serving PORT rather than failing to start.
+const FRIENDLY_PORT = process.env.STAGE_UTILITY_FRIENDLY_PORT !== undefined
+  ? Number(process.env.STAGE_UTILITY_FRIENDLY_PORT)
+  : 80;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -103,6 +115,51 @@ function error(res: http.ServerResponse, message: string, status = 400): void {
   json(res, { error: message }, status);
 }
 
+/** Self-contained /log viewer page — polls /api/log every 2s, filter + autoscroll.
+ *  No framework/build; served directly so it works even if the renderer bundle is
+ *  missing. Carries any ?token through to its fetches. */
+function renderLogPage(): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stage Utility — Server log</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0b0c0e;color:#d6d9de}
+header{position:sticky;top:0;display:flex;gap:.75rem;align-items:center;padding:.6rem .8rem;background:#121418;border-bottom:1px solid #23262c}
+header h1{font:600 14px system-ui;margin:0;color:#e8ebef}.sp{flex:1}
+input,button{font:inherit;background:#1a1d22;color:#d6d9de;border:1px solid #2a2e35;border-radius:6px;padding:.3rem .5rem}button{cursor:pointer}
+#log{padding:.5rem .8rem;white-space:pre-wrap;word-break:break-word}.ln{padding:.5px 0}.t{color:#6b7280}.warn{color:#f5c451}.error{color:#f2777a}.muted{color:#6b7280}
+</style></head><body>
+<header><h1>Server log</h1><span class="muted" id="count"></span><span class="sp"></span>
+<input id="filter" placeholder="filter…" autocomplete="off"><label class="muted"><input type="checkbox" id="auto" checked> auto</label><button id="refresh">refresh</button></header>
+<div id="log"></div>
+<script>
+var token=new URLSearchParams(location.search).get('token');var q=token?('?token='+encodeURIComponent(token)):'';
+var logEl=document.getElementById('log'),filterEl=document.getElementById('filter'),autoEl=document.getElementById('auto'),countEl=document.getElementById('count');var lines=[];
+function esc(s){return String(s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
+function render(){var f=filterEl.value.toLowerCase();var atBottom=(window.innerHeight+window.scrollY)>=(document.body.scrollHeight-40);
+var shown=lines.filter(function(l){return !f||l.msg.toLowerCase().indexOf(f)>=0||l.level.indexOf(f)>=0});
+countEl.textContent=shown.length+' / '+lines.length+' lines';
+logEl.innerHTML=shown.map(function(l){return '<div class="ln '+l.level+'"><span class="t">'+esc(l.t).slice(11,19)+'</span> '+esc(l.msg)+'</div>'}).join('');
+if(autoEl.checked&&atBottom)window.scrollTo(0,document.body.scrollHeight)}
+function load(){fetch('/api/log'+q).then(function(r){return r.json()}).then(function(d){lines=d.lines||[];render()}).catch(function(){})}
+filterEl.oninput=render;document.getElementById('refresh').onclick=load;load();setInterval(function(){if(autoEl.checked)load()},2000);
+</script></body></html>`;
+}
+
+/** Whether a live service / active recording is in progress, and why. Used to lock
+ *  self-updates (which restart the process and would interrupt a service mid-flight
+ *  and drop the last un-persisted samples) unless the operator explicitly overrides. */
+function serviceActivity(): { active: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+  if (stageController.getLastLive()?.mode === "item") reasons.push("A PCO service is live");
+  const spl = splRecorder.getCurrent();
+  if (spl && !spl.endedAt) reasons.push("SPL is recording");
+  const att = attendanceRecorder.getCurrent();
+  if (att && !att.endedAt) reasons.push("Attendance is recording");
+  const tl = serviceTimelineRecorder.getCurrent();
+  if (tl && !tl.endedAt) reasons.push("Service history is recording");
+  return { active: reasons.length > 0, reasons };
+}
+
 function isDisplayKind(v: unknown): v is DisplayKind {
   return (
     v === "slots" ||
@@ -134,6 +191,22 @@ async function readBody(req: http.IncomingMessage): Promise<unknown> {
 
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();
+// Keep the SSE pipe warm and surface dead clients: EventSource ignores comment
+// lines, but the write itself fails (or backs up) on a half-open socket so we can
+// reap it. Without this, a slept/dropped kiosk lingers forever holding memory and
+// one of the browser's ~6 HTTP/1.1 connection slots.
+const SSE_HEARTBEAT_MS = 20_000;
+// If a client's un-flushed write buffer grows past this, it's stalled (asleep, wifi
+// gone). Drop it rather than let its backlog grow server memory without bound — the
+// broadcast loop has no backpressure otherwise.
+const SSE_MAX_BUFFER_BYTES = 2_000_000;
+// Per-connection channel filter. A client reports the exact channel set it renders
+// (POST /api/events/subscribe, keyed by its cid); the fan-out then skips channels a
+// client didn't ask for — so a mic display never receives the 4 Hz spl:metrics
+// firehose it discards anyway. Absent entry = no report yet → send everything (safe
+// fallback; filtering is a pure optimization, never a correctness dependency).
+const resCid = new WeakMap<http.ServerResponse, string>();
+const clientChannels = new Map<string, Set<string>>();
 
 // Small FIFO cache of ProPresenter slide thumbnails, keyed by the per-slide
 // cache-bust token. Lets multiple displays showing the same slide share one
@@ -154,13 +227,80 @@ function scheduleRestart(): void {
 // Pushed into the integration manager so the "companion" panel shows "N connected".
 const companionClients = new Set<http.ServerResponse>();
 
-function sseWrite(res: http.ServerResponse, event: string, data: unknown): void {
-  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+/** Write one SSE event. Returns false when the client is gone or so far behind
+ *  (buffered bytes over the cap) that it should be dropped — callers remove + destroy
+ *  it. This is the only backpressure guard on the fan-out, so a slow/dead client
+ *  can't buffer unboundedly in server memory. */
+function sseHealthy(res: http.ServerResponse): boolean {
+  return !res.writableEnded && !res.destroyed && res.writableLength <= SSE_MAX_BUFFER_BYTES;
+}
+/** Write a pre-built SSE frame; returns false if the client is gone or backed up. */
+function sseWriteFrame(res: http.ServerResponse, frame: string): boolean {
+  if (!sseHealthy(res)) return false;
+  try {
+    res.write(frame);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function sseWrite(res: http.ServerResponse, event: string, data: unknown): boolean {
+  return sseWriteFrame(res, `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+// gzip for static text assets — a Pi re-downloads the whole (re-fingerprinted) build
+// on each deploy, and ~736 KB of JS/CSS/HTML collapses to ~217 KB. Immutable
+// /assets/* are content-hashed, so compress once and cache the bytes forever.
+// Per-request logging is off unless STAGE_UTILITY_DEBUG=1 — it's one line per HTTP
+// request and the launchd/systemd stdout log is often unrotated (grows until reboot).
+const DEBUG_HTTP = process.env.STAGE_UTILITY_DEBUG === "1";
+// Optional token gate for the /log viewer. The app has no auth (LAN-trusted), so
+// /log is open by default like everything else; set STAGE_UTILITY_LOG_TOKEN to
+// require ?token=… on /log + /api/log (logs can carry internal detail).
+const LOG_TOKEN = process.env.STAGE_UTILITY_LOG_TOKEN || null;
+function logAuthed(url: URL): boolean {
+  return !LOG_TOKEN || url.searchParams.get("token") === LOG_TOKEN;
+}
+const COMPRESSIBLE = new Set([".html", ".js", ".mjs", ".css", ".svg", ".json", ".webmanifest"]);
+const gzipCache = new Map<string, Buffer>();
+function acceptsGzip(acceptEncoding: string | undefined): boolean {
+  return typeof acceptEncoding === "string" && /\bgzip\b/.test(acceptEncoding);
+}
+function sendStatic(
+  res: http.ServerResponse,
+  data: Buffer,
+  mime: string,
+  cacheControl: string,
+  ext: string,
+  acceptEncoding: string | undefined,
+  cacheKey: string | null, // non-null → immutable, cache the gzipped bytes
+): void {
+  const headers: Record<string, string> = {
+    "Content-Type": mime,
+    "Cache-Control": cacheControl,
+    Vary: "Accept-Encoding",
+  };
+  if (COMPRESSIBLE.has(ext) && data.length > 1024 && acceptsGzip(acceptEncoding)) {
+    let gz = cacheKey ? gzipCache.get(cacheKey) : undefined;
+    if (!gz) {
+      gz = zlib.gzipSync(data);
+      if (cacheKey) gzipCache.set(cacheKey, gz);
+    }
+    headers["Content-Encoding"] = "gzip";
+    res.writeHead(200, headers);
+    res.end(gz);
+  } else {
+    res.writeHead(200, headers);
+    res.end(data);
+  }
 }
 
 export class RemoteServer {
   private server: http.Server | null = null;
+  private friendlyServer: http.Server | null = null;
+  private friendlyRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private sockets = new Set<net.Socket>();
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     // Resolve control.html with a multi-candidate fallback so it works whether
@@ -176,7 +316,7 @@ export class RemoteServer {
   private _controlHtmlCandidates: string[] = [];
 
   /** Try to serve a file from the Vite renderer build. Returns true if handled. */
-  private async tryServeStatic(pathname: string, res: http.ServerResponse): Promise<boolean> {
+  private async tryServeStatic(pathname: string, res: http.ServerResponse, acceptEncoding?: string): Promise<boolean> {
     // Clean-URL entry points → built HTML files:
     //   /                     → kiosk (index.html)
     //   /settings             → settings panel (settings-window.html)
@@ -213,11 +353,9 @@ export class RemoteServer {
       // Vite fingerprints everything under /assets/, so cache those forever;
       // everything else (HTML, manifest, icons) must revalidate so a new build is
       // picked up immediately instead of Safari serving a stale page.
-      const cacheControl = urlPath.startsWith("/assets/")
-        ? "public, max-age=31536000, immutable"
-        : "no-cache";
-      res.writeHead(200, { "Content-Type": mime, "Cache-Control": cacheControl });
-      res.end(data);
+      const immutable = urlPath.startsWith("/assets/");
+      const cacheControl = immutable ? "public, max-age=31536000, immutable" : "no-cache";
+      sendStatic(res, data, mime, cacheControl, ext, acceptEncoding, immutable ? candidate : null);
       return true;
     } catch {
       // File not found — fall through
@@ -227,9 +365,8 @@ export class RemoteServer {
     if (!path.extname(urlPath)) {
       const fallback = path.join(RENDERER_BUILD_DIR, "index.html");
       try {
-        const html = await fs.readFile(fallback, "utf-8");
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
-        res.end(html);
+        const html = await fs.readFile(fallback);
+        sendStatic(res, html, "text/html; charset=utf-8", "no-cache", ".html", acceptEncoding, null);
         return true;
       } catch {
         // No renderer build — fall through to legacy control page
@@ -260,21 +397,60 @@ export class RemoteServer {
 
     // Push state to SSE clients on every broadcast so the phone page can use
     // EventSource instead of polling.
-    addBroadcastListener((channel, payload) => {
+    // Let producers idle when nothing is watching their channel: true if any client
+    // is subscribed to it, or any client hasn't reported a filter yet (wants all).
+    setSubscriberCheck((channel) => {
       for (const client of sseClients) {
-        try {
-          sseWrite(client, channel, payload);
-        } catch {
+        const cid = resCid.get(client);
+        const chans = cid ? clientChannels.get(cid) : undefined;
+        if (!chans || chans.has(channel)) return true;
+      }
+      return false;
+    });
+
+    addBroadcastListener((channel, payload, serialized) => {
+      let frame: string | null = null; // serialize at most once, only if a client wants it
+      for (const client of sseClients) {
+        const cid = resCid.get(client);
+        const chans = cid ? clientChannels.get(cid) : undefined;
+        if (chans && !chans.has(channel)) continue; // client filtered this channel out
+        if (frame === null) frame = `event: ${channel}\ndata: ${serialized ?? JSON.stringify(payload)}\n\n`;
+        if (!sseWriteFrame(client, frame)) {
           sseClients.delete(client);
+          if (cid) clientChannels.delete(cid);
+          client.destroy();
         }
       }
     });
 
-    this.server = http.createServer(async (req, res) => {
+    // Heartbeat: ping every open stream so idle intermediaries don't drop it and so
+    // half-open/stalled clients get reaped (write fails or backs up → dropped).
+    this.heartbeatTimer = setInterval(() => {
+      for (const client of sseClients) {
+        // ": ..." is an SSE comment line — EventSource ignores it; it just exercises
+        // the write so a half-open or stalled client surfaces and gets reaped.
+        let ok = !client.writableEnded && !client.destroyed && client.writableLength <= SSE_MAX_BUFFER_BYTES;
+        if (ok) {
+          try {
+            client.write(`: ping\n\n`);
+          } catch {
+            ok = false;
+          }
+        }
+        if (!ok) {
+          sseClients.delete(client);
+          client.destroy();
+        }
+      }
+    }, SSE_HEARTBEAT_MS);
+    this.heartbeatTimer.unref?.();
+
+    // One request handler, shared by both listeners (PORT + the friendly port).
+    const handler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
       const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
       const pathname = url.pathname;
 
-      console.log(`[remote-server] ${req.method} ${pathname}`);
+      if (DEBUG_HTTP) console.log(`[remote-server] ${req.method} ${pathname}`);
 
       // CORS preflight
       if (req.method === "OPTIONS") {
@@ -293,12 +469,15 @@ export class RemoteServer {
         console.error(`[remote-server] handler error ${pathname}:`, msg);
         error(res, msg, 500);
       }
-    });
+    };
 
-    this.server.on("connection", (socket: net.Socket) => {
+    const trackConn = (socket: net.Socket) => {
       this.sockets.add(socket);
       socket.on("close", () => this.sockets.delete(socket));
-    });
+    };
+
+    this.server = http.createServer(handler);
+    this.server.on("connection", trackConn);
 
     await new Promise<void>((resolve, reject) => {
       this.server!.listen(PORT, "0.0.0.0", () => {
@@ -307,15 +486,70 @@ export class RemoteServer {
       });
       this.server!.on("error", reject);
     });
+
+    // Friendly port (e.g. 80) so the LAN URL needs no port. Bound in addition to
+    // PORT and self-healing: if it can't bind right now (e.g. the previous process
+    // hasn't released it yet across a restart), keep serving PORT and RETRY in the
+    // background until it succeeds — never fatal, and it reclaims 80 within seconds
+    // of it becoming free. With the privilege granted (CAP_NET_BIND_SERVICE on prod)
+    // the only failure mode is that transient restart race, which the retry closes.
+    if (FRIENDLY_PORT && FRIENDLY_PORT !== PORT) {
+      this.bindFriendlyPort(handler, trackConn);
+    }
+  }
+
+  private bindFriendlyPort(
+    handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
+    trackConn: (socket: net.Socket) => void,
+    attempt = 0,
+  ): void {
+    const friendly = http.createServer(handler);
+    friendly.on("connection", trackConn);
+    friendly.once("error", (err: NodeJS.ErrnoException) => {
+      friendly.close();
+      // Log the actionable reason once (first failure); stay quiet on subsequent retries.
+      if (attempt === 0) {
+        const why = err.code === "EACCES"
+          ? `no privilege to bind port ${FRIENDLY_PORT} (Linux: re-run 'sudo ./scripts/install.sh' to grant CAP_NET_BIND_SERVICE)`
+          : err.code === "EADDRINUSE"
+            ? `port ${FRIENDLY_PORT} still in use (likely a restart releasing it)`
+            : err.message;
+        console.warn(`[remote-server] port ${FRIENDLY_PORT} not bound yet — ${why}. Serving :${PORT} and retrying in the background.`);
+      }
+      // Fast retries first (covers the restart-release race), then back off — but
+      // never give up, so 80 is reclaimed the moment it frees up.
+      const next = attempt + 1;
+      const delay = next <= 5 ? 1000 : next <= 15 ? 5000 : 30000;
+      this.friendlyRetryTimer = setTimeout(() => this.bindFriendlyPort(handler, trackConn, next), delay);
+      this.friendlyRetryTimer.unref?.();
+    });
+    friendly.listen(FRIENDLY_PORT, "0.0.0.0", () => {
+      this.friendlyServer = friendly;
+      if (this.friendlyRetryTimer) { clearTimeout(this.friendlyRetryTimer); this.friendlyRetryTimer = null; }
+      console.log(`[remote-server] also listening on 0.0.0.0:${FRIENDLY_PORT} (port-free URL)${attempt > 0 ? ` — bound after ${attempt} retr${attempt === 1 ? "y" : "ies"}` : ""}`);
+    });
   }
 
   async stop(): Promise<void> {
     console.log("[remote-server] stopping");
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
     // Force-close all tracked sockets so the server shuts down promptly.
     for (const socket of this.sockets) {
       socket.destroy();
     }
     this.sockets.clear();
+
+    if (this.friendlyRetryTimer) {
+      clearTimeout(this.friendlyRetryTimer);
+      this.friendlyRetryTimer = null;
+    }
+    if (this.friendlyServer) {
+      await new Promise<void>((resolve) => this.friendlyServer!.close(() => resolve()));
+      this.friendlyServer = null;
+    }
 
     await new Promise<void>((resolve) => {
       if (!this.server) {
@@ -335,10 +569,62 @@ export class RemoteServer {
     _url: URL,
     method: string,
   ): Promise<void> {
+    // ── Uploaded custom-layout images ─────────────────────────────────────
+    // Served before static so the SPA fallback doesn't swallow /layout-images/*.
+    {
+      const imgMatch = pathname.match(/^\/layout-images\/([^/]+)$/);
+      if (method === "GET" && imgMatch) {
+        const img = await readLayoutImage(decodeURIComponent(imgMatch[1]));
+        if (!img) {
+          res.writeHead(404, { "Content-Type": "text/plain" });
+          res.end("Not found");
+          return;
+        }
+        // Content-hashed name → immutable, cache forever.
+        res.writeHead(200, { "Content-Type": img.mime, "Cache-Control": "public, max-age=31536000, immutable" });
+        res.end(img.data);
+        return;
+      }
+    }
+    if (method === "POST" && pathname === "/api/layout-images") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      if (typeof body.dataUrl !== "string") {
+        error(res, "body.dataUrl (base64 data:image/… URL) required");
+        return;
+      }
+      try {
+        json(res, { url: await saveLayoutImage(body.dataUrl) });
+      } catch (err) {
+        error(res, String(err instanceof Error ? err.message : err));
+      }
+      return;
+    }
+
+    // ── Server log viewer ─────────────────────────────────────────────────
+    // Handled before static serving so the SPA fallback doesn't swallow /log.
+    if (method === "GET" && pathname === "/log") {
+      if (!logAuthed(_url)) {
+        res.writeHead(401, { "Content-Type": "text/plain" });
+        res.end("Unauthorized — append ?token=…");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
+      res.end(renderLogPage());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/log") {
+      if (!logAuthed(_url)) {
+        error(res, "unauthorized", 401);
+        return;
+      }
+      json(res, { lines: getLogLines() });
+      return;
+    }
+
     // ── Serve renderer static build (standalone mode) ─────────────────────
     // Serves the Vite-built renderer from build/renderer/ when it exists.
     if (method === "GET" && !pathname.startsWith("/api/") && pathname !== "/photos") {
-      const staticServed = await this.tryServeStatic(pathname, res);
+      const staticServed = await this.tryServeStatic(pathname, res, req.headers["accept-encoding"] as string | undefined);
       if (staticServed) return;
       // Fall through to the phone control page.
     }
@@ -375,7 +661,9 @@ export class RemoteServer {
       sseWrite(res, "server:hello", { version: SERVER_VERSION });
       // Send initial snapshots so the client is immediately in sync — these
       // channels otherwise only broadcast on change, leaving a fresh client blank.
+      stageController.ensureResolvedFresh(); // fold in any device status that changed while idle
       sseWrite(res, "stage:state-changed", stageController.getState());
+      sseWrite(res, "pco:live", stageController.getLastLive());
       sseWrite(res, "propresenter:status", propresenterService.getStatus());
       sseWrite(res, "propresenter:instances", propresenterManager.getInstancesDto());
       sseWrite(res, "spl:metrics", smaartService.getLatest());
@@ -387,6 +675,10 @@ export class RemoteServer {
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
       sseClients.add(res);
+      // Correlate this stream to its client id so POST /api/events/subscribe can set
+      // its channel filter. No cid (or no report yet) → the fan-out sends everything.
+      const cid = _url.searchParams.get("cid");
+      if (cid) resCid.set(res, cid);
       // A Companion module marks its event stream so we can show a live
       // connected-client count in the integration panel. Re-broadcast the
       // integration states so the count updates everywhere immediately.
@@ -399,11 +691,22 @@ export class RemoteServer {
       }
       req.on("close", () => {
         sseClients.delete(res);
+        if (cid) clientChannels.delete(cid);
         if (isCompanion) {
           companionClients.delete(res);
           integrationManager.setCompanionClients(companionClients.size);
         }
       });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/events/subscribe") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const cid = typeof body.cid === "string" ? body.cid : null;
+      const channels = Array.isArray(body.channels)
+        ? body.channels.filter((c): c is string => typeof c === "string")
+        : null;
+      if (cid && channels) clientChannels.set(cid, new Set(channels));
+      json(res, { ok: cid != null && channels != null });
       return;
     }
 
@@ -486,6 +789,39 @@ export class RemoteServer {
     }
 
     // ── Attendance history (mirrors the SPL history routes) ─────────────────
+    if (method === "POST" && pathname === "/api/history/window") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      if (typeof body.serviceKey !== "string") {
+        error(res, "body.serviceKey (string) required");
+        return;
+      }
+      await editServiceWindow(body.serviceKey, {
+        startedAt: typeof body.startedAt === "string" ? body.startedAt : undefined,
+        endedAt: typeof body.endedAt === "string" ? body.endedAt : undefined,
+      });
+      json(res, { ok: true });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/history/recalc") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      if (typeof body.serviceKey !== "string") {
+        error(res, "body.serviceKey (string) required");
+        return;
+      }
+      await recalcAttendance(body.serviceKey);
+      json(res, { ok: true });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/history/item-counted") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      if (typeof body.serviceKey !== "string" || typeof body.itemId !== "string" || typeof body.counted !== "boolean") {
+        error(res, "body.serviceKey, body.itemId (strings) + body.counted (boolean) required");
+        return;
+      }
+      await setItemCounted(body.serviceKey, body.itemId, body.counted);
+      json(res, { ok: true });
+      return;
+    }
     if (method === "GET" && pathname === "/api/attendance/history/current") {
       json(res, attendanceRecorder.getCurrent());
       return;
@@ -750,6 +1086,58 @@ export class RemoteServer {
       }
       const plans = await stageController.listPlans(serviceTypeId);
       json(res, plans);
+      return;
+    }
+
+    // ── ScriptView (in-app ScriptViewer replacement) ─────────────────────────
+    if (method === "GET" && pathname === "/api/scriptview/layouts") {
+      json(res, await stageController.listScriptViewLayouts());
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/scriptview/layouts") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.layouts)) {
+        error(res, "body.layouts (array) required");
+        return;
+      }
+      json(res, await stageController.saveScriptViewLayouts(body.layouts as ScriptViewLayout[]));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/scriptview/config") {
+      json(res, await stageController.getScriptViewConfig());
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/scriptview/config") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.serviceTypeIds)) {
+        error(res, "body.serviceTypeIds (array) required");
+        return;
+      }
+      json(res, await stageController.setScriptViewConfig(body.serviceTypeIds.map(String)));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/scriptview/note-categories") {
+      const serviceTypeId = _url.searchParams.get("serviceTypeId");
+      if (!serviceTypeId) {
+        error(res, "serviceTypeId query param required");
+        return;
+      }
+      json(res, await stageController.listScriptViewNoteCategories(serviceTypeId));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/scriptview/rundown") {
+      const serviceTypeId = _url.searchParams.get("serviceTypeId");
+      if (!serviceTypeId) {
+        error(res, "serviceTypeId query param required");
+        return;
+      }
+      const planId = _url.searchParams.get("planId");
+      json(res, await stageController.getScriptViewRundown(serviceTypeId, planId));
       return;
     }
 
@@ -1090,14 +1478,16 @@ export class RemoteServer {
       const hasViewId = "viewId" in body
         && (typeof body.viewId === "string" || body.viewId === null);
       const hasBlackout = typeof body.blackout === "boolean";
-      if (!hasName && !hasViewId && !hasBlackout) {
-        error(res, "body.name (string), body.viewId (string|null), or body.blackout (boolean) required");
+      const hasLocked = typeof body.locked === "boolean";
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), or body.locked (boolean) required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameOutput(id, body.name as string);
       if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null);
       if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
+      if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
       json(res, state);
       return;
     }
@@ -1404,7 +1794,17 @@ export class RemoteServer {
       json(res, await updater.checkForUpdate());
       return;
     }
+    if (method === "GET" && pathname === "/api/update/lock") {
+      json(res, serviceActivity());
+      return;
+    }
     if (method === "POST" && pathname === "/api/update/apply") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const lock = serviceActivity();
+      if (lock.active && body.override !== true) {
+        json(res, { error: "locked", locked: true, reasons: lock.reasons }, 409);
+        return;
+      }
       try {
         json(res, await updater.applyUpdate());
       } catch (err) {
@@ -1418,8 +1818,21 @@ export class RemoteServer {
         error(res, "body.branch (string) required");
         return;
       }
+      const lock = serviceActivity();
+      if (lock.active && body.override !== true) {
+        json(res, { error: "locked", locked: true, reasons: lock.reasons }, 409);
+        return;
+      }
       try {
         json(res, await updater.switchTrack(body.branch));
+      } catch (err) {
+        error(res, String(err instanceof Error ? err.message : err));
+      }
+      return;
+    }
+    if (method === "POST" && pathname === "/api/update/restart") {
+      try {
+        json(res, updater.restart());
       } catch (err) {
         error(res, String(err instanceof Error ? err.message : err));
       }

@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, Trash2Icon, ClockIcon, CopyIcon } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Trash2Icon, ClockIcon, CopyIcon, TimerIcon, TrendingUpIcon, TrendingDownIcon, GaugeIcon, UsersIcon, CalendarDaysIcon, DoorOpenIcon, type LucideIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { confirm, EmptyState, SkeletonRows, Button, toast } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
+import { HistoryCalendar } from "../../components/history-calendar";
+import { AttendanceDetail, servicePeakAttendance } from "./attendance-history-section";
+import { SplDetail } from "./spl-history-section";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -14,13 +17,65 @@ function fmtTime(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 function fmtDay(day: string): string {
   const d = new Date(`${day}T00:00:00`);
   if (Number.isNaN(d.getTime())) return day;
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 }
+/** Short local date label ("Jul 5") for a YYYY-MM-DD service date. */
+function shortDay(day: string): string {
+  const d = new Date(`${day}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? day : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// Selectable Overview metrics — grouped (Timing / Attendance) with an icon each.
+type OverviewGroup = "timing" | "attendance";
+interface OverviewMetricDef { key: string; label: string; group: OverviewGroup; Icon: LucideIcon }
+const OVERVIEW_METRICS: OverviewMetricDef[] = [
+  { key: "services", label: "Services", group: "timing", Icon: CalendarDaysIcon },
+  { key: "avgLength", label: "Avg length", group: "timing", Icon: TimerIcon },
+  { key: "avgStart", label: "Avg start", group: "timing", Icon: ClockIcon },
+  { key: "longest", label: "Longest service", group: "timing", Icon: TrendingUpIcon },
+  { key: "shortest", label: "Shortest service", group: "timing", Icon: TrendingDownIcon },
+  { key: "avgOverrun", label: "Avg overrun", group: "timing", Icon: GaugeIcon },
+  { key: "avgAttendance", label: "Avg attendance", group: "attendance", Icon: UsersIcon },
+  { key: "highestAttended", label: "Highest attended", group: "attendance", Icon: TrendingUpIcon },
+  { key: "lowestAttended", label: "Lowest attended", group: "attendance", Icon: TrendingDownIcon },
+  { key: "dayAttendance", label: "Day attendance", group: "attendance", Icon: CalendarDaysIcon },
+  { key: "avgEntries", label: "Avg entries", group: "attendance", Icon: DoorOpenIcon },
+];
+const OVERVIEW_KEYS = OVERVIEW_METRICS.map((m) => m.key);
+const OVERVIEW_GROUP_LABEL: Record<OverviewGroup, string> = { timing: "Timing", attendance: "Attendance" };
+const OVERVIEW_STORE_KEY = "history:overviewMetrics";
+function loadOverviewMetrics(): string[] {
+  try {
+    const raw = localStorage.getItem(OVERVIEW_STORE_KEY);
+    if (raw) {
+      const a = JSON.parse(raw);
+      if (Array.isArray(a)) return a.filter((k) => OVERVIEW_KEYS.includes(k));
+    }
+  } catch {
+    /* default */
+  }
+  return ["services", "avgLength", "avgStart", "avgAttendance"];
+}
+
+/** ISO → local "HH:MM" for a <input type="time">, or "" if absent/invalid. */
+function toTimeInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+/** Local "HH:MM" on the record's service date → ISO, or undefined if blank/invalid. */
+function fromTimeInput(serviceDate: string, hhmm: string): string | undefined {
+  if (!hhmm) return undefined;
+  const d = new Date(`${serviceDate}T${hhmm}:00`);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
 /** Seconds → "m:ss" (or "h:mm:ss"). */
 function fmtDur(sec: number | null): string {
   if (sec == null) return "—";
@@ -39,10 +94,35 @@ function fmtDelta(sec: number | null): string {
   return `${sign}${Math.floor(a / 60)}:${String(a % 60).padStart(2, "0")}`;
 }
 
+/** Trailing "Stream Buffer"-type padding items — post-service, often left running
+ *  long, so they're excluded from all timing math (kept visible but not counted). */
+function isBufferItem(title: string | null | undefined): boolean {
+  return (title ?? "").toUpperCase().includes("BUFFER");
+}
+
+/** Pre-service items (Doors, Pre-roll, …). Prefers the recorder's position-based
+ *  flag (above the SERVICE START header — robust to early/late/storm-delayed starts);
+ *  falls back to "went live before the scheduled time" for records made before it. */
+function isPreServiceItem(it: ServiceTimelineItem, rec: ServiceTimeline): boolean {
+  if (typeof it.preService === "boolean") return it.preService;
+  if (!rec.serviceTimeStartsAt || !it.startedAt) return false;
+  const s = Date.parse(it.startedAt);
+  const svc = Date.parse(rec.serviceTimeStartsAt);
+  return Number.isFinite(s) && Number.isFinite(svc) && s < svc;
+}
+
+/** Whether an item counts toward the service timers. A per-item user override (the
+ *  checkbox) wins; otherwise the auto default excludes buffer + pre-service items. */
+function isCountedItem(it: ServiceTimelineItem, rec: ServiceTimeline): boolean {
+  if (typeof it.counted === "boolean") return it.counted;
+  return !isBufferItem(it.title) && !isPreServiceItem(it, rec);
+}
+
 /** Derived service-level timing from a record. */
 function summarize(rec: ServiceTimeline) {
-  const items = rec.items;
-  const firstStart = items[0]?.startedAt ?? rec.startedAt;
+  const counted = rec.items.filter((it) => isCountedItem(it, rec));
+  // "Started" = when the service proper began (first counted item), not doors.
+  const firstStart = counted[0]?.startedAt ?? rec.items[0]?.startedAt ?? rec.startedAt;
   const scheduled = rec.serviceTimeStartsAt;
   let lateStartSec: number | null = null;
   if (scheduled && firstStart) {
@@ -52,7 +132,7 @@ function summarize(rec: ServiceTimeline) {
   let planned = 0;
   let actual = 0;
   let plannedKnown = false;
-  for (const it of items) {
+  for (const it of counted) {
     if (it.plannedLengthSec != null) { planned += it.plannedLengthSec; plannedKnown = true; }
     if (it.actualDurationSec != null) actual += it.actualDurationSec;
   }
@@ -63,7 +143,7 @@ function summarize(rec: ServiceTimeline) {
  *  planned and actual times. */
 function overrunStats(tl: ServiceTimeline) {
   const deltas = tl.items
-    .filter((it) => it.plannedLengthSec != null && it.actualDurationSec != null)
+    .filter((it) => isCountedItem(it, tl) && it.plannedLengthSec != null && it.actualDurationSec != null)
     .map((it) => (it.actualDurationSec as number) - (it.plannedLengthSec as number));
   if (!deltas.length) return { avg: null as number | null, over: 0, total: 0 };
   return { avg: deltas.reduce((a, b) => a + b, 0) / deltas.length, over: deltas.filter((d) => d > 0).length, total: deltas.length };
@@ -105,7 +185,7 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
   if (att) {
     const avgOcc = att.samples.length ? Math.round(att.samples.reduce((s, p) => s + p.occupancy, 0) / att.samples.length) : null;
     L.push("", "ATTENDANCE");
-    L.push(`Peak attendance ${att.peakAttendance.toLocaleString()} · Peak in-room ${att.peakOccupancy.toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
+    L.push(`Peak attendance ${servicePeakAttendance(att).toLocaleString()} · Peak in-room ${att.peakOccupancy.toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
   }
   if (spl && spl.items.length) {
     L.push("", "AUDIO — peak SPL (dB)");
@@ -136,7 +216,67 @@ export function ServiceHistorySection() {
   const [spl, setSpl] = useState<ServiceSplHistory | null>(null);
   // Baptism sessions (cross-linked to a service by time overlap).
   const [baptisms, setBaptisms] = useState<BaptismSession[]>([]);
+  // Attendance records for all services — for the Overview card's avg in-room.
+  const [attList, setAttList] = useState<ServiceAttendance[]>([]);
   const [day, setDay] = useState<string | null>(null);
+  // Active service-type filter (serviceTypeId), or null for all types.
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  // Editing the service window (times) in the detail view.
+  const [editingTimes, setEditingTimes] = useState(false);
+  const [editStart, setEditStart] = useState("");
+  const [editEnd, setEditEnd] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  // Which Overview metrics to show (persisted), and whether the picker is open.
+  const [overviewMetrics, setOverviewMetrics] = useState<string[]>(loadOverviewMetrics);
+  const [customizing, setCustomizing] = useState(false);
+  const [sparklinesOn, setSparklinesOn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("history:overviewSparklines") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  function toggleSparklines() {
+    setSparklinesOn((v) => {
+      const n = !v;
+      try {
+        localStorage.setItem("history:overviewSparklines", n ? "1" : "0");
+      } catch {
+        /* best-effort */
+      }
+      return n;
+    });
+  }
+  const [dragMetric, setDragMetric] = useState<string | null>(null);
+  const persistOverview = (next: string[]) => {
+    try {
+      localStorage.setItem(OVERVIEW_STORE_KEY, JSON.stringify(next));
+    } catch {
+      /* best-effort */
+    }
+    return next;
+  };
+  function toggleOverviewMetric(key: string) {
+    setOverviewMetrics((prev) => persistOverview(prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+  // Drag a metric card onto another to reorder (order = display order, persisted).
+  // Only within the same group — cross-group drops are ignored.
+  function moveOverviewMetric(from: string | null, to: string) {
+    if (!from || from === to) return;
+    const gf = OVERVIEW_METRICS.find((m) => m.key === from)?.group;
+    const gt = OVERVIEW_METRICS.find((m) => m.key === to)?.group;
+    if (gf !== gt) {
+      setDragMetric(null);
+      return;
+    }
+    setOverviewMetrics((prev) => {
+      const arr = prev.filter((k) => k !== from);
+      const idx = arr.indexOf(to);
+      arr.splice(idx < 0 ? arr.length : idx, 0, from);
+      return persistOverview(arr);
+    });
+    setDragMetric(null);
+  }
 
   function reload() {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
@@ -145,6 +285,9 @@ export function ServiceHistorySection() {
   }
   useEffect(() => {
     reload();
+    invoke<ServiceAttendance[]>("attendance:listHistory")
+      .then((a) => setAttList(a ?? []))
+      .catch(() => setAttList([]));
   }, []);
 
   // Live updates while a service is recording — refresh the open detail/list.
@@ -189,19 +332,110 @@ export function ServiceHistorySection() {
     return () => {
       cancelled = true;
     };
-  }, [selectedKey]);
+  }, [selectedKey, reloadKey]);
+
+  // Distinct service types present, labeled by their PCO name (a record with the
+  // name wins over the bare id fallback). Drives the filter; only shown at 2+ types.
+  const typeOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const s of list ?? []) {
+      if (!s.serviceTypeId) continue;
+      if (s.serviceTypeName) byId.set(s.serviceTypeId, s.serviceTypeName);
+      else if (!byId.has(s.serviceTypeId)) byId.set(s.serviceTypeId, s.serviceTypeId);
+    }
+    return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [list]);
+
+  // Records scoped to the active service-type filter (null = all types).
+  const filtered = useMemo(
+    () => (list ?? []).filter((s) => !typeFilter || s.serviceTypeId === typeFilter),
+    [list, typeFilter],
+  );
 
   const days = useMemo(() => {
     const set = new Set<string>();
-    for (const s of list ?? []) set.add(s.serviceDate);
+    for (const s of filtered) set.add(s.serviceDate);
     return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
-  }, [list]);
+  }, [filtered]);
 
+  // Auto-select the newest day; also re-select when the filter drops the current day.
   useEffect(() => {
-    if (day == null && days.length > 0) setDay(days[0]);
+    if (days.length > 0 && (day == null || !days.includes(day))) setDay(days[0]);
   }, [days, day]);
 
-  const dayServices = useMemo(() => (list ?? []).filter((s) => s.serviceDate === day), [list, day]);
+  const dayServices = useMemo(() => filtered.filter((s) => s.serviceDate === day), [filtered, day]);
+  // Per-day service counts for the calendar dots (respects the type filter).
+  const dateCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of filtered) m.set(s.serviceDate, (m.get(s.serviceDate) ?? 0) + 1);
+    return m;
+  }, [filtered]);
+
+  // Overview stats, cumulative THROUGH the selected day (serviceDate <= day) so
+  // picking a past date shows how things looked as of then; scoped to the type
+  // filter so a Youth service's numbers don't blend into Sunday's. Finished only.
+  const overview = useMemo(() => {
+    const asOf = day;
+    const inScope = (typeId: string | null, date: string, ended: unknown) =>
+      ended != null && (!typeFilter || typeId === typeFilter) && (!asOf || date <= asOf);
+    const tl = (list ?? []).filter((t) => inScope(t.serviceTypeId, t.serviceDate, t.endedAt));
+    const att = attList.filter((a) => inScope(a.serviceTypeId, a.serviceDate, a.endedAt));
+    const mean = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
+    const sums = tl.map((t) => ({ t, s: summarize(t) }));
+    const lens = sums.filter((x) => x.s.actual > 0);
+    const punct = sums.map((x) => x.s.lateStartSec).filter((v): v is number => v != null);
+    const overruns = sums.map((x) => (x.s.planned != null ? x.s.actual - x.s.planned : null)).filter((v): v is number => v != null);
+    // "Attendance" = peak people in the room (peakOccupancy); "entries" = cumulative
+    // door count (double-counts re-entries) via servicePeakAttendance.
+    const occ = att.filter((a) => a.peakOccupancy > 0);
+    const entries = att.map((a) => servicePeakAttendance(a)).filter((v) => v > 0);
+    const maxOcc = occ.length ? occ.reduce((m, a) => (a.peakOccupancy > m.peakOccupancy ? a : m)) : null;
+    const minOcc = occ.length ? occ.reduce((m, a) => (a.peakOccupancy < m.peakOccupancy ? a : m)) : null;
+    const longest = lens.length ? lens.reduce((m, x) => (x.s.actual > m.s.actual ? x : m)) : null;
+    const shortest = lens.length ? lens.reduce((m, x) => (x.s.actual < m.s.actual ? x : m)) : null;
+    const startFmt = (sec: number) => (sec >= 0 ? `${fmtDur(sec)} late` : `${fmtDur(-sec)} early`);
+    const avgPunct = mean(punct);
+    const avgOverrun = mean(overruns);
+    const num = (n: number | null) => (n != null ? n.toLocaleString() : "—");
+    // Day attendance: the SELECTED day's services' peak in-room, summed (both services).
+    const dayOcc = asOf ? att.filter((a) => a.serviceDate === asOf).reduce((s, a) => s + a.peakOccupancy, 0) : 0;
+    const dayCount = asOf ? att.filter((a) => a.serviceDate === asOf).length : 0;
+    return {
+      services: { value: tl.length.toLocaleString(), accent: "text-gray-12" },
+      avgLength: { value: fmtDur(mean(lens.map((x) => x.s.actual))), accent: "text-blue-11" },
+      avgStart: { value: avgPunct != null ? startFmt(avgPunct) : "—", accent: avgPunct != null && avgPunct > 60 ? "text-amber-11" : "text-gray-12" },
+      avgAttendance: { value: num(mean(occ.map((a) => a.peakOccupancy))), accent: "text-green-11" },
+      avgEntries: { value: num(mean(entries)), accent: "text-blue-11" },
+      highestAttended: { value: maxOcc ? maxOcc.peakOccupancy.toLocaleString() : "—", sub: maxOcc ? shortDay(maxOcc.serviceDate) : undefined, accent: "text-green-11" },
+      lowestAttended: { value: minOcc ? minOcc.peakOccupancy.toLocaleString() : "—", sub: minOcc ? shortDay(minOcc.serviceDate) : undefined, accent: "text-amber-11" },
+      dayAttendance: { value: dayCount ? dayOcc.toLocaleString() : "—", sub: dayCount ? `${dayCount} service${dayCount === 1 ? "" : "s"}` : undefined, accent: "text-green-11" },
+      longest: { value: longest ? fmtDur(longest.s.actual) : "—", sub: longest ? shortDay(longest.t.serviceDate) : undefined, accent: "text-gray-12" },
+      shortest: { value: shortest ? fmtDur(shortest.s.actual) : "—", sub: shortest ? shortDay(shortest.t.serviceDate) : undefined, accent: "text-gray-12" },
+      avgOverrun: { value: avgOverrun != null ? fmtDelta(avgOverrun) : "—", accent: avgOverrun != null && avgOverrun > 0 ? "text-red-11" : "text-gray-12" },
+    } as Record<string, { value: string; sub?: string; accent: string }>;
+  }, [list, attList, day, typeFilter]);
+
+  // Per-service series (chronological, last ~16) behind the average tiles — the
+  // trend the average summarizes. Same scope as `overview` (type filter + as-of).
+  const sparkSeries = useMemo(() => {
+    const asOf = day;
+    const inScope = (typeId: string | null, date: string, ended: unknown) =>
+      ended != null && (!typeFilter || typeId === typeFilter) && (!asOf || date <= asOf);
+    const tl = (list ?? [])
+      .filter((t) => inScope(t.serviceTypeId, t.serviceDate, t.endedAt))
+      .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+    const att = attList
+      .filter((a) => inScope(a.serviceTypeId, a.serviceDate, a.endedAt))
+      .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+    const tail = <T,>(a: T[]) => a.slice(-16);
+    return {
+      avgLength: tail(tl.map((t) => summarize(t).actual).filter((v) => v > 0)),
+      avgStart: tail(tl.map((t) => summarize(t).lateStartSec).filter((v): v is number => v != null)),
+      avgOverrun: tail(tl.map((t) => { const s = summarize(t); return s.planned != null ? s.actual - s.planned : null; }).filter((v): v is number => v != null)),
+      avgAttendance: tail(att.map((a) => a.peakOccupancy).filter((v) => v > 0)),
+      avgEntries: tail(att.map((a) => servicePeakAttendance(a)).filter((v) => v > 0)),
+    } as Record<string, number[]>;
+  }, [list, attList, day, typeFilter]);
 
   async function deleteService(key: string, title: string) {
     if (!(await confirm({ title: "Delete recording?", message: `Delete the service-timing recording for "${title}"? This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
@@ -240,6 +474,19 @@ export function ServiceHistorySection() {
     const sum = summarize(detail);
     const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
     const over = overrunStats(detail);
+    // Projected end = actual start + planned length; actual end = the record's
+    // finalized end (else the last item that closed). Shown as card subscripts.
+    const firstStartMs = Date.parse(sum.firstStart);
+    const projectedEnd =
+      sum.planned != null && Number.isFinite(firstStartMs)
+        ? new Date(firstStartMs + sum.planned * 1000).toISOString()
+        : null;
+    // Actual end = the last COUNTED item's end (excludes trailing buffer / pre-service).
+    const actualEnd = [...detail.items].reverse().find((it) => isCountedItem(it, detail) && it.endedAt)?.endedAt ?? detail.endedAt ?? null;
+    const actualSub = [
+      totalDelta != null ? `${fmtDelta(totalDelta)} vs plan` : null,
+      actualEnd ? `ended ${fmtTime(actualEnd)}` : null,
+    ].filter(Boolean).join(" · ") || undefined;
     const det = detail; // narrow for the async handler
     const linkedBap = linkedBaptisms(baptisms, detail);
     const bapTot = baptismTotals(linkedBap);
@@ -248,9 +495,46 @@ export function ServiceHistorySection() {
       if (ok) toast.success("Report copied to clipboard");
       else toast.error("Couldn't copy the report");
     }
-    const avgOcc = attendance && attendance.samples.length
-      ? Math.round(attendance.samples.reduce((s, p) => s + p.occupancy, 0) / attendance.samples.length)
-      : null;
+    function startEditTimes() {
+      setEditStart(toTimeInput(det.startedAt));
+      setEditEnd(toTimeInput(det.endedAt));
+      setEditingTimes(true);
+    }
+    async function saveTimes() {
+      try {
+        await invoke("history:editWindow", {
+          serviceKey: det.serviceKey,
+          startedAt: fromTimeInput(det.serviceDate, editStart),
+          endedAt: fromTimeInput(det.serviceDate, editEnd),
+        });
+        setEditingTimes(false);
+        setReloadKey((k) => k + 1);
+        toast.success("Service times updated");
+      } catch (e) {
+        toast.error(`Couldn't update times: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    async function recalc() {
+      try {
+        await invoke("history:recalcAttendance", { serviceKey: det.serviceKey });
+        setReloadKey((k) => k + 1);
+        toast.success("Attendance recalculated");
+      } catch {
+        toast.error("Recalculate failed");
+      }
+    }
+    async function toggleCounted(item: ServiceTimelineItem) {
+      // Broadcasts service-timeline:history → detail refreshes via the SSE handler.
+      try {
+        await invoke("history:setItemCounted", { serviceKey: det.serviceKey, itemId: item.itemId, counted: !isCountedItem(item, det) });
+      } catch {
+        toast.error("Couldn't update");
+      }
+    }
+    // The include/exclude checkbox column only shows while editing times.
+    const gridCols = editingTimes
+      ? "grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_4.5rem]"
+      : "grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem]";
     return (
       <div className="flex flex-col gap-4">
         <button className="self-start text-caption1 text-blue-11 hover:underline" onClick={() => setSelectedKey(null)}>
@@ -268,62 +552,95 @@ export function ServiceHistorySection() {
               {fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt) ? ` · ${fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt)}` : ""}
             </span>
           </div>
-          <Button variant="filled" size="small" onClick={copyReport} tooltip="Copy a full text report (timing + attendance + audio)">
-            <CopyIcon className="size-3.5 text-gray-9" /> Copy report
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="filled" size="small" onClick={startEditTimes} tooltip="Fix the recorded start/end (trims samples + items outside the window)">
+              <ClockIcon className="size-3.5 text-gray-9" /> Edit times
+            </Button>
+            <Button variant="filled" size="small" onClick={copyReport} tooltip="Copy a full text report (timing + attendance + audio)">
+              <CopyIcon className="size-3.5 text-gray-9" /> Copy report
+            </Button>
+          </div>
         </div>
+        {editingTimes && (
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-5 bg-gray-2 p-3">
+            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+              Start
+              <input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="rounded-md border border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12" />
+            </label>
+            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+              End
+              <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="rounded-md border border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12" />
+            </label>
+            <Button variant="accent" size="small" onClick={saveTimes}>Save</Button>
+            <Button variant="transparent" size="small" onClick={() => setEditingTimes(false)}>Cancel</Button>
+            <Button variant="transparent" size="small" onClick={recalc} tooltip="Re-derive peak/min from samples without changing the window">Recalculate</Button>
+            <span className="text-caption2 text-gray-9 flex-1 min-w-[14rem]">
+              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service.
+            </span>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat label="Started" value={fmtTime(sum.firstStart)} accent={sum.lateStartSec != null && sum.lateStartSec > 60 ? "text-amber-11" : "text-gray-12"} sub={sum.lateStartSec != null ? (sum.lateStartSec >= 0 ? `${fmtDelta(sum.lateStartSec)} late` : `${fmtDelta(sum.lateStartSec)} early`) : undefined} />
-          <Stat label="Planned" value={fmtDur(sum.planned)} accent="text-gray-12" />
-          <Stat label="Actual" value={fmtDur(sum.actual)} accent="text-blue-11" sub={totalDelta != null ? `${fmtDelta(totalDelta)} vs plan` : undefined} />
+          <Stat label="Planned" value={fmtDur(sum.planned)} accent="text-gray-12" sub={projectedEnd ? `ends ${fmtTime(projectedEnd)}` : undefined} />
+          <Stat label="Actual" value={fmtDur(sum.actual)} accent="text-blue-11" sub={actualSub} />
           <Stat label="Avg overrun" value={over.avg != null ? fmtDelta(over.avg) : "—"} accent={over.avg != null && over.avg > 0 ? "text-red-11" : "text-gray-12"} sub={over.total ? `${over.over} of ${over.total} over` : undefined} />
         </div>
 
         <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
-          <div className="grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem] gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10">
-            <span>#</span><span>Item</span><span className="text-right">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span>
+          <div className={`grid ${gridCols} gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10`}>
+            {editingTimes && <span className="text-center" title="Count toward the service timers">✓</span>}
+            <span>#</span><span>Item</span><span className="text-right">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right">Ended</span>
           </div>
           {detail.items.map((it, i) => {
             const itemLive = it.endedAt == null;
+            const counted = isCountedItem(it, detail); // buffer + pre-service shown but not totaled
             const delta = it.plannedLengthSec != null && it.actualDurationSec != null ? it.actualDurationSec - it.plannedLengthSec : null;
             const deltaColor = delta == null ? "text-gray-9" : delta > 30 ? "text-red-11" : delta < -30 ? "text-blue-11" : "text-gray-11";
             return (
-              <div key={it.itemId} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"}`}>
+              <div key={it.itemId} className={`grid ${gridCols} gap-2 px-3 py-1.5 text-caption1 tabular-nums items-center ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${counted ? "" : "opacity-55"}`}>
+                {editingTimes && (
+                  <input
+                    type="checkbox"
+                    checked={counted}
+                    onChange={() => toggleCounted(it)}
+                    className="justify-self-center cursor-pointer"
+                    title={counted ? "Counted in service timers — click to exclude" : "Not counted — click to include"}
+                  />
+                )}
                 <span className="text-gray-9">{i + 1}</span>
-                <span className="text-gray-12 truncate">{it.title || "—"}{itemLive && <span className="ml-1.5 text-[10px] text-red-11">live</span>}</span>
-                <span className="text-right text-gray-10">{fmtDur(it.plannedLengthSec)}</span>
+                <span className="text-gray-12 truncate">
+                  {it.title || "—"}
+                  {itemLive && <span className="ml-1.5 text-[10px] text-red-11">live</span>}
+                  {!counted && <span className="ml-1.5 text-[10px] italic text-gray-9">not counted</span>}
+                </span>
+                <span className="text-right text-gray-10">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
                 <span className="text-right text-gray-12">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
-                <span className={`text-right ${deltaColor}`}>{itemLive ? "" : fmtDelta(delta)}</span>
+                <span className={`text-right ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
+                <span className="text-right text-gray-9 whitespace-nowrap">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
               </div>
             );
           })}
         </div>
 
-        {/* Combined report: attendance + audio for the same service occurrence. */}
-        {attendance && (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-caption1 font-medium text-gray-11">Attendance</span>
-            <div className="flex flex-wrap gap-2 text-caption1 tabular-nums">
-              <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Peak attendance </span><span className="text-blue-11">{attendance.peakAttendance.toLocaleString()}</span></span>
-              <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Peak in-room </span><span className="text-green-11">{attendance.peakOccupancy.toLocaleString()}</span></span>
-              {avgOcc != null && <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Avg in-room </span><span className="text-gray-12">{avgOcc.toLocaleString()}</span></span>}
-            </div>
-          </div>
-        )}
-        {spl && spl.items.some((it) => it.maxSpl != null) && (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-caption1 font-medium text-gray-11">Audio — peak SPL</span>
-            <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
-              {spl.items.filter((it) => it.maxSpl != null).map((it, i) => (
-                <div key={it.itemId} className={`grid grid-cols-[1fr_5rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"}`}>
-                  <span className="text-gray-12 truncate">{it.title || "—"}</span>
-                  <span className="text-right text-amber-11">{(it.maxSpl as number).toFixed(1)} dB</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Full attendance + audio detail for the same service occurrence — one place
+            for everything about this service (rundown above, the rest folded in here). */}
+        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
+          <span className="text-body font-semibold text-gray-12">Attendance</span>
+          {attendance ? (
+            <AttendanceDetail detail={attendance} timeline={detail} />
+          ) : (
+            <p className="text-caption1 text-gray-9">No attendance recorded for this service.</p>
+          )}
+        </div>
+        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
+          <span className="text-body font-semibold text-gray-12">Audio (SPL)</span>
+          {spl ? (
+            <SplDetail detail={spl} />
+          ) : (
+            <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
+          )}
+        </div>
         {linkedBap.length > 0 && (
           <div className="flex flex-col gap-1.5">
             <span className="text-caption1 font-medium text-gray-11">Baptisms</span>
@@ -339,28 +656,84 @@ export function ServiceHistorySection() {
   }
 
   // ── List view: services for the selected day. ──
-  const dayIdx = day ? days.indexOf(day) : -1;
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <button
-          className="rounded-md border border-gray-5 p-1.5 text-gray-11 enabled:hover:bg-gray-3 disabled:opacity-40"
-          disabled={dayIdx < 0 || dayIdx >= days.length - 1}
-          onClick={() => setDay(days[dayIdx + 1])}
-          aria-label="Earlier day"
-        >
-          <ChevronLeftIcon className="size-4" />
-        </button>
-        <span className="text-body font-medium text-gray-12">{day ? fmtDay(day) : "—"}</span>
-        <button
-          className="rounded-md border border-gray-5 p-1.5 text-gray-11 enabled:hover:bg-gray-3 disabled:opacity-40"
-          disabled={dayIdx <= 0}
-          onClick={() => setDay(days[dayIdx - 1])}
-          aria-label="Later day"
-        >
-          <ChevronRightIcon className="size-4" />
-        </button>
+      {typeOptions.length >= 2 && (
+        <div className="flex flex-wrap gap-1.5">
+          <TypeChip active={typeFilter === null} onClick={() => setTypeFilter(null)}>All</TypeChip>
+          {typeOptions.map((o) => (
+            <TypeChip key={o.id} active={typeFilter === o.id} onClick={() => setTypeFilter(o.id)}>
+              {o.name}
+            </TypeChip>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+        <HistoryCalendar counts={dateCounts} selected={day} onPick={setDay} />
+        <div className="flex-1 min-w-0 rounded-xl border border-gray-5 bg-gray-2 p-3 flex flex-col">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <span className="text-caption2 text-gray-9">
+              Overview{day ? ` · through ${fmtDay(day)}` : " · all time"}
+            </span>
+            <div className="flex items-center gap-3">
+              <button
+                className={`text-caption2 transition-colors ${sparklinesOn ? "text-blue-11 hover:text-blue-10" : "text-gray-10 hover:text-gray-12"}`}
+                onClick={toggleSparklines}
+              >
+                Sparklines {sparklinesOn ? "on" : "off"}
+              </button>
+              <button
+                className="text-caption2 text-gray-10 hover:text-gray-12 transition-colors"
+                onClick={() => setCustomizing((v) => !v)}
+              >
+                {customizing ? "Done" : "Customize"}
+              </button>
+            </div>
+          </div>
+          {customizing && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {OVERVIEW_METRICS.map((m) => (
+                <TypeChip key={m.key} active={overviewMetrics.includes(m.key)} onClick={() => toggleOverviewMetric(m.key)}>
+                  {m.label}
+                </TypeChip>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-col gap-3 flex-1 justify-center">
+            {(["timing", "attendance"] as OverviewGroup[]).map((group) => {
+              const keys = overviewMetrics.filter((k) => OVERVIEW_METRICS.find((m) => m.key === k)?.group === group);
+              if (keys.length === 0) return null;
+              return (
+                <div key={group} className="flex flex-col gap-1.5">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-gray-9">{OVERVIEW_GROUP_LABEL[group]}</span>
+                  <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(8.5rem, 1fr))" }}>
+                    {keys.map((key) => {
+                      const m = OVERVIEW_METRICS.find((x) => x.key === key)!;
+                      const d = overview[key];
+                      if (!d) return null;
+                      return (
+                        <KpiTile
+                          key={key}
+                          def={m}
+                          value={d.value}
+                          sub={d.sub}
+                          accent={d.accent}
+                          series={sparklinesOn ? sparkSeries[key] : undefined}
+                          onDragStart={() => setDragMetric(key)}
+                          onDragEnd={() => setDragMetric(null)}
+                          onDrop={() => moveOverviewMetric(dragMetric, key)}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            {overviewMetrics.length === 0 && <span className="text-caption1 text-gray-9">No metrics selected — hit Customize.</span>}
+          </div>
+        </div>
       </div>
+      {day && <span className="text-body font-medium text-gray-12">{fmtDay(day)}</span>}
 
       <div className="flex flex-col gap-2">
         {dayServices.map((s) => {
@@ -395,6 +768,82 @@ export function ServiceHistorySection() {
         })}
         {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
       </div>
+    </div>
+  );
+}
+
+/** Service-type filter chip (shown only when 2+ types have recordings). */
+function TypeChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${
+        active ? "border-blue-7 bg-blue-3 text-blue-11" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Minimal dependency-free sparkline — normalizes a series to a tiny SVG polyline.
+ *  Inherits stroke from currentColor (set via className to the tile's accent). */
+function Sparkline({ data, className }: { data: number[]; className?: string }) {
+  if (data.length < 2) return null;
+  const w = 100;
+  const h = 24;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const pts = data
+    .map((v, i) => `${((i / (data.length - 1)) * w).toFixed(1)},${(h - ((v - min) / range) * h).toFixed(1)}`)
+    .join(" ");
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className={`w-full ${className ?? ""}`} style={{ height: "1.1rem" }} aria-hidden="true">
+      <polyline points={pts} fill="none" stroke="currentColor" strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" opacity={0.8} />
+    </svg>
+  );
+}
+
+/** A KPI tile for the Overview dashboard: icon + label, big value, context sub, and
+ *  an optional trend sparkline. Bordered + packed so a few metrics don't float in
+ *  empty space; draggable to reorder within its group. */
+function KpiTile({
+  def,
+  value,
+  sub,
+  accent,
+  series,
+  onDragStart,
+  onDragEnd,
+  onDrop,
+}: {
+  def: OverviewMetricDef;
+  value: string;
+  sub?: string;
+  accent: string;
+  series?: number[];
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDrop: () => void;
+}) {
+  const Icon = def.Icon;
+  return (
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={onDrop}
+      className="flex flex-col gap-1 rounded-lg border border-gray-5 bg-gray-1 px-3 py-2.5 cursor-grab active:cursor-grabbing hover:border-gray-7 transition-colors"
+    >
+      <div className="flex items-center gap-1.5 text-caption2 text-gray-9 min-w-0">
+        <Icon className="size-3.5 shrink-0" />
+        <span className="truncate">{def.label}</span>
+      </div>
+      <div className={`text-title3 font-semibold tabular-nums leading-tight ${accent}`}>{value}</div>
+      {sub && <div className="text-caption2 text-gray-9 truncate">{sub}</div>}
+      {series && series.length >= 2 && <Sparkline data={series} className={accent} />}
     </div>
   );
 }

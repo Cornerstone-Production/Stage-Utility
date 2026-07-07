@@ -55,6 +55,18 @@ class StageErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundar
 
 // ---- kiosk top bar ----------------------------------------------------------
 
+// A "locked" kiosk (shared-link with ?kiosk=1) keeps the top bar for consistency
+// but strips the escape hatches — the QR/settings link and the clickable home
+// logo — so a handed-out link can't navigate away to settings or other displays.
+// Soft by design (a savvy user could edit the URL); it's a guardrail, not auth.
+function kioskLocked(): boolean {
+  try {
+    return new URLSearchParams(window.location.search).get("kiosk") === "1";
+  } catch {
+    return false;
+  }
+}
+
 interface KioskTopBarProps {
   serviceTypeName: string | null;
   planSeriesTitle: string | null;
@@ -67,6 +79,9 @@ interface KioskTopBarProps {
   appName: string;
   appLogo: string | null;
   appLogoMonochrome: boolean;
+  /** This output is locked (from its Displays-tab toggle) — strip the nav escape
+   *  hatches even without the ?kiosk=1 URL override. */
+  locked?: boolean;
 }
 
 function KioskTopBar({
@@ -79,6 +94,7 @@ function KioskTopBar({
   appName,
   appLogo,
   appLogoMonochrome,
+  locked: lockedProp = false,
 }: KioskTopBarProps) {
   const service = serviceTypeName ?? "—";
   const event = planTitle ?? "No plan";
@@ -87,6 +103,27 @@ function KioskTopBar({
       ? `${service} - ${planSeriesTitle}`
       : service;
   const contextLabel = `${lead}: ${event}`;
+  const locked = lockedProp || kioskLocked();
+
+  // Brand logo + name; a link home only when unlocked (locked → plain, no navigation).
+  const brandInner = (
+    <>
+      {appLogo && (
+        <BrandLogo
+          logo={appLogo}
+          monochrome={appLogoMonochrome}
+          className="rounded select-none shrink-0"
+          style={{ width: "1.55em", height: "1.55em" }}
+        />
+      )}
+      <span
+        className="font-title select-none truncate"
+        style={{ fontSize: "1em", letterSpacing: "0.02em" }}
+      >
+        {appName}
+      </span>
+    </>
+  );
 
   return (
     <div
@@ -106,28 +143,21 @@ function KioskTopBar({
       {/* Brand + display name — one centered row so logo, name, divider and
           display name all share the same vertical center. */}
       <div className="shrink-0 flex items-center relative z-10" style={{ marginLeft: "1em", gap: "0.7em" }}>
-        <a
-          href="/"
-          className="flex items-center text-white/70 rounded hover:opacity-80 transition-opacity"
-          style={{ gap: "0.55em" }}
-          title="Back to home"
-          aria-label="Back to home"
-        >
-          {appLogo && (
-            <BrandLogo
-              logo={appLogo}
-              monochrome={appLogoMonochrome}
-              className="rounded select-none shrink-0"
-              style={{ width: "1.55em", height: "1.55em" }}
-            />
-          )}
-          <span
-            className="font-title select-none truncate"
-            style={{ fontSize: "1em", letterSpacing: "0.02em" }}
+        {locked ? (
+          <div className="flex items-center text-white/70" style={{ gap: "0.55em" }}>
+            {brandInner}
+          </div>
+        ) : (
+          <a
+            href="/"
+            className="flex items-center text-white/70 rounded hover:opacity-80 transition-opacity"
+            style={{ gap: "0.55em" }}
+            title="Back to home"
+            aria-label="Back to home"
           >
-            {appName}
-          </span>
-        </a>
+            {brandInner}
+          </a>
+        )}
         {displayName && (
           <>
             <span className="w-px bg-white/15 shrink-0" style={{ height: "1.3em" }} aria-hidden="true" />
@@ -150,7 +180,7 @@ function KioskTopBar({
         </span>
       </div>
 
-      {showQr && remoteUrl && (
+      {showQr && remoteUrl && !locked && (
         <a
           href="/settings"
           target="_blank"
@@ -178,7 +208,7 @@ function KioskLoading() {
   );
 }
 
-function KioskNotConfigured({ state, displayName }: { state: StageState; displayName: string | null }) {
+function KioskNotConfigured({ state, displayName, locked }: { state: StageState; displayName: string | null; locked?: boolean }) {
   return (
     <div className="flex flex-col h-[100dvh] kiosk-surface">
       <KioskTopBar
@@ -191,6 +221,7 @@ function KioskNotConfigured({ state, displayName }: { state: StageState; display
         appName={state.appName}
         appLogo={state.appLogo}
         appLogoMonochrome={state.appLogoMonochrome}
+        locked={locked}
       />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
         <MonitorIcon className="size-12 text-gray-7" />
@@ -203,7 +234,7 @@ function KioskNotConfigured({ state, displayName }: { state: StageState; display
   );
 }
 
-function KioskEmpty({ state, displayName }: { state: StageState; displayName: string | null }) {
+function KioskEmpty({ state, displayName, locked }: { state: StageState; displayName: string | null; locked?: boolean }) {
   return (
     <div className="flex flex-col h-[100dvh] kiosk-surface">
       <KioskTopBar
@@ -216,6 +247,7 @@ function KioskEmpty({ state, displayName }: { state: StageState; displayName: st
         appName={state.appName}
         appLogo={state.appLogo}
         appLogoMonochrome={state.appLogoMonochrome}
+        locked={locked}
       />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
         <MonitorIcon className="size-12 text-gray-7" />
@@ -229,7 +261,7 @@ function KioskEmpty({ state, displayName }: { state: StageState; displayName: st
 }
 
 // Shown when an output exists but has no View routed to it.
-function KioskUnrouted({ state, displayName }: { state: StageState; displayName: string | null }) {
+function KioskUnrouted({ state, displayName, locked }: { state: StageState; displayName: string | null; locked?: boolean }) {
   return (
     <div className="flex flex-col h-[100dvh] kiosk-surface">
       <KioskTopBar
@@ -242,6 +274,7 @@ function KioskUnrouted({ state, displayName }: { state: StageState; displayName:
         appName={state.appName}
         appLogo={state.appLogo}
         appLogoMonochrome={state.appLogoMonochrome}
+        locked={locked}
       />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
         <MonitorIcon className="size-12 text-gray-7" />
@@ -341,6 +374,8 @@ export function StageView() {
   // A real output (not a preview) with no View routed to it is unconfigured —
   // show a clear "no view assigned" screen rather than an empty slot grid.
   const resolved = previewViewId ? null : state.resolvedByOutput?.[displayId];
+  // Per-output kiosk lock (Displays-tab toggle) — never in the settings preview iframe.
+  const outputLocked = !previewViewId && (resolved?.locked ?? false);
 
   // Blackout: a true black screen on command (Companion / Displays page), taking
   // priority over the routed View. Toggling it off restores the View instantly.
@@ -352,7 +387,7 @@ export function StageView() {
   if (isUnrouted) {
     return (
       <StageErrorBoundary>
-        <KioskUnrouted state={state} displayName={displayName} />
+        <KioskUnrouted state={state} displayName={displayName} locked={outputLocked} />
       </StageErrorBoundary>
     );
   }
@@ -375,6 +410,7 @@ export function StageView() {
               appName={state.appName}
               appLogo={state.appLogo}
               appLogoMonochrome={state.appLogoMonochrome}
+              locked={outputLocked}
             />
             <div className="flex-1 min-h-0">
               {/* interactive only on a real display route — never in the
@@ -387,7 +423,7 @@ export function StageView() {
     }
     return (
       <StageErrorBoundary>
-        <KioskEmpty state={state} displayName={displayName} />
+        <KioskEmpty state={state} displayName={displayName} locked={outputLocked} />
       </StageErrorBoundary>
     );
   }
@@ -436,7 +472,7 @@ export function StageView() {
   if (!state.pcoConfigured) {
     return (
       <StageErrorBoundary>
-        <KioskNotConfigured state={state} displayName={displayName} />
+        <KioskNotConfigured state={state} displayName={displayName} locked={outputLocked} />
       </StageErrorBoundary>
     );
   }
@@ -458,7 +494,7 @@ export function StageView() {
   if (sortedSlots.length === 0) {
     return (
       <StageErrorBoundary>
-        <KioskEmpty state={state} displayName={displayName} />
+        <KioskEmpty state={state} displayName={displayName} locked={outputLocked} />
       </StageErrorBoundary>
     );
   }
@@ -476,6 +512,7 @@ export function StageView() {
           appName={state.appName}
           appLogo={state.appLogo}
           appLogoMonochrome={state.appLogoMonochrome}
+          locked={outputLocked}
         />
         {/* Desktop / kiosk: fill-height columns (stacked slots share a column).
             With a slotsLayout, columns are inch-sized and centered so they line up

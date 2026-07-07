@@ -3,9 +3,9 @@
 
 import { randomUUID } from "crypto";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
-import { broadcast } from "./broadcaster.js";
+import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
@@ -13,6 +13,8 @@ import { settingsStore } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
 import { layoutGroupsStore } from "./layout-groups-store.js";
+import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
+import { scriptViewConfigStore } from "./scriptview-config-store.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { updater } from "./updater.js";
 
@@ -165,6 +167,7 @@ export class StageController {
   private connectionNames = new Map<string, string>();
   // Coalesce timer for device-status updates (see applyDeviceStatus).
   private deviceStatusFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private deviceStatusDirty = false; // device status changed while no client watched
   // Cached team members for the active plan.
   private teamMembers: TeamMemberDTO[] = [];
   // Raw (un-resolved) slot configs per VIEW id for the ACTIVE service type.
@@ -175,6 +178,7 @@ export class StageController {
 
   // PCO credentials (set by IntegrationManager after config saves).
   private pcoAppId: string | null = null;
+  private pcoCountdownTarget: "plan-start" | "service-time" = "plan-start";
   private pcoSecret: string | null = null;
 
   // Latest PCO live state (set by fetchLive) — used by the auto-update guard.
@@ -291,9 +295,10 @@ export class StageController {
 
   // ── PCO credentials ───────────────────────────────────────────────────
 
-  setPcoCredentials(appId: string | null, secret: string | null): void {
+  setPcoCredentials(appId: string | null, secret: string | null, countdownTarget?: "plan-start" | "service-time"): void {
     this.pcoAppId = appId;
     this.pcoSecret = secret;
+    if (countdownTarget) this.pcoCountdownTarget = countdownTarget;
     this.state = { ...this.state, pcoConfigured: !!(appId && secret) };
     // No broadcast here — called as part of IntegrationManager's setConfig which broadcasts separately.
   }
@@ -418,6 +423,7 @@ export class StageController {
       this.pcoSecret,
       this.state.serviceTypeId,
       this.state.planId,
+      this.pcoCountdownTarget,
     );
     // Remembered for the auto-update guard (don't update mid-service).
     this.lastLive = live;
@@ -427,6 +433,11 @@ export class StageController {
   /** True when a PCO Services Live session is running (used to defer auto-updates). */
   isServiceLive(): boolean {
     return this.lastLive != null && this.lastLive.mode !== "none";
+  }
+
+  /** Latest PCO live snapshot (null if none fetched yet) — for the update-lock guard. */
+  getLastLive(): PcoLiveDTO | null {
+    return this.lastLive;
   }
 
   /**
@@ -479,6 +490,79 @@ export class StageController {
     const ordered = categories.filter((c) => used.has(c));
     for (const c of used) if (!ordered.includes(c)) ordered.push(c); // any non-canonical, at end
     return { planId: this.state.planId, items, noteCategories: ordered };
+  }
+
+  // ── ScriptView (in-app ScriptViewer replacement) ────────────────────────
+
+  async listScriptViewLayouts(): Promise<ScriptViewLayout[]> {
+    return scriptViewLayoutsStore.load();
+  }
+
+  /** Bulk replace — the settings UI manages the whole array and saves it. */
+  async saveScriptViewLayouts(layouts: ScriptViewLayout[]): Promise<ScriptViewLayout[]> {
+    await scriptViewLayoutsStore.save(layouts);
+    return layouts;
+  }
+
+  async getScriptViewConfig(): Promise<ScriptViewConfig> {
+    return scriptViewConfigStore.load();
+  }
+
+  async setScriptViewConfig(serviceTypeIds: string[]): Promise<ScriptViewConfig> {
+    const config: ScriptViewConfig = { serviceTypeIds };
+    await scriptViewConfigStore.save(config);
+    return config;
+  }
+
+  /** All note-category names PCO knows for a service type (drives the column
+   *  picker). Unlike the rundown's `noteCategories`, this is NOT pruned to
+   *  categories currently in use, so authors can pre-add a column. */
+  async listScriptViewNoteCategories(serviceTypeId: string): Promise<string[]> {
+    if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return [];
+    return pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId);
+  }
+
+  /** Resolve the rundown for a ScriptView page. planId picks a specific plan;
+   *  otherwise the live plan (when this IS the active type) or the nearest
+   *  upcoming plan. `isLive` gates the live-item highlight in the renderer. */
+  async getScriptViewRundown(serviceTypeId: string, planId?: string | null): Promise<ScriptViewRundownDTO> {
+    const empty: ScriptViewRundownDTO = {
+      serviceTypeId, planId: null, planTitle: null, planSeriesTitle: null,
+      planDates: null, items: [], noteCategories: [], serviceTimes: [], timeZone: null, isActivePlan: false,
+    };
+    if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return empty;
+
+    const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, serviceTypeId);
+    const isActiveType = serviceTypeId === this.state.serviceTypeId;
+    let plan: PlanDTO | null = null;
+    if (planId) plan = plans.find((p) => p.id === planId) ?? null;
+    else if (isActiveType && this.state.planId) plan = plans.find((p) => p.id === this.state.planId) ?? plans[0] ?? null;
+    else plan = plans[0] ?? null;
+    if (!plan) return empty;
+
+    const [items, categories, serviceTimes, timeZone] = await Promise.all([
+      pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
+      pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId),
+      pcoService.listPlanServiceTimes(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
+      pcoService.listOrgTimeZone(this.pcoAppId, this.pcoSecret),
+    ]);
+    const used = new Set<string>();
+    for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
+    const ordered = categories.filter((c) => used.has(c));
+    for (const c of used) if (!ordered.includes(c)) ordered.push(c);
+
+    return {
+      serviceTypeId,
+      planId: plan.id,
+      planTitle: plan.title,
+      planSeriesTitle: plan.seriesTitle,
+      planDates: plan.dates,
+      items,
+      noteCategories: ordered,
+      serviceTimes,
+      timeZone,
+      isActivePlan: isActiveType && plan.id === this.state.planId,
+    };
   }
 
   /**
@@ -857,7 +941,7 @@ export class StageController {
   private startUpdateChecks(): void {
     if (this.updateCheckTimer) clearInterval(this.updateCheckTimer);
     // Initial check shortly after boot, then hourly.
-    setTimeout(() => void this.updateCheckTick(), 30_000);
+    setTimeout(() => void this.updateCheckTick(), 3_000);
     this.updateCheckTimer = setInterval(() => void this.updateCheckTick(), 60 * 60 * 1000);
   }
 
@@ -1484,6 +1568,21 @@ export class StageController {
     return this.state;
   }
 
+  /** Lock/unlock an output's kiosk chrome (hides the QR/settings + home logo links
+   *  so a handed-out display link can't navigate away). */
+  async setOutputLocked(id: string, locked: boolean): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:setLocked — output ${id} not found`);
+    }
+    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, locked } : o));
+    console.log(`[stage-controller] setOutputLocked output=${id} → ${locked ? "LOCKED" : "unlocked"}`);
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
   /** Reorder outputs to match the given id order (drag-and-drop). */
   async reorderOutputs(orderedIds: string[]): Promise<StageState> {
     const byId = new Map(this.state.outputs.map((o) => [o.id, o]));
@@ -1657,9 +1756,25 @@ export class StageController {
     if (this.deviceStatusFlushTimer !== null) return;
     this.deviceStatusFlushTimer = setTimeout(() => {
       this.deviceStatusFlushTimer = null;
-      this.recomputeResolved();
-      this.broadcast();
+      // Skip the expensive re-resolve + full-state broadcast when no display is
+      // watching (idle). Mark dirty so the next connecting client gets fresh state
+      // via ensureResolvedFresh() before hydration.
+      if (channelHasSubscribers("stage:state-changed")) {
+        this.recomputeResolved();
+        this.broadcast();
+      } else {
+        this.deviceStatusDirty = true;
+      }
     }, DEVICE_STATUS_FLUSH_MS);
+  }
+
+  /** Re-resolve views if device statuses changed while no client was connected, so a
+   *  freshly-connecting display hydrates with current RF/battery state. Called by the
+   *  SSE connect handler before sending the stage:state-changed snapshot. */
+  ensureResolvedFresh(): void {
+    if (!this.deviceStatusDirty) return;
+    this.deviceStatusDirty = false;
+    this.recomputeResolved();
   }
 
   /** Cancel any pending coalesced device-status broadcast (used on shutdown). */
@@ -1827,6 +1942,7 @@ export class StageController {
         ndiSource,
         viewName: view?.name ?? null,
         blackout: output.blackout ?? false,
+        locked: output.locked ?? false,
       };
       slotsByDisplay[output.id] = view && view.kind === "slots" ? (slotsByView[view.id] ?? []) : [];
       displays.push({ id: output.id, name: output.name, kind, ndiSource });
@@ -1872,8 +1988,18 @@ export class StageController {
       .sort((a, b) => a.chargerIndex - b.chargerIndex || a.bay - b.bay);
   }
 
+  private lastBroadcastSig: string | null = null;
   private broadcast(): void {
-    broadcast("stage:state-changed", this.state);
+    // Skip when nothing actually changed — a setter called with its current value
+    // (same mode, unchanged settings save) still runs the mutating method. State is
+    // change-driven and fires rarely, so a full-record delta protocol isn't worth its
+    // client-merge risk; this dedupe removes the redundant full-state pushes cheaply.
+    const sig = JSON.stringify(this.state);
+    if (sig === this.lastBroadcastSig) return;
+    this.lastBroadcastSig = sig;
+    // Reuse the dedupe serialization as the SSE frame body so the fan-out doesn't
+    // re-stringify the full state (which carries base64 branding blobs).
+    broadcast("stage:state-changed", this.state, sig);
   }
 }
 

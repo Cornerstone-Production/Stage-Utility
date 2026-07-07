@@ -81,6 +81,30 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "stage:listTeamPositions":
       return apiFetch<T>("/api/team-positions");
 
+    // ── ScriptView (in-app ScriptViewer replacement) ────────────────────
+    case "scriptview:listLayouts":
+      return apiFetch<T>("/api/scriptview/layouts");
+
+    case "scriptview:saveLayouts":
+      return post<T>("/api/scriptview/layouts", { layouts: p.layouts });
+
+    case "scriptview:getConfig":
+      return apiFetch<T>("/api/scriptview/config");
+
+    case "scriptview:setConfig":
+      return post<T>("/api/scriptview/config", { serviceTypeIds: p.serviceTypeIds });
+
+    case "scriptview:noteCategories": {
+      const id = p.serviceTypeId as string;
+      return apiFetch<T>(`/api/scriptview/note-categories?serviceTypeId=${encodeURIComponent(id)}`);
+    }
+
+    case "scriptview:rundown": {
+      const id = p.serviceTypeId as string;
+      const qs = p.planId ? `&planId=${encodeURIComponent(p.planId as string)}` : "";
+      return apiFetch<T>(`/api/scriptview/rundown?serviceTypeId=${encodeURIComponent(id)}${qs}`);
+    }
+
     case "stage:setServiceType":
       return post<T>("/api/service-type", p);
 
@@ -236,13 +260,19 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/update/check");
 
     case "update:apply":
-      return post<T>("/api/update/apply");
+      return post<T>("/api/update/apply", p);
+
+    case "update:lock":
+      return apiFetch<T>("/api/update/lock");
 
     case "update:setAuto":
       return post<T>("/api/update/auto", p);
 
     case "update:setTrack":
       return post<T>("/api/update/track", p);
+
+    case "update:restart":
+      return post<T>("/api/update/restart");
 
     // ── Config snapshot (backup / restore) ───────────────────────────────
     case "config:listSnapshots":
@@ -427,6 +457,23 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { viewId: p.viewId });
     }
 
+    case "outputs:setLocked": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { locked: p.locked });
+    }
+
+    case "history:editWindow":
+      return post<T>("/api/history/window", p);
+
+    case "history:recalcAttendance":
+      return post<T>("/api/history/recalc", p);
+
+    case "history:setItemCounted":
+      return post<T>("/api/history/item-counted", p);
+
+    case "layout:uploadImage":
+      return post<T>("/api/layout-images", { dataUrl: p.dataUrl });
+
     case "outputs:remove": {
       const id = p.id as string;
       return del<T>(`/api/outputs/${encodeURIComponent(id)}`);
@@ -577,18 +624,92 @@ interface SseListener {
 let eventSource: EventSource | null = null;
 const sseListeners: SseListener[] = [];
 
+// Stable per-context client id, sent on the SSE URL so the server can scope this
+// stream's channel filter to us. crypto.randomUUID is unavailable in an insecure
+// context (prod is plain HTTP), so guard it and fall back.
+function genClientId(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch {
+    /* insecure context — fall through */
+  }
+  return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+const CLIENT_ID = genClientId();
+
+// Tell the server exactly which channels this client renders so it can skip the
+// rest (e.g. a mic display never gets the 4 Hz spl:metrics firehose). Debounced to
+// batch the burst of subscribes when a view mounts. A failed report just means the
+// server keeps sending everything — filtering is an optimization, never required.
+let reportTimer: ReturnType<typeof setTimeout> | null = null;
+function reportChannels(): void {
+  if (reportTimer) return;
+  reportTimer = setTimeout(() => {
+    reportTimer = null;
+    const channels = [...new Set(sseListeners.map((l) => l.channel))];
+    void post("/api/events/subscribe", { cid: CLIENT_ID, channels }).catch(() => {});
+  }, 200);
+}
+
+// ── Optional shared-worker SSE relay ────────────────────────────────────────
+// One EventSource shared across all this machine's tabs (fixes the ~6-connection
+// HTTP/1.1 limit on multi-window machines). Opt-in and off by default so untested
+// concurrency can't regress live displays; the direct path below stays the default.
+//   Enable:  localStorage.setItem("stage:sharedSse", "1")  (then reload)
+let sharedSse = (() => {
+  try {
+    return typeof SharedWorker !== "undefined" && localStorage.getItem("stage:sharedSse") === "1";
+  } catch {
+    return false;
+  }
+})();
+const workerHandlers = new Map<string, Set<(payload: unknown) => void>>();
+let sseWorker: SharedWorker | null = null;
+
+function ensureWorker(): boolean {
+  if (sseWorker) return true;
+  try {
+    sseWorker = new SharedWorker(new URL("./sse-shared-worker.ts", import.meta.url), { type: "module" });
+    sseWorker.port.onmessage = (ev: MessageEvent) => {
+      const { channel, data } = ev.data as { channel: string; data: unknown };
+      const set = workerHandlers.get(channel);
+      if (set) for (const cb of set) {
+        try { cb(data); } catch (err) { console.error(`[api] SSE handler error for "${channel}":`, err); }
+      }
+    };
+    sseWorker.port.start();
+    addEventListener("pagehide", () => {
+      try { sseWorker?.port.postMessage({ type: "bye" }); } catch { /* ignore */ }
+    });
+    return true;
+  } catch (err) {
+    console.warn("[api] SharedWorker SSE unavailable — falling back to direct EventSource", err);
+    sseWorker = null;
+    sharedSse = false; // permanent fallback for this session
+    return false;
+  }
+}
+
+function workerReport(): void {
+  sseWorker?.port.postMessage({ type: "subscribe", channels: [...workerHandlers.keys()] });
+}
+
 function ensureEventSource(): EventSource {
   if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
     return eventSource;
   }
 
   console.log("[api] (re)connecting SSE at /api/events");
-  eventSource = new EventSource("/api/events");
+  eventSource = new EventSource(`/api/events?cid=${encodeURIComponent(CLIENT_ID)}`);
 
   // Re-attach all registered listeners on reconnect.
   for (const entry of sseListeners) {
     eventSource.addEventListener(entry.channel, entry.handler);
   }
+
+  // (Re)report our channel set on every (re)connect — the server drops the filter
+  // when a stream closes, so a transparent reconnect needs a fresh report.
+  eventSource.onopen = () => reportChannels();
 
   eventSource.onerror = (e) => {
     console.warn("[api] SSE error — browser will auto-reconnect", e);
@@ -605,6 +726,23 @@ export function onNotification(
   channel: string,
   cb: (payload: unknown) => void,
 ): () => void {
+  // Shared-worker path: register the callback and let the worker deliver parsed
+  // payloads. Falls through to the direct path if the worker can't be created.
+  if (sharedSse && ensureWorker()) {
+    let set = workerHandlers.get(channel);
+    if (!set) {
+      set = new Set();
+      workerHandlers.set(channel, set);
+    }
+    set.add(cb);
+    workerReport();
+    return () => {
+      set!.delete(cb);
+      if (set!.size === 0) workerHandlers.delete(channel);
+      workerReport();
+    };
+  }
+
   const handler = (e: MessageEvent) => {
     try {
       cb(JSON.parse(e.data));
@@ -618,10 +756,12 @@ export function onNotification(
 
   const es = ensureEventSource();
   es.addEventListener(channel, handler);
+  reportChannels(); // our channel set grew — tell the server
 
   return () => {
     const idx = sseListeners.indexOf(entry);
     if (idx !== -1) sseListeners.splice(idx, 1);
     eventSource?.removeEventListener(channel, handler);
+    reportChannels(); // our channel set shrank — tell the server
   };
 }

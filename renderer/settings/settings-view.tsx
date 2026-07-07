@@ -20,10 +20,9 @@ import {
   PlugIcon,
   QrCodeIcon,
   PaletteIcon,
-  ActivityIcon,
-  UsersIcon,
   ClockIcon,
   DropletIcon,
+  ListChecksIcon,
   SlidersHorizontalIcon,
   SunIcon,
   MoonIcon,
@@ -41,9 +40,8 @@ import { IntegrationsSection } from "./sections/integrations-section";
 import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
 import { AdvancedSection } from "./sections/advanced-section";
-import { SplHistorySection } from "./sections/spl-history-section";
-import { AttendanceHistorySection } from "./sections/attendance-history-section";
 import { ServiceHistorySection } from "./sections/service-history-section";
+import { ScriptViewSection } from "./sections/scriptview-section";
 import { BaptismsSection } from "./sections/baptisms-section";
 import { GettingStarted } from "./getting-started";
 import { BrandHeader } from "./brand-header";
@@ -145,13 +143,12 @@ function useSidebarCollapsed() {
 const SECTIONS: SectionItem[] = [
   { id: "plan", label: "Plan", icon: <CalendarIcon className="size-4 text-gray-11" /> },
   { id: "views", label: "Views", icon: <LayoutTemplateIcon className="size-4 text-gray-11" /> },
+  { id: "scriptview", label: "ScriptView", icon: <ListChecksIcon className="size-4 text-gray-11" /> },
   { id: "displays", label: "Displays", icon: <MonitorIcon className="size-4 text-gray-11" /> },
   { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4 text-gray-11" /> },
   { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4 text-gray-11" /> },
   { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4 text-gray-11" /> },
-  { id: "spl-history", label: "SPL History", icon: <ActivityIcon className="size-4 text-gray-11" /> },
-  { id: "attendance", label: "Attendance", icon: <UsersIcon className="size-4 text-gray-11" /> },
-  { id: "service-history", label: "Service History", icon: <ClockIcon className="size-4 text-gray-11" /> },
+  { id: "service-history", label: "History", icon: <ClockIcon className="size-4 text-gray-11" /> },
   { id: "baptisms", label: "Baptisms", icon: <DropletIcon className="size-4 text-gray-11" /> },
   { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
 ];
@@ -215,42 +212,29 @@ export function SettingsView() {
     queryFn: () => ipc<SlotPreset[]>("presets:list"),
   });
 
-  // Show the SPL History tab only when Smaart is configured (enabled) OR there's
-  // recorded history. Gating on the persisted setting (not live connection) means
-  // the tab survives the Smaart PC being powered off after a service, and past
-  // history stays reachable even if Smaart is later disabled.
-  const { data: integrationsData } = useQuery({
-    queryKey: ["integrations:list"],
-    queryFn: () => ipc<{ states: IntegrationState[] }>("integrations:list"),
-  });
+  // The unified History tab shows whenever PCO is configured or there's any recorded
+  // data (service timing, attendance, or SPL) — so past history stays reachable even
+  // after the recording integration is powered off/disabled.
   const { data: splHistoryList } = useQuery({
     queryKey: ["spl:listHistory"],
     queryFn: () => ipc<ServiceSplHistory[]>("spl:listHistory"),
   });
-  const showSplHistory =
-    (integrationsData?.states?.some((s) => s.id === "smaart" && s.enabled) ?? false) ||
-    (splHistoryList?.length ?? 0) > 0;
   const { data: attendanceList } = useQuery({
     queryKey: ["attendance:listHistory"],
     queryFn: () => ipc<ServiceAttendance[]>("attendance:listHistory"),
   });
-  const showAttendance =
-    (integrationsData?.states?.some((s) => s.id === "sensource" && s.enabled) ?? false) ||
-    (attendanceList?.length ?? 0) > 0;
   const { data: timelineList } = useQuery({
     queryKey: ["serviceTimeline:list"],
     queryFn: () => ipc<ServiceTimeline[]>("serviceTimeline:list"),
   });
-  const showServiceHistory = (stageState?.pcoConfigured ?? false) || (timelineList?.length ?? 0) > 0;
+  const showHistory =
+    (stageState?.pcoConfigured ?? false) ||
+    (timelineList?.length ?? 0) > 0 ||
+    (attendanceList?.length ?? 0) > 0 ||
+    (splHistoryList?.length ?? 0) > 0;
   const sections = useMemo(
-    () =>
-      SECTIONS.filter(
-        (s) =>
-          (s.id !== "spl-history" || showSplHistory) &&
-          (s.id !== "attendance" || showAttendance) &&
-          (s.id !== "service-history" || showServiceHistory),
-      ),
-    [showSplHistory, showAttendance, showServiceHistory],
+    () => SECTIONS.filter((s) => s.id !== "service-history" || showHistory),
+    [showHistory],
   );
 
   // In-app update status (git-based; surfaced in the Advanced tab).
@@ -504,9 +488,9 @@ export function SettingsView() {
     }
   }
 
-  async function handleApplyUpdate() {
+  async function handleApplyUpdate(override = false) {
     try {
-      const status = await ipc<UpdateStatus>("update:apply");
+      const status = await ipc<UpdateStatus>("update:apply", { override });
       queryClient.setQueryData(["update:status"], status);
       // Remember the version we're updating FROM, so the server:hello after the
       // restart (carrying a new version) tells us the apply finished — then we
@@ -897,6 +881,21 @@ export function SettingsView() {
     }
   }
 
+  async function handleSetOutputLocked(id: string, locked: boolean) {
+    const prev = queryClient.getQueryData<StageState>(["stage:getState"]);
+    if (prev) {
+      const outputs = prev.outputs.map((o) => (o.id === id ? { ...o, locked } : o));
+      queryClient.setQueryData(["stage:getState"], { ...prev, outputs });
+    }
+    try {
+      const next = await ipc<StageState>("outputs:setLocked", { id, locked });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      if (prev) queryClient.setQueryData(["stage:getState"], prev);
+      toast.error(`Failed to update display lock: ${String(err)}`);
+    }
+  }
+
   async function handleRemoveOutput(id: string) {
     try {
       const next = await ipc<StageState>("outputs:remove", { id });
@@ -978,6 +977,7 @@ export function SettingsView() {
     handleAddOutput,
     handleRenameOutput,
     handleSetOutputView,
+    handleSetOutputLocked,
     handleRemoveOutput,
     handleReorderOutputs,
     handleOpenOutputWindow,
@@ -1033,6 +1033,8 @@ export function SettingsView() {
             handlers={handlers}
           />
         );
+      case "scriptview":
+        return <ScriptViewSection />;
       case "displays":
         return <OutputsSection stageState={stageState} handlers={handlers} />;
       case "integrations":
@@ -1041,18 +1043,6 @@ export function SettingsView() {
         return <ConnectSection stageState={stageState} handlers={handlers} />;
       case "branding":
         return <BrandingSection stageState={stageState} handlers={handlers} />;
-      case "spl-history":
-        return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
-            <SplHistorySection />
-          </div>
-        );
-      case "attendance":
-        return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
-            <AttendanceHistorySection />
-          </div>
-        );
       case "service-history":
         return (
           <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">

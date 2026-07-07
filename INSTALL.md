@@ -1,8 +1,15 @@
 # Installing Stage Utility
 
 Stage Utility is a web/server-only app: a small Node backend serves the kiosk
-display, the settings UI, and a phone control panel — all on one port (**8788**).
+display, the settings UI, and a phone control panel — on port **8788**, and (by
+default, where the process is allowed to) **also on port 80** so displays can use
+a URL with no port (`http://<server-ip>/`). Port 8788 always stays available.
 It runs anywhere Node runs.
+
+> **Port 80 is best-effort.** If the process can't bind it (no privilege, or the
+> port is already in use), the app logs a note and keeps serving 8788 — it never
+> fails to start. The Linux installer grants the needed privilege automatically
+> (see below). Disable the port-80 listener with `STAGE_UTILITY_FRIENDLY_PORT=0`.
 
 **It installs on Linux, macOS, and Windows.** The app itself is identical on each;
 only the way you make it **auto-start on boot and restart if it crashes** differs.
@@ -22,9 +29,9 @@ set it to auto-start → configure in the browser.**
 - **Node.js ≥ 24** and **git** — the steps below install these per-OS.
 - **The repo URL:** `https://github.com/Cornerstone-Production/Stage-Utility.git`.
   It's a public repo, so cloning needs no authentication.
-- **Port 8788** must be reachable on your LAN (open it in the firewall — shown per
-  platform). Override the port with the `STAGE_UTILITY_PORT` environment variable
-  if needed.
+- **Ports 8788 and 80** must be reachable on your LAN (open them in the firewall —
+  shown per platform). Override the main port with `STAGE_UTILITY_PORT`; change or
+  disable the port-free listener with `STAGE_UTILITY_FRIENDLY_PORT` (`0` = off).
 - **Where config lives:** a *data directory* outside the repo (paths noted per
   platform). Updates never touch it. Back it up — see [Backups](#backups).
 
@@ -81,11 +88,17 @@ sudo ./scripts/install.sh --no-service                    # build only, no servi
 
 ```bash
 sudo ufw allow from 192.168.0.0/16 to any port 8788 proto tcp
+sudo ufw allow from 192.168.0.0/16 to any port 80 proto tcp    # port-free URL
 ```
+
+The installer grants the service the `CAP_NET_BIND_SERVICE` capability so it can
+bind port 80 as a non-root user. **Upgrading an existing box?** In-app updates
+don't rewrite the systemd unit, so re-run `sudo ./scripts/install.sh` once to pick
+up the port-80 capability (subsequent in-app updates keep it).
 
 ### 5. Configure
 
-Open `http://<server-ip>:8788/settings` in a browser and follow
+Open `http://<server-ip>/settings` in a browser and follow
 [First-time configuration](#first-time-configuration-all-platforms).
 
 ### Operating & updating (Linux)
@@ -163,7 +176,7 @@ Replace **`/ABS/PATH/TO/node`**, **`/ABS/PATH/TO/Stage-Utility`**, and **`yourus
 <plist version="1.0">
 <dict>
   <key>Label</key>            <string>com.stage-utility.app</string>
-  <key>UserName</key>         <string>youruser</string>
+  <key>UserName</key>         <string>youruser</string>   <!-- omit this line to run as root if you want the port-free URL (:80) on macOS -->
   <key>WorkingDirectory</key> <string>/ABS/PATH/TO/Stage-Utility</string>
   <key>ProgramArguments</key>
   <array>
@@ -252,6 +265,14 @@ npm start            # → http://localhost:8788/   (Ctrl-C to stop)
 
 Allow the app through **Windows Defender Firewall** when prompted (at least for
 Private networks). Confirm `http://localhost:8788/settings` loads, then stop it.
+Windows has no privileged-port restriction, so the port-free URL (`:80`) works
+out of the box as long as nothing else (IIS, `http.sys`) already holds port 80.
+Add a firewall rule for it too:
+
+```powershell
+netsh advfirewall firewall add rule name="Stage Utility 80" dir=in action=allow protocol=TCP localport=80
+netsh advfirewall firewall add rule name="Stage Utility 8788" dir=in action=allow protocol=TCP localport=8788
+```
 
 ### 4a. Set it to auto-start — NSSM (recommended)
 
@@ -319,23 +340,32 @@ Then work through the sidebar:
    (from a PCO Personal Access Token at
    [api.planningcenteronline.com](https://api.planningcenteronline.com) →
    Developers → Personal Access Tokens).
-2. **Integrations → Wireless Gear** *(optional)* — pick your Shure model and
-   enter its IP, TCP port (usually `2202`), and channel count.
-3. **Integrations → ProPresenter / ProdCom / Smaart** *(optional)* — host + API
-   port (ProPresenter `1025`, ProdCom `24480`, Smaart `26000` for live SPL).
+2. **Integrations → Wireless Gear** *(optional)* — pick your model (Shure ULX-D /
+   Axient / PSM, or Sennheiser EW-DX / EW-G4 / Spectera) and enter its IP, port
+   (Shure TCP usually `2202`), and channel count. Offline/manual devices are OK too.
+3. **Integrations → ProPresenter / ProdCom / Smaart / OBS / OSC / SenSource / Ross**
+   *(all optional)* — host + port: ProPresenter `1025` (add multiple instances if
+   needed), ProdCom `24480`, Smaart `26000` (live SPL), OBS WebSocket `4455` +
+   password, SenSource Vea client ID + secret (people counting), Ross MultiViewer
+   TSL port (pushes people counts). OSC targets are set per **OSC button** in the
+   custom-layout editor.
 4. **Plan**, **Views**, **Displays** — pick a plan (or Auto) and toggle which
    **Active Service Types** auto-selection considers, build views (slots, dashboard,
    stage, captions, script, SPL rundown, or a custom visual layout), and route each
    display to a view.
-5. **Advanced → Public address (DNS)** *(optional)* — if you reach the server via
-   a DNS name (e.g. behind a reverse proxy), set it here so the connect QR code
-   and display links use it instead of the LAN IP.
+5. **ScriptView** *(optional)* — choose which service types appear on the `/scriptview`
+   landing page and define global column layouts (Audio/Video/Lighting/…). **History**
+   (SPL + attendance + item timing) and **Baptisms** appear once there's data.
+6. **Advanced** — set the **Public address (DNS)** if you reach the server via a DNS
+   name (used for the connect QR + display links); switch the **update track** (beta /
+   main); and **save/download a full config snapshot** to back up or move the setup
+   (secrets excluded).
 
-The kiosk display is at `http://<server-ip>:8788/`. On a phone on the same
+The kiosk display is at `http://<server-ip>/` (or `:8788`). On a phone on the same
 network, scan the QR code shown on the display (enable it under **Connect**).
 
 To point a kiosk/Pi browser straight at one screen, use
-`http://<server-ip>:8788/display-1` (etc.).
+`http://<server-ip>/display-1` (etc.).
 
 ## Updating from within the app
 

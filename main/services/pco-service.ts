@@ -19,6 +19,9 @@ const TTL_MEDIUM_MS = 3 * 60_000;
 const ATTACH_OPEN_TTL_MS = 10 * 60_000;
 /** Retry budget for transient PCO failures (429 / 5xx / network). */
 const MAX_RETRIES = 3;
+// Per-request PCO logging (~2 lines per uncached /live, ~1 Hz during a service) is
+// off unless STAGE_UTILITY_DEBUG=1 — keeps an unrotated stdout log from ballooning.
+const DEBUG_PCO = process.env.STAGE_UTILITY_DEBUG === "1";
 
 /** True for PCO's auto-generated "initials" placeholder avatar (served at
  *  …/uploads/initials/AB.png when a person has no uploaded photo). Real photos
@@ -51,6 +54,25 @@ interface ServiceTime {
   id: string;
   startsAt: string;
   endsAt: string | null;
+}
+
+/** True when a header title marks the start of the service (the anchor the "service
+ *  time" sits at), so items above it are pre-service. Matches common phrasings
+ *  case-insensitively — PCO exposes no explicit anchor, so this header is the signal.
+ *  Deliberately narrow (won't match "pre-service", "service order", etc.). */
+export function isServiceStartHeader(title: string): boolean {
+  const t = (title ?? "").toUpperCase().replace(/[^A-Z ]+/g, " ").replace(/\s+/g, " ").trim();
+  return t === "SERVICE START" || t.includes("SERVICE START") || t.includes("START OF SERVICE") || t.includes("SERVICE BEGIN");
+}
+
+/** True when a header title marks the END of the service — items at/after it are
+ *  post-service (buffer, stream padding, dismissal). When the live controller
+ *  reaches this boundary, the service is over even if PCO still reports an item
+ *  "live" (operators often park on a trailing buffer), so recording should stop.
+ *  Deliberately narrow so it only matches a purpose-placed end marker. */
+export function isServiceEndHeader(title: string): boolean {
+  const t = (title ?? "").toUpperCase().replace(/[^A-Z ]+/g, " ").replace(/\s+/g, " ").trim();
+  return t === "SERVICE END" || t.includes("SERVICE END") || t.includes("END OF SERVICE") || t.includes("SERVICE DISMISS");
 }
 
 /**
@@ -145,7 +167,7 @@ class PcoService {
     appId: string,
     secret: string,
   ): Promise<PcoResponse<T>> {
-    console.log(`[pco] GET ${url}`);
+    if (DEBUG_PCO) console.log(`[pco] GET ${url}`);
     // Retry transient failures (429 rate-limit, 5xx, network) with backoff. PCO
     // allows ~100 req / 20s per app; a burst (many displays + a refresh) can 429,
     // which previously threw and dropped data. 401/other-4xx fail fast.
@@ -179,7 +201,7 @@ class PcoService {
       }
 
       const json = await response.json() as PcoResponse<T>;
-      console.log(`[pco] OK ${url} (${Array.isArray(json.data) ? (json.data as T[]).length : 1} items)`);
+      if (DEBUG_PCO) console.log(`[pco] OK ${url} (${Array.isArray(json.data) ? (json.data as T[]).length : 1} items)`);
       return json;
     }
   }
@@ -458,7 +480,7 @@ class PcoService {
 
     const out: PlanItemDTO[] = [];
     let url: string | null =
-      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/items?include=item_notes&per_page=100`;
+      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/items?include=item_notes,arrangement&per_page=100`;
 
     for (let page = 0; url && page < 6; page++) {
       const json: PcoResponse & { links?: { next?: string } } = await this.request(url, appId, secret);
@@ -466,11 +488,19 @@ class PcoService {
 
       // Index included ItemNote nodes by id (carry content + category_name).
       const notesById = new Map<string, { category: string; content: string }>();
+      // Index included Arrangement nodes by id (carry bpm + arrangement name).
+      const arrById = new Map<string, { bpm: number | null; name: string | null }>();
       for (const n of json.included ?? []) {
-        if (n.type !== "ItemNote") continue;
-        const category = typeof n.attributes.category_name === "string" ? n.attributes.category_name : "";
-        const content = typeof n.attributes.content === "string" ? n.attributes.content : "";
-        if (category && content) notesById.set(n.id, { category, content });
+        if (n.type === "ItemNote") {
+          const category = typeof n.attributes.category_name === "string" ? n.attributes.category_name : "";
+          const content = typeof n.attributes.content === "string" ? n.attributes.content : "";
+          if (category && content) notesById.set(n.id, { category, content });
+        } else if (n.type === "Arrangement") {
+          arrById.set(n.id, {
+            bpm: typeof n.attributes.bpm === "number" ? n.attributes.bpm : null,
+            name: typeof n.attributes.name === "string" && n.attributes.name ? n.attributes.name : null,
+          });
+        }
       }
 
       for (const item of items) {
@@ -483,6 +513,8 @@ class PcoService {
             if (note) notesByCategory[note.category] = note.content;
           }
         }
+        const arrRef = item.relationships?.arrangement?.data;
+        const arr = arrRef && !Array.isArray(arrRef) ? arrById.get(arrRef.id) : undefined;
         out.push({
           id: item.id,
           title: String(a.title ?? a.description ?? "Untitled"),
@@ -491,6 +523,10 @@ class PcoService {
           sequence: typeof a.sequence === "number" ? a.sequence : out.length,
           notesByCategory,
           description: typeof a.description === "string" && a.description ? a.description : null,
+          songKey: typeof a.key_name === "string" && a.key_name ? a.key_name : null,
+          bpm: arr?.bpm ?? null,
+          arrangementName: arr?.name ?? null,
+          servicePosition: typeof a.service_position === "string" ? a.service_position : null,
         });
       }
 
@@ -501,6 +537,44 @@ class PcoService {
     out.sort((a, b) => a.sequence - b.sequence);
     this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
     return out;
+  }
+
+  /** Scheduled service start times for a plan (ISO), earliest first — the
+   *  time_type=service plan_times. Anchors the ScriptView projected clock. */
+  async listPlanServiceTimes(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<string[]> {
+    const cacheKey = `plan-times:${appId}:${planId}`;
+    const cached = this.cacheGet<string[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times?per_page=50`;
+    const json = await this.request(url, appId, secret).catch(() => null);
+    const items = json && Array.isArray(json.data) ? json.data : [];
+    const times = items
+      .filter((t) => t.attributes.time_type === "service" && typeof t.attributes.starts_at === "string")
+      .map((t) => t.attributes.starts_at as string)
+      .sort((a, b) => Date.parse(a) - Date.parse(b));
+
+    this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    return times;
+  }
+
+  /** The organization's IANA time zone (e.g. "America/Chicago"), used to render
+   *  projected clock times in the plan's local time rather than the viewer's. */
+  async listOrgTimeZone(appId: string, secret: string): Promise<string | null> {
+    const cacheKey = `org-tz:${appId}`;
+    const cached = this.cacheGet<string>(cacheKey);
+    if (cached) return cached;
+
+    const json = await this.request(PCO_BASE, appId, secret).catch(() => null);
+    const data = json && !Array.isArray(json.data) ? json.data : null;
+    const tz = data && typeof data.attributes.time_zone === "string" ? data.attributes.time_zone : null;
+    if (tz) this.cacheSet(cacheKey, tz, TTL_LONG_MS);
+    return tz;
   }
 
   async listTeamMembers(
@@ -671,6 +745,7 @@ class PcoService {
     secret: string,
     serviceTypeId: string,
     planId: string,
+    countdownTarget: "plan-start" | "service-time" = "plan-start",
   ): Promise<PcoLiveDTO> {
     const serverNow = new Date().toISOString();
     const base = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}`;
@@ -714,6 +789,17 @@ class PcoService {
       const offset =
         typeof it.attributes.length_offset === "number" ? it.attributes.length_offset : 0;
       const adjLen = planLen + offset;
+      // Service-ended: the church marks the end with a "SERVICE END" header; once the
+      // live controller reaches/passes it (operators park on a trailing buffer item
+      // like "Stream Buffer"/"End of Service"), the service is over. Only trip on an
+      // explicit end header — plans without one keep the normal "left item mode" end.
+      const endIdx = planItems.findIndex((p) => p.itemType === "header" && isServiceEndHeader(p.title));
+      const startIdx = planItems.findIndex((p) => p.itemType === "header" && isServiceStartHeader(p.title));
+      const curIdx = planItems.findIndex((p) => p.id === itemId);
+      const serviceEnded = endIdx >= 0 && curIdx >= 0 && curIdx >= endIdx;
+      // Position-based (not time-based): items above the SERVICE START header are
+      // pre-service (doors, pre-roll) — robust against early/late/storm-delayed starts.
+      const beforeServiceStart = startIdx >= 0 && curIdx >= 0 && curIdx < startIdx;
       return {
         mode: "item",
         currentItemId: itemId,
@@ -726,18 +812,36 @@ class PcoService {
         nextItemTitle,
         serviceTimeId,
         serviceTimeStartsAt,
+        serviceEnded,
+        beforeServiceStart,
       };
     }
 
-    // ── "preservice" mode: count down to the service start (PCO's pre-service timer). ──
+    // ── "preservice" mode: count down like PCO's green timer. ──
+    // PCO's timer counts to the TOP of the plan (the first item), not the service
+    // time — the "service time" is anchored at the service-start item, so pre-service
+    // items above it (doors, pre-roll, …) run BEFORE it. When countdownTarget is
+    // "plan-start" (default) we find a "service start"-type header and shift the
+    // target earlier by the length of items above it, matching PCO. If there's no
+    // such header (or countdownTarget is "service-time"), we count to the service
+    // time. PCO's API exposes no per-item scheduled time or explicit anchor, so a
+    // marker header is the only in-plan signal for where the service begins.
     if (serviceTimeStartsAt) {
+      let targetAt = serviceTimeStartsAt;
+      if (countdownTarget === "plan-start") {
+        const startIdx = planItems.findIndex((p) => p.itemType === "header" && isServiceStartHeader(p.title));
+        if (startIdx > 0) {
+          const preSec = planItems.slice(0, startIdx).reduce((sum, p) => sum + (p.lengthSec || 0), 0);
+          if (preSec > 0) targetAt = new Date(Date.parse(serviceTimeStartsAt) - preSec * 1000).toISOString();
+        }
+      }
       return {
         mode: "preservice",
         currentItemId: null,
         label: "Service starts",
         lengthSec: null,
         liveStartAt: null,
-        targetAt: serviceTimeStartsAt,
+        targetAt,
         serverNow,
         currentItemTitle,
         nextItemTitle,

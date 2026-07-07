@@ -1,11 +1,12 @@
-import { useState, useEffect, useLayoutEffect, useRef, type CSSProperties } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import { invoke } from "../lib/api";
 import { BrandLogo } from "../components/brand-logo";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
-import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow } from "./use-people-count-state";
+import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance } from "./use-people-count-state";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessChannels } from "./use-wireless-channels";
@@ -38,6 +39,9 @@ export interface LayoutRenderCtx {
   /** Lowest in-room occupancy during the current/most-recent live service — the
    *  "Low" metric (replaces the useless whole-day minimum). null when none. */
   serviceLow: number | null;
+  /** Per-service attendance for the current live service (baselined) — the
+   *  "Attendance (this service)" metric, vs the day-total `peopleCount.attendance`. */
+  serviceAttendance: number | null;
   /** Live baptism-timer state — for the baptism-timer object. */
   baptism: BaptismState | null;
   /** In-progress service timeline (planned vs actual item timing) — for the
@@ -172,6 +176,46 @@ function rfBarsGlyph(bars: number): string {
   return "▮".repeat(n) + "▯".repeat(5 - n);
 }
 
+// Shrinks the font so `text` fits its box (width + height) instead of clipping —
+// used by single-value text objects (current/next item) where a long title would
+// otherwise overflow. Converges in a pass or two by back-deriving the natural size
+// from the live scroll size (same approach as ServiceOrderObject's auto-fit).
+function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign?: LayoutVAlign }) {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const elRef = useRef<HTMLSpanElement | null>(null);
+  const [scale, setScale] = useState(1);
+  const scaleRef = useRef(1);
+  scaleRef.current = scale;
+  const basePx = parseFloat(String(ts.fontSize)) || 16;
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const el = elRef.current;
+    if (!wrap || !el) return;
+    const measure = () => {
+      const availW = wrap.clientWidth;
+      const availH = wrap.clientHeight;
+      if (availW <= 1 || availH <= 1) return;
+      const cur = scaleRef.current;
+      const natW = el.scrollWidth / cur;
+      const natH = el.scrollHeight / cur;
+      if (natW <= 0 || natH <= 0) return;
+      const desired = Math.max(0.3, Math.min(1, Math.min(availW / natW, availH / natH)));
+      if (Math.abs(desired - cur) > 0.01) setScale(desired);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, [text, basePx, ts.fontWeight]);
+  const justify = vAlign === "top" ? "flex-start" : vAlign === "bottom" ? "flex-end" : "center";
+  const align = ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center";
+  return (
+    <div ref={wrapRef} style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: justify, alignItems: align, overflow: "hidden" }}>
+      <span ref={elRef} style={{ ...ts, width: undefined, maxWidth: "100%", display: "inline-block", fontSize: `${basePx * scale}px` }}>{text}</span>
+    </div>
+  );
+}
+
 export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   const c = o.config;
   const ts = textStyle(o, ctx.H);
@@ -242,13 +286,14 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     }
     case "current-service-item": {
       // Follow the PCO plan order (authoritative); fall back to ProPresenter's
-      // active playlist only when PCO has no current item.
+      // active playlist only when PCO has no current item. Auto-fit so a long title
+      // shrinks to the box instead of clipping.
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
-      return span(ctx.pcoLive?.currentItemTitle ?? pro?.currentServiceItem ?? "");
+      return <FitText text={ctx.pcoLive?.currentItemTitle ?? pro?.currentServiceItem ?? ""} ts={ts} vAlign={o.style?.vAlign} />;
     }
     case "next-service-item": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
-      return span(ctx.pcoLive?.nextItemTitle ?? pro?.nextServiceItem ?? "");
+      return <FitText text={ctx.pcoLive?.nextItemTitle ?? pro?.nextServiceItem ?? ""} ts={ts} vAlign={o.style?.vAlign} />;
     }
     case "service-order":
       return <ServiceOrderObject o={o} config={c} ctx={ctx} />;
@@ -459,12 +504,16 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       return <SplMeterValue config={c} spl={ctx.spl} ts={ts} />;
     case "people-counter": {
       const metric = c.metric ?? "attendance";
-      // "min" now means "lowest in-room during the live service" (building-wide),
-      // sourced from the attendance record — not the useless whole-day minimum.
-      const value = metric === "min" ? ctx.serviceLow : resolvePeopleValue(ctx.peopleCount, metric, c.zoneId);
+      // "min" = lowest in-room during the live service; "serviceAttendance" = entered
+      // THIS service (baselined) — both from the attendance record. "attendance" is
+      // the building's day total. Everything else comes from the live people counts.
+      const value =
+        metric === "min" ? ctx.serviceLow
+        : metric === "serviceAttendance" ? ctx.serviceAttendance
+        : resolvePeopleValue(ctx.peopleCount, metric, c.zoneId);
       if (value == null) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
       const fallbackLabel =
-        metric === "occupancy" ? "in room" : metric === "peak" ? "peak" : metric === "min" ? "low" : metric === "avg" ? "avg" : "people";
+        metric === "occupancy" ? "in room" : metric === "peak" ? "peak att." : metric === "min" ? "low" : metric === "avg" ? "avg att." : metric === "serviceAttendance" ? "svc entries" : "entries";
       return (
         <span style={ts}>
           {value.toLocaleString()}
@@ -477,9 +526,9 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       );
     }
     case "people-graph":
-      return <PeopleGraph history={ctx.peopleCount?.history ?? []} metric={c.metric ?? "occupancy"} config={c} ts={ts} H={ctx.H} />;
+      return <PeopleGraphObject ctx={ctx} config={c} ts={ts} />;
     case "people-panel":
-      return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} ts={ts} H={ctx.H} />;
+      return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} ts={ts} H={ctx.H} />;
     case "baptism-timer":
       return <BaptismTimer state={ctx.baptism} config={c} ts={ts} now={ctx.now} />;
     case "obs-status": {
@@ -616,7 +665,7 @@ function SplMeterValue({
 
 function hhmm(iso: string): string {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 /** A "nice" integer axis step (1 / 2 / 5 × 10ⁿ, minimum 1) for a target interval
@@ -635,21 +684,89 @@ function niceStepInt(target: number): number {
 // HTML overlays. Y-axis auto-scales to nice round integer bounds (1/2/5 ×10ⁿ) that
 // expand with the data — no cap, so it grows to thousands — with headroom (so a
 // spike never clips) and three distinct labels; x-axis shows the first/last sample.
+/** Fetch a recorded service's per-service curve + PCO markers for the people-graph
+ *  "recorded" mode. serviceKey null → most recent finished service. */
+function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefined) {
+  const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[] } | null>(null);
+  useEffect(() => {
+    if (!enabled) { setData(null); return; }
+    let cancelled = false;
+    void (async () => {
+      let key = serviceKey ?? null;
+      if (!key) {
+        const list = await invoke<ServiceAttendance[]>("attendance:listHistory").catch(() => [] as ServiceAttendance[]);
+        key = (list ?? []).filter((s) => s.endedAt).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0]?.serviceKey ?? null;
+      }
+      if (!key) { if (!cancelled) setData({ points: [], markers: [] }); return; }
+      const [att, tl] = await Promise.all([
+        invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: key }).catch(() => null),
+        invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: key }).catch(() => null),
+      ]);
+      if (cancelled) return;
+      const base = att?.samples?.[0]?.attendance ?? 0; // per-service anchor
+      const points: PeopleHistoryPoint[] = (att?.samples ?? []).map((s) => ({ t: s.t, attendance: Math.max(0, s.attendance - base), occupancy: s.occupancy }));
+      const markers = (tl?.items ?? []).filter((it) => it.title && it.startedAt).map((it) => ({ t: it.startedAt, label: it.title }));
+      setData({ points, markers });
+    })();
+    return () => { cancelled = true; };
+  }, [enabled, serviceKey]);
+  return data;
+}
+
+/** People-graph object: live rolling window or a recorded service's curve, with a
+ *  kiosk live/recorded toggle, PCO-item markers, and a hover tooltip. */
+function PeopleGraphObject({ ctx, config, ts }: { ctx: LayoutRenderCtx; config: Extract<LayoutObjectConfig, { type: "people-graph" }>; ts: CSSProperties }) {
+  const cfgSource = config.source ?? "live";
+  const [mode, setMode] = useState<"live" | "recorded">(cfgSource);
+  useEffect(() => setMode(cfgSource), [cfgSource]);
+  const recorded = useRecordedGraph(mode === "recorded", config.recordedServiceKey);
+  const liveMarkers = (ctx.serviceTimeline?.items ?? []).filter((it) => it.title && it.startedAt).map((it) => ({ t: it.startedAt, label: it.title }));
+  const points = mode === "recorded" ? (recorded?.points ?? []) : (ctx.peopleCount?.history ?? []);
+  const markers = mode === "recorded" ? (recorded?.markers ?? []) : liveMarkers;
+  return (
+    <PeopleGraph
+      history={points}
+      metric={config.metric ?? "occupancy"}
+      config={config}
+      markers={config.showMarkers !== false ? markers : []}
+      showTooltip={config.showTooltip !== false}
+      ts={ts}
+      H={ctx.H}
+      toggle={config.kioskToggle && ctx.interactive ? { mode, onToggle: () => setMode((m) => (m === "live" ? "recorded" : "live")) } : null}
+    />
+  );
+}
+
 function PeopleGraph({
   history,
   metric,
   config,
+  markers = [],
+  showTooltip = true,
+  toggle = null,
   ts,
   H,
 }: {
   history: PeopleHistoryPoint[];
   metric: "attendance" | "occupancy";
   config: Extract<LayoutObjectConfig, { type: "people-graph" }>;
+  markers?: { t: string; label: string }[];
+  showTooltip?: boolean;
+  toggle?: { mode: "live" | "recorded"; onToggle: () => void } | null;
   ts: CSSProperties;
   H: number;
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<number | null>(null);
   const vals = history.map((h) => (metric === "attendance" ? h.attendance : h.occupancy));
-  if (vals.length < 2) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+  if (vals.length < 2) {
+    return (
+      <div style={{ position: "relative", width: "100%", height: "100%" }}>
+        <span style={{ ...ts, opacity: 0.4 }}>{toggle?.mode === "recorded" ? "no recorded data" : "—"}</span>
+        {toggle && <GraphToggle mode={toggle.mode} onToggle={toggle.onToggle} stroke={ts.color ?? "#fff"} H={H} />}
+      </div>
+    );
+  }
   const n = vals.length;
   const stroke = ts.color ?? "#ffffff";
 
@@ -686,8 +803,44 @@ function PeopleGraph({
   });
   const yTop = `${PADT}%`, yMidPct = `${PADT + (100 - PADT - PADB) / 2}%`, yBot = `${100 - PADB}%`;
 
+  // PCO markers: snap each item's time to the nearest sample index, then to plot X.
+  const times = history.map((h) => Date.parse(h.t));
+  const t0 = times[0], tN = times[n - 1];
+  const nearestIdx = (ms: number): number => {
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < n; i++) { const d = Math.abs(times[i] - ms); if (d < bd) { bd = d; best = i; } }
+    return best;
+  };
+  const markerPts = markers
+    .map((m) => ({ label: m.label, ms: Date.parse(m.t), t: m.t }))
+    .filter((m) => Number.isFinite(m.ms) && m.ms >= t0 - 1000 && m.ms <= tN + 1000)
+    .map((m) => { const idx = nearestIdx(m.ms); return { ...m, idx, x: px(idx) }; });
+  // Autosize marker labels: full size up to ~6 markers, then scale down (floored)
+  // so a busy plan's rotated times stay legible without overlapping.
+  const markerFont = Math.max(6, fontPx * 0.85 * (markerPts.length > 6 ? 6 / markerPts.length : 1));
+
+  // Hover: map pointer X (over the full-width box) back to the nearest sample index.
+  function onMove(e: React.PointerEvent<HTMLDivElement>) {
+    const el = wrapRef.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0) return;
+    const vbX = ((e.clientX - r.left) / r.width) * 100;
+    const frac = (vbX - PADL) / (100 - PADL - PADR);
+    setHover(Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1)))));
+  }
+  // Guard the hover index against the current series: switching live↔recorded swaps
+  // the data under a stale index, so clamp it out rather than indexing undefined.
+  const hIdx = hover != null && hover >= 0 && hover < n ? hover : null;
+  const hoverX = hIdx != null ? px(hIdx) : 0;
+  const nearMarker = hIdx != null ? markerPts.find((m) => m.idx === hIdx) : undefined;
+
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
+    <div
+      ref={wrapRef}
+      style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}
+      onPointerMove={showTooltip ? onMove : undefined}
+      onPointerLeave={showTooltip ? () => setHover(null) : undefined}
+    >
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: "100%", height: "100%", display: "block" }}>
         {/* gridlines at lo / mid / hi */}
         {[PADT, PADT + (100 - PADT - PADB) / 2, 100 - PADB].map((y, i) => (
@@ -695,6 +848,15 @@ function PeopleGraph({
         ))}
         <polygon points={`${PADL},${100 - PADB} ${line} ${100 - PADR},${100 - PADB}`} fill={stroke} fillOpacity={0.13} />
         <polyline points={line} fill="none" stroke={stroke} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+        {/* PCO plan-item markers */}
+        {markerPts.map((m, i) => (
+          <line key={i} x1={m.x} y1={PADT} x2={m.x} y2={100 - PADB} stroke={stroke} strokeOpacity={0.4} strokeWidth={0.75} strokeDasharray="2 2" vectorEffect="non-scaling-stroke" />
+        ))}
+        {/* hover crosshair (the round point is an HTML overlay — a <circle> would
+            stretch to an ellipse under preserveAspectRatio="none") */}
+        {hIdx != null && (
+          <line x1={hoverX} y1={PADT} x2={hoverX} y2={100 - PADB} stroke={stroke} strokeOpacity={0.55} strokeWidth={0.75} vectorEffect="non-scaling-stroke" />
+        )}
       </svg>
 
       {/* y-axis value labels (crisp HTML overlays) */}
@@ -706,13 +868,87 @@ function PeopleGraph({
       <span style={{ position: "absolute", left: `${PADL}%`, bottom: 0, color: stroke, opacity: 0.7, fontSize: `${fontPx}px`, lineHeight: 1 }}>{hhmm(history[0].t)}</span>
       <span style={{ position: "absolute", right: `${PADR}%`, bottom: 0, color: stroke, opacity: 0.7, fontSize: `${fontPx}px`, lineHeight: 1 }}>{hhmm(history[n - 1].t)}</span>
 
-      {/* current value readout (top-right, clear of the y-max label) */}
+      {/* current value readout (top-right; drops below the toggle when both show) */}
       {config.showLabel && (
-        <span style={{ position: "absolute", top: 0, right: `${PADR}%`, color: stroke, fontSize: `${fontPx * 1.3}px`, fontWeight: 700, lineHeight: 1, opacity: 0.95 }}>
+        <span style={{ position: "absolute", top: toggle ? `${0.05 * H}px` : 0, right: `${PADR}%`, color: stroke, fontSize: `${fontPx * 1.3}px`, fontWeight: 700, lineHeight: 1, opacity: 0.95 }}>
           {(config.label ? `${config.label} ` : "") + vals[n - 1].toLocaleString()}
         </span>
       )}
+
+      {/* PCO marker time labels — rotated vertical so they don't crowd, and
+          shrunk as markers get dense (denser plan → smaller type, floored). */}
+      {markerPts.map((m, i) => (
+        <span
+          key={i}
+          style={{
+            position: "absolute", left: `${m.x}%`, top: `${PADT}%`,
+            transform: "translate(-50%, -50%) rotate(-90deg)", transformOrigin: "center",
+            color: stroke, opacity: 0.7, fontSize: `${markerFont}px`, lineHeight: 1,
+            fontWeight: 600, whiteSpace: "nowrap", pointerEvents: "none",
+          }}
+        >
+          {hhmm(m.t)}
+        </span>
+      ))}
+
+      {/* hover point (HTML so it stays a circle) */}
+      {hIdx != null && (
+        <span style={{ position: "absolute", left: `${hoverX}%`, top: `${py(vals[hIdx])}%`, transform: "translate(-50%, -50%)", width: `${Math.max(4, 0.02 * H)}px`, height: `${Math.max(4, 0.02 * H)}px`, borderRadius: "50%", background: stroke, pointerEvents: "none", zIndex: 1 }} />
+      )}
+
+      {/* hover tooltip */}
+      {showTooltip && hIdx != null && (
+        <div
+          style={{
+            position: "absolute", left: `${hoverX}%`, top: `${PADT}%`,
+            transform: hoverX > 60 ? "translate(-102%, 0)" : "translate(2%, 0)",
+            background: "rgba(0,0,0,0.78)", color: stroke, borderRadius: `${0.01 * H}px`,
+            padding: `${0.008 * H}px ${0.012 * H}px`, fontSize: `${fontPx}px`, lineHeight: 1.25,
+            fontWeight: 600, pointerEvents: "none", whiteSpace: "nowrap", zIndex: 2,
+          }}
+        >
+          <div style={{ opacity: 0.75 }}>{hhmm(history[hIdx].t)}</div>
+          <div>{vals[hIdx].toLocaleString()}</div>
+          {nearMarker && <div style={{ opacity: 0.85, maxWidth: `${0.35 * H}px`, overflow: "hidden", textOverflow: "ellipsis" }}>{nearMarker.label}</div>}
+        </div>
+      )}
+
+      {toggle && <GraphToggle mode={toggle.mode} onToggle={toggle.onToggle} stroke={stroke} H={H} />}
     </div>
+  );
+}
+
+/** Live/recorded toggle for kiosk viewers. Borderless and set in the top-right so
+ *  it reads as part of the chart's label layer (the y-axis labels own the left),
+ *  rather than a bolted-on button. A green/amber dot carries the state. */
+function GraphToggle({ mode, onToggle, stroke, H }: { mode: "live" | "recorded"; onToggle: () => void; stroke: string; H: number }) {
+  const [hot, setHot] = useState(false);
+  const [down, setDown] = useState(false);
+  const dot = `${Math.max(4, 0.016 * H)}px`;
+  const pad = `${0.006 * H}px`;
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      onPointerEnter={() => setHot(true)}
+      onPointerLeave={() => { setHot(false); setDown(false); }}
+      onPointerDown={() => setDown(true)}
+      onPointerUp={() => setDown(false)}
+      title={mode === "live" ? "Showing live — tap for the last recorded service" : "Showing recorded service — tap for live"}
+      style={{
+        position: "absolute", top: `${0.008 * H}px`, right: `${0.008 * H}px`,
+        display: "inline-flex", alignItems: "center", gap: `${0.006 * H}px`,
+        // Faint surface only on hover/press — a touch affordance that stays invisible at rest.
+        background: down ? "rgba(255,255,255,0.16)" : hot ? "rgba(255,255,255,0.08)" : "transparent",
+        color: stroke, border: "none", borderRadius: `${0.02 * H}px`,
+        padding: `${pad} ${0.01 * H}px`, margin: `-${pad} -${0.004 * H}px`,
+        fontSize: `${Math.max(7, 0.03 * H)}px`, fontWeight: 700, letterSpacing: "0.06em",
+        lineHeight: 1, cursor: "pointer", opacity: hot ? 1 : 0.8, zIndex: 3,
+        transition: "background 120ms ease, opacity 120ms ease",
+      }}
+    >
+      <span style={{ width: dot, height: dot, borderRadius: "50%", background: mode === "live" ? "#22c55e" : "#f59e0b", flex: "0 0 auto" }} />
+      {mode === "live" ? "LIVE" : "REC"}
+    </button>
   );
 }
 
@@ -721,10 +957,11 @@ function PeopleGraph({
 // not per-zone). avgService = mean peak across recorded services.
 const PEOPLE_PANEL_LABELS: Record<string, string> = {
   occupancy: "In room",
-  peak: "Peak",
-  attendance: "Attendance",
+  peak: "Peak att.",
+  attendance: "Entries (day)",
+  serviceAttendance: "Entries (svc)",
   min: "Low",
-  avg: "Avg today",
+  avg: "Avg att.",
   avgService: "Avg / service",
   capacity: "Capacity",
   vsAverage: "vs avg",
@@ -733,12 +970,14 @@ function PeoplePanel({
   config,
   people,
   serviceLow,
+  serviceAttendance,
   ts,
   H,
 }: {
   config: Extract<LayoutObjectConfig, { type: "people-panel" }>;
   people: PeopleCountDTO | null;
   serviceLow: number | null;
+  serviceAttendance: number | null;
   ts: CSSProperties;
   H: number;
 }) {
@@ -767,7 +1006,7 @@ function PeoplePanel({
     // "min" = lowest in-room during the live service (the service "floor"), from
     // the attendance record — not the whole-day minimum (which is ~always 0).
     const v =
-      k === "avgService" ? serviceAvg : k === "min" ? serviceLow : ((t as Record<string, number | null> | undefined)?.[k] ?? null);
+      k === "avgService" ? serviceAvg : k === "min" ? serviceLow : k === "serviceAttendance" ? serviceAttendance : ((t as Record<string, number | null> | undefined)?.[k] ?? null);
     return { text: v == null ? "—" : v.toLocaleString(), color: base };
   };
   return (
@@ -1306,21 +1545,45 @@ function ServiceOrderObject({
   );
 }
 
-/** Live data + tickers shared by the kiosk renderer and the settings editor. */
-export function useLayoutData() {
+/** Collect the set of object `config.type`s present in a layout (recursing into
+ *  container children) so live-data hooks can be gated to only the channels the
+ *  layout actually renders. */
+function collectLayoutTypes(objects: LayoutObject[] | undefined, into: Set<string>): void {
+  for (const o of objects ?? []) {
+    if (o.config?.type) into.add(o.config.type);
+    if (o.children?.length) collectLayoutTypes(o.children, into);
+  }
+}
+
+/** Live data + tickers shared by the kiosk renderer and the settings editor.
+ *  When a `layout` is passed (kiosk display), the optional/high-frequency data
+ *  hooks are gated to the object types the layout contains — so a clock-only
+ *  display doesn't subscribe to (or re-render on) SPL/transcript/wireless/etc.
+ *  Called with no arg (editor) → every hook is enabled so previews always show data. */
+export function useLayoutData(layout?: LayoutDTO) {
+  const types = useMemo(() => {
+    if (!layout) return null; // editor / unknown → enable everything
+    const s = new Set<string>();
+    collectLayoutTypes(layout.objects, s);
+    return s;
+  }, [layout]);
+  const want = (kinds: string[]) => types === null || kinds.some((k) => types.has(k));
+  const peopleWanted = want(["people-counter", "people-graph", "people-panel"]);
+
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
-  const transcript = useTranscript();
-  const spl = useSplState();
-  const obs = useObsState();
-  const osc = useOscState();
-  const peopleCount = usePeopleCountState();
-  const serviceLow = useLiveServiceLow(true);
+  const transcript = useTranscript(want(["transcript-strip"]));
+  const spl = useSplState(want(["spl-meter"]));
+  const obs = useObsState(want(["obs-status"]));
+  const osc = useOscState(want(["osc-button"]));
+  const peopleCount = usePeopleCountState(peopleWanted);
+  const serviceLow = useLiveServiceLow(peopleWanted);
+  const serviceAttendance = useLiveServiceAttendance(peopleWanted);
+  const wireless = useWirelessChannels(want(["wireless-summary", "wireless-channel"]));
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();
   const serviceTimeline = useServiceTimeline();
   const integrationsSnap = useIntegrations();
-  const wireless = useWirelessChannels();
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -1332,7 +1595,7 @@ export function useLayoutData() {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -1340,7 +1603,7 @@ export function useLayoutData() {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData();
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -1384,7 +1647,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // with the window instead of the design canvas.
   const fill = canvas.fit === "fill";
   const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

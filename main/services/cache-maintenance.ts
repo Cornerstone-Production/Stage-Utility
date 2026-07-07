@@ -4,6 +4,7 @@
 
 import { prunePhotoCache } from "./photo-cache.js";
 import { pruneAttachmentCache } from "./pco-attachment-cache.js";
+import { pruneLayoutImages } from "./layout-image-store.js";
 
 const INITIAL_DELAY_MS = 30_000; // let startup settle first
 const INTERVAL_MS = 24 * 60 * 60 * 1000; // daily
@@ -31,6 +32,7 @@ class CacheMaintenance {
     try {
       await prunePhotoCache();
       await pruneAttachmentCache();
+      await pruneLayoutImages();
     } catch (err) {
       console.error("[cache-maintenance] prune failed:", err);
     }

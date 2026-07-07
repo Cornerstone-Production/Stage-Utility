@@ -9,7 +9,7 @@
 // meter never re-renders every display 8×/sec.
 
 import type { SplMetricsDTO } from "../types/stage.js";
-import { broadcast } from "./broadcaster.js";
+import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { ModernSmaartAdapter, type SmaartInput, type SplReading } from "./smaart-protocol.js";
 
 type SmaartConnState = "connected" | "error" | "disconnected";
@@ -234,13 +234,15 @@ class SmaartService {
   }
 
   private emit(snapshot: SplMetricsDTO, immediate: boolean): void {
-    this.last = snapshot;
+    this.last = snapshot; // always kept fresh — the SPL recorder pulls getLatest()
     this.dirty = false;
     if (immediate && this.throttleTimer) {
       clearTimeout(this.throttleTimer);
       this.throttleTimer = null;
     }
-    broadcast("spl:metrics", snapshot);
+    // 4 Hz to nobody is wasted work — skip the push when no display renders SPL
+    // meters. Recording is unaffected (it reads this.last, not the broadcast).
+    if (channelHasSubscribers("spl:metrics")) broadcast("spl:metrics", snapshot);
   }
 }
 

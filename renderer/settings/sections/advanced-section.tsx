@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon } from "lucide-react";
+import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon } from "lucide-react";
 import { invoke, onNotification } from "../../lib/api";
 import { CompanionInfoPanel } from "../../components/companion-info-panel";
 import {
@@ -91,31 +91,83 @@ function UpdatesPanel({
   const updating = s?.phase === "updating";
   const behind = s?.behind ?? 0;
   const [trackSel, setTrackSel] = useState<string | null>(null);
+  // Update lock — a live service / active recording blocks self-updates (which
+  // restart the process) unless overridden. Re-checked whenever a service goes
+  // live/idle or a recorder opens/closes so the indicator stays fresh.
+  const [lock, setLock] = useState<{ active: boolean; reasons: string[] } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () =>
+      invoke<{ active: boolean; reasons: string[] }>("update:lock")
+        .then((l) => !cancelled && setLock(l))
+        .catch(() => {});
+    refresh();
+    const offs = ["pco:live", "spl:history", "attendance:history", "service-timeline:history"].map((ch) =>
+      onNotification(ch, refresh),
+    );
+    return () => {
+      cancelled = true;
+      offs.forEach((off) => off());
+    };
+  }, []);
 
   async function onUpdateNow() {
+    if (lock?.active) {
+      if (
+        await confirm({
+          title: "Service in progress",
+          message: `Updating restarts the server and would interrupt: ${lock.reasons.join(", ")}. It's safest to wait until the service is over.`,
+          confirmLabel: "Override & update anyway",
+          destructive: true,
+        })
+      ) {
+        handlers.handleApplyUpdate(true);
+      }
+      return;
+    }
     if (await confirm({ title: "Update now?", message: "The displays will go blank and reload for a few seconds while the server restarts.", confirmLabel: "Update now" })) {
       handlers.handleApplyUpdate();
+    }
+  }
+
+  async function onRestart() {
+    if (await confirm({ title: "Restart the server?", message: "The displays will go blank and reload for a few seconds while the server restarts. No update is installed.", confirmLabel: "Restart" })) {
+      void invoke("update:restart").catch((e) =>
+        window.alert(`Restart failed: ${e instanceof Error ? e.message : String(e)}`),
+      );
     }
   }
 
   async function onSwitchTrack() {
     const branch = trackSel ?? s?.branch ?? null;
     if (!branch || branch === s?.branch) return;
-    if (
-      await confirm({
-        title: `Switch to "${branch}"?`,
-        message: `The server will reinstall + rebuild and restart (displays go blank for a few seconds), then follow the ${branch} branch.`,
-        confirmLabel: "Switch track",
-      })
-    ) {
-      void invoke("update:setTrack", { branch }).catch((e) =>
+    const locked = lock?.active ?? false;
+    const ok = await confirm(
+      locked
+        ? {
+            title: "Service in progress",
+            message: `Switching tracks reinstalls, rebuilds, and restarts the server, interrupting: ${lock!.reasons.join(", ")}. It's safest to wait until the service is over.`,
+            confirmLabel: "Override & switch",
+            destructive: true,
+          }
+        : {
+            title: `Switch to "${branch}"?`,
+            message: `The server will reinstall + rebuild and restart (displays go blank for a few seconds), then follow the ${branch} branch.`,
+            confirmLabel: "Switch track",
+          },
+    );
+    if (ok) {
+      void invoke("update:setTrack", { branch, override: locked }).catch((e) =>
         window.alert(`Track switch failed: ${e instanceof Error ? e.message : String(e)}`),
       );
     }
   }
 
-  // Not a git checkout → can't self-update.
-  if (s && !s.isGitRepo) {
+  // Not a git checkout → can't self-update. Only show this once a check has
+  // actually confirmed it (lastCheckedAt set) — otherwise a freshly-restarted
+  // server briefly serves the default `isGitRepo:false` and flashes this banner
+  // before the first check runs.
+  if (s && !s.isGitRepo && s.lastCheckedAt) {
     return (
       <FieldSet title="Updates">
         <FieldGroup>
@@ -209,6 +261,11 @@ function UpdatesPanel({
                 <CheckCircle2Icon className="size-3.5" /> You're on the latest version.
               </p>
             ) : null}
+            {lock?.active && !updating ? (
+              <p className="mt-1 flex items-center gap-1.5 text-caption2 text-amber-11">
+                <LockIcon className="size-3.5" /> Update locked — {lock.reasons.join(" · ")}. Finish the service, or override in the dialog.
+              </p>
+            ) : null}
           </FieldContent>
 
           <div className="flex flex-wrap gap-2">
@@ -219,6 +276,10 @@ function UpdatesPanel({
             <Button variant="accent" size="small" onClick={onUpdateNow} disabled={updating || behind === 0}>
               {updating ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
               {updating ? "Updating…" : "Update now"}
+            </Button>
+            <Button variant="filled" size="small" onClick={onRestart} disabled={updating}>
+              <RotateCwIcon className="size-3.5 text-gray-9" />
+              Restart
             </Button>
           </div>
         </Field>

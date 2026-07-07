@@ -114,10 +114,12 @@ function ConnectionBadge({ connection, message }: { connection: ConnectionState;
     );
   }
   if (connection === "error") {
+    // Truncate a long error (e.g. "Can't reach 192.168.x.x — ECONNREFUSED…") so it
+    // never overflows its row; the full text shows on hover via the native title.
     return (
-      <span className="flex items-center gap-1">
+      <span className="flex items-center gap-1 min-w-0" title={message ?? "Error"}>
         <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
-        <span className="text-caption1 text-red-10">{message ?? "Error"}</span>
+        <span className="text-caption1 text-red-10 truncate">{message ?? "Error"}</span>
       </span>
     );
   }
@@ -158,7 +160,7 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
       if (field.type === "password" && typeof raw === "string" && raw !== "") {
         out[field.key] = MASKED_PASSWORD;
       } else {
-        out[field.key] = raw ?? "";
+        out[field.key] = raw ?? field.default ?? "";
       }
     }
     return out;

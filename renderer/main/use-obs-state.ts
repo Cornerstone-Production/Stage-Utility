@@ -7,10 +7,11 @@ import { invoke, onNotification } from "../lib/api";
  * mount (the channel only broadcasts on change) then stays live. Shared by the
  * custom-layout "OBS status" object and its editor inspector.
  */
-export function useObsState(): ObsStatusDTO | null {
+export function useObsState(enabled = true): ObsStatusDTO | null {
   const [obs, setObs] = useState<ObsStatusDTO | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     invoke<ObsStatusDTO>("obs:getStatus")
       .then((s) => {
@@ -22,11 +23,12 @@ export function useObsState(): ObsStatusDTO | null {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     return onNotification("obs:status", (p) => setObs(p as ObsStatusDTO));
-  }, []);
+  }, [enabled]);
 
   return obs;
 }

@@ -5,15 +5,21 @@ several live sources and shows them on monitors around the stage:
 
 - **Planning Center Online** — the band lineup (people, roles, photos), the active
   plan, and a live service countdown.
-- **Shure** wireless systems — RF, battery, frequency, and audio level for each mic
-  or in-ear pack.
-- **ProPresenter** — the live slide: current/next text, the song **section**
-  (Verse/Chorus/Bridge/Intro/Outro…), chords, running timers, and a slide thumbnail.
+- **Shure** and **Sennheiser** wireless systems — RF, battery, frequency, and audio
+  level for each mic or in-ear pack.
+- **ProPresenter** (one or more instances) — the live slide: current/next text, the song
+  **section** (Verse/Chorus/Bridge/Intro/Outro…), chords, running timers, and a thumbnail.
 - **ProdCom** — live audio **transcription** (captions), shown full-screen or as a
   strip on the dashboards.
-- **Smaart** (Rational Acoustics) — live **SPL** (sound-pressure level) from a FOH
-  measurement rig: shown on the dashboards/custom layouts and recorded as a max/avg
-  **per service item** across a service, with a history browser for past services.
+- **Smaart** (Rational Acoustics) — live **SPL** from a FOH rig, recorded max/avg
+  **per service item**, with a history browser.
+- **SenSource Vea** — live **people counting** / attendance, with per-service recording
+  and trend graphs (and optional push to a **Ross** multiviewer via TSL UMD).
+- **OBS Studio** (streaming/recording state) and **OSC** control + feedback to LAN gear.
+
+It also includes **ScriptView** (per-service-type PCO rundown dashboards), a unified
+**History** browser (SPL + attendance + item timing, by calendar), and a **baptism**
+timer/operator workflow.
 
 Each monitor is a **display** (a screen at its own URL) pointed at a **view** —
 reusable content you build once and can route to any number of displays. A view is one
@@ -179,23 +185,33 @@ in the repo. Open `…/settings-window.html` and work through the sidebar:
      section headers, length, clock + live countdown; current item highlighted), with an
      optional per-display PCO Prev/Next control.
    - **SPL Rundown** — a compact item-plus-max-SPL list for the live service.
-8. **Displays** — your physical screens. Each has its own URL and is **routed to a
+8. **ScriptView** — a per-service-type PCO rundown dashboard (an in-app replacement
+   for ScriptViewer) at `/scriptview`. Pick a service type → open a shareable,
+   deep-linkable rundown (`/scriptview/weekend/audio`) to pin in its own tab. Define
+   **global layouts** (Audio/Video/Lighting/…) as column presets shared across every
+   service type, each with per-element toggles (clock, time, song key/BPM/arrangement,
+   item notes, total time) and department row coloring; the projected clock follows the
+   plan's timezone, and the live item highlights when the service is running.
+9. **Displays** — your physical screens. Each has its own URL and is **routed to a
    view** (one view can drive many screens). Rename, drag to reorder, or open in its
    own window.
-9. **Connect** — toggle the on-screen QR code for the phone remote.
+10. **Connect** — toggle the on-screen QR code for the phone remote.
 
 ## URLs & ports
 
 | Surface | Dev (`npm run dev`) | Production (`npm start`) |
 |---------|----------------------|--------------------------|
-| Display picker | `http://localhost:3000/` | `http://<host>:8788/` |
-| A specific display | `http://localhost:3000/display-1` | `http://<host>:8788/display-1` |
-| Settings UI | `http://localhost:3000/settings` | `http://<host>:8788/settings` |
-| Phone remote | — (use `:8788`) | `http://<host>:8788/` when no built UI is present¹ |
-| API / SSE | proxied to `:8788` | `http://<host>:8788/api/*` |
+| Display picker | `http://localhost:3000/` | `http://<host>/` (or `:8788`) |
+| A specific display | `http://localhost:3000/display-1` | `http://<host>/display-1` |
+| ScriptView | — | `http://<host>/scriptview` (per-service-type PCO rundowns) |
+| Settings UI | `http://localhost:3000/settings` | `http://<host>/settings` |
+| Phone remote | — (use `:8788`) | `http://<host>/` when no built UI is present¹ |
+| API / SSE | proxied to `:8788` | `http://<host>/api/*` |
 
-The server binds `0.0.0.0:8788` (LAN-accessible). Override the port with the
-`STAGE_UTILITY_PORT` environment variable.
+The server binds `0.0.0.0:8788` (LAN-accessible) and, where the process is
+permitted, **also `:80`** so URLs need no port — 8788 always stays up. Override
+the main port with `STAGE_UTILITY_PORT`; change/disable the port-free listener
+with `STAGE_UTILITY_FRIENDLY_PORT` (`0` = off).
 Clean URLs (`/settings`, `/display-N`) are served directly in production and mapped
 by a small Vite middleware in dev. The display picker at `/` lists every configured
 display; clicking the brand/logo in any display returns there.
@@ -208,12 +224,86 @@ React app instead.
 
 | Integration | Kind | Config | Notes |
 |-------------|------|--------|-------|
-| **Planning Center** | lineup | App ID, Secret, refresh interval | Fetches service types, plans, and team members; auto-refreshes on the chosen interval (default 1 h) plus on demand. Also drives the live service countdown (`pco:live`). |
-| **Wireless Gear** | wireless | per-device host / port / channels | Shure **ULX-D**, **Axient Digital**, and **PSM (in-ear)** drivers over TCP; reports RF, battery, charging, frequency, audio level. |
-| **ProPresenter** | control | host, API port (`1025`) | Talks directly to ProPresenter 7.9+'s local HTTP API (LAN, no auth). Polls the active presentation, slide status, arrangement, timers, and a thumbnail; broadcasts `propresenter:status`. Section is resolved from the arrangement **play order** (works through repeats, jumps, and text-less Intro/Instrumental/Outro slides). |
+| **Planning Center** | lineup | App ID, Secret, refresh interval, countdown target | Fetches service types, plans, and team members; auto-refreshes on the chosen interval (default 1 h) plus on demand. Also drives the live service countdown (`pco:live`). Request volume is minimized (tiered caches, consolidated `plan_times` + team-positions calls, 429 backoff). |
+| **Wireless Gear** | wireless | per-device host / port / channels | Shure **ULX-D**, **Axient Digital**, **PSM (in-ear)**, and Sennheiser **EW-DX**, **EW-G4 (SSC)**, **Spectera** drivers; reports RF, battery, charging, frequency, audio level. Offline/manually-entered devices supported. |
+| **ProPresenter** | control | host, API port (`1025`), **per-instance name** | Talks directly to ProPresenter 7.9+'s local HTTP API (LAN, no auth). **Multiple instances** can be configured and selected per layout object. Polls the active presentation, slide status, arrangement, timers, and a thumbnail; broadcasts `propresenter:status`. Section is resolved from the arrangement **play order**. |
 | **ProdCom** | lineup | host, API port (`24480`), API key | Holds an SSE connection to ProdCom's transcript stream and re-broadcasts `prodcom:transcript`; backfills recent lines on connect. Powers the Captions display + dashboard transcript strips. |
-| **Smaart (SPL)** | control | host, port (`26000`), password | Connects to Smaart's modern JSON-over-WebSocket API (8.3+, auto-negotiates SDK V3/V4) for live SPL. Streams per-meter readings (`spl:metrics`), and a server-side recorder tracks max/avg SPL **per plan item** during a live service (`spl:history`), browsable per past service under **SPL History**. |
-| **Bitfocus Companion** | control | host, port | Descriptor present; control endpoints exist. Reserved for future use. |
+| **Smaart (SPL)** | control | host, port (`26000`), password | Connects to Smaart's modern JSON-over-WebSocket API (8.3+, auto-negotiates SDK V3/V4) for live SPL. Streams per-meter readings (`spl:metrics`); a recorder tracks max/avg SPL **per plan item** per service (`spl:history`), browsable under **History**. |
+| **OBS Studio** | control | host, WebSocket port (`4455`), password | Connects to OBS's obs-websocket v5 (direct, not via Companion). Reports streaming/recording/scene state; drives an **"OBS status"** layout object that turns red while recording. |
+| **OSC** | control | per-button targets (host / port / address / args) | Custom-layout **OSC button** objects send OSC over UDP to LAN gear and reflect device state via OSC **feedback**; multiple targets per button. Zero external deps (`node:dgram` + a hand-rolled codec). |
+| **SenSource Vea** | people | client ID + secret (or static token), poll interval | People-counting: pulls authoritative building occupancy (zone→location scoping, nets ins/outs across doors). Feeds the **attendance** metrics, trend graph, and per-service recording. |
+| **Ross MultiViewer (TSL UMD)** | output | switcher host, TSL port | Pushes live people counts to a Ross multiviewer/switcher as TSL UMD tally text. |
+| **Bitfocus Companion** | control | host, port | Backed by a separate Companion module; in-app control endpoints exist. |
+
+## Attendance & service history
+
+- **People counting (SenSource Vea).** Live building occupancy shown on dashboards
+  and custom layouts. Metrics include **in-room now**, **peak attendance** (highest
+  in-room), **day attendance** (sum of the day's services' peaks), **per-service
+  attendance**, **% of capacity**, **vs average**, and **Low** (lowest in-room during
+  the live service). "Attendance" = people in the room; "entries" = cumulative door
+  count (double-counts re-entries), kept separately.
+- **History tab** (Settings → History) unifies **SPL**, **attendance**, and
+  **service-timeline** records into one browser with a **calendar** (dots on days with
+  data). Per-service detail shows charts — an attendance trend with **PCO plan-item
+  markers** + a service-average line, and per-item SPL — plus a **grouped, drag-orderable
+  KPI overview** (timers, attendance, highest/lowest attended, day totals), with
+  toggleable sparklines. Service windows are **editable** (fix a bad capture), individual
+  items can be **counted/excluded** from the timers, and a service **report** is exportable.
+- **Recorders** capture attendance / SPL / service-timeline per service, keyed to the
+  plan + occurrence, and **auto-finalize at the plan's SERVICE END marker** (robust to
+  a parked live controller). Records are written atomically and reconciled on startup.
+- **Layout objects:** **people counter**, **people summary** (several metrics side by
+  side, each toggleable), and **people graph** (live rolling window **or** a recorded
+  service, with PCO-item markers, a hover tooltip, and an optional kiosk live/recorded
+  toggle).
+
+## ScriptView
+
+A per-service-type PCO **rundown dashboard** at `/scriptview` — an in-app replacement
+for ScriptViewer. The landing page lists the service types you enable; each opens a
+**deep-linkable** rundown at a readable URL (`/scriptview/weekend/audio`) you can pin in
+its own browser tab. **Layouts are global** column presets (Audio / Video / Lighting / …)
+shared across every service type, each with per-element toggles (**clock, time, song
+key / BPM / arrangement, item notes, total time**) and **department row coloring**. The
+projected clock follows the **plan's timezone**; the current item highlights live only
+while a service is actually running. Configured in **Settings → ScriptView** with a live
+preview.
+
+## Baptisms
+
+A standalone **`/baptism` operator page** (also a Settings tab) with a **grouped
+workflow** (all testimonies, then all baptisms). Sessions are named by service and
+**cross-linked into Service History** with per-person splits + averages. An on-air
+**"Baptism timer"** layout object shows the live count/timer on a display.
+
+## Reliability & efficiency
+
+The live layer is tuned for many always-on kiosks:
+
+- **SSE:** a single multiplexed stream with **per-connection channel filtering** (a
+  display only receives the channels it uses), **broadcast-on-change** (e.g. `pco:live`
+  and `spl:metrics` emit on change, not every tick), payloads **stringified once** per
+  broadcast, a **heartbeat + backpressure guard** that reaps dead clients, and an
+  **opt-in shared-worker relay** (`stage:sharedSse`) that shares one connection across
+  tabs on the same machine.
+- **PCO:** tiered response caches, consolidated `plan_times` + team-position calls, and
+  **429 backoff** cut request volume; the live timer stays uncached.
+- **Storage:** the DataStore uses **atomic writes** (temp + rename) and is
+  **corruption-safe** on load (bad files are backed up, never overwritten). Photo and
+  plan-attachment disk caches are pruned by age + size.
+- **Polling & assets:** static assets are gzipped; ProPresenter thumbnails are cached
+  and its poll interval is configurable; charger/heartbeat polls are slowed; live-history
+  broadcasts are throttled to ~5 s.
+- **Updater:** skips `npm ci` / `npm run build` when an update doesn't touch deps or the
+  renderer, and can switch between the **beta** and **main** update tracks in-app.
+
+## Backups & portability
+
+A **full config snapshot** (Settings → Advanced) can be **saved/recalled** in-app and
+**downloaded/uploaded** as a file to move a configuration between machines. Integration
+**secrets are excluded** from snapshots (they stay AES-256-GCM encrypted on the box). A
+server **log viewer** is available at `/log`.
 
 ## Data model & concepts
 
@@ -247,8 +337,11 @@ drive many displays, so you change content in one place. Both can be reordered. 
   canvas (default 1920×1080) of positioned **objects** — clock, countdown, current/next
   slide text + notes, slide thumbnail, section chip, mic-slots grid, transcript, SPL
   meter, charger battery, PCO live controls, brand logo, image, **plan file**, shape,
-  text, and **container** — each bound to the same live data. Positions and sizes are
-  stored as fractions of the canvas, so a layout renders identically at any resolution.
+  text, **container**, plus the newer **people counter / summary / graph**, **OBS
+  status**, **OSC button**, **integration status**, **wireless summary**, **caption
+  filter**, **baptism timer**, and **service order** — each bound to the same live data.
+  Positions and sizes are stored as fractions of the canvas, so a layout renders
+  identically at any resolution.
 
   **Containers** are styled boxes that hold other objects: a child's position/size is a
   fraction of its container, so moving or resizing the container moves and scales its
@@ -363,12 +456,31 @@ and `POST /api/displays` + `PATCH/DELETE /api/displays/:id`.
 | GET | `/api/spl/history/:key` | One past-service record |
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
 
+**People, attendance, timeline & baptism**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/people/count` | Live building occupancy (SenSource) |
+| GET | `/api/sensource/locations` \| `/api/sensource/zones` | Pickers for the SenSource config |
+| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record |
+| GET | `/api/service-timeline` \| `/:key` \| `/current` | List / one / live per-item timing record |
+| GET | `/api/obs/status` | OBS streaming / recording / scene state |
+| GET | `/api/baptism` \| `/api/baptism/sessions` | Live baptism state / saved sessions (+ start/next/baptized actions) |
+
+**ScriptView**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/scriptview/rundown?serviceTypeId=…[&planId=]` | Resolved rundown (items, columns, service times, timezone) |
+| GET / POST | `/api/scriptview/layouts` | List / save global layouts |
+| GET / POST | `/api/scriptview/config` | Get / set which service types show on the landing |
+| GET | `/api/scriptview/note-categories?serviceTypeId=…` | Note categories for the column picker |
+
 **Branding & other**
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/branding/source?target=app\|empty` | Original (un-cropped) brand/empty logo source |
 | POST | `/api/branding` | Update app name + logos |
-| GET | `/api/events` | Server-Sent Events stream (`stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `spl:metrics`, `spl:history`, `integrations:state-changed`, `wireless:connections-changed`) |
+| GET | `/api/events` | Multiplexed Server-Sent Events stream with per-connection channel filtering. Channels: `stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `spl:metrics`, `spl:history`, `people:count`, `attendance:history`, `service-timeline:history`, `obs:status`, `osc:feedback`, `baptism`, `integrations:state-changed`, `wireless:connections-changed` |
+| POST | `/api/events/subscribe` | Set the channels a connection wants (channel filtering) |
 | GET | `/photos?u=…` | Cached Planning Center photo proxy |
 
 ## Project structure
@@ -385,7 +497,7 @@ and `POST /api/displays` + `PATCH/DELETE /api/displays/:id`.
 │   │                          #   wireless/device managers, integration-manager,
 │   │                          #   stores (settings/slots/views/presets/layout-templates),
 │   │                          #   slot-resolver, encryption, broadcaster, app-paths, …
-│   ├── providers/wireless/    # Shure ULX-D / Axient / PSM drivers + registry
+│   ├── providers/wireless/    # Shure (ULX-D/Axient/PSM) + Sennheiser (EW-DX/EW-G4/Spectera) drivers + registry
 │   └── types/                 # Backend type contracts (stage.ts: View/Output/LayoutDTO…)
 ├── renderer/                  # Frontend (React)
 │   ├── main/                  # Displays: stage-view (router/picker) → slot grid,
@@ -422,7 +534,10 @@ State persists in a **data directory** — `$STAGE_UTILITY_DATA` if set, otherwi
 - `views.json` — view definitions (kind + config; custom views carry their layout)
 - `slots.json` — slot sets, keyed by view + service type
 - `layout-templates.json` — saved custom-layout library; `presets.json` — slot presets
-- `spl-history.json` — per-item SPL recordings (one record per service), for SPL History
+- `layout-groups.json` — reusable object groups; `scriptview-layouts.json` + `scriptview-config.json` — ScriptView presets + landing curation
+- `spl-history.json` — per-item SPL recordings (one record per service), for History
+- `attendance-history.json` — per-service attendance recordings; `service-timeline.json` — per-service item timing
+- `baptism.json` — baptism sessions; `osc.json` — OSC button/target definitions
 - `secrets.bin` — integration secrets, **AES-256-GCM encrypted**
 - `encryption.key` — 32-byte key, auto-generated on first run (mode `600`)
 - `photo-cache/` — cached PCO photos

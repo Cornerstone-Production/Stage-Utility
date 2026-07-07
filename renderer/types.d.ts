@@ -10,6 +10,7 @@ interface ConfigField {
   options?: { value: string; label: string }[];
   placeholder?: string;
   help?: string;
+  default?: string | number;
 }
 
 interface IntegrationDescriptor {
@@ -142,6 +143,8 @@ interface SplItemHistory {
 interface ServiceSplHistory {
   serviceKey: string;
   serviceTypeId: string | null;
+  /** PCO service-type name — labels the History service-type filter. */
+  serviceTypeName?: string | null;
   planId: string | null;
   planTitle: string | null;
   seriesTitle: string | null;
@@ -163,6 +166,8 @@ interface AttendanceSample {
 interface ServiceAttendance {
   serviceKey: string;
   serviceTypeId: string | null;
+  /** PCO service-type name — labels the History service-type filter. */
+  serviceTypeName?: string | null;
   planId: string | null;
   planTitle: string | null;
   seriesTitle: string | null;
@@ -171,7 +176,12 @@ interface ServiceAttendance {
   serviceTimeStartsAt: string | null;
   startedAt: string;
   endedAt: string | null;
+  /** samples.attendance is PER-SERVICE (baselined) so a 2nd service in the same plan starts at 0. */
   samples: AttendanceSample[];
+  /** Raw cumulative attendance at this record's first sample; per-service = raw − baseline. */
+  attendanceBaseline: number | null;
+  /** Latest raw cumulative attendance = running total across all of the day's services. */
+  totalAttendance: number;
   peakAttendance: number;
   peakOccupancy: number;
   /** Lowest in-room occupancy seen while the service was live (the "floor"); null
@@ -188,10 +198,16 @@ interface ServiceTimelineItem {
   startedAt: string;
   endedAt: string | null;
   actualDurationSec: number | null;
+  /** Auto: recorded above the plan's SERVICE START header (pre-service). */
+  preService?: boolean;
+  /** User override for counting this item toward the service timers. */
+  counted?: boolean;
 }
 interface ServiceTimeline {
   serviceKey: string;
   serviceTypeId: string | null;
+  /** PCO service-type name — labels the History service-type filter. */
+  serviceTypeName?: string | null;
   planId: string | null;
   planTitle: string | null;
   seriesTitle: string | null;
@@ -245,12 +261,48 @@ interface PlanItemDTO {
   sequence: number;
   notesByCategory: Record<string, string>;
   description: string | null;
+  songKey?: string | null;
+  bpm?: number | null;
+  arrangementName?: string | null;
+  servicePosition?: string | null;
 }
 
 interface PlanItemsDTO {
   planId: string | null;
   items: PlanItemDTO[];
   noteCategories: string[];
+}
+
+interface ScriptViewLayout {
+  id: string;
+  name: string;
+  order: number;
+  columns: string[];
+  showClock?: boolean;
+  showLength?: boolean;
+  showKey?: boolean;
+  showBpm?: boolean;
+  showArrangement?: boolean;
+  showItemNotes?: boolean;
+  showTotalTime?: boolean;
+  accentDepartment?: string | null;
+}
+
+interface ScriptViewConfig {
+  serviceTypeIds: string[];
+}
+
+interface ScriptViewRundownDTO {
+  serviceTypeId: string;
+  planId: string | null;
+  planTitle: string | null;
+  planSeriesTitle: string | null;
+  planDates: string | null;
+  items: PlanItemDTO[];
+  noteCategories: string[];
+  serviceTimes: string[];
+  timeZone: string | null;
+  isActivePlan: boolean;
 }
 
 interface PlanDTO {
@@ -483,7 +535,7 @@ type LayoutObjectConfig =
     }
   | {
       type: "people-counter";
-      metric?: "attendance" | "occupancy" | "peak" | "min" | "avg";
+      metric?: "attendance" | "serviceAttendance" | "occupancy" | "peak" | "min" | "avg";
       zoneId?: string | null;
       label?: string;
       showLabel?: boolean;
@@ -493,10 +545,20 @@ type LayoutObjectConfig =
       metric?: "attendance" | "occupancy";
       label?: string;
       showLabel?: boolean;
+      /** "live" = real-time rolling window; "recorded" = a past service's curve. */
+      source?: "live" | "recorded";
+      /** Which recorded service to show (null = most recent) when source = recorded. */
+      recordedServiceKey?: string | null;
+      /** Overlay PCO plan-item markers (with times). */
+      showMarkers?: boolean;
+      /** Hover/tap tooltip showing the value + time at a point. */
+      showTooltip?: boolean;
+      /** Show an on-screen live/recorded toggle so a kiosk viewer can switch. */
+      kioskToggle?: boolean;
     }
   | {
       type: "people-panel";
-      metrics?: ("occupancy" | "peak" | "attendance" | "min" | "avg" | "avgService" | "capacity" | "vsAverage")[];
+      metrics?: ("occupancy" | "peak" | "attendance" | "serviceAttendance" | "min" | "avg" | "avgService" | "capacity" | "vsAverage")[];
       showLabels?: boolean;
       orientation?: "row" | "column";
     }
@@ -561,6 +623,9 @@ interface Output {
   viewId: string | null;
   /** When true, the screen renders a full black blackout regardless of its View. */
   blackout?: boolean;
+  /** When true, this display's top bar hides its nav escape hatches (QR/settings +
+   *  home logo) so a handed-out link can't leave the display. */
+  locked?: boolean;
 }
 
 /** Per-output render descriptor (output id → routed view's kind/ndi/name). */
@@ -570,6 +635,7 @@ interface ResolvedOutput {
   ndiSource: string | null;
   viewName: string | null;
   blackout: boolean;
+  locked: boolean;
 }
 
 /** A live transcript line from ProdCom (SSE "prodcom:transcript"). */
@@ -617,6 +683,10 @@ interface PcoLiveDTO {
   nextItemTitle: string | null;
   serviceTimeId: string | null;
   serviceTimeStartsAt: string | null;
+  /** True once the live controller reached the plan's "SERVICE END" marker. */
+  serviceEnded?: boolean;
+  /** True while the current live item is above the plan's "SERVICE START" header. */
+  beforeServiceStart?: boolean;
 }
 
 /** Live ProPresenter status (SSE "propresenter:status"). */

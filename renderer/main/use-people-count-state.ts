@@ -7,10 +7,11 @@ import { invoke, onNotification } from "../lib/api";
  * Hydrates once on mount (the channel only broadcasts on poll) then stays live.
  * Shared by the custom-layout "People counter" object and its editor inspector.
  */
-export function usePeopleCountState(): PeopleCountDTO | null {
+export function usePeopleCountState(enabled = true): PeopleCountDTO | null {
   const [people, setPeople] = useState<PeopleCountDTO | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     invoke<PeopleCountDTO>("people:getCount")
       .then((s) => {
@@ -22,11 +23,12 @@ export function usePeopleCountState(): PeopleCountDTO | null {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     return onNotification("people:count", (p) => setPeople(p as PeopleCountDTO));
-  }, []);
+  }, [enabled]);
 
   return people;
 }
@@ -88,7 +90,35 @@ export function useLiveServiceLow(enabled: boolean): number | null {
   return low;
 }
 
-export type PeopleMetric = "attendance" | "occupancy" | "peak" | "min" | "avg";
+/** Per-service attendance for the current (or most-recent) live service — the count
+ *  entered THIS service, baselined by the recorder so a second service in the same
+ *  plan starts from 0 (vs. the day-total `attendance` metric). From the in-progress
+ *  attendance record's per-service `lastAttendance`. null when nothing's recording. */
+export function useLiveServiceAttendance(enabled: boolean): number | null {
+  const [val, setVal] = useState<number | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    invoke<ServiceAttendance | null>("attendance:getHistoryCurrent")
+      .then((rec) => {
+        if (!cancelled) setVal(rec?.lastAttendance ?? null);
+      })
+      .catch(() => {
+        /* ignore */
+      });
+    const off = onNotification("attendance:history", (p) => {
+      const rec = p as ServiceAttendance | null;
+      setVal(rec?.lastAttendance ?? null);
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [enabled]);
+  return val;
+}
+
+export type PeopleMetric = "attendance" | "serviceAttendance" | "occupancy" | "peak" | "min" | "avg";
 
 /** Resolve the value an object should show, by metric + optional zone. Returns
  *  null when there's no data (so the renderer can show a placeholder).
@@ -100,6 +130,9 @@ export function resolvePeopleValue(
   zoneId: string | null | undefined,
 ): number | null {
   if (!people) return null;
+  // Per-service attendance isn't a live building-count field — it comes from the
+  // in-progress record (ctx.serviceAttendance) and is special-cased at the call site.
+  if (metric === "serviceAttendance") return null;
   if (zoneId) {
     if (metric === "attendance" || metric === "occupancy") {
       const z = people.zones.find((zone) => zone.id === zoneId);

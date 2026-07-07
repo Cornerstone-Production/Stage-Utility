@@ -8,7 +8,7 @@ import { invoke, onNotification } from "../lib/api";
  * connection set changes (`wireless:connections-changed`). Backs the "Wireless
  * summary" layout object (mics online / lowest battery).
  */
-export function useWirelessChannels(): DeviceStatus[] {
+export function useWirelessChannels(enabled = true): DeviceStatus[] {
   const [channels, setChannels] = useState<DeviceStatus[]>([]);
 
   const load = useCallback(() => {
@@ -20,12 +20,14 @@ export function useWirelessChannels(): DeviceStatus[] {
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     load();
-  }, [load]);
+  }, [load, enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     return onNotification("wireless:connections-changed", () => load());
-  }, [load]);
+  }, [load, enabled]);
 
   return channels;
 }

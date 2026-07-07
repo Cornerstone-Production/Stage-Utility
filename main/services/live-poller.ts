@@ -18,9 +18,26 @@ const LIVE_INTERVAL_MS = 1000;
 // (the countdown itself ticks client-side, so this is just change detection).
 const IDLE_INTERVAL_MS = 4000;
 
+// Everything on the live DTO that a client actually reacts to. serverNow is
+// deliberately excluded: it changes every tick but the client ticks the countdown
+// itself from targetAt/liveStartAt + its own clock, so re-pushing it every second
+// is pure overhead. We broadcast only when one of these changes (plus a slow
+// keepalive for clock re-sync).
+function liveSignature(l: PcoLiveDTO): string {
+  return JSON.stringify([
+    l.mode, l.currentItemId, l.label, l.lengthSec, l.liveStartAt, l.targetAt,
+    l.serviceTimeId, l.serviceTimeStartsAt, l.currentItemTitle, l.nextItemTitle,
+  ]);
+}
+// Re-push at least this often even when unchanged, so a client's clock-skew estimate
+// can't drift and a just-connected client stays fresh. Still ~15x fewer pushes than 1 Hz.
+const LIVE_KEEPALIVE_MS = 15_000;
+
 class LivePoller {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
+  private lastSig: string | null = null;
+  private lastBroadcastAt = 0;
 
   start(): void {
     if (this.running) return;
@@ -55,7 +72,16 @@ class LivePoller {
     }
 
     if (live) {
-      broadcast("pco:live", live);
+      // Poll fast (to detect item switches promptly) but only PUSH when something
+      // the client renders actually changed — or every LIVE_KEEPALIVE_MS for clock
+      // re-sync. Cuts pco:live from 1 push/sec/client to ~1 per item change.
+      const sig = liveSignature(live);
+      const now = Date.now();
+      if (sig !== this.lastSig || now - this.lastBroadcastAt >= LIVE_KEEPALIVE_MS) {
+        broadcast("pco:live", live);
+        this.lastSig = sig;
+        this.lastBroadcastAt = now;
+      }
       // Fold the current SPL reading into the live item's running max/avg.
       void splRecorder.onLiveTick(live);
       // Sample the live attendance/occupancy into the service's trend.

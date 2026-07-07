@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2Icon } from "lucide-react";
 
 import { BrandLogo } from "../components/brand-logo";
 import { QrHint } from "../components/qr-hint";
 import { LiveControls } from "./live-controls";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
+import { RundownTable, type RundownColumn } from "./rundown-table";
 import { useDashboardState } from "./use-dashboard-state";
 import { usePlanItems } from "./use-plan-items";
 import { resolveSplValue, useSplHistory, useSplState } from "./use-spl-state";
@@ -43,12 +44,6 @@ export function ScriptView({ displayId, showLiveControls }: ScriptViewProps) {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  // Auto-scroll the current item into view as the service advances.
-  const currentRef = useRef<HTMLTableRowElement | null>(null);
-  useEffect(() => {
-    currentRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [pcoLive?.currentItemId]);
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-[100dvh] kiosk-surface">
@@ -79,6 +74,22 @@ export function ScriptView({ displayId, showLiveControls }: ScriptViewProps) {
   const items = plan?.items ?? [];
   const maxByItem = new Map<string, number | null>();
   for (const it of history?.items ?? []) maxByItem.set(it.itemId, it.maxSpl);
+
+  const columns: RundownColumn[] = [
+    { key: "len", header: "Len", align: "right", width: "4rem", cellClassName: "text-white/55", render: (it) => fmtLen(it.lengthSec) },
+    {
+      key: "title", header: "Item",
+      render: (it, { isCurrent }) => <span className={`font-medium ${isCurrent ? "text-[#7fe3c4]" : "text-white/90"}`}>{it.title}</span>,
+    },
+    ...cats.map((c): RundownColumn => ({
+      key: `note:${c}`, header: c, cellClassName: "text-white/60 whitespace-pre-line",
+      render: (it) => it.notesByCategory[c] ?? "",
+    })),
+    {
+      key: "spl", header: "Max SPL", align: "right", width: "6rem", cellClassName: "text-white/80",
+      render: (it) => { const max = maxByItem.get(it.id); return max != null ? `${Math.round(max)} dB` : "—"; },
+    },
+  ];
 
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
@@ -123,49 +134,7 @@ export function ScriptView({ displayId, showLiveControls }: ScriptViewProps) {
             {plan ? "No items in this plan" : "Planning Center not configured"}
           </div>
         ) : (
-          <table className="w-full border-collapse text-[clamp(0.8rem,1.6vmin,1.1rem)]">
-            <thead className="sticky top-0 z-10 bg-[#14161c] text-white/45">
-              <tr className="text-left">
-                <th className="px-3 py-2 font-medium w-16 text-right">Len</th>
-                <th className="px-3 py-2 font-medium">Item</th>
-                {cats.map((c) => <th key={c} className="px-3 py-2 font-medium">{c}</th>)}
-                <th className="px-3 py-2 font-medium w-24 text-right">Max SPL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((it) => {
-                if (it.itemType === "header") {
-                  return (
-                    <tr key={it.id} className="bg-white/[0.06]">
-                      <td colSpan={cats.length + 3} className="px-3 py-1.5 text-caption1 font-semibold uppercase tracking-wider text-white/70">
-                        {it.title}
-                      </td>
-                    </tr>
-                  );
-                }
-                const isCurrent = pcoLive?.currentItemId === it.id;
-                const max = maxByItem.get(it.id);
-                return (
-                  <tr
-                    key={it.id}
-                    ref={isCurrent ? currentRef : undefined}
-                    className={`border-b border-white/5 align-top ${isCurrent ? "bg-[#2dd49618]" : ""}`}
-                  >
-                    <td className="px-3 py-2 text-right tabular-nums text-white/55">{fmtLen(it.lengthSec)}</td>
-                    <td className={`px-3 py-2 font-medium ${isCurrent ? "text-[#7fe3c4]" : "text-white/90"}`}>
-                      {it.title}
-                    </td>
-                    {cats.map((c) => (
-                      <td key={c} className="px-3 py-2 text-white/60 whitespace-pre-line">{it.notesByCategory[c] ?? ""}</td>
-                    ))}
-                    <td className="px-3 py-2 text-right tabular-nums text-white/80">
-                      {max != null ? `${Math.round(max)} dB` : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <RundownTable items={items} columns={columns} currentItemId={pcoLive?.currentItemId} />
         )}
       </div>
 

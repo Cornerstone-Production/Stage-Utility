@@ -307,7 +307,7 @@ export type LayoutObjectConfig =
       type: "people-counter";
       // attendance (Σins) / occupancy (in-room now) resolve per-zone or building;
       // peak/min/avg (today, from the space endpoint) are building-only.
-      metric?: "attendance" | "occupancy" | "peak" | "min" | "avg";
+      metric?: "attendance" | "serviceAttendance" | "occupancy" | "peak" | "min" | "avg";
       zoneId?: string | null;
       label?: string;
       showLabel?: boolean;
@@ -333,13 +333,18 @@ export type LayoutObjectConfig =
       metric?: "attendance" | "occupancy";
       label?: string;
       showLabel?: boolean;
+      source?: "live" | "recorded";
+      recordedServiceKey?: string | null;
+      showMarkers?: boolean;
+      showTooltip?: boolean;
+      kioskToggle?: boolean;
     }
   // A multi-metric people summary — several building-wide counts side by side,
   // each toggleable. `metrics` is the ordered set shown. avgService is the mean
   // peak occupancy across recorded services (from Attendance history).
   | {
       type: "people-panel";
-      metrics?: ("occupancy" | "peak" | "attendance" | "min" | "avg" | "avgService" | "capacity" | "vsAverage")[];
+      metrics?: ("occupancy" | "peak" | "attendance" | "serviceAttendance" | "min" | "avg" | "avgService" | "capacity" | "vsAverage")[];
       showLabels?: boolean;
       orientation?: "row" | "column";
     }
@@ -414,6 +419,9 @@ export interface Output {
   /** When true, this screen renders a full black "blackout" regardless of its
    *  routed View. Toggling it off restores the View instantly. */
   blackout?: boolean;
+  /** When true, this display's top bar hides its nav escape hatches (QR/settings +
+   *  home logo) so a handed-out link can't navigate away from the display. */
+  locked?: boolean;
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */
@@ -423,6 +431,7 @@ export interface ResolvedOutput {
   ndiSource: string | null;
   viewName: string | null;
   blackout: boolean;
+  locked: boolean;
 }
 
 /**
@@ -452,6 +461,14 @@ export interface PcoLiveDTO {
   serviceTimeId: string | null;
   /** ISO start of the chosen service occurrence (also the preservice target). */
   serviceTimeStartsAt: string | null;
+  /** True once the live controller has reached the plan's "SERVICE END" marker —
+   *  the service is over (recording should finalize) even though an item is still
+   *  "live". Only set when the plan has an explicit end header. */
+  serviceEnded?: boolean;
+  /** True while the current live item is ABOVE the plan's "SERVICE START" header —
+   *  a pre-service item (doors, pre-roll). Position-based, so early/late starts
+   *  don't misclassify it. Only set when the plan has a start header. */
+  beforeServiceStart?: boolean;
 }
 
 /** Live ProPresenter status (pushed on "propresenter:status"). */
@@ -609,6 +626,9 @@ export interface ServiceSplHistory {
   /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */
   serviceKey: string;
   serviceTypeId: string | null;
+  /** PCO service-type name (e.g. "Weekend", "The Salt Company") — labels the
+   *  History service-type filter. Absent on records made before this was added. */
+  serviceTypeName?: string | null;
   planId: string | null;
   planTitle: string | null;
   seriesTitle: string | null;
@@ -641,6 +661,9 @@ export interface ServiceAttendance {
   /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */
   serviceKey: string;
   serviceTypeId: string | null;
+  /** PCO service-type name (e.g. "Weekend", "The Salt Company") — labels the
+   *  History service-type filter. Absent on records made before this was added. */
+  serviceTypeName?: string | null;
   planId: string | null;
   planTitle: string | null;
   seriesTitle: string | null;
@@ -650,8 +673,18 @@ export interface ServiceAttendance {
   serviceTimeStartsAt: string | null;
   startedAt: string;
   endedAt: string | null;
-  /** Down-sampled building-total samples across the service (oldest→newest). */
+  /** Down-sampled samples across the service (oldest→newest). `attendance` is
+   *  PER-SERVICE (baselined — see attendanceBaseline), so a second service in the
+   *  same plan starts its curve at 0 instead of inheriting the first service's count. */
   samples: AttendanceSample[];
+  /** Raw cumulative attendance (SenSource Σ-entries, a running daily total) captured
+   *  when this record's first sample landed. Per-service attendance = raw − baseline.
+   *  null until the first sample. */
+  attendanceBaseline: number | null;
+  /** Latest raw cumulative attendance = the building's running total across ALL of
+   *  the day's services (kept alongside the per-service figure). */
+  totalAttendance: number;
+  /** Peak PER-SERVICE attendance (baselined). */
   peakAttendance: number;
   peakOccupancy: number;
   /** Lowest in-room occupancy seen while the service was live (the service
@@ -676,6 +709,12 @@ export interface ServiceTimelineItem {
   endedAt: string | null;
   /** Actual elapsed seconds (endedAt − startedAt), null while still live. */
   actualDurationSec: number | null;
+  /** Auto: item was above the plan's SERVICE START header when recorded (pre-service).
+   *  Drives the default "not counted" state. Absent on older records. */
+  preService?: boolean;
+  /** User override for whether this item counts toward the service timers. When set,
+   *  it wins over the auto (buffer/pre-service) default; absent = use the default. */
+  counted?: boolean;
 }
 
 /** Recorded ACTUAL service rundown timing for one occurrence — when each item
@@ -687,6 +726,9 @@ export interface ServiceTimeline {
   /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */
   serviceKey: string;
   serviceTypeId: string | null;
+  /** PCO service-type name (e.g. "Weekend", "The Salt Company") — labels the
+   *  History service-type filter. Absent on records made before this was added. */
+  serviceTypeName?: string | null;
   planId: string | null;
   planTitle: string | null;
   seriesTitle: string | null;
@@ -783,6 +825,12 @@ export interface PlanItemDTO {
   /** Per-note-category content (e.g. {"Audio": "...", "Vocals": "..."}). */
   notesByCategory: Record<string, string>;
   description: string | null;
+  /** Song meta (present on "song" items): selected key, arrangement BPM + name. */
+  songKey?: string | null;
+  bpm?: number | null;
+  arrangementName?: string | null;
+  /** PCO service_position: "pre" | "during" | "post" (drives pre-service styling). */
+  servicePosition?: string | null;
 }
 
 /** A plan's full rundown plus the ordered note-category column names. */
@@ -791,6 +839,55 @@ export interface PlanItemsDTO {
   items: PlanItemDTO[];
   /** Ordered note-category names (the script columns: Audio, Band, MD, Vocals…). */
   noteCategories: string[];
+}
+
+/** A saved ScriptView layout — a named column preset (our in-app ScriptViewer
+ *  replacement). GLOBAL: one set of layouts applies across every service type.
+ *  Columns reference PCO note categories by name, so a layout works under any
+ *  type (a category a type lacks just renders as an empty column). */
+export interface ScriptViewLayout {
+  id: string;
+  name: string;
+  order: number;
+  /** Ordered note-category names shown as columns. */
+  columns: string[];
+  // Per-element visibility toggles (undefined = shown; opt-out by setting false).
+  showClock?: boolean;        // projected wall-clock column
+  showLength?: boolean;       // length / "Time" column
+  showKey?: boolean;          // song key in the title meta line
+  showBpm?: boolean;          // BPM in the title meta line
+  showArrangement?: boolean;  // arrangement name in the title meta line
+  showItemNotes?: boolean;    // description line (leader / cues) under the title
+  showTotalTime?: boolean;    // total-time footer
+  /** Note category whose presence tints the row (department focus), or null. */
+  accentDepartment?: string | null;
+}
+
+/** ScriptView-wide config: which PCO service types appear on the landing page
+ *  (ordered). Empty = fall back to types that have layouts. */
+export interface ScriptViewConfig {
+  serviceTypeIds: string[];
+}
+
+/** The resolved rundown for a ScriptView page: the chosen plan's items + columns,
+ *  plus whether this service type is the one currently running live. */
+export interface ScriptViewRundownDTO {
+  serviceTypeId: string;
+  planId: string | null;
+  planTitle: string | null;
+  planSeriesTitle: string | null;
+  planDates: string | null;
+  items: PlanItemDTO[];
+  noteCategories: string[];
+  /** Scheduled service start time(s), ISO (from PCO plan_times type=service).
+   *  serviceTimes[0] anchors the projected per-item clock. */
+  serviceTimes: string[];
+  /** Org IANA time zone for rendering the clock in the plan's local time. */
+  timeZone: string | null;
+  /** True when this is the app's currently-selected plan, so the live pcoLive
+   *  feed applies to it. Actual "live" (badge/highlight) additionally requires
+   *  pcoLive.mode === "item" — this flag alone does NOT mean a service is running. */
+  isActivePlan: boolean;
 }
 
 /** A file attached to a PCO plan (e.g. a stage plot, chart, or rundown PDF). */

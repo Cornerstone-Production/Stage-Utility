@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2Icon } from "lucide-react";
 
 import { BrandLogo } from "../components/brand-logo";
@@ -33,6 +33,13 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+  // Rebuild only when the recorded history changes, not on every 1 Hz clock tick.
+  // Must stay above the early returns below (Rules of Hooks).
+  const maxByItem = useMemo(() => {
+    const m = new Map<string, number | null>();
+    for (const it of history?.items ?? []) m.set(it.itemId, it.maxSpl);
+    return m;
+  }, [history]);
 
   if (isLoading) {
     return (
@@ -56,8 +63,6 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
   const live = resolveSplValue(spl);
 
   const items = plan?.items ?? [];
-  const maxByItem = new Map<string, number | null>();
-  for (const it of history?.items ?? []) maxByItem.set(it.itemId, it.maxSpl);
 
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
