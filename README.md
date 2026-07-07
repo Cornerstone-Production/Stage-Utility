@@ -179,23 +179,33 @@ in the repo. Open `…/settings-window.html` and work through the sidebar:
      section headers, length, clock + live countdown; current item highlighted), with an
      optional per-display PCO Prev/Next control.
    - **SPL Rundown** — a compact item-plus-max-SPL list for the live service.
-8. **Displays** — your physical screens. Each has its own URL and is **routed to a
+8. **ScriptView** — a per-service-type PCO rundown dashboard (an in-app replacement
+   for ScriptViewer) at `/scriptview`. Pick a service type → open a shareable,
+   deep-linkable rundown (`/scriptview/weekend/audio`) to pin in its own tab. Define
+   **global layouts** (Audio/Video/Lighting/…) as column presets shared across every
+   service type, each with per-element toggles (clock, time, song key/BPM/arrangement,
+   item notes, total time) and department row coloring; the projected clock follows the
+   plan's timezone, and the live item highlights when the service is running.
+9. **Displays** — your physical screens. Each has its own URL and is **routed to a
    view** (one view can drive many screens). Rename, drag to reorder, or open in its
    own window.
-9. **Connect** — toggle the on-screen QR code for the phone remote.
+10. **Connect** — toggle the on-screen QR code for the phone remote.
 
 ## URLs & ports
 
 | Surface | Dev (`npm run dev`) | Production (`npm start`) |
 |---------|----------------------|--------------------------|
-| Display picker | `http://localhost:3000/` | `http://<host>:8788/` |
-| A specific display | `http://localhost:3000/display-1` | `http://<host>:8788/display-1` |
-| Settings UI | `http://localhost:3000/settings` | `http://<host>:8788/settings` |
-| Phone remote | — (use `:8788`) | `http://<host>:8788/` when no built UI is present¹ |
-| API / SSE | proxied to `:8788` | `http://<host>:8788/api/*` |
+| Display picker | `http://localhost:3000/` | `http://<host>/` (or `:8788`) |
+| A specific display | `http://localhost:3000/display-1` | `http://<host>/display-1` |
+| ScriptView | — | `http://<host>/scriptview` (per-service-type PCO rundowns) |
+| Settings UI | `http://localhost:3000/settings` | `http://<host>/settings` |
+| Phone remote | — (use `:8788`) | `http://<host>/` when no built UI is present¹ |
+| API / SSE | proxied to `:8788` | `http://<host>/api/*` |
 
-The server binds `0.0.0.0:8788` (LAN-accessible). Override the port with the
-`STAGE_UTILITY_PORT` environment variable.
+The server binds `0.0.0.0:8788` (LAN-accessible) and, where the process is
+permitted, **also `:80`** so URLs need no port — 8788 always stays up. Override
+the main port with `STAGE_UTILITY_PORT`; change/disable the port-free listener
+with `STAGE_UTILITY_FRIENDLY_PORT` (`0` = off).
 Clean URLs (`/settings`, `/display-N`) are served directly in production and mapped
 by a small Vite middleware in dev. The display picker at `/` lists every configured
 display; clicking the brand/logo in any display returns there.
