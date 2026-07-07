@@ -109,7 +109,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
           <ArrowLeftIcon className="size-4 text-white/60" />
         </a>
         <div className="flex items-center gap-2 min-w-0">
-          {state?.appLogo && <BrandLogo logo={state.appLogo} monochrome={state.appLogoMonochrome} className="size-6 rounded" />}
+          {state?.appLogo && <BrandLogo logo={state.appLogo} monochrome className="size-6 rounded text-white/90" />}
           <div className="flex flex-col min-w-0 leading-tight">
             <span className="text-caption1 font-title text-white/85 truncate">{rundown?.planSeriesTitle ?? rundown?.planTitle ?? "ScriptView"}</span>
             <span className="text-caption2 text-white/45 truncate">

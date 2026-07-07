@@ -82,7 +82,7 @@ export function ScriptViewIndex() {
       >
         <div className="shrink-0 ml-3 flex items-center gap-2 text-white/70 relative z-10">
           {state?.appLogo && (
-            <BrandLogo logo={state.appLogo} monochrome={state.appLogoMonochrome} className="size-5 rounded select-none" />
+            <BrandLogo logo={state.appLogo} monochrome className="size-5 rounded select-none text-white/80" />
           )}
           <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
             {state?.appName ?? "ScriptView"}
