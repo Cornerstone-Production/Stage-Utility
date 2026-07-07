@@ -298,6 +298,7 @@ function sendStatic(
 export class RemoteServer {
   private server: http.Server | null = null;
   private friendlyServer: http.Server | null = null;
+  private friendlyRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private sockets = new Set<net.Socket>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -486,25 +487,47 @@ export class RemoteServer {
       this.server!.on("error", reject);
     });
 
-    // Best-effort friendly port (e.g. 80) so the LAN URL needs no port. Never fatal:
-    // a bind failure (no privilege / port in use) just logs and leaves PORT serving.
+    // Friendly port (e.g. 80) so the LAN URL needs no port. Bound in addition to
+    // PORT and self-healing: if it can't bind right now (e.g. the previous process
+    // hasn't released it yet across a restart), keep serving PORT and RETRY in the
+    // background until it succeeds — never fatal, and it reclaims 80 within seconds
+    // of it becoming free. With the privilege granted (CAP_NET_BIND_SERVICE on prod)
+    // the only failure mode is that transient restart race, which the retry closes.
     if (FRIENDLY_PORT && FRIENDLY_PORT !== PORT) {
-      const friendly = http.createServer(handler);
-      friendly.on("connection", trackConn);
-      friendly.on("error", (err: NodeJS.ErrnoException) => {
-        const why = err.code === "EACCES"
-          ? `needs privilege to bind port ${FRIENDLY_PORT} (Linux: re-run 'sudo ./scripts/install.sh' to grant CAP_NET_BIND_SERVICE)`
-          : err.code === "EADDRINUSE"
-            ? `port ${FRIENDLY_PORT} is already in use by another process`
-            : err.message;
-        console.warn(`[remote-server] port-free URL disabled — ${why}. Still serving on :${PORT}.`);
-        this.friendlyServer = null;
-      });
-      friendly.listen(FRIENDLY_PORT, "0.0.0.0", () => {
-        this.friendlyServer = friendly;
-        console.log(`[remote-server] also listening on 0.0.0.0:${FRIENDLY_PORT} (port-free URL)`);
-      });
+      this.bindFriendlyPort(handler, trackConn);
     }
+  }
+
+  private bindFriendlyPort(
+    handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
+    trackConn: (socket: net.Socket) => void,
+    attempt = 0,
+  ): void {
+    const friendly = http.createServer(handler);
+    friendly.on("connection", trackConn);
+    friendly.once("error", (err: NodeJS.ErrnoException) => {
+      friendly.close();
+      // Log the actionable reason once (first failure); stay quiet on subsequent retries.
+      if (attempt === 0) {
+        const why = err.code === "EACCES"
+          ? `no privilege to bind port ${FRIENDLY_PORT} (Linux: re-run 'sudo ./scripts/install.sh' to grant CAP_NET_BIND_SERVICE)`
+          : err.code === "EADDRINUSE"
+            ? `port ${FRIENDLY_PORT} still in use (likely a restart releasing it)`
+            : err.message;
+        console.warn(`[remote-server] port ${FRIENDLY_PORT} not bound yet — ${why}. Serving :${PORT} and retrying in the background.`);
+      }
+      // Fast retries first (covers the restart-release race), then back off — but
+      // never give up, so 80 is reclaimed the moment it frees up.
+      const next = attempt + 1;
+      const delay = next <= 5 ? 1000 : next <= 15 ? 5000 : 30000;
+      this.friendlyRetryTimer = setTimeout(() => this.bindFriendlyPort(handler, trackConn, next), delay);
+      this.friendlyRetryTimer.unref?.();
+    });
+    friendly.listen(FRIENDLY_PORT, "0.0.0.0", () => {
+      this.friendlyServer = friendly;
+      if (this.friendlyRetryTimer) { clearTimeout(this.friendlyRetryTimer); this.friendlyRetryTimer = null; }
+      console.log(`[remote-server] also listening on 0.0.0.0:${FRIENDLY_PORT} (port-free URL)${attempt > 0 ? ` — bound after ${attempt} retr${attempt === 1 ? "y" : "ies"}` : ""}`);
+    });
   }
 
   async stop(): Promise<void> {
@@ -519,6 +542,10 @@ export class RemoteServer {
     }
     this.sockets.clear();
 
+    if (this.friendlyRetryTimer) {
+      clearTimeout(this.friendlyRetryTimer);
+      this.friendlyRetryTimer = null;
+    }
     if (this.friendlyServer) {
       await new Promise<void>((resolve) => this.friendlyServer!.close(() => resolve()));
       this.friendlyServer = null;
