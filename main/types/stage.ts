@@ -863,6 +863,12 @@ export interface ScriptViewLayout {
   accentDepartment?: string | null;
 }
 
+/** ScriptView-wide config: which PCO service types appear on the landing page
+ *  (ordered). Empty = fall back to types that have layouts. */
+export interface ScriptViewConfig {
+  serviceTypeIds: string[];
+}
+
 /** The resolved rundown for a ScriptView page: the chosen plan's items + columns,
  *  plus whether this service type is the one currently running live. */
 export interface ScriptViewRundownDTO {
@@ -876,6 +882,8 @@ export interface ScriptViewRundownDTO {
   /** Scheduled service start time(s), ISO (from PCO plan_times type=service).
    *  serviceTimes[0] anchors the projected per-item clock. */
   serviceTimes: string[];
+  /** Org IANA time zone for rendering the clock in the plan's local time. */
+  timeZone: string | null;
   /** True when this service type is the active/live one (enables live highlight). */
   isLive: boolean;
 }

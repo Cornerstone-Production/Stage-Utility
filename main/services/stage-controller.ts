@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -14,6 +14,7 @@ import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
 import { layoutGroupsStore } from "./layout-groups-store.js";
 import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
+import { scriptViewConfigStore } from "./scriptview-config-store.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { updater } from "./updater.js";
 
@@ -503,6 +504,16 @@ export class StageController {
     return layouts;
   }
 
+  async getScriptViewConfig(): Promise<ScriptViewConfig> {
+    return scriptViewConfigStore.load();
+  }
+
+  async setScriptViewConfig(serviceTypeIds: string[]): Promise<ScriptViewConfig> {
+    const config: ScriptViewConfig = { serviceTypeIds };
+    await scriptViewConfigStore.save(config);
+    return config;
+  }
+
   /** All note-category names PCO knows for a service type (drives the column
    *  picker). Unlike the rundown's `noteCategories`, this is NOT pruned to
    *  categories currently in use, so authors can pre-add a column. */
@@ -517,7 +528,7 @@ export class StageController {
   async getScriptViewRundown(serviceTypeId: string, planId?: string | null): Promise<ScriptViewRundownDTO> {
     const empty: ScriptViewRundownDTO = {
       serviceTypeId, planId: null, planTitle: null, planSeriesTitle: null,
-      planDates: null, items: [], noteCategories: [], serviceTimes: [], isLive: false,
+      planDates: null, items: [], noteCategories: [], serviceTimes: [], timeZone: null, isLive: false,
     };
     if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return empty;
 
@@ -529,10 +540,11 @@ export class StageController {
     else plan = plans[0] ?? null;
     if (!plan) return empty;
 
-    const [items, categories, serviceTimes] = await Promise.all([
+    const [items, categories, serviceTimes, timeZone] = await Promise.all([
       pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
       pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId),
       pcoService.listPlanServiceTimes(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
+      pcoService.listOrgTimeZone(this.pcoAppId, this.pcoSecret),
     ]);
     const used = new Set<string>();
     for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
@@ -548,6 +560,7 @@ export class StageController {
       items,
       noteCategories: ordered,
       serviceTimes,
+      timeZone,
       isLive: isActiveType && plan.id === this.state.planId,
     };
   }

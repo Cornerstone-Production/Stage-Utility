@@ -17,6 +17,7 @@ export function ScriptViewIndex() {
   const { state, isLoading: stateLoading } = useStageState();
   const [types, setTypes] = useState<ServiceTypeDTO[] | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
+  const [shownIds, setShownIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sel, setSel] = useState<Record<string, string>>({});
 
@@ -26,13 +27,14 @@ export function ScriptViewIndex() {
     Promise.all([
       invoke<ServiceTypeDTO[]>("stage:listServiceTypes"),
       invoke<ScriptViewLayout[]>("scriptview:listLayouts"),
+      invoke<ScriptViewConfig>("scriptview:getConfig"),
     ])
-      .then(([t, l]) => { setTypes(t); setLayouts(l); })
+      .then(([t, l, c]) => { setTypes(t); setLayouts(l); setShownIds(c.serviceTypeIds ?? []); })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  // Which types to show: those with a saved layout. Before any exist, show all
-  // types so the page is usable immediately (each gets the All-columns default).
+  // Which types to show: the curated set (in configured order) when set; otherwise
+  // fall back to types with a saved layout, or all types before any exist.
   const rows = useMemo(() => {
     if (!types) return [];
     const byType = new Map<string, ScriptViewLayout[]>();
@@ -41,14 +43,17 @@ export function ScriptViewIndex() {
       arr.push(l);
       byType.set(l.serviceTypeId, arr);
     }
+    const withLayouts = (t: ServiceTypeDTO) => ({ type: t, layouts: (byType.get(t.id) ?? []).sort((a, b) => a.order - b.order) });
+
+    if (shownIds.length > 0) {
+      return shownIds
+        .map((id) => types.find((t) => t.id === id))
+        .filter((t): t is ServiceTypeDTO => !!t)
+        .map(withLayouts);
+    }
     const anyConfigured = layouts.length > 0;
-    return types
-      .filter((t) => !anyConfigured || byType.has(t.id))
-      .map((t) => ({
-        type: t,
-        layouts: (byType.get(t.id) ?? []).sort((a, b) => a.order - b.order),
-      }));
-  }, [types, layouts]);
+    return types.filter((t) => !anyConfigured || byType.has(t.id)).map(withLayouts);
+  }, [types, layouts, shownIds]);
 
   const optionsFor = (ls: ScriptViewLayout[]) => [
     ...ls.map((l) => ({ value: l.id, label: l.name })),

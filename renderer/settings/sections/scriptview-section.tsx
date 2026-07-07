@@ -22,20 +22,33 @@ export function ScriptViewSection() {
   const [noteCats, setNoteCats] = useState<string[]>([]);
   const [rundown, setRundown] = useState<ScriptViewRundownDTO | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [shownIds, setShownIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
       invoke<ServiceTypeDTO[]>("stage:listServiceTypes"),
       invoke<ScriptViewLayout[]>("scriptview:listLayouts"),
+      invoke<ScriptViewConfig>("scriptview:getConfig"),
     ])
-      .then(([t, l]) => {
+      .then(([t, l, c]) => {
         setTypes(t);
         setLayouts(l);
+        setShownIds(c.serviceTypeIds ?? []);
         setTypeId((cur) => cur ?? l[0]?.serviceTypeId ?? t[0]?.id ?? null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
+
+  async function toggleShown(id: string, on: boolean) {
+    // Preserve service-type order (PCO listing order) when adding.
+    const next = on
+      ? types.filter((t) => shownIds.includes(t.id) || t.id === id).map((t) => t.id)
+      : shownIds.filter((x) => x !== id);
+    setShownIds(next);
+    try { await invoke("scriptview:setConfig", { serviceTypeIds: next }); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  }
 
   useEffect(() => {
     if (!typeId) return;
@@ -117,6 +130,23 @@ export function ScriptViewSection() {
       </div>
 
       {error && <p className="text-caption1 text-red-11 mb-3">{error}</p>}
+
+      {/* Which service types appear on the landing page (curated per church). */}
+      <div className="rounded-xl border border-gray-a5 bg-gray-a2 p-4 mb-5">
+        <div className="text-caption2 uppercase tracking-wider text-gray-9 mb-2">Shown on the landing page</div>
+        {types.length === 0 ? (
+          <p className="text-caption1 text-gray-9">Loading service types…</p>
+        ) : (
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            {types.map((t) => (
+              <label key={t.id} className="flex items-center gap-2 text-caption1 text-gray-11">
+                <Switch checked={shownIds.includes(t.id)} onCheckedChange={(v: boolean) => toggleShown(t.id, v)} /> {t.name}
+              </label>
+            ))}
+          </div>
+        )}
+        <p className="text-caption2 text-gray-9 mt-2">If none are selected, the landing falls back to service types that have a layout.</p>
+      </div>
 
       <div className="flex items-center gap-2 mb-4">
         <span className="text-caption1 text-gray-11">Service type</span>
@@ -215,7 +245,7 @@ export function ScriptViewSection() {
             ) : (
               <RundownTable
                 items={rundown.items}
-                columns={buildScriptViewColumns(resolveScriptViewSpec(previewLayout, noteCats), computeClocks(rundown.items, rundown.serviceTimes?.[0]))}
+                columns={buildScriptViewColumns(resolveScriptViewSpec(previewLayout, noteCats), computeClocks(rundown.items, rundown.serviceTimes?.[0]), rundown.timeZone)}
                 accentDepartment={previewLayout.accentDepartment ?? null}
                 autoScroll={false}
                 footer={previewLayout.showTotalTime !== false ? <span>{fmtTotal(totalLengthSec(rundown.items))} <span className="text-white/40">· total time</span></span> : undefined}

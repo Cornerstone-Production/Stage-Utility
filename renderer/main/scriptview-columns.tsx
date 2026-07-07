@@ -68,8 +68,12 @@ export function fmtTotal(sec: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-export function fmtClock(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
+/** Format an epoch-ms clock in the plan's timezone (falls back to the viewer's). */
+export function fmtClock(ms: number, timeZone?: string | null): string {
+  return new Date(ms).toLocaleTimeString(undefined, {
+    hour: "numeric", minute: "2-digit", second: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
+  });
 }
 
 export function totalLengthSec(items: PlanItemDTO[]): number {
@@ -77,14 +81,15 @@ export function totalLengthSec(items: PlanItemDTO[]): number {
 }
 
 /** Build the RundownTable columns for a spec. `clocks` (from computeClocks) drives
- *  the Clock column; omit/null to hide it even when showClock is on. */
-export function buildScriptViewColumns(spec: ScriptViewSpec, clocks: Map<string, number> | null): RundownColumn[] {
+ *  the Clock column; omit/null to hide it even when showClock is on. `timeZone`
+ *  renders the clock in the plan's local time. */
+export function buildScriptViewColumns(spec: ScriptViewSpec, clocks: Map<string, number> | null, timeZone?: string | null): RundownColumn[] {
   const cols: RundownColumn[] = [];
 
   if (spec.showClock && clocks) {
     cols.push({
       key: "clock", header: "Clock", width: "6.5rem", cellClassName: "text-white/55 tabular-nums",
-      render: (it) => { const ms = clocks.get(it.id); return ms != null ? fmtClock(ms) : ""; },
+      render: (it) => { const ms = clocks.get(it.id); return ms != null ? fmtClock(ms, timeZone) : ""; },
     });
   }
 

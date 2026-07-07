@@ -1,7 +1,7 @@
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useStageState } from "./use-stage-state";
-import { Loader2Icon, MonitorIcon, ChevronRightIcon, DropletIcon } from "lucide-react";
+import { Loader2Icon, MonitorIcon, ChevronRightIcon, DropletIcon, ListChecksIcon } from "lucide-react";
 
 // Landing page at "/". Lists the configured displays so a freshly-pointed
 // monitor can pick which display it should show. Styled to match the kiosk
@@ -114,6 +114,14 @@ export function DisplayPickerView() {
 
           {/* Operator tools — not a display, but reachable here for convenience. */}
           <div className="my-1 h-px bg-white/10" />
+          <a
+            href="/scriptview"
+            className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 transition-colors hover:bg-white/10"
+          >
+            <ListChecksIcon className="size-5 text-white/55 shrink-0" />
+            <span className="text-body font-medium text-white/90 truncate">ScriptView</span>
+            <ChevronRightIcon className="size-4 text-white/35 ml-auto shrink-0" />
+          </a>
           <a
             href="/baptism"
             className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 transition-colors hover:bg-white/10"

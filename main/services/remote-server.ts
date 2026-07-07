@@ -1040,6 +1040,21 @@ export class RemoteServer {
       return;
     }
 
+    if (method === "GET" && pathname === "/api/scriptview/config") {
+      json(res, await stageController.getScriptViewConfig());
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/scriptview/config") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.serviceTypeIds)) {
+        error(res, "body.serviceTypeIds (array) required");
+        return;
+      }
+      json(res, await stageController.setScriptViewConfig(body.serviceTypeIds.map(String)));
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/scriptview/note-categories") {
       const serviceTypeId = _url.searchParams.get("serviceTypeId");
       if (!serviceTypeId) {

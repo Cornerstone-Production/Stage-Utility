@@ -9,9 +9,9 @@ import { useDashboardState } from "./use-dashboard-state";
 import { invoke } from "../lib/api";
 import { ALL_COLUMNS_LAYOUT_ID } from "./scriptview-index-view";
 
-function fmtSvcTime(iso: string): string {
+function fmtSvcTime(iso: string, timeZone?: string | null): string {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", ...(timeZone ? { timeZone } : {}) });
 }
 
 // A standalone ScriptView rundown page: /scriptview/{serviceTypeId}/{layoutId}.
@@ -65,7 +65,7 @@ export function ScriptViewPlan({ serviceTypeId, layoutId }: { serviceTypeId: str
   const items = useMemo(() => rundown?.items ?? [], [rundown?.items]);
   const spec = useMemo(() => resolveScriptViewSpec(layout, rundown?.noteCategories ?? []), [layout, rundown?.noteCategories]);
   const clocks = useMemo(() => computeClocks(items, rundown?.serviceTimes?.[0]), [items, rundown?.serviceTimes]);
-  const columns = useMemo(() => buildScriptViewColumns(spec, clocks), [spec, clocks]);
+  const columns = useMemo(() => buildScriptViewColumns(spec, clocks, rundown?.timeZone), [spec, clocks, rundown?.timeZone]);
 
   const timer = rundown?.isLive ? computePcoTimer(pcoLive, now, skewMs) : null;
   const over = !!timer?.over;
@@ -77,7 +77,7 @@ export function ScriptViewPlan({ serviceTypeId, layoutId }: { serviceTypeId: str
   const ss = String(clock.getSeconds()).padStart(2, "0");
   const ampm = clock.getHours() < 12 ? "AM" : "PM";
 
-  const svcTimes = (rundown?.serviceTimes ?? []).map(fmtSvcTime).filter(Boolean).join("  ·  ");
+  const svcTimes = (rundown?.serviceTimes ?? []).map((t) => fmtSvcTime(t, rundown?.timeZone)).filter(Boolean).join("  ·  ");
 
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">

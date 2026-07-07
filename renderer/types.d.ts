@@ -289,6 +289,10 @@ interface ScriptViewLayout {
   accentDepartment?: string | null;
 }
 
+interface ScriptViewConfig {
+  serviceTypeIds: string[];
+}
+
 interface ScriptViewRundownDTO {
   serviceTypeId: string;
   planId: string | null;
@@ -298,6 +302,7 @@ interface ScriptViewRundownDTO {
   items: PlanItemDTO[];
   noteCategories: string[];
   serviceTimes: string[];
+  timeZone: string | null;
   isLive: boolean;
 }
 

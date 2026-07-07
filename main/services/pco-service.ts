@@ -563,6 +563,20 @@ class PcoService {
     return times;
   }
 
+  /** The organization's IANA time zone (e.g. "America/Chicago"), used to render
+   *  projected clock times in the plan's local time rather than the viewer's. */
+  async listOrgTimeZone(appId: string, secret: string): Promise<string | null> {
+    const cacheKey = `org-tz:${appId}`;
+    const cached = this.cacheGet<string>(cacheKey);
+    if (cached) return cached;
+
+    const json = await this.request(PCO_BASE, appId, secret).catch(() => null);
+    const data = json && !Array.isArray(json.data) ? json.data : null;
+    const tz = data && typeof data.attributes.time_zone === "string" ? data.attributes.time_zone : null;
+    if (tz) this.cacheSet(cacheKey, tz, TTL_LONG_MS);
+    return tz;
+  }
+
   async listTeamMembers(
     appId: string,
     secret: string,

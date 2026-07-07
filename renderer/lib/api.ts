@@ -88,6 +88,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "scriptview:saveLayouts":
       return post<T>("/api/scriptview/layouts", { layouts: p.layouts });
 
+    case "scriptview:getConfig":
+      return apiFetch<T>("/api/scriptview/config");
+
+    case "scriptview:setConfig":
+      return post<T>("/api/scriptview/config", { serviceTypeIds: p.serviceTypeIds });
+
     case "scriptview:noteCategories": {
       const id = p.serviceTypeId as string;
       return apiFetch<T>(`/api/scriptview/note-categories?serviceTypeId=${encodeURIComponent(id)}`);
