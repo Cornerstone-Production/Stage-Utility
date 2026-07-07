@@ -340,23 +340,32 @@ Then work through the sidebar:
    (from a PCO Personal Access Token at
    [api.planningcenteronline.com](https://api.planningcenteronline.com) →
    Developers → Personal Access Tokens).
-2. **Integrations → Wireless Gear** *(optional)* — pick your Shure model and
-   enter its IP, TCP port (usually `2202`), and channel count.
-3. **Integrations → ProPresenter / ProdCom / Smaart** *(optional)* — host + API
-   port (ProPresenter `1025`, ProdCom `24480`, Smaart `26000` for live SPL).
+2. **Integrations → Wireless Gear** *(optional)* — pick your model (Shure ULX-D /
+   Axient / PSM, or Sennheiser EW-DX / EW-G4 / Spectera) and enter its IP, port
+   (Shure TCP usually `2202`), and channel count. Offline/manual devices are OK too.
+3. **Integrations → ProPresenter / ProdCom / Smaart / OBS / OSC / SenSource / Ross**
+   *(all optional)* — host + port: ProPresenter `1025` (add multiple instances if
+   needed), ProdCom `24480`, Smaart `26000` (live SPL), OBS WebSocket `4455` +
+   password, SenSource Vea client ID + secret (people counting), Ross MultiViewer
+   TSL port (pushes people counts). OSC targets are set per **OSC button** in the
+   custom-layout editor.
 4. **Plan**, **Views**, **Displays** — pick a plan (or Auto) and toggle which
    **Active Service Types** auto-selection considers, build views (slots, dashboard,
    stage, captions, script, SPL rundown, or a custom visual layout), and route each
    display to a view.
-5. **Advanced → Public address (DNS)** *(optional)* — if you reach the server via
-   a DNS name (e.g. behind a reverse proxy), set it here so the connect QR code
-   and display links use it instead of the LAN IP.
+5. **ScriptView** *(optional)* — choose which service types appear on the `/scriptview`
+   landing page and define global column layouts (Audio/Video/Lighting/…). **History**
+   (SPL + attendance + item timing) and **Baptisms** appear once there's data.
+6. **Advanced** — set the **Public address (DNS)** if you reach the server via a DNS
+   name (used for the connect QR + display links); switch the **update track** (beta /
+   main); and **save/download a full config snapshot** to back up or move the setup
+   (secrets excluded).
 
-The kiosk display is at `http://<server-ip>:8788/`. On a phone on the same
+The kiosk display is at `http://<server-ip>/` (or `:8788`). On a phone on the same
 network, scan the QR code shown on the display (enable it under **Connect**).
 
 To point a kiosk/Pi browser straight at one screen, use
-`http://<server-ip>:8788/display-1` (etc.).
+`http://<server-ip>/display-1` (etc.).
 
 ## Updating from within the app
 
