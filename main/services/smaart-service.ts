@@ -144,7 +144,7 @@ class SmaartService {
       this.emit(this.last, true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[smaart] connect error:", msg);
+      if (this.reconnectAttempt === 0) console.warn(`[smaart] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
       adapter.close();
       if (this.adapter === adapter) this.adapter = null;
@@ -186,7 +186,7 @@ class SmaartService {
   /** A stream dropped — if we're still meant to be running, reconnect the lot. */
   private onStreamClose(adapter: ModernSmaartAdapter): void {
     if (!this.running || this.adapter !== adapter) return;
-    console.warn("[smaart] stream closed — reconnecting");
+    if (this.reconnectAttempt === 0) console.warn("[smaart] stream closed — reconnecting");
     this.teardownStreams();
     adapter.close();
     if (this.adapter === adapter) this.adapter = null;

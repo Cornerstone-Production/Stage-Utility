@@ -250,7 +250,9 @@ export abstract class ShureBaseProvider implements DeviceProvider {
     }
 
     this.setConnectionState("connecting");
-    console.log(`[shure:${this.id}] connecting to ${this.cfg.host}:${this.cfg.port}`);
+    // Log the connect attempt only at the start of an outage (attempts === 0) so a
+    // device off all week doesn't spam the log every retry cycle.
+    if (this.reconnectAttempts === 0) console.log(`[shure:${this.id}] connecting to ${this.cfg.host}:${this.cfg.port}`);
 
     const socket = new net.Socket();
     this.socket = socket;
@@ -274,12 +276,12 @@ export abstract class ShureBaseProvider implements DeviceProvider {
     });
 
     socket.on("timeout", () => {
-      console.warn(`[shure:${this.id}] socket timeout`);
+      if (this.reconnectAttempts === 0) console.warn(`[shure:${this.id}] socket timeout`);
       socket.destroy();
     });
 
     socket.on("error", (err) => {
-      console.error(`[shure:${this.id}] socket error:`, err.message);
+      if (this.reconnectAttempts === 0) console.warn(`[shure:${this.id}] socket error: ${err.message}`);
       this.setConnectionState("error");
       // Tear down so 'close' fires and we reconnect with back-off, rather than
       // leaving a half-open socket lingering.
@@ -287,7 +289,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
     });
 
     socket.on("close", () => {
-      console.log(`[shure:${this.id}] socket closed`);
+      if (this.reconnectAttempts === 0) console.log(`[shure:${this.id}] socket closed`);
       this.stopHeartbeat();
       this.markAllChannelsOffline();
       if (this.connectionState !== "disconnected") {
@@ -378,7 +380,6 @@ export abstract class ShureBaseProvider implements DeviceProvider {
     if (this.reconnectTimer !== null) return;
     const delay = serviceWindow.capDelayMs(RECONNECT_BASE_MS * 2 ** Math.min(this.reconnectAttempts, 20));
     this.reconnectAttempts++;
-    console.log(`[shure:${this.id}] will reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.enabled) {
