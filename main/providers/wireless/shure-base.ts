@@ -1,4 +1,4 @@
-// shure-base.ts — Abstract base class for Shure ASCII-over-TCP wireless providers.
+// shure-base.ts â Abstract base class for Shure ASCII-over-TCP wireless providers.
 // Protocol: messages are framed as `< PAYLOAD >` over a persistent TCP connection.
 // Framing: accumulate in a string buffer; split on `>`; for each segment strip
 // leading `<` / whitespace and trim; tokenise by spaces. Ignore partial/empty.
@@ -6,6 +6,7 @@
 import * as net from "net";
 import type { DeviceChannel, DeviceProvider, DeviceStatus } from "../../types/devices.js";
 import type { ConfigField, ConnectionState } from "../../types/integrations.js";
+import { serviceWindow } from "../../services/service-window.js";
 
 // Per-channel mutable runtime state.
 export interface ChannelState {
@@ -33,13 +34,12 @@ export interface ShureConfig {
   meterRateMs: number;
 }
 
-// Reconnect back-off: start at 3s, double on each failed attempt, cap at 30s, so
-// an unreachable device doesn't hammer the network / churn the event loop.
+// Reconnect back-off: start at 3s and double; the service-window scheduler applies the real ceiling
+// (≤2 min in/near a service, stretched toward the idle ceiling otherwise).
 const RECONNECT_BASE_MS = 3_000;
-const RECONNECT_MAX_MS = 120_000;
-// Connect-phase inactivity timeout (ms) — fail fast on a wrong/unreachable IP.
+// Connect-phase inactivity timeout (ms) â fail fast on a wrong/unreachable IP.
 const CONNECT_TIMEOUT_MS = 10_000;
-// Heartbeat interval in ms. 60s (was 30s) — TCP keep-alive is already enabled at
+// Heartbeat interval in ms. 60s (was 30s) â TCP keep-alive is already enabled at
 // the socket level (setKeepAlive), so this app-level probe only needs to be a
 // slow backstop; halving it trims idle command chatter to each receiver.
 const HEARTBEAT_INTERVAL_MS = 60_000;
@@ -65,7 +65,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
   private enabled = false;
   private cfg: ShureConfig = { host: "", port: 2202, channels: 1, meterRateMs: 1000 };
 
-  /** Metering interval (ms) for this connection — set from config on connect. */
+  /** Metering interval (ms) for this connection â set from config on connect. */
   protected get meterRateMs(): number {
     return this.cfg.meterRateMs;
   }
@@ -73,7 +73,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
   // Per-channel state, keyed by channel number (1-based).
   protected channelStates = new Map<number, ChannelState>();
 
-  // ── DeviceProvider interface ──────────────────────────────────────────────
+  // ââ DeviceProvider interface ââââââââââââââââââââââââââââââââââââââââââââââ
 
   onStatus(cb: (s: DeviceStatus) => void): void {
     this.statusCallback = cb;
@@ -115,7 +115,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
     return result;
   }
 
-  // ── Subclass hooks ────────────────────────────────────────────────────────
+  // ââ Subclass hooks ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
   /** Called once the socket is connected. Subclasses send init/metering commands here. */
   protected abstract onConnected(): void;
@@ -133,7 +133,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
    */
   protected abstract handleSample(channel: number, tokens: string[]): void;
 
-  // ── Protected helpers ─────────────────────────────────────────────────────
+  // ââ Protected helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
   /** Send a command over the TCP socket. cmd must NOT include the `< >` framing. */
   protected send(cmd: string): void {
@@ -219,7 +219,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
     }
   }
 
-  // ── Private networking ────────────────────────────────────────────────────
+  // ââ Private networking ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
   private parseCfg(raw: Record<string, unknown>): ShureConfig {
     const host = typeof raw.host === "string" ? raw.host.trim() : "";
@@ -334,7 +334,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
       // Format: SAMPLE {ch} ...
       const ch = parseInt(tokens[1] ?? "", 10);
       if (Number.isNaN(ch) || ch < 1) {
-        console.debug(`[shure:${this.id}] SAMPLE — unrecognised channel token: ${tokens[1]}`);
+        console.debug(`[shure:${this.id}] SAMPLE â unrecognised channel token: ${tokens[1]}`);
         return;
       }
       if (!this.ensureChannel(ch)) {
@@ -376,7 +376,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer !== null) return;
-    const delay = Math.min(RECONNECT_BASE_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_MS);
+    const delay = serviceWindow.capDelayMs(RECONNECT_BASE_MS * 2 ** Math.min(this.reconnectAttempts, 20));
     this.reconnectAttempts++;
     console.log(`[shure:${this.id}] will reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
     this.reconnectTimer = setTimeout(() => {
@@ -420,7 +420,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
   }
 }
 
-// ── Utility helpers (exported for subclasses) ─────────────────────────────
+// ââ Utility helpers (exported for subclasses) âââââââââââââââââââââââââââââ
 
 /** Parse an integer; returns NaN on failure. */
 export function safeInt(s: string | undefined): number {
@@ -436,14 +436,14 @@ export function clamp(n: number, min: number, max: number): number {
 
 /**
  * Normalise a dB value within [minDb, maxDb] to a 0..1 float.
- * Values below minDb → 0; values at or above maxDb → 1.
+ * Values below minDb â 0; values at or above maxDb â 1.
  */
 export function normalisedDb(db: number, minDb: number, maxDb: number): number {
   if (maxDb <= minDb) return 0;
   return clamp((db - minDb) / (maxDb - minDb), 0, 1);
 }
 
-/** Convert RF level in dBm to a 0–5 bar count. */
+/** Convert RF level in dBm to a 0â5 bar count. */
 export function rfBarsFromDbm(dbm: number): number {
   if (dbm >= -25) return 5;
   if (dbm >= -70) return 4;
@@ -453,7 +453,7 @@ export function rfBarsFromDbm(dbm: number): number {
   return 0;
 }
 
-/** Strip Shure name braces: `{Name}` → `Name`. */
+/** Strip Shure name braces: `{Name}` â `Name`. */
 export function stripBraces(s: string): string {
   return s.replace(/^\{/, "").replace(/\}$/, "").trim();
 }

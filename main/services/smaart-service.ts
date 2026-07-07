@@ -10,12 +10,12 @@
 
 import type { SplMetricsDTO } from "../types/stage.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
+import { serviceWindow } from "./service-window.js";
 import { ModernSmaartAdapter, type SmaartInput, type SplReading } from "./smaart-protocol.js";
 
 type SmaartConnState = "connected" | "error" | "disconnected";
 
 const RECONNECT_BASE_MS = 3000;
-const RECONNECT_MAX_MS = 120_000;
 /** Trailing throttle for broadcasts — 4 Hz is smooth for a numeric readout. */
 const BROADCAST_THROTTLE_MS = 250;
 /** Per-stream frame rate requested from Smaart (≤ 8). */
@@ -198,10 +198,7 @@ class SmaartService {
   private scheduleReconnect(): void {
     if (!this.running) return;
     this.clearReconnect();
-    const delay = Math.min(
-      RECONNECT_MAX_MS,
-      RECONNECT_BASE_MS * 2 ** this.reconnectAttempt,
-    );
+    const delay = serviceWindow.capDelayMs(RECONNECT_BASE_MS * 2 ** this.reconnectAttempt, channelHasSubscribers("spl:metrics"));
     this.reconnectAttempt++;
     this.reconnectTimer = setTimeout(() => void this.connect(), delay);
   }

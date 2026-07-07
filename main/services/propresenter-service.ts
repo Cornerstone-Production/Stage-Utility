@@ -15,13 +15,13 @@ import * as http from "http";
 
 import type { ProPresenterStatusDTO, ProSection, ProTimer, PropInstancesDTO, PropInstanceMeta, PropInstanceConn } from "../types/stage.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
+import { serviceWindow } from "./service-window.js";
 
 const POLL_INTERVAL_MS = 1000; // once/sec is plenty for slide/timer changes (was 500)
 // Reconnect back-off when the machine is unreachable (off for the week, etc.): start
-// at 5s and double up to a 2-min cap, so a dead host isn't re-polled every 5s forever.
-// Resets to the fast poll the instant it reconnects. (was a flat 5s retry)
+// at 5s and double, clamped by the service-window scheduler (≤2 min in/near a service,
+// stretched toward the idle ceiling otherwise). Resets to the fast poll on reconnect.
 const ERROR_BASE_MS = 5000;
-const ERROR_MAX_MS = 120_000;
 // When no client is watching this instance's channel, drop to a slow keepalive
 // instead of hammering 6 requests/sec — the badge/data stay fresh enough and refresh
 // immediately when someone connects (hydrated on connect + fast poll resumes).
@@ -347,10 +347,10 @@ class ProPresenterService {
       const msg = err instanceof Error ? err.message : String(err);
       // Log only the first failure of an outage, then stay quiet until it recovers —
       // a machine off all week shouldn't spam the log every retry.
-      if (this.errorAttempts === 0) console.warn(`[propresenter] ${host}:${port} unreachable (${msg}) — backing off, retrying up to ${ERROR_MAX_MS / 1000}s`);
+      if (this.errorAttempts === 0) console.warn(`[propresenter] ${host}:${port} unreachable (${msg}) — backing off, will keep retrying quietly`);
       if (this.last.connected) this.emit(OFFLINE);
       this.report("error", `Can't reach ${host}:${port} — ${msg}`);
-      const delay = Math.min(ERROR_MAX_MS, ERROR_BASE_MS * 2 ** this.errorAttempts);
+      const delay = serviceWindow.capDelayMs(ERROR_BASE_MS * 2 ** this.errorAttempts, channelHasSubscribers(this.channel));
       this.errorAttempts++;
       this.schedule(delay);
     }

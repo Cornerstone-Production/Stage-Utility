@@ -563,6 +563,33 @@ class PcoService {
     return times;
   }
 
+  /** All rehearsal + service times for a plan (ISO starts/ends). Drives the
+   *  time-aware reconnect scheduler (rehearsal = when gear comes on). */
+  async listPlanTimes(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<{ type: string; startsAt: string; endsAt: string | null }[]> {
+    const cacheKey = `plan-times-full:${appId}:${planId}`;
+    const cached = this.cacheGet<{ type: string; startsAt: string; endsAt: string | null }[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times?per_page=50`;
+    const json = await this.request(url, appId, secret).catch(() => null);
+    const items = json && Array.isArray(json.data) ? json.data : [];
+    const times = items
+      .filter((t) => (t.attributes.time_type === "service" || t.attributes.time_type === "rehearsal") && typeof t.attributes.starts_at === "string")
+      .map((t) => ({
+        type: t.attributes.time_type as string,
+        startsAt: t.attributes.starts_at as string,
+        endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
+      }));
+
+    this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    return times;
+  }
+
   /** The organization's IANA time zone (e.g. "America/Chicago"), used to render
    *  projected clock times in the plan's local time rather than the viewer's. */
   async listOrgTimeZone(appId: string, secret: string): Promise<string | null> {

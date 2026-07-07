@@ -518,6 +518,15 @@ export function SettingsView() {
     }
   }
 
+  async function handleSetReconnectSchedule(partial: { enabled?: boolean; leadMin?: number; tailMin?: number; dormantMin?: number }) {
+    try {
+      const next = await ipc<StageState>("settings:setReconnectSchedule", partial);
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to update reconnect settings: ${String(err)}`);
+    }
+  }
+
   async function handleSetAllowedServiceTypes(ids: string[]) {
     try {
       const next = await ipc<StageState>("stage:setAllowedServiceTypes", { ids });
@@ -947,6 +956,7 @@ export function SettingsView() {
     handleCheckUpdates,
     handleApplyUpdate,
     handleSetAutoUpdate,
+    handleSetReconnectSchedule,
     handleSetAllowedServiceTypes,
     handleSetBranding,
     updateSlot,

@@ -54,6 +54,8 @@ export interface SettingsData {
   captionChannelColors: Record<string, string>;
   /** Scheduled in-app auto-update window. */
   autoUpdate: { enabled: boolean; dayOfWeek: number | null; hour: number };
+  /** Time-aware integration reconnect tunables (leadMin/tailMin/dormantMin). */
+  reconnectSchedule?: { enabled: boolean; leadMin: number; tailMin: number; dormantMin: number };
   /** Local UDP port the OSC integration listens on for device feedback. */
   oscFeedbackPort: number;
   /** Smaart metric keys to surface in the SPL History tab (empty = auto default). */

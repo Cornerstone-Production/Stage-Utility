@@ -1848,6 +1848,16 @@ export class RemoteServer {
       json(res, state);
       return;
     }
+    if (method === "POST" && pathname === "/api/reconnect-schedule") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const partial: Record<string, unknown> = {};
+      if (typeof body.enabled === "boolean") partial.enabled = body.enabled;
+      for (const k of ["leadMin", "tailMin", "dormantMin"]) {
+        if (typeof body[k] === "number") partial[k] = body[k];
+      }
+      json(res, await stageController.setReconnectSchedule(partial));
+      return;
+    }
 
     // ── Config snapshot (backup / restore) ──────────────────────────────────
     // Download the full config (secrets excluded) as a .json file.

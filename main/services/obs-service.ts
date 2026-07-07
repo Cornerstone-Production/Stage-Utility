@@ -9,13 +9,13 @@
 // refreshes the record timecode.
 
 import type { ObsStatusDTO } from "../types/stage.js";
-import { broadcast } from "./broadcaster.js";
+import { broadcast, channelHasSubscribers } from "./broadcaster.js";
+import { serviceWindow } from "./service-window.js";
 import { ObsWebSocketAdapter, type ObsEvent } from "./obs-protocol.js";
 
 type ObsConnState = "connected" | "error" | "disconnected";
 
 const RECONNECT_BASE_MS = 3000;
-const RECONNECT_MAX_MS = 120_000;
 const TIMECODE_POLL_MS = 1000;
 
 const OFFLINE: ObsStatusDTO = {
@@ -238,7 +238,7 @@ class ObsService {
   private scheduleReconnect(): void {
     if (!this.running) return;
     this.clearReconnect();
-    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** this.reconnectAttempt);
+    const delay = serviceWindow.capDelayMs(RECONNECT_BASE_MS * 2 ** this.reconnectAttempt, channelHasSubscribers("obs:status"));
     this.reconnectAttempt++;
     this.reconnectTimer = setTimeout(() => void this.connect(), delay);
   }

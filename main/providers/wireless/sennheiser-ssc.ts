@@ -19,13 +19,14 @@ import * as dgram from "node:dgram";
 
 import type { DeviceChannel, DeviceProvider, DeviceStatus } from "../../types/devices.js";
 import type { ConfigField, ConnectionState } from "../../types/integrations.js";
+import { serviceWindow } from "../../services/service-window.js";
 
 export const SSC_DEFAULT_PORT = 45;
 const PING_INTERVAL_MS = 5_000; // liveness probe (GET /device/name)
 const POLL_INTERVAL_MS = 3_000; // subclass query / subscription-renew cadence
 const RESPONSE_TIMEOUT_MS = 8_000; // no valid reply for this long → mark offline
 const RECONNECT_BASE_MS = 3_000;
-const RECONNECT_MAX_MS = 120_000;
+const RECONNECT_MAX_MS = 3_600_000; // internal ceiling; the service-window scheduler applies the real cap
 
 export const SSC_DEBUG = !!process.env.SENNHEISER_DEBUG;
 
@@ -275,7 +276,7 @@ export abstract class SennheiserSscBase implements DeviceProvider {
 
   private scheduleReconnect(): void {
     if (!this.running || this.reconnectTimer) return;
-    const delay = this.reconnectMs;
+    const delay = serviceWindow.capDelayMs(this.reconnectMs);
     this.reconnectMs = Math.min(this.reconnectMs * 2, RECONNECT_MAX_MS);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
