@@ -480,7 +480,7 @@ class PcoService {
 
     const out: PlanItemDTO[] = [];
     let url: string | null =
-      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/items?include=item_notes&per_page=100`;
+      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/items?include=item_notes,arrangement&per_page=100`;
 
     for (let page = 0; url && page < 6; page++) {
       const json: PcoResponse & { links?: { next?: string } } = await this.request(url, appId, secret);
@@ -488,11 +488,19 @@ class PcoService {
 
       // Index included ItemNote nodes by id (carry content + category_name).
       const notesById = new Map<string, { category: string; content: string }>();
+      // Index included Arrangement nodes by id (carry bpm + arrangement name).
+      const arrById = new Map<string, { bpm: number | null; name: string | null }>();
       for (const n of json.included ?? []) {
-        if (n.type !== "ItemNote") continue;
-        const category = typeof n.attributes.category_name === "string" ? n.attributes.category_name : "";
-        const content = typeof n.attributes.content === "string" ? n.attributes.content : "";
-        if (category && content) notesById.set(n.id, { category, content });
+        if (n.type === "ItemNote") {
+          const category = typeof n.attributes.category_name === "string" ? n.attributes.category_name : "";
+          const content = typeof n.attributes.content === "string" ? n.attributes.content : "";
+          if (category && content) notesById.set(n.id, { category, content });
+        } else if (n.type === "Arrangement") {
+          arrById.set(n.id, {
+            bpm: typeof n.attributes.bpm === "number" ? n.attributes.bpm : null,
+            name: typeof n.attributes.name === "string" && n.attributes.name ? n.attributes.name : null,
+          });
+        }
       }
 
       for (const item of items) {
@@ -505,6 +513,8 @@ class PcoService {
             if (note) notesByCategory[note.category] = note.content;
           }
         }
+        const arrRef = item.relationships?.arrangement?.data;
+        const arr = arrRef && !Array.isArray(arrRef) ? arrById.get(arrRef.id) : undefined;
         out.push({
           id: item.id,
           title: String(a.title ?? a.description ?? "Untitled"),
@@ -513,6 +523,9 @@ class PcoService {
           sequence: typeof a.sequence === "number" ? a.sequence : out.length,
           notesByCategory,
           description: typeof a.description === "string" && a.description ? a.description : null,
+          songKey: typeof a.key_name === "string" && a.key_name ? a.key_name : null,
+          bpm: arr?.bpm ?? null,
+          arrangementName: arr?.name ?? null,
         });
       }
 

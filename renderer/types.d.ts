@@ -261,6 +261,9 @@ interface PlanItemDTO {
   sequence: number;
   notesByCategory: Record<string, string>;
   description: string | null;
+  songKey?: string | null;
+  bpm?: number | null;
+  arrangementName?: string | null;
 }
 
 interface PlanItemsDTO {

@@ -3,7 +3,7 @@ import { Loader2Icon, ArrowLeftIcon } from "lucide-react";
 
 import { BrandLogo } from "../components/brand-logo";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
-import { RundownTable, type RundownColumn } from "./rundown-table";
+import { RundownTable, songMeta, type RundownColumn } from "./rundown-table";
 import { useDashboardState } from "./use-dashboard-state";
 import { invoke } from "../lib/api";
 import { ALL_COLUMNS_LAYOUT_ID } from "./scriptview-index-view";
@@ -76,12 +76,16 @@ export function ScriptViewPlan({ serviceTypeId, layoutId }: { serviceTypeId: str
     if (showLength) c.push({ key: "len", header: "Time", align: "right", width: "4.5rem", cellClassName: "text-white/55", render: (it) => fmtLen(it.lengthSec) });
     c.push({
       key: "title", header: "Item",
-      render: (it, { isCurrent }) => (
-        <div className="flex flex-col leading-tight">
-          <span className={`font-medium ${isCurrent ? "text-[#7fe3c4]" : "text-white/90"}`}>{it.title}</span>
-          {showTitleMeta && it.description && <span className="text-caption2 text-white/45 whitespace-pre-line">{it.description}</span>}
-        </div>
-      ),
+      render: (it, { isCurrent }) => {
+        const meta = showTitleMeta ? songMeta(it) : null;
+        return (
+          <div className="flex flex-col leading-tight">
+            <span className={`font-medium ${isCurrent ? "text-[#7fe3c4]" : "text-white/90"}`}>{it.title}</span>
+            {meta && <span className="text-caption2 italic text-[#8ab4ff]/85">{meta}</span>}
+            {showTitleMeta && !meta && it.description && <span className="text-caption2 text-white/45 whitespace-pre-line">{it.description}</span>}
+          </div>
+        );
+      },
     });
     for (const cat of cols) {
       c.push({ key: `note:${cat}`, header: cat, cellClassName: "text-white/60 whitespace-pre-line", render: (it) => it.notesByCategory[cat] ?? "" });

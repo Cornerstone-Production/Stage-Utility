@@ -3,7 +3,7 @@ import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLef
 
 import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, EmptyState, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
-import { RundownTable, type RundownColumn } from "../../main/rundown-table";
+import { RundownTable, songMeta, type RundownColumn } from "../../main/rundown-table";
 
 // crypto.randomUUID is undefined in an insecure (plain-HTTP) context, which prod
 // is served over — fall back so layout creation never throws there.
@@ -226,12 +226,16 @@ function previewColumns(l: ScriptViewLayout): RundownColumn[] {
   if (l.showLength !== false) c.push({ key: "len", header: "Time", align: "right", width: "4.5rem", cellClassName: "text-white/55", render: (it) => fmtLen(it.lengthSec) });
   c.push({
     key: "title", header: "Item",
-    render: (it, { isCurrent }) => (
-      <div className="flex flex-col leading-tight">
-        <span className={`font-medium ${isCurrent ? "text-[#7fe3c4]" : "text-white/90"}`}>{it.title}</span>
-        {l.showTitleMeta !== false && it.description && <span className="text-caption2 text-white/45 whitespace-pre-line">{it.description}</span>}
-      </div>
-    ),
+    render: (it, { isCurrent }) => {
+      const meta = l.showTitleMeta !== false ? songMeta(it) : null;
+      return (
+        <div className="flex flex-col leading-tight">
+          <span className={`font-medium ${isCurrent ? "text-[#7fe3c4]" : "text-white/90"}`}>{it.title}</span>
+          {meta && <span className="text-caption2 italic text-[#8ab4ff]/85">{meta}</span>}
+          {l.showTitleMeta !== false && !meta && it.description && <span className="text-caption2 text-white/45 whitespace-pre-line">{it.description}</span>}
+        </div>
+      );
+    },
   });
   for (const cat of l.columns) c.push({ key: `note:${cat}`, header: cat, cellClassName: "text-white/60 whitespace-pre-line", render: (it) => it.notesByCategory[cat] ?? "" });
   return c;

@@ -27,6 +27,16 @@ export function departmentColor(dept: string): string {
   return "#5b9cff";
 }
 
+/** The song meta line under a title: "Key A · 75 BPM · Matt Maher" (whatever's
+ *  present). Null for non-songs / when nothing is set. */
+export function songMeta(it: PlanItemDTO): string | null {
+  const parts: string[] = [];
+  if (it.songKey) parts.push(`Key ${it.songKey}`);
+  if (it.bpm) parts.push(`${it.bpm} BPM`);
+  if (it.arrangementName) parts.push(it.arrangementName);
+  return parts.length ? parts.join("  ·  ") : null;
+}
+
 export interface RundownColumn {
   key: string;
   header: string;

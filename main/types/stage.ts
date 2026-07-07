@@ -825,6 +825,10 @@ export interface PlanItemDTO {
   /** Per-note-category content (e.g. {"Audio": "...", "Vocals": "..."}). */
   notesByCategory: Record<string, string>;
   description: string | null;
+  /** Song meta (present on "song" items): selected key, arrangement BPM + name. */
+  songKey?: string | null;
+  bpm?: number | null;
+  arrangementName?: string | null;
 }
 
 /** A plan's full rundown plus the ordered note-category column names. */
