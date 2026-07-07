@@ -828,8 +828,11 @@ function PeopleGraph({
     const frac = (vbX - PADL) / (100 - PADL - PADR);
     setHover(Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1)))));
   }
-  const hoverX = hover != null ? px(hover) : 0;
-  const nearMarker = hover != null ? markerPts.find((m) => m.idx === hover) : undefined;
+  // Guard the hover index against the current series: switching live↔recorded swaps
+  // the data under a stale index, so clamp it out rather than indexing undefined.
+  const hIdx = hover != null && hover >= 0 && hover < n ? hover : null;
+  const hoverX = hIdx != null ? px(hIdx) : 0;
+  const nearMarker = hIdx != null ? markerPts.find((m) => m.idx === hIdx) : undefined;
 
   return (
     <div
@@ -851,7 +854,7 @@ function PeopleGraph({
         ))}
         {/* hover crosshair (the round point is an HTML overlay — a <circle> would
             stretch to an ellipse under preserveAspectRatio="none") */}
-        {hover != null && (
+        {hIdx != null && (
           <line x1={hoverX} y1={PADT} x2={hoverX} y2={100 - PADB} stroke={stroke} strokeOpacity={0.55} strokeWidth={0.75} vectorEffect="non-scaling-stroke" />
         )}
       </svg>
@@ -889,12 +892,12 @@ function PeopleGraph({
       ))}
 
       {/* hover point (HTML so it stays a circle) */}
-      {hover != null && (
-        <span style={{ position: "absolute", left: `${hoverX}%`, top: `${py(vals[hover])}%`, transform: "translate(-50%, -50%)", width: `${Math.max(4, 0.02 * H)}px`, height: `${Math.max(4, 0.02 * H)}px`, borderRadius: "50%", background: stroke, pointerEvents: "none", zIndex: 1 }} />
+      {hIdx != null && (
+        <span style={{ position: "absolute", left: `${hoverX}%`, top: `${py(vals[hIdx])}%`, transform: "translate(-50%, -50%)", width: `${Math.max(4, 0.02 * H)}px`, height: `${Math.max(4, 0.02 * H)}px`, borderRadius: "50%", background: stroke, pointerEvents: "none", zIndex: 1 }} />
       )}
 
       {/* hover tooltip */}
-      {showTooltip && hover != null && (
+      {showTooltip && hIdx != null && (
         <div
           style={{
             position: "absolute", left: `${hoverX}%`, top: `${PADT}%`,
@@ -904,8 +907,8 @@ function PeopleGraph({
             fontWeight: 600, pointerEvents: "none", whiteSpace: "nowrap", zIndex: 2,
           }}
         >
-          <div style={{ opacity: 0.75 }}>{hhmm(history[hover].t)}</div>
-          <div>{vals[hover].toLocaleString()}</div>
+          <div style={{ opacity: 0.75 }}>{hhmm(history[hIdx].t)}</div>
+          <div>{vals[hIdx].toLocaleString()}</div>
           {nearMarker && <div style={{ opacity: 0.85, maxWidth: `${0.35 * H}px`, overflow: "hidden", textOverflow: "ellipsis" }}>{nearMarker.label}</div>}
         </div>
       )}
@@ -919,17 +922,28 @@ function PeopleGraph({
  *  it reads as part of the chart's label layer (the y-axis labels own the left),
  *  rather than a bolted-on button. A green/amber dot carries the state. */
 function GraphToggle({ mode, onToggle, stroke, H }: { mode: "live" | "recorded"; onToggle: () => void; stroke: string; H: number }) {
+  const [hot, setHot] = useState(false);
+  const [down, setDown] = useState(false);
   const dot = `${Math.max(4, 0.016 * H)}px`;
+  const pad = `${0.006 * H}px`;
   return (
     <button
       onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      onPointerEnter={() => setHot(true)}
+      onPointerLeave={() => { setHot(false); setDown(false); }}
+      onPointerDown={() => setDown(true)}
+      onPointerUp={() => setDown(false)}
       title={mode === "live" ? "Showing live — tap for the last recorded service" : "Showing recorded service — tap for live"}
       style={{
-        position: "absolute", top: `${0.012 * H}px`, right: `${0.012 * H}px`,
+        position: "absolute", top: `${0.008 * H}px`, right: `${0.008 * H}px`,
         display: "inline-flex", alignItems: "center", gap: `${0.006 * H}px`,
-        background: "transparent", color: stroke, border: "none", padding: 0,
+        // Faint surface only on hover/press — a touch affordance that stays invisible at rest.
+        background: down ? "rgba(255,255,255,0.16)" : hot ? "rgba(255,255,255,0.08)" : "transparent",
+        color: stroke, border: "none", borderRadius: `${0.02 * H}px`,
+        padding: `${pad} ${0.01 * H}px`, margin: `-${pad} -${0.004 * H}px`,
         fontSize: `${Math.max(7, 0.03 * H)}px`, fontWeight: 700, letterSpacing: "0.06em",
-        lineHeight: 1, cursor: "pointer", opacity: 0.8, zIndex: 3,
+        lineHeight: 1, cursor: "pointer", opacity: hot ? 1 : 0.8, zIndex: 3,
+        transition: "background 120ms ease, opacity 120ms ease",
       }}
     >
       <span style={{ width: dot, height: dot, borderRadius: "50%", background: mode === "live" ? "#22c55e" : "#f59e0b", flex: "0 0 auto" }} />
