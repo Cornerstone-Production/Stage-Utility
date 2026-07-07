@@ -44,6 +44,14 @@ import { wirelessManager } from "./wireless-manager.js";
 const RENDERER_BUILD_DIR = path.join(process.cwd(), "build", "renderer");
 
 const PORT = Number(process.env.STAGE_UTILITY_PORT) || 8788;
+// "Friendly" port so operators can browse without typing the port. We bind it in
+// ADDITION to PORT (8788 always stays up for Companion + existing links). Default
+// 80; set STAGE_UTILITY_FRIENDLY_PORT=0 to disable. Binding is best-effort — if the
+// process lacks privilege (non-root, no CAP_NET_BIND_SERVICE) or the port is taken,
+// we log and keep serving PORT rather than failing to start.
+const FRIENDLY_PORT = process.env.STAGE_UTILITY_FRIENDLY_PORT !== undefined
+  ? Number(process.env.STAGE_UTILITY_FRIENDLY_PORT)
+  : 80;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -289,6 +297,7 @@ function sendStatic(
 
 export class RemoteServer {
   private server: http.Server | null = null;
+  private friendlyServer: http.Server | null = null;
   private sockets = new Set<net.Socket>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -435,7 +444,8 @@ export class RemoteServer {
     }, SSE_HEARTBEAT_MS);
     this.heartbeatTimer.unref?.();
 
-    this.server = http.createServer(async (req, res) => {
+    // One request handler, shared by both listeners (PORT + the friendly port).
+    const handler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
       const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
       const pathname = url.pathname;
 
@@ -458,12 +468,15 @@ export class RemoteServer {
         console.error(`[remote-server] handler error ${pathname}:`, msg);
         error(res, msg, 500);
       }
-    });
+    };
 
-    this.server.on("connection", (socket: net.Socket) => {
+    const trackConn = (socket: net.Socket) => {
       this.sockets.add(socket);
       socket.on("close", () => this.sockets.delete(socket));
-    });
+    };
+
+    this.server = http.createServer(handler);
+    this.server.on("connection", trackConn);
 
     await new Promise<void>((resolve, reject) => {
       this.server!.listen(PORT, "0.0.0.0", () => {
@@ -472,6 +485,26 @@ export class RemoteServer {
       });
       this.server!.on("error", reject);
     });
+
+    // Best-effort friendly port (e.g. 80) so the LAN URL needs no port. Never fatal:
+    // a bind failure (no privilege / port in use) just logs and leaves PORT serving.
+    if (FRIENDLY_PORT && FRIENDLY_PORT !== PORT) {
+      const friendly = http.createServer(handler);
+      friendly.on("connection", trackConn);
+      friendly.on("error", (err: NodeJS.ErrnoException) => {
+        const why = err.code === "EACCES"
+          ? `needs privilege to bind port ${FRIENDLY_PORT} (Linux: re-run 'sudo ./scripts/install.sh' to grant CAP_NET_BIND_SERVICE)`
+          : err.code === "EADDRINUSE"
+            ? `port ${FRIENDLY_PORT} is already in use by another process`
+            : err.message;
+        console.warn(`[remote-server] port-free URL disabled — ${why}. Still serving on :${PORT}.`);
+        this.friendlyServer = null;
+      });
+      friendly.listen(FRIENDLY_PORT, "0.0.0.0", () => {
+        this.friendlyServer = friendly;
+        console.log(`[remote-server] also listening on 0.0.0.0:${FRIENDLY_PORT} (port-free URL)`);
+      });
+    }
   }
 
   async stop(): Promise<void> {
@@ -485,6 +518,11 @@ export class RemoteServer {
       socket.destroy();
     }
     this.sockets.clear();
+
+    if (this.friendlyServer) {
+      await new Promise<void>((resolve) => this.friendlyServer!.close(() => resolve()));
+      this.friendlyServer = null;
+    }
 
     await new Promise<void>((resolve) => {
       if (!this.server) {

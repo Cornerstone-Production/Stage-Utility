@@ -20,6 +20,7 @@ set -euo pipefail
 SERVICE_NAME="stage-utility"
 UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 PORT=8788
+FRIENDLY_PORT=80   # bound in addition to PORT so the LAN URL needs no port
 MIN_NODE_MAJOR=24
 
 # Repo root = parent of this script's directory.
@@ -135,6 +136,10 @@ User=${SERVICE_USER}
 WorkingDirectory=${REPO_ROOT}
 Environment=STAGE_UTILITY_DATA=${DATA_DIR}
 Environment=NODE_ENV=production
+Environment=STAGE_UTILITY_FRIENDLY_PORT=${FRIENDLY_PORT}
+# Let the (non-root) service user bind the low friendly port (80) so the LAN URL
+# needs no port. Least-privilege: grants ONLY the bind-low-port capability.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 ExecStart=${NODE_BIN} --import tsx ${REPO_ROOT}/server.ts
 # `always` (not on-failure) so the in-app updater can restart the service by
 # exiting the process after it pulls + rebuilds.
@@ -157,7 +162,7 @@ systemctl --no-pager --lines=0 status "${SERVICE_NAME}" || true
 LAN_IP="$(node -e 'const n=require("os").networkInterfaces();for(const k in n)for(const a of n[k])if(a.family==="IPv4"&&!a.internal){console.log(a.address);process.exit(0)}' 2>/dev/null || echo "<server-ip>")"
 echo
 log "Stage Utility is running."
-log "  Kiosk display : http://${LAN_IP}:${PORT}/"
-log "  Settings      : http://${LAN_IP}:${PORT}/settings-window.html"
+log "  Kiosk display : http://${LAN_IP}/  (or http://${LAN_IP}:${PORT}/)"
+log "  Settings      : http://${LAN_IP}/settings-window.html"
 log "Configure it in the Settings page → Integrations (Planning Center App ID + Secret, Shure gear)."
 log "Logs:  journalctl -u ${SERVICE_NAME} -f"
