@@ -849,12 +849,10 @@ function PeopleGraph({
         {markerPts.map((m, i) => (
           <line key={i} x1={m.x} y1={PADT} x2={m.x} y2={100 - PADB} stroke={stroke} strokeOpacity={0.4} strokeWidth={0.75} strokeDasharray="2 2" vectorEffect="non-scaling-stroke" />
         ))}
-        {/* hover crosshair + point */}
+        {/* hover crosshair (the round point is an HTML overlay — a <circle> would
+            stretch to an ellipse under preserveAspectRatio="none") */}
         {hover != null && (
-          <>
-            <line x1={hoverX} y1={PADT} x2={hoverX} y2={100 - PADB} stroke={stroke} strokeOpacity={0.55} strokeWidth={0.75} vectorEffect="non-scaling-stroke" />
-            <circle cx={hoverX} cy={py(vals[hover])} r={1.6} fill={stroke} vectorEffect="non-scaling-stroke" />
-          </>
+          <line x1={hoverX} y1={PADT} x2={hoverX} y2={100 - PADB} stroke={stroke} strokeOpacity={0.55} strokeWidth={0.75} vectorEffect="non-scaling-stroke" />
         )}
       </svg>
 
@@ -867,9 +865,9 @@ function PeopleGraph({
       <span style={{ position: "absolute", left: `${PADL}%`, bottom: 0, color: stroke, opacity: 0.7, fontSize: `${fontPx}px`, lineHeight: 1 }}>{hhmm(history[0].t)}</span>
       <span style={{ position: "absolute", right: `${PADR}%`, bottom: 0, color: stroke, opacity: 0.7, fontSize: `${fontPx}px`, lineHeight: 1 }}>{hhmm(history[n - 1].t)}</span>
 
-      {/* current value readout (top-right, clear of the y-max label) */}
+      {/* current value readout (top-right; drops below the toggle when both show) */}
       {config.showLabel && (
-        <span style={{ position: "absolute", top: 0, right: `${PADR}%`, color: stroke, fontSize: `${fontPx * 1.3}px`, fontWeight: 700, lineHeight: 1, opacity: 0.95 }}>
+        <span style={{ position: "absolute", top: toggle ? `${0.05 * H}px` : 0, right: `${PADR}%`, color: stroke, fontSize: `${fontPx * 1.3}px`, fontWeight: 700, lineHeight: 1, opacity: 0.95 }}>
           {(config.label ? `${config.label} ` : "") + vals[n - 1].toLocaleString()}
         </span>
       )}
@@ -889,6 +887,11 @@ function PeopleGraph({
           {hhmm(m.t)}
         </span>
       ))}
+
+      {/* hover point (HTML so it stays a circle) */}
+      {hover != null && (
+        <span style={{ position: "absolute", left: `${hoverX}%`, top: `${py(vals[hover])}%`, transform: "translate(-50%, -50%)", width: `${Math.max(4, 0.02 * H)}px`, height: `${Math.max(4, 0.02 * H)}px`, borderRadius: "50%", background: stroke, pointerEvents: "none", zIndex: 1 }} />
+      )}
 
       {/* hover tooltip */}
       {showTooltip && hover != null && (
@@ -912,22 +915,24 @@ function PeopleGraph({
   );
 }
 
-/** Small live/recorded pill for kiosk viewers to flip a people-graph object. */
+/** Live/recorded toggle for kiosk viewers. Borderless and set in the top-right so
+ *  it reads as part of the chart's label layer (the y-axis labels own the left),
+ *  rather than a bolted-on button. A green/amber dot carries the state. */
 function GraphToggle({ mode, onToggle, stroke, H }: { mode: "live" | "recorded"; onToggle: () => void; stroke: string; H: number }) {
+  const dot = `${Math.max(4, 0.016 * H)}px`;
   return (
     <button
       onClick={(e) => { e.stopPropagation(); onToggle(); }}
-      title={mode === "live" ? "Showing live — click for last recorded service" : "Showing recorded service — click for live"}
+      title={mode === "live" ? "Showing live — tap for the last recorded service" : "Showing recorded service — tap for live"}
       style={{
-        position: "absolute", top: `${0.008 * H}px`, left: `${0.008 * H}px`,
-        display: "inline-flex", alignItems: "center", gap: `${0.004 * H}px`,
-        background: "rgba(0,0,0,0.55)", color: stroke, border: `1px solid ${stroke}`,
-        borderRadius: `${0.02 * H}px`, padding: `${0.004 * H}px ${0.01 * H}px`,
-        fontSize: `${Math.max(7, 0.028 * H)}px`, fontWeight: 700, lineHeight: 1,
-        cursor: "pointer", opacity: 0.85, zIndex: 3,
+        position: "absolute", top: `${0.012 * H}px`, right: `${0.012 * H}px`,
+        display: "inline-flex", alignItems: "center", gap: `${0.006 * H}px`,
+        background: "transparent", color: stroke, border: "none", padding: 0,
+        fontSize: `${Math.max(7, 0.03 * H)}px`, fontWeight: 700, letterSpacing: "0.06em",
+        lineHeight: 1, cursor: "pointer", opacity: 0.8, zIndex: 3,
       }}
     >
-      <span style={{ width: `${0.014 * H}px`, height: `${0.014 * H}px`, borderRadius: "50%", background: mode === "live" ? "#22c55e" : "#f59e0b" }} />
+      <span style={{ width: dot, height: dot, borderRadius: "50%", background: mode === "live" ? "#22c55e" : "#f59e0b", flex: "0 0 auto" }} />
       {mode === "live" ? "LIVE" : "REC"}
     </button>
   );
