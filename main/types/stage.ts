@@ -884,8 +884,10 @@ export interface ScriptViewRundownDTO {
   serviceTimes: string[];
   /** Org IANA time zone for rendering the clock in the plan's local time. */
   timeZone: string | null;
-  /** True when this service type is the active/live one (enables live highlight). */
-  isLive: boolean;
+  /** True when this is the app's currently-selected plan, so the live pcoLive
+   *  feed applies to it. Actual "live" (badge/highlight) additionally requires
+   *  pcoLive.mode === "item" — this flag alone does NOT mean a service is running. */
+  isActivePlan: boolean;
 }
 
 /** A file attached to a PCO plan (e.g. a stage plot, chart, or rundown PDF). */

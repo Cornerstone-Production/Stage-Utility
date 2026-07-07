@@ -528,7 +528,7 @@ export class StageController {
   async getScriptViewRundown(serviceTypeId: string, planId?: string | null): Promise<ScriptViewRundownDTO> {
     const empty: ScriptViewRundownDTO = {
       serviceTypeId, planId: null, planTitle: null, planSeriesTitle: null,
-      planDates: null, items: [], noteCategories: [], serviceTimes: [], timeZone: null, isLive: false,
+      planDates: null, items: [], noteCategories: [], serviceTimes: [], timeZone: null, isActivePlan: false,
     };
     if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return empty;
 
@@ -561,7 +561,7 @@ export class StageController {
       noteCategories: ordered,
       serviceTimes,
       timeZone,
-      isLive: isActiveType && plan.id === this.state.planId,
+      isActivePlan: isActiveType && plan.id === this.state.planId,
     };
   }
 

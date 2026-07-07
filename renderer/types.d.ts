@@ -303,7 +303,7 @@ interface ScriptViewRundownDTO {
   noteCategories: string[];
   serviceTimes: string[];
   timeZone: string | null;
-  isLive: boolean;
+  isActivePlan: boolean;
 }
 
 interface PlanDTO {

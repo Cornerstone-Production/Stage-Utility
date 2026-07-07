@@ -85,9 +85,13 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const clocks = useMemo(() => computeClocks(items, rundown?.serviceTimes?.[0]), [items, rundown?.serviceTimes]);
   const columns = useMemo(() => buildScriptViewColumns(spec, clocks, rundown?.timeZone), [spec, clocks, rundown?.timeZone]);
 
-  const timer = rundown?.isLive ? computePcoTimer(pcoLive, now, skewMs) : null;
+  // Only the app's active plan gets the live feed; a service is actually LIVE only
+  // when the PCO controller is on a plan item (preservice countdown ≠ live).
+  const isActivePlan = !!rundown?.isActivePlan;
+  const liveNow = isActivePlan && pcoLive?.mode === "item";
+  const timer = isActivePlan ? computePcoTimer(pcoLive, now, skewMs) : null;
   const over = !!timer?.over;
-  const currentItemId = rundown?.isLive ? pcoLive?.currentItemId : null;
+  const currentItemId = liveNow ? pcoLive?.currentItemId : null;
 
   const clock = new Date(now);
   const h12 = String(((clock.getHours() + 11) % 12) + 1).padStart(2, "0");
@@ -114,7 +118,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
           </div>
         </div>
         <div className="ml-auto flex items-center gap-4 tabular-nums">
-          {rundown?.isLive && (
+          {liveNow && (
             <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-[#7fe3c4]">
               <span className="size-2 rounded-full bg-[#22c55e]" /> Live
             </span>
