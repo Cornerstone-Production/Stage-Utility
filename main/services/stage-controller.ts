@@ -517,7 +517,7 @@ export class StageController {
   async getScriptViewRundown(serviceTypeId: string, planId?: string | null): Promise<ScriptViewRundownDTO> {
     const empty: ScriptViewRundownDTO = {
       serviceTypeId, planId: null, planTitle: null, planSeriesTitle: null,
-      planDates: null, items: [], noteCategories: [], isLive: false,
+      planDates: null, items: [], noteCategories: [], serviceTimes: [], isLive: false,
     };
     if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return empty;
 
@@ -529,9 +529,10 @@ export class StageController {
     else plan = plans[0] ?? null;
     if (!plan) return empty;
 
-    const [items, categories] = await Promise.all([
+    const [items, categories, serviceTimes] = await Promise.all([
       pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
       pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId),
+      pcoService.listPlanServiceTimes(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
     ]);
     const used = new Set<string>();
     for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
@@ -546,6 +547,7 @@ export class StageController {
       planDates: plan.dates,
       items,
       noteCategories: ordered,
+      serviceTimes,
       isLive: isActiveType && plan.id === this.state.planId,
     };
   }

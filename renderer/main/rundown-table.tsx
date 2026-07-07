@@ -27,16 +27,6 @@ export function departmentColor(dept: string): string {
   return "#5b9cff";
 }
 
-/** The song meta line under a title: "Key A · 75 BPM · Matt Maher" (whatever's
- *  present). Null for non-songs / when nothing is set. */
-export function songMeta(it: PlanItemDTO): string | null {
-  const parts: string[] = [];
-  if (it.songKey) parts.push(`Key ${it.songKey}`);
-  if (it.bpm) parts.push(`${it.bpm} BPM`);
-  if (it.arrangementName) parts.push(it.arrangementName);
-  return parts.length ? parts.join("  ·  ") : null;
-}
-
 export interface RundownColumn {
   key: string;
   header: string;
@@ -53,6 +43,7 @@ export function RundownTable({
   columns,
   currentItemId,
   accentDepartment,
+  footer,
   autoScroll = true,
   textSizeClass = "text-[clamp(0.8rem,1.6vmin,1.1rem)]",
 }: {
@@ -61,6 +52,8 @@ export function RundownTable({
   currentItemId?: string | null;
   /** Tint a row when this note category has content for the item (department focus). */
   accentDepartment?: string | null;
+  /** Optional sticky bottom band (e.g. total time), spanning all columns. */
+  footer?: import("react").ReactNode;
   autoScroll?: boolean;
   textSizeClass?: string;
 }) {
@@ -123,6 +116,15 @@ export function RundownTable({
           );
         })}
       </tbody>
+      {footer != null && (
+        <tfoot className="sticky bottom-0 z-10 bg-[#14161c]">
+          <tr>
+            <td colSpan={columns.length} className="px-3 py-2 border-t border-white/10 text-caption1 font-semibold uppercase tracking-wider text-white/70">
+              {footer}
+            </td>
+          </tr>
+        </tfoot>
+      )}
     </table>
   );
 }

@@ -829,6 +829,8 @@ export interface PlanItemDTO {
   songKey?: string | null;
   bpm?: number | null;
   arrangementName?: string | null;
+  /** PCO service_position: "pre" | "during" | "post" (drives pre-service styling). */
+  servicePosition?: string | null;
 }
 
 /** A plan's full rundown plus the ordered note-category column names. */
@@ -849,10 +851,14 @@ export interface ScriptViewLayout {
   order: number;
   /** Ordered note-category names shown as columns. */
   columns: string[];
-  showClock?: boolean;
-  showLength?: boolean;
-  /** Show the meta line (description / key·BPM) under each title. */
-  showTitleMeta?: boolean;
+  // Per-element visibility toggles (undefined = shown; opt-out by setting false).
+  showClock?: boolean;        // projected wall-clock column
+  showLength?: boolean;       // length / "Time" column
+  showKey?: boolean;          // song key in the title meta line
+  showBpm?: boolean;          // BPM in the title meta line
+  showArrangement?: boolean;  // arrangement name in the title meta line
+  showItemNotes?: boolean;    // description line (leader / cues) under the title
+  showTotalTime?: boolean;    // total-time footer
   /** Note category whose presence tints the row (department focus), or null. */
   accentDepartment?: string | null;
 }
@@ -867,6 +873,9 @@ export interface ScriptViewRundownDTO {
   planDates: string | null;
   items: PlanItemDTO[];
   noteCategories: string[];
+  /** Scheduled service start time(s), ISO (from PCO plan_times type=service).
+   *  serviceTimes[0] anchors the projected per-item clock. */
+  serviceTimes: string[];
   /** True when this service type is the active/live one (enables live highlight). */
   isLive: boolean;
 }

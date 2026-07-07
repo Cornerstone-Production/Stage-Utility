@@ -3,16 +3,15 @@ import { Loader2Icon, ArrowLeftIcon } from "lucide-react";
 
 import { BrandLogo } from "../components/brand-logo";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
-import { RundownTable, songMeta, type RundownColumn } from "./rundown-table";
+import { RundownTable } from "./rundown-table";
+import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLengthSec, fmtTotal } from "./scriptview-columns";
 import { useDashboardState } from "./use-dashboard-state";
 import { invoke } from "../lib/api";
 import { ALL_COLUMNS_LAYOUT_ID } from "./scriptview-index-view";
 
-function fmtLen(sec: number): string {
-  if (!sec || sec <= 0) return "—";
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
+function fmtSvcTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 // A standalone ScriptView rundown page: /scriptview/{serviceTypeId}/{layoutId}.
@@ -58,40 +57,15 @@ export function ScriptViewPlan({ serviceTypeId, layoutId }: { serviceTypeId: str
   const layout = layoutId === ALL_COLUMNS_LAYOUT_ID ? null : typeLayouts.find((l) => l.id === layoutId) ?? null;
   const layoutName = layout?.name ?? "All columns";
 
-  // Resolve which note-category columns to show + the item detail toggles.
-  const cats = rundown?.noteCategories ?? [];
-  // A layout shows exactly its chosen columns (in order), even ones not currently
-  // used in this plan (they render empty). No layout = every used category.
-  const cols = layout ? layout.columns : cats;
-  const showLength = layout ? layout.showLength !== false : true;
-  const showTitleMeta = layout ? layout.showTitleMeta !== false : true;
-
   useEffect(() => {
     const t = rundown?.planTitle ?? rundown?.planSeriesTitle ?? "ScriptView";
     document.title = `${t} · ${layoutName}`;
   }, [rundown?.planTitle, rundown?.planSeriesTitle, layoutName]);
 
-  const columns: RundownColumn[] = useMemo(() => {
-    const c: RundownColumn[] = [];
-    if (showLength) c.push({ key: "len", header: "Time", align: "right", width: "4.5rem", cellClassName: "text-white/55", render: (it) => fmtLen(it.lengthSec) });
-    c.push({
-      key: "title", header: "Item",
-      render: (it, { isCurrent }) => {
-        const meta = showTitleMeta ? songMeta(it) : null;
-        return (
-          <div className="flex flex-col leading-tight">
-            <span className={`font-medium ${isCurrent ? "text-[#7fe3c4]" : "text-white/90"}`}>{it.title}</span>
-            {meta && <span className="text-caption2 italic text-[#8ab4ff]/85">{meta}</span>}
-            {showTitleMeta && !meta && it.description && <span className="text-caption2 text-white/45 whitespace-pre-line">{it.description}</span>}
-          </div>
-        );
-      },
-    });
-    for (const cat of cols) {
-      c.push({ key: `note:${cat}`, header: cat, cellClassName: "text-white/60 whitespace-pre-line", render: (it) => it.notesByCategory[cat] ?? "" });
-    }
-    return c;
-  }, [cols, showLength, showTitleMeta]);
+  const items = useMemo(() => rundown?.items ?? [], [rundown?.items]);
+  const spec = useMemo(() => resolveScriptViewSpec(layout, rundown?.noteCategories ?? []), [layout, rundown?.noteCategories]);
+  const clocks = useMemo(() => computeClocks(items, rundown?.serviceTimes?.[0]), [items, rundown?.serviceTimes]);
+  const columns = useMemo(() => buildScriptViewColumns(spec, clocks), [spec, clocks]);
 
   const timer = rundown?.isLive ? computePcoTimer(pcoLive, now, skewMs) : null;
   const over = !!timer?.over;
@@ -103,7 +77,7 @@ export function ScriptViewPlan({ serviceTypeId, layoutId }: { serviceTypeId: str
   const ss = String(clock.getSeconds()).padStart(2, "0");
   const ampm = clock.getHours() < 12 ? "AM" : "PM";
 
-  const items = rundown?.items ?? [];
+  const svcTimes = (rundown?.serviceTimes ?? []).map(fmtSvcTime).filter(Boolean).join("  ·  ");
 
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
@@ -117,8 +91,7 @@ export function ScriptViewPlan({ serviceTypeId, layoutId }: { serviceTypeId: str
           <div className="flex flex-col min-w-0 leading-tight">
             <span className="text-caption1 font-title text-white/85 truncate">{rundown?.planSeriesTitle ?? rundown?.planTitle ?? "ScriptView"}</span>
             <span className="text-caption2 text-white/45 truncate">
-              {rundown?.planTitle && rundown?.planSeriesTitle ? `${rundown.planTitle}` : ""}
-              {rundown?.planDates ? `${rundown?.planTitle && rundown?.planSeriesTitle ? " · " : ""}${rundown.planDates}` : ""}
+              {[rundown?.planSeriesTitle ? rundown?.planTitle : null, rundown?.planDates, svcTimes || null].filter(Boolean).join("  ·  ")}
             </span>
           </div>
         </div>
@@ -161,7 +134,13 @@ export function ScriptViewPlan({ serviceTypeId, layoutId }: { serviceTypeId: str
             {rundown.planId ? "No items in this plan" : "No upcoming plan for this service type"}
           </div>
         ) : (
-          <RundownTable items={items} columns={columns} currentItemId={currentItemId} accentDepartment={layout?.accentDepartment ?? null} />
+          <RundownTable
+            items={items}
+            columns={columns}
+            currentItemId={currentItemId}
+            accentDepartment={layout?.accentDepartment ?? null}
+            footer={spec.showTotalTime ? <span>{fmtTotal(totalLengthSec(items))} <span className="text-white/40">· total time</span></span> : undefined}
+          />
         )}
       </div>
     </div>

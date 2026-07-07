@@ -526,6 +526,7 @@ class PcoService {
           songKey: typeof a.key_name === "string" && a.key_name ? a.key_name : null,
           bpm: arr?.bpm ?? null,
           arrangementName: arr?.name ?? null,
+          servicePosition: typeof a.service_position === "string" ? a.service_position : null,
         });
       }
 
@@ -536,6 +537,30 @@ class PcoService {
     out.sort((a, b) => a.sequence - b.sequence);
     this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
     return out;
+  }
+
+  /** Scheduled service start times for a plan (ISO), earliest first — the
+   *  time_type=service plan_times. Anchors the ScriptView projected clock. */
+  async listPlanServiceTimes(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<string[]> {
+    const cacheKey = `plan-times:${appId}:${planId}`;
+    const cached = this.cacheGet<string[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times?per_page=50`;
+    const json = await this.request(url, appId, secret).catch(() => null);
+    const items = json && Array.isArray(json.data) ? json.data : [];
+    const times = items
+      .filter((t) => t.attributes.time_type === "service" && typeof t.attributes.starts_at === "string")
+      .map((t) => t.attributes.starts_at as string)
+      .sort((a, b) => Date.parse(a) - Date.parse(b));
+
+    this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    return times;
   }
 
   async listTeamMembers(

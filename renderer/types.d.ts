@@ -264,6 +264,7 @@ interface PlanItemDTO {
   songKey?: string | null;
   bpm?: number | null;
   arrangementName?: string | null;
+  servicePosition?: string | null;
 }
 
 interface PlanItemsDTO {
@@ -280,7 +281,11 @@ interface ScriptViewLayout {
   columns: string[];
   showClock?: boolean;
   showLength?: boolean;
-  showTitleMeta?: boolean;
+  showKey?: boolean;
+  showBpm?: boolean;
+  showArrangement?: boolean;
+  showItemNotes?: boolean;
+  showTotalTime?: boolean;
   accentDepartment?: string | null;
 }
 
@@ -292,6 +297,7 @@ interface ScriptViewRundownDTO {
   planDates: string | null;
   items: PlanItemDTO[];
   noteCategories: string[];
+  serviceTimes: string[];
   isLive: boolean;
 }
 

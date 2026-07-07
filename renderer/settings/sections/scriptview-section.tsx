@@ -3,7 +3,8 @@ import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLef
 
 import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, EmptyState, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
-import { RundownTable, songMeta, type RundownColumn } from "../../main/rundown-table";
+import { RundownTable } from "../../main/rundown-table";
+import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLengthSec, fmtTotal } from "../../main/scriptview-columns";
 
 // crypto.randomUUID is undefined in an insecure (plain-HTTP) context, which prod
 // is served over — fall back so layout creation never throws there.
@@ -62,7 +63,7 @@ export function ScriptViewSection() {
     const order = typeLayouts.length ? Math.max(...typeLayouts.map((l) => l.order)) + 1 : 0;
     const layout: ScriptViewLayout = {
       id: uid(), serviceTypeId: typeId, name: `Layout ${typeLayouts.length + 1}`, order,
-      columns: [...noteCats], showLength: true, showTitleMeta: true, accentDepartment: null,
+      columns: [...noteCats], accentDepartment: null, // all element toggles default on
     };
     setPreviewId(layout.id);
     persist([...layouts, layout]);
@@ -172,9 +173,14 @@ export function ScriptViewSection() {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showLength !== false} onCheckedChange={(v: boolean) => update(l.id, { showLength: v })} /> Show length</label>
-                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showTitleMeta !== false} onCheckedChange={(v: boolean) => update(l.id, { showTitleMeta: v })} /> Show item detail</label>
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showClock !== false} onCheckedChange={(v: boolean) => update(l.id, { showClock: v })} /> Clock</label>
+                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showLength !== false} onCheckedChange={(v: boolean) => update(l.id, { showLength: v })} /> Time</label>
+                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showKey !== false} onCheckedChange={(v: boolean) => update(l.id, { showKey: v })} /> Song key</label>
+                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showBpm !== false} onCheckedChange={(v: boolean) => update(l.id, { showBpm: v })} /> BPM</label>
+                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showArrangement !== false} onCheckedChange={(v: boolean) => update(l.id, { showArrangement: v })} /> Arrangement</label>
+                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showItemNotes !== false} onCheckedChange={(v: boolean) => update(l.id, { showItemNotes: v })} /> Item notes</label>
+                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showTotalTime !== false} onCheckedChange={(v: boolean) => update(l.id, { showTotalTime: v })} /> Total time</label>
                   <div className="flex items-center gap-2 text-caption1 text-gray-11">
                     Row accent
                     <Select value={l.accentDepartment ?? "__none__"} onValueChange={(v) => update(l.id, { accentDepartment: v === "__none__" ? null : v })}>
@@ -209,9 +215,10 @@ export function ScriptViewSection() {
             ) : (
               <RundownTable
                 items={rundown.items}
-                columns={previewColumns(previewLayout)}
+                columns={buildScriptViewColumns(resolveScriptViewSpec(previewLayout, noteCats), computeClocks(rundown.items, rundown.serviceTimes?.[0]))}
                 accentDepartment={previewLayout.accentDepartment ?? null}
                 autoScroll={false}
+                footer={previewLayout.showTotalTime !== false ? <span>{fmtTotal(totalLengthSec(rundown.items))} <span className="text-white/40">· total time</span></span> : undefined}
               />
             )}
           </div>
@@ -219,31 +226,4 @@ export function ScriptViewSection() {
       )}
     </div>
   );
-}
-
-function previewColumns(l: ScriptViewLayout): RundownColumn[] {
-  const c: RundownColumn[] = [];
-  if (l.showLength !== false) c.push({ key: "len", header: "Time", align: "right", width: "4.5rem", cellClassName: "text-white/55", render: (it) => fmtLen(it.lengthSec) });
-  c.push({
-    key: "title", header: "Item",
-    render: (it, { isCurrent }) => {
-      const meta = l.showTitleMeta !== false ? songMeta(it) : null;
-      return (
-        <div className="flex flex-col leading-tight">
-          <span className={`font-medium ${isCurrent ? "text-[#7fe3c4]" : "text-white/90"}`}>{it.title}</span>
-          {meta && <span className="text-caption2 italic text-[#8ab4ff]/85">{meta}</span>}
-          {l.showTitleMeta !== false && !meta && it.description && <span className="text-caption2 text-white/45 whitespace-pre-line">{it.description}</span>}
-        </div>
-      );
-    },
-  });
-  for (const cat of l.columns) c.push({ key: `note:${cat}`, header: cat, cellClassName: "text-white/60 whitespace-pre-line", render: (it) => it.notesByCategory[cat] ?? "" });
-  return c;
-}
-
-function fmtLen(sec: number): string {
-  if (!sec || sec <= 0) return "—";
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
 }
