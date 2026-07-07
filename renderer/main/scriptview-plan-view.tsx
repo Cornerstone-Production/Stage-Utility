@@ -7,38 +7,51 @@ import { RundownTable } from "./rundown-table";
 import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLengthSec, fmtTotal } from "./scriptview-columns";
 import { useDashboardState } from "./use-dashboard-state";
 import { invoke } from "../lib/api";
-import { ALL_COLUMNS_LAYOUT_ID } from "./scriptview-index-view";
+import { ALL_COLUMNS_LAYOUT_ID, ALL_COLUMNS_SLUG, slugify, scriptViewUrl } from "./scriptview-index-view";
 
 function fmtSvcTime(iso: string, timeZone?: string | null): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", ...(timeZone ? { timeZone } : {}) });
 }
 
-// A standalone ScriptView rundown page: /scriptview/{serviceTypeId}/{layoutId}.
-// Follows the service type's live-or-next plan, applies the chosen layout's column
-// preset, and highlights the live item when this type is the one running.
-export function ScriptViewPlan({ serviceTypeId, layoutId }: { serviceTypeId: string; layoutId: string }) {
+// A standalone ScriptView rundown page: /scriptview/{type}/{layout}. Both path
+// parts are name slugs (e.g. /scriptview/weekend/audio) resolved to ids here, with
+// raw ids still accepted for backward-compatible bookmarks. Follows the type's
+// live-or-next plan; highlights the live item when this type is running.
+export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeParam: string; layoutParam: string }) {
   const { state, pcoLive } = useDashboardState();
+  const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
   const [rundown, setRundown] = useState<ScriptViewRundownDTO | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    invoke<ServiceTypeDTO[]>("stage:listServiceTypes").then(setTypes).catch(() => setTypes([]));
+    invoke<ScriptViewLayout[]>("scriptview:listLayouts").then(setLayouts).catch(() => setLayouts([]));
+  }, []);
+
+  // Resolve the service-type slug (or raw id) to an id.
+  const serviceType = useMemo(
+    () => types.find((t) => t.id === serviceTypeParam) ?? types.find((t) => slugify(t.name) === serviceTypeParam.toLowerCase()) ?? null,
+    [types, serviceTypeParam],
+  );
+  // Use the resolved id, or the raw param if it's numeric (id URL) so we can fetch
+  // before the type list arrives; null while a slug is still unresolved.
+  const resolvedTypeId = serviceType?.id ?? (/^\d+$/.test(serviceTypeParam) ? serviceTypeParam : null);
+
   // Rundown items change rarely; refetch on a slow timer. Live position arrives
   // separately via the SSE-backed dashboard state (pcoLive).
   useEffect(() => {
+    if (!resolvedTypeId) return;
     let cancelled = false;
     const load = () =>
-      invoke<ScriptViewRundownDTO>("scriptview:rundown", { serviceTypeId })
+      invoke<ScriptViewRundownDTO>("scriptview:rundown", { serviceTypeId: resolvedTypeId })
         .then((r) => { if (!cancelled) { setRundown(r); setError(null); } })
         .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
     load();
     const t = setInterval(load, 60_000);
     return () => { cancelled = true; clearInterval(t); };
-  }, [serviceTypeId]);
-
-  useEffect(() => {
-    invoke<ScriptViewLayout[]>("scriptview:listLayouts").then(setLayouts).catch(() => setLayouts([]));
-  }, []);
+  }, [resolvedTypeId]);
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -51,11 +64,16 @@ export function ScriptViewPlan({ serviceTypeId, layoutId }: { serviceTypeId: str
   }, [pcoLive?.serverNow]);
 
   const typeLayouts = useMemo(
-    () => layouts.filter((l) => l.serviceTypeId === serviceTypeId).sort((a, b) => a.order - b.order),
-    [layouts, serviceTypeId],
+    () => layouts.filter((l) => l.serviceTypeId === resolvedTypeId).sort((a, b) => a.order - b.order),
+    [layouts, resolvedTypeId],
   );
-  const layout = layoutId === ALL_COLUMNS_LAYOUT_ID ? null : typeLayouts.find((l) => l.id === layoutId) ?? null;
+  // Resolve the layout slug (or raw id) to a layout; the All-columns slug/id → null.
+  const layout = layoutParam === ALL_COLUMNS_SLUG || layoutParam === ALL_COLUMNS_LAYOUT_ID
+    ? null
+    : typeLayouts.find((l) => l.id === layoutParam) ?? typeLayouts.find((l) => slugify(l.name) === layoutParam.toLowerCase()) ?? null;
   const layoutName = layout?.name ?? "All columns";
+  const currentLayoutKey = layout?.id ?? ALL_COLUMNS_LAYOUT_ID;
+  const typeNameForUrl = serviceType?.name ?? serviceTypeParam;
 
   useEffect(() => {
     const t = rundown?.planTitle ?? rundown?.planSeriesTitle ?? "ScriptView";
@@ -113,8 +131,11 @@ export function ScriptViewPlan({ serviceTypeId, layoutId }: { serviceTypeId: str
           </div>
           {/* Layout switcher */}
           <select
-            value={layoutId}
-            onChange={(e) => { window.location.href = `/scriptview/${encodeURIComponent(serviceTypeId)}/${encodeURIComponent(e.target.value)}`; }}
+            value={currentLayoutKey}
+            onChange={(e) => {
+              const id = e.target.value;
+              window.location.href = scriptViewUrl(typeNameForUrl, id, typeLayouts.find((l) => l.id === id)?.name);
+            }}
             className="rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-caption1 text-white/85 outline-none focus:border-white/25"
             title="Layout"
           >

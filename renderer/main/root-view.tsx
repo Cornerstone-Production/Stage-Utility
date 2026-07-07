@@ -17,7 +17,7 @@ export function RootView() {
   else if (slug === "baptism") content = <BaptismOperatorView />;
   else if (parts[0] === "scriptview") {
     content = parts.length >= 3
-      ? <ScriptViewPlan serviceTypeId={parts[1]} layoutId={parts[2]} />
+      ? <ScriptViewPlan serviceTypeParam={parts[1]} layoutParam={parts[2]} />
       : <ScriptViewIndex />;
   } else content = <Outlet />;
 

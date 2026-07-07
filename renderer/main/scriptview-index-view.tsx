@@ -9,6 +9,18 @@ import { invoke } from "../lib/api";
 // Implicit layout that shows every note-category column — always available so the
 // landing page works before any custom layout is configured (Phase 3 adds those).
 export const ALL_COLUMNS_LAYOUT_ID = "__all__";
+export const ALL_COLUMNS_SLUG = "all-columns";
+
+/** URL-friendly slug from a name ("The Salt Company" → "the-salt-company"). */
+export function slugify(s: string): string {
+  return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "x";
+}
+
+/** Build a pretty ScriptView URL from names (falls back to ids when unnamed). */
+export function scriptViewUrl(typeName: string, layoutId: string, layoutName?: string): string {
+  const laySlug = layoutId === ALL_COLUMNS_LAYOUT_ID ? ALL_COLUMNS_SLUG : slugify(layoutName ?? layoutId);
+  return `/scriptview/${encodeURIComponent(slugify(typeName))}/${encodeURIComponent(laySlug)}`;
+}
 
 // ScriptView landing at "/scriptview". Lists PCO service types, each with a layout
 // dropdown + open arrow, deep-linking to /scriptview/{serviceTypeId}/{layoutId}.
@@ -114,7 +126,7 @@ export function ScriptViewIndex() {
                     {opts.map((o) => <option key={o.value} value={o.value} className="bg-[#14161c]">{o.label}</option>)}
                   </select>
                   <a
-                    href={`/scriptview/${encodeURIComponent(type.id)}/${encodeURIComponent(cur)}`}
+                    href={scriptViewUrl(type.name, cur, ls.find((l) => l.id === cur)?.name)}
                     className="flex items-center justify-center rounded-lg border border-white/10 bg-white/5 size-8 shrink-0 transition-colors hover:bg-white/15"
                     title={`Open ${type.name}`}
                     aria-label={`Open ${type.name}`}
