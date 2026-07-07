@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon, EyeIcon } from "lucide-react";
+import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
 
 import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, EmptyState, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
@@ -21,7 +21,7 @@ export function ScriptViewSection() {
   const [typeId, setTypeId] = useState<string | null>(null);
   const [noteCats, setNoteCats] = useState<string[]>([]);
   const [rundown, setRundown] = useState<ScriptViewRundownDTO | null>(null);
-  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [shownIds, setShownIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,7 +78,7 @@ export function ScriptViewSection() {
       id: uid(), serviceTypeId: typeId, name: `Layout ${typeLayouts.length + 1}`, order,
       columns: [...noteCats], accentDepartment: null, // all element toggles default on
     };
-    setPreviewId(layout.id);
+    setExpandedId(layout.id);
     persist([...layouts, layout]);
   }
 
@@ -113,7 +113,8 @@ export function ScriptViewSection() {
     update(l.id, { columns: cols });
   };
 
-  const previewLayout = typeLayouts.find((l) => l.id === previewId) ?? typeLayouts[0] ?? null;
+  // The expanded card is the one being edited + previewed; fall back to the first.
+  const openId = typeLayouts.some((l) => l.id === expandedId) ? expandedId : (typeLayouts[0]?.id ?? null);
 
   return (
     <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
@@ -150,7 +151,7 @@ export function ScriptViewSection() {
 
       <div className="flex items-center gap-2 mb-4">
         <span className="text-caption1 text-gray-11">Service type</span>
-        <Select value={typeId ?? ""} onValueChange={(v) => { setTypeId(v); setPreviewId(null); }}>
+        <Select value={typeId ?? ""} onValueChange={(v) => { setTypeId(v); setExpandedId(null); }}>
           <SelectTrigger className="w-64"><SelectValue placeholder="Select a service type" /></SelectTrigger>
           <SelectContent>
             {types.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
@@ -167,94 +168,107 @@ export function ScriptViewSection() {
       ) : (
         <div className="flex flex-col gap-3">
           {typeLayouts.map((l, li) => {
+            const open = openId === l.id;
             const remaining = noteCats.filter((c) => !l.columns.includes(c));
             return (
-              <div key={l.id} className="rounded-xl border border-gray-a5 bg-gray-a2 p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Input value={l.name} onChange={(e) => update(l.id, { name: e.target.value })} className="max-w-xs font-medium" />
-                  <div className="ml-auto flex items-center gap-1">
+              <div key={l.id} className="rounded-xl border border-gray-a5 bg-gray-a2 overflow-hidden">
+                {/* Header — click to expand/collapse (and preview). */}
+                <div className="flex items-center gap-2 p-3">
+                  <button
+                    onClick={() => setExpandedId(open ? null : l.id)}
+                    className="shrink-0 text-gray-10 hover:text-gray-12"
+                    aria-label={open ? "Collapse" : "Expand"}
+                    aria-expanded={open}
+                  >
+                    <ChevronRightIcon className={`size-4 transition-transform ${open ? "rotate-90" : ""}`} />
+                  </button>
+                  <Input value={l.name} onChange={(e) => update(l.id, { name: e.target.value })} className="max-w-[14rem] font-medium" />
+                  {!open && (
+                    <span className="text-caption1 text-gray-9 truncate min-w-0 hidden sm:block">
+                      {l.columns.length ? l.columns.join(" · ") : "No columns"}
+                    </span>
+                  )}
+                  <div className="ml-auto flex items-center gap-1 shrink-0">
                     <Button variant="transparent" size="small" iconOnly disabled={li === 0} onClick={() => moveLayout(l, -1)} aria-label="Move up"><ChevronUpIcon className="size-4" /></Button>
                     <Button variant="transparent" size="small" iconOnly disabled={li === typeLayouts.length - 1} onClick={() => moveLayout(l, 1)} aria-label="Move down"><ChevronDownIcon className="size-4" /></Button>
-                    <Button variant="transparent" size="small" iconOnly onClick={() => setPreviewId(l.id)} aria-label="Preview"><EyeIcon className={`size-4 ${previewLayout?.id === l.id ? "text-accent-11" : ""}`} /></Button>
                     <Button variant="transparent" size="small" iconOnly onClick={() => removeLayout(l)} aria-label="Delete"><Trash2Icon className="size-4 text-red-10" /></Button>
                   </div>
                 </div>
 
-                <div className="mb-3">
-                  <span className="text-caption2 uppercase tracking-wider text-gray-9">Columns</span>
-                  <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                    {l.columns.length === 0 && <span className="text-caption1 text-gray-9">No columns — add one →</span>}
-                    {l.columns.map((c, ci) => (
-                      <span key={c} className="inline-flex items-center gap-1 rounded-md border border-gray-a5 bg-gray-a3 pl-2 pr-1 py-1 text-caption1 text-gray-12">
-                        <button className="text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={ci === 0} onClick={() => moveColumn(l, ci, -1)} aria-label="Move left"><ChevronLeftIcon className="size-3.5" /></button>
-                        {c}
-                        <button className="text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={ci === l.columns.length - 1} onClick={() => moveColumn(l, ci, 1)} aria-label="Move right"><ChevronRightIcon className="size-3.5" /></button>
-                        <button className="text-gray-9 hover:text-red-10 ml-0.5" onClick={() => removeColumn(l, c)} aria-label={`Remove ${c}`}><XIcon className="size-3.5" /></button>
-                      </span>
-                    ))}
-                    {remaining.length > 0 && (
-                      <Select value="" onValueChange={(v) => addColumn(l, v)}>
-                        <SelectTrigger className="w-auto h-7 px-2 text-caption1"><span className="inline-flex items-center gap-1 text-gray-10"><PlusIcon className="size-3.5" /> Add</span></SelectTrigger>
-                        <SelectContent>
-                          {remaining.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                </div>
+                {open && (
+                  <div className="px-4 pb-4 border-t border-gray-a4 pt-3">
+                    <div className="mb-3">
+                      <span className="text-caption2 uppercase tracking-wider text-gray-9">Columns</span>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        {l.columns.length === 0 && <span className="text-caption1 text-gray-9">No columns — add one →</span>}
+                        {l.columns.map((c, ci) => (
+                          <span key={c} className="inline-flex items-center gap-1 rounded-md border border-gray-a5 bg-gray-a3 pl-2 pr-1 py-1 text-caption1 text-gray-12">
+                            <button className="text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={ci === 0} onClick={() => moveColumn(l, ci, -1)} aria-label="Move left"><ChevronLeftIcon className="size-3.5" /></button>
+                            {c}
+                            <button className="text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={ci === l.columns.length - 1} onClick={() => moveColumn(l, ci, 1)} aria-label="Move right"><ChevronRightIcon className="size-3.5" /></button>
+                            <button className="text-gray-9 hover:text-red-10 ml-0.5" onClick={() => removeColumn(l, c)} aria-label={`Remove ${c}`}><XIcon className="size-3.5" /></button>
+                          </span>
+                        ))}
+                        {remaining.length > 0 && (
+                          <Select value="" onValueChange={(v) => addColumn(l, v)}>
+                            <SelectTrigger className="w-auto h-7 px-2 text-caption1"><span className="inline-flex items-center gap-1 text-gray-10"><PlusIcon className="size-3.5" /> Add</span></SelectTrigger>
+                            <SelectContent>
+                              {remaining.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+                    </div>
 
-                <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showClock !== false} onCheckedChange={(v: boolean) => update(l.id, { showClock: v })} /> Clock</label>
-                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showLength !== false} onCheckedChange={(v: boolean) => update(l.id, { showLength: v })} /> Time</label>
-                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showKey !== false} onCheckedChange={(v: boolean) => update(l.id, { showKey: v })} /> Song key</label>
-                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showBpm !== false} onCheckedChange={(v: boolean) => update(l.id, { showBpm: v })} /> BPM</label>
-                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showArrangement !== false} onCheckedChange={(v: boolean) => update(l.id, { showArrangement: v })} /> Arrangement</label>
-                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showItemNotes !== false} onCheckedChange={(v: boolean) => update(l.id, { showItemNotes: v })} /> Item notes</label>
-                  <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showTotalTime !== false} onCheckedChange={(v: boolean) => update(l.id, { showTotalTime: v })} /> Total time</label>
-                  <div className="flex items-center gap-2 text-caption1 text-gray-11">
-                    Row accent
-                    <Select value={l.accentDepartment ?? "__none__"} onValueChange={(v) => update(l.id, { accentDepartment: v === "__none__" ? null : v })}>
-                      <SelectTrigger className="w-40 h-7"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">None</SelectItem>
-                        {l.columns.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4">
+                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showClock !== false} onCheckedChange={(v: boolean) => update(l.id, { showClock: v })} /> Clock</label>
+                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showLength !== false} onCheckedChange={(v: boolean) => update(l.id, { showLength: v })} /> Time</label>
+                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showKey !== false} onCheckedChange={(v: boolean) => update(l.id, { showKey: v })} /> Song key</label>
+                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showBpm !== false} onCheckedChange={(v: boolean) => update(l.id, { showBpm: v })} /> BPM</label>
+                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showArrangement !== false} onCheckedChange={(v: boolean) => update(l.id, { showArrangement: v })} /> Arrangement</label>
+                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showItemNotes !== false} onCheckedChange={(v: boolean) => update(l.id, { showItemNotes: v })} /> Item notes</label>
+                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showTotalTime !== false} onCheckedChange={(v: boolean) => update(l.id, { showTotalTime: v })} /> Total time</label>
+                      <div className="flex items-center gap-2 text-caption1 text-gray-11">
+                        Row accent
+                        <Select value={l.accentDepartment ?? "__none__"} onValueChange={(v) => update(l.id, { accentDepartment: v === "__none__" ? null : v })}>
+                          <SelectTrigger className="w-40 h-7"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">None</SelectItem>
+                            {l.columns.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* Inline live preview for this layout (16:9, scrolls internally). */}
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-caption2 uppercase tracking-wider text-gray-9">Preview</span>
+                      {rundown?.planTitle && <span className="text-caption1 text-gray-11">{rundown.planTitle}</span>}
+                    </div>
+                    <div className="rounded-xl border border-white/10 overflow-hidden aspect-video w-full kiosk-surface">
+                      <div className="h-full overflow-y-auto">
+                        {!rundown ? (
+                          <div className="p-6 text-caption1 text-gray-9">Loading plan…</div>
+                        ) : rundown.items.length === 0 ? (
+                          <div className="p-6 text-caption1 text-gray-9">No upcoming plan for this service type.</div>
+                        ) : (
+                          <RundownTable
+                            items={rundown.items}
+                            columns={buildScriptViewColumns(resolveScriptViewSpec(l, noteCats), computeClocks(rundown.items, rundown.serviceTimes?.[0]), rundown.timeZone)}
+                            accentDepartment={l.accentDepartment ?? null}
+                            autoScroll={false}
+                            footer={l.showTotalTime !== false ? <span>{fmtTotal(totalLengthSec(rundown.items))} <span className="text-white/40">· total time</span></span> : undefined}
+                          />
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             );
           })}
 
           <Button variant="filled" size="small" className="self-start" onClick={addLayout}><PlusIcon className="size-4" /> Add layout</Button>
-        </div>
-      )}
-
-      {/* Live preview */}
-      {previewLayout && (
-        <div className="mt-6">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-caption2 uppercase tracking-wider text-gray-9">Preview</span>
-            <span className="text-caption1 text-gray-11">{previewLayout.name}{rundown?.planTitle ? ` · ${rundown.planTitle}` : ""}</span>
-          </div>
-          {/* 16:9 preview locked to display proportions; scrolls internally. */}
-          <div className="rounded-xl border border-white/10 overflow-hidden aspect-video w-full kiosk-surface">
-            <div className="h-full overflow-y-auto">
-              {!rundown ? (
-                <div className="p-6 text-caption1 text-gray-9">Loading plan…</div>
-              ) : rundown.items.length === 0 ? (
-                <div className="p-6 text-caption1 text-gray-9">No upcoming plan for this service type.</div>
-              ) : (
-                <RundownTable
-                  items={rundown.items}
-                  columns={buildScriptViewColumns(resolveScriptViewSpec(previewLayout, noteCats), computeClocks(rundown.items, rundown.serviceTimes?.[0]), rundown.timeZone)}
-                  accentDepartment={previewLayout.accentDepartment ?? null}
-                  autoScroll={false}
-                  footer={previewLayout.showTotalTime !== false ? <span>{fmtTotal(totalLengthSec(rundown.items))} <span className="text-white/40">· total time</span></span> : undefined}
-                />
-              )}
-            </div>
-          </div>
         </div>
       )}
     </div>
