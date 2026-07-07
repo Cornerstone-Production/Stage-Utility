@@ -63,14 +63,11 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  const typeLayouts = useMemo(
-    () => layouts.filter((l) => l.serviceTypeId === resolvedTypeId).sort((a, b) => a.order - b.order),
-    [layouts, resolvedTypeId],
-  );
+  const allLayouts = useMemo(() => [...layouts].sort((a, b) => a.order - b.order), [layouts]);
   // Resolve the layout slug (or raw id) to a layout; the All-columns slug/id → null.
   const layout = layoutParam === ALL_COLUMNS_SLUG || layoutParam === ALL_COLUMNS_LAYOUT_ID
     ? null
-    : typeLayouts.find((l) => l.id === layoutParam) ?? typeLayouts.find((l) => slugify(l.name) === layoutParam.toLowerCase()) ?? null;
+    : allLayouts.find((l) => l.id === layoutParam) ?? allLayouts.find((l) => slugify(l.name) === layoutParam.toLowerCase()) ?? null;
   const layoutName = layout?.name ?? "All columns";
   const currentLayoutKey = layout?.id ?? ALL_COLUMNS_LAYOUT_ID;
   const typeNameForUrl = serviceType?.name ?? serviceTypeParam;
@@ -138,12 +135,12 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
             value={currentLayoutKey}
             onChange={(e) => {
               const id = e.target.value;
-              window.location.href = scriptViewUrl(typeNameForUrl, id, typeLayouts.find((l) => l.id === id)?.name);
+              window.location.href = scriptViewUrl(typeNameForUrl, id, allLayouts.find((l) => l.id === id)?.name);
             }}
             className="rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-caption1 text-white/85 outline-none focus:border-white/25"
             title="Layout"
           >
-            {typeLayouts.map((l) => <option key={l.id} value={l.id} className="bg-[#14161c]">{l.name}</option>)}
+            {allLayouts.map((l) => <option key={l.id} value={l.id} className="bg-[#14161c]">{l.name}</option>)}
             <option value={ALL_COLUMNS_LAYOUT_ID} className="bg-[#14161c]">All columns</option>
           </select>
         </div>

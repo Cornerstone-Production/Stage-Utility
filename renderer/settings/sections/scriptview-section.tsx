@@ -35,7 +35,8 @@ export function ScriptViewSection() {
         setTypes(t);
         setLayouts(l);
         setShownIds(c.serviceTypeIds ?? []);
-        setTypeId((cur) => cur ?? l[0]?.serviceTypeId ?? t[0]?.id ?? null);
+        // Preview against the first enabled type, else the first service type.
+        setTypeId((cur) => cur ?? (c.serviceTypeIds ?? [])[0] ?? t[0]?.id ?? null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
@@ -57,9 +58,11 @@ export function ScriptViewSection() {
     invoke<ScriptViewRundownDTO>("scriptview:rundown", { serviceTypeId: typeId }).then(setRundown).catch(() => setRundown(null));
   }, [typeId]);
 
-  const typeLayouts = useMemo(
-    () => layouts.filter((l) => l.serviceTypeId === typeId).sort((a, b) => a.order - b.order),
-    [layouts, typeId],
+  // Layouts are global — one set across all service types. `typeId` only chooses
+  // which type/plan to preview against (and which note categories are offered).
+  const sortedLayouts = useMemo(
+    () => [...layouts].sort((a, b) => a.order - b.order),
+    [layouts],
   );
 
   async function persist(next: ScriptViewLayout[]) {
@@ -72,10 +75,9 @@ export function ScriptViewSection() {
     persist(layouts.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
   function addLayout() {
-    if (!typeId) return;
-    const order = typeLayouts.length ? Math.max(...typeLayouts.map((l) => l.order)) + 1 : 0;
+    const order = sortedLayouts.length ? Math.max(...sortedLayouts.map((l) => l.order)) + 1 : 0;
     const layout: ScriptViewLayout = {
-      id: uid(), serviceTypeId: typeId, name: `Layout ${typeLayouts.length + 1}`, order,
+      id: uid(), name: `Layout ${sortedLayouts.length + 1}`, order,
       columns: [...noteCats], accentDepartment: null, // all element toggles default on
     };
     setExpandedId(layout.id);
@@ -88,14 +90,12 @@ export function ScriptViewSection() {
   }
 
   function moveLayout(l: ScriptViewLayout, dir: -1 | 1) {
-    const arr = [...typeLayouts];
+    const arr = [...sortedLayouts];
     const i = arr.findIndex((x) => x.id === l.id);
     const j = i + dir;
     if (j < 0 || j >= arr.length) return;
     [arr[i], arr[j]] = [arr[j], arr[i]];
-    const reordered = arr.map((x, idx) => ({ ...x, order: idx }));
-    const others = layouts.filter((x) => x.serviceTypeId !== typeId);
-    persist([...others, ...reordered]);
+    persist(arr.map((x, idx) => ({ ...x, order: idx })));
   }
 
   // Column ops on one layout.
@@ -114,7 +114,7 @@ export function ScriptViewSection() {
   };
 
   // The expanded card is the one being edited + previewed; fall back to the first.
-  const openId = typeLayouts.some((l) => l.id === expandedId) ? expandedId : (typeLayouts[0]?.id ?? null);
+  const openId = sortedLayouts.some((l) => l.id === expandedId) ? expandedId : (sortedLayouts[0]?.id ?? null);
 
   return (
     <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
@@ -122,7 +122,7 @@ export function ScriptViewSection() {
         <div>
           <h2 className="text-title3 font-semibold text-gray-12">ScriptView layouts</h2>
           <p className="text-caption1 text-gray-10 mt-0.5 max-w-prose">
-            Named column presets per service type — our in-app replacement for ScriptViewer. Each opens at a shareable URL you can pin in its own tab.
+            Named column presets — our in-app replacement for ScriptViewer. Layouts are shared across every service type; each opens at a shareable URL you can pin in its own tab.
           </p>
         </div>
         <a href="/scriptview" target="_blank" rel="noopener noreferrer" className="shrink-0 inline-flex items-center gap-1.5 text-caption1 text-gray-11 hover:text-gray-12 rounded-lg border border-gray-a5 px-3 py-1.5">
@@ -150,24 +150,25 @@ export function ScriptViewSection() {
       </div>
 
       <div className="flex items-center gap-2 mb-4">
-        <span className="text-caption1 text-gray-11">Service type</span>
-        <Select value={typeId ?? ""} onValueChange={(v) => { setTypeId(v); setExpandedId(null); }}>
+        <span className="text-caption1 text-gray-11">Preview with</span>
+        <Select value={typeId ?? ""} onValueChange={(v) => setTypeId(v)}>
           <SelectTrigger className="w-64"><SelectValue placeholder="Select a service type" /></SelectTrigger>
           <SelectContent>
             {types.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
           </SelectContent>
         </Select>
+        <span className="text-caption2 text-gray-9">the plan + note columns used for the previews below</span>
       </div>
 
-      {typeLayouts.length === 0 ? (
+      {sortedLayouts.length === 0 ? (
         <EmptyState
           title="No layouts yet"
-          hint="Add a layout to choose which PCO note columns show for this service type."
+          hint="Add a layout to choose which PCO note columns show. Layouts apply across every service type."
           action={<Button variant="accent" size="small" onClick={addLayout}><PlusIcon className="size-4" /> Add layout</Button>}
         />
       ) : (
         <div className="flex flex-col gap-3">
-          {typeLayouts.map((l, li) => {
+          {sortedLayouts.map((l, li) => {
             const open = openId === l.id;
             const remaining = noteCats.filter((c) => !l.columns.includes(c));
             return (
@@ -190,7 +191,7 @@ export function ScriptViewSection() {
                   )}
                   <div className="ml-auto flex items-center gap-1 shrink-0">
                     <Button variant="transparent" size="small" iconOnly disabled={li === 0} onClick={() => moveLayout(l, -1)} aria-label="Move up"><ChevronUpIcon className="size-4" /></Button>
-                    <Button variant="transparent" size="small" iconOnly disabled={li === typeLayouts.length - 1} onClick={() => moveLayout(l, 1)} aria-label="Move down"><ChevronDownIcon className="size-4" /></Button>
+                    <Button variant="transparent" size="small" iconOnly disabled={li === sortedLayouts.length - 1} onClick={() => moveLayout(l, 1)} aria-label="Move down"><ChevronDownIcon className="size-4" /></Button>
                     <Button variant="transparent" size="small" iconOnly onClick={() => removeLayout(l)} aria-label="Delete"><Trash2Icon className="size-4 text-red-10" /></Button>
                   </div>
                 </div>

@@ -275,7 +275,6 @@ interface PlanItemsDTO {
 
 interface ScriptViewLayout {
   id: string;
-  serviceTypeId: string;
   name: string;
   order: number;
   columns: string[];

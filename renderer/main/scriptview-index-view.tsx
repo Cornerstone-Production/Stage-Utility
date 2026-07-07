@@ -45,28 +45,23 @@ export function ScriptViewIndex() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
+  // Layouts are global — every service type offers the same set.
+  const globalLayouts = useMemo(() => [...layouts].sort((a, b) => a.order - b.order), [layouts]);
+
   // The curated set is authoritative: show exactly the enabled service types, in
   // the configured order. Nothing enabled → empty (guide the operator to Settings).
   const rows = useMemo(() => {
     if (!types) return [];
-    const byType = new Map<string, ScriptViewLayout[]>();
-    for (const l of layouts) {
-      const arr = byType.get(l.serviceTypeId) ?? [];
-      arr.push(l);
-      byType.set(l.serviceTypeId, arr);
-    }
     return shownIds
       .map((id) => types.find((t) => t.id === id))
-      .filter((t): t is ServiceTypeDTO => !!t)
-      .map((t) => ({ type: t, layouts: (byType.get(t.id) ?? []).sort((a, b) => a.order - b.order) }));
-  }, [types, layouts, shownIds]);
+      .filter((t): t is ServiceTypeDTO => !!t);
+  }, [types, shownIds]);
 
-  const optionsFor = (ls: ScriptViewLayout[]) => [
-    ...ls.map((l) => ({ value: l.id, label: l.name })),
+  const options = [
+    ...globalLayouts.map((l) => ({ value: l.id, label: l.name })),
     { value: ALL_COLUMNS_LAYOUT_ID, label: "All columns" },
   ];
-  const selectedFor = (typeId: string, ls: ScriptViewLayout[]) =>
-    sel[typeId] ?? ls[0]?.id ?? ALL_COLUMNS_LAYOUT_ID;
+  const selectedFor = (typeId: string) => sel[typeId] ?? globalLayouts[0]?.id ?? ALL_COLUMNS_LAYOUT_ID;
 
   return (
     <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
@@ -111,9 +106,8 @@ export function ScriptViewIndex() {
           ) : rows.length === 0 ? (
             <p className="text-body text-white/40 text-center max-w-xs">No service types enabled. Turn them on in Settings → ScriptView.</p>
           ) : (
-            rows.map(({ type, layouts: ls }) => {
-              const opts = optionsFor(ls);
-              const cur = selectedFor(type.id, ls);
+            rows.map((type) => {
+              const cur = selectedFor(type.id);
               return (
                 <div key={type.id} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
                   <ListChecksIcon className="size-5 text-white/45 shrink-0" />
@@ -123,10 +117,10 @@ export function ScriptViewIndex() {
                     onChange={(e) => setSel((s) => ({ ...s, [type.id]: e.target.value }))}
                     className="rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-caption1 text-white/85 outline-none focus:border-white/25"
                   >
-                    {opts.map((o) => <option key={o.value} value={o.value} className="bg-[#14161c]">{o.label}</option>)}
+                    {options.map((o) => <option key={o.value} value={o.value} className="bg-[#14161c]">{o.label}</option>)}
                   </select>
                   <a
-                    href={scriptViewUrl(type.name, cur, ls.find((l) => l.id === cur)?.name)}
+                    href={scriptViewUrl(type.name, cur, globalLayouts.find((l) => l.id === cur)?.name)}
                     className="flex items-center justify-center rounded-lg border border-white/10 bg-white/5 size-8 shrink-0 transition-colors hover:bg-white/15"
                     title={`Open ${type.name}`}
                     aria-label={`Open ${type.name}`}

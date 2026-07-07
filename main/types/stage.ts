@@ -841,12 +841,12 @@ export interface PlanItemsDTO {
   noteCategories: string[];
 }
 
-/** A saved ScriptView layout — a named column preset for one service type (our
- *  in-app ScriptViewer replacement). Columns reference PCO note categories by name
- *  so they survive re-fetches. */
+/** A saved ScriptView layout — a named column preset (our in-app ScriptViewer
+ *  replacement). GLOBAL: one set of layouts applies across every service type.
+ *  Columns reference PCO note categories by name, so a layout works under any
+ *  type (a category a type lacks just renders as an empty column). */
 export interface ScriptViewLayout {
   id: string;
-  serviceTypeId: string;
   name: string;
   order: number;
   /** Ordered note-category names shown as columns. */
