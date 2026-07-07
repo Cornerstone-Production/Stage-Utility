@@ -210,6 +210,7 @@ export function ScriptViewSection() {
               <RundownTable
                 items={rundown.items}
                 columns={previewColumns(previewLayout)}
+                accentDepartment={previewLayout.accentDepartment ?? null}
                 autoScroll={false}
               />
             )}

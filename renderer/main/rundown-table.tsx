@@ -14,6 +14,19 @@ export function rundownHeaderKind(title: string): "start" | "end" | null {
   return null;
 }
 
+// Department → accent hue for row tinting. Keyword-matched (categories are named
+// freely per org) with a neutral-blue fallback, in our palette — subtler than
+// ScriptViewer's saturated fills.
+export function departmentColor(dept: string): string {
+  const d = dept.toLowerCase();
+  if (d.includes("light")) return "#f59e0b";
+  if (d.includes("video") || d.includes("graphic") || d.includes("pro") || d.includes("screen")) return "#22c55e";
+  if (d.includes("audio") || d.includes("sound") || d.includes("foh")) return "#38bdf8";
+  if (d.includes("vocal") || d.includes("band") || d.includes("music") || d.includes("md") || d.includes("key") || d.includes("drum")) return "#a78bfa";
+  if (d.includes("stage") || d.includes("cam") || d.includes("director")) return "#ec4899";
+  return "#5b9cff";
+}
+
 export interface RundownColumn {
   key: string;
   header: string;
@@ -29,15 +42,19 @@ export function RundownTable({
   items,
   columns,
   currentItemId,
+  accentDepartment,
   autoScroll = true,
   textSizeClass = "text-[clamp(0.8rem,1.6vmin,1.1rem)]",
 }: {
   items: PlanItemDTO[];
   columns: RundownColumn[];
   currentItemId?: string | null;
+  /** Tint a row when this note category has content for the item (department focus). */
+  accentDepartment?: string | null;
   autoScroll?: boolean;
   textSizeClass?: string;
 }) {
+  const accentColor = accentDepartment ? departmentColor(accentDepartment) : null;
   const currentRef = useRef<HTMLTableRowElement | null>(null);
   useEffect(() => {
     if (autoScroll) currentRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -74,11 +91,15 @@ export function RundownTable({
             );
           }
           const isCurrent = currentItemId != null && currentItemId === it.id;
+          // Row tint when the accent department has content here (not while the
+          // live-item highlight already owns the row).
+          const accentActive = !!accentColor && !isCurrent && !!accentDepartment && !!it.notesByCategory[accentDepartment]?.trim();
           return (
             <tr
               key={it.id}
               ref={isCurrent ? currentRef : undefined}
               className={`border-b border-white/5 align-top ${isCurrent ? "bg-[#2dd49618]" : ""}`}
+              style={accentActive ? { backgroundColor: `${accentColor}1f`, boxShadow: `inset 3px 0 0 0 ${accentColor}` } : undefined}
             >
               {columns.map((c) => (
                 <td

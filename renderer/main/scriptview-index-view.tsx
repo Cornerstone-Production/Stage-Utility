@@ -20,6 +20,8 @@ export function ScriptViewIndex() {
   const [error, setError] = useState<string | null>(null);
   const [sel, setSel] = useState<Record<string, string>>({});
 
+  useEffect(() => { document.title = "ScriptView"; }, []);
+
   useEffect(() => {
     Promise.all([
       invoke<ServiceTypeDTO[]>("stage:listServiceTypes"),

@@ -157,7 +157,7 @@ export function ScriptViewPlan({ serviceTypeId, layoutId }: { serviceTypeId: str
             {rundown.planId ? "No items in this plan" : "No upcoming plan for this service type"}
           </div>
         ) : (
-          <RundownTable items={items} columns={columns} currentItemId={currentItemId} />
+          <RundownTable items={items} columns={columns} currentItemId={currentItemId} accentDepartment={layout?.accentDepartment ?? null} />
         )}
       </div>
     </div>
