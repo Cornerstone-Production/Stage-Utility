@@ -145,7 +145,7 @@ export function ScriptViewSection() {
             ))}
           </div>
         )}
-        <p className="text-caption2 text-gray-9 mt-2">If none are selected, the landing falls back to service types that have a layout.</p>
+        <p className="text-caption2 text-gray-9 mt-2">Only the selected service types appear on the ScriptView landing page.</p>
       </div>
 
       <div className="flex items-center gap-2 mb-4">
@@ -237,20 +237,23 @@ export function ScriptViewSection() {
             <span className="text-caption2 uppercase tracking-wider text-gray-9">Preview</span>
             <span className="text-caption1 text-gray-11">{previewLayout.name}{rundown?.planTitle ? ` · ${rundown.planTitle}` : ""}</span>
           </div>
-          <div className="rounded-xl border border-white/10 overflow-hidden max-h-[420px] overflow-y-auto kiosk-surface">
-            {!rundown ? (
-              <div className="p-6 text-caption1 text-gray-9">Loading plan…</div>
-            ) : rundown.items.length === 0 ? (
-              <div className="p-6 text-caption1 text-gray-9">No upcoming plan for this service type.</div>
-            ) : (
-              <RundownTable
-                items={rundown.items}
-                columns={buildScriptViewColumns(resolveScriptViewSpec(previewLayout, noteCats), computeClocks(rundown.items, rundown.serviceTimes?.[0]), rundown.timeZone)}
-                accentDepartment={previewLayout.accentDepartment ?? null}
-                autoScroll={false}
-                footer={previewLayout.showTotalTime !== false ? <span>{fmtTotal(totalLengthSec(rundown.items))} <span className="text-white/40">· total time</span></span> : undefined}
-              />
-            )}
+          {/* 16:9 preview locked to display proportions; scrolls internally. */}
+          <div className="rounded-xl border border-white/10 overflow-hidden aspect-video w-full kiosk-surface">
+            <div className="h-full overflow-y-auto">
+              {!rundown ? (
+                <div className="p-6 text-caption1 text-gray-9">Loading plan…</div>
+              ) : rundown.items.length === 0 ? (
+                <div className="p-6 text-caption1 text-gray-9">No upcoming plan for this service type.</div>
+              ) : (
+                <RundownTable
+                  items={rundown.items}
+                  columns={buildScriptViewColumns(resolveScriptViewSpec(previewLayout, noteCats), computeClocks(rundown.items, rundown.serviceTimes?.[0]), rundown.timeZone)}
+                  accentDepartment={previewLayout.accentDepartment ?? null}
+                  autoScroll={false}
+                  footer={previewLayout.showTotalTime !== false ? <span>{fmtTotal(totalLengthSec(rundown.items))} <span className="text-white/40">· total time</span></span> : undefined}
+                />
+              )}
+            </div>
           </div>
         </div>
       )}

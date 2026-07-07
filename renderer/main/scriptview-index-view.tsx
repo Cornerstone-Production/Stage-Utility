@@ -33,8 +33,8 @@ export function ScriptViewIndex() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  // Which types to show: the curated set (in configured order) when set; otherwise
-  // fall back to types with a saved layout, or all types before any exist.
+  // The curated set is authoritative: show exactly the enabled service types, in
+  // the configured order. Nothing enabled → empty (guide the operator to Settings).
   const rows = useMemo(() => {
     if (!types) return [];
     const byType = new Map<string, ScriptViewLayout[]>();
@@ -43,16 +43,10 @@ export function ScriptViewIndex() {
       arr.push(l);
       byType.set(l.serviceTypeId, arr);
     }
-    const withLayouts = (t: ServiceTypeDTO) => ({ type: t, layouts: (byType.get(t.id) ?? []).sort((a, b) => a.order - b.order) });
-
-    if (shownIds.length > 0) {
-      return shownIds
-        .map((id) => types.find((t) => t.id === id))
-        .filter((t): t is ServiceTypeDTO => !!t)
-        .map(withLayouts);
-    }
-    const anyConfigured = layouts.length > 0;
-    return types.filter((t) => !anyConfigured || byType.has(t.id)).map(withLayouts);
+    return shownIds
+      .map((id) => types.find((t) => t.id === id))
+      .filter((t): t is ServiceTypeDTO => !!t)
+      .map((t) => ({ type: t, layouts: (byType.get(t.id) ?? []).sort((a, b) => a.order - b.order) }));
   }, [types, layouts, shownIds]);
 
   const optionsFor = (ls: ScriptViewLayout[]) => [
@@ -89,7 +83,10 @@ export function ScriptViewIndex() {
         )}
       </div>
 
-      <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-8 px-6 py-8 overflow-y-auto overscroll-contain">
+      {/* Scroll container + inner min-h-full centering wrapper: centers when the
+          list is short, scrolls without clipping the ends when it's long. */}
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+        <div className="min-h-full flex flex-col items-center justify-center gap-8 px-6 py-8">
         <div className="flex flex-col gap-2 w-full max-w-md">
           <span className="text-caption2 font-medium uppercase tracking-wider text-white/40 text-center select-none mb-1" style={{ letterSpacing: "0.08em" }}>
             ScriptView · pick a service
@@ -100,7 +97,7 @@ export function ScriptViewIndex() {
           ) : !types || stateLoading ? (
             <div className="flex justify-center py-8"><Loader2Icon className="size-7 text-gray-7 animate-spin" /></div>
           ) : rows.length === 0 ? (
-            <p className="text-body text-gray-7 text-center">No service types found.</p>
+            <p className="text-body text-white/40 text-center max-w-xs">No service types enabled. Turn them on in Settings → ScriptView.</p>
           ) : (
             rows.map(({ type, layouts: ls }) => {
               const opts = optionsFor(ls);
@@ -128,6 +125,7 @@ export function ScriptViewIndex() {
               );
             })
           )}
+        </div>
         </div>
       </div>
     </div>
