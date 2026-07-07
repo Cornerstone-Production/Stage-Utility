@@ -36,7 +36,7 @@ export interface ShureConfig {
 // Reconnect back-off: start at 3s, double on each failed attempt, cap at 30s, so
 // an unreachable device doesn't hammer the network / churn the event loop.
 const RECONNECT_BASE_MS = 3_000;
-const RECONNECT_MAX_MS = 30_000;
+const RECONNECT_MAX_MS = 120_000;
 // Connect-phase inactivity timeout (ms) — fail fast on a wrong/unreachable IP.
 const CONNECT_TIMEOUT_MS = 10_000;
 // Heartbeat interval in ms. 60s (was 30s) — TCP keep-alive is already enabled at

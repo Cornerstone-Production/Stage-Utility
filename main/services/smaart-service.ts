@@ -15,7 +15,7 @@ import { ModernSmaartAdapter, type SmaartInput, type SplReading } from "./smaart
 type SmaartConnState = "connected" | "error" | "disconnected";
 
 const RECONNECT_BASE_MS = 3000;
-const RECONNECT_MAX_MS = 30000;
+const RECONNECT_MAX_MS = 120_000;
 /** Trailing throttle for broadcasts — 4 Hz is smooth for a numeric readout. */
 const BROADCAST_THROTTLE_MS = 250;
 /** Per-stream frame rate requested from Smaart (≤ 8). */

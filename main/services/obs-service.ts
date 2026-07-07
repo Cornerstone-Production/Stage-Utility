@@ -15,7 +15,7 @@ import { ObsWebSocketAdapter, type ObsEvent } from "./obs-protocol.js";
 type ObsConnState = "connected" | "error" | "disconnected";
 
 const RECONNECT_BASE_MS = 3000;
-const RECONNECT_MAX_MS = 30000;
+const RECONNECT_MAX_MS = 120_000;
 const TIMECODE_POLL_MS = 1000;
 
 const OFFLINE: ObsStatusDTO = {

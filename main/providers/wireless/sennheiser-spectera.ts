@@ -25,7 +25,7 @@ const DEBUG = !!process.env.SPECTERA_DEBUG;
 const DEFAULT_PORT = 443;
 const USERNAME = "controlSennheiser"; // fixed per Sennheiser SSCv2 auth
 const RECONNECT_BASE_MS = 3_000;
-const RECONNECT_MAX_MS = 30_000;
+const RECONNECT_MAX_MS = 120_000;
 // Resource branches we ask the base station to push.
 const SUBSCRIBE_PATHS = ["/api/mts/paired/all", "/api/rf/channels", "/api/audio/links"];
 

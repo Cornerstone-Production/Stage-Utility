@@ -17,7 +17,11 @@ import type { ProPresenterStatusDTO, ProSection, ProTimer, PropInstancesDTO, Pro
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 
 const POLL_INTERVAL_MS = 1000; // once/sec is plenty for slide/timer changes (was 500)
-const ERROR_INTERVAL_MS = 5000;
+// Reconnect back-off when the machine is unreachable (off for the week, etc.): start
+// at 5s and double up to a 2-min cap, so a dead host isn't re-polled every 5s forever.
+// Resets to the fast poll the instant it reconnects. (was a flat 5s retry)
+const ERROR_BASE_MS = 5000;
+const ERROR_MAX_MS = 120_000;
 // When no client is watching this instance's channel, drop to a slow keepalive
 // instead of hammering 6 requests/sec — the badge/data stay fresh enough and refresh
 // immediately when someone connects (hydrated on connect + fast poll resumes).
@@ -208,6 +212,7 @@ class ProPresenterService {
   private port: number | null = null;
   private pollMs = POLL_INTERVAL_MS;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private errorAttempts = 0; // consecutive poll failures, for exponential back-off
   private running = false;
   private last: ProPresenterStatusDTO = OFFLINE;
   private lastJson = "";
@@ -267,6 +272,7 @@ class ProPresenterService {
   start(): void {
     if (this.running || !this.host || !this.port) return;
     this.running = true;
+    this.errorAttempts = 0;
     console.log(`[propresenter] polling ${this.host}:${this.port}`);
     void this.tick();
   }
@@ -334,14 +340,19 @@ class ProPresenterService {
 
       this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
       this.report("connected", `Connected to ${host}:${port}`);
+      this.errorAttempts = 0; // reconnected — reset back-off
       // Fast poll only while a display/panel renders this instance; else keepalive.
       this.schedule(channelHasSubscribers(this.channel) ? this.pollMs : IDLE_INTERVAL_MS);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[propresenter] poll error:", msg);
+      // Log only the first failure of an outage, then stay quiet until it recovers —
+      // a machine off all week shouldn't spam the log every retry.
+      if (this.errorAttempts === 0) console.warn(`[propresenter] ${host}:${port} unreachable (${msg}) — backing off, retrying up to ${ERROR_MAX_MS / 1000}s`);
       if (this.last.connected) this.emit(OFFLINE);
       this.report("error", `Can't reach ${host}:${port} — ${msg}`);
-      this.schedule(ERROR_INTERVAL_MS);
+      const delay = Math.min(ERROR_MAX_MS, ERROR_BASE_MS * 2 ** this.errorAttempts);
+      this.errorAttempts++;
+      this.schedule(delay);
     }
   }
 

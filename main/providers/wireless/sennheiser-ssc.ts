@@ -25,7 +25,7 @@ const PING_INTERVAL_MS = 5_000; // liveness probe (GET /device/name)
 const POLL_INTERVAL_MS = 3_000; // subclass query / subscription-renew cadence
 const RESPONSE_TIMEOUT_MS = 8_000; // no valid reply for this long → mark offline
 const RECONNECT_BASE_MS = 3_000;
-const RECONNECT_MAX_MS = 30_000;
+const RECONNECT_MAX_MS = 120_000;
 
 export const SSC_DEBUG = !!process.env.SENNHEISER_DEBUG;
 
