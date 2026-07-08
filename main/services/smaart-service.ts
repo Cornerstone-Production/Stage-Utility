@@ -10,12 +10,12 @@
 
 import type { SplMetricsDTO } from "../types/stage.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
+import { serviceWindow } from "./service-window.js";
 import { ModernSmaartAdapter, type SmaartInput, type SplReading } from "./smaart-protocol.js";
 
 type SmaartConnState = "connected" | "error" | "disconnected";
 
 const RECONNECT_BASE_MS = 3000;
-const RECONNECT_MAX_MS = 30000;
 /** Trailing throttle for broadcasts — 4 Hz is smooth for a numeric readout. */
 const BROADCAST_THROTTLE_MS = 250;
 /** Per-stream frame rate requested from Smaart (≤ 8). */
@@ -144,7 +144,7 @@ class SmaartService {
       this.emit(this.last, true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[smaart] connect error:", msg);
+      if (this.reconnectAttempt === 0) console.warn(`[smaart] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
       adapter.close();
       if (this.adapter === adapter) this.adapter = null;
@@ -186,7 +186,7 @@ class SmaartService {
   /** A stream dropped — if we're still meant to be running, reconnect the lot. */
   private onStreamClose(adapter: ModernSmaartAdapter): void {
     if (!this.running || this.adapter !== adapter) return;
-    console.warn("[smaart] stream closed — reconnecting");
+    if (this.reconnectAttempt === 0) console.warn("[smaart] stream closed — reconnecting");
     this.teardownStreams();
     adapter.close();
     if (this.adapter === adapter) this.adapter = null;
@@ -198,10 +198,7 @@ class SmaartService {
   private scheduleReconnect(): void {
     if (!this.running) return;
     this.clearReconnect();
-    const delay = Math.min(
-      RECONNECT_MAX_MS,
-      RECONNECT_BASE_MS * 2 ** this.reconnectAttempt,
-    );
+    const delay = serviceWindow.capDelayMs(RECONNECT_BASE_MS * 2 ** this.reconnectAttempt, channelHasSubscribers("spl:metrics"));
     this.reconnectAttempt++;
     this.reconnectTimer = setTimeout(() => void this.connect(), delay);
   }

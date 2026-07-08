@@ -782,6 +782,7 @@ interface StageState {
   chargerBays: ChargerBayDTO[];
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
+  reconnectSchedule: ReconnectSchedule;
   onboardingDismissed: boolean;
 }
 
@@ -807,6 +808,13 @@ interface AutoUpdateSettings {
   dayOfWeek: number | null;
   /** Hour of day 0–23 (local time) the update window opens. */
   hour: number;
+}
+
+interface ReconnectSchedule {
+  enabled: boolean;
+  leadMin: number;
+  tailMin: number;
+  dormantMin: number;
 }
 
 /** In-app update status (git-based), surfaced in the Advanced tab. */

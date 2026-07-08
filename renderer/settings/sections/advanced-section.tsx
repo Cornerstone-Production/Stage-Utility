@@ -565,6 +565,15 @@ export function AdvancedSection({
     handlers.handleSetPublicUrl(trimmed || null);
   }
 
+  const rc = stageState.reconnectSchedule ?? { enabled: true, leadMin: 120, tailMin: 60, dormantMin: 30 };
+  const [lead, setLead] = useState(String(rc.leadMin));
+  const [tail, setTail] = useState(String(rc.tailMin));
+  const [dormant, setDormant] = useState(String(rc.dormantMin));
+  const commitNum = (key: "leadMin" | "tailMin" | "dormantMin", valStr: string, cur: number) => {
+    const n = Math.round(Number(valStr));
+    if (Number.isFinite(n) && n >= 0 && n !== cur) handlers.handleSetReconnectSchedule({ [key]: n });
+  };
+
   return (
     <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
       <UpdatesPanel
@@ -598,6 +607,61 @@ export function AdvancedSection({
               aria-label="Public address (DNS)"
             />
           </Field>
+        </FieldGroup>
+      </FieldSet>
+
+      <FieldSet title="Integration reconnects">
+        <FieldGroup>
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Wake around service times</FieldLabel>
+              <FieldDescription>
+                Quiet ProPresenter / OBS / Smaart / wireless reconnects when gear is off for the week,
+                then ramp back up before a Planning Center rehearsal or service. Off = a fixed 2-minute retry.
+              </FieldDescription>
+            </FieldContent>
+            <Switch
+              checked={rc.enabled}
+              onCheckedChange={(v: boolean) => handlers.handleSetReconnectSchedule({ enabled: v })}
+            />
+          </Field>
+          {rc.enabled && (
+            <>
+              <Field orientation="horizontal">
+                <FieldContent>
+                  <FieldLabel>Lead time before rehearsal</FieldLabel>
+                  <FieldDescription>Start reconnecting this many minutes before a scheduled rehearsal/service.</FieldDescription>
+                </FieldContent>
+                <Input type="number" min={0} max={1440} value={lead} className="w-24 text-gray-12"
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setLead(e.target.value)}
+                  onBlur={() => commitNum("leadMin", lead, rc.leadMin)}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                  aria-label="Lead time before rehearsal (minutes)" />
+              </Field>
+              <Field orientation="horizontal">
+                <FieldContent>
+                  <FieldLabel>Keep active after service ends</FieldLabel>
+                  <FieldDescription>Stay in fast-reconnect mode this many minutes after the service end time.</FieldDescription>
+                </FieldContent>
+                <Input type="number" min={0} max={1440} value={tail} className="w-24 text-gray-12"
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setTail(e.target.value)}
+                  onBlur={() => commitNum("tailMin", tail, rc.tailMin)}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                  aria-label="Keep active after service ends (minutes)" />
+              </Field>
+              <Field orientation="horizontal">
+                <FieldContent>
+                  <FieldLabel>Idle retry interval</FieldLabel>
+                  <FieldDescription>Longest gap between reconnect attempts when far from any service (the dead-week cadence).</FieldDescription>
+                </FieldContent>
+                <Input type="number" min={1} max={1440} value={dormant} className="w-24 text-gray-12"
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setDormant(e.target.value)}
+                  onBlur={() => commitNum("dormantMin", dormant, rc.dormantMin)}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                  aria-label="Idle retry interval (minutes)" />
+              </Field>
+            </>
+          )}
         </FieldGroup>
       </FieldSet>
 

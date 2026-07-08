@@ -9,13 +9,13 @@
 // refreshes the record timecode.
 
 import type { ObsStatusDTO } from "../types/stage.js";
-import { broadcast } from "./broadcaster.js";
+import { broadcast, channelHasSubscribers } from "./broadcaster.js";
+import { serviceWindow } from "./service-window.js";
 import { ObsWebSocketAdapter, type ObsEvent } from "./obs-protocol.js";
 
 type ObsConnState = "connected" | "error" | "disconnected";
 
 const RECONNECT_BASE_MS = 3000;
-const RECONNECT_MAX_MS = 30000;
 const TIMECODE_POLL_MS = 1000;
 
 const OFFLINE: ObsStatusDTO = {
@@ -183,7 +183,7 @@ class ObsService {
       this.startPoll();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[obs] connect error:", msg);
+      if (this.reconnectAttempt === 0) console.warn(`[obs] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
       adapter.close();
       if (this.adapter === adapter) this.adapter = null;
@@ -200,7 +200,7 @@ class ObsService {
 
   private onClose(adapter: ObsWebSocketAdapter): void {
     if (!this.running || this.adapter !== adapter) return;
-    console.warn("[obs] connection closed — reconnecting");
+    if (this.reconnectAttempt === 0) console.warn("[obs] connection closed — reconnecting");
     this.clearPoll();
     if (this.adapter === adapter) this.adapter = null;
     this.report("error", "OBS connection dropped — reconnecting");
@@ -238,7 +238,7 @@ class ObsService {
   private scheduleReconnect(): void {
     if (!this.running) return;
     this.clearReconnect();
-    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** this.reconnectAttempt);
+    const delay = serviceWindow.capDelayMs(RECONNECT_BASE_MS * 2 ** this.reconnectAttempt, channelHasSubscribers("obs:status"));
     this.reconnectAttempt++;
     this.reconnectTimer = setTimeout(() => void this.connect(), delay);
   }

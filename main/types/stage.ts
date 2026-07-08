@@ -1056,6 +1056,7 @@ export interface StageState {
   chargerBays: ChargerBayDTO[];
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
+  reconnectSchedule: ReconnectSchedule;
   /** Operator dismissed the first-run "Getting started" checklist (machine-wide). */
   onboardingDismissed: boolean;
 }
@@ -1092,6 +1093,18 @@ export interface AutoUpdateSettings {
   dayOfWeek: number | null;
   /** Hour of day 0–23 (local time) the update window opens. */
   hour: number;
+}
+
+/** Tunables for time-aware integration reconnects (Advanced tab). */
+export interface ReconnectSchedule {
+  /** When on, reconnect cadence follows PCO rehearsal/service times. */
+  enabled: boolean;
+  /** Ramp up this many minutes before a rehearsal/service start. */
+  leadMin: number;
+  /** Stay active this many minutes after a service ends. */
+  tailMin: number;
+  /** Max minutes between retries when far from any service. */
+  dormantMin: number;
 }
 
 /** In-app update status (git-based), surfaced in the Advanced tab. */

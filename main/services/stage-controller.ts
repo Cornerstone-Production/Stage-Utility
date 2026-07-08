@@ -3,7 +3,7 @@
 
 import { randomUUID } from "crypto";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -15,6 +15,7 @@ import { viewsStore } from "./views-store.js";
 import { layoutGroupsStore } from "./layout-groups-store.js";
 import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
 import { scriptViewConfigStore } from "./scriptview-config-store.js";
+import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { updater } from "./updater.js";
 
@@ -157,6 +158,7 @@ export class StageController {
     publicUrl: null,
     captionChannelColors: {},
     autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
+    reconnectSchedule: { ...DEFAULT_RECONNECT_SCHEDULE },
     onboardingDismissed: false,
   };
 
@@ -226,10 +228,12 @@ export class StageController {
       publicUrl: settings.publicUrl ?? null,
       captionChannelColors: settings.captionChannelColors ?? {},
       autoUpdate: settings.autoUpdate ?? { enabled: false, dayOfWeek: null, hour: 3 },
+      reconnectSchedule: settings.reconnectSchedule ?? { ...DEFAULT_RECONNECT_SCHEDULE },
       onboardingDismissed: settings.onboardingDismissed ?? false,
     };
     this.publicUrl = settings.publicUrl ?? null;
     this.applyRemoteUrl();
+    serviceWindow.setSchedule(this.state.reconnectSchedule);
     this.startUpdateChecks();
 
     await this.loadAllViewRawSlots(settings.serviceTypeId);
@@ -300,6 +304,7 @@ export class StageController {
     this.pcoSecret = secret;
     if (countdownTarget) this.pcoCountdownTarget = countdownTarget;
     this.state = { ...this.state, pcoConfigured: !!(appId && secret) };
+    void this.refreshServiceWindows(); // creds (re)applied — (re)compute reconnect windows
     // No broadcast here — called as part of IntegrationManager's setConfig which broadcasts separately.
   }
 
@@ -935,6 +940,51 @@ export class StageController {
     await settingsStore.patch({ autoUpdate: next });
     this.broadcast();
     return this.state;
+  }
+
+  // ── Time-aware reconnect scheduling ───────────────────────────────────
+
+  async setReconnectSchedule(partial: Partial<ReconnectSchedule>): Promise<StageState> {
+    const next: ReconnectSchedule = { ...this.state.reconnectSchedule, ...partial };
+    next.leadMin = Math.min(1440, Math.max(0, Math.round(next.leadMin)));
+    next.tailMin = Math.min(1440, Math.max(0, Math.round(next.tailMin)));
+    next.dormantMin = Math.min(1440, Math.max(1, Math.round(next.dormantMin)));
+    console.log(`[stage-controller] setReconnectSchedule →`, next);
+    this.state = { ...this.state, reconnectSchedule: next };
+    await settingsStore.patch({ reconnectSchedule: next });
+    serviceWindow.setSchedule(next);
+    void this.refreshServiceWindows(); // lead/tail shift the window bounds
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Recompute the upcoming rehearsal/service windows (from PCO) that gate the
+   *  integration reconnect cadence. Cheap (cached PCO calls); runs on refresh +
+   *  when creds/allowed/schedule change. Never throws. */
+  async refreshServiceWindows(): Promise<void> {
+    if (!this.pcoAppId || !this.pcoSecret) { serviceWindow.setWindows([]); return; }
+    const { leadMin, tailMin } = this.state.reconnectSchedule;
+    const leadMs = leadMin * 60_000, tailMs = tailMin * 60_000;
+    try {
+      const allTypes = await pcoService.listServiceTypes(this.pcoAppId, this.pcoSecret);
+      const allowed = this.state.allowedServiceTypeIds;
+      const types = allowed.length ? allTypes.filter((t) => allowed.includes(t.id)) : allTypes;
+      const windows: { open: number; close: number }[] = [];
+      for (const t of types) {
+        const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, t.id).catch(() => [] as PlanDTO[]);
+        for (const p of plans.slice(0, 2)) { // next couple plans per type is plenty
+          const times = await pcoService.listPlanTimes(this.pcoAppId, this.pcoSecret, t.id, p.id).catch(() => []);
+          const starts = times.map((x) => Date.parse(x.startsAt)).filter(Number.isFinite);
+          if (!starts.length) continue;
+          const ends = times.map((x) => (x.endsAt ? Date.parse(x.endsAt) : NaN)).filter(Number.isFinite);
+          windows.push({ open: Math.min(...starts) - leadMs, close: (ends.length ? Math.max(...ends) : Math.max(...starts)) + tailMs });
+        }
+      }
+      serviceWindow.setWindows(windows);
+      console.log(`[stage-controller] reconnect windows recomputed: ${windows.length}`);
+    } catch (err) {
+      console.warn("[stage-controller] refreshServiceWindows failed:", err instanceof Error ? err.message : err);
+    }
   }
 
   /** Start the hourly update-availability check + scheduled auto-apply. */
@@ -1685,6 +1735,8 @@ export class StageController {
     // service times) stays cached instead of being re-fetched every interval.
     if (full) pcoService.clearCache();
     else if (this.state.planId) pcoService.clearPlanCache(this.state.planId);
+
+    void this.refreshServiceWindows(); // keep reconnect windows current with PCO
 
     if (this.state.planMode === "auto") {
       await this.selectGlobalNextPlan();

@@ -20,12 +20,13 @@ import * as https from "node:https";
 
 import type { DeviceChannel, DeviceProvider, DeviceStatus } from "../../types/devices.js";
 import type { ConfigField, ConnectionState } from "../../types/integrations.js";
+import { serviceWindow } from "../../services/service-window.js";
 
 const DEBUG = !!process.env.SPECTERA_DEBUG;
 const DEFAULT_PORT = 443;
 const USERNAME = "controlSennheiser"; // fixed per Sennheiser SSCv2 auth
 const RECONNECT_BASE_MS = 3_000;
-const RECONNECT_MAX_MS = 30_000;
+const RECONNECT_MAX_MS = 3_600_000; // internal ceiling; the service-window scheduler applies the real cap
 // Resource branches we ask the base station to push.
 const SUBSCRIBE_PATHS = ["/api/mts/paired/all", "/api/rf/channels", "/api/audio/links"];
 
@@ -177,7 +178,7 @@ export class SennheiserSpectera implements DeviceProvider {
 
   private scheduleReconnect(): void {
     if (!this.running || this.reconnectTimer) return;
-    const delay = this.reconnectMs;
+    const delay = serviceWindow.capDelayMs(this.reconnectMs);
     this.reconnectMs = Math.min(this.reconnectMs * 2, RECONNECT_MAX_MS);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;

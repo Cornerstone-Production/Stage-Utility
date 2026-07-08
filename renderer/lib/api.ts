@@ -268,6 +268,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "update:setAuto":
       return post<T>("/api/update/auto", p);
 
+    case "settings:setReconnectSchedule":
+      return post<T>("/api/reconnect-schedule", p);
+
     case "update:setTrack":
       return post<T>("/api/update/track", p);
 
