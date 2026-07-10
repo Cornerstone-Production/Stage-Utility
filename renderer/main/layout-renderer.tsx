@@ -946,7 +946,7 @@ function GraphToggle({ mode, onToggle, stroke, H }: { mode: "live" | "recorded";
         transition: "background 120ms ease, opacity 120ms ease",
       }}
     >
-      <span style={{ width: dot, height: dot, borderRadius: "50%", background: mode === "live" ? "#22c55e" : "#f59e0b", flex: "0 0 auto" }} />
+      <span style={{ width: dot, height: dot, borderRadius: "50%", background: mode === "live" ? "var(--su-live-9)" : "var(--su-warn-9)", flex: "0 0 auto" }} />
       {mode === "live" ? "LIVE" : "REC"}
     </button>
   );
@@ -1514,7 +1514,7 @@ function ServiceOrderObject({
               borderRadius: `${0.008 * H}px`,
               padding: `${base * 0.1}px ${base * 0.3}px`,
               background: isLive ? "rgba(45,212,150,0.16)" : undefined,
-              borderLeft: isLive ? `${0.004 * H}px solid var(--green-9, #2dd496)` : `${0.004 * H}px solid transparent`,
+              borderLeft: isLive ? `${0.004 * H}px solid var(--su-live-9)` : `${0.004 * H}px solid transparent`,
               borderTop: divider ? "1px solid rgba(255,255,255,0.07)" : undefined,
             }}
           >

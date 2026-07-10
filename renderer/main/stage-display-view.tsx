@@ -169,7 +169,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
           >
             {timer ? (
               <div className="flex flex-col items-center gap-1">
-                <span className={`text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums ${over ? "text-red-10" : "text-[#7fe3c4]"}`}>
+                <span className={`text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums ${over ? "text-red-10" : "text-live-11"}`}>
                   {fmtDuration(timer.seconds)}
                 </span>
                 {timer.label && (
@@ -288,7 +288,7 @@ function Cell({
   children: React.ReactNode;
 }) {
   const border =
-    accent === "green" ? "border-[#2dd49622] bg-[#2dd49614]"
+    accent === "green" ? "border-live-9/15 bg-live-9/8"
     : accent === "red" ? "border-red-a6 bg-red-a3"
     : accent === "amber" ? "border-amber-a5 bg-amber-a2"
     : "border-white/8 bg-white/4";

@@ -105,8 +105,8 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
             const isCurrent = pcoLive?.currentItemId === it.id;
             const max = maxByItem.get(it.id) ?? null;
             return (
-              <div key={it.id} className={`flex items-center gap-4 px-4 py-3 ${isCurrent ? "bg-[#2dd49618]" : ""}`}>
-                <span className={`flex-1 min-w-0 truncate text-[clamp(1rem,3vmin,1.6rem)] font-medium ${isCurrent ? "text-[#7fe3c4]" : "text-white/85"}`}>
+              <div key={it.id} className={`flex items-center gap-4 px-4 py-3 ${isCurrent ? "bg-live-9/10" : ""}`}>
+                <span className={`flex-1 min-w-0 truncate text-[clamp(1rem,3vmin,1.6rem)] font-medium ${isCurrent ? "text-live-11" : "text-white/85"}`}>
                   {it.title}
                 </span>
                 <span className={`shrink-0 tabular-nums text-[clamp(1.1rem,3.4vmin,1.9rem)] font-medium ${splColor(max)}`}>

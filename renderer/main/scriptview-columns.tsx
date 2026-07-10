@@ -110,7 +110,7 @@ export function buildScriptViewColumns(spec: ScriptViewSpec, clocks: Map<string,
       const meta = parts.join("  ·  ");
       return (
         <div className="flex flex-col leading-tight">
-          <span className={`font-medium ${isCurrent ? "text-[#7fe3c4]" : "text-white/90"}`}>{it.title}</span>
+          <span className={`font-medium ${isCurrent ? "text-live-11" : "text-white/90"}`}>{it.title}</span>
           {meta && <span className="text-caption2 italic text-[#8ab4ff]/85">{meta}</span>}
           {spec.showItemNotes && it.description && <span className="text-caption2 text-white/55 whitespace-pre-line mt-0.5">{it.description}</span>}
         </div>

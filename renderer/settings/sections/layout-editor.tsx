@@ -327,7 +327,7 @@ function dashboardTemplate(): LayoutObject[] {
   const rowH = 0.29, y1 = 0.03, y2 = y1 + rowH + g;
   return [
     tile(x1, y1, colW, rowH, "Current time", body({ type: "clock", showSeconds: true, format: "12h" }, "#ffffff", 0.09)),
-    tile(x2, y1, colW, rowH, "Service timer", body({ type: "countdown-timer" }, "#7fe3c4", 0.09)),
+    tile(x2, y1, colW, rowH, "Service timer", body({ type: "countdown-timer" }, "#86efac", 0.09)),
     tile(x1, y2, colW, rowH, "Now", body({ type: "current-service-item" }, "#ffffff", 0.05)),
     tile(x2, y2, colW, rowH, "Up next", body({ type: "next-service-item" }, "rgba(255,255,255,0.7)", 0.05)),
     {

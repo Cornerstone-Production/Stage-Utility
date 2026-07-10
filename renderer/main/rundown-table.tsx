@@ -101,7 +101,7 @@ export function RundownTable({
             <tr
               key={it.id}
               ref={isCurrent ? currentRef : undefined}
-              className={`border-b border-white/5 align-top ${isCurrent ? "bg-[#2dd49618]" : ""}`}
+              className={`border-b border-white/5 align-top ${isCurrent ? "bg-live-9/10" : ""}`}
               style={accentActive ? { backgroundColor: `${accentColor}1f`, boxShadow: `inset 3px 0 0 0 ${accentColor}` } : undefined}
             >
               {columns.map((c) => (

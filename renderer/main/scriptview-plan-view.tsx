@@ -116,14 +116,14 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         </div>
         <div className="ml-auto flex items-center gap-4 tabular-nums">
           {liveNow && (
-            <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-[#7fe3c4]">
-              <span className="size-2 rounded-full bg-[#22c55e]" /> Live
+            <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-live-11">
+              <span className="size-2 rounded-full bg-live-9" /> Live
             </span>
           )}
           {timer && (
             <div className="flex flex-col items-end leading-none">
               <span className="text-caption2 uppercase tracking-wider text-white/40">{over ? "Over" : timer.mode === "preservice" ? "Starts in" : "Remaining"}</span>
-              <span className={`text-title3 font-medium ${over ? "text-red-10" : "text-[#7fe3c4]"}`}>{fmtDuration(timer.seconds)}</span>
+              <span className={`text-title3 font-medium ${over ? "text-red-10" : "text-live-11"}`}>{fmtDuration(timer.seconds)}</span>
             </div>
           )}
           <div className="flex flex-col items-end leading-none">

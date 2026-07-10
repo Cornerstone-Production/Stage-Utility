@@ -79,7 +79,7 @@ export function ScriptView({ displayId, showLiveControls }: ScriptViewProps) {
     { key: "len", header: "Len", align: "right", width: "4rem", cellClassName: "text-white/55", render: (it) => fmtLen(it.lengthSec) },
     {
       key: "title", header: "Item",
-      render: (it, { isCurrent }) => <span className={`font-medium ${isCurrent ? "text-[#7fe3c4]" : "text-white/90"}`}>{it.title}</span>,
+      render: (it, { isCurrent }) => <span className={`font-medium ${isCurrent ? "text-live-11" : "text-white/90"}`}>{it.title}</span>,
     },
     ...cats.map((c): RundownColumn => ({
       key: `note:${c}`, header: c, cellClassName: "text-white/60 whitespace-pre-line",
@@ -112,7 +112,7 @@ export function ScriptView({ displayId, showLiveControls }: ScriptViewProps) {
           {timer && (
             <div className="flex flex-col items-end leading-none">
               <span className="text-caption2 uppercase tracking-wider text-white/40">{over ? "Over" : timer.mode === "preservice" ? "Starts in" : "Remaining"}</span>
-              <span className={`text-title3 font-medium ${over ? "text-red-10" : "text-[#7fe3c4]"}`}>{fmtDuration(timer.seconds)}</span>
+              <span className={`text-title3 font-medium ${over ? "text-red-10" : "text-live-11"}`}>{fmtDuration(timer.seconds)}</span>
             </div>
           )}
           <div className="flex flex-col items-end leading-none">

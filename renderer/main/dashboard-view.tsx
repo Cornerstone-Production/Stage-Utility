@@ -159,7 +159,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
             <div className="flex flex-col items-center gap-1.5">
               <span
                 className={`text-[clamp(2rem,9vmin,5rem)] font-medium leading-none tabular-nums ${
-                  over ? "text-red-10" : "text-[#7fe3c4]"
+                  over ? "text-red-10" : "text-live-11"
                 }`}
               >
                 {fmtDuration(timer.seconds)}
@@ -278,7 +278,7 @@ function Tile({
 }) {
   const border =
     accent === "green"
-      ? "border-[#2dd49622] bg-[#2dd49614]"
+      ? "border-live-9/15 bg-live-9/8"
       : accent === "red"
         ? "border-red-a6 bg-red-a3"
         : "border-white/8 bg-white/4";
