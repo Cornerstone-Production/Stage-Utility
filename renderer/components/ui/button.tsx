@@ -22,7 +22,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         className={cn(
           // Base
           "inline-flex items-center justify-center gap-1.5 rounded-md font-medium",
-          "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-8",
+          "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
           "disabled:pointer-events-none disabled:opacity-40 select-none",
           // Size
           size === "small" && !iconOnly && "h-6 px-2 text-[12px]",
@@ -31,16 +31,16 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           size === "medium" && iconOnly && "h-8 w-8 p-0 text-[13px]",
           // Variant
           variant === "accent" && [
-            "bg-blue-9 text-white",
-            "hover:bg-blue-10 active:bg-blue-11",
+            "bg-accent text-white",
+            "hover:bg-accent-hover active:bg-accent-active",
           ],
           variant === "filled" && [
-            "bg-gray-a3 text-gray-12",
-            "hover:bg-gray-a4 active:bg-gray-a5",
+            "bg-fill text-fg",
+            "hover:bg-fill-hover active:bg-fill-active",
           ],
           variant === "transparent" && [
-            "bg-transparent text-gray-11",
-            "hover:bg-gray-a3 active:bg-gray-a4",
+            "bg-transparent text-fg-muted",
+            "hover:bg-fill active:bg-fill-hover",
           ],
           className,
         )}

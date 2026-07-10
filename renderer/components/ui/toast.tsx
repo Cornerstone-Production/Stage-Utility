@@ -66,7 +66,7 @@ export function Toaster() {
           }}
           className={cn(
             "flex items-center gap-2 rounded-lg border px-4 py-3 shadow-lg",
-            "bg-gray-2 border-gray-a6 text-gray-12",
+            "bg-surface border-line-strong text-fg",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-bottom-full",
             "data-[state=closed]:fade-out-80",
@@ -82,7 +82,7 @@ export function Toaster() {
             {t.message}
           </ToastPrimitive.Description>
           <ToastPrimitive.Close asChild>
-            <button className="ml-1 rounded p-0.5 text-gray-9 hover:text-gray-12 transition-colors">
+            <button className="ml-1 rounded p-0.5 text-gray-9 hover:text-fg transition-colors">
               <XIcon className="size-3.5" />
             </button>
           </ToastPrimitive.Close>

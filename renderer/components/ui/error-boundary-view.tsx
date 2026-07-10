@@ -7,12 +7,12 @@ function ErrorDisplay({ error, reset }: { error: Error; reset?: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">
       <AlertCircleIcon className="size-8 text-red-10" />
-      <p className="text-[17px] font-semibold text-gray-12">Something went wrong</p>
+      <p className="text-[17px] font-semibold text-fg">Something went wrong</p>
       <p className="text-[13px] text-gray-9 max-w-md">{error.message}</p>
       {reset && (
         <button
           onClick={reset}
-          className="mt-2 rounded-md px-3 py-1.5 text-[13px] bg-gray-a3 hover:bg-gray-a4 text-gray-12 transition-colors"
+          className="mt-2 rounded-md px-3 py-1.5 text-[13px] bg-fill hover:bg-fill-hover text-fg transition-colors"
         >
           Try again
         </button>

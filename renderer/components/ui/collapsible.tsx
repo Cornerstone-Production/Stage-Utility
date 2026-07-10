@@ -38,7 +38,7 @@ export function Collapsible({
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          className="flex flex-1 min-w-0 items-center gap-1.5 py-1 text-caption1 font-medium text-gray-10 hover:text-gray-12 transition-colors text-left"
+          className="flex flex-1 min-w-0 items-center gap-1.5 py-1 text-caption1 font-medium text-fg-subtle hover:text-fg transition-colors text-left"
         >
           <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
           <span className="min-w-0">{label}</span>

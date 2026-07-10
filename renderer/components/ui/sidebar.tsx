@@ -46,7 +46,7 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {}
 export function Sidebar({ className, children, ...props }: SidebarProps) {
   return (
     <div
-      className={cn("flex flex-col h-full bg-gray-2 border-r border-gray-a4", className)}
+      className={cn("flex flex-col h-full bg-surface border-r border-line", className)}
       {...props}
     >
       {children}
@@ -164,8 +164,8 @@ export function SidebarListItem({
         "text-[13px] font-medium transition-colors",
         railed && "justify-center px-0",
         isActive
-          ? "bg-blue-9 text-white"
-          : "text-gray-11 hover:bg-gray-a3 hover:text-gray-12",
+          ? "bg-accent text-white"
+          : "text-fg-muted hover:bg-fill hover:text-fg",
         className,
       )}
       aria-current={isActive ? "page" : undefined}

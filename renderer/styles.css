@@ -170,6 +170,11 @@
   --color-accent-hover:   var(--su-accent-hover);
   --color-accent-active:  var(--su-accent-active);
   --color-on-accent:      var(--su-on-accent);
+  --color-focus:          var(--su-focus);
+  --color-field:          var(--su-field);
+  --color-fill:           var(--su-fill);
+  --color-fill-hover:     var(--su-fill-hover);
+  --color-fill-active:    var(--su-fill-active);
   --color-live-9:         var(--su-live-9);
   --color-live-11:        var(--su-live-11);
   --color-danger-9:       var(--su-danger-9);
@@ -207,6 +212,11 @@
   --su-accent-hover:   var(--blue-10);
   --su-accent-active:  var(--blue-11);
   --su-on-accent:      #ffffff;
+  --su-focus:          var(--blue-8);   /* focus ring */
+  --su-field:          var(--gray-a2);  /* input / control fill */
+  --su-fill:           var(--gray-a3);  /* interaction fill (ghost/filled) */
+  --su-fill-hover:     var(--gray-a4);
+  --su-fill-active:    var(--gray-a5);
   --su-live-9:         var(--live-9);
   --su-live-11:        var(--live-11);
   --su-danger-9:       var(--red-9);

@@ -72,8 +72,8 @@ export function NumberInput({
   return (
     <div
       className={cn(
-        "inline-flex h-7 w-full items-stretch overflow-hidden rounded-md border border-gray-a6 bg-gray-a2",
-        "transition-colors focus-within:border-blue-8 focus-within:ring-1 focus-within:ring-blue-8",
+        "inline-flex h-7 w-full items-stretch overflow-hidden rounded-md border border-line-strong bg-field",
+        "transition-colors focus-within:border-focus focus-within:ring-1 focus-within:ring-focus",
         disabled && "cursor-not-allowed opacity-50",
         className,
       )}
@@ -101,12 +101,12 @@ export function NumberInput({
           }
         }}
         onChange={(e) => commitText(e.target.value)}
-        className={cn("min-w-0 flex-1 bg-transparent px-2.5 py-1 text-[13px] text-gray-12 tabular-nums outline-none", NO_SPINNER)}
+        className={cn("min-w-0 flex-1 bg-transparent px-2.5 py-1 text-[13px] text-fg tabular-nums outline-none", NO_SPINNER)}
       />
       {suffix && (
         <span className="pointer-events-none flex select-none items-center pr-1 text-caption2 text-gray-8">{suffix}</span>
       )}
-      <div className="flex w-6 shrink-0 flex-col border-l border-gray-a6">
+      <div className="flex w-6 shrink-0 flex-col border-l border-line-strong">
         <button
           type="button"
           tabIndex={-1}
@@ -114,7 +114,7 @@ export function NumberInput({
           aria-label="Increase"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => bump(1)}
-          className="flex flex-1 items-center justify-center text-gray-9 transition-colors hover:bg-gray-a4 hover:text-gray-12"
+          className="flex flex-1 items-center justify-center text-gray-9 transition-colors hover:bg-fill-hover hover:text-fg"
         >
           <ChevronUpIcon className="size-3" />
         </button>
@@ -125,7 +125,7 @@ export function NumberInput({
           aria-label="Decrease"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => bump(-1)}
-          className="flex flex-1 items-center justify-center border-t border-gray-a6 text-gray-9 transition-colors hover:bg-gray-a4 hover:text-gray-12"
+          className="flex flex-1 items-center justify-center border-t border-line-strong text-gray-9 transition-colors hover:bg-fill-hover hover:text-fg"
         >
           <ChevronDownIcon className="size-3" />
         </button>

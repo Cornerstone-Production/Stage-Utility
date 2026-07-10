@@ -39,7 +39,7 @@ export function UnsavedBanner({
         )}
       >
         <TriangleAlertIcon className="size-3.5 shrink-0 text-amber-11" />
-        <span className="text-caption2 font-medium text-gray-12">Unsaved</span>
+        <span className="text-caption2 font-medium text-fg">Unsaved</span>
         <Button variant="transparent" size="small" onClick={onDiscard} disabled={saving}>
           Discard
         </Button>
@@ -57,7 +57,7 @@ export function UnsavedBanner({
       )}
     >
       <TriangleAlertIcon className="size-4 shrink-0 text-amber-11" />
-      <span className="flex-1 min-w-0 text-caption1 font-medium text-gray-12">{message}</span>
+      <span className="flex-1 min-w-0 text-caption1 font-medium text-fg">{message}</span>
       <Button variant="transparent" size="small" onClick={onDiscard} disabled={saving}>
         Discard
       </Button>
