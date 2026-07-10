@@ -152,6 +152,86 @@
   --color-amber-a10: var(--amber-a10);
   --color-amber-a11: var(--amber-a11);
   --color-amber-a12: var(--amber-a12);
+
+  /* ── Semantic design tokens (see DESIGN_TOKENS_PROPOSAL.md) ──
+     These resolve per context: settings (Radix, light/dark) vs .kiosk (stage).
+     Generates utilities: bg-surface, text-fg, text-fg-muted, border-line,
+     bg-live-9, text-live-11, bg-danger-9, text-warn-11, … */
+  --color-bg:             var(--su-bg);
+  --color-surface:        var(--su-surface);
+  --color-surface-raised: var(--su-surface-raised);
+  --color-line:           var(--su-line);
+  --color-line-strong:    var(--su-line-strong);
+  --color-fg:             var(--su-fg);
+  --color-fg-muted:       var(--su-fg-muted);
+  --color-fg-subtle:      var(--su-fg-subtle);
+  --color-fg-faint:       var(--su-fg-faint);
+  --color-accent:         var(--su-accent);
+  --color-accent-hover:   var(--su-accent-hover);
+  --color-accent-active:  var(--su-accent-active);
+  --color-on-accent:      var(--su-on-accent);
+  --color-live-9:         var(--su-live-9);
+  --color-live-11:        var(--su-live-11);
+  --color-danger-9:       var(--su-danger-9);
+  --color-danger-11:      var(--su-danger-11);
+  --color-warn-9:         var(--su-warn-9);
+  --color-warn-11:        var(--su-warn-11);
+  --color-ok-9:           var(--su-ok-9);
+  --color-ok-11:          var(--su-ok-11);
+  --color-info-9:         var(--su-info-9);
+  --color-info-11:        var(--su-info-11);
+}
+
+/* ── Design-token layer (Tier 1 primitives + Tier 2 semantic vars) ──
+   See DESIGN_TOKENS_PROPOSAL.md. One source of truth for color across both the
+   settings UI (Radix, light/dark) and the kiosk stage (near-black, white-opacity).
+   Seeded with the pre-existing values so adopting this layer is non-breaking. */
+:root {
+  /* Tier 1 — brand primitives */
+  --live-9: #22c55e;   /* emerald — chosen live-accent fill (dots, tile tints) */
+  --live-11: #86efac;  /* emerald — live-accent text (LIVE, on-pace countdown) */
+  --cyan-9: #22d3d3;   /* reserved palette color — saved for future use */
+  --cyan-11: #99f0f0;
+
+  /* Tier 2 — semantic tokens (settings defaults; Radix scales flip with .dark) */
+  --su-bg:             var(--gray-1);
+  --su-surface:        var(--gray-2);
+  --su-surface-raised: var(--gray-3);
+  --su-line:           var(--gray-a4);
+  --su-line-strong:    var(--gray-a6);
+  --su-fg:             var(--gray-12);
+  --su-fg-muted:       var(--gray-11);
+  --su-fg-subtle:      var(--gray-10);
+  --su-fg-faint:       var(--gray-8);
+  --su-accent:         var(--blue-9);
+  --su-accent-hover:   var(--blue-10);
+  --su-accent-active:  var(--blue-11);
+  --su-on-accent:      #ffffff;
+  --su-live-9:         var(--live-9);
+  --su-live-11:        var(--live-11);
+  --su-danger-9:       var(--red-9);
+  --su-danger-11:      var(--red-11);
+  --su-warn-9:         #f59e0b;
+  --su-warn-11:        var(--amber-11);
+  --su-ok-9:           var(--green-9);
+  --su-ok-11:          var(--green-11);
+  --su-info-9:         var(--blue-9);
+  --su-info-11:        var(--blue-11);
+}
+
+/* Stage (kiosk) overrides — always-dark near-black surfaces + white-opacity text.
+   Scoped to the `.kiosk` root class (set on index.html's <html>). Placed after
+   :root so it wins the cascade. Accent + status tokens inherit the brand values. */
+.kiosk {
+  --su-bg:             var(--kiosk-bg);
+  --su-surface:        rgba(255, 255, 255, 0.04);
+  --su-surface-raised: rgba(255, 255, 255, 0.06);
+  --su-line:           rgba(255, 255, 255, 0.09);
+  --su-line-strong:    rgba(255, 255, 255, 0.15);
+  --su-fg:             #ffffff;
+  --su-fg-muted:       rgba(255, 255, 255, 0.70);
+  --su-fg-subtle:      rgba(255, 255, 255, 0.45);
+  --su-fg-faint:       rgba(255, 255, 255, 0.25);
 }
 
 /* ── Brand title face (self-hosted, no CDN — kiosks run on a closed LAN) ── */
