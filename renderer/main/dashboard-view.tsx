@@ -86,7 +86,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         <div className="shrink-0 ml-3 flex items-center gap-2.5 relative z-10">
           <a
             href="/"
-            className="flex items-center gap-2 text-white/70 rounded hover:opacity-80 transition-opacity"
+            className="flex items-center gap-2 text-fg-muted rounded hover:opacity-80 transition-opacity"
             title="Back to home"
             aria-label="Back to home"
           >
@@ -104,7 +104,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
           {displayName && (
             <>
               <span className="w-px h-4 bg-white/15 shrink-0" aria-hidden="true" />
-              <span className="text-caption1 font-medium text-white/40 select-none truncate" style={{ letterSpacing: "0.02em" }}>
+              <span className="text-caption1 font-medium text-fg-subtle select-none truncate" style={{ letterSpacing: "0.02em" }}>
                 {displayName}
               </span>
             </>
@@ -132,11 +132,11 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         {/* Clock */}
         <Tile label="Current time">
           <div className="flex items-baseline gap-2 tabular-nums">
-            <span className="text-[clamp(2rem,9vmin,5rem)] font-medium text-white/90 leading-none">
+            <span className="text-[clamp(2rem,9vmin,5rem)] font-medium text-fg leading-none">
               {h12}:{mm}
             </span>
-            <span className="text-[clamp(1rem,4vmin,2rem)] text-white/45 leading-none">{ss}</span>
-            <span className="text-[clamp(0.8rem,2.5vmin,1.25rem)] text-white/40 leading-none">{ampm}</span>
+            <span className="text-[clamp(1rem,4vmin,2rem)] text-fg-subtle leading-none">{ss}</span>
+            <span className="text-[clamp(0.8rem,2.5vmin,1.25rem)] text-fg-subtle leading-none">{ampm}</span>
           </div>
         </Tile>
 
@@ -164,12 +164,12 @@ export function DashboardView({ displayId }: DashboardViewProps) {
               >
                 {fmtDuration(timer.seconds)}
               </span>
-              <span className="text-caption1 text-white/45 truncate max-w-full">
+              <span className="text-caption1 text-fg-subtle truncate max-w-full">
                 {timer.label ?? (timer.mode === "preservice" ? "Service start" : "Current item")}
               </span>
             </div>
           ) : (
-            <span className="text-body text-white/35">No live service</span>
+            <span className="text-body text-fg-faint">No live service</span>
           )}
         </Tile>
 
@@ -177,39 +177,39 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         <Tile label="ProPresenter · now">
           {proConnected ? (
             <div className="flex flex-col gap-2 w-full px-1">
-              <span className="text-[clamp(1.1rem,4vmin,2rem)] font-medium text-white/90 leading-tight truncate">
+              <span className="text-[clamp(1.1rem,4vmin,2rem)] font-medium text-fg leading-tight truncate">
                 {pro?.currentItem ?? "—"}
               </span>
               {pro?.slideCount != null && pro?.slideIndex != null ? (
                 <div className="flex items-center gap-2.5">
-                  <span className="text-caption1 text-white/45 shrink-0 tabular-nums">
+                  <span className="text-caption1 text-fg-subtle shrink-0 tabular-nums">
                     Slide {pro.slideIndex} of {pro.slideCount}
                   </span>
                   <span className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
                     <span
-                      className="block h-full bg-white/50"
+                      className="block h-full bg-surface0"
                       style={{ width: `${Math.min(100, Math.round((pro.slideIndex / pro.slideCount) * 100))}%` }}
                     />
                   </span>
-                  <span className="text-caption1 text-white/60 shrink-0 tabular-nums">
+                  <span className="text-caption1 text-fg-muted shrink-0 tabular-nums">
                     {pro.slidesRemaining ?? 0} left
                   </span>
                 </div>
               ) : null}
             </div>
           ) : (
-            <span className="text-body text-white/35">ProPresenter offline</span>
+            <span className="text-body text-fg-faint">ProPresenter offline</span>
           )}
         </Tile>
 
         {/* ProPresenter — next */}
         <Tile label="Up next">
           {proConnected ? (
-            <span className="text-[clamp(1.1rem,4vmin,2rem)] font-medium text-white/70 leading-tight truncate px-1">
+            <span className="text-[clamp(1.1rem,4vmin,2rem)] font-medium text-fg-muted leading-tight truncate px-1">
               {pro?.nextItem ?? "—"}
             </span>
           ) : (
-            <span className="text-body text-white/35">—</span>
+            <span className="text-body text-fg-faint">—</span>
           )}
         </Tile>
       </div>
@@ -230,14 +230,14 @@ function TranscriptStrip({ lines }: { lines: TranscriptLineDTO[] }) {
   const last = lines[lines.length - 1];
   const speaker = channelLabel(last);
   return (
-    <div className="shrink-0 rounded-2xl border border-white/8 bg-white/4 px-4 py-3 flex items-center gap-3 min-h-0">
+    <div className="shrink-0 rounded-2xl border border-line bg-surface px-4 py-3 flex items-center gap-3 min-h-0">
       <span
         className="text-caption2 font-semibold uppercase tracking-wider shrink-0 max-w-[28%] truncate"
         style={{ letterSpacing: "0.1em", color: speaker ? channelColor(last.channel) : "rgba(255,255,255,0.4)" }}
       >
         {speaker ?? "Transcript"}
       </span>
-      <span className={`text-[clamp(0.9rem,2.4vmin,1.4rem)] truncate ${last.isFinal ? "text-white/85" : "text-white/50"}`}>
+      <span className={`text-[clamp(0.9rem,2.4vmin,1.4rem)] truncate ${last.isFinal ? "text-fg" : "text-fg-subtle"}`}>
         {last.text}
       </span>
     </div>
@@ -249,18 +249,18 @@ function SplStrip({ spl }: { spl: SplMetricsDTO | null }) {
   const r = resolveSplValue(spl);
   if (!r) return null;
   return (
-    <div className="shrink-0 rounded-2xl border border-white/8 bg-white/4 px-4 py-3 flex items-center gap-3 min-h-0">
+    <div className="shrink-0 rounded-2xl border border-line bg-surface px-4 py-3 flex items-center gap-3 min-h-0">
       <span
-        className="text-caption2 font-semibold uppercase tracking-wider shrink-0 text-white/40"
+        className="text-caption2 font-semibold uppercase tracking-wider shrink-0 text-fg-subtle"
         style={{ letterSpacing: "0.1em" }}
       >
         SPL
       </span>
-      <span className="text-[clamp(1.4rem,5vmin,2.4rem)] font-medium text-white/90 leading-none tabular-nums">
+      <span className="text-[clamp(1.4rem,5vmin,2.4rem)] font-medium text-fg leading-none tabular-nums">
         {Math.round(r.value)}
-        <span className="text-[0.5em] text-white/45 ml-1">dB</span>
+        <span className="text-[0.5em] text-fg-subtle ml-1">dB</span>
       </span>
-      <span className="text-caption1 text-white/40 ml-auto truncate">
+      <span className="text-caption1 text-fg-subtle ml-auto truncate">
         {r.metricKey} · {r.meterLabel}
       </span>
     </div>
@@ -281,8 +281,8 @@ function Tile({
       ? "border-live-9/15 bg-live-9/8"
       : accent === "red"
         ? "border-red-a6 bg-red-a3"
-        : "border-white/8 bg-white/4";
-  const labelColor = accent === "green" ? "text-[#5dcaa5]" : accent === "red" ? "text-red-10" : "text-white/40";
+        : "border-line bg-surface";
+  const labelColor = accent === "green" ? "text-[#5dcaa5]" : accent === "red" ? "text-red-10" : "text-fg-subtle";
   return (
     <div className={`flex flex-col items-center justify-center rounded-2xl border p-4 max-sm:p-3 min-h-0 ${border}`}>
       <span

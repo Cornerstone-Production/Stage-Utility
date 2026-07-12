@@ -101,15 +101,15 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Header: back + brand + plan · layout switcher · countdown · clock */}
-      <div className="flex items-center gap-4 px-4 h-14 shrink-0 border-b border-white/10 bg-black/40">
+      <div className="flex items-center gap-4 px-4 h-14 shrink-0 border-b border-line bg-black/40">
         <a href="/scriptview" className="flex items-center justify-center rounded-lg size-8 shrink-0 transition-colors hover:bg-white/10" title="All services" aria-label="All services">
-          <ArrowLeftIcon className="size-4 text-white/60" />
+          <ArrowLeftIcon className="size-4 text-fg-muted" />
         </a>
         <div className="flex items-center gap-2 min-w-0">
-          {state?.appLogo && <BrandLogo logo={state.appLogo} monochrome className="size-6 rounded text-white/90" />}
+          {state?.appLogo && <BrandLogo logo={state.appLogo} monochrome className="size-6 rounded text-fg" />}
           <div className="flex flex-col min-w-0 leading-tight">
-            <span className="text-caption1 font-title text-white/85 truncate">{rundown?.planSeriesTitle ?? rundown?.planTitle ?? "ScriptView"}</span>
-            <span className="text-caption2 text-white/45 truncate">
+            <span className="text-caption1 font-title text-fg truncate">{rundown?.planSeriesTitle ?? rundown?.planTitle ?? "ScriptView"}</span>
+            <span className="text-caption2 text-fg-subtle truncate">
               {[rundown?.planSeriesTitle ? rundown?.planTitle : null, rundown?.planDates, svcTimes || null].filter(Boolean).join("  ·  ")}
             </span>
           </div>
@@ -122,13 +122,13 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
           )}
           {timer && (
             <div className="flex flex-col items-end leading-none">
-              <span className="text-caption2 uppercase tracking-wider text-white/40">{over ? "Over" : timer.mode === "preservice" ? "Starts in" : "Remaining"}</span>
+              <span className="text-caption2 uppercase tracking-wider text-fg-subtle">{over ? "Over" : timer.mode === "preservice" ? "Starts in" : "Remaining"}</span>
               <span className={`text-title3 font-medium ${over ? "text-red-10" : "text-live-11"}`}>{fmtDuration(timer.seconds)}</span>
             </div>
           )}
           <div className="flex flex-col items-end leading-none">
-            <span className="text-caption2 uppercase tracking-wider text-white/40">Clock</span>
-            <span className="text-title3 font-medium text-white/90">{h12}:{mm}<span className="text-white/45 text-[0.7em]">:{ss} {ampm}</span></span>
+            <span className="text-caption2 uppercase tracking-wider text-fg-subtle">Clock</span>
+            <span className="text-title3 font-medium text-fg">{h12}:{mm}<span className="text-fg-subtle text-[0.7em]">:{ss} {ampm}</span></span>
           </div>
           {/* Layout switcher */}
           <select
@@ -137,7 +137,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
               const id = e.target.value;
               window.location.href = scriptViewUrl(typeNameForUrl, id, allLayouts.find((l) => l.id === id)?.name);
             }}
-            className="rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-caption1 text-white/85 outline-none focus:border-white/25"
+            className="rounded-lg border border-line bg-black/30 px-3 py-1.5 text-caption1 text-fg outline-none focus:border-line-strong"
             title="Layout"
           >
             {allLayouts.map((l) => <option key={l.id} value={l.id} className="bg-[#14161c]">{l.name}</option>)}
@@ -152,7 +152,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         ) : !rundown ? (
           <div className="flex items-center justify-center h-full"><Loader2Icon className="size-8 text-gray-7 animate-spin" /></div>
         ) : items.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-white/35 text-body">
+          <div className="flex items-center justify-center h-full text-fg-faint text-body">
             {rundown.planId ? "No items in this plan" : "No upcoming plan for this service type"}
           </div>
         ) : (
@@ -161,7 +161,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
             columns={columns}
             currentItemId={currentItemId}
             accentDepartment={layout?.accentDepartment ?? null}
-            footer={spec.showTotalTime ? <span>{fmtTotal(totalLengthSec(items))} <span className="text-white/40">· total time</span></span> : undefined}
+            footer={spec.showTotalTime ? <span>{fmtTotal(totalLengthSec(items))} <span className="text-fg-subtle">· total time</span></span> : undefined}
           />
         )}
       </div>

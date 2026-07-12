@@ -47,7 +47,7 @@ export function DisplayPickerView() {
           } as React.CSSProperties
         }
       >
-        <div className="shrink-0 ml-3 flex items-center gap-2 text-white/70 relative z-10">
+        <div className="shrink-0 ml-3 flex items-center gap-2 text-fg-muted relative z-10">
           {state.appLogo && (
             <BrandLogo
               logo={state.appLogo}
@@ -83,14 +83,14 @@ export function DisplayPickerView() {
           <BrandLogo
             logo={centerLogo}
             monochrome
-            className="text-white/25 shrink-0"
+            className="text-fg-faint shrink-0"
             style={{ width: "clamp(6rem,22vmin,16rem)", height: "clamp(6rem,22vmin,16rem)" }}
           />
         )}
 
         <div className="flex flex-col gap-2 w-full max-w-xs">
           <span
-            className="text-caption2 font-medium uppercase tracking-wider text-white/40 text-center select-none"
+            className="text-caption2 font-medium uppercase tracking-wider text-fg-subtle text-center select-none"
             style={{ letterSpacing: "0.08em" }}
           >
             Select a display
@@ -103,11 +103,11 @@ export function DisplayPickerView() {
               <a
                 key={d.id}
                 href={`/${d.id}`}
-                className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 transition-colors hover:bg-white/10"
+                className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:bg-white/10"
               >
-                <MonitorIcon className="size-5 text-white/55 shrink-0" />
-                <span className="text-body font-medium text-white/90 truncate">{d.name}</span>
-                <ChevronRightIcon className="size-4 text-white/35 ml-auto shrink-0" />
+                <MonitorIcon className="size-5 text-fg-subtle shrink-0" />
+                <span className="text-body font-medium text-fg truncate">{d.name}</span>
+                <ChevronRightIcon className="size-4 text-fg-faint ml-auto shrink-0" />
               </a>
             ))
           )}
@@ -116,19 +116,19 @@ export function DisplayPickerView() {
           <div className="my-1 h-px bg-white/10" />
           <a
             href="/scriptview"
-            className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 transition-colors hover:bg-white/10"
+            className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:bg-white/10"
           >
-            <ListChecksIcon className="size-5 text-white/55 shrink-0" />
-            <span className="text-body font-medium text-white/90 truncate">ScriptView</span>
-            <ChevronRightIcon className="size-4 text-white/35 ml-auto shrink-0" />
+            <ListChecksIcon className="size-5 text-fg-subtle shrink-0" />
+            <span className="text-body font-medium text-fg truncate">ScriptView</span>
+            <ChevronRightIcon className="size-4 text-fg-faint ml-auto shrink-0" />
           </a>
           <a
             href="/baptism"
-            className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 transition-colors hover:bg-white/10"
+            className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:bg-white/10"
           >
             <DropletIcon className="size-5 text-blue-9 shrink-0" />
-            <span className="text-body font-medium text-white/90 truncate">Baptisms</span>
-            <ChevronRightIcon className="size-4 text-white/35 ml-auto shrink-0" />
+            <span className="text-body font-medium text-fg truncate">Baptisms</span>
+            <ChevronRightIcon className="size-4 text-fg-faint ml-auto shrink-0" />
           </a>
         </div>
       </div>

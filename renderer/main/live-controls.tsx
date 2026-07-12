@@ -25,8 +25,8 @@ export function LiveControls({ className = "" }: { className?: string }) {
   }
 
   const btn =
-    "flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 " +
-    "text-white/85 hover:bg-white/10 active:bg-white/[0.16] transition-colors py-3 " +
+    "flex items-center justify-center gap-2 rounded-2xl border border-line bg-surface " +
+    "text-fg hover:bg-white/10 active:bg-white/[0.16] transition-colors py-3 " +
     "text-[clamp(0.9rem,2.4vmin,1.25rem)] font-medium uppercase tracking-wider select-none " +
     "disabled:opacity-50 disabled:pointer-events-none";
 

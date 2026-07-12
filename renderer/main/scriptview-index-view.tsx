@@ -75,9 +75,9 @@ export function ScriptViewIndex() {
           boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 8px rgba(0,0,0,0.40)",
         }}
       >
-        <div className="shrink-0 ml-3 flex items-center gap-2 text-white/70 relative z-10">
+        <div className="shrink-0 ml-3 flex items-center gap-2 text-fg-muted relative z-10">
           {state?.appLogo && (
-            <BrandLogo logo={state.appLogo} monochrome className="size-5 rounded select-none text-white/80" />
+            <BrandLogo logo={state.appLogo} monochrome className="size-5 rounded select-none text-fg" />
           )}
           <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
             {state?.appName ?? "ScriptView"}
@@ -95,7 +95,7 @@ export function ScriptViewIndex() {
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
         <div className="min-h-full flex flex-col items-center justify-center gap-8 px-6 py-8">
         <div className="flex flex-col gap-2 w-full max-w-md">
-          <span className="text-caption2 font-medium uppercase tracking-wider text-white/40 text-center select-none mb-1" style={{ letterSpacing: "0.08em" }}>
+          <span className="text-caption2 font-medium uppercase tracking-wider text-fg-subtle text-center select-none mb-1" style={{ letterSpacing: "0.08em" }}>
             ScriptView · pick a service
           </span>
 
@@ -104,28 +104,28 @@ export function ScriptViewIndex() {
           ) : !types || stateLoading ? (
             <div className="flex justify-center py-8"><Loader2Icon className="size-7 text-gray-7 animate-spin" /></div>
           ) : rows.length === 0 ? (
-            <p className="text-body text-white/40 text-center max-w-xs">No service types enabled. Turn them on in Settings → ScriptView.</p>
+            <p className="text-body text-fg-subtle text-center max-w-xs">No service types enabled. Turn them on in Settings → ScriptView.</p>
           ) : (
             rows.map((type) => {
               const cur = selectedFor(type.id);
               return (
-                <div key={type.id} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-                  <ListChecksIcon className="size-5 text-white/45 shrink-0" />
-                  <span className="text-body font-medium text-white/90 flex-1 truncate">{type.name}</span>
+                <div key={type.id} className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3">
+                  <ListChecksIcon className="size-5 text-fg-subtle shrink-0" />
+                  <span className="text-body font-medium text-fg flex-1 truncate">{type.name}</span>
                   <select
                     value={cur}
                     onChange={(e) => setSel((s) => ({ ...s, [type.id]: e.target.value }))}
-                    className="rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-caption1 text-white/85 outline-none focus:border-white/25"
+                    className="rounded-lg border border-line bg-black/30 px-3 py-1.5 text-caption1 text-fg outline-none focus:border-line-strong"
                   >
                     {options.map((o) => <option key={o.value} value={o.value} className="bg-[#14161c]">{o.label}</option>)}
                   </select>
                   <a
                     href={scriptViewUrl(type.name, cur, globalLayouts.find((l) => l.id === cur)?.name)}
-                    className="flex items-center justify-center rounded-lg border border-white/10 bg-white/5 size-8 shrink-0 transition-colors hover:bg-white/15"
+                    className="flex items-center justify-center rounded-lg border border-line bg-surface size-8 shrink-0 transition-colors hover:bg-white/15"
                     title={`Open ${type.name}`}
                     aria-label={`Open ${type.name}`}
                   >
-                    <ArrowRightIcon className="size-4 text-white/70" />
+                    <ArrowRightIcon className="size-4 text-fg-muted" />
                   </a>
                 </div>
               );

@@ -76,17 +76,17 @@ export function ScriptView({ displayId, showLiveControls }: ScriptViewProps) {
   for (const it of history?.items ?? []) maxByItem.set(it.itemId, it.maxSpl);
 
   const columns: RundownColumn[] = [
-    { key: "len", header: "Len", align: "right", width: "4rem", cellClassName: "text-white/55", render: (it) => fmtLen(it.lengthSec) },
+    { key: "len", header: "Len", align: "right", width: "4rem", cellClassName: "text-fg-subtle", render: (it) => fmtLen(it.lengthSec) },
     {
       key: "title", header: "Item",
-      render: (it, { isCurrent }) => <span className={`font-medium ${isCurrent ? "text-live-11" : "text-white/90"}`}>{it.title}</span>,
+      render: (it, { isCurrent }) => <span className={`font-medium ${isCurrent ? "text-live-11" : "text-fg"}`}>{it.title}</span>,
     },
     ...cats.map((c): RundownColumn => ({
-      key: `note:${c}`, header: c, cellClassName: "text-white/60 whitespace-pre-line",
+      key: `note:${c}`, header: c, cellClassName: "text-fg-muted whitespace-pre-line",
       render: (it) => it.notesByCategory[c] ?? "",
     })),
     {
-      key: "spl", header: "Max SPL", align: "right", width: "6rem", cellClassName: "text-white/80",
+      key: "spl", header: "Max SPL", align: "right", width: "6rem", cellClassName: "text-fg",
       render: (it) => { const max = maxByItem.get(it.id); return max != null ? `${Math.round(max)} dB` : "—"; },
     },
   ];
@@ -94,30 +94,30 @@ export function ScriptView({ displayId, showLiveControls }: ScriptViewProps) {
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Header: brand + plan · clock · countdown · live SPL */}
-      <div className="flex items-center gap-4 px-4 h-14 shrink-0 border-b border-white/10 bg-black/40">
+      <div className="flex items-center gap-4 px-4 h-14 shrink-0 border-b border-line bg-black/40">
         <div className="flex items-center gap-2 min-w-0">
           {state.appLogo && <BrandLogo logo={state.appLogo} monochrome={state.appLogoMonochrome} className="size-6 rounded" />}
           <div className="flex flex-col min-w-0 leading-tight">
-            <span className="text-caption1 font-title text-white/85 truncate">{state.planSeriesTitle ?? state.appName}</span>
-            <span className="text-caption2 text-white/45 truncate">{state.planTitle ?? display?.name ?? "Script"}</span>
+            <span className="text-caption1 font-title text-fg truncate">{state.planSeriesTitle ?? state.appName}</span>
+            <span className="text-caption2 text-fg-subtle truncate">{state.planTitle ?? display?.name ?? "Script"}</span>
           </div>
         </div>
         <div className="ml-auto flex items-center gap-5 tabular-nums">
           {live && (
             <div className="flex flex-col items-end leading-none">
-              <span className="text-caption2 uppercase tracking-wider text-white/40">SPL</span>
-              <span className="text-title3 font-medium text-white/90">{Math.round(live.value)} dB</span>
+              <span className="text-caption2 uppercase tracking-wider text-fg-subtle">SPL</span>
+              <span className="text-title3 font-medium text-fg">{Math.round(live.value)} dB</span>
             </div>
           )}
           {timer && (
             <div className="flex flex-col items-end leading-none">
-              <span className="text-caption2 uppercase tracking-wider text-white/40">{over ? "Over" : timer.mode === "preservice" ? "Starts in" : "Remaining"}</span>
+              <span className="text-caption2 uppercase tracking-wider text-fg-subtle">{over ? "Over" : timer.mode === "preservice" ? "Starts in" : "Remaining"}</span>
               <span className={`text-title3 font-medium ${over ? "text-red-10" : "text-live-11"}`}>{fmtDuration(timer.seconds)}</span>
             </div>
           )}
           <div className="flex flex-col items-end leading-none">
-            <span className="text-caption2 uppercase tracking-wider text-white/40">Clock</span>
-            <span className="text-title3 font-medium text-white/90">{h12}:{mm}<span className="text-white/45 text-[0.7em]">:{ss} {ampm}</span></span>
+            <span className="text-caption2 uppercase tracking-wider text-fg-subtle">Clock</span>
+            <span className="text-title3 font-medium text-fg">{h12}:{mm}<span className="text-fg-subtle text-[0.7em]">:{ss} {ampm}</span></span>
           </div>
           {state.showQr && state.remoteUrl && (
             <a href="/settings" target="_blank" rel="noopener noreferrer" className="rounded hover:opacity-70 transition-opacity">
@@ -130,7 +130,7 @@ export function ScriptView({ displayId, showLiveControls }: ScriptViewProps) {
       {/* Rundown table */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {items.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-white/35 text-body">
+          <div className="flex items-center justify-center h-full text-fg-faint text-body">
             {plan ? "No items in this plan" : "Planning Center not configured"}
           </div>
         ) : (
@@ -139,7 +139,7 @@ export function ScriptView({ displayId, showLiveControls }: ScriptViewProps) {
       </div>
 
       {showLiveControls && (
-        <div className="shrink-0 p-3 border-t border-white/10">
+        <div className="shrink-0 p-3 border-t border-line">
           <LiveControls />
         </div>
       )}

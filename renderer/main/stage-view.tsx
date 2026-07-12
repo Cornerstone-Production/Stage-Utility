@@ -144,13 +144,13 @@ function KioskTopBar({
           display name all share the same vertical center. */}
       <div className="shrink-0 flex items-center relative z-10" style={{ marginLeft: "1em", gap: "0.7em" }}>
         {locked ? (
-          <div className="flex items-center text-white/70" style={{ gap: "0.55em" }}>
+          <div className="flex items-center text-fg-muted" style={{ gap: "0.55em" }}>
             {brandInner}
           </div>
         ) : (
           <a
             href="/"
-            className="flex items-center text-white/70 rounded hover:opacity-80 transition-opacity"
+            className="flex items-center text-fg-muted rounded hover:opacity-80 transition-opacity"
             style={{ gap: "0.55em" }}
             title="Back to home"
             aria-label="Back to home"
@@ -162,7 +162,7 @@ function KioskTopBar({
           <>
             <span className="w-px bg-white/15 shrink-0" style={{ height: "1.3em" }} aria-hidden="true" />
             <span
-              className="font-medium text-white/40 select-none truncate"
+              className="font-medium text-fg-subtle select-none truncate"
               style={{ fontSize: "0.92em", letterSpacing: "0.02em" }}
             >
               {displayName}
@@ -173,7 +173,7 @@ function KioskTopBar({
 
       <div className="absolute inset-0 flex items-center justify-center px-32 pointer-events-none max-sm:hidden">
         <span
-          className="font-medium text-white/55 truncate select-none tracking-wide"
+          className="font-medium text-fg-subtle truncate select-none tracking-wide"
           style={{ fontSize: "1em", letterSpacing: "0.02em" }}
         >
           {contextLabel}

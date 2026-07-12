@@ -65,7 +65,7 @@ export function RundownTable({
 
   return (
     <table className={`w-full border-collapse ${textSizeClass}`}>
-      <thead className="sticky top-0 z-10 bg-[#14161c] text-white/45">
+      <thead className="sticky top-0 z-10 bg-[#14161c] text-fg-subtle">
         <tr className="text-left">
           {columns.map((c) => (
             <th
@@ -86,7 +86,7 @@ export function RundownTable({
               <tr key={it.id} className={kind ? "bg-white/[0.1]" : "bg-white/[0.06]"}>
                 <td
                   colSpan={columns.length}
-                  className={`px-3 py-1.5 text-caption1 font-semibold uppercase tracking-wider ${kind ? "text-white/85" : "text-white/70"}`}
+                  className={`px-3 py-1.5 text-caption1 font-semibold uppercase tracking-wider ${kind ? "text-fg" : "text-fg-muted"}`}
                 >
                   {it.title}
                 </td>
@@ -101,7 +101,7 @@ export function RundownTable({
             <tr
               key={it.id}
               ref={isCurrent ? currentRef : undefined}
-              className={`border-b border-white/5 align-top ${isCurrent ? "bg-live-9/10" : ""}`}
+              className={`border-b border-line align-top ${isCurrent ? "bg-live-9/10" : ""}`}
               style={accentActive ? { backgroundColor: `${accentColor}1f`, boxShadow: `inset 3px 0 0 0 ${accentColor}` } : undefined}
             >
               {columns.map((c) => (
@@ -119,7 +119,7 @@ export function RundownTable({
       {footer != null && (
         <tfoot className="sticky bottom-0 z-10 bg-[#14161c]">
           <tr>
-            <td colSpan={columns.length} className="px-3 py-2 border-t border-white/10 text-caption1 font-semibold uppercase tracking-wider text-white/70">
+            <td colSpan={columns.length} className="px-3 py-2 border-t border-line text-caption1 font-semibold uppercase tracking-wider text-fg-muted">
               {footer}
             </td>
           </tr>

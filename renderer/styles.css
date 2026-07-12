@@ -238,10 +238,10 @@
   --su-surface-raised: rgba(255, 255, 255, 0.06);
   --su-line:           rgba(255, 255, 255, 0.09);
   --su-line-strong:    rgba(255, 255, 255, 0.15);
-  --su-fg:             #ffffff;
+  --su-fg:             rgba(255, 255, 255, 0.92);
   --su-fg-muted:       rgba(255, 255, 255, 0.70);
   --su-fg-subtle:      rgba(255, 255, 255, 0.45);
-  --su-fg-faint:       rgba(255, 255, 255, 0.25);
+  --su-fg-faint:       rgba(255, 255, 255, 0.28);
 }
 
 /* ── Brand title face (self-hosted, no CDN — kiosks run on a closed LAN) ── */

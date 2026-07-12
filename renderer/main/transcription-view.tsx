@@ -26,7 +26,7 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
   const displayName = display?.name ?? null;
 
   return (
-    <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface text-white pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface text-fg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Brand top bar */}
       <div
         className="relative flex items-center h-10 shrink-0"
@@ -41,7 +41,7 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
         <div className="shrink-0 ml-3 flex items-center gap-2.5 relative z-10">
           <a
             href="/"
-            className="flex items-center gap-2 text-white/70 rounded hover:opacity-80 transition-opacity"
+            className="flex items-center gap-2 text-fg-muted rounded hover:opacity-80 transition-opacity"
             title="Back to home"
             aria-label="Back to home"
           >
@@ -55,7 +55,7 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
           {displayName && (
             <>
               <span className="w-px h-4 bg-white/15 shrink-0" aria-hidden="true" />
-              <span className="text-caption1 font-medium text-white/40 select-none truncate" style={{ letterSpacing: "0.02em" }}>
+              <span className="text-caption1 font-medium text-fg-subtle select-none truncate" style={{ letterSpacing: "0.02em" }}>
                 {displayName}
               </span>
             </>

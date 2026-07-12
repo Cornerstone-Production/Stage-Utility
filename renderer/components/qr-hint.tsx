@@ -66,7 +66,7 @@ export function QrHint({ url, compact = false, sizeCss }: QrHintProps) {
     <div className="inline-flex flex-col items-center gap-1.5 p-3 bg-[#18181b] rounded-xl">
       <canvas ref={canvasRef} width={backing} height={backing} className="rounded" />
       <span
-        className="text-caption1 text-white/80 tabular-nums text-center leading-tight"
+        className="text-caption1 text-fg tabular-nums text-center leading-tight"
         style={{ maxWidth: 140, wordBreak: "break-all" }}
       >
         {url}

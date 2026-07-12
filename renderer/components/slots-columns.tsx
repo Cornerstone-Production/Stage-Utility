@@ -57,7 +57,7 @@ export function SlotsColumns({
                       <BrandLogo
                         logo={emptySlotLogo}
                         monochrome
-                        className="text-white/25"
+                        className="text-fg-faint"
                         style={{ width: "clamp(2rem,32cqw,9rem)", height: "clamp(2rem,32cqw,9rem)" }}
                       />
                     </div>

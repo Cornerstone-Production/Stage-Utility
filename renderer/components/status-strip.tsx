@@ -31,7 +31,7 @@ function chargeColor(pct: number): string {
 }
 
 function readoutColor(level: number | null): string {
-  if (level === null) return "text-white/30";
+  if (level === null) return "text-fg-faint";
   if (level >= 60) return "text-green-10";
   if (level >= 25) return "text-yellow-10";
   return "text-red-10";
@@ -114,7 +114,7 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
   // matches the bar.
   const chargeReadoutColor =
     charge === null
-      ? "text-white/30"
+      ? "text-fg-faint"
       : charge >= 60
         ? "text-green-10"
         : charge >= 25
@@ -161,7 +161,7 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
                 {device.freq}
               </span>
             ) : (
-              <span className="font-bold text-white/25 leading-none" style={valueTextStyle}>—</span>
+              <span className="font-bold text-fg-faint leading-none" style={valueTextStyle}>—</span>
             )}
           </div>
         </>
@@ -220,7 +220,7 @@ export function OfflinePill({ micLabel, iemLabel, className }: { micLabel: strin
       {labels.map((label, i) => (
         <span
           key={i}
-          className="max-w-full truncate text-center font-semibold leading-none text-white/85"
+          className="max-w-full truncate text-center font-semibold leading-none text-fg"
           style={valueTextStyle}
         >
           {label || "Offline"}

@@ -88,14 +88,14 @@ export function buildScriptViewColumns(spec: ScriptViewSpec, clocks: Map<string,
 
   if (spec.showClock && clocks) {
     cols.push({
-      key: "clock", header: "Clock", width: "6.5rem", cellClassName: "text-white/55 tabular-nums",
+      key: "clock", header: "Clock", width: "6.5rem", cellClassName: "text-fg-subtle tabular-nums",
       render: (it) => { const ms = clocks.get(it.id); return ms != null ? fmtClock(ms, timeZone) : ""; },
     });
   }
 
   if (spec.showLength) {
     cols.push({
-      key: "len", header: "Time", width: "4.75rem", cellClassName: "text-white/55 tabular-nums",
+      key: "len", header: "Time", width: "4.75rem", cellClassName: "text-fg-subtle tabular-nums",
       render: (it) => { const s = fmtLen(it.lengthSec); return s ? (it.servicePosition === "pre" ? `- ${s}` : s) : ""; },
     });
   }
@@ -110,16 +110,16 @@ export function buildScriptViewColumns(spec: ScriptViewSpec, clocks: Map<string,
       const meta = parts.join("  ·  ");
       return (
         <div className="flex flex-col leading-tight">
-          <span className={`font-medium ${isCurrent ? "text-live-11" : "text-white/90"}`}>{it.title}</span>
+          <span className={`font-medium ${isCurrent ? "text-live-11" : "text-fg"}`}>{it.title}</span>
           {meta && <span className="text-caption2 italic text-[#8ab4ff]/85">{meta}</span>}
-          {spec.showItemNotes && it.description && <span className="text-caption2 text-white/55 whitespace-pre-line mt-0.5">{it.description}</span>}
+          {spec.showItemNotes && it.description && <span className="text-caption2 text-fg-subtle whitespace-pre-line mt-0.5">{it.description}</span>}
         </div>
       );
     },
   });
 
   for (const c of spec.columns) {
-    cols.push({ key: `note:${c}`, header: c, cellClassName: "text-white/60 whitespace-pre-line", render: (it) => it.notesByCategory[c] ?? "" });
+    cols.push({ key: `note:${c}`, header: c, cellClassName: "text-fg-muted whitespace-pre-line", render: (it) => it.notesByCategory[c] ?? "" });
   }
 
   return cols;

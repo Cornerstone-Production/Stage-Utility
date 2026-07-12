@@ -82,13 +82,13 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             <BrandLogo
               logo={emptySlotLogo}
               monochrome
-              className="text-white/25"
+              className="text-fg-faint"
               // Size to the slot itself (the card is the container), capped so it
               // never exceeds the column width and gets clipped on narrow displays.
               style={{ width: "clamp(2.5rem,55cqw,11rem)", height: "clamp(2.5rem,55cqw,11rem)", maxWidth: "80%" }}
             />
           ) : (
-            <span className="text-callout font-medium text-white/20 select-none">empty</span>
+            <span className="text-callout font-medium text-fg-faint select-none">empty</span>
           )}
         </div>
       </div>
@@ -149,12 +149,12 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
                   <BrandLogo
                     logo={defaultAvatar}
                     monochrome
-                    className="text-white/80"
+                    className="text-fg"
                     style={{ width: "70%", height: "70%" }}
                   />
                 ) : (
                   <UserRoundIcon
-                    className="text-white/70"
+                    className="text-fg-muted"
                     style={{ width: "55%", height: "55%" }}
                     strokeWidth={1.75}
                   />
@@ -187,7 +187,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
         >
           <div>
             <span
-              className="font-semibold text-white leading-tight line-clamp-2 block"
+              className="font-semibold text-fg leading-tight line-clamp-2 block"
               // Stacked mode reserves two lines (2 × 1.25 leading-tight) so one- and
               // two-line names yield the SAME card height, keeping photo bottoms /
               // position / RF aligned across the row. Overlay mode sits at the bottom
@@ -198,7 +198,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             </span>
             {!isStatic && slot.link.kind === "pco" && slot.link.matchBy === "position" && (
               <span
-                className="text-white/65 block leading-tight truncate mt-0.5"
+                className="text-fg-muted block leading-tight truncate mt-0.5"
                 style={{ fontSize: "clamp(0.72rem, 8.5cqi, 1.75rem)" }}
               >
                 {slot.link.teamPositionName}
