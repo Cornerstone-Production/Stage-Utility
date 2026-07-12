@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Trash2Icon, ClockIcon, CopyIcon, TimerIcon, TrendingUpIcon, TrendingDownIcon, GaugeIcon, UsersIcon, CalendarDaysIcon, DoorOpenIcon, type LucideIcon } from "lucide-react";
+import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, TimerIcon, TrendingUpIcon, TrendingDownIcon, GaugeIcon, UsersIcon, CalendarDaysIcon, DoorOpenIcon, type LucideIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { confirm, EmptyState, SkeletonRows, Button, toast } from "../../components/ui";
@@ -225,6 +225,8 @@ export function ServiceHistorySection() {
   const [editingTimes, setEditingTimes] = useState(false);
   const [editStart, setEditStart] = useState("");
   const [editEnd, setEditEnd] = useState("");
+  const [merging, setMerging] = useState(false);
+  const [mergeTarget, setMergeTarget] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   // Which Overview metrics to show (persisted), and whether the picker is open.
   const [overviewMetrics, setOverviewMetrics] = useState<string[]>(loadOverviewMetrics);
@@ -523,6 +525,28 @@ export function ServiceHistorySection() {
         toast.error("Recalculate failed");
       }
     }
+    // Other same-day recordings this one could merge into (fix a mis-split service).
+    const mergeCandidates = (list ?? []).filter((s) => s.serviceKey !== det.serviceKey && s.serviceDate === det.serviceDate);
+    async function doMerge() {
+      const tgt = mergeCandidates.find((s) => s.serviceKey === mergeTarget);
+      if (!tgt) return;
+      if (!(await confirm({
+        title: `Merge into "${tgt.planTitle ?? "the selected service"}"?`,
+        message: "This recording's items + attendance samples move into the selected service (matching items aren't duplicated), then THIS record is deleted. Use to reunite a service that was split across two records.",
+        confirmLabel: "Merge + delete this",
+        destructive: true,
+      }))) return;
+      try {
+        await invoke("history:merge", { sourceKey: det.serviceKey, targetKey: mergeTarget });
+        setMerging(false);
+        setMergeTarget("");
+        setSelectedKey(mergeTarget); // jump to the record we merged into
+        setReloadKey((k) => k + 1);
+        toast.success("Merged");
+      } catch (e) {
+        toast.error(`Merge failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     async function toggleCounted(item: ServiceTimelineItem) {
       // Broadcasts service-timeline:history → detail refreshes via the SSE handler.
       try {
@@ -559,8 +583,33 @@ export function ServiceHistorySection() {
             <Button variant="filled" size="small" onClick={copyReport} tooltip="Copy a full text report (timing + attendance + audio)">
               <CopyIcon className="size-3.5 text-gray-9" /> Copy report
             </Button>
+            {mergeCandidates.length > 0 && (
+              <Button variant="filled" size="small" onClick={() => { setMerging((v) => !v); setEditingTimes(false); }} tooltip="Merge this recording into another service (fixes a split service), then delete this one">
+                <GitMergeIcon className="size-3.5 text-gray-9" /> Merge…
+              </Button>
+            )}
           </div>
         </div>
+        {merging && (
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-amber-6 bg-amber-2/40 p-3">
+            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+              Merge this recording into
+              <select value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)} className="rounded-md border border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12">
+                <option value="">Select a service…</option>
+                {mergeCandidates.map((s) => (
+                  <option key={s.serviceKey} value={s.serviceKey}>
+                    {(s.planTitle ?? s.serviceKey)}{fmtTime(s.serviceTimeStartsAt ?? s.startedAt) ? ` · ${fmtTime(s.serviceTimeStartsAt ?? s.startedAt)}` : ""} · {s.items.length} items
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button variant="accent" size="small" disabled={!mergeTarget} onClick={doMerge}>Merge + delete this</Button>
+            <Button variant="transparent" size="small" onClick={() => setMerging(false)}>Cancel</Button>
+            <span className="text-caption2 text-gray-9 flex-1 min-w-[14rem]">
+              Moves this recording's items + attendance samples into the chosen service (matching items aren't duplicated), then deletes this record. For reuniting a service split across two records (e.g. one that overran into the next occurrence).
+            </span>
+          </div>
+        )}
         {editingTimes && (
           <div className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-5 bg-gray-2 p-3">
             <label className="flex flex-col gap-1 text-caption2 text-gray-9">

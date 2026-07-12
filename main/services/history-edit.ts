@@ -106,3 +106,66 @@ export async function recalcAttendance(serviceKey: string): Promise<void> {
   await attendanceStore.upsert(att);
   broadcast("attendance:history", att);
 }
+
+/**
+ * Merge one service recording (source) INTO another (target) across all three
+ * stores, then delete the source. Fixes a mis-split service (e.g. a run that
+ * overran its planned end and rolled the tail into the next occurrence's record):
+ * merge the wrong record back into the right one. Items are matched by itemId so a
+ * duplicated boundary item isn't doubled; attendance samples are concatenated and
+ * aggregates re-derived; the target window extends to cover both.
+ */
+export async function mergeServiceRecords(sourceKey: string, targetKey: string): Promise<void> {
+  if (!sourceKey || !targetKey || sourceKey === targetKey) return;
+
+  // ── Timeline ──
+  const [srcTl, tgtTl] = await Promise.all([
+    serviceTimelineStore.get(sourceKey),
+    serviceTimelineStore.get(targetKey),
+  ]);
+  if (srcTl && tgtTl) {
+    const have = new Set(tgtTl.items.map((i) => i.itemId));
+    for (const it of srcTl.items) if (!have.has(it.itemId)) tgtTl.items.push(it);
+    tgtTl.items.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+    tgtTl.items.forEach((it, i) => { it.sequence = i; });
+    const ends = tgtTl.items.map((i) => (i.endedAt ? Date.parse(i.endedAt) : NaN)).filter(Number.isFinite);
+    if (ends.length) tgtTl.endedAt = new Date(Math.max(...ends)).toISOString();
+    await serviceTimelineStore.upsert(tgtTl);
+    await serviceTimelineStore.delete(sourceKey);
+    broadcast("service-timeline:history", tgtTl);
+  }
+
+  // ── Attendance ──
+  const [srcAt, tgtAt] = await Promise.all([
+    attendanceStore.get(sourceKey),
+    attendanceStore.get(targetKey),
+  ]);
+  if (srcAt && tgtAt) {
+    tgtAt.samples = [...tgtAt.samples, ...srcAt.samples].sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+    if (srcAt.endedAt && (!tgtAt.endedAt || Date.parse(srcAt.endedAt) > Date.parse(tgtAt.endedAt))) {
+      tgtAt.endedAt = srcAt.endedAt;
+    }
+    tgtAt.totalAttendance = Math.max(tgtAt.totalAttendance, srcAt.totalAttendance);
+    recomputeAttendance(tgtAt);
+    await attendanceStore.upsert(tgtAt);
+    await attendanceStore.delete(sourceKey);
+    broadcast("attendance:history", tgtAt);
+  }
+
+  // ── SPL ──
+  const [srcSpl, tgtSpl] = await Promise.all([
+    splHistoryStore.get(sourceKey),
+    splHistoryStore.get(targetKey),
+  ]);
+  if (srcSpl && tgtSpl) {
+    const have = new Set(tgtSpl.items.map((i) => i.itemId));
+    for (const it of srcSpl.items) if (!have.has(it.itemId)) tgtSpl.items.push(it);
+    tgtSpl.items.forEach((it, i) => { it.sequence = i; });
+    if (srcSpl.endedAt && (!tgtSpl.endedAt || Date.parse(srcSpl.endedAt) > Date.parse(tgtSpl.endedAt))) {
+      tgtSpl.endedAt = srcSpl.endedAt;
+    }
+    await splHistoryStore.upsert(tgtSpl);
+    await splHistoryStore.delete(sourceKey);
+    broadcast("spl:history", tgtSpl);
+  }
+}

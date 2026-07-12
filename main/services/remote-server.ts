@@ -17,7 +17,7 @@ import type { DisplayKind, LayoutDTO, LayoutObject, ScriptViewLayout, Slot, Slot
 import type { OscArg } from "../types/osc.js";
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { getLogLines } from "./log-buffer.js";
-import { editServiceWindow, recalcAttendance, setItemCounted } from "./history-edit.js";
+import { editServiceWindow, mergeServiceRecords, recalcAttendance, setItemCounted } from "./history-edit.js";
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
 import { deviceManager } from "./device-manager.js";
 import { configSnapshot } from "./config-snapshot.js";
@@ -819,6 +819,16 @@ export class RemoteServer {
         return;
       }
       await setItemCounted(body.serviceKey, body.itemId, body.counted);
+      json(res, { ok: true });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/history/merge") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      if (typeof body.sourceKey !== "string" || typeof body.targetKey !== "string") {
+        error(res, "body.sourceKey + body.targetKey (strings) required");
+        return;
+      }
+      await mergeServiceRecords(body.sourceKey, body.targetKey);
       json(res, { ok: true });
       return;
     }

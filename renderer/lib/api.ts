@@ -474,6 +474,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "history:setItemCounted":
       return post<T>("/api/history/item-counted", p);
 
+    case "history:merge":
+      return post<T>("/api/history/merge", p);
+
     case "layout:uploadImage":
       return post<T>("/api/layout-images", { dataUrl: p.dataUrl });
 
