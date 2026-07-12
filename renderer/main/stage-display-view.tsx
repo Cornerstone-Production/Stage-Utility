@@ -293,7 +293,7 @@ function Cell({
     : accent === "amber" ? "border-amber-a5 bg-amber-a2"
     : "border-line bg-surface";
   const labelColor =
-    accent === "green" ? "text-[#5dcaa5]" : accent === "red" ? "text-red-10" : accent === "amber" ? "text-amber-9" : "text-fg-subtle";
+    accent === "green" ? "text-live-11" : accent === "red" ? "text-red-10" : accent === "amber" ? "text-amber-9" : "text-fg-subtle";
   return (
     <div className={`flex flex-col justify-center rounded-2xl border p-3 min-h-0 overflow-hidden ${border} ${align === "center" ? "items-center" : "items-start"}`}>
       <span className={`text-caption2 font-medium uppercase tracking-wider mb-1 ${labelColor}`} style={{ letterSpacing: "0.1em" }}>

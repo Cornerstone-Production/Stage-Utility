@@ -187,7 +187,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
                   </span>
                   <span className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
                     <span
-                      className="block h-full bg-surface0"
+                      className="block h-full bg-fg"
                       style={{ width: `${Math.min(100, Math.round((pro.slideIndex / pro.slideCount) * 100))}%` }}
                     />
                   </span>
@@ -282,7 +282,7 @@ function Tile({
       : accent === "red"
         ? "border-red-a6 bg-red-a3"
         : "border-line bg-surface";
-  const labelColor = accent === "green" ? "text-[#5dcaa5]" : accent === "red" ? "text-red-10" : "text-fg-subtle";
+  const labelColor = accent === "green" ? "text-live-11" : accent === "red" ? "text-red-10" : "text-fg-subtle";
   return (
     <div className={`flex flex-col items-center justify-center rounded-2xl border p-4 max-sm:p-3 min-h-0 ${border}`}>
       <span
