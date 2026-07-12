@@ -112,8 +112,10 @@ export function ScriptViewSection() {
     update(l.id, { columns: cols });
   };
 
-  // The expanded card is the one being edited + previewed; fall back to the first.
-  const openId = sortedLayouts.some((l) => l.id === expandedId) ? expandedId : (sortedLayouts[0]?.id ?? null);
+  // The expanded card is the one being edited + previewed. Null = all collapsed
+  // (the default, and reachable by toggling the open one shut); a stale id (deleted
+  // layout) also collapses rather than forcing the first one open.
+  const openId = sortedLayouts.some((l) => l.id === expandedId) ? expandedId : null;
 
   return (
     <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
