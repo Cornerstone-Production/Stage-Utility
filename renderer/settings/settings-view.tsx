@@ -164,6 +164,9 @@ export function SettingsView() {
   const queryClient = useQueryClient();
 
   const [activeSection, setActiveSection] = useState<SectionItem>(SECTIONS[0]);
+  // Bumped whenever the History nav is clicked so the section remounts back to its
+  // landing list (instead of staying on the service you'd drilled into).
+  const [historyNonce, setHistoryNonce] = useState(0);
 
   // Fetch current stage state
   const { data: stageState, isLoading: stageLoading } = useQuery({
@@ -1056,7 +1059,7 @@ export function SettingsView() {
       case "service-history":
         return (
           <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
-            <ServiceHistorySection />
+            <ServiceHistorySection key={historyNonce} />
           </div>
         );
       case "baptisms":
@@ -1117,7 +1120,10 @@ export function SettingsView() {
           <SidebarList
             items={sections}
             selectedItem={activeSection}
-            onSelectedItemChange={(s: SectionItem) => withViewTransition(() => setActiveSection(s))}
+            onSelectedItemChange={(s: SectionItem) => withViewTransition(() => {
+              if (s.id === "service-history") setHistoryNonce((n) => n + 1);
+              setActiveSection(s);
+            })}
             getItemKey={(s: SectionItem) => s.id}
           >
             {sections.map((section) => (

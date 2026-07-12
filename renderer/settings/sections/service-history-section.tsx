@@ -541,6 +541,7 @@ export function ServiceHistorySection() {
         setMerging(false);
         setMergeTarget("");
         setSelectedKey(mergeTarget); // jump to the record we merged into
+        reload(); // drop the now-deleted source from the list (avoid a dead row)
         setReloadKey((k) => k + 1);
         toast.success("Merged");
       } catch (e) {
