@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
 
-import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, EmptyState, confirm } from "../../components/ui";
+import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { RundownTable } from "../../main/rundown-table";
 import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLengthSec, fmtTotal } from "../../main/scriptview-columns";
@@ -41,11 +41,10 @@ export function ScriptViewSection() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  async function toggleShown(id: string, on: boolean) {
-    // Preserve service-type order (PCO listing order) when adding.
-    const next = on
-      ? types.filter((t) => shownIds.includes(t.id) || t.id === id).map((t) => t.id)
-      : shownIds.filter((x) => x !== id);
+  async function setShown(ids: string[]) {
+    // Store in PCO listing order regardless of the order they were checked.
+    const wanted = new Set(ids);
+    const next = types.filter((t) => wanted.has(t.id)).map((t) => t.id);
     setShownIds(next);
     try { await invoke("scriptview:setConfig", { serviceTypeIds: next }); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
@@ -133,20 +132,17 @@ export function ScriptViewSection() {
       {error && <p className="text-caption1 text-red-11 mb-3">{error}</p>}
 
       {/* Which service types appear on the landing page (curated per church). */}
-      <div className="rounded-xl border border-gray-a5 bg-gray-a2 p-4 mb-5">
-        <div className="text-caption2 uppercase tracking-wider text-gray-9 mb-2">Shown on the landing page</div>
-        {types.length === 0 ? (
-          <p className="text-caption1 text-gray-9">Loading service types…</p>
-        ) : (
-          <div className="flex flex-wrap gap-x-5 gap-y-2">
-            {types.map((t) => (
-              <label key={t.id} className="flex items-center gap-2 text-caption1 text-gray-11">
-                <Switch checked={shownIds.includes(t.id)} onCheckedChange={(v: boolean) => toggleShown(t.id, v)} /> {t.name}
-              </label>
-            ))}
-          </div>
-        )}
-        <p className="text-caption2 text-gray-9 mt-2">Only the selected service types appear on the ScriptView landing page.</p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-5">
+        <span className="text-caption1 text-gray-11">Shown on the landing page</span>
+        <MultiSelect
+          className="w-64 max-sm:w-full"
+          options={types.map((t) => ({ value: t.id, label: t.name }))}
+          selected={shownIds}
+          onChange={setShown}
+          placeholder={types.length === 0 ? "Loading service types…" : "Select service types…"}
+          disabled={types.length === 0}
+        />
+        <span className="text-caption2 text-gray-9 basis-full sm:basis-auto">Only these appear on the ScriptView landing page.</span>
       </div>
 
       <div className="flex items-center gap-2 mb-4">

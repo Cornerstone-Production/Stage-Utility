@@ -557,16 +557,18 @@ export function ServiceHistorySection() {
       }
     }
     // The include/exclude checkbox column only shows while editing times.
+    // Mobile drops #, Plan, and Ended (see the max-sm:hidden cells) so the item name
+    // isn't crushed; sm+ shows the full grid. Templates must match the visible cells.
     const gridCols = editingTimes
-      ? "grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_4.5rem]"
-      : "grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem]";
+      ? "grid-cols-[1.4rem_1fr_3.5rem_3rem] sm:grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_4.5rem]"
+      : "grid-cols-[1fr_3.5rem_3rem] sm:grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem]";
     return (
       <div className="flex flex-col gap-4">
         <button className="self-start text-caption1 text-blue-11 hover:underline" onClick={() => setSelectedKey(null)}>
           ← All services
         </button>
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex flex-col">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex flex-col min-w-0">
             <span className="text-title3 font-semibold text-gray-12">
               {detail.planTitle ?? detail.serviceKey}
               {live && <span className="ml-2 align-middle rounded-full bg-red-9 px-2 py-0.5 text-[10px] font-semibold text-white">LIVE</span>}
@@ -577,7 +579,7 @@ export function ServiceHistorySection() {
               {fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt) ? ` · ${fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt)}` : ""}
             </span>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 flex-wrap sm:shrink-0">
             <Button variant="filled" size="small" onClick={startEditTimes} tooltip="Fix the recorded start/end (trims samples + items outside the window)">
               <ClockIcon className="size-3.5 text-gray-9" /> Edit times
             </Button>
@@ -640,7 +642,7 @@ export function ServiceHistorySection() {
         <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
           <div className={`grid ${gridCols} gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10`}>
             {editingTimes && <span className="text-center" title="Count toward the service timers">✓</span>}
-            <span>#</span><span>Item</span><span className="text-right">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right">Ended</span>
+            <span className="max-sm:hidden">#</span><span>Item</span><span className="text-right max-sm:hidden">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right max-sm:hidden">Ended</span>
           </div>
           {detail.items.map((it, i) => {
             const itemLive = it.endedAt == null;
@@ -658,16 +660,16 @@ export function ServiceHistorySection() {
                     title={counted ? "Counted in service timers — click to exclude" : "Not counted — click to include"}
                   />
                 )}
-                <span className="text-gray-9">{i + 1}</span>
+                <span className="text-gray-9 max-sm:hidden">{i + 1}</span>
                 <span className="text-gray-12 truncate">
                   {it.title || "—"}
                   {itemLive && <span className="ml-1.5 text-[10px] text-red-11">live</span>}
                   {!counted && <span className="ml-1.5 text-[10px] italic text-gray-9">not counted</span>}
                 </span>
-                <span className="text-right text-gray-10">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
+                <span className="text-right text-gray-10 max-sm:hidden">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
                 <span className="text-right text-gray-12">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
                 <span className={`text-right ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
-                <span className="text-right text-gray-9 whitespace-nowrap">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
+                <span className="text-right text-gray-9 whitespace-nowrap max-sm:hidden">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
               </div>
             );
           })}
