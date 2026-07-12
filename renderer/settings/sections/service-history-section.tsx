@@ -29,6 +29,12 @@ function shortDay(day: string): string {
   const d = new Date(`${day}T00:00:00`);
   return Number.isNaN(d.getTime()) ? day : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
+/** "Jul 12 · 10:30" — pins a single-service stat to the specific occurrence, so
+ *  on a multi-service day it's clear which one (not just the date). */
+function shortDayTime(serviceDate: string, startsAt: string | null | undefined, fallback?: string | null): string {
+  const t = fmtTime(startsAt ?? fallback ?? null);
+  return t ? `${shortDay(serviceDate)} · ${t}` : shortDay(serviceDate);
+}
 
 // Selectable Overview metrics — grouped (Timing / Attendance) with an icon each.
 type OverviewGroup = "timing" | "attendance";
@@ -408,11 +414,11 @@ export function ServiceHistorySection() {
       avgStart: { value: avgPunct != null ? startFmt(avgPunct) : "—", accent: avgPunct != null && avgPunct > 60 ? "text-amber-11" : "text-gray-12" },
       avgAttendance: { value: num(mean(occ.map((a) => a.peakOccupancy))), accent: "text-green-11" },
       avgEntries: { value: num(mean(entries)), accent: "text-blue-11" },
-      highestAttended: { value: maxOcc ? maxOcc.peakOccupancy.toLocaleString() : "—", sub: maxOcc ? shortDay(maxOcc.serviceDate) : undefined, accent: "text-green-11" },
-      lowestAttended: { value: minOcc ? minOcc.peakOccupancy.toLocaleString() : "—", sub: minOcc ? shortDay(minOcc.serviceDate) : undefined, accent: "text-amber-11" },
+      highestAttended: { value: maxOcc ? maxOcc.peakOccupancy.toLocaleString() : "—", sub: maxOcc ? shortDayTime(maxOcc.serviceDate, maxOcc.serviceTimeStartsAt, maxOcc.startedAt) : undefined, accent: "text-green-11" },
+      lowestAttended: { value: minOcc ? minOcc.peakOccupancy.toLocaleString() : "—", sub: minOcc ? shortDayTime(minOcc.serviceDate, minOcc.serviceTimeStartsAt, minOcc.startedAt) : undefined, accent: "text-amber-11" },
       dayAttendance: { value: dayCount ? dayOcc.toLocaleString() : "—", sub: dayCount ? `${dayCount} service${dayCount === 1 ? "" : "s"}` : undefined, accent: "text-green-11" },
-      longest: { value: longest ? fmtDur(longest.s.actual) : "—", sub: longest ? shortDay(longest.t.serviceDate) : undefined, accent: "text-gray-12" },
-      shortest: { value: shortest ? fmtDur(shortest.s.actual) : "—", sub: shortest ? shortDay(shortest.t.serviceDate) : undefined, accent: "text-gray-12" },
+      longest: { value: longest ? fmtDur(longest.s.actual) : "—", sub: longest ? shortDayTime(longest.t.serviceDate, longest.t.serviceTimeStartsAt, longest.t.startedAt) : undefined, accent: "text-gray-12" },
+      shortest: { value: shortest ? fmtDur(shortest.s.actual) : "—", sub: shortest ? shortDayTime(shortest.t.serviceDate, shortest.t.serviceTimeStartsAt, shortest.t.startedAt) : undefined, accent: "text-gray-12" },
       avgOverrun: { value: avgOverrun != null ? fmtDelta(avgOverrun) : "—", accent: avgOverrun != null && avgOverrun > 0 ? "text-red-11" : "text-gray-12" },
     } as Record<string, { value: string; sub?: string; accent: string }>;
   }, [list, attList, day, typeFilter]);
@@ -802,7 +808,7 @@ export function ServiceHistorySection() {
                   </span>
                 </div>
                 <span className="shrink-0 tabular-nums text-caption1 text-right">
-                  {sum.lateStartSec != null && sum.lateStartSec > 60 && <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">late </span><span className="text-amber-11">{fmtDelta(sum.lateStartSec)}</span></span>}
+                  {sum.lateStartSec != null && sum.lateStartSec >= 30 && <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">late </span><span className="text-amber-11">{fmtDelta(sum.lateStartSec)}</span></span>}
                   <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">ran </span><span className="text-blue-11">{fmtDur(sum.actual)}</span></span>
                   {totalDelta != null && <span className="ml-3 whitespace-nowrap"><span className={totalDelta > 0 ? "text-red-11" : "text-gray-11"}>{fmtDelta(totalDelta)}</span></span>}
                 </span>
