@@ -23,6 +23,17 @@
 @import "@radix-ui/colors/amber-alpha.css";
 @import "@radix-ui/colors/amber-dark-alpha.css";
 
+/* ── Brand type: IBM Plex (self-hosted via @fontsource; woff2 is bundled into
+   dist at build time, so there is no runtime CDN — kiosks stay on a closed LAN).
+   Sans carries all UI/headings/body; Mono carries every numeric/instrument
+   readout (clock, countdown, SPL, RF, tables). No serif in-app. ── */
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-500.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
+
 /* ── Tailwind source paths for class scanning ── */
 @source "./main/**/*.{ts,tsx}";
 @source "./settings/**/*.{ts,tsx}";
@@ -31,6 +42,10 @@
 
 /* ── Map Radix color CSS vars to Tailwind color utilities ── */
 @theme {
+  /* Type — IBM Plex is the whole system (all-sans; mono for numerals). */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
   /* Gray scale (1–12 + alpha) */
   --color-gray-1:   var(--gray-1);
   --color-gray-2:   var(--gray-2);
@@ -244,18 +259,12 @@
   --su-fg-faint:       rgba(255, 255, 255, 0.28);
 }
 
-/* ── Brand title face (self-hosted, no CDN — kiosks run on a closed LAN) ── */
-@font-face {
-  font-family: "Outfit";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("./fonts/Outfit-Regular.woff2") format("woff2");
-}
-
 /* ── Apple-inspired typography utilities ── */
 @layer utilities {
-  .font-title { font-family: "Outfit", ui-sans-serif, system-ui, sans-serif; }
+  /* Brand/heading utility — now IBM Plex Sans (all-sans; pair with a weight
+     such as font-semibold where a heading needs emphasis). Kept named
+     `font-title` to avoid churn across call sites. */
+  .font-title { font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif; }
 
   .text-large-title  { font-size: 34px; line-height: 41px; }
   .text-title1       { font-size: 28px; line-height: 34px; }
