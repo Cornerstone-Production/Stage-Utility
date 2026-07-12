@@ -162,6 +162,8 @@ interface AttendanceSample {
   t: string;
   attendance: number;
   occupancy: number;
+  /** "pre"/"post" = arrival ramp / emptying-room taper; omitted = in-service (feeds stats). */
+  phase?: "pre" | "post";
 }
 interface ServiceAttendance {
   serviceKey: string;
@@ -174,7 +176,11 @@ interface ServiceAttendance {
   serviceDate: string;
   serviceTimeId: string | null;
   serviceTimeStartsAt: string | null;
+  /** May be BEFORE the service (pre-service arrival ramp). */
   startedAt: string;
+  /** First in-service sample; null while only pre-service samples exist. */
+  serviceStartedAt?: string | null;
+  /** Service end = the taper boundary; post-service samples continue past it. */
   endedAt: string | null;
   /** samples.attendance is PER-SERVICE (baselined) so a 2nd service in the same plan starts at 0. */
   samples: AttendanceSample[];

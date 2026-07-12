@@ -295,7 +295,7 @@ export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendan
     : null;
   // Attendance is cumulative; show it per-service (each sample minus the first) so a
   // service not reset off the prior one still reads its own count on the chart + peak.
-  const attSamples = detail.samples.map((s) => ({ t: s.t, attendance: perServiceAttendance(s.attendance, detail.samples), occupancy: s.occupancy }));
+  const attSamples = detail.samples.map((s) => ({ t: s.t, attendance: perServiceAttendance(s.attendance, detail.samples), occupancy: s.occupancy, phase: s.phase }));
   const statValues: Record<string, { value: number | null; accent: string }> = {
     peak: { value: detail.peakOccupancy, accent: "text-green-11" }, // peak people in the room = real attendance
     lowest: { value: detail.minOccupancy ?? null, accent: "text-amber-11" },
@@ -325,6 +325,8 @@ export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendan
         avgOccupancy={shows("avg") ? avgOccupancy : null}
         showAttendance={shows("attendance")}
         showOccupancy={shows("occupancy")}
+        serviceStartedAt={detail.serviceStartedAt ?? null}
+        serviceEndedAt={detail.endedAt}
       />
     </div>
   );
@@ -384,12 +386,17 @@ function AttendanceChart({
   avgOccupancy = null,
   showAttendance = true,
   showOccupancy = true,
+  serviceStartedAt = null,
+  serviceEndedAt = null,
 }: {
   samples: AttendanceSample[];
   markers?: { t: string; label: string }[];
   avgOccupancy?: number | null;
   showAttendance?: boolean;
   showOccupancy?: boolean;
+  /** Service-proper window (the band between the arrival ramp and the taper). */
+  serviceStartedAt?: string | null;
+  serviceEndedAt?: string | null;
 }) {
   // Hover tooltip state — declared before the early return (Rules of Hooks).
   const svgRef = useRef<SVGSVGElement>(null);
@@ -434,6 +441,27 @@ function AttendanceChart({
     return Number.isFinite(mt) && mt >= t0 - 1000 && mt <= t1 + 1000;
   });
 
+  // Service-proper window: the arrival ramp sits left of it and the emptying-room
+  // taper to the right, so those tails get dimmed while the service band stays clear.
+  const clampX = (v: number) => Math.max(padL, Math.min(W - padR, v));
+  const sStart = serviceStartedAt ? Date.parse(serviceStartedAt) : NaN;
+  const sEnd = serviceEndedAt ? Date.parse(serviceEndedAt) : NaN;
+  const bandX0 = Number.isFinite(sStart) ? clampX(xt(serviceStartedAt as string)) : null;
+  const bandX1 = Number.isFinite(sEnd) ? clampX(xt(serviceEndedAt as string)) : null;
+  const hasPre = bandX0 != null && bandX0 > padL + 1;
+  const hasPost = bandX1 != null && bandX1 < W - padR - 1;
+  // PCO item times for the x-axis — thinned left→right so close items don't overlap
+  // (the NAME stays on the vertical marker line; only the time drops to the axis).
+  const axisTimes: { x: number; t: string }[] = [];
+  let lastAxisX = -Infinity;
+  for (const m of [...inRange].sort((a, b) => xt(a.t) - xt(b.t))) {
+    const mx = xt(m.t);
+    if (mx - lastAxisX >= 30 && mx > padL + 22 && mx < W - padR - 22) {
+      axisTimes.push({ x: mx, t: m.t });
+      lastAxisX = mx;
+    }
+  }
+
   // Hover tooltip: map the pointer to the nearest sample and show its values + time.
   function onMove(e: React.PointerEvent<SVGSVGElement>) {
     const svg = svgRef.current;
@@ -459,6 +487,7 @@ function AttendanceChart({
         {showAttendance && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-blue-9" /> Total entries</span>}
         {avgOccupancy != null && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-green-9" /> Avg attendance {avgOccupancy.toLocaleString()}</span>}
         {inRange.length > 0 && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-gray-8" /> Plan items</span>}
+        {(hasPre || hasPost) && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-sm bg-gray-a4" /> Before / after service</span>}
       </div>
       <div className="overflow-x-auto rounded-lg border border-gray-5 bg-gray-2 p-2">
         <svg ref={svgRef} onPointerMove={onMove} onPointerLeave={() => setHover(null)} viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 320 }} role="img" aria-label="Attendance and in-room occupancy over the service, with plan-item markers">
@@ -479,14 +508,19 @@ function AttendanceChart({
               <text x={padL - 6} y={y(t) + 3} textAnchor="end" fontSize={10} fill="var(--gray-9)">{t.toLocaleString()}</text>
             </g>
           ))}
-          {/* PCO plan-item markers */}
+          {/* dim the pre-service arrival ramp / post-service taper (outside the service band) */}
+          {hasPre && <rect x={padL} y={padT} width={(bandX0 as number) - padL} height={plotH} fill="var(--gray-a3)" />}
+          {hasPost && <rect x={bandX1 as number} y={padT} width={W - padR - (bandX1 as number)} height={plotH} fill="var(--gray-a3)" />}
+          {hasPre && <line x1={bandX0 as number} y1={padT} x2={bandX0 as number} y2={padT + plotH} stroke="var(--green-8)" strokeWidth={1} opacity={0.6} vectorEffect="non-scaling-stroke" />}
+          {hasPost && <line x1={bandX1 as number} y1={padT} x2={bandX1 as number} y2={padT + plotH} stroke="var(--amber-8)" strokeWidth={1} opacity={0.6} vectorEffect="non-scaling-stroke" />}
+          {/* PCO plan-item markers — item NAME on the line; the time drops to the x-axis */}
           {inRange.map((m, i) => {
             const mx = xt(m.t);
             return (
               <g key={`${m.t}-${i}`}>
                 <line x1={mx} y1={padT} x2={mx} y2={padT + plotH} stroke="var(--gray-a6)" strokeWidth={1} strokeDasharray="3 3" />
                 <text x={mx + 2} y={padT + 8} fontSize={9} fill="var(--gray-10)" transform={`rotate(90 ${mx + 2} ${padT + 8})`}>
-                  {fmtTime(m.t)}  {m.label.length > 18 ? `${m.label.slice(0, 17)}…` : m.label}
+                  {m.label.length > 22 ? `${m.label.slice(0, 21)}…` : m.label}
                 </text>
               </g>
             );
@@ -500,6 +534,13 @@ function AttendanceChart({
           )}
           <text x={padL} y={H - 8} textAnchor="start" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[0].t)}</text>
           <text x={W - padR} y={H - 8} textAnchor="end" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[n - 1].t)}</text>
+          {/* PCO item times on the x-axis (thinned), each ticking up to its marker line */}
+          {axisTimes.map((a, i) => (
+            <g key={`axt-${i}`}>
+              <line x1={a.x} y1={padT + plotH} x2={a.x} y2={padT + plotH + 3} stroke="var(--gray-a6)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+              <text x={a.x} y={H - 8} textAnchor="middle" fontSize={9} fill="var(--gray-10)">{fmtTime(a.t)}</text>
+            </g>
+          ))}
           {showOccupancy && <polyline points={line("occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />}
           {showAttendance && <polyline points={line("attendance")} fill="none" stroke="var(--blue-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />}
           {/* hover crosshair + tooltip */}

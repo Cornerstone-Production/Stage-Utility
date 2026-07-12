@@ -22,11 +22,17 @@ function recomputeAttendance(att: ServiceAttendance): void {
   const base = s.length ? s[0].attendance : 0;
   const perSvc = (v: number) => Math.max(0, v - base);
   att.attendanceBaseline = base;
-  att.peakAttendance = s.reduce((m, x) => Math.max(m, perSvc(x.attendance)), 0);
-  att.peakOccupancy = s.reduce((m, x) => Math.max(m, x.occupancy), 0);
-  att.minOccupancy = s.length ? s.reduce((m, x) => Math.min(m, x.occupancy), s[0].occupancy) : null;
-  att.lastAttendance = s.length ? perSvc(s[s.length - 1].attendance) : 0;
-  att.lastOccupancy = s.length ? s[s.length - 1].occupancy : 0;
+  // Peak/Lowest/Last reflect the SERVICE, not the pre-service arrival ramp or the
+  // post-service emptying room — those tagged samples still draw the curve but must
+  // not drag the "floor" or "last" toward an empty room. Fall back to all samples if
+  // a record has no in-service samples at all (shouldn't happen in practice).
+  const svc = s.filter((x) => !x.phase);
+  const stat = svc.length ? svc : s;
+  att.peakAttendance = stat.reduce((m, x) => Math.max(m, perSvc(x.attendance)), 0);
+  att.peakOccupancy = stat.reduce((m, x) => Math.max(m, x.occupancy), 0);
+  att.minOccupancy = stat.length ? stat.reduce((m, x) => Math.min(m, x.occupancy), stat[0].occupancy) : null;
+  att.lastAttendance = stat.length ? perSvc(stat[stat.length - 1].attendance) : 0;
+  att.lastOccupancy = stat.length ? stat[stat.length - 1].occupancy : 0;
 }
 
 /** Adjust a service's start/end window across all three records: trim the timeline's

@@ -687,7 +687,7 @@ function niceStepInt(target: number): number {
 /** Fetch a recorded service's per-service curve + PCO markers for the people-graph
  *  "recorded" mode. serviceKey null → most recent finished service. */
 function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefined) {
-  const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[] } | null>(null);
+  const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[]; serviceStartedAt: string | null; serviceEndedAt: string | null } | null>(null);
   useEffect(() => {
     if (!enabled) { setData(null); return; }
     let cancelled = false;
@@ -697,7 +697,7 @@ function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefine
         const list = await invoke<ServiceAttendance[]>("attendance:listHistory").catch(() => [] as ServiceAttendance[]);
         key = (list ?? []).filter((s) => s.endedAt).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0]?.serviceKey ?? null;
       }
-      if (!key) { if (!cancelled) setData({ points: [], markers: [] }); return; }
+      if (!key) { if (!cancelled) setData({ points: [], markers: [], serviceStartedAt: null, serviceEndedAt: null }); return; }
       const [att, tl] = await Promise.all([
         invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: key }).catch(() => null),
         invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: key }).catch(() => null),
@@ -706,7 +706,7 @@ function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefine
       const base = att?.samples?.[0]?.attendance ?? 0; // per-service anchor
       const points: PeopleHistoryPoint[] = (att?.samples ?? []).map((s) => ({ t: s.t, attendance: Math.max(0, s.attendance - base), occupancy: s.occupancy }));
       const markers = (tl?.items ?? []).filter((it) => it.title && it.startedAt).map((it) => ({ t: it.startedAt, label: it.title }));
-      setData({ points, markers });
+      setData({ points, markers, serviceStartedAt: att?.serviceStartedAt ?? null, serviceEndedAt: att?.endedAt ?? null });
     })();
     return () => { cancelled = true; };
   }, [enabled, serviceKey]);
@@ -732,6 +732,8 @@ function PeopleGraphObject({ ctx, config, ts }: { ctx: LayoutRenderCtx; config: 
       showTooltip={config.showTooltip !== false}
       ts={ts}
       H={ctx.H}
+      serviceStartedAt={mode === "recorded" ? (recorded?.serviceStartedAt ?? null) : null}
+      serviceEndedAt={mode === "recorded" ? (recorded?.serviceEndedAt ?? null) : null}
       toggle={config.kioskToggle && ctx.interactive ? { mode, onToggle: () => setMode((m) => (m === "live" ? "recorded" : "live")) } : null}
     />
   );
@@ -746,6 +748,8 @@ function PeopleGraph({
   toggle = null,
   ts,
   H,
+  serviceStartedAt = null,
+  serviceEndedAt = null,
 }: {
   history: PeopleHistoryPoint[];
   metric: "attendance" | "occupancy";
@@ -755,6 +759,9 @@ function PeopleGraph({
   toggle?: { mode: "live" | "recorded"; onToggle: () => void } | null;
   ts: CSSProperties;
   H: number;
+  /** Service-proper window (recorded mode) — dims the arrival ramp / emptying-room taper. */
+  serviceStartedAt?: string | null;
+  serviceEndedAt?: string | null;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -816,8 +823,25 @@ function PeopleGraph({
     .filter((m) => Number.isFinite(m.ms) && m.ms >= t0 - 1000 && m.ms <= tN + 1000)
     .map((m) => { const idx = nearestIdx(m.ms); return { ...m, idx, x: px(idx) }; });
   // Autosize marker labels: full size up to ~6 markers, then scale down (floored)
-  // so a busy plan's rotated times stay legible without overlapping.
+  // so a busy plan's rotated names stay legible without overlapping.
   const markerFont = Math.max(6, fontPx * 0.85 * (markerPts.length > 6 ? 6 / markerPts.length : 1));
+
+  // Service-proper band (recorded mode): dim the arrival ramp / emptying-room taper
+  // outside it so the service itself reads as the main event.
+  const bandX0 = serviceStartedAt && Number.isFinite(Date.parse(serviceStartedAt)) ? px(nearestIdx(Date.parse(serviceStartedAt))) : null;
+  const bandX1 = serviceEndedAt && Number.isFinite(Date.parse(serviceEndedAt)) ? px(nearestIdx(Date.parse(serviceEndedAt))) : null;
+  const hasPre = bandX0 != null && bandX0 > PADL + 0.5;
+  const hasPost = bandX1 != null && bandX1 < 100 - PADR - 0.5;
+  // PCO item times for the x-axis — thinned left→right so close items don't crowd
+  // (the item NAME stays on the vertical marker line; only the time drops to the axis).
+  const axisMarkers: { x: number; t: string }[] = [];
+  let lastAxisX = -Infinity;
+  for (const m of [...markerPts].sort((a, b) => a.x - b.x)) {
+    if (m.x - lastAxisX >= 8 && m.x > PADL + 4 && m.x < 100 - PADR - 4) {
+      axisMarkers.push({ x: m.x, t: m.t });
+      lastAxisX = m.x;
+    }
+  }
 
   // Hover: map pointer X (over the full-width box) back to the nearest sample index.
   function onMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -848,6 +872,11 @@ function PeopleGraph({
         ))}
         <polygon points={`${PADL},${100 - PADB} ${line} ${100 - PADR},${100 - PADB}`} fill={stroke} fillOpacity={0.13} />
         <polyline points={line} fill="none" stroke={stroke} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+        {/* dim the pre-service ramp / post-service taper outside the service band */}
+        {hasPre && <rect x={PADL} y={PADT} width={(bandX0 as number) - PADL} height={100 - PADT - PADB} fill="rgba(0,0,0,0.32)" />}
+        {hasPost && <rect x={bandX1 as number} y={PADT} width={100 - PADR - (bandX1 as number)} height={100 - PADT - PADB} fill="rgba(0,0,0,0.32)" />}
+        {hasPre && <line x1={bandX0 as number} y1={PADT} x2={bandX0 as number} y2={100 - PADB} stroke={stroke} strokeOpacity={0.5} strokeWidth={0.6} strokeDasharray="1.5 1.5" vectorEffect="non-scaling-stroke" />}
+        {hasPost && <line x1={bandX1 as number} y1={PADT} x2={bandX1 as number} y2={100 - PADB} stroke={stroke} strokeOpacity={0.5} strokeWidth={0.6} strokeDasharray="1.5 1.5" vectorEffect="non-scaling-stroke" />}
         {/* PCO plan-item markers */}
         {markerPts.map((m, i) => (
           <line key={i} x1={m.x} y1={PADT} x2={m.x} y2={100 - PADB} stroke={stroke} strokeOpacity={0.4} strokeWidth={0.75} strokeDasharray="2 2" vectorEffect="non-scaling-stroke" />
@@ -864,9 +893,21 @@ function PeopleGraph({
       <span style={labelStyle(yMidPct)}>{yLabel(mid)}</span>
       <span style={labelStyle(yBot)}>{yLabel(lo)}</span>
 
-      {/* x-axis time labels */}
+      {/* x-axis time labels — endpoints + thinned PCO item times */}
       <span style={{ position: "absolute", left: `${PADL}%`, bottom: 0, color: stroke, opacity: 0.7, fontSize: `${fontPx}px`, lineHeight: 1 }}>{hhmm(history[0].t)}</span>
       <span style={{ position: "absolute", right: `${PADR}%`, bottom: 0, color: stroke, opacity: 0.7, fontSize: `${fontPx}px`, lineHeight: 1 }}>{hhmm(history[n - 1].t)}</span>
+      {axisMarkers.map((m, i) => (
+        <span
+          key={`axt-${i}`}
+          style={{
+            position: "absolute", left: `${m.x}%`, bottom: 0, transform: "translateX(-50%)",
+            color: stroke, opacity: 0.55, fontSize: `${markerFont}px`, lineHeight: 1,
+            whiteSpace: "nowrap", pointerEvents: "none",
+          }}
+        >
+          {hhmm(m.t)}
+        </span>
+      ))}
 
       {/* current value readout (top-right; drops below the toggle when both show) */}
       {config.showLabel && (
@@ -875,7 +916,7 @@ function PeopleGraph({
         </span>
       )}
 
-      {/* PCO marker time labels — rotated vertical so they don't crowd, and
+      {/* PCO marker labels — the item NAME rotated on its line (time is on the x-axis),
           shrunk as markers get dense (denser plan → smaller type, floored). */}
       {markerPts.map((m, i) => (
         <span
@@ -885,9 +926,10 @@ function PeopleGraph({
             transform: "translate(-50%, -50%) rotate(-90deg)", transformOrigin: "center",
             color: stroke, opacity: 0.7, fontSize: `${markerFont}px`, lineHeight: 1,
             fontWeight: 600, whiteSpace: "nowrap", pointerEvents: "none",
+            maxWidth: `${0.32 * H}px`, overflow: "hidden", textOverflow: "ellipsis",
           }}
         >
-          {hhmm(m.t)}
+          {m.label}
         </span>
       ))}
 

@@ -653,6 +653,10 @@ export interface AttendanceSample {
   t: string;
   attendance: number;
   occupancy: number;
+  /** "pre" = arrivals sampled before the service began, "post" = the room emptying
+   *  after it ended. Omitted = in-service — only these feed Peak/Lowest/Avg so the
+   *  ramp-up and taper tails don't skew the stats (they still draw on the curve). */
+  phase?: "pre" | "post";
 }
 
 /** Recorded attendance/occupancy trend for one service occurrence, keyed by
@@ -671,7 +675,13 @@ export interface ServiceAttendance {
   serviceDate: string;
   serviceTimeId: string | null;
   serviceTimeStartsAt: string | null;
+  /** When recording began — may be BEFORE the service (pre-service arrival ramp). */
   startedAt: string;
+  /** First in-service sample (the service proper began). Null while only pre-service
+   *  samples exist; may differ from `startedAt`. Absent on pre-taper legacy records. */
+  serviceStartedAt?: string | null;
+  /** When the service ended (the taper boundary). Post-service samples continue past
+   *  this during the cooldown window. */
   endedAt: string | null;
   /** Down-sampled samples across the service (oldest→newest). `attendance` is
    *  PER-SERVICE (baselined — see attendanceBaseline), so a second service in the

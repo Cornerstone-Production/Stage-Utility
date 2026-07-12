@@ -8,7 +8,7 @@
 // keyed `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}` and persisted,
 // so a mid-service restart resumes the same record.
 
-import type { PcoLiveDTO, ServiceAttendance } from "../types/stage.js";
+import type { AttendanceSample, PcoLiveDTO, ServiceAttendance } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { attendanceStore } from "./attendance-store.js";
 import { sensourceService } from "./sensource-service.js";
@@ -20,6 +20,14 @@ const PERSIST_DEBOUNCE_MS = 4000;
 const SAMPLE_INTERVAL_MS = 30_000;
 /** Max cadence for pushing the (O(n)) live record to trend viewers between samples. */
 const LIVE_BROADCAST_MS = 5_000;
+/** Sample the arrival ramp this far ahead of the service start (preservice countdown)
+ *  so the curve shows people filling the room before the first song. */
+const PRE_SERVICE_LEAD_MS = 60 * 60_000;
+/** Keep sampling the emptying room this long after the service ends, so the taper —
+ *  how fast the room clears — is captured even once PCO Live is cleared. */
+const POST_SERVICE_COOLDOWN_MS = 60 * 60_000;
+
+type Phase = "pre" | "service" | "post";
 /** A gap between live-item ticks shorter than this = still the SAME service, so a
  *  serviceTimeId change (a service running past its planned end rolls pickServiceTime
  *  to the next occurrence) must NOT split the recording. A longer gap = a genuinely
@@ -50,29 +58,83 @@ class AttendanceRecorder {
     return this.current;
   }
 
+  /** Classify what (if anything) to sample this tick:
+   *  - "service": a live plan item is running (the service proper) → feeds the stats.
+   *  - "pre": the arrival ramp — the preservice countdown (within the lead window) or a
+   *    pre-roll item positioned above the plan's SERVICE START header.
+   *  - "post": the emptying room — parked past SERVICE END, or within the cooldown
+   *    window after the service ended.
+   *  - null: nothing to record. */
+  private classify(live: PcoLiveDTO): Phase | null {
+    if (live.mode === "item" && live.currentItemId && isLiveServiceToday(live)) {
+      if (live.serviceEnded) return "post"; // still parked on an item past SERVICE END
+      if (live.beforeServiceStart) return "pre"; // pre-roll item above SERVICE START
+      return "service";
+    }
+    if (live.mode === "preservice" && isLiveServiceToday(live)) {
+      // Only once the countdown is within the arrival window (and not absurdly early).
+      const start = live.serviceTimeStartsAt ? Date.parse(live.serviceTimeStartsAt) : NaN;
+      if (Number.isFinite(start) && start - Date.now() <= PRE_SERVICE_LEAD_MS && Date.now() <= start + 5 * 60_000) {
+        return "pre";
+      }
+      return null;
+    }
+    // No live item (mode "none"): keep sampling the taper if a service ended recently.
+    if (this.current?.endedAt) {
+      const ended = Date.parse(this.current.endedAt);
+      if (Number.isFinite(ended) && Date.now() - ended <= POST_SERVICE_COOLDOWN_MS) return "post";
+    }
+    return null;
+  }
+
   /** Called by the live-poller after each pco:live broadcast. */
   async onLiveTick(live: PcoLiveDTO | null): Promise<void> {
     if (!live || this.busy) return;
     this.busy = true;
     try {
-      if (live.mode === "item" && live.currentItemId && !live.serviceEnded && isLiveServiceToday(live)) {
-        const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
-        this.lastLiveAt = Date.now();
-        await this.ensureRecord(live, gapSinceLive);
-        if (!this.current) return;
-        if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
+      const phase = this.classify(live);
+      if (phase === null) {
+        // Nothing to sample. Close any record left open (mode dropped with no end
+        // header, before the cooldown branch can tag it) so it stops reading as live;
+        // the next tick's cooldown check then resumes it as "post".
+        if (this.current && !this.current.endedAt) {
+          this.finalizeRecord();
+          await attendanceStore.upsert(this.current);
+          broadcast("attendance:history", this.current);
+        }
+        return;
+      }
 
-        const p = sensourceService.getLatest();
-        if (!p.connected || p.total.attendance == null || p.total.occupancy == null) return;
-        const rawA = p.total.attendance; // SenSource Σ-entries — a running DAILY total
-        const o = p.total.occupancy;
-        // Baseline on the first sample so attendance is PER-SERVICE: a second service
-        // in the same plan (new serviceTimeId → new record) starts its curve at 0
-        // instead of inheriting the first service's count. The raw daily total is
-        // kept separately as totalAttendance.
-        if (this.current.attendanceBaseline == null) this.current.attendanceBaseline = rawA;
-        const a = Math.max(0, rawA - this.current.attendanceBaseline);
-        this.current.totalAttendance = rawA;
+      const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
+      if (live.mode === "item") this.lastLiveAt = Date.now(); // gap is measured between live items
+
+      // Establish the record for pre/service; "post" only ever samples into the
+      // record we just ended (never spins up a new one for an emptying room).
+      if (phase === "service" || phase === "pre") await this.ensureRecord(live, gapSinceLive);
+      if (!this.current) return;
+
+      if (phase === "service") {
+        if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull/cooldown
+        if (!this.current.serviceStartedAt) this.current.serviceStartedAt = new Date().toISOString();
+      } else if (phase === "post") {
+        this.finalizeRecord(); // stamp the service-end boundary once (guarded)
+      }
+
+      const p = sensourceService.getLatest();
+      if (!p.connected || p.total.attendance == null || p.total.occupancy == null) return;
+      const rawA = p.total.attendance; // SenSource Σ-entries — a running DAILY total
+      const o = p.total.occupancy;
+      // Baseline on the first sample so attendance is PER-SERVICE: a second service
+      // in the same plan (new serviceTimeId → new record) starts its curve at 0
+      // instead of inheriting the first service's count. The raw daily total is
+      // kept separately as totalAttendance.
+      if (this.current.attendanceBaseline == null) this.current.attendanceBaseline = rawA;
+      const a = Math.max(0, rawA - this.current.attendanceBaseline);
+      this.current.totalAttendance = rawA;
+
+      // Only the service proper feeds Peak/Lowest/Last — the pre-service ramp and the
+      // post-service taper would otherwise drag the "floor"/"last" toward an empty room.
+      if (phase === "service") {
         this.current.peakAttendance = Math.max(this.current.peakAttendance, a);
         this.current.peakOccupancy = Math.max(this.current.peakOccupancy, o);
         // Running min "floor" — null until the first reading so an empty-room
@@ -81,27 +143,22 @@ class AttendanceRecorder {
         this.current.minOccupancy = this.current.minOccupancy == null ? o : Math.min(this.current.minOccupancy, o);
         this.current.lastAttendance = a;
         this.current.lastOccupancy = o;
+      }
 
-        const now = Date.now();
-        let appended = false;
-        if (now - this.lastSampleAt >= SAMPLE_INTERVAL_MS) {
-          this.current.samples.push({ t: new Date().toISOString(), attendance: a, occupancy: o });
-          this.lastSampleAt = now;
-          this.schedulePersist();
-          appended = true;
-        }
-        // The full record is O(n) and the counts move slowly, so live-trend viewers
-        // don't need it 1x/sec — push on a new sample, else at most every LIVE_BROADCAST_MS.
-        if (appended || now - this.lastBroadcastAt >= LIVE_BROADCAST_MS) {
-          this.lastBroadcastAt = now;
-          broadcast("attendance:history", this.current);
-        }
-      } else if (this.current && !this.current.endedAt) {
-        // Left "item" mode — service ended or the next service's preservice began.
-        // Close the open record so the Attendance tab stops showing it as live.
-        // Self-healing: an item going live above reopens it.
-        this.finalizeRecord();
-        await attendanceStore.upsert(this.current);
+      const now = Date.now();
+      let appended = false;
+      if (now - this.lastSampleAt >= SAMPLE_INTERVAL_MS) {
+        const sample: AttendanceSample = { t: new Date().toISOString(), attendance: a, occupancy: o };
+        if (phase !== "service") sample.phase = phase; // tag ramp/taper; in-service stays untagged
+        this.current.samples.push(sample);
+        this.lastSampleAt = now;
+        this.schedulePersist();
+        appended = true;
+      }
+      // The full record is O(n) and the counts move slowly, so live-trend viewers
+      // don't need it 1x/sec — push on a new sample, else at most every LIVE_BROADCAST_MS.
+      if (appended || now - this.lastBroadcastAt >= LIVE_BROADCAST_MS) {
+        this.lastBroadcastAt = now;
         broadcast("attendance:history", this.current);
       }
     } finally {
@@ -155,6 +212,7 @@ class AttendanceRecorder {
         serviceTimeId: serviceTimeId ?? null,
         serviceTimeStartsAt: live.serviceTimeStartsAt,
         startedAt: new Date().toISOString(),
+        serviceStartedAt: null,
         endedAt: null,
         samples: [],
         attendanceBaseline: null,
@@ -172,7 +230,10 @@ class AttendanceRecorder {
 
   private finalizeRecord(): void {
     if (!this.current) return;
-    this.current.endedAt = new Date().toISOString();
+    // Stamp the service-end boundary only once — re-finalizing (e.g. as the next
+    // service's preservice starts, or each cooldown tick) must not push endedAt
+    // later and swallow the taper into the service window.
+    if (!this.current.endedAt) this.current.endedAt = new Date().toISOString();
   }
 
   private schedulePersist(): void {
