@@ -37,7 +37,7 @@ export function ConnectSection({ stageState, handlers }: Pick<SectionProps, "sta
                 </FieldDescription>
                 <button
                   type="button"
-                  className="mt-1.5 self-start text-left text-[11px] font-mono text-gray-a9 hover:text-gray-11 transition-colors truncate max-w-full"
+                  className="mt-1.5 self-start text-left text-caption2 font-mono text-gray-a9 hover:text-gray-11 transition-colors truncate max-w-full"
                   title="Click to copy URL"
                   onClick={async () => {
                     const ok = await copyText(stageState.remoteUrl!);

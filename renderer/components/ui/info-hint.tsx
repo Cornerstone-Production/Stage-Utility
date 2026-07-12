@@ -31,7 +31,7 @@ export function InfoHint({ children, className }: { children: React.ReactNode; c
           sideOffset={6}
           collisionPadding={8}
           className={cn(
-            "z-50 max-w-[16rem] rounded-lg border border-line-strong bg-surface px-3 py-2 text-[12px] leading-snug text-fg-muted shadow-md",
+            "z-50 max-w-[16rem] rounded-lg border border-line-strong bg-surface px-3 py-2 text-caption1 leading-snug text-fg-muted shadow-md",
             "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           )}
         >

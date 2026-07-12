@@ -161,7 +161,7 @@ export function SidebarListItem({
       type="button"
       className={cn(
         "flex items-center gap-2 w-full rounded-md px-2.5 py-1.5 text-left",
-        "text-[13px] font-medium transition-colors",
+        "text-footnote font-medium transition-colors",
         railed && "justify-center px-0",
         isActive
           ? "bg-accent text-white"
@@ -192,7 +192,7 @@ export function SidebarListItem({
           <TooltipPrimitive.Content
             side="right"
             sideOffset={8}
-            className="z-50 select-none rounded-md bg-gray-12 px-2 py-1 text-[12px] font-medium text-gray-1 shadow-md"
+            className="z-50 select-none rounded-md bg-gray-12 px-2 py-1 text-caption1 font-medium text-gray-1 shadow-md"
           >
             {displayLabel}
           </TooltipPrimitive.Content>

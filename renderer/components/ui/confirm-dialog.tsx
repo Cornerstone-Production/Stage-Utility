@@ -72,11 +72,11 @@ export function ConfirmHost() {
             "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           )}
         >
-          <AlertDialogPrimitive.Title className="text-[15px] font-semibold text-fg mb-1">
+          <AlertDialogPrimitive.Title className="text-subheadline font-semibold text-fg mb-1">
             {state?.title}
           </AlertDialogPrimitive.Title>
           {state?.message && (
-            <AlertDialogPrimitive.Description className="text-[12px] text-fg-subtle mb-4 whitespace-pre-line">
+            <AlertDialogPrimitive.Description className="text-caption1 text-fg-subtle mb-4 whitespace-pre-line">
               {state.message}
             </AlertDialogPrimitive.Description>
           )}

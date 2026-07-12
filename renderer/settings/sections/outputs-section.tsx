@@ -136,7 +136,7 @@ function OutputRow({ output, views, baseUrl, isFirst, canRemove, onRename, onSet
         </Select>
         <button
           type="button"
-          className="text-left text-[11px] text-gray-a9 hover:text-gray-11 font-mono truncate transition-colors min-w-0"
+          className="text-left text-caption2 text-gray-a9 hover:text-gray-11 font-mono truncate transition-colors min-w-0"
           title="Click to copy URL"
           onClick={async () => { if (await copyText(outputUrl)) toast.success("URL copied"); else toast.error("Couldn't copy — select the URL manually"); }}
         >

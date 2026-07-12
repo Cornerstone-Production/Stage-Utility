@@ -66,7 +66,7 @@ interface FieldLabelProps extends React.HTMLAttributes<HTMLSpanElement> {}
 
 export function FieldLabel({ className, children, ...props }: FieldLabelProps) {
   return (
-    <span className={cn("text-[13px] font-medium text-fg leading-tight", className)} {...props}>
+    <span className={cn("text-footnote font-medium text-fg leading-tight", className)} {...props}>
       {children}
     </span>
   );
@@ -78,7 +78,7 @@ interface FieldDescriptionProps extends React.HTMLAttributes<HTMLSpanElement> {}
 
 export function FieldDescription({ className, children, ...props }: FieldDescriptionProps) {
   return (
-    <span className={cn("text-[11px] text-fg-subtle leading-tight mt-0.5", className)} {...props}>
+    <span className={cn("text-caption2 text-fg-subtle leading-tight mt-0.5", className)} {...props}>
       {children}
     </span>
   );

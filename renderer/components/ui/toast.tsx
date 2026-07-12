@@ -78,7 +78,7 @@ export function Toaster() {
           {t.type === "error" && (
             <XCircleIcon className="size-4 shrink-0 text-red-10" />
           )}
-          <ToastPrimitive.Description className="flex-1 text-[13px]">
+          <ToastPrimitive.Description className="flex-1 text-footnote">
             {t.message}
           </ToastPrimitive.Description>
           <ToastPrimitive.Close asChild>

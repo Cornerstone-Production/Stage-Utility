@@ -25,10 +25,10 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
           "disabled:pointer-events-none disabled:opacity-40 select-none",
           // Size
-          size === "small" && !iconOnly && "h-6 px-2 text-[12px]",
-          size === "small" && iconOnly && "h-6 w-6 p-0 text-[12px]",
-          size === "medium" && !iconOnly && "h-8 px-3 text-[13px]",
-          size === "medium" && iconOnly && "h-8 w-8 p-0 text-[13px]",
+          size === "small" && !iconOnly && "h-6 px-2 text-caption1",
+          size === "small" && iconOnly && "h-6 w-6 p-0 text-caption1",
+          size === "medium" && !iconOnly && "h-8 px-3 text-footnote",
+          size === "medium" && iconOnly && "h-8 w-8 p-0 text-footnote",
           // Variant
           variant === "accent" && [
             "bg-accent text-white",
@@ -64,7 +64,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             side="top"
             sideOffset={6}
             className={cn(
-              "z-50 rounded-md bg-gray-12 px-2 py-1 text-[11px] font-medium text-gray-1 shadow-md",
+              "z-50 rounded-md bg-gray-12 px-2 py-1 text-caption2 font-medium text-gray-1 shadow-md",
               "select-none data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95",
             )}
           >

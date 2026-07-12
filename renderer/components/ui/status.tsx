@@ -23,7 +23,7 @@ export function Status({ variant = "neutral", className, children, ...props }: S
         )}
       />
       {children && (
-        <span className="text-[12px] text-fg-muted">{children}</span>
+        <span className="text-caption1 text-fg-muted">{children}</span>
       )}
     </span>
   );

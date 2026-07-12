@@ -101,7 +101,7 @@ export function NumberInput({
           }
         }}
         onChange={(e) => commitText(e.target.value)}
-        className={cn("min-w-0 flex-1 bg-transparent px-2.5 py-1 text-[13px] text-fg tabular-nums outline-none", NO_SPINNER)}
+        className={cn("min-w-0 flex-1 bg-transparent px-2.5 py-1 text-footnote text-fg tabular-nums outline-none", NO_SPINNER)}
       />
       {suffix && (
         <span className="pointer-events-none flex select-none items-center pr-1 text-caption2 text-gray-8">{suffix}</span>

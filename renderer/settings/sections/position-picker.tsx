@@ -46,7 +46,7 @@ export function PositionPicker({ value, teamPositions, onChange }: PositionPicke
           type="button"
           className={cn(
             "flex h-7 flex-1 min-w-0 items-center justify-between gap-1 rounded-md border border-gray-a6 bg-gray-a2",
-            "px-2.5 py-1 text-[13px] text-gray-12",
+            "px-2.5 py-1 text-footnote text-gray-12",
             "focus:outline-none focus:border-blue-8 focus:ring-1 focus:ring-blue-8",
           )}
         >
@@ -73,7 +73,7 @@ export function PositionPicker({ value, teamPositions, onChange }: PositionPicke
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search positions…"
               className={cn(
-                "h-7 w-full rounded border border-gray-a6 bg-gray-a2 px-2 text-[13px]",
+                "h-7 w-full rounded border border-gray-a6 bg-gray-a2 px-2 text-footnote",
                 "text-gray-12 placeholder:text-gray-a8 focus:outline-none focus:border-blue-8",
               )}
             />
@@ -99,7 +99,7 @@ export function PositionPicker({ value, teamPositions, onChange }: PositionPicke
                           type="button"
                           onClick={() => select(p.positionName)}
                           className={cn(
-                            "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] text-gray-12",
+                            "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-footnote text-gray-12",
                             "hover:bg-gray-a3",
                             selected && "bg-gray-a3",
                           )}

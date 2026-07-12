@@ -68,7 +68,7 @@ export const DialogTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Title
     ref={ref}
-    className={cn("text-[15px] font-semibold text-fg", className)}
+    className={cn("text-subheadline font-semibold text-fg", className)}
     {...props}
   />
 ));
@@ -80,7 +80,7 @@ export const DialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Description
     ref={ref}
-    className={cn("text-[13px] text-fg-muted", className)}
+    className={cn("text-footnote text-fg-muted", className)}
     {...props}
   />
 ));
@@ -159,11 +159,11 @@ export function Dialog({
             "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           )}
         >
-          <DialogPrimitive.Title className="text-[15px] font-semibold text-fg mb-1">
+          <DialogPrimitive.Title className="text-subheadline font-semibold text-fg mb-1">
             {title}
           </DialogPrimitive.Title>
           {description && (
-            <DialogPrimitive.Description className="text-[12px] text-fg-subtle mb-4">
+            <DialogPrimitive.Description className="text-caption1 text-fg-subtle mb-4">
               {description}
             </DialogPrimitive.Description>
           )}

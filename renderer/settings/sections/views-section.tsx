@@ -451,7 +451,7 @@ export function ViewsSection({
         {/* Mobile-only back affordance to the view list. */}
         <button
           type="button"
-          className="sm:hidden mb-3 flex items-center gap-1 text-[13px] font-medium text-gray-11"
+          className="sm:hidden mb-3 flex items-center gap-1 text-footnote font-medium text-gray-11"
           onClick={() => setMobileShowDetail(false)}
         >
           <ChevronLeftIcon className="size-4" />
@@ -461,7 +461,7 @@ export function ViewsSection({
         {listCollapsed && (
           <button
             type="button"
-            className="hidden sm:flex mb-3 items-center gap-1 text-[13px] font-medium text-gray-11 hover:text-gray-12 self-start"
+            className="hidden sm:flex mb-3 items-center gap-1 text-footnote font-medium text-gray-11 hover:text-gray-12 self-start"
             onClick={toggleList}
           >
             <PanelLeftOpenIcon className="size-4" />
