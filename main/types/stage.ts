@@ -1067,6 +1067,8 @@ export interface StageState {
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
   reconnectSchedule: ReconnectSchedule;
+  /** Attendance ramp/taper capture windows (Advanced tab). */
+  taperWindow: TaperWindow;
   /** Operator dismissed the first-run "Getting started" checklist (machine-wide). */
   onboardingDismissed: boolean;
 }
@@ -1103,6 +1105,15 @@ export interface AutoUpdateSettings {
   dayOfWeek: number | null;
   /** Hour of day 0–23 (local time) the update window opens. */
   hour: number;
+}
+
+/** Minutes to keep sampling attendance/occupancy around a service so the graphs
+ *  show the room filling before and emptying after (Advanced tab). 0 = off. */
+export interface TaperWindow {
+  /** Sample the arrival ramp this many minutes before the service start. */
+  preMin: number;
+  /** Keep sampling the emptying room this many minutes after the service ends. */
+  postMin: number;
 }
 
 /** Tunables for time-aware integration reconnects (Advanced tab). */

@@ -1868,6 +1868,15 @@ export class RemoteServer {
       json(res, await stageController.setReconnectSchedule(partial));
       return;
     }
+    if (method === "POST" && pathname === "/api/taper-window") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const partial: Record<string, unknown> = {};
+      for (const k of ["preMin", "postMin"]) {
+        if (typeof body[k] === "number") partial[k] = body[k];
+      }
+      json(res, await stageController.setTaperWindow(partial));
+      return;
+    }
 
     // ── Config snapshot (backup / restore) ──────────────────────────────────
     // Download the full config (secrets excluded) as a .json file.

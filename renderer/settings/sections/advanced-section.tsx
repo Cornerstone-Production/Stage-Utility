@@ -569,6 +569,13 @@ export function AdvancedSection({
   const [lead, setLead] = useState(String(rc.leadMin));
   const [tail, setTail] = useState(String(rc.tailMin));
   const [dormant, setDormant] = useState(String(rc.dormantMin));
+  const tw = stageState.taperWindow ?? { preMin: 60, postMin: 60 };
+  const [preMin, setPreMin] = useState(String(tw.preMin));
+  const [postMin, setPostMin] = useState(String(tw.postMin));
+  const commitTaper = (key: "preMin" | "postMin", valStr: string, cur: number) => {
+    const n = Number(valStr);
+    if (Number.isFinite(n) && n >= 0 && n !== cur) handlers.handleSetTaperWindow({ [key]: n });
+  };
   const commitNum = (key: "leadMin" | "tailMin" | "dormantMin", valStr: string, cur: number) => {
     const n = Math.round(Number(valStr));
     if (Number.isFinite(n) && n >= 0 && n !== cur) handlers.handleSetReconnectSchedule({ [key]: n });
@@ -662,6 +669,33 @@ export function AdvancedSection({
               </Field>
             </>
           )}
+        </FieldGroup>
+      </FieldSet>
+
+      <FieldSet title="Attendance capture">
+        <FieldGroup>
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Pre-service ramp</FieldLabel>
+              <FieldDescription>Start sampling attendance this many minutes before the service start, so the graph shows the room filling up. 0 = off.</FieldDescription>
+            </FieldContent>
+            <Input type="number" min={0} max={240} value={preMin} className="w-24 text-gray-12"
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setPreMin(e.target.value)}
+              onBlur={() => commitTaper("preMin", preMin, tw.preMin)}
+              onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+              aria-label="Pre-service ramp (minutes)" />
+          </Field>
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Post-service taper</FieldLabel>
+              <FieldDescription>Keep sampling this many minutes after the service ends (even once PCO Live is cleared) to capture how fast the room empties. Excluded from Peak/Lowest stats. 0 = off.</FieldDescription>
+            </FieldContent>
+            <Input type="number" min={0} max={240} value={postMin} className="w-24 text-gray-12"
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setPostMin(e.target.value)}
+              onBlur={() => commitTaper("postMin", postMin, tw.postMin)}
+              onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+              aria-label="Post-service taper (minutes)" />
+          </Field>
         </FieldGroup>
       </FieldSet>
 

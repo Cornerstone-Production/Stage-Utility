@@ -11,6 +11,7 @@
 import type { AttendanceSample, PcoLiveDTO, ServiceAttendance } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { attendanceStore } from "./attendance-store.js";
+import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { sensourceService } from "./sensource-service.js";
 import { isLiveServiceToday } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
@@ -20,13 +21,6 @@ const PERSIST_DEBOUNCE_MS = 4000;
 const SAMPLE_INTERVAL_MS = 30_000;
 /** Max cadence for pushing the (O(n)) live record to trend viewers between samples. */
 const LIVE_BROADCAST_MS = 5_000;
-/** Sample the arrival ramp this far ahead of the service start (preservice countdown)
- *  so the curve shows people filling the room before the first song. */
-const PRE_SERVICE_LEAD_MS = 60 * 60_000;
-/** Keep sampling the emptying room this long after the service ends, so the taper —
- *  how fast the room clears — is captured even once PCO Live is cleared. */
-const POST_SERVICE_COOLDOWN_MS = 60 * 60_000;
-
 type Phase = "pre" | "service" | "post";
 /** A gap between live-item ticks shorter than this = still the SAME service, so a
  *  serviceTimeId change (a service running past its planned end rolls pickServiceTime
@@ -48,6 +42,9 @@ class AttendanceRecorder {
   private currentKey: string | null = null;
   private lastLiveAt = 0; // last live-item tick (to detect the gap between services)
   private lastSampleAt = 0;
+  // Ramp/taper windows (ms), refreshed from settings each tick — see the Advanced tab.
+  private preMs = DEFAULT_TAPER_WINDOW.preMin * 60_000;
+  private postMs = DEFAULT_TAPER_WINDOW.postMin * 60_000;
   private lastBroadcastAt = 0;
   private busy = false;
   private dirty = false;
@@ -71,18 +68,18 @@ class AttendanceRecorder {
       if (live.beforeServiceStart) return "pre"; // pre-roll item above SERVICE START
       return "service";
     }
-    if (live.mode === "preservice" && isLiveServiceToday(live)) {
+    if (live.mode === "preservice" && this.preMs > 0 && isLiveServiceToday(live)) {
       // Only once the countdown is within the arrival window (and not absurdly early).
       const start = live.serviceTimeStartsAt ? Date.parse(live.serviceTimeStartsAt) : NaN;
-      if (Number.isFinite(start) && start - Date.now() <= PRE_SERVICE_LEAD_MS && Date.now() <= start + 5 * 60_000) {
+      if (Number.isFinite(start) && start - Date.now() <= this.preMs && Date.now() <= start + 5 * 60_000) {
         return "pre";
       }
       return null;
     }
     // No live item (mode "none"): keep sampling the taper if a service ended recently.
-    if (this.current?.endedAt) {
+    if (this.postMs > 0 && this.current?.endedAt) {
       const ended = Date.parse(this.current.endedAt);
-      if (Number.isFinite(ended) && Date.now() - ended <= POST_SERVICE_COOLDOWN_MS) return "post";
+      if (Number.isFinite(ended) && Date.now() - ended <= this.postMs) return "post";
     }
     return null;
   }
@@ -92,6 +89,11 @@ class AttendanceRecorder {
     if (!live || this.busy) return;
     this.busy = true;
     try {
+      // Refresh the ramp/taper windows from settings (cached read — cheap).
+      const tw = (await settingsStore.get()).taperWindow ?? DEFAULT_TAPER_WINDOW;
+      this.preMs = Math.max(0, tw.preMin) * 60_000;
+      this.postMs = Math.max(0, tw.postMin) * 60_000;
+
       const phase = this.classify(live);
       if (phase === null) {
         // Nothing to sample. Close any record left open (mode dropped with no end

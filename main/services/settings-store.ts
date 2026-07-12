@@ -56,6 +56,8 @@ export interface SettingsData {
   autoUpdate: { enabled: boolean; dayOfWeek: number | null; hour: number };
   /** Time-aware integration reconnect tunables (leadMin/tailMin/dormantMin). */
   reconnectSchedule?: { enabled: boolean; leadMin: number; tailMin: number; dormantMin: number };
+  /** Attendance ramp/taper capture windows in minutes (preMin/postMin). */
+  taperWindow?: { preMin: number; postMin: number };
   /** Local UDP port the OSC integration listens on for device feedback. */
   oscFeedbackPort: number;
   /** Smaart metric keys to surface in the SPL History tab (empty = auto default). */
@@ -96,6 +98,10 @@ const DEFAULT_SETTINGS: SettingsData = {
   splVisibleMetrics: [],
   onboardingDismissed: false,
 };
+
+/** Default attendance capture windows (minutes). Shared by the recorder (fallback
+ *  when unset) and the stage state the Advanced tab reads. */
+export const DEFAULT_TAPER_WINDOW = { preMin: 60, postMin: 60 };
 
 const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS);
 

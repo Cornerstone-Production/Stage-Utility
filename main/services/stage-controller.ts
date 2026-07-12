@@ -3,13 +3,13 @@
 
 import { randomUUID } from "crypto";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
-import { settingsStore } from "./settings-store.js";
+import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
 import { layoutGroupsStore } from "./layout-groups-store.js";
@@ -159,6 +159,7 @@ export class StageController {
     captionChannelColors: {},
     autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
     reconnectSchedule: { ...DEFAULT_RECONNECT_SCHEDULE },
+    taperWindow: { ...DEFAULT_TAPER_WINDOW },
     onboardingDismissed: false,
   };
 
@@ -229,6 +230,7 @@ export class StageController {
       captionChannelColors: settings.captionChannelColors ?? {},
       autoUpdate: settings.autoUpdate ?? { enabled: false, dayOfWeek: null, hour: 3 },
       reconnectSchedule: settings.reconnectSchedule ?? { ...DEFAULT_RECONNECT_SCHEDULE },
+      taperWindow: settings.taperWindow ?? { ...DEFAULT_TAPER_WINDOW },
       onboardingDismissed: settings.onboardingDismissed ?? false,
     };
     this.publicUrl = settings.publicUrl ?? null;
@@ -954,6 +956,17 @@ export class StageController {
     await settingsStore.patch({ reconnectSchedule: next });
     serviceWindow.setSchedule(next);
     void this.refreshServiceWindows(); // lead/tail shift the window bounds
+    this.broadcast();
+    return this.state;
+  }
+
+  async setTaperWindow(partial: Partial<TaperWindow>): Promise<StageState> {
+    const next: TaperWindow = { ...this.state.taperWindow, ...partial };
+    next.preMin = Math.min(240, Math.max(0, Math.round(next.preMin)));
+    next.postMin = Math.min(240, Math.max(0, Math.round(next.postMin)));
+    console.log(`[stage-controller] setTaperWindow →`, next);
+    this.state = { ...this.state, taperWindow: next };
+    await settingsStore.patch({ taperWindow: next });
     this.broadcast();
     return this.state;
   }

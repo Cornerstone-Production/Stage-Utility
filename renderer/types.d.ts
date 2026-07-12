@@ -789,7 +789,16 @@ interface StageState {
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
   reconnectSchedule: ReconnectSchedule;
+  /** Attendance ramp/taper capture windows (Advanced tab). */
+  taperWindow: TaperWindow;
   onboardingDismissed: boolean;
+}
+
+interface TaperWindow {
+  /** Minutes to sample the arrival ramp before the service start (0 = off). */
+  preMin: number;
+  /** Minutes to keep sampling the emptying room after the service ends (0 = off). */
+  postMin: number;
 }
 
 interface ChargerBayDTO {

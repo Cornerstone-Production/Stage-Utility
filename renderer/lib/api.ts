@@ -271,6 +271,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "settings:setReconnectSchedule":
       return post<T>("/api/reconnect-schedule", p);
 
+    case "settings:setTaperWindow":
+      return post<T>("/api/taper-window", p);
+
     case "update:setTrack":
       return post<T>("/api/update/track", p);
 

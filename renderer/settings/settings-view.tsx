@@ -530,6 +530,15 @@ export function SettingsView() {
     }
   }
 
+  async function handleSetTaperWindow(partial: { preMin?: number; postMin?: number }) {
+    try {
+      const next = await ipc<StageState>("settings:setTaperWindow", partial);
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to update taper settings: ${String(err)}`);
+    }
+  }
+
   async function handleSetAllowedServiceTypes(ids: string[]) {
     try {
       const next = await ipc<StageState>("stage:setAllowedServiceTypes", { ids });
@@ -960,6 +969,7 @@ export function SettingsView() {
     handleApplyUpdate,
     handleSetAutoUpdate,
     handleSetReconnectSchedule,
+    handleSetTaperWindow,
     handleSetAllowedServiceTypes,
     handleSetBranding,
     updateSlot,
