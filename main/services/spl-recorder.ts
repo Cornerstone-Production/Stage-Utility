@@ -17,6 +17,9 @@ import { stageController } from "./stage-controller.js";
 const PERSIST_DEBOUNCE_MS = 4000;
 /** Max cadence for pushing the (O(n)) live record to trend viewers between item changes. */
 const LIVE_BROADCAST_MS = 5_000;
+/** Short gap between live-item ticks = same service (hold the record through a
+ *  serviceTimeId roll on overrun); a long gap = a new service occurrence. */
+const SERVICE_GAP_MS = 10 * 60_000;
 /** Metric preference for the recorded level (A-weighted, slow → broadband). */
 const PREFERRED_METRICS = ["SPL A Slow", "SPL A Fast", "LAeq 10", "SPL Slow", "SPL Fast"];
 
@@ -65,6 +68,7 @@ function pickMeter(spl: SplMetricsDTO | null): MeterSample | null {
 class SplRecorder {
   private current: ServiceSplHistory | null = null;
   private currentKey: string | null = null;
+  private lastLiveAt = 0; // last live-item tick (to detect the gap between services)
   private lastItemId: string | null = null;
   private lastBroadcastAt = 0;
   private nextSequence = 0;
@@ -83,7 +87,9 @@ class SplRecorder {
     this.busy = true;
     try {
       if (live.mode === "item" && live.currentItemId && !live.serviceEnded && isLiveServiceToday(live)) {
-        await this.ensureRecord(live);
+        const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
+        this.lastLiveAt = Date.now();
+        await this.ensureRecord(live, gapSinceLive);
         if (!this.current) return;
         if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
         let itemChanged = false;
@@ -115,27 +121,27 @@ class SplRecorder {
     }
   }
 
-  private async ensureRecord(live: PcoLiveDTO): Promise<void> {
+  private async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<void> {
     const st = stageController.getState();
     if (!st.serviceTypeId || !st.planId) return; // can't key a record yet
     const date = todayLocal();
     // Separate back-to-back services that share one plan by the PCO service-time
-    // occurrence (9am vs 11am). pickServiceTime flips to the next occurrence as one
-    // ends, which is exactly the boundary we want. Fall back to the date when no
-    // service time is known (keeps legacy keys stable).
+    // occurrence (9am vs 11am). Fall back to the date when no service time is known.
     const serviceTimeId = live.serviceTimeId;
     const key = `${st.serviceTypeId}:${st.planId}:${serviceTimeId ?? date}`;
     if (this.currentKey === key && this.current) return;
 
-    // Guard a transient null serviceTimeId (cache miss / network blip) from
-    // splitting the open record mid-service: keep the current record when it's the
-    // same plan + date and we just lost the occasion id.
+    // Hold the open record through a serviceTimeId change within the same live
+    // service: pickServiceTime rolls to the NEXT occurrence when a service runs past
+    // its planned end (and a null is a transient cache miss). A short gap since the
+    // last live tick = same service → keep appending, don't split; only a long gap
+    // means a genuinely new occurrence.
     if (
-      serviceTimeId == null &&
       this.current &&
       this.current.serviceTypeId === st.serviceTypeId &&
       this.current.planId === st.planId &&
-      this.current.serviceDate === date
+      this.current.serviceDate === date &&
+      (serviceTimeId == null || gapSinceLive < SERVICE_GAP_MS)
     ) {
       return;
     }

@@ -20,6 +20,12 @@ const PERSIST_DEBOUNCE_MS = 4000;
 const SAMPLE_INTERVAL_MS = 30_000;
 /** Max cadence for pushing the (O(n)) live record to trend viewers between samples. */
 const LIVE_BROADCAST_MS = 5_000;
+/** A gap between live-item ticks shorter than this = still the SAME service, so a
+ *  serviceTimeId change (a service running past its planned end rolls pickServiceTime
+ *  to the next occurrence) must NOT split the recording. A longer gap = a genuinely
+ *  new service occurrence → new record. Services are far enough apart that 10 min
+ *  cleanly separates them while bridging any within-service lull. */
+const SERVICE_GAP_MS = 10 * 60_000;
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -32,6 +38,7 @@ function todayLocal(): string {
 class AttendanceRecorder {
   private current: ServiceAttendance | null = null;
   private currentKey: string | null = null;
+  private lastLiveAt = 0; // last live-item tick (to detect the gap between services)
   private lastSampleAt = 0;
   private lastBroadcastAt = 0;
   private busy = false;
@@ -49,7 +56,9 @@ class AttendanceRecorder {
     this.busy = true;
     try {
       if (live.mode === "item" && live.currentItemId && !live.serviceEnded && isLiveServiceToday(live)) {
-        await this.ensureRecord(live);
+        const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
+        this.lastLiveAt = Date.now();
+        await this.ensureRecord(live, gapSinceLive);
         if (!this.current) return;
         if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
 
@@ -100,7 +109,7 @@ class AttendanceRecorder {
     }
   }
 
-  private async ensureRecord(live: PcoLiveDTO): Promise<void> {
+  private async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<void> {
     const st = stageController.getState();
     if (!st.serviceTypeId || !st.planId) return;
     const date = todayLocal();
@@ -108,14 +117,17 @@ class AttendanceRecorder {
     const key = `${st.serviceTypeId}:${st.planId}:${serviceTimeId ?? date}`;
     if (this.currentKey === key && this.current) return;
 
-    // Tolerate a transient null serviceTimeId (cache miss) — keep the open record
-    // if it's the same plan + date, so we don't split mid-service.
+    // Hold the open record through a serviceTimeId change WITHIN the same live
+    // service: a service running past its planned end rolls pickServiceTime to the
+    // next occurrence (a null cache-miss does the same). If we were recording moments
+    // ago (short gap), it's the same service — keep appending, don't split. Only a
+    // long gap since the last live tick means a genuinely new service occurrence.
     if (
-      serviceTimeId == null &&
       this.current &&
       this.current.serviceTypeId === st.serviceTypeId &&
       this.current.planId === st.planId &&
-      this.current.serviceDate === date
+      this.current.serviceDate === date &&
+      (serviceTimeId == null || gapSinceLive < SERVICE_GAP_MS)
     ) {
       return;
     }

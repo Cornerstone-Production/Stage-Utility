@@ -16,6 +16,9 @@ import { isLiveServiceToday } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
 
 const PERSIST_DEBOUNCE_MS = 4000;
+/** Short gap between live-item ticks = same service (hold the record through a
+ *  serviceTimeId roll on overrun); a long gap = a new service occurrence. */
+const SERVICE_GAP_MS = 10 * 60_000;
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -28,6 +31,7 @@ function todayLocal(): string {
 class ServiceTimelineRecorder {
   private current: ServiceTimeline | null = null;
   private currentKey: string | null = null;
+  private lastLiveAt = 0; // last live-item tick (to detect the gap between services)
   private lastItemId: string | null = null;
   private nextSequence = 0;
   private busy = false;
@@ -45,7 +49,9 @@ class ServiceTimelineRecorder {
     this.busy = true;
     try {
       if (live.mode === "item" && live.currentItemId && !live.serviceEnded && isLiveServiceToday(live)) {
-        await this.ensureRecord(live);
+        const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
+        this.lastLiveAt = Date.now();
+        await this.ensureRecord(live, gapSinceLive);
         if (!this.current) return;
         if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
         // Only mutate on an item transition — between transitions nothing changes.
@@ -70,7 +76,7 @@ class ServiceTimelineRecorder {
     }
   }
 
-  private async ensureRecord(live: PcoLiveDTO): Promise<void> {
+  private async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<void> {
     const st = stageController.getState();
     if (!st.serviceTypeId || !st.planId) return;
     const date = todayLocal();
@@ -78,14 +84,16 @@ class ServiceTimelineRecorder {
     const key = `${st.serviceTypeId}:${st.planId}:${serviceTimeId ?? date}`;
     if (this.currentKey === key && this.current) return;
 
-    // Tolerate a transient null serviceTimeId (cache miss) — keep the open record
-    // if it's the same plan + date, so we don't split mid-service.
+    // Hold the open record through a serviceTimeId change within the same live service
+    // (overrun rolls pickServiceTime to the next occurrence; a null is a cache miss).
+    // A short gap since the last live tick = same service → keep appending, don't
+    // split. Only a long gap means a genuinely new service occurrence.
     if (
-      serviceTimeId == null &&
       this.current &&
       this.current.serviceTypeId === st.serviceTypeId &&
       this.current.planId === st.planId &&
-      this.current.serviceDate === date
+      this.current.serviceDate === date &&
+      (serviceTimeId == null || gapSinceLive < SERVICE_GAP_MS)
     ) {
       return;
     }
