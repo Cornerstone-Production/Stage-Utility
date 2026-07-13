@@ -1,5 +1,16 @@
 # Stage Utility — Design & Style Guide
 
+> **⚠️ Design overhaul in progress (`feat/design-overhaul`).** Parts of this guide
+> are now historical. The foundation has changed — see
+> [`docs/design-overhaul/DESIGN_OVERHAUL.md`](docs/design-overhaul/DESIGN_OVERHAUL.md)
+> for the plan. Locked so far:
+> - **Type:** IBM Plex Sans (all UI/headings) + IBM Plex Mono (all numerals). **All-sans, no serif.** Outfit retired. (§2.3 below is stale.)
+> - **Neutral:** aliased to Radix **slate** (cool, AV register — not warm/cream).
+> - **Accent:** themeable `--brand-accent` (one hex → whole ramp via `color-mix`), set per-org in **Branding → Accent color**; semantic status green/red/amber stay separate.
+> - **Material:** one elevation ramp (`--su-shadow-1/2`) + `.su-card` / `.su-card-live` utilities (Pi-safe, no `backdrop-filter`); the `.glass-*` utils are being consolidated onto it in Phase 2.
+>
+> This guide gets a full rewrite once Phases 2–3 (component restyling) land.
+
 A reference for the app's current visual system: tokens, components, and the two
 distinct visual "worlds." This documents **what exists today** (grounded in the
 code, with file references) so it can serve as a baseline for polish or a future
