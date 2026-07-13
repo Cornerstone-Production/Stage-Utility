@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
+import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
 import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
@@ -119,18 +119,7 @@ export function ScriptViewSection() {
 
   return (
     <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
-      <div className="flex items-start justify-between gap-3 mb-4">
-        <div>
-          <h2 className="text-title3 font-semibold text-gray-12">ScriptView layouts</h2>
-          <p className="text-caption1 text-gray-10 mt-0.5 max-w-prose">
-            Named column presets — our in-app replacement for ScriptViewer. Layouts are shared across every service type; each opens at a shareable URL you can pin in its own tab.
-          </p>
-        </div>
-        <a href="/scriptview" target="_blank" rel="noopener noreferrer" className="shrink-0 inline-flex items-center gap-1.5 text-caption1 text-gray-11 hover:text-gray-12 rounded-lg border border-gray-a5 px-3 py-1.5">
-          Open ScriptView <ExternalLinkIcon className="size-3.5" />
-        </a>
-      </div>
-
+      {/* "Open ScriptView" lives inline in the section header (settings-view). */}
       {error && <p className="text-caption1 text-red-11 mb-3">{error}</p>}
 
       {/* Which service types appear on the landing page (curated per church). */}

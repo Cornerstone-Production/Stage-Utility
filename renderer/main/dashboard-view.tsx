@@ -131,7 +131,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
       <div className="grid flex-1 min-h-0 grid-cols-2 grid-rows-2 gap-3 max-sm:grid-cols-1 max-sm:grid-rows-4 max-sm:gap-2">
         {/* Clock */}
         <Tile label="Current time">
-          <div className="flex items-baseline gap-2 tabular-nums">
+          <div className="flex items-baseline gap-2 font-mono tabular-nums">
             <span className="text-[clamp(2rem,9vmin,5rem)] font-medium text-fg leading-none">
               {h12}:{mm}
             </span>
@@ -158,7 +158,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
           {timer ? (
             <div className="flex flex-col items-center gap-1.5">
               <span
-                className={`text-[clamp(2rem,9vmin,5rem)] font-medium leading-none tabular-nums ${
+                className={`text-[clamp(2rem,9vmin,5rem)] font-mono font-medium leading-none tabular-nums ${
                   over ? "text-red-10" : "text-live-11"
                 }`}
               >
@@ -187,7 +187,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
                   </span>
                   <span className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
                     <span
-                      className="block h-full bg-surface0"
+                      className="block h-full bg-fg"
                       style={{ width: `${Math.min(100, Math.round((pro.slideIndex / pro.slideCount) * 100))}%` }}
                     />
                   </span>
@@ -230,7 +230,7 @@ function TranscriptStrip({ lines }: { lines: TranscriptLineDTO[] }) {
   const last = lines[lines.length - 1];
   const speaker = channelLabel(last);
   return (
-    <div className="shrink-0 rounded-2xl border border-line bg-surface px-4 py-3 flex items-center gap-3 min-h-0">
+    <div className="shrink-0 su-card px-4 py-3 flex items-center gap-3 min-h-0">
       <span
         className="text-caption2 font-semibold uppercase tracking-wider shrink-0 max-w-[28%] truncate"
         style={{ letterSpacing: "0.1em", color: speaker ? channelColor(last.channel) : "rgba(255,255,255,0.4)" }}
@@ -249,14 +249,14 @@ function SplStrip({ spl }: { spl: SplMetricsDTO | null }) {
   const r = resolveSplValue(spl);
   if (!r) return null;
   return (
-    <div className="shrink-0 rounded-2xl border border-line bg-surface px-4 py-3 flex items-center gap-3 min-h-0">
+    <div className="shrink-0 su-card px-4 py-3 flex items-center gap-3 min-h-0">
       <span
         className="text-caption2 font-semibold uppercase tracking-wider shrink-0 text-fg-subtle"
         style={{ letterSpacing: "0.1em" }}
       >
         SPL
       </span>
-      <span className="text-[clamp(1.4rem,5vmin,2.4rem)] font-medium text-fg leading-none tabular-nums">
+      <span className="text-[clamp(1.4rem,5vmin,2.4rem)] font-mono font-medium text-fg leading-none tabular-nums">
         {Math.round(r.value)}
         <span className="text-[0.5em] text-fg-subtle ml-1">dB</span>
       </span>
@@ -282,7 +282,7 @@ function Tile({
       : accent === "red"
         ? "border-red-a6 bg-red-a3"
         : "border-line bg-surface";
-  const labelColor = accent === "green" ? "text-[#5dcaa5]" : accent === "red" ? "text-red-10" : "text-fg-subtle";
+  const labelColor = accent === "green" ? "text-live-11" : accent === "red" ? "text-red-10" : "text-fg-subtle";
   return (
     <div className={`flex flex-col items-center justify-center rounded-2xl border p-4 max-sm:p-3 min-h-0 ${border}`}>
       <span

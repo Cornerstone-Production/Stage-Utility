@@ -6,6 +6,9 @@
 @import "@radix-ui/colors/gray-dark.css";
 @import "@radix-ui/colors/gray-alpha.css";
 @import "@radix-ui/colors/gray-dark-alpha.css";
+/* Neutral = Radix gray (a true neutral — near-black in dark, matching the
+   mockup). Slate was tried but read blue/purple in dark mode; gray is the
+   AV-instrument near-black we want. */
 @import "@radix-ui/colors/blue.css";
 @import "@radix-ui/colors/blue-dark.css";
 @import "@radix-ui/colors/blue-alpha.css";
@@ -23,6 +26,17 @@
 @import "@radix-ui/colors/amber-alpha.css";
 @import "@radix-ui/colors/amber-dark-alpha.css";
 
+/* ── Brand type: IBM Plex (self-hosted via @fontsource; woff2 is bundled into
+   dist at build time, so there is no runtime CDN — kiosks stay on a closed LAN).
+   Sans carries all UI/headings/body; Mono carries every numeric/instrument
+   readout (clock, countdown, SPL, RF, tables). No serif in-app. ── */
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-500.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
+
 /* ── Tailwind source paths for class scanning ── */
 @source "./main/**/*.{ts,tsx}";
 @source "./settings/**/*.{ts,tsx}";
@@ -31,6 +45,10 @@
 
 /* ── Map Radix color CSS vars to Tailwind color utilities ── */
 @theme {
+  /* Type — IBM Plex is the whole system (all-sans; mono for numerals). */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
   /* Gray scale (1–12 + alpha) */
   --color-gray-1:   var(--gray-1);
   --color-gray-2:   var(--gray-2);
@@ -160,6 +178,7 @@
   --color-bg:             var(--su-bg);
   --color-surface:        var(--su-surface);
   --color-surface-raised: var(--su-surface-raised);
+  --color-rail:           var(--su-rail);
   --color-line:           var(--su-line);
   --color-line-strong:    var(--su-line-strong);
   --color-fg:             var(--su-fg);
@@ -198,21 +217,28 @@
   --cyan-9: #22d3d3;   /* reserved palette color — saved for future use */
   --cyan-11: #99f0f0;
 
-  /* Tier 2 — semantic tokens (settings defaults; Radix scales flip with .dark) */
-  --su-bg:             var(--gray-1);
-  --su-surface:        var(--gray-2);
-  --su-surface-raised: var(--gray-3);
-  --su-line:           var(--gray-a4);
-  --su-line-strong:    var(--gray-a6);
-  --su-fg:             var(--gray-12);
-  --su-fg-muted:       var(--gray-11);
-  --su-fg-subtle:      var(--gray-10);
-  --su-fg-faint:       var(--gray-8);
-  --su-accent:         var(--blue-9);
-  --su-accent-hover:   var(--blue-10);
-  --su-accent-active:  var(--blue-11);
+  /* Tier 2 — semantic tokens. Settings LIGHT defaults are explicit neutral hex
+     matching the approved mockup (a true neutral — NOT slate/tinted). `.dark`
+     overrides below give the near-black dark theme; `.kiosk` overrides the stage. */
+  --su-bg:             #f7f8fa;
+  --su-surface:        #ffffff;
+  --su-surface-raised: #ffffff;
+  --su-rail:           #f1f2f4;   /* sidebar — slightly grayer than content in light */
+  --su-line:           #e7e9ec;
+  --su-line-strong:    #d8dce1;
+  --su-fg:             #161b22;
+  --su-fg-muted:       #5c6470;
+  --su-fg-subtle:      #9aa1ab;
+  --su-fg-faint:       #b8bec6;
+  /* Brand accent — THEMEABLE. --brand-accent is overridden at runtime from
+     Branding → Accent color (per org; empty = this per-theme default). Ramp
+     derives via color-mix, so one picked hex works in both themes. */
+  --brand-accent:      #2e6691;
+  --su-accent:         var(--brand-accent);
+  --su-accent-hover:   color-mix(in srgb, var(--brand-accent), black 12%);
+  --su-accent-active:  color-mix(in srgb, var(--brand-accent), black 22%);
   --su-on-accent:      #ffffff;
-  --su-focus:          var(--blue-8);   /* focus ring */
+  --su-focus:          var(--brand-accent);   /* focus ring */
   --su-field:          var(--gray-a2);  /* input / control fill */
   --su-fill:           var(--gray-a3);  /* interaction fill (ghost/filled) */
   --su-fill-hover:     var(--gray-a4);
@@ -227,6 +253,33 @@
   --su-ok-11:          var(--green-11);
   --su-info-9:         var(--blue-9);
   --su-info-11:        var(--blue-11);
+
+  /* Elevation ramp (light settings). Pi-safe — plain shadows, no backdrop-filter. */
+  --su-shadow-1: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.04);
+  --su-shadow-2: 0 4px 16px rgba(16, 24, 40, 0.09), 0 2px 6px rgba(16, 24, 40, 0.05);
+}
+
+/* Dark settings elevation (.dark on <html>). Depth via inset top highlight +
+   soft drop shadow — the quiet, material feel, no backdrop-filter. */
+.dark {
+  /* Near-black PURE-neutral surfaces (R=G=B — zero cool/purple cast). */
+  --su-bg:             #0e0e0e;
+  --su-surface:        rgba(255, 255, 255, 0.03);
+  --su-surface-raised: rgba(255, 255, 255, 0.055);
+  --su-rail:           #0e0e0e;   /* seamless with content in dark */
+  --su-line:           rgba(255, 255, 255, 0.08);
+  --su-line-strong:    rgba(255, 255, 255, 0.14);
+  --su-fg:             #ededf0;
+  --su-fg-muted:       #9a9aa2;
+  --su-fg-subtle:      #63636b;
+  --su-fg-faint:       rgba(255, 255, 255, 0.32);
+  /* A lighter accent reads better on near-black (mockup default); still themeable. */
+  --brand-accent:      #6aa6df;
+  /* On dark, accent states lighten (not darken). */
+  --su-accent-hover:  color-mix(in srgb, var(--brand-accent), white 14%);
+  --su-accent-active: color-mix(in srgb, var(--brand-accent), white 26%);
+  --su-shadow-1: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 4px 18px rgba(0, 0, 0, 0.40);
+  --su-shadow-2: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 14px 44px rgba(0, 0, 0, 0.55);
 }
 
 /* Stage (kiosk) overrides — always-dark near-black surfaces + white-opacity text.
@@ -241,21 +294,19 @@
   --su-fg:             rgba(255, 255, 255, 0.92);
   --su-fg-muted:       rgba(255, 255, 255, 0.70);
   --su-fg-subtle:      rgba(255, 255, 255, 0.45);
-  --su-fg-faint:       rgba(255, 255, 255, 0.28);
-}
-
-/* ── Brand title face (self-hosted, no CDN — kiosks run on a closed LAN) ── */
-@font-face {
-  font-family: "Outfit";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("./fonts/Outfit-Regular.woff2") format("woff2");
+  --su-fg-faint:       rgba(255, 255, 255, 0.34);
+  --su-accent-hover:  color-mix(in srgb, var(--brand-accent), white 14%);
+  --su-accent-active: color-mix(in srgb, var(--brand-accent), white 26%);
+  --su-shadow-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 4px 18px rgba(0, 0, 0, 0.45);
+  --su-shadow-2: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 16px 48px rgba(0, 0, 0, 0.6);
 }
 
 /* ── Apple-inspired typography utilities ── */
 @layer utilities {
-  .font-title { font-family: "Outfit", ui-sans-serif, system-ui, sans-serif; }
+  /* Brand/heading utility — now IBM Plex Sans (all-sans; pair with a weight
+     such as font-semibold where a heading needs emphasis). Kept named
+     `font-title` to avoid churn across call sites. */
+  .font-title { font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif; }
 
   .text-large-title  { font-size: 34px; line-height: 41px; }
   .text-title1       { font-size: 28px; line-height: 34px; }
@@ -268,32 +319,25 @@
   .text-footnote     { font-size: 13px; line-height: 18px; }
   .text-caption1     { font-size: 12px; line-height: 16px; }
   .text-caption2     { font-size: 11px; line-height: 13px; }
-}
 
-/* ── Liquid Glass helpers ── */
-.glass-card {
-  background: rgba(255, 255, 255, 0.04);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.09),
-    0 4px 32px rgba(0, 0, 0, 0.60),
-    0 1px 4px rgba(0, 0, 0, 0.40);
-}
-
-.glass-dark {
-  background: rgba(0, 0, 0, 0.40);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.10),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 2px 16px rgba(0, 0, 0, 0.50);
-}
-
-.glass-sheen::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 0px, transparent 1px);
-  pointer-events: none;
+  /* ── Material: one refined surface (replaces the ad-hoc glass tiles as
+     components migrate in Phase 2). Theme-aware via --su tokens; Pi-safe. ── */
+  .su-card {
+    background: var(--su-surface);
+    border: 1px solid var(--su-line);
+    border-radius: 0.875rem;
+    box-shadow: var(--su-shadow-1);
+  }
+  /* Live variant — the "live owns the screen" primitive: on-pace-green edge +
+     soft glow. Swaps to --su-danger-9 by setting --su-live-9 at the element
+     when a service runs over. */
+  .su-card-live {
+    border: 1px solid color-mix(in srgb, var(--su-live-9) 55%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--su-live-9) 45%, transparent),
+      0 0 34px color-mix(in srgb, var(--su-live-9) 16%, transparent),
+      var(--su-shadow-1);
+  }
 }
 
 /* Radix ScrollArea wraps content in a `display:table; min-width:100%` element,

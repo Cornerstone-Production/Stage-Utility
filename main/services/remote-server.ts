@@ -1948,6 +1948,15 @@ export class RemoteServer {
       const partial: Record<string, unknown> = {};
       if (typeof body.name === "string") partial.name = body.name;
       if (typeof body.monochrome === "boolean") partial.monochrome = body.monochrome;
+      if ("accentColor" in body) {
+        const v = body.accentColor;
+        if (v === null) partial.accentColor = null;
+        else if (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) partial.accentColor = v;
+        else {
+          error(res, "body.accentColor must be a #rrggbb hex or null");
+          return;
+        }
+      }
 
       // Validate a data-URL image field; cap size so it can't bloat storage.
       const validateImage = (key: "logo" | "logoOriginal" | "emptyLogo" | "emptyLogoOriginal" | "avatar" | "avatarOriginal"): boolean => {

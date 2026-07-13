@@ -604,7 +604,7 @@ export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanel
         step={100}
         min={0}
         suffix="ms"
-        className="w-28"
+        className="w-44"
         aria-label="Polling interval in milliseconds"
       />
     </div>

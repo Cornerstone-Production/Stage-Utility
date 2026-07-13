@@ -118,7 +118,7 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
           className="flex-1 min-w-0"
           aria-label="Host"
         />
-        <NumberInput value={port} onChange={setPort} onCommit={() => patchConfig({ port })} min={1} max={65535} className="w-24" aria-label="Port" />
+        <NumberInput value={port} onChange={setPort} onCommit={() => patchConfig({ port })} min={1} max={65535} className="w-44" aria-label="Port" />
       </div>
 
       <div className="flex items-center gap-2 pl-1">
@@ -130,7 +130,7 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
           className="flex-1 min-w-0"
           aria-label="Subscribe address"
         />
-        <NumberInput value={subSec} onChange={setSubSec} onCommit={() => patchConfig({ subscribeIntervalSec: subSec })} min={1} max={60} suffix="s" className="w-20" aria-label="Subscribe interval seconds" />
+        <NumberInput value={subSec} onChange={setSubSec} onCommit={() => patchConfig({ subscribeIntervalSec: subSec })} min={1} max={60} suffix="s" className="w-28" aria-label="Subscribe interval seconds" />
         <InfoHint>
           Optional. Some gear (e.g. Behringer/Midas) only sends feedback while it keeps hearing from a
           subscriber — enter the address it expects (like /xremote) and how often to send it. Leave blank

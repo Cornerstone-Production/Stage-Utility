@@ -31,3 +31,7 @@ npm-debug.log*
 # Local SenSource API diagnostic captures (contain org names/addresses/MACs — never commit)
 sensource-capture*.json
 sensource-probe*.json
+
+# Local tooling scratch (Playwright MCP screenshots/logs, impeccable design plugin)
+.playwright-mcp/
+.impeccable/

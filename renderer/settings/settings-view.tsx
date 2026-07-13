@@ -1,5 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import { PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import {
@@ -7,6 +7,7 @@ import {
   Sidebar,
   SidebarList,
   SidebarListItem,
+  SidebarGroupLabel,
   ScrollArea,
   Button,
   toast,
@@ -28,6 +29,7 @@ import {
   MoonIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
+  ExternalLinkIcon,
 } from "lucide-react";
 import { useIsMobile } from "../lib/use-media-query";
 import { withViewTransition } from "../lib/view-transition";
@@ -39,6 +41,8 @@ import { OutputsSection } from "./sections/outputs-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
+import { applyAccentVar } from "../lib/apply-accent";
+import { cn } from "../lib/cn";
 import { AdvancedSection } from "./sections/advanced-section";
 import { ServiceHistorySection } from "./sections/service-history-section";
 import { ScriptViewSection } from "./sections/scriptview-section";
@@ -141,16 +145,38 @@ function useSidebarCollapsed() {
 // ---- sidebar section definitions --------------------------------------------
 
 const SECTIONS: SectionItem[] = [
-  { id: "plan", label: "Plan", icon: <CalendarIcon className="size-4 text-gray-11" /> },
-  { id: "views", label: "Views", icon: <LayoutTemplateIcon className="size-4 text-gray-11" /> },
-  { id: "scriptview", label: "ScriptView", icon: <ListChecksIcon className="size-4 text-gray-11" /> },
-  { id: "displays", label: "Displays", icon: <MonitorIcon className="size-4 text-gray-11" /> },
-  { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4 text-gray-11" /> },
-  { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4 text-gray-11" /> },
-  { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4 text-gray-11" /> },
-  { id: "service-history", label: "History", icon: <ClockIcon className="size-4 text-gray-11" /> },
-  { id: "baptisms", label: "Baptisms", icon: <DropletIcon className="size-4 text-gray-11" /> },
-  { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
+  { id: "plan", label: "Plan", icon: <CalendarIcon className="size-4" /> },
+  { id: "views", label: "Views", icon: <LayoutTemplateIcon className="size-4" /> },
+  { id: "scriptview", label: "ScriptView", icon: <ListChecksIcon className="size-4" /> },
+  { id: "displays", label: "Displays", icon: <MonitorIcon className="size-4" /> },
+  { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4" /> },
+  { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4" /> },
+  { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4" /> },
+  { id: "service-history", label: "History", icon: <ClockIcon className="size-4" /> },
+  { id: "baptisms", label: "Baptisms", icon: <DropletIcon className="size-4" /> },
+  { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4" /> },
+];
+
+// Per-tab header subtitles (shown under the section title in the content pane).
+const SECTION_DESC: Record<string, string> = {
+  plan: "Choose which Planning Center plan the displays follow.",
+  views: "Build and arrange what each display shows.",
+  scriptview: "Named rundown column presets for the ScriptView dashboard.",
+  displays: "Point each physical screen at a View.",
+  integrations: "Connect the gear and services that run your service.",
+  connect: "Share the display link and QR for phones on the network.",
+  branding: "Your organization's name, logo, and accent color.",
+  "service-history": "Every service you've run — timing and attendance.",
+  baptisms: "Time testimonies and baptisms live.",
+  advanced: "Updates, network address, capture windows, and full config.",
+};
+
+// Nav clusters — keeps the flat 10-item list within a scannable 7±2 per group.
+const NAV_GROUPS: { label: string; ids: string[] }[] = [
+  { label: "Content", ids: ["plan", "views", "scriptview"] },
+  { label: "Output", ids: ["displays", "connect", "integrations"] },
+  { label: "Identity", ids: ["branding", "baptisms"] },
+  { label: "System", ids: ["service-history", "advanced"] },
 ];
 
 // ---- main settings view -----------------------------------------------------
@@ -163,16 +189,45 @@ export function SettingsView() {
   const railed = collapsed && !isMobile;
   const queryClient = useQueryClient();
 
-  const [activeSection, setActiveSection] = useState<SectionItem>(SECTIONS[0]);
+  // Restore the tab from the URL hash (e.g. #integrations) so a refresh stays put
+  // and tabs are deep-linkable; falls back to the first section.
+  const [activeSection, setActiveSection] = useState<SectionItem>(() => {
+    const id = window.location.hash.replace(/^#/, "");
+    return SECTIONS.find((s) => s.id === id) ?? SECTIONS[0];
+  });
   // Bumped whenever the History nav is clicked so the section remounts back to its
   // landing list (instead of staying on the service you'd drilled into).
   const [historyNonce, setHistoryNonce] = useState(0);
+
+  // Mirror the active tab into the URL hash. replaceState keeps tab-switching out
+  // of the history stack (so Back leaves Settings rather than cycling tabs).
+  useEffect(() => {
+    if (window.location.hash.replace(/^#/, "") !== activeSection.id) {
+      window.history.replaceState(null, "", `#${activeSection.id}`);
+    }
+  }, [activeSection]);
+
+  // Follow external hash changes (manual edit / deep link opened in-session).
+  useEffect(() => {
+    const onHash = () => {
+      const id = window.location.hash.replace(/^#/, "");
+      const next = SECTIONS.find((s) => s.id === id);
+      if (next) setActiveSection((cur) => (cur.id === next.id ? cur : next));
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   // Fetch current stage state
   const { data: stageState, isLoading: stageLoading } = useQuery({
     queryKey: ["stage:getState"],
     queryFn: () => ipc<StageState>("stage:getState"),
   });
+
+  // Apply the themeable brand accent to the settings root as it changes.
+  useEffect(() => {
+    applyAccentVar(stageState?.accentColor);
+  }, [stageState?.accentColor]);
 
   // Fetch all service types
   const { data: serviceTypes = [] } = useQuery({
@@ -550,6 +605,7 @@ export function SettingsView() {
 
   async function handleSetBranding(partial: {
     name?: string;
+    accentColor?: string | null;
     logo?: string | null;
     monochrome?: boolean;
     logoOriginal?: string | null;
@@ -1136,29 +1192,77 @@ export function SettingsView() {
             })}
             getItemKey={(s: SectionItem) => s.id}
           >
-            {sections.map((section) => (
-              <SidebarListItem key={section.id} item={section} icon={section.icon} title={section.label} />
-            ))}
+            {NAV_GROUPS.map((g) => {
+              const items = sections.filter((s) => g.ids.includes(s.id));
+              if (items.length === 0) return null;
+              return (
+                <Fragment key={g.label}>
+                  <SidebarGroupLabel>{g.label}</SidebarGroupLabel>
+                  {items.map((section) => (
+                    <SidebarListItem key={section.id} item={section} icon={section.icon} title={section.label} />
+                  ))}
+                </Fragment>
+              );
+            })}
           </SidebarList>
 
-          {/* Light / dark toggle, pinned to the bottom of the sidebar. */}
-          <div className="mt-auto p-2">
-            <SidebarListItem
-              icon={
-                theme.isDark ? (
-                  <SunIcon className="size-4 text-gray-11" />
-                ) : (
-                  <MoonIcon className="size-4 text-gray-11" />
-                )
-              }
-              title={theme.isDark ? "Light mode" : "Dark mode"}
-              onClick={theme.toggle}
-            />
+          {/* Rail footer: version + segmented light/dark toggle (matches the mockup:
+              an accent-tint pill; the active segment is just an accent-colored icon). */}
+          <div className="mt-auto flex items-center justify-between px-3 py-2.5">
+            <span className="text-[11.5px] leading-none text-fg-subtle tabular-nums truncate">
+              {updateStatus?.version ? `v${updateStatus.version}` : ""}
+              {updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}
+            </span>
+            <div className="flex items-center gap-px rounded-lg bg-accent/12 p-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => theme.isDark && theme.toggle()}
+                aria-label="Light mode"
+                aria-pressed={!theme.isDark}
+                className={cn(
+                  "flex h-5 w-6 items-center justify-center rounded-md transition-colors",
+                  !theme.isDark ? "text-accent" : "text-fg-subtle hover:text-fg",
+                )}
+              >
+                <SunIcon className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => !theme.isDark && theme.toggle()}
+                aria-label="Dark mode"
+                aria-pressed={theme.isDark}
+                className={cn(
+                  "flex h-5 w-6 items-center justify-center rounded-md transition-colors",
+                  theme.isDark ? "text-accent" : "text-fg-subtle hover:text-fg",
+                )}
+              >
+                <MoonIcon className="size-3.5" />
+              </button>
+            </div>
           </div>
         </Sidebar>
       }
     >
       <ScrollArea className="h-full" title={activeSection.label}>
+        {/* Per-tab header (title + subtitle), matching the mockup. */}
+        <header className="px-5 max-sm:px-3 pt-6 max-sm:pt-5 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-title2 font-semibold text-fg leading-tight">{activeSection.label}</h1>
+            {SECTION_DESC[activeSection.id] && (
+              <p className="text-footnote text-fg-muted mt-1 max-w-[68ch]">{SECTION_DESC[activeSection.id]}</p>
+            )}
+          </div>
+          {activeSection.id === "scriptview" && (
+            <a
+              href="/scriptview"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-caption1 text-fg-muted transition-colors hover:bg-fill hover:text-fg"
+            >
+              Open ScriptView <ExternalLinkIcon className="size-3.5" />
+            </a>
+          )}
+        </header>
         {/* Keep a render error in one section from blanking the whole window. Keyed
             by the active tab so switching sections resets the boundary. */}
         <ErrorBoundary key={activeSection.id}>{renderSection()}</ErrorBoundary>

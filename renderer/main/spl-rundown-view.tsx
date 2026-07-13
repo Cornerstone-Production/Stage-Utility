@@ -78,12 +78,12 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
           {live && (
             <div className="flex flex-col items-end leading-none">
               <span className="text-caption2 uppercase tracking-wider text-fg-subtle">Live SPL</span>
-              <span className="text-title2 font-medium text-fg">{Math.round(live.value)} dB</span>
+              <span className="text-title2 font-mono font-medium text-fg">{Math.round(live.value)} dB</span>
             </div>
           )}
           <div className="flex flex-col items-end leading-none">
             <span className="text-caption2 uppercase tracking-wider text-fg-subtle">Clock</span>
-            <span className="text-title3 font-medium text-fg">{h12}:{mm}</span>
+            <span className="text-title3 font-mono font-medium text-fg">{h12}:{mm}</span>
           </div>
         </div>
       </div>
@@ -109,7 +109,7 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
                 <span className={`flex-1 min-w-0 truncate text-[clamp(1rem,3vmin,1.6rem)] font-medium ${isCurrent ? "text-live-11" : "text-fg"}`}>
                   {it.title}
                 </span>
-                <span className={`shrink-0 tabular-nums text-[clamp(1.1rem,3.4vmin,1.9rem)] font-medium ${splColor(max)}`}>
+                <span className={`shrink-0 font-mono tabular-nums text-[clamp(1.1rem,3.4vmin,1.9rem)] font-medium ${splColor(max)}`}>
                   {max != null ? `${Math.round(max)} dB` : "—"}
                 </span>
               </div>

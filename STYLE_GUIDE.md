@@ -1,30 +1,38 @@
 # Stage Utility — Design & Style Guide
 
-A reference for the app's current visual system: tokens, components, and the two
-distinct visual "worlds." This documents **what exists today** (grounded in the
-code, with file references) so it can serve as a baseline for polish or a future
-overhaul. Where the system is inconsistent, that's called out in
-[§9 Observations](#9-observations--overhaul-opportunities).
+> Reflects the design overhaul on `feat/design-overhaul`. The plan and principles
+> behind it live in
+> [`docs/design-overhaul/DESIGN_OVERHAUL.md`](docs/design-overhaul/DESIGN_OVERHAUL.md);
+> this guide documents **what the code does now**, grounded in file references.
+
+The overhaul unified two previously disconnected visual systems (the kiosk's
+hardcoded hex/opacity vs. the settings' Radix scales) onto **one semantic token
+layer** (`--su-*`), swapped the type system to **IBM Plex** (all-sans, mono for
+numerals), made the **brand accent themeable** from a single hex, and introduced a
+**material/elevation ramp** (`.su-card` / `.su-card-live`) that is Pi-safe. Semantic
+status colors (live green / over red / caution amber) are kept deliberately separate
+from the brand accent.
 
 ---
 
 ## 1. Two worlds
 
-The app renders two visually distinct surfaces from one codebase:
+The app renders two visually distinct surfaces from one codebase. They now share a
+token layer, a type system, and a material — so they read as one product in two
+registers rather than two apps.
 
 | | **Kiosk / Display** | **Settings / Admin** |
 |---|---|---|
 | Where | Stage monitors, `/`, `/display-N`, `/scriptview` | Settings window (`settings-window.html`) |
-| Entry | `index.html` → `renderer/main/*` | `settings-window.html` → `renderer/settings/*` |
-| Theme | **Always dark**, fixed | **Light or dark**, user-toggleable |
-| Color model | Mostly **hardcoded hex / white-opacity** | **Radix color scales** (`gray-11`, `blue-9`, …) |
+| Entry | `index.html` (`.kiosk` on `<html>`) → `renderer/main/*` | `settings-window.html` → `renderer/settings/*` |
+| Theme | **Always dark**, fixed (`.kiosk` token overrides) | **Light or dark**, user-toggleable (`.dark`) |
 | Type sizing | **Responsive** (`clamp()`, `vmin`, fractions of canvas height) | **Fixed** px / Apple-HIG utility classes |
 | Density | Spacious, legible-at-distance | Compact, information-dense |
-| Aesthetic | Dark "glass tiles" over a near-black stage | Radix-flavored settings app, form-first |
+| Aesthetic | Confidence-monitor: near-black stage, live state leads | Cursor/Claude/Linear-restraint admin, form-first |
 
-They share the **Outfit** brand font, the Apple-HIG type scale, Lucide icons, and
-a family resemblance in the "glass" surface treatment — but their color and sizing
-systems are largely separate today.
+Both draw color from the same `--su-*` semantic tokens (resolved per world), the same
+IBM Plex families, the Apple-HIG size scale, Lucide icons, and the `.su-card`
+material.
 
 ---
 
@@ -32,62 +40,28 @@ systems are largely separate today.
 
 ### 2.1 Tailwind
 
-- **Tailwind v4** (`@tailwindcss/vite`), configured **in CSS** — there is no
+- **Tailwind v4** (`@tailwindcss/vite`), configured **in CSS** — no
   `tailwind.config.js`. The theme lives in an `@theme { … }` block in
   `renderer/styles.css`, with `@source` globs pointing at `main/`, `settings/`,
   `components/`, `lib/`.
 - Class merging uses **`cn()`** (`renderer/lib/cn.ts` = `clsx` + `tailwind-merge`).
-- No custom breakpoints — standard Tailwind, and the app only really uses **`sm:`
-  (640px)** as the mobile↔desktop hinge (plus `max-sm:`).
+- Standard breakpoints; the app hinges mobile↔desktop on **`sm:` (640px)** (plus `max-sm:`).
 
-### 2.2 Color
+### 2.2 Type system — IBM Plex
 
-**Two systems, by world:**
+Self-hosted via `@fontsource` (woff2 bundled into `dist` at build; no runtime CDN, so
+kiosks stay on a closed LAN). Imported at the top of `renderer/styles.css`:
 
-**A) Settings — Radix color scales** (`@radix-ui/colors`, imported in
-`renderer/styles.css` and mapped into Tailwind via `@theme`). Light+dark scales for
-`gray, blue, green, red, amber, orange, yellow` (+ alpha `a1–a12`). The `.dark`
-class on `<html>` flips every scale. Accent = **blue**.
+- **IBM Plex Sans** (`--font-sans`) — the entire UI: body, labels, headings.
+  Weights 400/500/600 loaded. **All-sans: there is no serif in-app.**
+- **IBM Plex Mono** (`--font-mono`) — every numeric / instrument readout: clock,
+  countdown, SPL, RF, tables, timers. Weights 400/500/600.
 
-Semantic mapping (the important part — use these, not raw hex, in settings):
+`font-title` is a utility (in `@layer utilities`) that now maps to **IBM Plex Sans**
+(the name is kept to avoid call-site churn; pair with `font-semibold` where a heading
+needs emphasis). There is no separate display/brand face.
 
-| Role | Token |
-|---|---|
-| Primary text | `text-gray-12` |
-| Secondary text | `text-gray-11` |
-| Muted / descriptions | `text-gray-10` / `gray-9` |
-| Faint (grips, hints) | `text-gray-7` / `gray-8` |
-| App surface | `bg-gray-1` / `bg-gray-2` |
-| Subtle fill (inputs, ghost hover) | `bg-gray-a2` / `gray-a3` |
-| Borders | `border-gray-a4` (light) → `gray-a6` (input/focus) |
-| Primary action | `blue-9` → hover `blue-10` → active `blue-11`; focus ring `blue-8` |
-| Destructive | `red-9/10/11` (fills), `red-10` (icons) |
-| Success | `green-9/10/11`, `green-a2/a5` (banners) |
-| Caution / unsaved | `amber-6` border, `amber-2/90` fill, `amber-11` icon/text |
-
-**B) Kiosk — hardcoded values.** The display code uses raw hex and white-opacity
-directly. The recurring palette:
-
-| Value | Meaning / use |
-|---|---|
-| `#0a0a0a` (`--kiosk-bg`, `.kiosk-surface`) | The stage backdrop (neutral near-black, intentionally **not** blue-tinted) |
-| `#7fe3c4` | **Live / active / on-pace** teal — live countdown, current slide, "LIVE" |
-| `#2dd496` | Tile-accent teal (green card fill/border, current-row highlight `#2dd49618`) — *note: drifts from `#7fe3c4`, see §9* |
-| `#22c55e` | Status "on" dot (e.g. live-mode indicator) |
-| `#f59e0b` | "Recorded" / amber toggle dot |
-| `#14161c` | Dark table header/footer bar |
-| `red-10` (Radix, referenced by var) | Over-time / recording / error |
-| `#9db8ff`, `#8ab4ff`, `#5b9cff` | Light-blue accents (script columns, sparkline stroke) |
-| `text-white/85` → `/70` → `/45` → `/40` → `/35` → `/25` → `/15` | Text/hairline hierarchy by opacity |
-| `rgba(0,0,0,0.50)` + `blur(20px) saturate(1.6)` | The brand top-bar glass |
-| Channel palette (`channel-color.ts`) | 6 stable per-channel caption colors: `#e6e6ea`, `#7fe3c4`, `#f0c060`, `#9db8ff`, `#f0a0c0`, `#b9e08a` |
-
-### 2.3 Typography
-
-**Fonts:** body = system UI stack; **`font-title` = "Outfit"** (self-hosted woff2,
-`renderer/fonts/Outfit-Regular.woff2`) used for brand/titles.
-
-**Apple-HIG scale** (utility classes in `renderer/styles.css`, `size / line-height`):
+**Apple-HIG size scale** (utility classes in `renderer/styles.css`, `size / line-height`):
 
 | Class | Size / LH | Notes |
 |---|---|---|
@@ -99,213 +73,219 @@ directly. The recurring palette:
 | `text-body` | 17 / 22 | |
 | `text-callout` | 16 / 21 | |
 | `text-subheadline` | 15 / 20 | |
-| `text-footnote` | 13 / 18 | |
+| `text-footnote` | 13 / 18 | form workhorse (inputs, buttons, field labels) |
 | `text-caption1` | 12 / 16 | metadata |
-| `text-caption2` | 11 / 13 | tiny label / uppercase section headers |
+| `text-caption2` | 11 / 13 | tiny / uppercase micro-labels |
 
-Alongside these, components frequently use raw `text-[11px|12px|13px|14px|15px]`
-(13px is the workhorse for form labels/inputs). See §9.
-
-**Kiosk sizing is fluid, not fixed:** big readouts use `clamp()` + `vmin`
-(clock `clamp(2rem,9vmin,5rem)`; captions `clamp(1.5rem,4.5vmin,3.25rem)`), and
+**Kiosk sizing is fluid:** hero readouts use `clamp()` + `vmin` (e.g. the stage
+countdown `clamp(1.4rem,6vmin,3rem)` in Plex Mono; see `stage-display-view.tsx`), and
 custom-layout objects size as a **fraction of canvas height** so a layout renders
-identically at any resolution. Numeric readouts use **`tabular-nums`**.
+identically at any resolution. Numeric readouts use `font-mono` + `tabular-nums`.
 
-### 2.4 Spacing & density
+### 2.3 Color — the `--su-*` semantic token layer
 
-4px Tailwind scale. Conventional usage:
-- **Sections:** `flex flex-col gap-6`
-- **Field row internals:** `gap-1.5`
-- **Button rows:** `flex flex-wrap gap-2`
-- **Field padding:** `px-3 py-2.5`
-- **Card/panel padding:** `p-2.5` or `p-4`
-- **Section wrapper:** `px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]` (the `pb-[50vh]` gives scroll runway)
+Color flows through **one semantic token layer**, defined in `renderer/styles.css` and
+exposed to Tailwind via `@theme` (which generates the utilities `bg-surface`,
+`text-fg`, `text-fg-muted`, `border-line`, `bg-accent`, `ring-focus`, `bg-live-9`,
+`text-live-11`, `bg-danger-9`, `text-warn-11`, `bg-ok-9`, `text-info-11`, …).
 
-### 2.5 Radius
+The two-tier structure:
 
-Tailwind defaults, applied consistently by scale: `rounded-md` (6px, controls),
-`rounded-lg` (8px, fieldsets/cards), `rounded-xl` (12px, dialogs/prominent cards),
-`rounded-full` (pills/dots). Kiosk objects use a **fractional** `cornerRadius`
-(~`0.0148` of canvas height ≈ 16px on 1080p).
+- **Tier 1 — primitives.** The Radix color scales are imported and mapped into
+  Tailwind. **Neutral = Radix `slate`** (a subtly cool, blue-tinted gray — the
+  AV/instrument register, *not* warm cream). Slate is aliased onto the `--color-gray-*`
+  names so existing `gray-*` utilities go cool-neutral in one place, no call-site churn.
+  Blue/green/red/yellow/orange/amber round out the palette. A couple of brand
+  primitives (`--live-9: #22c55e` emerald, `--live-11: #86efac`) sit here too.
+- **Tier 2 — semantic vars** (`--su-*`), the layer everything actually consumes:
 
-### 2.6 Elevation, glass & motion
+| Token | Role |
+|---|---|
+| `--su-bg` / `--su-surface` / `--su-surface-raised` | app / card / raised surfaces |
+| `--su-line` / `--su-line-strong` | hairline / control borders |
+| `--su-fg` / `-muted` / `-subtle` / `-faint` | text hierarchy (primary → faint) |
+| `--su-accent` / `-hover` / `-active` / `--su-on-accent` | brand accent + text-on-accent |
+| `--su-focus` | focus ring (= brand accent) |
+| `--su-field` | input / control fill |
+| `--su-fill` / `-hover` / `-active` | interaction fill (ghost / filled) |
+| `--su-live-9` / `-11` | **live / on-pace** (green) |
+| `--su-danger-9` / `-11` | **over / error** (red) |
+| `--su-warn-9` / `-11` | **caution / unsaved** (amber) |
+| `--su-ok-*`, `--su-info-*` | success / informational |
 
-- **Focus ring (universal):** `focus-visible:ring-2 focus-visible:ring-blue-8`.
-- **Glass utilities** (`renderer/styles.css`):
-  - `.glass-card` — `rgba(255,255,255,0.04)` + 1px white inner border + soft drop shadow.
-  - `.glass-dark` — `rgba(0,0,0,0.40)` + inset top highlight + shadow.
-- **Motion:** `transition-colors` on interactive elements; Radix
-  enter/leave via `data-[state]:animate-in/out` with `fade-in-0`/`zoom-in-95`/
-  `slide-in-from-*`; sidebar width `transition-[width] duration-150`; view-to-view
-  crossfade via `withViewTransition()` where supported. `motion-reduce` respected
-  on skeletons.
+**Theming per world:**
+- `:root` — the settings light defaults (slate + Radix scales).
+- `.dark` on `<html>` — flips the Radix slate scale; accent hover/active *lighten*
+  (`color-mix … white`) rather than darken; the elevation ramp switches to
+  inset-highlight + soft drop shadow.
+- `.kiosk` on `<html>` — always-dark near-black stage. `--su-bg` = `--kiosk-bg`
+  (`#0a0a0a`, a neutral near-black chosen over a blue-tinted one); surfaces and text
+  become white-opacity steps (`rgba(255,255,255,0.04 … 0.92)`); accent + status tokens
+  inherit the brand values.
+
+### 2.4 Themeable brand accent
+
+The brand accent is a **single hex** (`--brand-accent`, default `--blue-9`). The whole
+ramp derives from it via `color-mix()`:
+
+```css
+--su-accent:        var(--brand-accent);
+--su-accent-hover:  color-mix(in srgb, var(--brand-accent), black 12%);  /* light */
+--su-accent-active: color-mix(in srgb, var(--brand-accent), black 22%);
+/* .dark / .kiosk lighten instead: color-mix(… white 14% / 26%) */
+```
+
+So one picked color works legibly in both themes. It is set per-org in **Branding →
+Accent color** (`renderer/settings/sections/branding-section.tsx`): preset swatches
+(`ACCENT_PRESETS` — a considered blue plus a few distinct hues), a native custom-hex
+picker, and a **Default** button that clears the override. The chosen hex is injected
+into `--brand-accent` on the root at runtime; empty falls back to the built-in default.
+The accent appears sparingly — primary action, active nav, focus ring, on-toggle.
+
+**Semantic status colors are sacred and separate from brand:** green = live/on-pace,
+red = over, amber = caution. They are never themed and, on stage, they *lead* the
+hierarchy while the brand accent is near-absent.
+
+### 2.5 Material / elevation
+
+Depth is a **two-step shadow ramp**, retuned per theme, and **Pi-safe — plain box
+shadows, no `backdrop-filter`** (which is expensive on Raspberry Pi):
+
+- `--su-shadow-1` — raised card. Light: soft double drop shadow. Dark/kiosk: inset top
+  highlight + soft drop shadow (the quiet, material feel).
+- `--su-shadow-2` — dialog / popover (deeper).
+
+Two card utilities (in `@layer utilities`) build on the tokens:
+
+- **`.su-card`** — the one refined surface: `--su-surface` fill + `--su-line` hairline +
+  `--su-shadow-1`, `rounded-[0.875rem]`. This is the standard card across kiosk and admin.
+- **`.su-card-live`** — the **"live owns the screen"** primitive: an on-pace-green edge
+  (`--su-live-9`) + soft glow. Swap to red for over-time by setting `--su-live-9` to
+  the danger color on the element. Used on the current/live zone in the kiosk.
+
+`.su-card` is now used across `stage-display-view.tsx`, `dashboard-view.tsx`,
+`display-picker-view.tsx`, `slot-panel.tsx`, and `status-strip.tsx`.
+
+### 2.6 Spacing, radius, motion
+
+- **Spacing** (4px scale): sections `flex flex-col gap-6`; field internals `gap-1.5`;
+  button rows `gap-2`; field padding `px-3 py-2.5`; section wrapper
+  `px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]` (the `pb-[50vh]` gives scroll runway).
+- **Radius:** `rounded-md` (6px, controls), `rounded-lg` (8px, fieldsets), `rounded-xl`
+  (12px, dialogs), `.su-card`'s `0.875rem` (14px), `rounded-full` (pills/dots). Kiosk
+  objects use a fractional `cornerRadius` (~`0.0148·H`).
+- **Focus (universal):** `focus-visible:ring-2 focus-visible:ring-focus` (the accent).
+- **Motion:** `transition-colors` on interactive elements; Radix enter/leave via
+  `data-[state]:animate-in/out` (`fade-in-0`/`zoom-in-95`/`slide-in-from-*`); sidebar
+  width `transition-[width]`; view-to-view crossfade via `withViewTransition()` where
+  supported. State-conveying only, `motion-reduce` respected.
 
 ---
 
-## 3. The Kiosk / Display world
+## 3. Components (`renderer/components/ui/`)
 
-**Surface & chrome.** Every display sits on `.kiosk-surface` (`#0a0a0a`). Most open
-with a **brand top bar**: `h-10`, `rgba(0,0,0,0.50)` + `backdrop-blur(20px)
-saturate(1.6)`, `1px` white/9% bottom border; brand logo `size-5` + app name in
-`text-caption1 font-title`; optional QR (top-right) when `showQr && remoteUrl`.
+Radix-backed where interactive; custom where layout. All via `cn()`. The primitives
+now consume **semantic tokens** (`bg-accent`, `bg-fill`, `text-fg`, `border-line-strong`,
+`bg-field`, `ring-focus`) rather than raw Radix scales, so a theme or accent change
+flows through automatically.
 
-**Views** (`renderer/main/`): `dashboard-view` (2×2 metric tiles), `stage-display-view`
-(confidence: remaining slides, clock, countdown, SPL, current/next), `transcription-view`
-(full-screen captions), `script-view` / `spl-rundown-view` (rundown tables),
-`display-picker-view` (`/` monitor picker), plus the `layout-renderer` custom canvas.
+| Component | Key styling (token-based) |
+|---|---|
+| **Button** | variants `accent` (`bg-accent text-white` → `hover:bg-accent-hover`), `filled` (`bg-fill text-fg`), `transparent` (`text-fg-muted hover:bg-fill`); sizes `small` (h-6, `text-caption1`) / `medium` (h-8, `text-footnote`); `rounded-md font-medium`; ring `ring-focus`. Icon-only auto-tooltips from `aria-label`. |
+| **Input** | `h-7 rounded-md border-line-strong bg-field text-footnote text-fg`; focus `border-focus ring-1 ring-focus`; `placeholder:text-gray-a8`. |
+| **NumberInput** | input + chevron steppers (`ChevronUp/Down`), hides native spinner, `tabular-nums`, optional `suffix`; commits live on change **and** on each stepper click (`onChange` fires for dirty-tracking, `onCommit` on settle). The convention for all numeric fields — never a raw `<input type="number">`. |
+| **Switch** | `h-5 w-9` track; on `bg-accent` (`dark:bg-accent/85`), off `bg-gray-a6`; white `size-4` thumb; ring `ring-focus`. |
+| **Select** | trigger like Input (`border-line-strong bg-field`, `ring-focus`); content `bg-surface border-line-strong shadow-md`; item `pl-8` with check; `SelectLabel` = uppercase `text-caption2 tracking-wider text-gray-9`. Skips empty-value items defensively. |
+| **Sidebar / SidebarList / SidebarListItem** | `bg-surface border-line` rail. **Grouped nav:** `SidebarGroupLabel` renders a quiet uppercase `text-[10px] tracking-wider text-fg-subtle` heading (degrades to a thin `bg-line` divider in the collapsed icon rail). Active item is **quiet** — `bg-accent/12 text-fg` with an `text-accent` icon (not a saturated fill); inactive `text-fg-muted hover:bg-fill`. Railed items show a right-side tooltip. |
+| **Field / FieldSet / FieldGroup / FieldContent / FieldLabel / FieldDescription** | the form-row system: `FieldSet` = `rounded-lg border-line`; `FieldGroup` = `divide-y divide-gray-a4`; `Field` = `px-3 py-2.5 bg-bg`, horizontal stacks below `sm`; `FieldLabel` = `text-footnote font-medium text-fg`; `FieldDescription` = `text-caption2 text-fg-subtle`. |
 
-**Glass tiles** (dashboard/stage): near-invisible-at-rest cards — neutral
-`border-white/8 bg-white/4`; accent tiles tint the teal `#2dd496` at ~8% fill / 13%
-border; the current/live row highlights `bg-[#2dd49618]`.
-
-**The custom-layout style system** — the most formalized part of the kiosk. A
-`LayoutStyle` (`main/types/stage.ts`) whose sizing fields are **fractions of canvas
-height**, applied by `boxStyle()`/`textStyle()` in `layout-renderer.tsx`:
-
-```
-fontSize, fontWeight, italic, uppercase, letterSpacing, color, textAlign, vAlign,
-background, opacity, cornerRadius, padding, borderColor, borderWidth,
-textShadow (0..1), boxShadow (0..1), lineClamp
-```
-
-- Text defaults: `#ffffff`, `fontSize 0.05·H`, weight 400.
-- `textShadow` (legibility over video) and `boxShadow` (elevation) both scale by
-  canvas height `H`, so shadows look right at any resolution.
-- **Card presets** (`CARD_PRESETS` in `layout-editor.tsx`): `neutral` (glass), `green`,
-  `red`, `amber`, `flat` — the one-click "glass tile" accents.
-- **Surface presets** (`SURFACE_PRESETS`): `flat / glass / elevated / solid / outline` —
-  the elevation/border dimension (composes with color accents).
-
-**Brand logo** (`brand-logo.tsx`): two modes — **monochrome** (CSS mask filled with
-`currentColor`, so it adapts to the surrounding text color — used on dark bars) or
-**full-color** (`<img>`).
+Other primitives in the folder follow the same token conventions (Dialog, confirm /
+AlertDialog, ScrollArea, Separator, EmptyState, Skeleton, Status, InfoHint,
+Collapsible, Toast, UnsavedBanner, ButtonGroup, TooltipProvider, ErrorBoundary).
 
 ---
 
-## 4. The Settings / Admin world
+## 4. The Kiosk / Display world
 
-**Shell** (`settings-view.tsx` + `SplitView`/`Sidebar`): a two-pane split — a
-sidebar (200px expanded / 56px icon rail, collapse persisted) over `bg-gray-2` with
-a right border, and a scrolling content pane. On mobile it becomes a top bar +
-hamburger **drawer** (`w-64 max-w-[82vw]`, edge-swipe to open, safe-area insets).
-A `BrandHeader` (logo + auto-fitting app name) sits atop the sidebar; a Sun/Moon
-theme toggle sits at the bottom. Ten sections: Plan, Views, ScriptView, Displays,
-Integrations, Connect, Branding, History, Baptisms, Advanced.
+Every display sits on `.kiosk-surface` (`--kiosk-bg` `#0a0a0a`, flat — no gradient — so
+all view kinds match the slots view). Most open with a brand top bar (logo + app name
+in `text-caption1 font-title`, optional QR).
 
-**Theme.** `.dark` on `<html>`, key `stage-utility-theme`, with a no-flash inline
-script in `settings-window.html` (falls back to `prefers-color-scheme`). Radix
-scales do the rest.
+**Hero readouts** (`stage-display-view.tsx`, `dashboard-view.tsx`): clock / countdown /
+SPL / RF render in **IBM Plex Mono** at fluid `clamp()`+`vmin` scale with
+`tabular-nums`. The current/live item uses the **live-owns-the-screen** treatment —
+on-pace `text-live-11`, flipping to `text-red-10` when over. Panels are `.su-card`.
+
+**Custom-layout style system** — the most formalized part of the kiosk. A `LayoutStyle`
+(`main/types/stage.ts`) whose sizing fields are **fractions of canvas height**, applied
+by `boxStyle()`/`textStyle()` in `layout-renderer.tsx` (`fontSize`, `fontWeight`,
+`color`, `background`, `cornerRadius`, `borderColor/Width`, `textShadow`, `boxShadow`,
+`lineClamp`, …). `CARD_PRESETS` / `SURFACE_PRESETS` (`layout-editor.tsx`) provide
+one-click card accents (neutral / green / red / amber / flat) and elevation dimensions;
+saved layouts continue to work.
+
+**Brand logo** (`brand-logo.tsx`): monochrome (CSS mask filled with `currentColor`,
+adapts to surrounding text color) or full-color `<img>`.
+
+---
+
+## 5. The Settings / Admin world
+
+**Shell** (`settings-view.tsx` + `SplitView` / `Sidebar`): a two-pane split — a sidebar
+(`bg-surface border-r border-line`, expanded / collapsed icon rail, persisted) over a
+scrolling content pane; on mobile a top bar + hamburger drawer. The nav is **grouped**
+via `SidebarGroupLabel` (Content / Output / Identity / System) with quiet uppercase
+labels and a **quiet active state** (accent-tint fill, accent icon — no saturated
+block). Sections: Plan, Views, ScriptView, Displays, Integrations, Connect, Branding,
+History, Baptisms, Advanced.
+
+**Theme.** `.dark` on `<html>`, key `stage-utility-theme`, no-flash inline script in
+`settings-window.html` (falls back to `prefers-color-scheme`). Radix slate does the rest.
 
 **Section layout convention** (every section in `renderer/settings/sections/`):
 
 ```tsx
 <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
-  <FieldSet title="…">          {/* rounded-lg border border-gray-a4 */}
-    <FieldGroup>                {/* divide-y divide-gray-a4 */}
-      <Field orientation="horizontal">   {/* stacks < sm, row ≥ sm */}
+  <FieldSet title="…">
+    <FieldGroup>
+      <Field orientation="horizontal">
         <FieldContent>
-          <FieldLabel>…</FieldLabel>              {/* 13px / medium / gray-12 */}
-          <FieldDescription>…</FieldDescription>  {/* 11px / gray-10 */}
+          <FieldLabel>…</FieldLabel>
+          <FieldDescription>…</FieldDescription>
         </FieldContent>
-        <Input | Switch | Select … />
+        <Input | Switch | Select | NumberInput … />
       </Field>
     </FieldGroup>
   </FieldSet>
-  {/* ad-hoc cards: rounded-xl border border-gray-a5 bg-gray-a2 p-4 */}
 </div>
 ```
 
-Uppercase micro-labels use `text-caption2 uppercase tracking-wider text-gray-9`.
-
-**Interaction patterns:**
-- **Buttons:** `accent` (blue, primary) · `filled` (gray, secondary) · `transparent`
-  (ghost/icon). Sizes `small` (h-6) / `medium` (h-8). Icon-only auto-tooltips from
-  `aria-label`.
-- **Inline editing:** commit-on-blur + Enter-to-blur (local state, then persist).
-- **Reorder:** dnd-kit sortable lists with a `GripVerticalIcon` (`text-gray-7`) handle.
-- **Feedback:** `toast.success/error/info` (bottom-right, 4s); `confirm({…, destructive})`
-  alert dialog (red confirm when destructive); `UnsavedBanner` (amber sticky bar or
-  floating pill) for dirty state.
-- **"Test connection":** button shows a loading label + writes an ok/error message.
-
-**Iconography:** Lucide only, **no emojis** (hard rule). `size-4` (nav/buttons),
-`size-3.5` (compact), `size-5` (prominent); default `text-gray-11`, semantic colors
-for status (`green-10` ok, `red-10` danger, `amber-11` caution). Icons pair with a
-label except in icon-only buttons.
+**Iconography:** Lucide only, **no emojis** (hard rule). Default `text-gray-*`, semantic
+tokens for status (`text-ok-11` / `text-danger-11` / `text-warn-11`, or Radix
+`red-10` for destructive icons). Commit-on-blur for persisted text fields; dnd-kit for
+reorderable lists; toast + `confirm()` for feedback.
 
 ---
 
-## 5. Component library (`renderer/components/ui/`)
+## 6. Public-repo neutrality
 
-Radix-backed where interactive; custom where layout. All via `cn()`.
-
-| Component | Radix? | Key styling |
-|---|---|---|
-| **Button** | no | variants accent/filled/transparent × small/medium; `rounded-md font-medium`; ring `blue-8` |
-| **Input** | no | `h-7 rounded-md border-gray-a6 bg-gray-a2 text-[13px]`; focus `border/ring blue-8` |
-| **NumberInput** | no | input + chevron steppers; hides native spinner; `tabular-nums`; `suffix` unit; commit-on-blur |
-| **Switch** | yes | `h-5 w-9` track; on `bg-blue-9`, off `bg-gray-a6`; white `size-4` thumb |
-| **Select** | yes | trigger like Input; content `bg-gray-2 border-gray-a6 shadow-md`; item `pl-8` w/ check |
-| **Dialog** | yes | overlay `bg-black/40 backdrop-blur-sm`; content `max-w-lg rounded-xl bg-gray-1 p-6 shadow-xl` |
-| **confirm / ConfirmHost** | yes (AlertDialog) | promise API; `destructive` → red confirm |
-| **Field / FieldSet / FieldGroup / …** | no | the form-row system (see §4); horizontal stacks < sm |
-| **Sidebar / SidebarList / …Item** | no | nav rail; active `bg-blue-9 text-white`, inactive `text-gray-11` |
-| **SplitView** | no | responsive two-pane shell; desktop rail/expanded, mobile drawer |
-| **ScrollArea / ScrollBar** | yes | thin thumb `bg-gray-a6`; kiosk uses a custom auto-hiding `.so-scroll` |
-| **Separator** | yes | `bg-gray-a4`, 1px |
-| **EmptyState** | no | dashed border, `gray-8` icon, `text-callout` title + `caption2` hint + CTA |
-| **Skeleton / SkeletonRows** | no | `animate-pulse rounded-md bg-gray-a3` (motion-reduce aware) |
-| **Status** | no | colored dot (`green/yellow/red/blue/gray-9`) + `text-[12px]` label |
-| **InfoHint** | yes (Popover) | `size-4` `(?)` trigger → `max-w-[16rem]` popover |
-| **Collapsible** | no | chevron header + summary (shown collapsed) + region |
-| **Toast / Toaster** | yes | `bottom-4 right-4`; `bg-gray-2 border-gray-a6`; success/error icon |
-| **UnsavedBanner** | no | amber sticky bar or floating pill; `backdrop-blur-xl` |
-| **ButtonGroup** | no | `inline-flex` wrapper for segmented toggles |
-| **TooltipProvider / ErrorBoundary** | yes / no | app-level plumbing |
+The app **ships brand-neutral** — the tool's own blue-family accent default, a generic
+mark, and the name "Stage Utility." No org identity is hardcoded (never Cornerstone).
+An org applies its real identity entirely through **Branding**: the **accent** (one hex
+→ full ramp) and the **logo** (with a monochrome recolor option). This keeps the public
+repo generic while letting any deployment look like itself.
 
 ---
 
-## 6. Cross-cutting conventions
-
-- **`cn()`** for all class composition (safe Tailwind conflict resolution).
-- **No emojis** anywhere in UI/code/output — Lucide icons or text only.
-- **`tabular-nums`** on every numeric readout (clocks, timers, SPL, RF).
-- **Commit-on-blur** for text/number fields that persist to the server.
-- **dnd-kit** for all reorderable lists (views, outputs, slots, scriptview layouts).
-- **Safe-area insets** (`env(safe-area-inset-*)`) on kiosk + mobile chrome.
-- **Fractional sizing** for anything on the custom-layout canvas (resolution-independent).
-
----
-
-## 7. Quick token cheat-sheet
-
-```
-Kiosk surface     #0a0a0a          Live/active       #7fe3c4
-Tile accent teal  #2dd496          Status "on" dot   #22c55e
-Over/error        red-10           Recorded amber    #f59e0b
-Table bar         #14161c          Brand-bar glass   rgba(0,0,0,.5)+blur(20px)
-
-Settings text     gray-12 / 11 / 10 / 9 / 7   (primary → faint)
-Settings surface  gray-1 / gray-2  ·  fills gray-a2/a3  ·  borders gray-a4/a6
-Primary action    blue-9 → 10 → 11 ·  ring blue-8
-Destructive red-9/10/11 · Success green-9/10/11 · Caution amber-6/2/11
-
-Type   13px = form workhorse · caption2(11) uppercase labels · title3(20) headings
-Radius md(6) controls · lg(8) fieldsets · xl(12) dialogs · full pills
-Space  sections gap-6 · fields gap-1.5 · buttons gap-2 · field pad px-3 py-2.5
-Focus  ring-2 ring-blue-8   ·   Font  Outfit (font-title)
-```
-
----
-
-## 8. File map
+## 7. File map
 
 | Area | File |
 |---|---|
-| Tokens, fonts, glass, type scale | `renderer/styles.css` |
-| Theme boot (no-flash) | `index.html`, `settings-window.html` |
+| Tokens, fonts, type scale, `.su-card` material, `.glass-*` legacy | `renderer/styles.css` |
+| Theme boot (no-flash) | `index.html` (`.kiosk`), `settings-window.html` (`.dark`) |
 | UI primitives | `renderer/components/ui/*` |
-| Kiosk views | `renderer/main/*` |
+| Accent picker | `renderer/settings/sections/branding-section.tsx` |
+| Kiosk views | `renderer/main/*` (`stage-display-view.tsx`, `dashboard-view.tsx`, …) |
 | Custom-layout renderer + style system | `renderer/main/layout-renderer.tsx`, `main/types/stage.ts` (`LayoutStyle`) |
 | Card/surface presets | `renderer/settings/sections/layout-editor.tsx` |
 | Settings shell + sections | `renderer/settings/settings-view.tsx`, `renderer/settings/sections/*` |
@@ -314,34 +294,16 @@ Focus  ring-2 ring-blue-8   ·   Font  Outfit (font-title)
 
 ---
 
-## 9. Observations & overhaul opportunities
+## 8. Known follow-ups
 
-Honest notes on where the system is inconsistent — good starting points if we do a
-polish pass or overhaul:
-
-1. **Two disconnected color systems.** Settings uses semantic Radix tokens; the kiosk
-   uses hardcoded hex + white-opacity. There's no shared token layer, so the "brand"
-   isn't defined in one place. *Opportunity:* promote the kiosk palette into CSS
-   variables (`--live`, `--surface`, `--accent`, …) so both worlds and the custom
-   layouts reference one source of truth.
-2. **Accent teal drift.** "Live/active" is `#7fe3c4` in some places and `#2dd496`
-   (+ its alpha tints) in others. They read as the same idea but aren't the same
-   color. Pick one live-accent and derive the tile tints from it.
-3. **Type scale vs. raw px.** There's a clean Apple-HIG scale (`text-body`,
-   `text-caption1`, …) but components lean heavily on ad-hoc `text-[13px]`/`[11px]`.
-   Consolidating onto the named scale (or aligning the two) would tighten typography.
-4. **Radix accent = blue, kiosk accent = teal/green.** The admin's primary action
-   color (blue) and the stage's identity color (teal) diverge. Intentional? Worth
-   deciding deliberately.
-5. **Glass defined in three places.** `.glass-card`/`.glass-dark` utilities,
-   `CARD_PRESETS`, and `SURFACE_PRESETS` all encode "glass" with slightly different
-   values. Could unify into one elevation ramp.
-6. **No documented spacing/radius scale** beyond Tailwind defaults — conventions are
-   consistent by habit, not enforced. A short set of named rules (or component
-   coverage) would keep new sections on-pattern.
-7. **Kiosk has no light mode** (correct for stage use) — but if any display is ever
-   used in a bright/lobby context, there's no path. Probably fine to leave.
-
-None of these are bugs; they're the seams a design overhaul would smooth. The system
-is coherent and tasteful already — the biggest single lever is **a shared token
-layer** (item 1) that both worlds draw from.
+- **Phase 4 — custom-layout editor polish.** The dense `layout-editor.tsx` still needs
+  the material-ramp + accent + field-grouping treatment (group the ~17 flat style
+  fields; surface presets on the new ramp; Layers-panel tidy). No behavior change planned.
+- **Brand mark parked.** The crafted, flat, scalable SVG mark is a separate focused
+  sprint; a neutral placeholder is used meanwhile (`brand-logo.tsx`, `public/app-icon.png`).
+- **`.glass-*` holdouts.** The legacy `.glass-card` / `.glass-dark` / `.glass-sheen`
+  utilities remain defined in `renderer/styles.css` but are effectively unused now that
+  the kiosk cards migrated to `.su-card` (`slot-panel.tsx` even documents deliberately
+  skipping `.glass-card`). They're pending removal once confirmed dead. (The
+  `glass-green/red/amber` entries in `layout-editor.tsx` are preset *labels*, not the CSS
+  utility.)

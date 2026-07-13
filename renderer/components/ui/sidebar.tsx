@@ -46,7 +46,7 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {}
 export function Sidebar({ className, children, ...props }: SidebarProps) {
   return (
     <div
-      className={cn("flex flex-col h-full bg-surface border-r border-line", className)}
+      className={cn("flex flex-col h-full bg-rail", className)}
       {...props}
     >
       {children}
@@ -95,6 +95,22 @@ export function SidebarList<T = unknown>({
         {children}
       </div>
     </SidebarListContext>
+  );
+}
+
+// ── SidebarGroupLabel ─────────────────────────────────────────────────────────
+// A quiet uppercase heading that clusters nav items (Content / Output / …).
+// In the collapsed icon rail it degrades to a thin divider.
+
+export function SidebarGroupLabel({ children }: { children: React.ReactNode }) {
+  const chrome = React.use(SidebarChromeContext);
+  if (chrome.collapsed && !chrome.isMobile) {
+    return <div className="mx-2 my-1.5 h-px bg-line" aria-hidden="true" />;
+  }
+  return (
+    <div className="px-2.5 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-fg-subtle select-none first:pt-1">
+      {children}
+    </div>
   );
 }
 
@@ -160,11 +176,11 @@ export function SidebarListItem({
     <button
       type="button"
       className={cn(
-        "flex items-center gap-2 w-full rounded-md px-2.5 py-1.5 text-left",
-        "text-footnote font-medium transition-colors",
+        "flex items-center gap-2.5 w-full rounded-lg px-2.5 py-2 text-left",
+        "text-[13.5px] font-medium transition-colors",
         railed && "justify-center px-0",
         isActive
-          ? "bg-accent text-white"
+          ? "bg-accent/12 text-fg"
           : "text-fg-muted hover:bg-fill hover:text-fg",
         className,
       )}
@@ -174,7 +190,7 @@ export function SidebarListItem({
       {...props}
     >
       {icon && (
-        <span className={cn("size-3.5 shrink-0", isActive ? "text-white/80" : "text-gray-9")}>
+        <span className={cn("size-4 shrink-0", isActive ? "text-accent" : "text-fg-subtle")}>
           {icon}
         </span>
       )}

@@ -25,6 +25,8 @@ export interface SettingsData {
   wirelessMeterRateMs: number;
   /** Customizable brand name shown in the sidebar header and on the kiosk. */
   appName: string;
+  /** Themeable brand accent as a #rrggbb hex, or null to use the built-in default. */
+  accentColor: string | null;
   /** Rendered (cropped) brand logo as a data URL, shown everywhere. */
   appLogo: string | null;
   /** Recolor a single-color logo to match the theme (mask with currentColor). */
@@ -80,6 +82,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
   wirelessMeterRateMs: 1000,
   appName: "Stage Utility",
+  accentColor: null,
   appLogo: null,
   appLogoMonochrome: true,
   appLogoOriginal: null,

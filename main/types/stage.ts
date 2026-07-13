@@ -1047,6 +1047,8 @@ export interface StageState {
   allowedServiceTypeIds: string[];
   /** Customizable brand name shown in the sidebar header and on the kiosk. */
   appName: string;
+  /** Themeable brand accent (#rrggbb), or null to use the built-in default. */
+  accentColor: string | null;
   /** Customizable brand logo as a data URL (PNG/JPG/SVG/WebP), or null. */
   appLogo: string | null;
   /** Recolor a single-color logo to match the theme. */

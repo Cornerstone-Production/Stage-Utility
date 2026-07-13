@@ -46,6 +46,7 @@ export interface SectionHandlers {
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {
     name?: string;
+    accentColor?: string | null;
     logo?: string | null;
     monochrome?: boolean;
     logoOriginal?: string | null;
