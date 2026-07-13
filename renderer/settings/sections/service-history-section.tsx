@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, TimerIcon, TrendingUpIcon, TrendingDownIcon, GaugeIcon, UsersIcon, CalendarDaysIcon, DoorOpenIcon, type LucideIcon } from "lucide-react";
+import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { confirm, EmptyState, SkeletonRows, Button, toast } from "../../components/ui";
@@ -29,43 +29,59 @@ function shortDay(day: string): string {
   const d = new Date(`${day}T00:00:00`);
   return Number.isNaN(d.getTime()) ? day : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
-/** "Jul 12 · 10:30" — pins a single-service stat to the specific occurrence, so
- *  on a multi-service day it's clear which one (not just the date). */
-function shortDayTime(serviceDate: string, startsAt: string | null | undefined, fallback?: string | null): string {
-  const t = fmtTime(startsAt ?? fallback ?? null);
-  return t ? `${shortDay(serviceDate)} · ${t}` : shortDay(serviceDate);
+
+/** One point on the attendance trend chart — a service occurrence with its peak
+ *  in-room count and the day it happened (for the axis labels). */
+interface TrendPoint { day: string; value: number }
+
+/** A trend indicator: which direction the latest value moved vs the mean of the
+ *  prior window, and whether that direction is good or bad for THIS metric.
+ *  `null` when there isn't enough prior data to judge honestly. */
+type TrendTone = "good" | "bad" | "neutral";
+interface Trend { dir: "up" | "down"; tone: TrendTone; pct: number | null; priorCount: number }
+
+/**
+ * Compare the latest value in a chronological series to the mean of the prior
+ * window (everything before it, capped at `window`). Returns null when there's
+ * no prior data — so we never fake a direction. `higherIsBetter` maps the raw
+ * up/down direction onto good/bad for the metric (attendance up = good; overrun
+ * up = bad). Values within `deadband` (fractional) of the prior mean read neutral.
+ */
+function computeTrend(series: number[], higherIsBetter: boolean, opts?: { window?: number; deadband?: number }): Trend | null {
+  if (series.length < 2) return null;
+  const window = opts?.window ?? 4;
+  const deadband = opts?.deadband ?? 0.02;
+  const latest = series[series.length - 1];
+  const prior = series.slice(Math.max(0, series.length - 1 - window), series.length - 1);
+  if (prior.length === 0) return null;
+  const priorMean = prior.reduce((a, b) => a + b, 0) / prior.length;
+  const diff = latest - priorMean;
+  const pct = priorMean !== 0 ? diff / Math.abs(priorMean) : null;
+  const dir: "up" | "down" = diff >= 0 ? "up" : "down";
+  const withinDeadband = pct != null && Math.abs(pct) < deadband;
+  const tone: TrendTone = withinDeadband ? "neutral" : (dir === "up") === higherIsBetter ? "good" : "bad";
+  return { dir, tone, pct, priorCount: prior.length };
 }
 
-// Selectable Overview metrics — grouped (Timing / Attendance) with an icon each.
-type OverviewGroup = "timing" | "attendance";
-interface OverviewMetricDef { key: string; label: string; group: OverviewGroup; Icon: LucideIcon }
-const OVERVIEW_METRICS: OverviewMetricDef[] = [
-  { key: "services", label: "Services", group: "timing", Icon: CalendarDaysIcon },
-  { key: "avgLength", label: "Avg length", group: "timing", Icon: TimerIcon },
-  { key: "avgStart", label: "Avg start", group: "timing", Icon: ClockIcon },
-  { key: "longest", label: "Longest service", group: "timing", Icon: TrendingUpIcon },
-  { key: "shortest", label: "Shortest service", group: "timing", Icon: TrendingDownIcon },
-  { key: "avgOverrun", label: "Avg overrun", group: "timing", Icon: GaugeIcon },
-  { key: "avgAttendance", label: "Avg attendance", group: "attendance", Icon: UsersIcon },
-  { key: "highestAttended", label: "Highest attended", group: "attendance", Icon: TrendingUpIcon },
-  { key: "lowestAttended", label: "Lowest attended", group: "attendance", Icon: TrendingDownIcon },
-  { key: "dayAttendance", label: "Day attendance", group: "attendance", Icon: CalendarDaysIcon },
-  { key: "avgEntries", label: "Avg entries", group: "attendance", Icon: DoorOpenIcon },
-];
-const OVERVIEW_KEYS = OVERVIEW_METRICS.map((m) => m.key);
-const OVERVIEW_GROUP_LABEL: Record<OverviewGroup, string> = { timing: "Timing", attendance: "Attendance" };
-const OVERVIEW_STORE_KEY = "history:overviewMetrics";
-function loadOverviewMetrics(): string[] {
-  try {
-    const raw = localStorage.getItem(OVERVIEW_STORE_KEY);
-    if (raw) {
-      const a = JSON.parse(raw);
-      if (Array.isArray(a)) return a.filter((k) => OVERVIEW_KEYS.includes(k));
-    }
-  } catch {
-    /* default */
-  }
-  return ["services", "avgLength", "avgStart", "avgAttendance"];
+/** Tailwind text color for a trend tone (semantic status tokens). */
+function trendColor(tone: TrendTone): string {
+  return tone === "good" ? "text-ok-11" : tone === "bad" ? "text-warn-11" : "text-fg-subtle";
+}
+
+/** Computed Overview blend data (lead stat + strip + chart series + trends). */
+interface OverviewData {
+  avgAttendance: string;
+  attTrend: Trend | null;
+  attPoints: TrendPoint[];
+  services: string;
+  avgLength: string;
+  avgStart: string;
+  avgStartEarly: boolean;
+  avgStartLate: boolean;
+  avgOverrun: string;
+  overrunTrend: Trend | null;
+  peakAttendance: string;
+  peakSub?: string;
 }
 
 /** ISO → local "HH:MM" for a <input type="time">, or "" if absent/invalid. */
@@ -234,57 +250,6 @@ export function ServiceHistorySection() {
   const [merging, setMerging] = useState(false);
   const [mergeTarget, setMergeTarget] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
-  // Which Overview metrics to show (persisted), and whether the picker is open.
-  const [overviewMetrics, setOverviewMetrics] = useState<string[]>(loadOverviewMetrics);
-  const [customizing, setCustomizing] = useState(false);
-  const [sparklinesOn, setSparklinesOn] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem("history:overviewSparklines") !== "0";
-    } catch {
-      return true;
-    }
-  });
-  function toggleSparklines() {
-    setSparklinesOn((v) => {
-      const n = !v;
-      try {
-        localStorage.setItem("history:overviewSparklines", n ? "1" : "0");
-      } catch {
-        /* best-effort */
-      }
-      return n;
-    });
-  }
-  const [dragMetric, setDragMetric] = useState<string | null>(null);
-  const persistOverview = (next: string[]) => {
-    try {
-      localStorage.setItem(OVERVIEW_STORE_KEY, JSON.stringify(next));
-    } catch {
-      /* best-effort */
-    }
-    return next;
-  };
-  function toggleOverviewMetric(key: string) {
-    setOverviewMetrics((prev) => persistOverview(prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
-  }
-  // Drag a metric card onto another to reorder (order = display order, persisted).
-  // Only within the same group — cross-group drops are ignored.
-  function moveOverviewMetric(from: string | null, to: string) {
-    if (!from || from === to) return;
-    const gf = OVERVIEW_METRICS.find((m) => m.key === from)?.group;
-    const gt = OVERVIEW_METRICS.find((m) => m.key === to)?.group;
-    if (gf !== gt) {
-      setDragMetric(null);
-      return;
-    }
-    setOverviewMetrics((prev) => {
-      const arr = prev.filter((k) => k !== from);
-      const idx = arr.indexOf(to);
-      arr.splice(idx < 0 ? arr.length : idx, 0, from);
-      return persistOverview(arr);
-    });
-    setDragMetric(null);
-  }
 
   function reload() {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
@@ -379,10 +344,22 @@ export function ServiceHistorySection() {
     return m;
   }, [filtered]);
 
+  // Small summary shown beneath the calendar for the selected day: how many
+  // services + their average peak in-room (scoped to the active type filter).
+  const daySummary = useMemo(() => {
+    if (!day) return null;
+    const count = dayServices.length;
+    const occ = attList.filter((a) => a.serviceDate === day && (!typeFilter || a.serviceTypeId === typeFilter) && a.peakOccupancy > 0);
+    const avg = occ.length ? Math.round(occ.reduce((s, a) => s + a.peakOccupancy, 0) / occ.length) : null;
+    return { count, avg };
+  }, [day, dayServices, attList, typeFilter]);
+
   // Overview stats, cumulative THROUGH the selected day (serviceDate <= day) so
   // picking a past date shows how things looked as of then; scoped to the type
   // filter so a Youth service's numbers don't blend into Sunday's. Finished only.
-  const overview = useMemo(() => {
+  // Produces the blend's lead stat, the instrument strip, and the attendance
+  // trend chart series — plus honest trend indicators (latest vs prior window).
+  const overview = useMemo<OverviewData>(() => {
     const asOf = day;
     const inScope = (typeId: string | null, date: string, ended: unknown) =>
       ended != null && (!typeFilter || typeId === typeFilter) && (!asOf || date <= asOf);
@@ -393,56 +370,45 @@ export function ServiceHistorySection() {
     const lens = sums.filter((x) => x.s.actual > 0);
     const punct = sums.map((x) => x.s.lateStartSec).filter((v): v is number => v != null);
     const overruns = sums.map((x) => (x.s.planned != null ? x.s.actual - x.s.planned : null)).filter((v): v is number => v != null);
-    // "Attendance" = peak people in the room (peakOccupancy); "entries" = cumulative
-    // door count (double-counts re-entries) via servicePeakAttendance.
+    // "Attendance" = peak people in the room (peakOccupancy).
     const occ = att.filter((a) => a.peakOccupancy > 0);
-    const entries = att.map((a) => servicePeakAttendance(a)).filter((v) => v > 0);
     const maxOcc = occ.length ? occ.reduce((m, a) => (a.peakOccupancy > m.peakOccupancy ? a : m)) : null;
-    const minOcc = occ.length ? occ.reduce((m, a) => (a.peakOccupancy < m.peakOccupancy ? a : m)) : null;
-    const longest = lens.length ? lens.reduce((m, x) => (x.s.actual > m.s.actual ? x : m)) : null;
-    const shortest = lens.length ? lens.reduce((m, x) => (x.s.actual < m.s.actual ? x : m)) : null;
     const startFmt = (sec: number) => (sec >= 0 ? `${fmtDur(sec)} late` : `${fmtDur(-sec)} early`);
     const avgPunct = mean(punct);
     const avgOverrun = mean(overruns);
-    const num = (n: number | null) => (n != null ? n.toLocaleString() : "—");
-    // Day attendance: the SELECTED day's services' peak in-room, summed (both services).
-    const dayOcc = asOf ? att.filter((a) => a.serviceDate === asOf).reduce((s, a) => s + a.peakOccupancy, 0) : 0;
-    const dayCount = asOf ? att.filter((a) => a.serviceDate === asOf).length : 0;
-    return {
-      services: { value: tl.length.toLocaleString(), accent: "text-gray-12" },
-      avgLength: { value: fmtDur(mean(lens.map((x) => x.s.actual))), accent: "text-gray-12" },
-      avgStart: { value: avgPunct != null ? startFmt(avgPunct) : "—", accent: avgPunct != null && avgPunct > 60 ? "text-amber-11" : "text-gray-12" },
-      avgAttendance: { value: num(mean(occ.map((a) => a.peakOccupancy))), accent: "text-gray-12" },
-      avgEntries: { value: num(mean(entries)), accent: "text-gray-12" },
-      highestAttended: { value: maxOcc ? maxOcc.peakOccupancy.toLocaleString() : "—", sub: maxOcc ? shortDayTime(maxOcc.serviceDate, maxOcc.serviceTimeStartsAt, maxOcc.startedAt) : undefined, accent: "text-gray-12" },
-      lowestAttended: { value: minOcc ? minOcc.peakOccupancy.toLocaleString() : "—", sub: minOcc ? shortDayTime(minOcc.serviceDate, minOcc.serviceTimeStartsAt, minOcc.startedAt) : undefined, accent: "text-gray-12" },
-      dayAttendance: { value: dayCount ? dayOcc.toLocaleString() : "—", sub: dayCount ? `${dayCount} service${dayCount === 1 ? "" : "s"}` : undefined, accent: "text-gray-12" },
-      longest: { value: longest ? fmtDur(longest.s.actual) : "—", sub: longest ? shortDayTime(longest.t.serviceDate, longest.t.serviceTimeStartsAt, longest.t.startedAt) : undefined, accent: "text-gray-12" },
-      shortest: { value: shortest ? fmtDur(shortest.s.actual) : "—", sub: shortest ? shortDayTime(shortest.t.serviceDate, shortest.t.serviceTimeStartsAt, shortest.t.startedAt) : undefined, accent: "text-gray-12" },
-      avgOverrun: { value: avgOverrun != null ? fmtDelta(avgOverrun) : "—", accent: avgOverrun != null && avgOverrun > 0 ? "text-red-11" : "text-gray-12" },
-    } as Record<string, { value: string; sub?: string; accent: string }>;
-  }, [list, attList, day, typeFilter]);
+    const avgAttendance = mean(occ.map((a) => a.peakOccupancy));
 
-  // Per-service series (chronological, last ~16) behind the average tiles — the
-  // trend the average summarizes. Same scope as `overview` (type filter + as-of).
-  const sparkSeries = useMemo(() => {
-    const asOf = day;
-    const inScope = (typeId: string | null, date: string, ended: unknown) =>
-      ended != null && (!typeFilter || typeId === typeFilter) && (!asOf || date <= asOf);
-    const tl = (list ?? [])
-      .filter((t) => inScope(t.serviceTypeId, t.serviceDate, t.endedAt))
-      .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-    const att = attList
-      .filter((a) => inScope(a.serviceTypeId, a.serviceDate, a.endedAt))
-      .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-    const tail = <T,>(a: T[]) => a.slice(-16);
+    // Chronological per-service attendance series (oldest → newest) for the chart
+    // and the trend math. Day-labeled so the chart axis pins to real dates.
+    const attChron = [...occ].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+    const attPoints: TrendPoint[] = attChron.map((a) => ({ day: a.serviceDate, value: a.peakOccupancy }));
+    const attSeries = attPoints.map((p) => p.value);
+    // Overrun series (chronological) for its own trend indicator.
+    const overrunChron = [...sums]
+      .sort((a, b) => Date.parse(a.t.startedAt) - Date.parse(b.t.startedAt))
+      .map((x) => (x.s.planned != null ? x.s.actual - x.s.planned : null))
+      .filter((v): v is number => v != null);
+
+    // Attendance up = good; overrun up = bad.
+    const attTrend = computeTrend(attSeries, true);
+    const overrunTrend = computeTrend(overrunChron, false);
+
     return {
-      avgLength: tail(tl.map((t) => summarize(t).actual).filter((v) => v > 0)),
-      avgStart: tail(tl.map((t) => summarize(t).lateStartSec).filter((v): v is number => v != null)),
-      avgOverrun: tail(tl.map((t) => { const s = summarize(t); return s.planned != null ? s.actual - s.planned : null; }).filter((v): v is number => v != null)),
-      avgAttendance: tail(att.map((a) => a.peakOccupancy).filter((v) => v > 0)),
-      avgEntries: tail(att.map((a) => servicePeakAttendance(a)).filter((v) => v > 0)),
-    } as Record<string, number[]>;
+      // Lead stat.
+      avgAttendance: avgAttendance != null ? avgAttendance.toLocaleString() : "—",
+      attTrend,
+      attPoints,
+      // Instrument strip.
+      services: tl.length.toLocaleString(),
+      avgLength: fmtDur(mean(lens.map((x) => x.s.actual))),
+      avgStart: avgPunct != null ? startFmt(avgPunct) : "—",
+      avgStartEarly: avgPunct != null && avgPunct < 0,
+      avgStartLate: avgPunct != null && avgPunct > 60,
+      avgOverrun: avgOverrun != null ? fmtDelta(avgOverrun) : "—",
+      overrunTrend,
+      peakAttendance: maxOcc ? maxOcc.peakOccupancy.toLocaleString() : "—",
+      peakSub: maxOcc ? shortDay(maxOcc.serviceDate) : undefined,
+    };
   }, [list, attList, day, typeFilter]);
 
   async function deleteService(key: string, title: string) {
@@ -726,109 +692,179 @@ export function ServiceHistorySection() {
           ))}
         </div>
       )}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
-        <HistoryCalendar counts={dateCounts} selected={day} onPick={setDay} />
-        <div className="flex-1 min-w-0 rounded-xl border border-gray-5 bg-gray-2 p-3 flex flex-col">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <span className="text-caption2 text-gray-9">
-              Overview{day ? ` · through ${fmtDay(day)}` : " · all time"}
-            </span>
-            <div className="flex items-center gap-3">
-              <button
-                className={`text-caption2 transition-colors ${sparklinesOn ? "text-blue-11 hover:text-blue-10" : "text-gray-10 hover:text-gray-12"}`}
-                onClick={toggleSparklines}
-              >
-                Sparklines {sparklinesOn ? "on" : "off"}
-              </button>
-              <button
-                className="text-caption2 text-gray-10 hover:text-gray-12 transition-colors"
-                onClick={() => setCustomizing((v) => !v)}
-              >
-                {customizing ? "Done" : "Customize"}
-              </button>
-            </div>
-          </div>
-          {customizing && (
-            <div className="flex flex-wrap gap-1.5 mb-3">
-              {OVERVIEW_METRICS.map((m) => (
-                <TypeChip key={m.key} active={overviewMetrics.includes(m.key)} onClick={() => toggleOverviewMetric(m.key)}>
-                  {m.label}
-                </TypeChip>
-              ))}
+      {/* Overview blend — full width. Lead stat + real trend chart, then a divided
+          instrument strip. Replaces the old customizable KPI-tile grid. */}
+      <div className="flex flex-col gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">
+          Overview{day ? ` · through ${fmtDay(day)}` : " · all time"}
+        </span>
+        <OverviewBlend overview={overview} />
+      </div>
+
+      {/* Calendar (sticky) + selected-day detail. */}
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-[320px_1fr] sm:items-start">
+        <div className="sm:sticky sm:top-0 flex flex-col gap-3">
+          <HistoryCalendar counts={dateCounts} selected={day} onPick={setDay} />
+          {day && daySummary && (
+            <div className="su-card px-4 py-3 text-caption1 text-fg-muted">
+              Selected: <span className="font-mono tabular-nums text-fg">{shortDay(day)}</span>
+              {" · "}
+              <span className="font-mono tabular-nums text-fg">{daySummary.count}</span>
+              {` service${daySummary.count === 1 ? "" : "s"}`}
+              {daySummary.avg != null && (
+                <>
+                  {" · "}
+                  <span className="font-mono tabular-nums text-fg">{daySummary.avg.toLocaleString()}</span>
+                  {" avg"}
+                </>
+              )}
             </div>
           )}
-          <div className="flex flex-col gap-3 flex-1 justify-center">
-            {(["timing", "attendance"] as OverviewGroup[]).map((group) => {
-              const keys = overviewMetrics.filter((k) => OVERVIEW_METRICS.find((m) => m.key === k)?.group === group);
-              if (keys.length === 0) return null;
-              return (
-                <div key={group} className="flex flex-col gap-1.5">
-                  <span className="text-[10px] font-medium uppercase tracking-wider text-gray-9">{OVERVIEW_GROUP_LABEL[group]}</span>
-                  <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(8.5rem, 1fr))" }}>
-                    {keys.map((key) => {
-                      const m = OVERVIEW_METRICS.find((x) => x.key === key)!;
-                      const d = overview[key];
-                      if (!d) return null;
-                      return (
-                        <KpiTile
-                          key={key}
-                          def={m}
-                          value={d.value}
-                          sub={d.sub}
-                          accent={d.accent}
-                          series={sparklinesOn ? sparkSeries[key] : undefined}
-                          onDragStart={() => setDragMetric(key)}
-                          onDragEnd={() => setDragMetric(null)}
-                          onDrop={() => moveOverviewMetric(dragMetric, key)}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-            {overviewMetrics.length === 0 && <span className="text-caption1 text-gray-9">No metrics selected — hit Customize.</span>}
-          </div>
         </div>
-      </div>
-      {day && <span className="text-body font-medium text-gray-12">{fmtDay(day)}</span>}
 
-      <div className="flex flex-col gap-2">
-        {dayServices.map((s) => {
-          const sum = summarize(s);
-          const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
-          return (
-            <div key={s.serviceKey} className="flex items-center gap-1 rounded-lg border border-gray-5 bg-gray-2 pr-1.5 hover:bg-gray-3 transition-colors">
-              <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(s.serviceKey)}>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-body font-medium text-gray-12 truncate">{s.planTitle ?? s.serviceKey}</span>
-                  <span className="text-caption2 text-gray-9 truncate">
-                    {fmtTime(s.serviceTimeStartsAt ?? s.startedAt) ? `${fmtTime(s.serviceTimeStartsAt ?? s.startedAt)} · ` : ""}
-                    {s.endedAt == null ? "recording…" : `${s.items.length} items`}
+        <div className="min-w-0 flex flex-col gap-2">
+          {day && <span className="text-body font-semibold text-gray-12">{fmtDay(day)}</span>}
+          {dayServices.map((s) => {
+            const sum = summarize(s);
+            const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
+            return (
+              <div key={s.serviceKey} className="flex items-center gap-1 rounded-lg border border-gray-5 bg-gray-2 pr-1.5 hover:bg-gray-3 transition-colors">
+                <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(s.serviceKey)}>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-body font-medium text-gray-12 truncate">{s.planTitle ?? s.serviceKey}</span>
+                    <span className="text-caption2 text-gray-9 truncate">
+                      {fmtTime(s.serviceTimeStartsAt ?? s.startedAt) ? `${fmtTime(s.serviceTimeStartsAt ?? s.startedAt)} · ` : ""}
+                      {s.endedAt == null ? "recording…" : `${s.items.length} items`}
+                    </span>
+                  </div>
+                  <span className="shrink-0 tabular-nums text-caption1 text-right">
+                    {sum.lateStartSec != null && sum.lateStartSec >= 30 && <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">late </span><span className="text-amber-11">{fmtDelta(sum.lateStartSec)}</span></span>}
+                    <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">ran </span><span className="text-blue-11">{fmtDur(sum.actual)}</span></span>
+                    {totalDelta != null && <span className="ml-3 whitespace-nowrap"><span className={totalDelta > 0 ? "text-red-11" : "text-gray-11"}>{fmtDelta(totalDelta)}</span></span>}
                   </span>
-                </div>
-                <span className="shrink-0 tabular-nums text-caption1 text-right">
-                  {sum.lateStartSec != null && sum.lateStartSec >= 30 && <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">late </span><span className="text-amber-11">{fmtDelta(sum.lateStartSec)}</span></span>}
-                  <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">ran </span><span className="text-blue-11">{fmtDur(sum.actual)}</span></span>
-                  {totalDelta != null && <span className="ml-3 whitespace-nowrap"><span className={totalDelta > 0 ? "text-red-11" : "text-gray-11"}>{fmtDelta(totalDelta)}</span></span>}
-                </span>
-              </button>
-              <button
-                className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
-                onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
-                aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
-                title="Delete recording"
-              >
-                <Trash2Icon className="size-4" />
-              </button>
-            </div>
-          );
-        })}
-        {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
+                </button>
+                <button
+                  className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                  onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
+                  aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
+                  title="Delete recording"
+                >
+                  <Trash2Icon className="size-4" />
+                </button>
+              </div>
+            );
+          })}
+          {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
+        </div>
       </div>
     </div>
   );
 }
+
+/** Real triangle glyph (▲/▼) trend indicator + optional label, in a semantic
+ *  status color. Renders nothing when there wasn't enough prior data. */
+function TrendChip({ trend, label }: { trend: Trend | null; label?: string }) {
+  if (!trend) return null;
+  const glyph = trend.dir === "up" ? "▲" : "▼";
+  const text =
+    label != null
+      ? label
+      : trend.pct != null
+        ? `${trend.pct >= 0 ? "+" : "−"}${Math.round(Math.abs(trend.pct) * 100)}%`
+        : "";
+  return (
+    <span className={`inline-flex items-center gap-1 text-caption1 ${trendColor(trend.tone)}`}>
+      <span aria-hidden="true">{glyph}</span>
+      {text && <span>{text}</span>}
+    </span>
+  );
+}
+
+/** The Overview blend: a lead stat (avg attendance) with a colored trend line, a
+ *  real attendance trend chart, and a divided instrument stat strip below. */
+function OverviewBlend({ overview }: { overview: OverviewData }) {
+  const strip: { k: string; v: string; accent?: string; trend?: Trend | null; trendLabel?: string }[] = [
+    { k: "Services", v: overview.services },
+    { k: "Avg length", v: overview.avgLength },
+    { k: "Avg start", v: overview.avgStart, accent: overview.avgStartEarly ? "text-ok-11" : overview.avgStartLate ? "text-warn-11" : undefined },
+    { k: "Avg overrun", v: overview.avgOverrun, trend: overview.overrunTrend, trendLabel: overview.overrunTrend ? (overview.overrunTrend.tone === "bad" ? "worse" : overview.overrunTrend.tone === "good" ? "better" : "steady") : undefined },
+    { k: "Peak attendance", v: overview.peakAttendance },
+  ];
+  return (
+    <div className="su-card px-5 py-5 flex flex-col">
+      <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-8">
+        <div className="shrink-0">
+          <div className="text-caption1 uppercase tracking-[0.08em] text-fg-muted">Avg attendance</div>
+          <div className="mt-1 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
+            {overview.avgAttendance}
+          </div>
+          {overview.attTrend && (
+            <div className={`mt-2 flex items-center gap-1.5 text-caption1 ${trendColor(overview.attTrend.tone)}`}>
+              <span aria-hidden="true">{overview.attTrend.dir === "up" ? "▲" : "▼"}</span>
+              <span>
+                {overview.attTrend.pct != null
+                  ? `${overview.attTrend.pct >= 0 ? "+" : "−"}${Math.round(Math.abs(overview.attTrend.pct) * 100)}%`
+                  : "changed"}{" "}
+                vs the prior {overview.attTrend.priorCount} service{overview.attTrend.priorCount === 1 ? "" : "s"}
+              </span>
+            </div>
+          )}
+        </div>
+        <div className="flex-1 min-w-0 md:max-w-[640px]">
+          <AttendanceTrendChart points={overview.attPoints} />
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-y-3 border-t border-line pt-4 sm:flex-nowrap">
+        {strip.map((s, i) => (
+          <div key={s.k} className={`flex-1 min-w-[6.5rem] px-4 first:pl-0 ${i < strip.length - 1 ? "sm:border-r sm:border-line" : ""}`}>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle">{s.k}</div>
+            <div className={`mt-1 flex items-baseline gap-1.5 font-mono tabular-nums text-lg ${s.accent ?? "text-fg"}`}>
+              <span>{s.v}</span>
+              {s.trend && <TrendChip trend={s.trend} label={s.trendLabel} />}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Real attendance trend chart (SVG): a baseline, the per-service polyline, the
+ *  latest point marked, and first/last date labels. The hero of the blend — not
+ *  decorative. Falls back to a quiet note when there isn't enough to plot. */
+function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
+  const W = 640;
+  const H = 130;
+  const padTop = 16;
+  const padBottom = 26;
+  const padX = 10;
+  if (points.length < 2) {
+    return (
+      <div className="flex h-[130px] items-center justify-center text-caption1 text-fg-subtle">
+        Not enough services yet to chart a trend.
+      </div>
+    );
+  }
+  const vals = points.map((p) => p.value);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const range = max - min || 1;
+  const x = (i: number) => padX + (i / (points.length - 1)) * (W - padX * 2);
+  const y = (v: number) => padTop + (1 - (v - min) / range) * (H - padTop - padBottom);
+  const poly = points.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+  const lastX = x(points.length - 1);
+  const lastY = y(points[points.length - 1].value);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img" aria-label="Attendance trend across recent services">
+      <line x1={0} y1={H - padBottom} x2={W} y2={H - padBottom} stroke="var(--su-line)" />
+      <polyline points={poly} fill="none" stroke="var(--su-accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      <circle cx={lastX} cy={lastY} r={4} fill="var(--su-accent)" />
+      <text x={padX} y={H - 8} fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[0].day)}</text>
+      <text x={W - padX} y={H - 8} textAnchor="end" fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[points.length - 1].day)}</text>
+    </svg>
+  );
+}
+
 
 /** Service-type filter chip (shown only when 2+ types have recordings). */
 function TypeChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
@@ -841,68 +877,6 @@ function TypeChip({ active, onClick, children }: { active: boolean; onClick: () 
     >
       {children}
     </button>
-  );
-}
-
-/** Minimal dependency-free sparkline — normalizes a series to a tiny SVG polyline.
- *  Inherits stroke from currentColor (set via className to the tile's accent). */
-function Sparkline({ data, className }: { data: number[]; className?: string }) {
-  if (data.length < 2) return null;
-  const w = 100;
-  const h = 24;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const pts = data
-    .map((v, i) => `${((i / (data.length - 1)) * w).toFixed(1)},${(h - ((v - min) / range) * h).toFixed(1)}`)
-    .join(" ");
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className={`w-full ${className ?? ""}`} style={{ height: "1.1rem" }} aria-hidden="true">
-      <polyline points={pts} fill="none" stroke="currentColor" strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" opacity={0.8} />
-    </svg>
-  );
-}
-
-/** A KPI tile for the Overview dashboard: icon + label, big value, context sub, and
- *  an optional trend sparkline. Bordered + packed so a few metrics don't float in
- *  empty space; draggable to reorder within its group. */
-function KpiTile({
-  def,
-  value,
-  sub,
-  accent,
-  series,
-  onDragStart,
-  onDragEnd,
-  onDrop,
-}: {
-  def: OverviewMetricDef;
-  value: string;
-  sub?: string;
-  accent: string;
-  series?: number[];
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onDrop: () => void;
-}) {
-  const Icon = def.Icon;
-  return (
-    <div
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={onDrop}
-      className="flex flex-col gap-1 rounded-lg border border-gray-5 bg-gray-1 px-3 py-2.5 cursor-grab active:cursor-grabbing hover:border-gray-7 transition-colors"
-    >
-      <div className="flex items-center gap-1.5 text-caption2 text-gray-9 min-w-0">
-        <Icon className="size-3.5 shrink-0" />
-        <span className="truncate">{def.label}</span>
-      </div>
-      <div className={`text-title3 font-semibold tabular-nums leading-tight ${accent}`}>{value}</div>
-      {sub && <div className="text-caption2 text-gray-9 truncate">{sub}</div>}
-      {series && series.length >= 2 && <Sparkline data={series} className={accent} />}
-    </div>
   );
 }
 
