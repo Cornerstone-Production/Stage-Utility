@@ -262,11 +262,11 @@
 /* Dark settings elevation (.dark on <html>). Depth via inset top highlight +
    soft drop shadow — the quiet, material feel, no backdrop-filter. */
 .dark {
-  /* Near-black neutral surfaces (matches the mockup — true neutral, no blue/purple). */
-  --su-bg:             #0e0e10;
+  /* Near-black PURE-neutral surfaces (R=G=B — zero cool/purple cast). */
+  --su-bg:             #0e0e0e;
   --su-surface:        rgba(255, 255, 255, 0.03);
   --su-surface-raised: rgba(255, 255, 255, 0.055);
-  --su-rail:           #0e0e10;   /* seamless with content in dark */
+  --su-rail:           #0e0e0e;   /* seamless with content in dark */
   --su-line:           rgba(255, 255, 255, 0.08);
   --su-line-strong:    rgba(255, 255, 255, 0.14);
   --su-fg:             #ededf0;

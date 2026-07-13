@@ -144,16 +144,16 @@ function useSidebarCollapsed() {
 // ---- sidebar section definitions --------------------------------------------
 
 const SECTIONS: SectionItem[] = [
-  { id: "plan", label: "Plan", icon: <CalendarIcon className="size-4 text-gray-11" /> },
-  { id: "views", label: "Views", icon: <LayoutTemplateIcon className="size-4 text-gray-11" /> },
-  { id: "scriptview", label: "ScriptView", icon: <ListChecksIcon className="size-4 text-gray-11" /> },
-  { id: "displays", label: "Displays", icon: <MonitorIcon className="size-4 text-gray-11" /> },
-  { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4 text-gray-11" /> },
-  { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4 text-gray-11" /> },
-  { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4 text-gray-11" /> },
-  { id: "service-history", label: "History", icon: <ClockIcon className="size-4 text-gray-11" /> },
-  { id: "baptisms", label: "Baptisms", icon: <DropletIcon className="size-4 text-gray-11" /> },
-  { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
+  { id: "plan", label: "Plan", icon: <CalendarIcon className="size-4" /> },
+  { id: "views", label: "Views", icon: <LayoutTemplateIcon className="size-4" /> },
+  { id: "scriptview", label: "ScriptView", icon: <ListChecksIcon className="size-4" /> },
+  { id: "displays", label: "Displays", icon: <MonitorIcon className="size-4" /> },
+  { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4" /> },
+  { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4" /> },
+  { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4" /> },
+  { id: "service-history", label: "History", icon: <ClockIcon className="size-4" /> },
+  { id: "baptisms", label: "Baptisms", icon: <DropletIcon className="size-4" /> },
+  { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4" /> },
 ];
 
 // Per-tab header subtitles (shown under the section title in the content pane).
