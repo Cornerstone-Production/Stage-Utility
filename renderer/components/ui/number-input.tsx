@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ChevronUpIcon, ChevronDownIcon } from "lucide-react";
+import { MinusIcon, PlusIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 
 // Hide the browser's native number spinner — we render our own themed steppers.
@@ -72,7 +72,7 @@ export function NumberInput({
   return (
     <div
       className={cn(
-        "inline-flex h-7 w-full items-stretch overflow-hidden rounded-md border border-line-strong bg-field",
+        "inline-flex h-7 w-full items-stretch overflow-hidden rounded-md border border-line bg-field",
         "transition-colors focus-within:border-focus focus-within:ring-1 focus-within:ring-focus",
         disabled && "cursor-not-allowed opacity-50",
         className,
@@ -106,18 +106,9 @@ export function NumberInput({
       {suffix && (
         <span className="pointer-events-none flex select-none items-center pr-1 text-caption2 text-gray-8">{suffix}</span>
       )}
-      <div className="flex w-6 shrink-0 flex-col border-l border-line-strong">
-        <button
-          type="button"
-          tabIndex={-1}
-          disabled={disabled}
-          aria-label="Increase"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => bump(1)}
-          className="flex flex-1 items-center justify-center text-gray-9 transition-colors hover:bg-fill-hover hover:text-fg"
-        >
-          <ChevronUpIcon className="size-3" />
-        </button>
+      {/* Horizontal −/+ steppers grouped on the right. Bigger, calmer targets
+          than a stacked chevron column, and touch-friendly on kiosk panels. */}
+      <div className="flex shrink-0 border-l border-line">
         <button
           type="button"
           tabIndex={-1}
@@ -125,9 +116,20 @@ export function NumberInput({
           aria-label="Decrease"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => bump(-1)}
-          className="flex flex-1 items-center justify-center border-t border-line-strong text-gray-9 transition-colors hover:bg-fill-hover hover:text-fg"
+          className="flex w-6 items-center justify-center text-fg-subtle transition-colors hover:bg-fill-hover hover:text-fg active:text-accent disabled:opacity-50"
         >
-          <ChevronDownIcon className="size-3" />
+          <MinusIcon className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          disabled={disabled}
+          aria-label="Increase"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => bump(1)}
+          className="flex w-6 items-center justify-center border-l border-line text-fg-subtle transition-colors hover:bg-fill-hover hover:text-fg active:text-accent disabled:opacity-50"
+        >
+          <PlusIcon className="size-3.5" />
         </button>
       </div>
     </div>

@@ -169,7 +169,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
             step={0.5}
             min={0.1}
             suffix="in"
-            className="w-24"
+            className="w-32"
             aria-label="Spacer width (inches)"
             onChange={(n) => onChange({ ...slot, widthIn: n })}
           />
@@ -1003,7 +1003,7 @@ export function AlignmentPanel({
                 step={0.25}
                 min={1}
                 suffix="in"
-                className="w-28"
+                className="w-32"
                 aria-label="Display active width (inches)"
                 onChange={(n) => onChange({ ...layout, displayWidthIn: n })}
               />
@@ -1015,7 +1015,7 @@ export function AlignmentPanel({
                 step={0.1}
                 min={0.1}
                 suffix="in"
-                className="w-28"
+                className="w-32"
                 aria-label="Charger column width (inches)"
                 onChange={(n) => onChange({ ...layout, columnWidthIn: n })}
               />
