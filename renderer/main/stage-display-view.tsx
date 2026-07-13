@@ -144,12 +144,12 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
         {/* Top strip: remaining slides · clock · PCO live · (SPL when present) */}
         <div className={`grid gap-2.5 h-[16%] min-h-0 ${splVal ? "grid-cols-4" : "grid-cols-3"}`}>
           <Cell label="Remaining slides">
-            <span className="text-[clamp(1.5rem,7vmin,3.5rem)] font-medium leading-none tabular-nums">
+            <span className="text-[clamp(1.5rem,7vmin,3.5rem)] font-mono font-medium leading-none tabular-nums">
               {pro?.slidesRemaining ?? "—"}
             </span>
           </Cell>
           <Cell label="Clock">
-            <span className="text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums">
+            <span className="text-[clamp(1.4rem,6vmin,3rem)] font-mono font-medium leading-none tabular-nums">
               {h12}:{cmm}<span className="text-fg-subtle text-[0.6em]">:{css} {ampm}</span>
             </span>
           </Cell>
@@ -169,7 +169,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
           >
             {timer ? (
               <div className="flex flex-col items-center gap-1">
-                <span className={`text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums ${over ? "text-red-10" : "text-live-11"}`}>
+                <span className={`text-[clamp(1.4rem,6vmin,3rem)] font-mono font-medium leading-none tabular-nums ${over ? "text-red-10" : "text-live-11"}`}>
                   {fmtDuration(timer.seconds)}
                 </span>
                 {timer.label && (
@@ -182,7 +182,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
           </Cell>
           {splVal && (
             <Cell label={`SPL · ${splVal.metricKey}`}>
-              <span className="text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums">
+              <span className="text-[clamp(1.4rem,6vmin,3rem)] font-mono font-medium leading-none tabular-nums">
                 {Math.round(splVal.value)}<span className="text-fg-subtle text-[0.6em]"> dB</span>
               </span>
             </Cell>
@@ -193,7 +193,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
             phones (max-sm) — the slide text is already shown here, so it's just
             clutter on a small screen; it stays on the wall/desktop display. */}
         <div className="flex flex-1 min-h-0 gap-2.5">
-          <div className="flex flex-col flex-1 min-w-0 rounded-2xl border border-line bg-surface p-3 gap-2">
+          <div className="flex flex-col flex-1 min-w-0 su-card p-3 gap-2">
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-caption2 uppercase tracking-wider text-fg-subtle" style={{ letterSpacing: "0.1em" }}>Now</span>
               <SectionChip section={pro?.currentSection ?? null} />
@@ -256,7 +256,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
           const last = transcript[transcript.length - 1];
           const speaker = channelLabel(last);
           return (
-            <div className="shrink-0 rounded-2xl border border-line bg-surface px-3 py-2 flex items-center gap-3 min-h-0">
+            <div className="shrink-0 su-card px-3 py-2 flex items-center gap-3 min-h-0">
               <span
                 className="text-caption2 font-semibold uppercase tracking-wider shrink-0 max-w-[28%] truncate"
                 style={{ letterSpacing: "0.1em", color: speaker ? channelColor(last.channel) : "rgba(255,255,255,0.4)" }}
