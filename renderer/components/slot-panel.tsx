@@ -108,7 +108,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           makes every cqi/cqw unit inside resolve against THIS card's width, so
           names/avatar/RF bar stay proportional from preview sliver to 4K column. */}
       <div
-        className="relative flex flex-col flex-1 overflow-hidden glass-card [container-type:inline-size]"
+        className="relative flex flex-col flex-1 overflow-hidden su-card [container-type:inline-size]"
         style={{ borderRadius: "7cqi" }}
       >
         {/* ── Photo (top) — fills all the space above the info card and stops at
