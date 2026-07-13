@@ -103,7 +103,7 @@ export function DisplayPickerView() {
               <a
                 key={d.id}
                 href={`/${d.id}`}
-                className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:bg-white/10"
+                className="flex items-center gap-3 su-card px-4 py-3 transition-colors hover:bg-white/10"
               >
                 <MonitorIcon className="size-5 text-fg-subtle shrink-0" />
                 <span className="text-body font-medium text-fg truncate">{d.name}</span>
@@ -116,7 +116,7 @@ export function DisplayPickerView() {
           <div className="my-1 h-px bg-white/10" />
           <a
             href="/scriptview"
-            className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:bg-white/10"
+            className="flex items-center gap-3 su-card px-4 py-3 transition-colors hover:bg-white/10"
           >
             <ListChecksIcon className="size-5 text-fg-subtle shrink-0" />
             <span className="text-body font-medium text-fg truncate">ScriptView</span>
@@ -124,9 +124,9 @@ export function DisplayPickerView() {
           </a>
           <a
             href="/baptism"
-            className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:bg-white/10"
+            className="flex items-center gap-3 su-card px-4 py-3 transition-colors hover:bg-white/10"
           >
-            <DropletIcon className="size-5 text-blue-9 shrink-0" />
+            <DropletIcon className="size-5 text-accent shrink-0" />
             <span className="text-body font-medium text-fg truncate">Baptisms</span>
             <ChevronRightIcon className="size-4 text-fg-faint ml-auto shrink-0" />
           </a>
