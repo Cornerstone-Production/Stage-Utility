@@ -7,7 +7,13 @@ interface FieldSetProps extends React.HTMLAttributes<HTMLDivElement> {}
 
 export function FieldSet({ className, children, ...props }: FieldSetProps) {
   return (
-    <div className={cn("rounded-lg border border-line overflow-hidden", className)} {...props}>
+    <div
+      className={cn(
+        "rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)] overflow-hidden",
+        className,
+      )}
+      {...props}
+    >
       {children}
     </div>
   );
@@ -35,7 +41,7 @@ export function Field({ className, orientation = "horizontal", children, ...prop
   return (
     <div
       className={cn(
-        "flex px-3 py-2.5 bg-bg",
+        "flex px-4 py-3 bg-transparent",
         // Horizontal fields stack (label above control) on phones, go side-by-side at ≥sm.
         orientation === "horizontal" && "flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-3",
         orientation === "vertical" && "flex-col gap-1.5",
