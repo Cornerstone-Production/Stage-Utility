@@ -6,14 +6,9 @@
 @import "@radix-ui/colors/gray-dark.css";
 @import "@radix-ui/colors/gray-alpha.css";
 @import "@radix-ui/colors/gray-dark-alpha.css";
-/* Neutral = Radix slate (a subtly cool, blue-tinted gray — the AV/instrument
-   register, not warm cream). Aliased under the existing gray-* utility + --su
-   token names below so surfaces go cool-neutral in one place, no call-site churn.
-   (Pure gray.css is kept: a few chart SVGs still reference the raw gray scale.) */
-@import "@radix-ui/colors/slate.css";
-@import "@radix-ui/colors/slate-dark.css";
-@import "@radix-ui/colors/slate-alpha.css";
-@import "@radix-ui/colors/slate-dark-alpha.css";
+/* Neutral = Radix gray (a true neutral — near-black in dark, matching the
+   mockup). Slate was tried but read blue/purple in dark mode; gray is the
+   AV-instrument near-black we want. */
 @import "@radix-ui/colors/blue.css";
 @import "@radix-ui/colors/blue-dark.css";
 @import "@radix-ui/colors/blue-alpha.css";
@@ -55,30 +50,30 @@
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
   /* Gray scale (1–12 + alpha) */
-  --color-gray-1:   var(--slate-1);
-  --color-gray-2:   var(--slate-2);
-  --color-gray-3:   var(--slate-3);
-  --color-gray-4:   var(--slate-4);
-  --color-gray-5:   var(--slate-5);
-  --color-gray-6:   var(--slate-6);
-  --color-gray-7:   var(--slate-7);
-  --color-gray-8:   var(--slate-8);
-  --color-gray-9:   var(--slate-9);
-  --color-gray-10:  var(--slate-10);
-  --color-gray-11:  var(--slate-11);
-  --color-gray-12:  var(--slate-12);
-  --color-gray-a1:  var(--slate-a1);
-  --color-gray-a2:  var(--slate-a2);
-  --color-gray-a3:  var(--slate-a3);
-  --color-gray-a4:  var(--slate-a4);
-  --color-gray-a5:  var(--slate-a5);
-  --color-gray-a6:  var(--slate-a6);
-  --color-gray-a7:  var(--slate-a7);
-  --color-gray-a8:  var(--slate-a8);
-  --color-gray-a9:  var(--slate-a9);
-  --color-gray-a10: var(--slate-a10);
-  --color-gray-a11: var(--slate-a11);
-  --color-gray-a12: var(--slate-a12);
+  --color-gray-1:   var(--gray-1);
+  --color-gray-2:   var(--gray-2);
+  --color-gray-3:   var(--gray-3);
+  --color-gray-4:   var(--gray-4);
+  --color-gray-5:   var(--gray-5);
+  --color-gray-6:   var(--gray-6);
+  --color-gray-7:   var(--gray-7);
+  --color-gray-8:   var(--gray-8);
+  --color-gray-9:   var(--gray-9);
+  --color-gray-10:  var(--gray-10);
+  --color-gray-11:  var(--gray-11);
+  --color-gray-12:  var(--gray-12);
+  --color-gray-a1:  var(--gray-a1);
+  --color-gray-a2:  var(--gray-a2);
+  --color-gray-a3:  var(--gray-a3);
+  --color-gray-a4:  var(--gray-a4);
+  --color-gray-a5:  var(--gray-a5);
+  --color-gray-a6:  var(--gray-a6);
+  --color-gray-a7:  var(--gray-a7);
+  --color-gray-a8:  var(--gray-a8);
+  --color-gray-a9:  var(--gray-a9);
+  --color-gray-a10: var(--gray-a10);
+  --color-gray-a11: var(--gray-a11);
+  --color-gray-a12: var(--gray-a12);
 
   /* Blue scale */
   --color-blue-1:  var(--blue-1);
@@ -222,15 +217,15 @@
   --cyan-11: #99f0f0;
 
   /* Tier 2 — semantic tokens (settings defaults; Radix scales flip with .dark) */
-  --su-bg:             var(--slate-1);
-  --su-surface:        var(--slate-2);
-  --su-surface-raised: var(--slate-3);
-  --su-line:           var(--slate-a4);
-  --su-line-strong:    var(--slate-a6);
-  --su-fg:             var(--slate-12);
-  --su-fg-muted:       var(--slate-11);
-  --su-fg-subtle:      var(--slate-10);
-  --su-fg-faint:       var(--slate-8);
+  --su-bg:             var(--gray-1);
+  --su-surface:        var(--gray-2);
+  --su-surface-raised: var(--gray-3);
+  --su-line:           var(--gray-a4);
+  --su-line-strong:    var(--gray-a6);
+  --su-fg:             var(--gray-12);
+  --su-fg-muted:       var(--gray-11);
+  --su-fg-subtle:      var(--gray-10);
+  --su-fg-faint:       var(--gray-8);
   /* Brand accent — THEMEABLE. --brand-accent is overridden at runtime from
      Branding → Accent color (per org; empty = this default). Hover/active/focus
      derive from it via color-mix, so a single picked hex drives the whole ramp
@@ -241,10 +236,10 @@
   --su-accent-active:  color-mix(in srgb, var(--brand-accent), black 22%);
   --su-on-accent:      #ffffff;
   --su-focus:          var(--brand-accent);   /* focus ring */
-  --su-field:          var(--slate-a2);  /* input / control fill */
-  --su-fill:           var(--slate-a3);  /* interaction fill (ghost/filled) */
-  --su-fill-hover:     var(--slate-a4);
-  --su-fill-active:    var(--slate-a5);
+  --su-field:          var(--gray-a2);  /* input / control fill */
+  --su-fill:           var(--gray-a3);  /* interaction fill (ghost/filled) */
+  --su-fill-hover:     var(--gray-a4);
+  --su-fill-active:    var(--gray-a5);
   --su-live-9:         var(--live-9);
   --su-live-11:        var(--live-11);
   --su-danger-9:       var(--red-9);

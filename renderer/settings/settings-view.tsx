@@ -41,6 +41,7 @@ import { IntegrationsSection } from "./sections/integrations-section";
 import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
 import { applyAccentVar } from "../lib/apply-accent";
+import { cn } from "../lib/cn";
 import { AdvancedSection } from "./sections/advanced-section";
 import { ServiceHistorySection } from "./sections/service-history-section";
 import { ScriptViewSection } from "./sections/scriptview-section";
@@ -154,6 +155,20 @@ const SECTIONS: SectionItem[] = [
   { id: "baptisms", label: "Baptisms", icon: <DropletIcon className="size-4 text-gray-11" /> },
   { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
 ];
+
+// Per-tab header subtitles (shown under the section title in the content pane).
+const SECTION_DESC: Record<string, string> = {
+  plan: "Choose which Planning Center plan the displays follow.",
+  views: "Build and arrange what each display shows.",
+  scriptview: "Named rundown column presets for the ScriptView dashboard.",
+  displays: "Point each physical screen at a View.",
+  integrations: "Connect the gear and services that run your service.",
+  connect: "Share the display link and QR for phones on the network.",
+  branding: "Your organization's name, logo, and accent color.",
+  "service-history": "Every service you've run — timing and attendance.",
+  baptisms: "Time testimonies and baptisms live.",
+  advanced: "Updates, network address, capture windows, and full config.",
+};
 
 // Nav clusters — keeps the flat 10-item list within a scannable 7±2 per group.
 const NAV_GROUPS: { label: string; ids: string[] }[] = [
@@ -1166,24 +1181,50 @@ export function SettingsView() {
             })}
           </SidebarList>
 
-          {/* Light / dark toggle, pinned to the bottom of the sidebar. */}
-          <div className="mt-auto p-2">
-            <SidebarListItem
-              icon={
-                theme.isDark ? (
-                  <SunIcon className="size-4 text-gray-11" />
-                ) : (
-                  <MoonIcon className="size-4 text-gray-11" />
-                )
-              }
-              title={theme.isDark ? "Light mode" : "Dark mode"}
-              onClick={theme.toggle}
-            />
+          {/* Rail footer: version + segmented light/dark toggle (matches the mockup). */}
+          <div className="mt-auto flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+            <span className="text-caption2 text-fg-subtle tabular-nums truncate">
+              {updateStatus?.version ? `v${updateStatus.version}` : ""}
+              {updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}
+            </span>
+            <div className="flex items-center gap-0.5 rounded-lg bg-fill p-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => theme.isDark && theme.toggle()}
+                aria-label="Light mode"
+                aria-pressed={!theme.isDark}
+                className={cn(
+                  "flex items-center justify-center size-6 rounded-md transition-colors",
+                  !theme.isDark ? "bg-surface text-accent shadow-[var(--su-shadow-1)]" : "text-fg-subtle hover:text-fg",
+                )}
+              >
+                <SunIcon className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => !theme.isDark && theme.toggle()}
+                aria-label="Dark mode"
+                aria-pressed={theme.isDark}
+                className={cn(
+                  "flex items-center justify-center size-6 rounded-md transition-colors",
+                  theme.isDark ? "bg-surface text-accent shadow-[var(--su-shadow-1)]" : "text-fg-subtle hover:text-fg",
+                )}
+              >
+                <MoonIcon className="size-3.5" />
+              </button>
+            </div>
           </div>
         </Sidebar>
       }
     >
       <ScrollArea className="h-full" title={activeSection.label}>
+        {/* Per-tab header (title + subtitle), matching the mockup. */}
+        <header className="px-5 max-sm:px-3 pt-6 max-sm:pt-5">
+          <h1 className="text-title2 font-semibold text-fg leading-tight">{activeSection.label}</h1>
+          {SECTION_DESC[activeSection.id] && (
+            <p className="text-footnote text-fg-muted mt-1 max-w-[68ch]">{SECTION_DESC[activeSection.id]}</p>
+          )}
+        </header>
         {/* Keep a render error in one section from blanking the whole window. Keyed
             by the active tab so switching sections resets the boundary. */}
         <ErrorBoundary key={activeSection.id}>{renderSection()}</ErrorBoundary>

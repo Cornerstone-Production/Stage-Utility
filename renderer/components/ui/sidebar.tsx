@@ -46,7 +46,7 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {}
 export function Sidebar({ className, children, ...props }: SidebarProps) {
   return (
     <div
-      className={cn("flex flex-col h-full bg-surface border-r border-line", className)}
+      className={cn("flex flex-col h-full bg-bg", className)}
       {...props}
     >
       {children}
