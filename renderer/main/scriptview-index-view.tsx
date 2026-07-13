@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2Icon, ListChecksIcon, ArrowRightIcon } from "lucide-react";
+import { Loader2Icon, ListChecksIcon, ArrowRightIcon, ChevronDownIcon } from "lucide-react";
 
 import { BrandLogo } from "../components/brand-logo";
 import { QrHint } from "../components/qr-hint";
@@ -112,13 +112,16 @@ export function ScriptViewIndex() {
                 <div key={type.id} className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3">
                   <ListChecksIcon className="size-5 text-fg-subtle shrink-0" />
                   <span className="text-body font-medium text-fg flex-1 truncate">{type.name}</span>
-                  <select
-                    value={cur}
-                    onChange={(e) => setSel((s) => ({ ...s, [type.id]: e.target.value }))}
-                    className="rounded-lg border border-line bg-black/30 px-3 py-1.5 text-caption1 text-fg outline-none focus:border-line-strong"
-                  >
-                    {options.map((o) => <option key={o.value} value={o.value} className="bg-[#14161c]">{o.label}</option>)}
-                  </select>
+                  <div className="relative shrink-0">
+                    <select
+                      value={cur}
+                      onChange={(e) => setSel((s) => ({ ...s, [type.id]: e.target.value }))}
+                      className="appearance-none cursor-pointer rounded-lg bg-white/[0.06] py-1.5 pl-3 pr-8 text-caption1 font-medium text-fg-muted outline-none transition-colors hover:bg-white/10 hover:text-fg focus:text-fg"
+                    >
+                      {options.map((o) => <option key={o.value} value={o.value} className="bg-[#14161c] font-medium">{o.label}</option>)}
+                    </select>
+                    <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 text-fg-subtle" />
+                  </div>
                   <a
                     href={scriptViewUrl(type.name, cur, globalLayouts.find((l) => l.id === cur)?.name)}
                     className="flex items-center justify-center rounded-lg border border-line bg-surface size-8 shrink-0 transition-colors hover:bg-white/15"

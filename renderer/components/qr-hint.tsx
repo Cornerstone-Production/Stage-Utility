@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 
 interface QrHintProps {
@@ -17,14 +17,28 @@ export function QrHint({ url, compact = false, sizeCss }: QrHintProps) {
   const backing = compact ? 160 : 132;
   const display = sizeCss ?? `${compact ? 28 : 132}px`;
 
+  // The non-compact QR lives in Settings (light or dark) with no backdrop box, so
+  // its modules must follow the theme foreground. Re-tint when the .dark class on
+  // the root toggles. The compact kiosk QR is always white on its dark bar.
+  const [themeTick, setThemeTick] = useState(0);
+  useEffect(() => {
+    if (compact) return;
+    const obs = new MutationObserver(() => setThemeTick((t) => t + 1));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, [compact]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !url) return;
+    const moduleColor = compact
+      ? "#ffffff"
+      : getComputedStyle(document.documentElement).getPropertyValue("--su-fg").trim() || "#ededf0";
     QRCode.toCanvas(canvas, url, {
       width: backing,
       margin: 1,
       color: {
-        dark: "#ffffff",
+        dark: moduleColor,
         light: "#00000000",
       },
     })
@@ -39,7 +53,7 @@ export function QrHint({ url, compact = false, sizeCss }: QrHintProps) {
       .catch((err: unknown) => {
         console.error("[QrHint] QR generation error", err);
       });
-  }, [url, backing, display]);
+  }, [url, backing, display, compact, themeTick]);
 
   if (!url) return null;
 
@@ -60,10 +74,10 @@ export function QrHint({ url, compact = false, sizeCss }: QrHintProps) {
     );
   }
 
-  // Solid dark backdrop (theme-independent) so the white QR modules stay
-  // high-contrast and scannable even on the light Settings window.
+  // No backdrop box: modules and URL are tinted with the theme foreground
+  // (near-black on light, near-white on dark) so the QR reads on either theme.
   return (
-    <div className="inline-flex flex-col items-center gap-1.5 p-3 bg-[#18181b] rounded-xl">
+    <div className="inline-flex flex-col items-center gap-1.5">
       <canvas ref={canvasRef} width={backing} height={backing} className="rounded" />
       <span
         className="text-caption1 text-fg tabular-nums text-center leading-tight"
