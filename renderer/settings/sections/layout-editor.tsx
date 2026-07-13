@@ -1241,7 +1241,11 @@ export function LayoutEditor({
       const top = el.getBoundingClientRect().top;
       const maxH = Math.max(240, window.innerHeight - top - 16);
       const fit = width > 0 ? width / aspect : maxH;
-      setCanvasH(Math.round(fillMode ? maxH : Math.min(fit, maxH)));
+      // Only clamp to the viewport while editing — there the inline slots editor
+      // must sit right below the canvas. When just viewing, fill the width like
+      // the read-only ViewPreview so a custom preview isn't shrunk vs other kinds.
+      const cap = isEditing ? maxH : Infinity;
+      setCanvasH(Math.round(fillMode ? maxH : Math.min(fit, cap)));
     };
     measure();
     window.addEventListener("resize", measure);
