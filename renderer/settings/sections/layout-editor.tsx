@@ -1730,7 +1730,7 @@ export function LayoutEditor({
             height (scrolls internally); only capped to the preview height while an
             inline slots-grid is selected, so its editor below stays reachable. */}
         {isEditing && (
-        <div className="w-64 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: inlineGrid ? (canvasH ?? undefined) : undefined }}>
+        <div className="w-80 @6xl:w-96 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: inlineGrid ? (canvasH ?? undefined) : undefined }}>
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Layers</span>
