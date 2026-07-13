@@ -178,6 +178,7 @@
   --color-bg:             var(--su-bg);
   --color-surface:        var(--su-surface);
   --color-surface-raised: var(--su-surface-raised);
+  --color-rail:           var(--su-rail);
   --color-line:           var(--su-line);
   --color-line-strong:    var(--su-line-strong);
   --color-fg:             var(--su-fg);
@@ -216,21 +217,23 @@
   --cyan-9: #22d3d3;   /* reserved palette color — saved for future use */
   --cyan-11: #99f0f0;
 
-  /* Tier 2 — semantic tokens (settings defaults; Radix scales flip with .dark) */
-  --su-bg:             var(--gray-1);
-  --su-surface:        var(--gray-2);
-  --su-surface-raised: var(--gray-3);
-  --su-line:           var(--gray-a4);
-  --su-line-strong:    var(--gray-a6);
-  --su-fg:             var(--gray-12);
-  --su-fg-muted:       var(--gray-11);
-  --su-fg-subtle:      var(--gray-10);
-  --su-fg-faint:       var(--gray-8);
+  /* Tier 2 — semantic tokens. Settings LIGHT defaults are explicit neutral hex
+     matching the approved mockup (a true neutral — NOT slate/tinted). `.dark`
+     overrides below give the near-black dark theme; `.kiosk` overrides the stage. */
+  --su-bg:             #f7f8fa;
+  --su-surface:        #ffffff;
+  --su-surface-raised: #ffffff;
+  --su-rail:           #f1f2f4;   /* sidebar — slightly grayer than content in light */
+  --su-line:           #e7e9ec;
+  --su-line-strong:    #d8dce1;
+  --su-fg:             #161b22;
+  --su-fg-muted:       #5c6470;
+  --su-fg-subtle:      #9aa1ab;
+  --su-fg-faint:       #b8bec6;
   /* Brand accent — THEMEABLE. --brand-accent is overridden at runtime from
-     Branding → Accent color (per org; empty = this default). Hover/active/focus
-     derive from it via color-mix, so a single picked hex drives the whole ramp
-     and works in both themes (dark/.kiosk lighten instead of darken, below). */
-  --brand-accent:      var(--blue-9);
+     Branding → Accent color (per org; empty = this per-theme default). Ramp
+     derives via color-mix, so one picked hex works in both themes. */
+  --brand-accent:      #2e6691;
   --su-accent:         var(--brand-accent);
   --su-accent-hover:   color-mix(in srgb, var(--brand-accent), black 12%);
   --su-accent-active:  color-mix(in srgb, var(--brand-accent), black 22%);
@@ -259,6 +262,19 @@
 /* Dark settings elevation (.dark on <html>). Depth via inset top highlight +
    soft drop shadow — the quiet, material feel, no backdrop-filter. */
 .dark {
+  /* Near-black neutral surfaces (matches the mockup — true neutral, no blue/purple). */
+  --su-bg:             #0e0e10;
+  --su-surface:        rgba(255, 255, 255, 0.03);
+  --su-surface-raised: rgba(255, 255, 255, 0.055);
+  --su-rail:           #0e0e10;   /* seamless with content in dark */
+  --su-line:           rgba(255, 255, 255, 0.08);
+  --su-line-strong:    rgba(255, 255, 255, 0.14);
+  --su-fg:             #ededf0;
+  --su-fg-muted:       #9a9aa2;
+  --su-fg-subtle:      #63636b;
+  --su-fg-faint:       rgba(255, 255, 255, 0.32);
+  /* A lighter accent reads better on near-black (mockup default); still themeable. */
+  --brand-accent:      #6aa6df;
   /* On dark, accent states lighten (not darken). */
   --su-accent-hover:  color-mix(in srgb, var(--brand-accent), white 14%);
   --su-accent-active: color-mix(in srgb, var(--brand-accent), white 26%);

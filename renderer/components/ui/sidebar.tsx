@@ -46,7 +46,7 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {}
 export function Sidebar({ className, children, ...props }: SidebarProps) {
   return (
     <div
-      className={cn("flex flex-col h-full bg-bg", className)}
+      className={cn("flex flex-col h-full bg-rail", className)}
       {...props}
     >
       {children}
@@ -176,8 +176,8 @@ export function SidebarListItem({
     <button
       type="button"
       className={cn(
-        "flex items-center gap-2 w-full rounded-md px-2.5 py-1.5 text-left",
-        "text-footnote font-medium transition-colors",
+        "flex items-center gap-2.5 w-full rounded-lg px-2.5 py-2 text-left",
+        "text-[13.5px] font-medium transition-colors",
         railed && "justify-center px-0",
         isActive
           ? "bg-accent/12 text-fg"
@@ -190,7 +190,7 @@ export function SidebarListItem({
       {...props}
     >
       {icon && (
-        <span className={cn("size-3.5 shrink-0", isActive ? "text-accent" : "text-gray-9")}>
+        <span className={cn("size-4 shrink-0", isActive ? "text-accent" : "text-fg-subtle")}>
           {icon}
         </span>
       )}

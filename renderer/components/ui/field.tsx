@@ -3,13 +3,18 @@ import { cn } from "../../lib/cn";
 
 // ── FieldSet ──────────────────────────────────────────────────────────────────
 
-interface FieldSetProps extends React.HTMLAttributes<HTMLDivElement> {}
+interface FieldSetProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Render without the card material — for a FieldSet nested inside another
+   *  card (e.g. an integration row), so we never stack cards within cards. */
+  flat?: boolean;
+}
 
-export function FieldSet({ className, children, ...props }: FieldSetProps) {
+export function FieldSet({ className, flat, children, ...props }: FieldSetProps) {
   return (
     <div
       className={cn(
-        "rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)] overflow-hidden",
+        "overflow-hidden",
+        flat ? "" : "rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]",
         className,
       )}
       {...props}

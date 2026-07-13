@@ -239,7 +239,7 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
   return (
     <div className="flex flex-col gap-3">
       {/* Schema-driven form */}
-      <FieldSet>
+      <FieldSet flat>
         <FieldGroup>
           {descriptor.configSchema.map((field) => {
             const value = localConfig[field.key];
@@ -752,7 +752,7 @@ function ProPresenterInstancesPanel({
                 <TrashIcon className="size-3.5 text-gray-9" />
               </Button>
             </div>
-            <FieldSet>
+            <FieldSet flat>
               <FieldGroup>
                 <Field orientation="horizontal">
                   <FieldContent>
@@ -878,10 +878,10 @@ function IntegrationRow({
     }
   }
   return (
-    <div className="rounded-lg border border-gray-a4 bg-gray-1 px-3 py-2">
+    <div className="su-card px-3 py-2">
       <Collapsible
         defaultOpen={!state.configured}
-        label={<span className="text-callout font-semibold text-gray-12 truncate">{descriptor.label}</span>}
+        label={<span className="text-callout font-semibold text-fg truncate">{descriptor.label}</span>}
         right={
           <div className="flex items-center gap-3 shrink-0">
             <ConnectionBadge connection={state.connection} message={state.message} />
@@ -1004,8 +1004,9 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
 
   return (
     <div className={cn("flex flex-col gap-5", className)}>
-      <p className="text-caption1 text-gray-9">
-        {connectedCount} connected{needsSetup > 0 ? ` · ${needsSetup} to set up` : ""}
+      <p className="text-caption1 text-fg-subtle">
+        <span className="font-medium text-accent">{connectedCount} connected</span>
+        {needsSetup > 0 ? ` · ${needsSetup} to set up` : ""}
       </p>
       {groups.map((g) => (
         <div key={g.title} className="flex flex-col gap-2">

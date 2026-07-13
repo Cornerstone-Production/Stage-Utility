@@ -1181,21 +1181,22 @@ export function SettingsView() {
             })}
           </SidebarList>
 
-          {/* Rail footer: version + segmented light/dark toggle (matches the mockup). */}
-          <div className="mt-auto flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
-            <span className="text-caption2 text-fg-subtle tabular-nums truncate">
+          {/* Rail footer: version + segmented light/dark toggle (matches the mockup:
+              an accent-tint pill; the active segment is just an accent-colored icon). */}
+          <div className="mt-auto flex items-center justify-between px-3 py-2.5">
+            <span className="text-[11.5px] leading-none text-fg-subtle tabular-nums truncate">
               {updateStatus?.version ? `v${updateStatus.version}` : ""}
               {updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}
             </span>
-            <div className="flex items-center gap-0.5 rounded-lg bg-fill p-0.5 shrink-0">
+            <div className="flex items-center gap-px rounded-lg bg-accent/12 p-0.5 shrink-0">
               <button
                 type="button"
                 onClick={() => theme.isDark && theme.toggle()}
                 aria-label="Light mode"
                 aria-pressed={!theme.isDark}
                 className={cn(
-                  "flex items-center justify-center size-6 rounded-md transition-colors",
-                  !theme.isDark ? "bg-surface text-accent shadow-[var(--su-shadow-1)]" : "text-fg-subtle hover:text-fg",
+                  "flex h-5 w-6 items-center justify-center rounded-md transition-colors",
+                  !theme.isDark ? "text-accent" : "text-fg-subtle hover:text-fg",
                 )}
               >
                 <SunIcon className="size-3.5" />
@@ -1206,8 +1207,8 @@ export function SettingsView() {
                 aria-label="Dark mode"
                 aria-pressed={theme.isDark}
                 className={cn(
-                  "flex items-center justify-center size-6 rounded-md transition-colors",
-                  theme.isDark ? "bg-surface text-accent shadow-[var(--su-shadow-1)]" : "text-fg-subtle hover:text-fg",
+                  "flex h-5 w-6 items-center justify-center rounded-md transition-colors",
+                  theme.isDark ? "text-accent" : "text-fg-subtle hover:text-fg",
                 )}
               >
                 <MoonIcon className="size-3.5" />
