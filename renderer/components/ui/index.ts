@@ -37,7 +37,7 @@ export { InfoHint } from "./info-hint";
 export { UnsavedBanner } from "./unsaved-banner";
 export { ScrollArea, ScrollBar } from "./scroll-area";
 export { SplitView } from "./split-view";
-export { Sidebar, SidebarList, SidebarListItem } from "./sidebar";
+export { Sidebar, SidebarList, SidebarListItem, SidebarGroupLabel } from "./sidebar";
 export {
   Field,
   FieldSet,

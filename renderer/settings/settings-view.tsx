@@ -1,5 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import { PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import {
@@ -7,6 +7,7 @@ import {
   Sidebar,
   SidebarList,
   SidebarListItem,
+  SidebarGroupLabel,
   ScrollArea,
   Button,
   toast,
@@ -152,6 +153,14 @@ const SECTIONS: SectionItem[] = [
   { id: "service-history", label: "History", icon: <ClockIcon className="size-4 text-gray-11" /> },
   { id: "baptisms", label: "Baptisms", icon: <DropletIcon className="size-4 text-gray-11" /> },
   { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4 text-gray-11" /> },
+];
+
+// Nav clusters — keeps the flat 10-item list within a scannable 7±2 per group.
+const NAV_GROUPS: { label: string; ids: string[] }[] = [
+  { label: "Content", ids: ["plan", "views", "scriptview"] },
+  { label: "Output", ids: ["displays", "connect", "integrations"] },
+  { label: "Identity", ids: ["branding", "baptisms"] },
+  { label: "System", ids: ["service-history", "advanced"] },
 ];
 
 // ---- main settings view -----------------------------------------------------
@@ -1143,9 +1152,18 @@ export function SettingsView() {
             })}
             getItemKey={(s: SectionItem) => s.id}
           >
-            {sections.map((section) => (
-              <SidebarListItem key={section.id} item={section} icon={section.icon} title={section.label} />
-            ))}
+            {NAV_GROUPS.map((g) => {
+              const items = sections.filter((s) => g.ids.includes(s.id));
+              if (items.length === 0) return null;
+              return (
+                <Fragment key={g.label}>
+                  <SidebarGroupLabel>{g.label}</SidebarGroupLabel>
+                  {items.map((section) => (
+                    <SidebarListItem key={section.id} item={section} icon={section.icon} title={section.label} />
+                  ))}
+                </Fragment>
+              );
+            })}
           </SidebarList>
 
           {/* Light / dark toggle, pinned to the bottom of the sidebar. */}
