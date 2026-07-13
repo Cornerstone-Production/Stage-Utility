@@ -829,11 +829,13 @@ function OverviewBlend({ overview }: { overview: OverviewData }) {
           <AttendanceTrendChart points={overview.attPoints} />
         </div>
       </div>
-      <div className="mt-4 flex flex-wrap gap-y-3 border-t border-line pt-4 sm:flex-nowrap">
-        {strip.map((s, i) => (
-          <div key={s.k} className={`flex-1 min-w-[6.5rem] px-4 first:pl-0 ${i < strip.length - 1 ? "sm:border-r sm:border-line" : ""}`}>
+      {/* Wrapping grid so the readouts never collide: 2 cols on mobile, 3 at sm,
+          all at lg. Value + trend can wrap within a cell rather than overrun. */}
+      <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-line pt-4 sm:grid-cols-3 lg:grid-cols-5">
+        {strip.map((s) => (
+          <div key={s.k} className="min-w-0">
             <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle">{s.k}</div>
-            <div className={`mt-1 flex items-baseline gap-1.5 font-mono tabular-nums text-lg ${s.accent ?? "text-fg"}`}>
+            <div className={`mt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 font-mono tabular-nums text-lg ${s.accent ?? "text-fg"}`}>
               <span>{s.v}</span>
               {s.trend && <TrendChip trend={s.trend} label={s.trendLabel} />}
             </div>
