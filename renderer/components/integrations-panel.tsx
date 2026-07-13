@@ -159,6 +159,15 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
       const raw = state.config[field.key];
       if (field.type === "password" && typeof raw === "string" && raw !== "") {
         out[field.key] = MASKED_PASSWORD;
+      } else if (field.type === "number") {
+        // Unset numeric fields (e.g. an API port) prefill the integration's
+        // default — field.default if declared, else the numeric placeholder
+        // (the shown default) — so the field displays and saves the real port
+        // instead of a bare 0.
+        const fallback =
+          field.default ?? (field.placeholder != null && field.placeholder !== "" ? Number(field.placeholder) : undefined);
+        const rawNum = raw == null || raw === "" ? NaN : Number(raw);
+        out[field.key] = Number.isFinite(rawNum) && rawNum > 0 ? rawNum : (fallback ?? "");
       } else {
         out[field.key] = raw ?? field.default ?? "";
       }
