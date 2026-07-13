@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
+import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
 import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
@@ -119,12 +119,7 @@ export function ScriptViewSection() {
 
   return (
     <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
-      <div className="flex items-center justify-end mb-4">
-        <a href="/scriptview" target="_blank" rel="noopener noreferrer" className="shrink-0 inline-flex items-center gap-1.5 text-caption1 text-fg-muted hover:text-fg rounded-lg border border-line px-3 py-1.5">
-          Open ScriptView <ExternalLinkIcon className="size-3.5" />
-        </a>
-      </div>
-
+      {/* "Open ScriptView" lives inline in the section header (settings-view). */}
       {error && <p className="text-caption1 text-red-11 mb-3">{error}</p>}
 
       {/* Which service types appear on the landing page (curated per church). */}

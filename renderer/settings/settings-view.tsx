@@ -29,6 +29,7 @@ import {
   MoonIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
+  ExternalLinkIcon,
 } from "lucide-react";
 import { useIsMobile } from "../lib/use-media-query";
 import { withViewTransition } from "../lib/view-transition";
@@ -1220,10 +1221,22 @@ export function SettingsView() {
     >
       <ScrollArea className="h-full" title={activeSection.label}>
         {/* Per-tab header (title + subtitle), matching the mockup. */}
-        <header className="px-5 max-sm:px-3 pt-6 max-sm:pt-5">
-          <h1 className="text-title2 font-semibold text-fg leading-tight">{activeSection.label}</h1>
-          {SECTION_DESC[activeSection.id] && (
-            <p className="text-footnote text-fg-muted mt-1 max-w-[68ch]">{SECTION_DESC[activeSection.id]}</p>
+        <header className="px-5 max-sm:px-3 pt-6 max-sm:pt-5 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-title2 font-semibold text-fg leading-tight">{activeSection.label}</h1>
+            {SECTION_DESC[activeSection.id] && (
+              <p className="text-footnote text-fg-muted mt-1 max-w-[68ch]">{SECTION_DESC[activeSection.id]}</p>
+            )}
+          </div>
+          {activeSection.id === "scriptview" && (
+            <a
+              href="/scriptview"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-caption1 text-fg-muted transition-colors hover:bg-fill hover:text-fg"
+            >
+              Open ScriptView <ExternalLinkIcon className="size-3.5" />
+            </a>
           )}
         </header>
         {/* Keep a render error in one section from blanking the whole window. Keyed
