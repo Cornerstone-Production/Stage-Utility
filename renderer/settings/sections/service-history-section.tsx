@@ -337,12 +337,27 @@ export function ServiceHistorySection() {
   }, [days, day]);
 
   const dayServices = useMemo(() => filtered.filter((s) => s.serviceDate === day), [filtered, day]);
-  // Per-day service counts for the calendar dots (respects the type filter).
+  // Per-day service counts for the calendar (respects the type filter).
   const dateCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of filtered) m.set(s.serviceDate, (m.get(s.serviceDate) ?? 0) + 1);
     return m;
   }, [filtered]);
+
+  // Per-day attendance intensity (0..1) for the calendar heatmap: a day's peak
+  // in-room count, normalized to the busiest recorded day (type-filter aware).
+  const dateIntensity = useMemo(() => {
+    const peak = new Map<string, number>();
+    for (const a of attList) {
+      if (typeFilter && a.serviceTypeId !== typeFilter) continue;
+      if (a.peakOccupancy <= 0) continue;
+      peak.set(a.serviceDate, Math.max(peak.get(a.serviceDate) ?? 0, a.peakOccupancy));
+    }
+    const max = Math.max(0, ...peak.values());
+    const m = new Map<string, number>();
+    if (max > 0) for (const [d, v] of peak) m.set(d, v / max);
+    return m;
+  }, [attList, typeFilter]);
 
   // Small summary shown beneath the calendar for the selected day: how many
   // services + their average peak in-room (scoped to the active type filter).
@@ -704,7 +719,7 @@ export function ServiceHistorySection() {
       {/* Calendar (sticky) + selected-day detail. */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-[320px_1fr] sm:items-start">
         <div className="sm:sticky sm:top-0 flex flex-col gap-3">
-          <HistoryCalendar counts={dateCounts} selected={day} onPick={setDay} />
+          <HistoryCalendar counts={dateCounts} intensity={dateIntensity} selected={day} onPick={setDay} />
           {day && daySummary && (
             <div className="su-card px-4 py-3 text-caption1 text-fg-muted">
               Selected: <span className="font-mono tabular-nums text-fg">{shortDay(day)}</span>
@@ -854,14 +869,26 @@ function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   const poly = points.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
   const lastX = x(points.length - 1);
   const lastY = y(points[points.length - 1].value);
+  const latest = points[points.length - 1].value;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img" aria-label="Attendance trend across recent services">
-      <line x1={0} y1={H - padBottom} x2={W} y2={H - padBottom} stroke="var(--su-line)" />
-      <polyline points={poly} fill="none" stroke="var(--su-accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-      <circle cx={lastX} cy={lastY} r={4} fill="var(--su-accent)" />
-      <text x={padX} y={H - 8} fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[0].day)}</text>
-      <text x={W - padX} y={H - 8} textAnchor="end" fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[points.length - 1].day)}</text>
-    </svg>
+    <div className="relative">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img" aria-label="Attendance trend across recent services">
+        <line x1={0} y1={H - padBottom} x2={W} y2={H - padBottom} stroke="var(--su-line)" />
+        <polyline points={poly} fill="none" stroke="var(--su-accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        <circle cx={lastX} cy={lastY} r={4} fill="var(--su-accent)" />
+        <text x={padX} y={H - 8} fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[0].day)}</text>
+        <text x={W - padX} y={H - 8} textAnchor="end" fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[points.length - 1].day)}</text>
+      </svg>
+      {/* Latest attendance, pinned just above the most recent point (height maps
+          1:1 to the viewBox, so lastY is a px offset). Only this one value —
+          labeling every point would clutter. */}
+      <span
+        className="pointer-events-none absolute right-1 font-mono text-caption1 font-medium tabular-nums text-fg"
+        style={{ top: `${Math.max(0, lastY - 20)}px` }}
+      >
+        {latest.toLocaleString()}
+      </span>
+    </div>
   );
 }
 
