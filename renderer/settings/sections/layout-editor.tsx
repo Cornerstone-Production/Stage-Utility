@@ -1654,7 +1654,7 @@ export function LayoutEditor({
                 onDragLeave={() => setDragLayerOver((cur) => (cur === o.id ? null : cur))}
                 onDrop={(e) => { e.preventDefault(); const src = e.dataTransfer.getData("text/plain"); setDragLayerOver(null); if (src) moveLayer(src, o.id); }}
                 style={{ paddingLeft: 8 + depth * 14 }}
-                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${o.id === selectedId ? "bg-gray-a4" : "hover:bg-gray-a3"} ${dragLayerOver === o.id ? "ring-1 ring-blue-9" : ""}`}
+                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${o.id === selectedId ? "bg-gray-a4" : "hover:bg-gray-a3"} ${dragLayerOver === o.id ? "ring-1 ring-focus" : ""}`}
               >
                 <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">
                   {o.config.type === "container" ? `${TYPE_LABELS[o.config.type]} (${o.children?.length ?? 0})` : TYPE_LABELS[o.config.type]}
@@ -2632,6 +2632,7 @@ function Inspector({
       {/* Style */}
       {isText && (
         <>
+          <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 mt-1">Type</span>
           <Row label="Font size"><NumberField value={pxOf(s.fontSize, 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
           <Row label="Weight">
             <Select value={String(s.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
@@ -2659,6 +2660,7 @@ function Inspector({
           <Row label="Max lines"><NumberInput value={s.lineClamp ?? 0} step={1} min={0} max={10} onChange={(v) => onStyle({ lineClamp: v > 0 ? Math.round(v) : null })} /></Row>
         </>
       )}
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 mt-1">Fill</span>
       <Row label="Fill"><input type="color" value={hexForInput(s.background, "#000000")} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent" />
         <Button variant="transparent" size="small" onClick={() => onStyle({ background: null })}>Clear</Button>
       </Row>
@@ -2670,13 +2672,14 @@ function Inspector({
           step={1}
           value={Math.round((s.opacity ?? 1) * 100)}
           onChange={(e) => onStyle({ opacity: parseInt(e.target.value, 10) / 100 })}
-          className="flex-1 min-w-0 accent-blue-9"
+          className="flex-1 min-w-0 accent-accent"
           aria-label="Opacity"
         />
         <span className="w-9 shrink-0 text-right tabular-nums text-caption2 text-gray-11">{Math.round((s.opacity ?? 1) * 100)}%</span>
       </Row>
       <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
       <Row label="Padding"><NumberField value={pxOf(s.padding, 0)} step={1} min={0} max={Math.round(0.3 * canvas.height)} suffix="px" onChange={(px) => onStyle({ padding: px / canvas.height })} /></Row>
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 mt-1">Border</span>
       <Row label="Border">
         <input
           type="color"
@@ -2694,6 +2697,7 @@ function Inspector({
           onChange={(px) => onStyle({ borderWidth: px / canvas.height, borderColor: s.borderColor ?? "#ffffff" })}
         />
       </Row>
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 mt-1">Elevation</span>
       {/* Elevation: one slider with labeled None/Low/Med/High stops (ticks), fine
           values allowed in between. Drives the box's drop shadow for layered depth. */}
       <Row label="Elevation" hint="Soft drop shadow under this object's box — lifts it above whatever it overlaps. Snaps toward None/Low/Med/High; drag for in-between.">
@@ -2705,7 +2709,7 @@ function Inspector({
           value={s.boxShadow ?? 0}
           onChange={(e) => onStyle({ boxShadow: parseFloat(e.target.value) })}
           list="elevation-stops"
-          className="flex-1 min-w-0 accent-blue-9"
+          className="flex-1 min-w-0 accent-accent"
           aria-label="Elevation"
         />
         <datalist id="elevation-stops">
