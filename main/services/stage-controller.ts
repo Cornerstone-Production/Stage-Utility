@@ -150,6 +150,7 @@ export class StageController {
     showQr: true,
     allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
     appName: "Stage Utility",
+    accentColor: null,
     appLogo: null,
     appLogoMonochrome: true,
     emptySlotLogo: null,
@@ -221,6 +222,7 @@ export class StageController {
       showQr,
       allowedServiceTypeIds,
       appName: settings.appName ?? "Stage Utility",
+      accentColor: settings.accentColor ?? null,
       appLogo: settings.appLogo ?? null,
       appLogoMonochrome: settings.appLogoMonochrome ?? true,
       emptySlotLogo: settings.emptySlotLogo ?? null,
@@ -1045,6 +1047,7 @@ export class StageController {
    *  persisted to settings only (not broadcast) so the editor can retain zoom. */
   async setBranding(partial: {
     name?: string;
+    accentColor?: string | null;
     logo?: string | null;
     monochrome?: boolean;
     logoOriginal?: string | null;
@@ -1057,8 +1060,9 @@ export class StageController {
     avatarCrop?: { scale: number; x: number; y: number } | null;
   }): Promise<StageState> {
     // Fields that live in both the broadcast state and settings.
-    const stateNext: Partial<Pick<StageState, "appName" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar">> = {};
+    const stateNext: Partial<Pick<StageState, "appName" | "accentColor" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar">> = {};
     if (typeof partial.name === "string") stateNext.appName = partial.name.trim() || "Stage Utility";
+    if (partial.accentColor !== undefined) stateNext.accentColor = partial.accentColor;
     if (partial.logo !== undefined) stateNext.appLogo = partial.logo;
     if (typeof partial.monochrome === "boolean") stateNext.appLogoMonochrome = partial.monochrome;
     if (partial.emptyLogo !== undefined) stateNext.emptySlotLogo = partial.emptyLogo;

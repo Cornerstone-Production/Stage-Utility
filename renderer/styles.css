@@ -231,11 +231,16 @@
   --su-fg-muted:       var(--slate-11);
   --su-fg-subtle:      var(--slate-10);
   --su-fg-faint:       var(--slate-8);
-  --su-accent:         var(--blue-9);
-  --su-accent-hover:   var(--blue-10);
-  --su-accent-active:  var(--blue-11);
+  /* Brand accent — THEMEABLE. --brand-accent is overridden at runtime from
+     Branding → Accent color (per org; empty = this default). Hover/active/focus
+     derive from it via color-mix, so a single picked hex drives the whole ramp
+     and works in both themes (dark/.kiosk lighten instead of darken, below). */
+  --brand-accent:      var(--blue-9);
+  --su-accent:         var(--brand-accent);
+  --su-accent-hover:   color-mix(in srgb, var(--brand-accent), black 12%);
+  --su-accent-active:  color-mix(in srgb, var(--brand-accent), black 22%);
   --su-on-accent:      #ffffff;
-  --su-focus:          var(--blue-8);   /* focus ring */
+  --su-focus:          var(--brand-accent);   /* focus ring */
   --su-field:          var(--slate-a2);  /* input / control fill */
   --su-fill:           var(--slate-a3);  /* interaction fill (ghost/filled) */
   --su-fill-hover:     var(--slate-a4);
@@ -259,6 +264,9 @@
 /* Dark settings elevation (.dark on <html>). Depth via inset top highlight +
    soft drop shadow — the quiet, material feel, no backdrop-filter. */
 .dark {
+  /* On dark, accent states lighten (not darken). */
+  --su-accent-hover:  color-mix(in srgb, var(--brand-accent), white 14%);
+  --su-accent-active: color-mix(in srgb, var(--brand-accent), white 26%);
   --su-shadow-1: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 4px 18px rgba(0, 0, 0, 0.40);
   --su-shadow-2: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 14px 44px rgba(0, 0, 0, 0.55);
 }
@@ -276,6 +284,8 @@
   --su-fg-muted:       rgba(255, 255, 255, 0.70);
   --su-fg-subtle:      rgba(255, 255, 255, 0.45);
   --su-fg-faint:       rgba(255, 255, 255, 0.34);
+  --su-accent-hover:  color-mix(in srgb, var(--brand-accent), white 14%);
+  --su-accent-active: color-mix(in srgb, var(--brand-accent), white 26%);
   --su-shadow-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 4px 18px rgba(0, 0, 0, 0.45);
   --su-shadow-2: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 16px 48px rgba(0, 0, 0, 0.6);
 }

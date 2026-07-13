@@ -16,6 +16,12 @@ import { invoke } from "../../lib/api";
 import { BrandLogo } from "../../components/brand-logo";
 import type { SectionProps } from "../types";
 import { LogoCropper } from "./logo-cropper";
+import { cn } from "../../lib/cn";
+
+// Convenience presets for the brand accent (any org can also pick a custom hex).
+// Kept non-generic: a considered blue plus a few distinct hues. Semantic status
+// colors (green/red/amber) are separate and never themed.
+const ACCENT_PRESETS = ["#2e6691", "#3b82a6", "#5b9bd8", "#6e56cf", "#0d9488", "#c2410c"];
 
 // Keep in sync with the server-side cap in remote-server.ts (~1.5 MB decoded
 // leaves headroom under the 2 MB data-URL limit).
@@ -35,6 +41,11 @@ export function BrandingSection({
   const [cropTarget, setCropTarget] = useState<Target>("app");
   const fileRef = useRef<HTMLInputElement>(null);
   const pickTarget = useRef<Target>("app");
+  const [accentDraft, setAccentDraft] = useState(stageState.accentColor ?? "#2e6691");
+
+  useEffect(() => {
+    setAccentDraft(stageState.accentColor ?? "#2e6691");
+  }, [stageState.accentColor]);
 
   useEffect(() => {
     setName(stageState.appName);
@@ -151,6 +162,58 @@ export function BrandingSection({
               className="w-full sm:w-60"
               aria-label="App name"
             />
+          </Field>
+
+          {/* ── Accent color (themeable brand accent) ── */}
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Accent color</FieldLabel>
+              <FieldDescription>
+                Brand accent for buttons, selection, links, and focus. Status colors
+                (live / over / caution) are unaffected. Clear to use the built-in default.
+              </FieldDescription>
+            </FieldContent>
+            <div className="flex items-center gap-2 flex-wrap">
+              {ACCENT_PRESETS.map((hex) => (
+                <button
+                  key={hex}
+                  type="button"
+                  onClick={() => handlers.handleSetBranding({ accentColor: hex })}
+                  className={cn(
+                    "size-6 rounded-md border border-gray-a5 transition-transform hover:scale-110",
+                    stageState.accentColor?.toLowerCase() === hex &&
+                      "ring-2 ring-offset-2 ring-offset-gray-1 ring-focus",
+                  )}
+                  style={{ backgroundColor: hex }}
+                  aria-label={`Set accent ${hex}`}
+                />
+              ))}
+              <label
+                className="relative size-6 rounded-md border border-gray-a5 overflow-hidden cursor-pointer"
+                aria-label="Custom accent color"
+                title="Custom color"
+              >
+                <input
+                  type="color"
+                  value={accentDraft}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setAccentDraft(e.target.value)}
+                  onBlur={() => {
+                    if (accentDraft.toLowerCase() !== (stageState.accentColor ?? "").toLowerCase()) {
+                      handlers.handleSetBranding({ accentColor: accentDraft });
+                    }
+                  }}
+                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                />
+                <span className="block h-full w-full bg-[conic-gradient(from_180deg,#c2410c,#0d9488,#5b9bd8,#6e56cf,#c2410c)]" />
+              </label>
+              <Button
+                variant="transparent"
+                size="small"
+                onClick={() => handlers.handleSetBranding({ accentColor: null })}
+              >
+                Default
+              </Button>
+            </div>
           </Field>
 
           {/* ── App logo ── */}

@@ -39,6 +39,7 @@ import { OutputsSection } from "./sections/outputs-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
+import { applyAccentVar } from "../lib/apply-accent";
 import { AdvancedSection } from "./sections/advanced-section";
 import { ServiceHistorySection } from "./sections/service-history-section";
 import { ScriptViewSection } from "./sections/scriptview-section";
@@ -173,6 +174,11 @@ export function SettingsView() {
     queryKey: ["stage:getState"],
     queryFn: () => ipc<StageState>("stage:getState"),
   });
+
+  // Apply the themeable brand accent to the settings root as it changes.
+  useEffect(() => {
+    applyAccentVar(stageState?.accentColor);
+  }, [stageState?.accentColor]);
 
   // Fetch all service types
   const { data: serviceTypes = [] } = useQuery({
@@ -550,6 +556,7 @@ export function SettingsView() {
 
   async function handleSetBranding(partial: {
     name?: string;
+    accentColor?: string | null;
     logo?: string | null;
     monochrome?: boolean;
     logoOriginal?: string | null;

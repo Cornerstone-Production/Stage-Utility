@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke, onNotification } from "../lib/api";
+import { applyAccentVar } from "../lib/apply-accent";
 
 interface UseStageStateResult {
   state: StageState | null;
@@ -76,6 +77,11 @@ export function useStageState(): UseStageStateResult {
       }
     });
   }, []);
+
+  // Push the themeable brand accent into --brand-accent whenever it changes.
+  useEffect(() => {
+    applyAccentVar(state?.accentColor);
+  }, [state?.accentColor]);
 
   return { state, isLoading, error };
 }
