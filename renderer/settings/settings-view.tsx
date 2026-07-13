@@ -189,10 +189,34 @@ export function SettingsView() {
   const railed = collapsed && !isMobile;
   const queryClient = useQueryClient();
 
-  const [activeSection, setActiveSection] = useState<SectionItem>(SECTIONS[0]);
+  // Restore the tab from the URL hash (e.g. #integrations) so a refresh stays put
+  // and tabs are deep-linkable; falls back to the first section.
+  const [activeSection, setActiveSection] = useState<SectionItem>(() => {
+    const id = window.location.hash.replace(/^#/, "");
+    return SECTIONS.find((s) => s.id === id) ?? SECTIONS[0];
+  });
   // Bumped whenever the History nav is clicked so the section remounts back to its
   // landing list (instead of staying on the service you'd drilled into).
   const [historyNonce, setHistoryNonce] = useState(0);
+
+  // Mirror the active tab into the URL hash. replaceState keeps tab-switching out
+  // of the history stack (so Back leaves Settings rather than cycling tabs).
+  useEffect(() => {
+    if (window.location.hash.replace(/^#/, "") !== activeSection.id) {
+      window.history.replaceState(null, "", `#${activeSection.id}`);
+    }
+  }, [activeSection]);
+
+  // Follow external hash changes (manual edit / deep link opened in-session).
+  useEffect(() => {
+    const onHash = () => {
+      const id = window.location.hash.replace(/^#/, "");
+      const next = SECTIONS.find((s) => s.id === id);
+      if (next) setActiveSection((cur) => (cur.id === next.id ? cur : next));
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   // Fetch current stage state
   const { data: stageState, isLoading: stageLoading } = useQuery({

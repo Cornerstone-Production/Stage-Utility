@@ -63,6 +63,9 @@ export function ScriptViewIndex() {
   ];
   const selectedFor = (typeId: string) => sel[typeId] ?? globalLayouts[0]?.id ?? ALL_COLUMNS_LAYOUT_ID;
 
+  // Same centered brand mark the display picker shows above its list.
+  const centerLogo = state?.emptySlotLogo ?? state?.appLogo;
+
   return (
     <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Brand top bar — matches the display picker. */}
@@ -94,6 +97,14 @@ export function ScriptViewIndex() {
           list is short, scrolls without clipping the ends when it's long. */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
         <div className="min-h-full flex flex-col items-center justify-center gap-8 px-6 py-8">
+        {centerLogo && (
+          <BrandLogo
+            logo={centerLogo}
+            monochrome
+            className="text-fg-faint shrink-0"
+            style={{ width: "clamp(6rem,22vmin,16rem)", height: "clamp(6rem,22vmin,16rem)" }}
+          />
+        )}
         <div className="flex flex-col gap-2 w-full max-w-md">
           <span className="text-caption2 font-medium uppercase tracking-wider text-fg-subtle text-center select-none mb-1" style={{ letterSpacing: "0.08em" }}>
             ScriptView · pick a service
