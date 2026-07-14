@@ -16,6 +16,7 @@ import {
   toast,
 } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
+import { onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 
 const KIND_LABELS: Record<ViewKind, string> = {
@@ -35,6 +36,8 @@ interface OutputRowProps {
   views: View[];
   /** Base origin for this display's URL — the configured public URL or the current origin. */
   baseUrl: string;
+  /** Whether a live kiosk page is currently connected for this output. */
+  online: boolean;
   canRemove: boolean;
   onRename: (name: string) => void;
   onSetView: (viewId: string | null) => void;
@@ -47,7 +50,7 @@ interface OutputRowProps {
 // One card per display: the name reads as a title, the View it shows is the one
 // prominent control, Open + Lock stay in reach, and the URL sits quietly in the
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
-function OutputRow({ output, views, baseUrl, canRemove, onRename, onSetView, onSetLocked, onOpenWindow, onRefresh, onRemove }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetView, onSetLocked, onOpenWindow, onRefresh, onRemove }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: output.id,
@@ -100,6 +103,13 @@ function OutputRow({ output, views, baseUrl, canRemove, onRename, onSetView, onS
           className="h-8 flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 text-callout font-semibold text-fg focus:bg-fill focus:ring-0"
           aria-label="Display name"
         />
+        <span
+          className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted"
+          title={online ? "A screen is connected to this display" : "No screen is currently connected"}
+        >
+          <span className={`size-2 rounded-full ${online ? "bg-ok-9" : "bg-fg-faint"}`} />
+          {online ? "Connected" : "Offline"}
+        </span>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
             <button
@@ -192,6 +202,18 @@ export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "sta
   // actually browse to; fall back to the current origin.
   const baseUrl = stageState.publicUrl || window.location.origin;
 
+  // Live per-display presence (Connected/Offline dot). The server broadcasts the
+  // connected-output set on change; kiosk pages heartbeat to keep it fresh.
+  const [connected, setConnected] = useState<Set<string>>(new Set());
+  useEffect(
+    () =>
+      onNotification("displays:presence", (p: unknown) => {
+        const ids = (p as { connected?: string[] } | null)?.connected ?? [];
+        setConnected(new Set(ids));
+      }),
+    [],
+  );
+
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -219,6 +241,7 @@ export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "sta
                 output={output}
                 views={views}
                 baseUrl={baseUrl}
+                online={connected.has(output.id)}
                 canRemove={outputs.length > 1}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}

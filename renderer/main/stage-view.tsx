@@ -355,6 +355,51 @@ export function StageView() {
     });
   }, [displayId]);
 
+  // Presence heartbeat: tell the server this screen is alive so Settings → Displays
+  // can show a Connected/Offline dot. Fast cadence near/during a PCO service, slow
+  // otherwise (no point pinging every 20s during a dead week); a sendBeacon on unload
+  // flips the dot offline at once, and the server TTL catches ungraceful deaths.
+  useEffect(() => {
+    if (displayId.startsWith("preview-")) return;
+    const url = "/api/displays/presence";
+    let near = false;
+    let timer: ReturnType<typeof setInterval>;
+    const ping = () => {
+      void fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outputId: displayId }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+    const schedule = () => {
+      clearInterval(timer);
+      timer = setInterval(ping, near ? 20_000 : 60_000);
+    };
+    ping();
+    schedule();
+    const offLive = onNotification("pco:live", (p: unknown) => {
+      const mode = (p as { mode?: string } | null)?.mode;
+      const n = mode === "item" || mode === "preservice";
+      if (n !== near) { near = n; schedule(); }
+    });
+    const leave = () => {
+      try {
+        navigator.sendBeacon?.(
+          url,
+          new Blob([JSON.stringify({ outputId: displayId, leaving: true })], { type: "application/json" }),
+        );
+      } catch { /* ignore */ }
+    };
+    window.addEventListener("pagehide", leave);
+    return () => {
+      clearInterval(timer);
+      offLive();
+      window.removeEventListener("pagehide", leave);
+      leave();
+    };
+  }, [displayId]);
+
   if (isLoading) return <KioskLoading />;
   if (error) return <KioskError message={error} />;
   if (!state) return <KioskError message="State is unavailable." />;
