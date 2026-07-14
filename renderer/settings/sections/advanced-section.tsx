@@ -9,6 +9,7 @@ import {
   FieldContent,
   FieldLabel,
   FieldDescription,
+  Collapsible,
   Switch,
   Input,
   NumberInput,
@@ -448,7 +449,7 @@ function ConfigSnapshotPanel() {
   }
 
   return (
-    <FieldSet title="Backup & restore">
+    <FieldSet flat>
       <FieldGroup>
         <Field orientation="vertical">
           <FieldContent>
@@ -551,7 +552,9 @@ export function AdvancedSection({
         onDismissJustUpdated={onDismissJustUpdated}
       />
 
-      <FieldSet title="Advanced">
+      <FieldSet>
+        <Collapsible label="Network & behavior" summary="Public address, reconnects, attendance" headerClassName="px-4 pt-3.5 pb-1">
+          <FieldSet flat>
         <FieldGroup>
           <Field orientation="vertical">
             <FieldContent>
@@ -577,7 +580,7 @@ export function AdvancedSection({
         </FieldGroup>
       </FieldSet>
 
-      <FieldSet title="Integration reconnects">
+          <FieldSet flat>
         <FieldGroup>
           <Field orientation="horizontal">
             <FieldContent>
@@ -626,7 +629,7 @@ export function AdvancedSection({
         </FieldGroup>
       </FieldSet>
 
-      <FieldSet title="Attendance capture">
+          <FieldSet flat>
         <FieldGroup>
           <Field orientation="horizontal">
             <FieldContent>
@@ -647,9 +650,15 @@ export function AdvancedSection({
               aria-label="Post-service taper (minutes)" />
           </Field>
         </FieldGroup>
+          </FieldSet>
+        </Collapsible>
       </FieldSet>
 
-      <ConfigSnapshotPanel />
+      <FieldSet>
+        <Collapsible label="Backup & restore" summary="Save, download & recall config snapshots" headerClassName="px-4 pt-3.5 pb-1">
+          <ConfigSnapshotPanel />
+        </Collapsible>
+      </FieldSet>
     </div>
   );
 }
