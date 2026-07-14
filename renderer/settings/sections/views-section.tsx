@@ -23,7 +23,7 @@ import { invoke } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { SlotEditor } from "./slots-section";
 import { ViewPreview } from "./view-preview";
-import { LayoutEditor } from "./layout-editor";
+import { LayoutEditor, dashboardTemplate, confidenceMonitorTemplate } from "./layout-editor";
 
 const KIND_LABELS: Record<ViewKind, string> = {
   slots: "Mic Slots",
@@ -355,6 +355,8 @@ export function ViewsSection({
   // Create-view dialog state
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState<ViewKind>("slots");
+  // Starter template for a new custom view (blank by default; templates optional).
+  const [newTemplate, setNewTemplate] = useState<"blank" | "dashboard" | "confidence">("blank");
 
   function handleViewDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -417,9 +419,18 @@ export function ViewsSection({
           confirmLabel="Create"
           confirmDisabled={false}
           onConfirm={async () => {
-            await handlers.handleAddView(newName.trim(), newKind);
+            const id = await handlers.handleAddView(newName.trim(), newKind);
+            if (id && newKind === "custom" && newTemplate !== "blank") {
+              const objects = newTemplate === "dashboard" ? dashboardTemplate() : confidenceMonitorTemplate();
+              await handlers.handleSetViewLayout(id, {
+                version: 1,
+                canvas: { width: 1920, height: 1080, background: null },
+                objects,
+              });
+            }
             setNewName("");
             setNewKind("slots");
+            setNewTemplate("blank");
           }}
         >
           <div className="flex flex-col gap-3">
@@ -442,6 +453,21 @@ export function ViewsSection({
                 ))}
               </SelectContent>
             </Select>
+            {newKind === "custom" && (
+              <label className="flex flex-col gap-1.5">
+                <span className="text-caption2 text-fg-subtle">Start from</span>
+                <Select value={newTemplate} onValueChange={(v: string) => setNewTemplate(v as "blank" | "dashboard" | "confidence")}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="blank">Blank canvas</SelectItem>
+                    <SelectItem value="dashboard">Dashboard template</SelectItem>
+                    <SelectItem value="confidence">Confidence Monitor template</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+            )}
           </div>
         </Dialog>
       </div>

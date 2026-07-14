@@ -737,15 +737,17 @@ export function SettingsView() {
   }
 
   // ── Views (content) ──────────────────────────────────────────────────
-  async function handleAddView(name: string, kind: ViewKind) {
+  async function handleAddView(name: string, kind: ViewKind): Promise<string | null> {
     try {
       const next = await ipc<StageState>("views:add", { name, kind });
       queryClient.setQueryData(["stage:getState"], next);
       // Select the newly-created view (last in the list).
       const created = next.views?.[next.views.length - 1];
       if (created) setSelectedViewId(created.id);
+      return created?.id ?? null;
     } catch (err) {
       toast.error(`Failed to add view: ${String(err)}`);
+      return null;
     }
   }
 

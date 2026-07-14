@@ -307,7 +307,7 @@ function makeObject(
 // 2×2 grid of glass tiles (clock / PCO timer / current + next item) plus SPL and
 // captions strips, mirroring renderer/main/dashboard-view.tsx. All coords are
 // canvas fractions, so it works on any canvas (designed for 16:9). Fresh ids.
-function dashboardTemplate(): LayoutObject[] {
+export function dashboardTemplate(): LayoutObject[] {
   let z = 0;
   const caption = (text: string): LayoutObject => ({
     id: uid(), x: 0.06, y: 0.1, w: 0.88, h: 0.2, z: 1,
@@ -362,7 +362,7 @@ function dashboardTemplate(): LayoutObject[] {
 // the mockup's abstract item-progress bar. The scripture reference + QR code in the
 // mockup have no backing object type, so the reference is a plain text label and the
 // QR is omitted.
-function confidenceMonitorTemplate(): LayoutObject[] {
+export function confidenceMonitorTemplate(): LayoutObject[] {
   const GREEN = "#46c47e";
   const FG = "rgba(255,255,255,0.95)";
   const FG_MUTED = "rgba(255,255,255,0.56)";

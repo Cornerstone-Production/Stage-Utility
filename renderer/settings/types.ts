@@ -68,7 +68,7 @@ export interface SectionHandlers {
   discardSlots: () => void;
   handleSetViewSlotsLayout: (id: string, slotsLayout: SlotsLayout | null) => Promise<void>;
   // Views (content)
-  handleAddView: (name: string, kind: ViewKind) => Promise<void>;
+  handleAddView: (name: string, kind: ViewKind) => Promise<string | null>;
   handleRenameView: (id: string, name: string) => Promise<void>;
   handleDuplicateView: (id: string) => Promise<void>;
   handleRemoveView: (id: string) => Promise<void>;
