@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
@@ -241,8 +241,6 @@ export function ServiceHistorySection() {
   // Attendance records for all services — for the Overview card's avg in-room.
   const [attList, setAttList] = useState<ServiceAttendance[]>([]);
   const [day, setDay] = useState<string | null>(null);
-  // Active service-type filter (serviceTypeId), or null for all types.
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
   // Editing the service window (times) in the detail view.
   const [editingTimes, setEditingTimes] = useState(false);
   const [editStart, setEditStart] = useState("");
@@ -307,23 +305,31 @@ export function ServiceHistorySection() {
     };
   }, [selectedKey, reloadKey]);
 
-  // Distinct service types present, labeled by their PCO name (a record with the
-  // name wins over the bare id fallback). Drives the filter; only shown at 2+ types.
-  const typeOptions = useMemo(() => {
-    const byId = new Map<string, string>();
-    for (const s of list ?? []) {
-      if (!s.serviceTypeId) continue;
-      if (s.serviceTypeName) byId.set(s.serviceTypeId, s.serviceTypeName);
-      else if (!byId.has(s.serviceTypeId)) byId.set(s.serviceTypeId, s.serviceTypeId);
+  // The service type the overview reflects — derived, not user-picked. It follows
+  // whatever you've selected (a drilled-in service, else the selected calendar
+  // day's service), and defaults to the most recent service's type (list is sorted
+  // newest-first; `day` auto-selects the newest day, so this lands on "most recent"
+  // out of the box). Keeps each type's averages separate without a manual filter.
+  const activeType = useMemo<string | null>(() => {
+    if (selectedKey) {
+      const s = (list ?? []).find((x) => x.serviceKey === selectedKey);
+      if (s) return s.serviceTypeId;
     }
-    return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [list]);
+    if (day) {
+      const s = (list ?? []).find((x) => x.serviceDate === day);
+      if (s) return s.serviceTypeId;
+    }
+    return (list ?? [])[0]?.serviceTypeId ?? null;
+  }, [selectedKey, day, list]);
+  const activeTypeName = useMemo<string | null>(() => {
+    if (!activeType) return null;
+    const s = (list ?? []).find((x) => x.serviceTypeId === activeType);
+    return s?.serviceTypeName ?? activeType;
+  }, [list, activeType]);
 
-  // Records scoped to the active service-type filter (null = all types).
-  const filtered = useMemo(
-    () => (list ?? []).filter((s) => !typeFilter || s.serviceTypeId === typeFilter),
-    [list, typeFilter],
-  );
+  // All services — the calendar and day list stay global so you can navigate to any
+  // service; only the overview scopes to activeType (below).
+  const filtered = useMemo(() => list ?? [], [list]);
 
   const days = useMemo(() => {
     const set = new Set<string>();
@@ -345,11 +351,11 @@ export function ServiceHistorySection() {
   }, [filtered]);
 
   // Per-day attendance intensity (0..1) for the calendar heatmap: a day's peak
-  // in-room count, normalized to the busiest recorded day (type-filter aware).
+  // in-room count, normalized to the busiest recorded day. Global (all types) — the
+  // calendar is a stable navigation surface; the overview does the type scoping.
   const dateIntensity = useMemo(() => {
     const peak = new Map<string, number>();
     for (const a of attList) {
-      if (typeFilter && a.serviceTypeId !== typeFilter) continue;
       if (a.peakOccupancy <= 0) continue;
       peak.set(a.serviceDate, Math.max(peak.get(a.serviceDate) ?? 0, a.peakOccupancy));
     }
@@ -357,17 +363,17 @@ export function ServiceHistorySection() {
     const m = new Map<string, number>();
     if (max > 0) for (const [d, v] of peak) m.set(d, v / max);
     return m;
-  }, [attList, typeFilter]);
+  }, [attList]);
 
   // Small summary shown beneath the calendar for the selected day: how many
   // services + their average peak in-room (scoped to the active type filter).
   const daySummary = useMemo(() => {
     if (!day) return null;
     const count = dayServices.length;
-    const occ = attList.filter((a) => a.serviceDate === day && (!typeFilter || a.serviceTypeId === typeFilter) && a.peakOccupancy > 0);
+    const occ = attList.filter((a) => a.serviceDate === day && a.peakOccupancy > 0);
     const avg = occ.length ? Math.round(occ.reduce((s, a) => s + a.peakOccupancy, 0) / occ.length) : null;
     return { count, avg };
-  }, [day, dayServices, attList, typeFilter]);
+  }, [day, dayServices, attList]);
 
   // Overview stats, cumulative THROUGH the selected day (serviceDate <= day) so
   // picking a past date shows how things looked as of then; scoped to the type
@@ -377,7 +383,7 @@ export function ServiceHistorySection() {
   const overview = useMemo<OverviewData>(() => {
     const asOf = day;
     const inScope = (typeId: string | null, date: string, ended: unknown) =>
-      ended != null && (!typeFilter || typeId === typeFilter) && (!asOf || date <= asOf);
+      ended != null && (!activeType || typeId === activeType) && (!asOf || date <= asOf);
     const tl = (list ?? []).filter((t) => inScope(t.serviceTypeId, t.serviceDate, t.endedAt));
     const att = attList.filter((a) => inScope(a.serviceTypeId, a.serviceDate, a.endedAt));
     const mean = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
@@ -424,7 +430,7 @@ export function ServiceHistorySection() {
       peakAttendance: maxOcc ? maxOcc.peakOccupancy.toLocaleString() : "—",
       peakSub: maxOcc ? shortDay(maxOcc.serviceDate) : undefined,
     };
-  }, [list, attList, day, typeFilter]);
+  }, [list, attList, day, activeType]);
 
   async function deleteService(key: string, title: string) {
     if (!(await confirm({ title: "Delete recording?", message: `Delete the service-timing recording for "${title}"? This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
@@ -697,21 +703,12 @@ export function ServiceHistorySection() {
   // ── List view: services for the selected day. ──
   return (
     <div className="flex flex-col gap-3">
-      {typeOptions.length >= 2 && (
-        <div className="flex flex-wrap gap-1.5">
-          <TypeChip active={typeFilter === null} onClick={() => setTypeFilter(null)}>All</TypeChip>
-          {typeOptions.map((o) => (
-            <TypeChip key={o.id} active={typeFilter === o.id} onClick={() => setTypeFilter(o.id)}>
-              {o.name}
-            </TypeChip>
-          ))}
-        </div>
-      )}
       {/* Overview blend — full width. Lead stat + real trend chart, then a divided
-          instrument strip. Replaces the old customizable KPI-tile grid. */}
+          instrument strip. Scoped to the active service type (from the selection /
+          most-recent), labeled so the numbers are never a silent blend of types. */}
       <div className="flex flex-col gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">
-          Overview{day ? ` · through ${fmtDay(day)}` : " · all time"}
+          Overview{activeTypeName ? ` · ${activeTypeName}` : ""}{day ? ` · through ${fmtDay(day)}` : " · all time"}
         </span>
         <OverviewBlend overview={overview} />
       </div>
@@ -934,20 +931,6 @@ function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   );
 }
 
-
-/** Service-type filter chip (shown only when 2+ types have recordings). */
-function TypeChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${
-        active ? "border-blue-7 bg-blue-3 text-blue-11" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
 
 function Stat({ label, value, accent, sub }: { label: string; value: string; accent: string; sub?: string }) {
   return (
