@@ -17,6 +17,7 @@ import type { DisplayKind, LayoutDTO, LayoutObject, ScriptViewLayout, Slot, Slot
 import type { OscArg } from "../types/osc.js";
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
+import { buildHistoryWorkbook, type HistorySheet } from "./history-export.js";
 import { getLogLines } from "./log-buffer.js";
 import { editServiceWindow, mergeServiceRecords, recalcAttendance, setItemCounted } from "./history-edit.js";
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
@@ -721,6 +722,27 @@ export class RemoteServer {
         else displayHeartbeat(outputId);
       }
       json(res, { ok: outputId != null });
+      return;
+    }
+    // Multi-sheet .xlsx export of service history — date range + which sheets via
+    // query params (?from=&to=&include=services,attendance,items,spl).
+    if (method === "GET" && pathname === "/api/history/export") {
+      const VALID: HistorySheet[] = ["services", "attendance", "items", "spl"];
+      const include = (_url.searchParams.get("include") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s): s is HistorySheet => (VALID as string[]).includes(s));
+      const buf = await buildHistoryWorkbook({
+        from: _url.searchParams.get("from"),
+        to: _url.searchParams.get("to"),
+        include,
+      });
+      const fname = `stage-utility-history-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      res.writeHead(200, {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${fname}"`,
+      });
+      res.end(buf);
       return;
     }
 

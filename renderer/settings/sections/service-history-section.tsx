@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon } from "lucide-react";
+import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, DownloadIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
-import { confirm, EmptyState, SkeletonRows, Button, toast } from "../../components/ui";
+import { confirm, EmptyState, SkeletonRows, Button, Collapsible, toast } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { HistoryCalendar } from "../../components/history-calendar";
 import { AttendanceDetail, servicePeakAttendance } from "./attendance-history-section";
@@ -229,6 +229,13 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
  * started late and total over/under. One record per PCO service-time occurrence
  * (same scheme as SPL History / Attendance), grouped by day.
  */
+const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
+  { id: "services", label: "Services summary", hint: "one row per service" },
+  { id: "attendance", label: "Attendance polls", hint: "every poll sample" },
+  { id: "items", label: "PCO item timings", hint: "planned vs actual per item" },
+  { id: "spl", label: "SPL", hint: "max / avg per item + metric" },
+];
+
 export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean } = {}) {
   const [list, setList] = useState<ServiceTimeline[] | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -248,6 +255,26 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   const [merging, setMerging] = useState(false);
   const [mergeTarget, setMergeTarget] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  // Export builder: date range + which sheets. None checked by default — the user
+  // picks what they want. Read-only, so it's available on the public /history page too.
+  const [expFrom, setExpFrom] = useState("");
+  const [expTo, setExpTo] = useState("");
+  const [expSheets, setExpSheets] = useState<Set<string>>(new Set());
+  function toggleSheet(id: string) {
+    setExpSheets((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function downloadExport() {
+    const params = new URLSearchParams();
+    if (expFrom) params.set("from", expFrom);
+    if (expTo) params.set("to", expTo);
+    params.set("include", [...expSheets].join(","));
+    window.location.assign(`/api/history/export?${params.toString()}`);
+  }
 
   function reload() {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
@@ -705,6 +732,52 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // ── List view: services for the selected day. ──
   return (
     <div className="flex flex-col gap-3">
+      {/* Export builder — a collapsed disclosure so it never crowds the overview.
+          Read-only, so it's available on the public /history page too. */}
+      <Collapsible label="Export" summary="date range · pick sheets" className="su-card px-4 py-2.5">
+        <div className="flex flex-col gap-3 pt-1">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
+              From
+              <input
+                type="date"
+                value={expFrom}
+                onChange={(e) => setExpFrom(e.target.value)}
+                className="rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
+              To
+              <input
+                type="date"
+                value={expTo}
+                onChange={(e) => setExpTo(e.target.value)}
+                className="rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg"
+              />
+            </label>
+            <span className="self-end pb-1.5 text-caption2 text-fg-subtle">Blank = all dates.</span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {EXPORT_SHEETS.map((s) => (
+              <label key={s.id} className="flex cursor-pointer items-center gap-2 text-footnote text-fg">
+                <input
+                  type="checkbox"
+                  checked={expSheets.has(s.id)}
+                  onChange={() => toggleSheet(s.id)}
+                  className="size-4 accent-[var(--su-accent)]"
+                />
+                {s.label}
+                <span className="text-caption2 text-fg-subtle">{s.hint}</span>
+              </label>
+            ))}
+          </div>
+          <div>
+            <Button variant="accent" size="small" disabled={expSheets.size === 0} onClick={downloadExport}>
+              <DownloadIcon className="size-3.5" /> Download .xlsx
+            </Button>
+          </div>
+        </div>
+      </Collapsible>
       {/* Overview blend — full width. Lead stat + real trend chart, then a divided
           instrument strip. Scoped to the active service type (from the selection /
           most-recent), labeled so the numbers are never a silent blend of types. */}
