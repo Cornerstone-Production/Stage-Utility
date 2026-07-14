@@ -672,7 +672,7 @@ function OverlayNode({
 
 function EditorCanvas({
   canvas, objects, selectedId, selectedIds, gridOn, ctx, ndiSource, interactive,
-  onSelect, onGeom, onCommitStart, onReparent, onBoxSize,
+  onSelect, onMarqueeSelect, onGeom, onCommitStart, onReparent, onBoxSize,
 }: {
   canvas: LayoutCanvas;
   objects: LayoutObject[];
@@ -684,6 +684,8 @@ function EditorCanvas({
   /** When false the canvas is a read-only preview (no overlay, handles, or drag). */
   interactive: boolean;
   onSelect: (id: string | null, additive?: boolean) => void;
+  /** Marquee drag on empty canvas → select all top-level objects it intersects. */
+  onMarqueeSelect: (ids: string[], additive: boolean) => void;
   onGeom: (id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => void;
   onCommitStart: () => void;
   /** Reports the rendered canvas box size so the parent's snap actions (Snap all /
@@ -740,6 +742,9 @@ function EditorCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boxW, boxH]);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // Marquee (rubber-band) selection on empty canvas: fractional rect while dragging.
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   // The container the dragged object would drop into right now (for the live
   // highlight). Null when not hovering a valid target.
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
@@ -825,6 +830,40 @@ function EditorCanvas({
     });
   }
 
+  // Rubber-band select: pointerdown on empty canvas (objects stopPropagation, so
+  // only the background reaches here) drags a rectangle; on release, select every
+  // top-level object it intersects. A plain click (no drag) clears the selection.
+  function startMarquee(e: ReactPointerEvent) {
+    const box = boxRef.current;
+    if (!box) { onSelect(null); return; }
+    const rect = box.getBoundingClientRect();
+    const x0 = (e.clientX - rect.left) / boxW;
+    const y0 = (e.clientY - rect.top) / boxH;
+    let moved = false;
+    const move = (ev: globalThis.PointerEvent) => {
+      const x1 = (ev.clientX - rect.left) / boxW;
+      const y1 = (ev.clientY - rect.top) / boxH;
+      if (Math.abs(x1 - x0) > 0.004 || Math.abs(y1 - y0) > 0.004) moved = true;
+      setMarquee({ x0, y0, x1, y1 });
+    };
+    const up = (ev: globalThis.PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setMarquee(null);
+      if (!moved) { onSelect(null); return; }
+      const x1 = (ev.clientX - rect.left) / boxW;
+      const y1 = (ev.clientY - rect.top) / boxH;
+      const rx0 = Math.min(x0, x1), rx1 = Math.max(x0, x1);
+      const ry0 = Math.min(y0, y1), ry1 = Math.max(y0, y1);
+      const hits = objects
+        .filter((o) => o.x < rx1 && o.x + o.w > rx0 && o.y < ry1 && o.y + o.h > ry0)
+        .map((o) => o.id);
+      onMarqueeSelect(hits, ev.shiftKey);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
   const sorted = [...objects].sort((a, b) => a.z - b.z);
   // Editor canvas is never interactive — live-control objects render as static
   // previews here so editing can't fire real PCO commands.
@@ -859,6 +898,7 @@ function EditorCanvas({
     <div ref={setWrap} className="relative w-full h-full flex items-start justify-center select-none">
       {boxW > 0 && boxH > 0 && (
         <div
+          ref={boxRef}
           className="relative overflow-hidden rounded-xl"
           style={{
             width: boxW,
@@ -878,7 +918,7 @@ function EditorCanvas({
                 ? "var(--kiosk-bg)"
                 : canvas.background,
           }}
-          onPointerDown={interactive ? () => onSelect(null) : undefined}
+          onPointerDown={interactive ? startMarquee : undefined}
         >
           {/* Content layer (visual only). Letterbox: design dims scaled. Fill: the
               layer IS the box (objects positioned by % of the live box). The grid
@@ -942,6 +982,21 @@ function EditorCanvas({
                 />
               ))}
             </div>
+          )}
+          {interactive && marquee && (
+            <div
+              style={{
+                position: "absolute",
+                left: `${Math.min(marquee.x0, marquee.x1) * 100}%`,
+                top: `${Math.min(marquee.y0, marquee.y1) * 100}%`,
+                width: `${Math.abs(marquee.x1 - marquee.x0) * 100}%`,
+                height: `${Math.abs(marquee.y1 - marquee.y0) * 100}%`,
+                border: "1px solid #3b82f6",
+                background: "rgba(59,130,246,0.12)",
+                pointerEvents: "none",
+                zIndex: 20,
+              }}
+            />
           )}
         </div>
       )}
@@ -1203,6 +1258,15 @@ export function LayoutEditor({
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }
+  // Select several objects at once (marquee). Additive (shift) keeps the current set.
+  function selectMany(ids: string[], additive: boolean) {
+    setSelectedIds((prev) => {
+      if (!additive) return new Set(ids);
+      const next = new Set(prev);
+      ids.forEach((id) => next.add(id));
       return next;
     });
   }
@@ -1834,6 +1898,7 @@ export function LayoutEditor({
               ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
+              onMarqueeSelect={selectMany}
               onGeom={onGeom}
               onCommitStart={pushHistory}
               onReparent={reparentIntoContainer}
