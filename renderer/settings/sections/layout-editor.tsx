@@ -606,19 +606,21 @@ interface DragState {
 // its parent overlay node so nested children resolve correctly. Recurses for a
 // container's children.
 function OverlayNode({
-  o, parentAbs, depth, selectedId, draggingId = null, onStart, parentLocked = false,
+  o, parentAbs, depth, selectedId, selectedIds, draggingId = null, onStart, parentLocked = false,
 }: {
   o: LayoutObject;
   parentAbs: FracRect;
   depth: number;
   selectedId: string | null;
+  selectedIds: Set<string>;
   /** Id of the object currently being dragged, for a "lifting" cue. */
   draggingId?: string | null;
   onStart: (e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) => void;
   /** True when an ancestor container is locked, so this node is locked too. */
   parentLocked?: boolean;
 }) {
-  const sel = o.id === selectedId;
+  const sel = o.id === selectedId; // single "primary" → resize handles
+  const inSel = selectedIds.has(o.id); // any selected → highlight outline
   const dragging = o.id === draggingId;
   const locked = parentLocked || !!o.locked;
   const abs = depth === 0 ? { x: o.x, y: o.y, w: o.w, h: o.h } : composeRect(parentAbs, o);
@@ -631,10 +633,10 @@ function OverlayNode({
         left: `${o.x * 100}%`, top: `${o.y * 100}%`,
         width: `${o.w * 100}%`, height: `${o.h * 100}%`,
         cursor: locked ? "default" : "move",
-        outline: dragging ? "2px dashed #3b82f6" : sel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
+        outline: dragging ? "2px dashed #3b82f6" : inSel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
         outlineOffset: 0,
         opacity: dragging ? 0.7 : 1,
-        boxShadow: sel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
+        boxShadow: inSel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
       }}
     >
       <span
@@ -643,7 +645,7 @@ function OverlayNode({
           display: "inline-flex", alignItems: "center", gap: 3,
           fontSize: 10, lineHeight: "14px", padding: "0 5px", maxWidth: "100%",
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          background: sel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
+          background: inSel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
           borderRadius: "4px 4px 0 0", pointerEvents: "none",
         }}
       >
@@ -662,25 +664,26 @@ function OverlayNode({
           return <div key={h} onPointerDown={(e) => onStart(e, o, h, parentAbs, depth)} style={{ ...pos, cursor: handleCursor(h) }} />;
         })}
       {kids?.map((c) => (
-        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} draggingId={draggingId} onStart={onStart} parentLocked={locked} />
+        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} selectedIds={selectedIds} draggingId={draggingId} onStart={onStart} parentLocked={locked} />
       ))}
     </div>
   );
 }
 
 function EditorCanvas({
-  canvas, objects, selectedId, gridOn, ctx, ndiSource, interactive,
+  canvas, objects, selectedId, selectedIds, gridOn, ctx, ndiSource, interactive,
   onSelect, onGeom, onCommitStart, onReparent, onBoxSize,
 }: {
   canvas: LayoutCanvas;
   objects: LayoutObject[];
   selectedId: string | null;
+  selectedIds: Set<string>;
   gridOn: boolean;
   ctx: Omit<LayoutRenderCtx, "H" | "ndiSource" | "interactive">;
   ndiSource: string | null;
   /** When false the canvas is a read-only preview (no overlay, handles, or drag). */
   interactive: boolean;
-  onSelect: (id: string | null) => void;
+  onSelect: (id: string | null, additive?: boolean) => void;
   onGeom: (id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => void;
   onCommitStart: () => void;
   /** Reports the rendered canvas box size so the parent's snap actions (Snap all /
@@ -796,7 +799,10 @@ function EditorCanvas({
   function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) {
     e.stopPropagation();
     e.preventDefault();
-    onSelect(o.id);
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    onSelect(o.id, additive);
+    // Shift/Cmd-click toggles selection only — don't start a drag.
+    if (additive) return;
     // Locked objects (and anything inside a locked container) select but never move.
     if (isLockedInTree(objects, o.id)) return;
     onCommitStart();
@@ -930,6 +936,7 @@ function EditorCanvas({
                   parentAbs={CANVAS_FRAC}
                   depth={0}
                   selectedId={selectedId}
+                  selectedIds={selectedIds}
                   draggingId={drag?.id ?? null}
                   onStart={startDrag}
                 />
@@ -1179,7 +1186,28 @@ export function LayoutEditor({
   const initial = view.layout ?? { version: 1 as const, canvas: { width: 1920, height: 1080, background: null }, objects: [] };
   const [canvas, setCanvas] = useState<LayoutCanvas>(initial.canvas);
   const [objects, setObjects] = useState<LayoutObject[]>(initial.objects);
-  const [selectedId, setSelectedId] = useState<string | null>(initial.objects[0]?.id ?? null);
+  // Multi-selection is the source of truth; `selectedId` is the single primary
+  // (for the inspector + resize handles) and is null unless exactly one is picked.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(initial.objects[0] ? [initial.objects[0].id] : []),
+  );
+  const selectedId = selectedIds.size === 1 ? [...selectedIds][0] : null;
+  // Select an object; additive (shift/ctrl/cmd) toggles it in/out of the selection.
+  function selectObject(id: string | null, additive = false) {
+    if (id === null) {
+      setSelectedIds(new Set());
+      return;
+    }
+    setSelectedIds((prev) => {
+      if (!additive) return new Set([id]);
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  // In-editor clipboard for Cmd/Ctrl-C / -V (stores fresh-id clones).
+  const clipboard = useRef<LayoutObject[]>([]);
   // Layers-panel drag-to-reorder: the row currently being hovered as a drop target.
   const [dragLayerOver, setDragLayerOver] = useState<string | null>(null);
   const [history, setHistory] = useState<LayoutObject[][]>([]);
@@ -1261,7 +1289,7 @@ export function LayoutEditor({
   function discardChanges() {
     setObjects(initial.objects);
     setCanvas(initial.canvas);
-    setSelectedId(initial.objects[0]?.id ?? null);
+    setSelectedIds(new Set(initial.objects[0] ? [initial.objects[0].id] : []));
     setHistory([]);
     setDirty(false);
   }
@@ -1274,7 +1302,7 @@ export function LayoutEditor({
   function loadTemplate(t: LayoutTemplate) {
     pushHistory();
     setObjects(t.layout.objects.map((o) => deepCloneFreshIds(o, uid)));
-    setSelectedId(null);
+    setSelectedIds(new Set());
     setDirty(true);
   }
   // Clear to an empty canvas. Blank is the default for a new custom view; this is
@@ -1282,14 +1310,14 @@ export function LayoutEditor({
   function startFromBlank() {
     pushHistory();
     setObjects([]);
-    setSelectedId(null);
+    setSelectedIds(new Set());
     setDirty(true);
   }
   // Replace the layout with the built-in dashboard starter (editable nested tiles).
   function startFromDashboard() {
     pushHistory();
     setObjects(dashboardTemplate());
-    setSelectedId(null);
+    setSelectedIds(new Set());
     setDirty(true);
   }
   // Replace the layout with the built-in "Confidence Monitor" starter (the stage
@@ -1297,7 +1325,7 @@ export function LayoutEditor({
   function startFromConfidenceMonitor() {
     pushHistory();
     setObjects(confidenceMonitorTemplate());
-    setSelectedId(null);
+    setSelectedIds(new Set());
     setDirty(true);
   }
 
@@ -1348,7 +1376,7 @@ export function LayoutEditor({
     pushHistory();
     const copy = { ...deepCloneFreshIds(g.object, uid), z: zTop + 1 };
     setObjects((prev) => [...prev, copy]);
-    setSelectedId(copy.id);
+    setSelectedIds(new Set([copy.id]));
     setDirty(true);
   }
 
@@ -1406,13 +1434,13 @@ export function LayoutEditor({
       const geom = type === "container" ? { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } : { x: 0.1, y: 0.3, w: 0.8, h: 0.4 };
       const child = makeObject(type, siblingMaxZ + 1, geom);
       setObjects((prev) => insertChild(prev, intoId, child));
-      setSelectedId(child.id);
+      setSelectedIds(new Set([child.id]));
     } else {
       const o = makeObject(type, zTop + 1);
       // Snap a new top-level object onto the square grid so its edges land on lines.
       const sn = snapRectToGrid({ x: o.x, y: o.y, w: o.w, h: o.h }, CANVAS_FRAC, editorBox.w || canvas.width, editorBox.h || canvas.height, true);
       setObjects((prev) => [...prev, { ...o, ...sn }]);
-      setSelectedId(o.id);
+      setSelectedIds(new Set([o.id]));
     }
   }
   /** Snap the selected object's existing position + size onto the grid. */
@@ -1433,7 +1461,12 @@ export function LayoutEditor({
     if (isLockedInTree(objects, id)) return; // locked → must unlock before deleting
     pushHistory();
     setObjects((prev) => removeById(prev, id).tree);
-    if (selectedId === id) setSelectedId(null);
+    setSelectedIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }
   function duplicateObject(id: string) {
     const src = findById(objects, id);
@@ -1449,8 +1482,78 @@ export function LayoutEditor({
     };
     const parent = getParentOf(objects, id);
     setObjects((prev) => (parent ? insertChild(prev, parent.id, copy) : [...prev, copy]));
-    setSelectedId(copy.id);
+    setSelectedIds(new Set([copy.id]));
   }
+  // Clone the given objects (fresh ids, offset) into a working tree; returns the
+  // new tree + the fresh ids. Preserves each object's parent when duplicating.
+  function cloneInto(tree: LayoutObject[], srcs: LayoutObject[], keepParent: boolean): { tree: LayoutObject[]; ids: Set<string> } {
+    let out = tree;
+    const ids = new Set<string>();
+    for (const s of srcs) {
+      const siblings = keepParent ? getSiblings(out, s.id) : out;
+      const z = siblings.reduce((m, o) => Math.max(m, o.z), 0) + 1;
+      const copy: LayoutObject = {
+        ...deepCloneFreshIds(s, uid),
+        x: clamp(s.x + 0.03, 0, 1 - s.w),
+        y: clamp(s.y + 0.03, 0, 1 - s.h),
+        z,
+      };
+      const parent = keepParent ? getParentOf(out, s.id) : null;
+      out = parent ? insertChild(out, parent.id, copy) : [...out, copy];
+      ids.add(copy.id);
+    }
+    return { tree: out, ids };
+  }
+  // Bulk actions over the whole selection (Delete key / Cmd-D / toolbar).
+  function removeSelected() {
+    const ids = [...selectedIds].filter((id) => !isLockedInTree(objects, id));
+    if (ids.length === 0) return;
+    pushHistory();
+    setObjects((prev) => ids.reduce((tree, id) => removeById(tree, id).tree, prev));
+    setSelectedIds(new Set());
+    setDirty(true);
+  }
+  function duplicateSelected() {
+    const srcs = [...selectedIds].map((id) => findById(objects, id)).filter((o): o is LayoutObject => !!o);
+    if (srcs.length === 0) return;
+    pushHistory();
+    const { tree, ids } = cloneInto(objects, srcs, true);
+    setObjects(tree);
+    setSelectedIds(ids);
+    setDirty(true);
+  }
+  // Cmd/Ctrl-C / -V. Copy snapshots the selection; paste drops fresh clones at the
+  // top level (offset) and selects them.
+  function copySelected() {
+    const srcs = [...selectedIds].map((id) => findById(objects, id)).filter((o): o is LayoutObject => !!o);
+    if (srcs.length) clipboard.current = srcs.map((o) => deepCloneFreshIds(o, uid));
+  }
+  function pasteClipboard() {
+    if (clipboard.current.length === 0) return;
+    pushHistory();
+    const { tree, ids } = cloneInto(objects, clipboard.current, false);
+    setObjects(tree);
+    setSelectedIds(ids);
+    setDirty(true);
+  }
+  // Keyboard: Delete/Backspace removes the selection; Cmd/Ctrl-D duplicates,
+  // -C copies, -V pastes. Ignored while typing in a form field.
+  useEffect(() => {
+    if (!isEditing) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      const mod = e.metaKey || e.ctrlKey;
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0) { e.preventDefault(); removeSelected(); }
+      else if (mod && (e.key === "d" || e.key === "D")) { e.preventDefault(); duplicateSelected(); }
+      else if (mod && (e.key === "c" || e.key === "C") && selectedIds.size > 0) { e.preventDefault(); copySelected(); }
+      else if (mod && (e.key === "v" || e.key === "V") && clipboard.current.length > 0) { e.preventDefault(); pasteClipboard(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // Handlers close over selectedIds/objects; re-bind when those change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing, selectedIds, objects]);
   // Move a nested object out to the top level, keeping its on-screen position by
   // converting its parent-local rect to an absolute canvas rect.
   function reparentToRoot(id: string) {
@@ -1482,7 +1585,7 @@ export function LayoutEditor({
       return insertChild(tree, containerId, { ...removed, x: clamp(local.x, 0, 1 - w), y: clamp(local.y, 0, 1 - h), w, h, z });
     });
     setDirty(true);
-    setSelectedId(id);
+    setSelectedIds(new Set([id]));
   }, []);
   function reorder(id: string, dir: "front" | "back" | "up" | "down") {
     pushHistory();
@@ -1725,11 +1828,12 @@ export function LayoutEditor({
               canvas={canvas}
               objects={objects}
               selectedId={selectedId}
+              selectedIds={selectedIds}
               gridOn={gridOn && isEditing}
               interactive={isEditing}
               ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels }}
               ndiSource={view.ndiSource ?? null}
-              onSelect={setSelectedId}
+              onSelect={selectObject}
               onGeom={onGeom}
               onCommitStart={pushHistory}
               onReparent={reparentIntoContainer}
@@ -1756,13 +1860,13 @@ export function LayoutEditor({
                 key={o.id}
                 type="button"
                 draggable
-                onClick={() => setSelectedId(o.id)}
+                onClick={(e) => selectObject(o.id, e.shiftKey || e.metaKey || e.ctrlKey)}
                 onDragStart={(e) => { e.dataTransfer.setData("text/plain", o.id); e.dataTransfer.effectAllowed = "move"; }}
                 onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragLayerOver !== o.id) setDragLayerOver(o.id); }}
                 onDragLeave={() => setDragLayerOver((cur) => (cur === o.id ? null : cur))}
                 onDrop={(e) => { e.preventDefault(); const src = e.dataTransfer.getData("text/plain"); setDragLayerOver(null); if (src) moveLayer(src, o.id); }}
                 style={{ paddingLeft: 8 + depth * 14 }}
-                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${o.id === selectedId ? "bg-gray-a4" : "hover:bg-gray-a3"} ${dragLayerOver === o.id ? "ring-1 ring-focus" : ""}`}
+                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${selectedIds.has(o.id) ? "bg-gray-a4" : "hover:bg-gray-a3"} ${dragLayerOver === o.id ? "ring-1 ring-focus" : ""}`}
               >
                 <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">
                   {o.config.type === "container" ? `${TYPE_LABELS[o.config.type]} (${o.children?.length ?? 0})` : TYPE_LABELS[o.config.type]}
@@ -1800,6 +1904,24 @@ export function LayoutEditor({
               </button>
             ))}
           </div>
+
+          {selectedIds.size > 1 && (
+            <>
+              <Separator />
+              <div className="flex flex-col gap-2 p-3">
+                <span className="text-caption1 font-medium text-fg">{selectedIds.size} objects selected</span>
+                <span className="text-caption2 text-fg-subtle">Shift-click to add or remove · drag a marquee on the canvas to select.</span>
+                <div className="flex gap-2">
+                  <Button variant="filled" size="small" onClick={duplicateSelected}>
+                    <CopyIcon className="size-3.5" /> Duplicate
+                  </Button>
+                  <Button variant="filled" size="small" onClick={removeSelected}>
+                    <Trash2Icon className="size-3.5 text-red-10" /> Delete
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
 
           {selected && (
             <>
