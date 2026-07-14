@@ -600,6 +600,9 @@ interface DragState {
   canReparent: boolean;
   /** Container drop targets captured at drag start. */
   targets: DropTarget[];
+  /** For a multi-selection move: start rects of all selected top-level objects
+   *  (incl. the dragged one). Present → move the whole group by the same delta. */
+  group?: { id: string; x: number; y: number; w: number; h: number }[];
 }
 
 // One overlay box (selection outline + move/resize handles), positioned in % of
@@ -672,7 +675,7 @@ function OverlayNode({
 
 function EditorCanvas({
   canvas, objects, selectedId, selectedIds, gridOn, ctx, ndiSource, interactive,
-  onSelect, onMarqueeSelect, onGeom, onCommitStart, onReparent, onBoxSize,
+  onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
 }: {
   canvas: LayoutCanvas;
   objects: LayoutObject[];
@@ -687,6 +690,8 @@ function EditorCanvas({
   /** Marquee drag on empty canvas → select all top-level objects it intersects. */
   onMarqueeSelect: (ids: string[], additive: boolean) => void;
   onGeom: (id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => void;
+  /** Apply geometry to several objects at once (group move). */
+  onGeomMany: (updates: { id: string; geom: Pick<LayoutObject, "x" | "y" | "w" | "h"> }[]) => void;
   onCommitStart: () => void;
   /** Reports the rendered canvas box size so the parent's snap actions (Snap all /
    *  Snap to grid) use the same grid aspect as the canvas. */
@@ -771,6 +776,19 @@ function EditorCanvas({
         geom = gridOn ? snapRectToGrid(g, drag.parentAbs, boxW, boxH, true) : g;
       }
       dragGeom.current = geom;
+      // Group move: shift every selected top-level object by the same delta as the
+      // dragged (primary) one. No reparenting while moving a group.
+      if (drag.group) {
+        const ddx = geom.x - drag.start.x;
+        const ddy = geom.y - drag.start.y;
+        onGeomMany(
+          drag.group.map((g) => ({
+            id: g.id,
+            geom: { x: clamp(g.x + ddx, 0, 1 - g.w), y: clamp(g.y + ddy, 0, 1 - g.h), w: g.w, h: g.h },
+          })),
+        );
+        return;
+      }
       // Live drop-target highlight while moving a reparentable object.
       if (drag.mode === "move" && drag.canReparent) {
         const target = findDropContainer(drag.targets, drag.start.config.type === "container", geom.x + geom.w / 2, geom.y + geom.h / 2);
@@ -780,8 +798,8 @@ function EditorCanvas({
     };
     const onUp = () => {
       const g = dragGeom.current;
-      // Only a top-level object dropped onto a container reparents into it.
-      if (drag.mode === "move" && drag.canReparent && g) {
+      // Only a lone top-level object dropped onto a container reparents into it.
+      if (drag.mode === "move" && drag.canReparent && !drag.group && g) {
         const cx = g.x + g.w / 2;
         const cy = g.y + g.h / 2;
         const target = findDropContainer(drag.targets, drag.start.config.type === "container", cx, cy);
@@ -799,15 +817,18 @@ function EditorCanvas({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [drag, boxW, boxH, gridOn, canvas, onGeom, onReparent]);
+  }, [drag, boxW, boxH, gridOn, canvas, onGeom, onGeomMany, onReparent]);
 
   function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) {
     e.stopPropagation();
     e.preventDefault();
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
-    onSelect(o.id, additive);
     // Shift/Cmd-click toggles selection only — don't start a drag.
-    if (additive) return;
+    if (additive) { onSelect(o.id, true); return; }
+    // Plain click: keep the selection if this object is already part of a multi-
+    // selection (so we drag the whole group); otherwise select just this one.
+    const inGroup = selectedIds.has(o.id) && selectedIds.size > 1;
+    if (!inGroup) onSelect(o.id, false);
     // Locked objects (and anything inside a locked container) select but never move.
     if (isLockedInTree(objects, o.id)) return;
     onCommitStart();
@@ -823,10 +844,15 @@ function EditorCanvas({
       if (n.o.config.type === "container" && !excluded.has(n.o.id) && !isLockedInTree(objects, n.o.id)) targets.push({ id: n.o.id, abs: n.abs, depth: n.depth });
     });
     dragGeom.current = { x: o.x, y: o.y, w: o.w, h: o.h };
+    const group = mode === "move" && depth === 0 && inGroup
+      ? objects
+          .filter((obj) => selectedIds.has(obj.id) && !isLockedInTree(objects, obj.id))
+          .map((obj) => ({ id: obj.id, x: obj.x, y: obj.y, w: obj.w, h: obj.h }))
+      : undefined;
     setDrag({
       id: o.id, mode, start: o, px: e.clientX, py: e.clientY,
       parentW: parentAbs.w * boxW, parentH: parentAbs.h * boxH,
-      parentAbs, depth, canReparent: depth === 0, targets,
+      parentAbs, depth, canReparent: depth === 0, targets, group,
     });
   }
 
@@ -1483,6 +1509,11 @@ export function LayoutEditor({
     setObjects((prev) => mapById(prev, id, (o) => ({ ...o, ...geom })));
     setDirty(true);
   }, []);
+  // Geometry for several objects at once (group move) — one state update.
+  const onGeomMany = useCallback((updates: { id: string; geom: Pick<LayoutObject, "x" | "y" | "w" | "h"> }[]) => {
+    setObjects((prev) => updates.reduce((tree, u) => mapById(tree, u.id, (o) => ({ ...o, ...u.geom })), prev));
+    setDirty(true);
+  }, []);
 
   function addObject(type: LayoutObjectType) {
     pushHistory();
@@ -1899,6 +1930,7 @@ export function LayoutEditor({
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}
+              onGeomMany={onGeomMany}
               onGeom={onGeom}
               onCommitStart={pushHistory}
               onReparent={reparentIntoContainer}
