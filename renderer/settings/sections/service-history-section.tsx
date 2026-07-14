@@ -229,7 +229,7 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
  * started late and total over/under. One record per PCO service-time occurrence
  * (same scheme as SPL History / Attendance), grouped by day.
  */
-export function ServiceHistorySection() {
+export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean } = {}) {
   const [list, setList] = useState<ServiceTimeline[] | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<ServiceTimeline | null>(null);
@@ -573,13 +573,15 @@ export function ServiceHistorySection() {
             </span>
           </div>
           <div className="flex items-center gap-2 flex-wrap sm:shrink-0">
-            <Button variant="filled" size="small" onClick={startEditTimes} tooltip="Fix the recorded start/end (trims samples + items outside the window)">
-              <ClockIcon className="size-3.5 text-gray-9" /> Edit times
-            </Button>
+            {!readOnly && (
+              <Button variant="filled" size="small" onClick={startEditTimes} tooltip="Fix the recorded start/end (trims samples + items outside the window)">
+                <ClockIcon className="size-3.5 text-gray-9" /> Edit times
+              </Button>
+            )}
             <Button variant="filled" size="small" onClick={copyReport} tooltip="Copy a full text report (timing + attendance + audio)">
               <CopyIcon className="size-3.5 text-gray-9" /> Copy report
             </Button>
-            {mergeCandidates.length > 0 && (
+            {!readOnly && mergeCandidates.length > 0 && (
               <Button variant="filled" size="small" onClick={() => { setMerging((v) => !v); setEditingTimes(false); }} tooltip="Merge this recording into another service (fixes a split service), then delete this one">
                 <GitMergeIcon className="size-3.5 text-gray-9" /> Merge…
               </Button>
@@ -755,14 +757,16 @@ export function ServiceHistorySection() {
                     {totalDelta != null && <span className="ml-3 whitespace-nowrap"><span className={totalDelta > 0 ? "text-red-11" : "text-gray-11"}>{fmtDelta(totalDelta)}</span></span>}
                   </span>
                 </button>
-                <button
-                  className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
-                  onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
-                  aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
-                  title="Delete recording"
-                >
-                  <Trash2Icon className="size-4" />
-                </button>
+                {!readOnly && (
+                  <button
+                    className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                    onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
+                    aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
+                    title="Delete recording"
+                  >
+                    <Trash2Icon className="size-4" />
+                  </button>
+                )}
               </div>
             );
           })}
