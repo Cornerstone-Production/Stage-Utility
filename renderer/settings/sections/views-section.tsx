@@ -2,7 +2,7 @@ import { useState, type ChangeEvent, type CSSProperties } from "react";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { PlusIcon, TrashIcon, CopyIcon, GripVerticalIcon, ChevronLeftIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, CopyIcon, ChevronLeftIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { useIsMobile } from "../../lib/use-media-query";
 import {
@@ -91,30 +91,23 @@ function SortableViewItem({
     opacity: isDragging ? 0.5 : 1,
   };
 
+  // No grip: the whole row is the drag handle (the 5px sensor activation distance
+  // lets a click still select without starting a reorder) and click-to-select.
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-1 rounded-lg pr-1 transition-colors ${
-        selected ? "bg-gray-a4" : "hover:bg-gray-a3"
-      }`}
+      className={`rounded-lg transition-colors ${selected ? "bg-fill-active" : "hover:bg-fill"}`}
     >
-      <button
-        {...attributes}
-        {...listeners}
-        className="cursor-grab active:cursor-grabbing touch-none py-2 pl-2 shrink-0"
-        aria-label="Drag to reorder"
-        tabIndex={-1}
-      >
-        <GripVerticalIcon className="size-4 text-gray-7" />
-      </button>
       <button
         type="button"
         onClick={onSelect}
-        className="flex flex-col items-start gap-0.5 py-2 pr-2 text-left flex-1 min-w-0"
+        {...attributes}
+        {...listeners}
+        className="flex w-full min-w-0 cursor-grab touch-none flex-col items-start gap-0.5 px-3 py-2 text-left active:cursor-grabbing"
       >
-        <span className="text-body text-gray-12 truncate w-full">{view.name}</span>
-        <span className="text-caption2 text-gray-9">{KIND_LABELS[view.kind]}</span>
+        <span className="w-full truncate text-body text-fg">{view.name}</span>
+        <span className="text-caption2 text-fg-subtle">{KIND_LABELS[view.kind]}</span>
       </button>
     </div>
   );
