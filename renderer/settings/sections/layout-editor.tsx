@@ -26,6 +26,7 @@ import {
   UnlockIcon,
   PackagePlusIcon,
   FilterIcon,
+  FilePlusIcon,
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import {
@@ -1276,6 +1277,14 @@ export function LayoutEditor({
     setSelectedId(null);
     setDirty(true);
   }
+  // Clear to an empty canvas. Blank is the default for a new custom view; this is
+  // the explicit way back to it (templates are optional, not a required start).
+  function startFromBlank() {
+    pushHistory();
+    setObjects([]);
+    setSelectedId(null);
+    setDirty(true);
+  }
   // Replace the layout with the built-in dashboard starter (editable nested tiles).
   function startFromDashboard() {
     pushHistory();
@@ -1654,6 +1663,9 @@ export function LayoutEditor({
         </ButtonGroup>
         <Button variant="filled" size="small" onClick={undo} disabled={history.length === 0}>
           <UndoIcon className="size-3.5" /> Undo
+        </Button>
+        <Button variant="filled" size="small" onClick={startFromBlank} title="Clear the canvas and build from scratch (blank is the default for a new view)">
+          <FilePlusIcon className="size-3.5" /> Start blank
         </Button>
         <Button variant="filled" size="small" onClick={startFromDashboard} title="Replace the layout with the dashboard design as editable tiles">
           <LayoutTemplateIcon className="size-3.5" /> Start from Dashboard
