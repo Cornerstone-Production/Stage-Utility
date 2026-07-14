@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
@@ -855,6 +855,8 @@ function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   const padTop = 16;
   const padBottom = 26;
   const padX = 10;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [hover, setHover] = useState<number | null>(null);
   if (points.length < 2) {
     return (
       <div className="flex h-[130px] items-center justify-center text-caption1 text-fg-subtle">
@@ -872,24 +874,62 @@ function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   const lastX = x(points.length - 1);
   const lastY = y(points[points.length - 1].value);
   const latest = points[points.length - 1].value;
+  const hp = hover != null ? points[hover] : null;
+  const hx = hover != null ? x(hover) : 0;
+  const hy = hp ? y(hp.value) : 0;
   return (
     <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img" aria-label="Attendance trend across recent services">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} ${H}`}
+        width="100%"
+        height={H}
+        preserveAspectRatio="none"
+        onPointerMove={(e) => {
+          const svg = svgRef.current;
+          if (!svg) return;
+          const r = svg.getBoundingClientRect();
+          const frac = (e.clientX - r.left) / r.width; // 0..1 across the plotted width
+          setHover(Math.min(points.length - 1, Math.max(0, Math.round(frac * (points.length - 1)))));
+        }}
+        onPointerLeave={() => setHover(null)}
+        role="img"
+        aria-label="Attendance trend across recent services"
+      >
         <line x1={0} y1={H - padBottom} x2={W} y2={H - padBottom} stroke="var(--su-line)" />
         <polyline points={poly} fill="none" stroke="var(--su-accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         <circle cx={lastX} cy={lastY} r={4} fill="var(--su-accent)" />
+        {hp && (
+          <g pointerEvents="none">
+            <line x1={hx} y1={padTop} x2={hx} y2={H - padBottom} stroke="var(--su-line-strong)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+            <circle cx={hx} cy={hy} r={4} fill="var(--su-accent)" stroke="var(--su-bg)" strokeWidth={1.5} />
+          </g>
+        )}
         <text x={padX} y={H - 8} fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[0].day)}</text>
         <text x={W - padX} y={H - 8} textAnchor="end" fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[points.length - 1].day)}</text>
       </svg>
-      {/* Latest attendance, pinned just above the most recent point (height maps
-          1:1 to the viewBox, so lastY is a px offset). Only this one value —
+      {/* Hover tooltip — HTML overlay positioned by % so its text isn't stretched
+          by the chart's non-uniform (preserveAspectRatio="none") X scale. */}
+      {hp && (
+        <div
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border border-line-strong bg-popover px-2 py-1 shadow-md backdrop-blur-xl"
+          style={{ left: `${(hx / W) * 100}%`, top: `${Math.max(hy - 8, 4)}px` }}
+        >
+          <div className="font-mono text-caption2 tabular-nums text-fg-subtle whitespace-nowrap">{shortDay(hp.day)}</div>
+          <div className="font-mono text-caption1 font-medium tabular-nums text-fg text-center">{hp.value.toLocaleString()}</div>
+        </div>
+      )}
+      {/* Latest attendance, pinned above the most recent point (hidden while
+          hovering so it doesn't collide with the tooltip). Only this one value —
           labeling every point would clutter. */}
-      <span
-        className="pointer-events-none absolute right-1 font-mono text-caption1 font-medium tabular-nums text-fg"
-        style={{ top: `${Math.max(0, lastY - 20)}px` }}
-      >
-        {latest.toLocaleString()}
-      </span>
+      {!hp && (
+        <span
+          className="pointer-events-none absolute right-1 font-mono text-caption1 font-medium tabular-nums text-fg"
+          style={{ top: `${Math.max(0, lastY - 20)}px` }}
+        >
+          {latest.toLocaleString()}
+        </span>
+      )}
     </div>
   );
 }
