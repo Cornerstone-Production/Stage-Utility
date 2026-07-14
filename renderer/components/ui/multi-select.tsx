@@ -64,7 +64,7 @@ export function MultiSelect({
           align="start"
           sideOffset={4}
           className={cn(
-            "z-50 w-[var(--radix-popover-trigger-width)] min-w-52 overflow-hidden rounded-md border border-line-strong bg-surface shadow-md",
+            "z-50 w-[var(--radix-popover-trigger-width)] min-w-52 overflow-hidden rounded-md border border-line-strong bg-popover backdrop-blur-xl shadow-md",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
             "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",

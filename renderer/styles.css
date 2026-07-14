@@ -178,6 +178,7 @@
   --color-bg:             var(--su-bg);
   --color-surface:        var(--su-surface);
   --color-surface-raised: var(--su-surface-raised);
+  --color-popover:        var(--su-popover);
   --color-rail:           var(--su-rail);
   --color-line:           var(--su-line);
   --color-line-strong:    var(--su-line-strong);
@@ -223,6 +224,9 @@
   --su-bg:             #f7f8fa;
   --su-surface:        #ffffff;
   --su-surface-raised: #ffffff;
+  /* Popover/menu surface (Select, MultiSelect). Near-opaque glass — a touch of
+     translucency + backdrop-blur where supported; still legible without it. */
+  --su-popover:        rgba(255, 255, 255, 0.92);
   --su-rail:           #f1f2f4;   /* sidebar — slightly grayer than content in light */
   --su-line:           #e7e9ec;
   --su-line-strong:    #d8dce1;
@@ -266,6 +270,9 @@
   --su-bg:             #0e0e0e;
   --su-surface:        rgba(255, 255, 255, 0.03);
   --su-surface-raised: rgba(255, 255, 255, 0.055);
+  /* Popover/menu surface — solid PURE-neutral (R=G=B) so menus never read
+     transparent or purple over content; blur adds glass depth where supported. */
+  --su-popover:        rgba(28, 28, 28, 0.82);
   --su-rail:           #0e0e0e;   /* seamless with content in dark */
   --su-line:           rgba(255, 255, 255, 0.08);
   --su-line-strong:    rgba(255, 255, 255, 0.14);
@@ -289,6 +296,7 @@
   --su-bg:             var(--kiosk-bg);
   --su-surface:        rgba(255, 255, 255, 0.04);
   --su-surface-raised: rgba(255, 255, 255, 0.06);
+  --su-popover:        #1a1a1a;   /* solid neutral — Pi-safe (no backdrop-filter reliance) */
   --su-line:           rgba(255, 255, 255, 0.09);
   --su-line-strong:    rgba(255, 255, 255, 0.15);
   --su-fg:             rgba(255, 255, 255, 0.92);
