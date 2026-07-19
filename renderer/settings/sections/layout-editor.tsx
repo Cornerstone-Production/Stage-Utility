@@ -28,6 +28,7 @@ import {
   FilterIcon,
   FilePlusIcon,
 } from "lucide-react";
+import { DropdownMenu, Popover } from "radix-ui";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import {
   Button,
@@ -1833,56 +1834,89 @@ export function LayoutEditor({
         <Button variant="filled" size="small" onClick={snapAllToGrid} aria-label="Snap all objects to grid" title="Snap every object's position + size to the grid">
           Snap all
         </Button>
-        <Select
-          value={CANVAS_PRESETS.find((p) => p.w === canvas.width && p.h === canvas.height)?.id ?? "custom"}
-          onValueChange={(id: string) => {
-            const p = CANVAS_PRESETS.find((x) => x.id === id);
-            if (p) { setCanvas({ ...canvas, width: p.w, height: p.h }); setDirty(true); }
-          }}
-        >
-          <SelectTrigger className="w-40" aria-label="Canvas shape"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {CANVAS_PRESETS.map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
-            {!CANVAS_PRESETS.some((p) => p.w === canvas.width && p.h === canvas.height) && (
-              <SelectItem value="custom" disabled>Custom · {canvas.width}×{canvas.height}</SelectItem>
-            )}
-          </SelectContent>
-        </Select>
-        {/* Custom canvas size */}
-        <div className="flex items-center gap-1" title="Custom canvas size (design width × height)">
-          <NumberField value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
-          <span className="text-caption2 text-gray-9">×</span>
-          <NumberField value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
-        </div>
-        {/* Fit: letterbox the design aspect, or fill the whole window. */}
-        <ButtonGroup>
-          <Button variant={canvas.fit !== "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "contain" }); setDirty(true); }} title="Letterbox: keep the design aspect (adds bars on mismatched screens)">Letterbox</Button>
-          <Button variant={canvas.fit === "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "fill" }); setDirty(true); }} title="Fill: use the whole window; objects reflow to its shape (no bars)">Fill</Button>
-        </ButtonGroup>
+        {/* Canvas size + fit, collapsed into a popover to keep the bar lean. */}
+        <Popover.Root>
+          <Popover.Trigger asChild>
+            <Button variant="filled" size="small" title="Canvas size & fit">
+              Canvas <ChevronDownIcon className="size-3.5 text-gray-9" />
+            </Button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content align="start" sideOffset={4} className="z-50 flex w-64 flex-col gap-3 rounded-md border border-line-strong bg-popover p-3 shadow-md backdrop-blur-xl">
+              <div className="flex flex-col gap-1.5">
+                <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Shape</span>
+                <div className="flex flex-wrap gap-1">
+                  {CANVAS_PRESETS.map((p) => {
+                    const active = p.w === canvas.width && p.h === canvas.height;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        title={p.label}
+                        onClick={() => { setCanvas({ ...canvas, width: p.w, height: p.h }); setDirty(true); }}
+                        className={`rounded-md px-2 py-1 text-caption2 tabular-nums transition-colors ${active ? "bg-accent text-on-accent" : "bg-fill text-fg-muted hover:bg-fill-hover hover:text-fg"}`}
+                      >
+                        {p.id}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Size (px)</span>
+                <div className="flex items-center gap-1">
+                  <NumberField value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
+                  <span className="text-caption2 text-fg-subtle">×</span>
+                  <NumberField value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Fit</span>
+                <ButtonGroup>
+                  <Button variant={canvas.fit !== "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "contain" }); setDirty(true); }} title="Letterbox: keep the design aspect (adds bars on mismatched screens)">Letterbox</Button>
+                  <Button variant={canvas.fit === "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "fill" }); setDirty(true); }} title="Fill: use the whole window; objects reflow to its shape (no bars)">Fill</Button>
+                </ButtonGroup>
+              </div>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
         <Button variant="filled" size="small" onClick={undo} disabled={history.length === 0}>
           <UndoIcon className="size-3.5" /> Undo
         </Button>
-        <Button variant="filled" size="small" onClick={startFromBlank} title="Clear the canvas and build from scratch (blank is the default for a new view)">
-          <FilePlusIcon className="size-3.5" /> Start blank
-        </Button>
-        <Button variant="filled" size="small" onClick={startFromDashboard} title="Replace the layout with the dashboard design as editable tiles">
-          <LayoutTemplateIcon className="size-3.5" /> Start from Dashboard
-        </Button>
-        <Button variant="filled" size="small" onClick={startFromConfidenceMonitor} title="Replace the layout with the Confidence Monitor design as editable objects">
-          <LayoutTemplateIcon className="size-3.5" /> Start from Confidence Monitor
-        </Button>
-
-        {templates.length > 0 && (
-          <Select
-            value=""
-            onValueChange={(id: string) => { const t = templates.find((x) => x.id === id); if (t) loadTemplate(t); }}
-          >
-            <SelectTrigger className="w-40"><SelectValue placeholder="Load layout…" /></SelectTrigger>
-            <SelectContent>
-              {templates.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
+        {/* Replace the current layout wholesale — starters + saved layouts. */}
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <Button variant="filled" size="small" title="Replace the current layout with a starter or a saved layout">
+              <LayoutTemplateIcon className="size-3.5" /> Replace
+              <ChevronDownIcon className="size-3.5 text-gray-9" />
+            </Button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content align="start" sideOffset={4} className="z-50 min-w-52 rounded-md border border-line-strong bg-popover p-1 shadow-md backdrop-blur-xl">
+              <DropdownMenu.Label className="px-2 pb-1 pt-1.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Replace with…</DropdownMenu.Label>
+              <DropdownMenu.Item onSelect={startFromBlank} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill">
+                <FilePlusIcon className="size-3.5 text-fg-subtle" /> Blank canvas
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={startFromDashboard} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill">
+                <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Dashboard template
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={startFromConfidenceMonitor} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill">
+                <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Confidence Monitor template
+              </DropdownMenu.Item>
+              {templates.length > 0 && (
+                <>
+                  <DropdownMenu.Separator className="my-1 h-px bg-line" />
+                  <DropdownMenu.Label className="px-2 pb-1 pt-0.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Saved layouts</DropdownMenu.Label>
+                  {templates.map((t) => (
+                    <DropdownMenu.Item key={t.id} onSelect={() => loadTemplate(t)} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill">
+                      {t.name}
+                    </DropdownMenu.Item>
+                  ))}
+                </>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
         <Dialog
           trigger={<Button variant="filled" size="small"><SaveIcon className="size-3.5" /> Save as layout</Button>}
           title="Save layout to library"
