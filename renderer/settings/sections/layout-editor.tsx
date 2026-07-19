@@ -1350,6 +1350,10 @@ export function LayoutEditor({
   // don't depend on the height we set, so this isn't circular.
   const canvasCellRef = useRef<HTMLDivElement>(null);
   const [canvasH, setCanvasH] = useState<number | null>(null);
+  // Available height from the canvas/panel row's top to the viewport bottom — the
+  // inspector panel is capped to this so it scrolls INTERNALLY (see the side panel
+  // below) instead of growing the editor and scrolling the preview out of view.
+  const [availH, setAvailH] = useState<number | null>(null);
   useEffect(() => {
     const el = canvasCellRef.current;
     if (!el) return;
@@ -1366,6 +1370,9 @@ export function LayoutEditor({
       // the read-only ViewPreview so a custom preview isn't shrunk vs other kinds.
       const cap = isEditing ? maxH : Infinity;
       setCanvasH(Math.round(fillMode ? maxH : Math.min(fit, cap)));
+      // A touch shorter than the raw available height so the section's own bottom
+      // padding doesn't tip the page into a few px of scroll.
+      setAvailH(Math.max(240, Math.round(maxH) - 12));
     };
     measure();
     window.addEventListener("resize", measure);
@@ -1977,11 +1984,12 @@ export function LayoutEditor({
           )}
         </div>
 
-        {/* Side panel: layers + inspector (edit mode only). Fills the full window
-            height (scrolls internally); only capped to the preview height while an
-            inline slots-grid is selected, so its editor below stays reachable. */}
+        {/* Side panel: layers + inspector (edit mode only). Capped to the canvas
+            height (which is measured to reach the viewport bottom) and scrolls
+            INTERNALLY, so paging through inspector options never scrolls the whole
+            editor and pushes the preview out of view. */}
         {isEditing && (
-        <div className="w-80 @6xl:w-96 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: inlineGrid ? (canvasH ?? undefined) : undefined }}>
+        <div className="w-80 @6xl:w-96 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: (inlineGrid ? canvasH : availH) ?? undefined }}>
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Layers</span>
