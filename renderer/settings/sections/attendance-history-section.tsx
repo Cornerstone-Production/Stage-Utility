@@ -408,7 +408,7 @@ function AttendanceChart({
       </div>
     );
   }
-  const W = 600, H = 240, padL = 40, padR = 12, padT = 16, padB = 26;
+  const W = 600, H = 264, padL = 40, padR = 12, padT = 16, padB = 50;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const n = samples.length;
@@ -532,13 +532,15 @@ function AttendanceChart({
           {avgOccupancy != null && (
             <line x1={padL} y1={y(avgOccupancy)} x2={W - padR} y2={y(avgOccupancy)} stroke="var(--green-9)" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} vectorEffect="non-scaling-stroke" />
           )}
-          <text x={padL} y={H - 8} textAnchor="start" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[0].t)}</text>
-          <text x={W - padR} y={H - 8} textAnchor="end" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[n - 1].t)}</text>
+          {/* Service start/end times — vertical (matching the item times) but in a
+              distinct, brighter tone so they read as boundaries, not plan items. */}
+          <text x={padL} y={padT + plotH + 6} fontSize={9} fill="var(--su-fg-muted)" transform={`rotate(90 ${padL} ${padT + plotH + 6})`}>{fmtTime(samples[0].t)}</text>
+          <text x={W - padR} y={padT + plotH + 6} fontSize={9} fill="var(--su-fg-muted)" transform={`rotate(90 ${W - padR} ${padT + plotH + 6})`}>{fmtTime(samples[n - 1].t)}</text>
           {/* PCO item times on the x-axis (thinned), each ticking up to its marker line */}
           {axisTimes.map((a, i) => (
             <g key={`axt-${i}`}>
               <line x1={a.x} y1={padT + plotH} x2={a.x} y2={padT + plotH + 3} stroke="var(--gray-a6)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-              <text x={a.x} y={H - 8} textAnchor="middle" fontSize={9} fill="var(--gray-10)">{fmtTime(a.t)}</text>
+              <text x={a.x} y={padT + plotH + 6} fontSize={9} fill="var(--su-fg-subtle)" transform={`rotate(90 ${a.x} ${padT + plotH + 6})`}>{fmtTime(a.t)}</text>
             </g>
           ))}
           {showOccupancy && <polyline points={line("occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />}
