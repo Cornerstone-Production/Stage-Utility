@@ -141,7 +141,7 @@ function isCountedItem(it: ServiceTimelineItem, rec: ServiceTimeline): boolean {
 }
 
 /** Derived service-level timing from a record. */
-function summarize(rec: ServiceTimeline) {
+function summarize(rec: ServiceTimeline, now = Date.now()) {
   const counted = rec.items.filter((it) => isCountedItem(it, rec));
   // "Started" = when the service proper began (first counted item), not doors.
   const firstStart = counted[0]?.startedAt ?? rec.items[0]?.startedAt ?? rec.startedAt;
@@ -157,6 +157,11 @@ function summarize(rec: ServiceTimeline) {
   for (const it of counted) {
     if (it.plannedLengthSec != null) { planned += it.plannedLengthSec; plannedKnown = true; }
     if (it.actualDurationSec != null) actual += it.actualDurationSec;
+    else if (it.endedAt == null && it.startedAt) {
+      // Live (in-progress) item: count its elapsed time so "Actual" ticks up live.
+      const el = (now - Date.parse(it.startedAt)) / 1000;
+      if (Number.isFinite(el) && el > 0) actual += el;
+    }
   }
   return { lateStartSec, planned: plannedKnown ? planned : null, actual, firstStart };
 }
@@ -288,9 +293,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       .catch(() => setAttList([]));
   }, []);
 
-  // Live updates while a service is recording — refresh the open detail/list.
+  // Live updates while a service is recording — refresh the open detail/list, the
+  // attendance chart (samples), and SPL, all without a page reload.
   useEffect(() => {
-    return onNotification("service-timeline:history", (p) => {
+    const offTl = onNotification("service-timeline:history", (p) => {
       const rec = p as ServiceTimeline | null;
       if (!rec) return;
       setList((prev) => {
@@ -303,7 +309,35 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       });
       setDetail((d) => (d && d.serviceKey === rec.serviceKey ? rec : d));
     });
+    const offAtt = onNotification("attendance:history", (p) => {
+      const rec = p as ServiceAttendance | null;
+      if (!rec) return;
+      setAttList((prev) => {
+        const i = prev.findIndex((a) => a.serviceKey === rec.serviceKey);
+        if (i === -1) return [rec, ...prev];
+        const next = prev.slice();
+        next[i] = rec;
+        return next;
+      });
+      setAttendance((a) => (a && a.serviceKey === rec.serviceKey ? rec : a));
+    });
+    const offSpl = onNotification("spl:history", (p) => {
+      const rec = p as ServiceSplHistory | null;
+      if (!rec) return;
+      setSpl((s) => (s && s.serviceKey === rec.serviceKey ? rec : s));
+    });
+    return () => { offTl(); offAtt(); offSpl(); };
   }, []);
+
+  // While the open service is still recording, tick every second so the "Actual"
+  // duration / pacing count up live between attendance/timeline broadcasts.
+  const detailLive = detail != null && detail.endedAt == null;
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!detailLive) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [detailLive]);
 
   useEffect(() => {
     if (!selectedKey) {
@@ -493,7 +527,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // ── Detail: one service's actual rundown. ──
   if (detail) {
     const live = detail.endedAt == null;
-    const sum = summarize(detail);
+    const sum = summarize(detail, live ? nowTick : undefined);
     const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
     const over = overrunStats(detail);
     // Projected end = actual start + planned length; actual end = the record's
