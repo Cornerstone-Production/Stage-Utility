@@ -132,10 +132,27 @@ function UpdatesPanel({
   }
 
   async function onRestart() {
-    if (await confirm({ title: "Restart the server?", message: "The displays will go blank and reload for a few seconds while the server restarts. No update is installed.", confirmLabel: "Restart" })) {
+    const doRestart = () =>
       void invoke("update:restart").catch((e) =>
         window.alert(`Restart failed: ${e instanceof Error ? e.message : String(e)}`),
       );
+    // Locked during a live service / recording, same as self-update — a manual
+    // restart interrupts displays too. Overridable for a genuine emergency.
+    if (lock?.active) {
+      if (
+        await confirm({
+          title: "Service in progress",
+          message: `Restarting the server would interrupt: ${lock.reasons.join(", ")}. It's safest to wait until the service is over.`,
+          confirmLabel: "Override & restart anyway",
+          destructive: true,
+        })
+      ) {
+        doRestart();
+      }
+      return;
+    }
+    if (await confirm({ title: "Restart the server?", message: "The displays will go blank and reload for a few seconds while the server restarts. No update is installed.", confirmLabel: "Restart" })) {
+      doRestart();
     }
   }
 
@@ -264,7 +281,7 @@ function UpdatesPanel({
             ) : null}
             {lock?.active && !updating ? (
               <p className="mt-1 flex items-center gap-1.5 text-caption2 text-amber-11">
-                <LockIcon className="size-3.5" /> Update locked — {lock.reasons.join(" · ")}. Finish the service, or override in the dialog.
+                <LockIcon className="size-3.5" /> Update &amp; restart locked — {lock.reasons.join(" · ")}. Finish the service, or override in the dialog.
               </p>
             ) : null}
           </FieldContent>
