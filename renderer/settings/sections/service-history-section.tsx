@@ -32,7 +32,7 @@ function shortDay(day: string): string {
 
 /** One point on the attendance trend chart — a service occurrence with its peak
  *  in-room count and the day it happened (for the axis labels). */
-interface TrendPoint { day: string; value: number }
+interface TrendPoint { day: string; value: number; parts?: { label: string; value: number }[] }
 
 /** A trend indicator: which direction the latest value moved vs the mean of the
  *  prior window, and whether that direction is good or bad for THIS metric.
@@ -456,17 +456,33 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     const overruns = sums.map((x) => (x.s.planned != null ? x.s.actual - x.s.planned : null)).filter((v): v is number => v != null);
     // "Attendance" = peak people in the room (peakOccupancy).
     const occ = att.filter((a) => a.peakOccupancy > 0);
-    const maxOcc = occ.length ? occ.reduce((m, a) => (a.peakOccupancy > m.peakOccupancy ? a : m)) : null;
     const startFmt = (sec: number) => (sec >= 0 ? `${fmtDur(sec)} late` : `${fmtDur(-sec)} early`);
     const avgPunct = mean(punct);
     const avgOverrun = mean(overruns);
-    const avgAttendance = mean(occ.map((a) => a.peakOccupancy));
 
-    // Chronological per-service attendance series (oldest → newest) for the chart
-    // and the trend math. Day-labeled so the chart axis pins to real dates.
-    const attChron = [...occ].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-    const attPoints: TrendPoint[] = attChron.map((a) => ({ day: a.serviceDate, value: a.peakOccupancy }));
+    // One point per WEEKEND (service date): value = TOTAL attendance across that
+    // day's services (the headline weekend number), with a per-service breakdown
+    // for the tooltip. So 3 weekends of 2 services each read as 3 dots, not 6.
+    const byDate = new Map<string, ServiceAttendance[]>();
+    for (const a of [...occ].sort((x, y) => Date.parse(x.startedAt) - Date.parse(y.startedAt))) {
+      const arr = byDate.get(a.serviceDate);
+      if (arr) arr.push(a);
+      else byDate.set(a.serviceDate, [a]);
+    }
+    const attPoints: TrendPoint[] = [...byDate.keys()]
+      .sort((x, y) => Date.parse(x) - Date.parse(y))
+      .map((d) => {
+        const svcs = byDate.get(d)!;
+        return {
+          day: d,
+          value: svcs.reduce((s, a) => s + a.peakOccupancy, 0),
+          parts: svcs.map((a) => ({ label: fmtTime(a.serviceTimeStartsAt ?? a.startedAt) || "service", value: a.peakOccupancy })),
+        };
+      });
     const attSeries = attPoints.map((p) => p.value);
+    // Lead stat + peak are WEEKEND totals now, to stay coherent with the chart.
+    const avgAttendance = mean(attSeries);
+    const peakWeekend = attPoints.length ? attPoints.reduce((m, p) => (p.value > m.value ? p : m)) : null;
     // Overrun series (chronological) for its own trend indicator.
     const overrunChron = [...sums]
       .sort((a, b) => Date.parse(a.t.startedAt) - Date.parse(b.t.startedAt))
@@ -490,8 +506,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       avgStartLate: avgPunct != null && avgPunct > 60,
       avgOverrun: avgOverrun != null ? fmtDelta(avgOverrun) : "—",
       overrunTrend,
-      peakAttendance: maxOcc ? maxOcc.peakOccupancy.toLocaleString() : "—",
-      peakSub: maxOcc ? shortDay(maxOcc.serviceDate) : undefined,
+      peakAttendance: peakWeekend ? peakWeekend.value.toLocaleString() : "—",
+      peakSub: peakWeekend ? shortDay(peakWeekend.day) : undefined,
     };
   }, [list, attList, day, activeType]);
 
@@ -924,7 +940,7 @@ function OverviewBlend({ overview }: { overview: OverviewData }) {
     <div className="su-card px-5 py-5 flex flex-col">
       <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-8">
         <div className="shrink-0">
-          <div className="text-caption1 uppercase tracking-[0.08em] text-fg-muted">Avg attendance</div>
+          <div className="text-caption1 uppercase tracking-[0.08em] text-fg-muted">Avg weekend</div>
           <div className="mt-1 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
             {overview.avgAttendance}
           </div>
@@ -935,7 +951,7 @@ function OverviewBlend({ overview }: { overview: OverviewData }) {
                 {overview.attTrend.pct != null
                   ? `${overview.attTrend.pct >= 0 ? "+" : "−"}${Math.round(Math.abs(overview.attTrend.pct) * 100)}%`
                   : "changed"}{" "}
-                vs the prior {overview.attTrend.priorCount} service{overview.attTrend.priorCount === 1 ? "" : "s"}
+                vs the prior {overview.attTrend.priorCount} weekend{overview.attTrend.priorCount === 1 ? "" : "s"}
               </span>
             </div>
           )}
@@ -1032,6 +1048,16 @@ function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
         >
           <div className="font-mono text-caption2 tabular-nums text-fg-subtle whitespace-nowrap">{shortDay(hp.day)}</div>
           <div className="font-mono text-caption1 font-medium tabular-nums text-fg text-center">{hp.value.toLocaleString()}</div>
+          {hp.parts && hp.parts.length > 1 && (
+            <div className="mt-1 flex flex-col gap-0.5 border-t border-line pt-1">
+              {hp.parts.map((p, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 font-mono text-caption2 tabular-nums text-fg-muted whitespace-nowrap">
+                  <span>{p.label}</span>
+                  <span>{p.value.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {/* Latest attendance, pinned above the most recent point (hidden while
