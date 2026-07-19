@@ -461,22 +461,19 @@ function AttendanceChart({
       lastAxisX = mx;
     }
   }
-  // Vertical NAME labels for items that start close together stack on the same x
-  // and become unreadable (e.g. "MEDIA" under "VIDEO: Pre-roll"). Push each into a
-  // horizontal "lane" — a label within CLUSTER_GAP of the previous shifts one lane
-  // right so a cluster fans out side-by-side instead of overlapping. Lone labels
-  // (lane 0) stay on their own line.
-  const LANE_W = 11;
-  const CLUSTER_GAP = 12;
-  const laneByIdx = new Map<number, number>();
+  // Vertical NAME labels for items that start close together (e.g. "MEDIA" +
+  // "VIDEO: Pre-roll") would stack illegibly. Draw a label only if it clears the
+  // last drawn one; collided labels are HIDDEN — their marker line stays, and the
+  // names are surfaced in the hover tooltip so nothing is lost.
+  const LABEL_GAP = 13;
+  const labelDrawn = new Set<number>();
   {
-    const order = inRange.map((m, i) => ({ i, mx: xt(m.t) })).sort((a, b) => a.mx - b.mx);
     let lastX = -Infinity;
-    let lane = 0;
-    for (const { i, mx } of order) {
-      lane = mx - lastX < CLUSTER_GAP ? lane + 1 : 0;
-      laneByIdx.set(i, lane);
-      lastX = mx;
+    for (const { i, mx } of inRange.map((m, i) => ({ i, mx: xt(m.t) })).sort((a, b) => a.mx - b.mx)) {
+      if (mx - lastX >= LABEL_GAP) {
+        labelDrawn.add(i);
+        lastX = mx;
+      }
     }
   }
 
@@ -497,6 +494,19 @@ function AttendanceChart({
   }
   const hs = hover != null ? samples[hover] : null;
   const hx = hs ? xt(hs.t) : 0;
+  // Plan items at the crosshair — surfaces any name the thinning above hid, so a
+  // cluster's overlapping labels are still discoverable ("so you know it's there").
+  const hoverItems = (() => {
+    if (!hs || inRange.length === 0) return [] as typeof inRange;
+    let nx = 0;
+    let nd = Infinity;
+    for (const m of inRange) {
+      const d = Math.abs(xt(m.t) - hx);
+      if (d < nd) { nd = d; nx = xt(m.t); }
+    }
+    if (nd > 18) return [] as typeof inRange;
+    return [...inRange].filter((m) => Math.abs(xt(m.t) - nx) <= LABEL_GAP).sort((a, b) => xt(a.t) - xt(b.t));
+  })();
 
   return (
     <div className="flex flex-col gap-2">
@@ -534,14 +544,14 @@ function AttendanceChart({
           {/* PCO plan-item markers — item NAME on the line; the time drops to the x-axis */}
           {inRange.map((m, i) => {
             const mx = xt(m.t);
-            // Shift clustered labels into their lane so vertical names don't stack.
-            const tx = mx + 2 + (laneByIdx.get(i) ?? 0) * LANE_W;
             return (
               <g key={`${m.t}-${i}`}>
                 <line x1={mx} y1={padT} x2={mx} y2={padT + plotH} stroke="var(--gray-a6)" strokeWidth={1} strokeDasharray="3 3" />
-                <text x={tx} y={padT + 8} fontSize={9} fill="var(--gray-10)" transform={`rotate(90 ${tx} ${padT + 8})`}>
-                  {m.label.length > 22 ? `${m.label.slice(0, 21)}…` : m.label}
-                </text>
+                {labelDrawn.has(i) && (
+                  <text x={mx + 2} y={padT + 8} fontSize={9} fill="var(--gray-10)" transform={`rotate(90 ${mx + 2} ${padT + 8})`}>
+                    {m.label.length > 22 ? `${m.label.slice(0, 21)}…` : m.label}
+                  </text>
+                )}
               </g>
             );
           })}
@@ -572,16 +582,18 @@ function AttendanceChart({
               {showOccupancy && <circle cx={hx} cy={y(hs.occupancy)} r={3} fill="var(--green-9)" />}
               {showAttendance && <circle cx={hx} cy={y(hs.attendance)} r={3} fill="var(--blue-9)" />}
               {(() => {
-                const rows = [fmtTime(hs.t)];
-                if (showOccupancy) rows.push(`Attendance ${hs.occupancy.toLocaleString()}`);
-                if (showAttendance) rows.push(`Entries ${hs.attendance.toLocaleString()}`);
-                const boxW = 96, boxH = 6 + rows.length * 12;
+                const rows: { t: string; kind: "time" | "val" | "item" }[] = [{ t: fmtTime(hs.t), kind: "time" }];
+                if (showOccupancy) rows.push({ t: `Attendance ${hs.occupancy.toLocaleString()}`, kind: "val" });
+                if (showAttendance) rows.push({ t: `Entries ${hs.attendance.toLocaleString()}`, kind: "val" });
+                for (const m of hoverItems) rows.push({ t: `▸ ${m.label.length > 24 ? `${m.label.slice(0, 23)}…` : m.label}`, kind: "item" });
+                const boxW = Math.min(W - padL - padR, Math.max(96, Math.round(Math.max(...rows.map((r) => r.t.length)) * 5) + 14));
+                const boxH = 6 + rows.length * 12;
                 const bx = Math.min(Math.max(hx + 6, padL), W - padR - boxW);
                 return (
                   <g>
                     <rect x={bx} y={padT + 2} width={boxW} height={boxH} rx={4} fill="var(--gray-1)" stroke="var(--gray-6)" opacity={0.97} />
                     {rows.map((ln, i) => (
-                      <text key={i} x={bx + 6} y={padT + 14 + i * 12} fontSize={9} fill={i === 0 ? "var(--gray-9)" : "var(--gray-12)"}>{ln}</text>
+                      <text key={i} x={bx + 6} y={padT + 14 + i * 12} fontSize={9} fill={ln.kind === "time" ? "var(--gray-9)" : ln.kind === "item" ? "var(--gray-11)" : "var(--gray-12)"}>{ln.t}</text>
                     ))}
                   </g>
                 );
