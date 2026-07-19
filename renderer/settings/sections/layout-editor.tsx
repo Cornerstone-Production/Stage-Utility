@@ -228,7 +228,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "integration-status": return { type: "integration-status", integrationId: null, showLabel: true };
     case "wireless-summary": return { type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" };
     case "wireless-channel": return { type: "wireless-channel", channelId: null, show: { rf: true, battery: true, frequency: true, audio: false }, showLabel: true };
-    case "service-pacing": return { type: "service-pacing", scope: "item", hideWhenIdle: false, showLabel: false };
+    case "service-pacing": return { type: "service-pacing", hideWhenIdle: false, showLabel: false };
     case "pp-timer": return { type: "pp-timer", timerName: null, propresenterInstanceId: null, warnStates: true, hideWhenIdle: false, showLabel: true };
     case "slide-progress": return { type: "slide-progress", propresenterInstanceId: null, display: "fraction", showLabel: false };
     case "people-counter": return { type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true };
@@ -2628,15 +2628,23 @@ function Inspector({
       )}
       {c.type === "service-pacing" && (
         <>
-          <RowToggle
-            label="Scope"
-            hint="Current item compares the live item's elapsed time to its planned length. Whole service sums how far ahead/behind the entire service is running (needs a service timeline recording)."
-            value={c.scope ?? "item"}
-            options={[{ value: "item", label: "Current item" }, { value: "service", label: "Whole service" }]}
-            onChange={(v) => onConfig({ ...c, scope: v })}
-          />
-          <RowSwitch label="Show scope label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-          <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
+          <div className="px-1 pb-1 text-xs text-fg-subtle">
+            Shows how far ahead or behind the whole schedule the service is running right now — carries over slippage from earlier items and grows live if the current item runs long. Needs a service-timeline recording.
+          </div>
+          <Row label="Ahead color">
+            <div className="flex items-center gap-2">
+              <input type="color" value={hexForInput(c.aheadColor, "#30a46c")} onChange={(e) => onConfig({ ...c, aheadColor: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" />
+              {c.aheadColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, aheadColor: null })}>Reset</button>}
+            </div>
+          </Row>
+          <Row label="Behind color">
+            <div className="flex items-center gap-2">
+              <input type="color" value={hexForInput(c.behindColor, "#e5484d")} onChange={(e) => onConfig({ ...c, behindColor: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" />
+              {c.behindColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, behindColor: null })}>Reset</button>}
+            </div>
+          </Row>
+          <RowSwitch label="Show ahead/behind label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+          <RowSwitch label="Show dash when idle" checked={!(c.hideWhenIdle ?? false)} onChange={(v) => onConfig({ ...c, hideWhenIdle: !v })} />
         </>
       )}
       {c.type === "slots-grid" && (() => {
