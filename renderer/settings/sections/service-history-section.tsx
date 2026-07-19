@@ -329,15 +329,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     return () => { offTl(); offAtt(); offSpl(); };
   }, []);
 
-  // While the open service is still recording, tick every second so the "Actual"
-  // duration / pacing count up live between attendance/timeline broadcasts.
+  // While a service is still recording — the open detail OR any row in the day
+  // list — tick every second so the live "Actual"/"running" durations count up
+  // between attendance/timeline broadcasts. (The Overview stays finished-only.)
   const detailLive = detail != null && detail.endedAt == null;
+  const listLive = (list ?? []).some((t) => t.endedAt == null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
-    if (!detailLive) return;
+    if (!detailLive && !listLive) return;
     const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [detailLive]);
+  }, [detailLive, listLive]);
 
   useEffect(() => {
     if (!selectedKey) {
@@ -846,7 +848,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <div className="min-w-0 flex flex-col gap-2">
           {day && <span className="text-body font-semibold text-gray-12">{fmtDay(day)}</span>}
           {dayServices.map((s) => {
-            const sum = summarize(s);
+            const live = s.endedAt == null;
+            // Live rows count up (summarize adds the in-progress item's elapsed);
+            // finished rows show the settled total.
+            const sum = summarize(s, live ? nowTick : undefined);
             const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
             return (
               <div key={s.serviceKey} className="flex items-center gap-1 rounded-lg border border-gray-5 bg-gray-2 pr-1.5 hover:bg-gray-3 transition-colors">
@@ -860,8 +865,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                   </div>
                   <span className="shrink-0 tabular-nums text-caption1 text-right">
                     {sum.lateStartSec != null && sum.lateStartSec >= 30 && <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">late </span><span className="text-amber-11">{fmtDelta(sum.lateStartSec)}</span></span>}
-                    <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">ran </span><span className="text-blue-11">{fmtDur(sum.actual)}</span></span>
-                    {totalDelta != null && <span className="ml-3 whitespace-nowrap"><span className={totalDelta > 0 ? "text-red-11" : "text-gray-11"}>{fmtDelta(totalDelta)}</span></span>}
+                    <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">{live ? "running " : "ran "}</span><span className="text-blue-11">{fmtDur(sum.actual)}</span></span>
+                    {/* Delta vs plan only once finished — a live "−38:45" (most of
+                        the plan not yet run) reads as misleading. */}
+                    {!live && totalDelta != null && <span className="ml-3 whitespace-nowrap"><span className={totalDelta > 0 ? "text-red-11" : "text-gray-11"}>{fmtDelta(totalDelta)}</span></span>}
                   </span>
                 </button>
                 {!readOnly && (
