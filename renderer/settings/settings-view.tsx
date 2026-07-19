@@ -120,6 +120,33 @@ function useTheme() {
 
 const SIDEBAR_COLLAPSED_KEY = "settings-sidebar-collapsed";
 
+/** Segmented light/dark toggle (accent-tint pill, active segment is accent).
+ *  `vertical` stacks the two segments so it fits the narrow collapsed rail. */
+function ThemeTogglePill({ isDark, toggle, vertical = false }: { isDark: boolean; toggle: () => void; vertical?: boolean }) {
+  return (
+    <div className={cn("flex items-center gap-px rounded-lg bg-accent/12 p-0.5 shrink-0", vertical && "flex-col")}>
+      <button
+        type="button"
+        onClick={() => isDark && toggle()}
+        aria-label="Light mode"
+        aria-pressed={!isDark}
+        className={cn("flex h-5 w-6 items-center justify-center rounded-md transition-colors", !isDark ? "text-accent" : "text-fg-subtle hover:text-fg")}
+      >
+        <SunIcon className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => !isDark && toggle()}
+        aria-label="Dark mode"
+        aria-pressed={isDark}
+        className={cn("flex h-5 w-6 items-center justify-center rounded-md transition-colors", isDark ? "text-accent" : "text-fg-subtle hover:text-fg")}
+      >
+        <MoonIcon className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
 function useSidebarCollapsed() {
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -190,10 +217,13 @@ export function SettingsView() {
   const queryClient = useQueryClient();
 
   // Restore the tab from the URL hash (e.g. #integrations) so a refresh stays put
-  // and tabs are deep-linkable; falls back to the first section.
+  // and tabs are deep-linkable; otherwise open on Views (a better first-run landing
+  // than Plan, which assumes PCO). Sidebar order is unchanged — this is only the
+  // default active tab.
   const [activeSection, setActiveSection] = useState<SectionItem>(() => {
     const id = window.location.hash.replace(/^#/, "");
-    return SECTIONS.find((s) => s.id === id) ?? SECTIONS[0];
+    const fallback = SECTIONS.find((s) => s.id === "views") ?? SECTIONS[0];
+    return SECTIONS.find((s) => s.id === id) ?? fallback;
   });
   // Bumped whenever the History nav is clicked so the section remounts back to its
   // landing list (instead of staying on the service you'd drilled into).
@@ -707,15 +737,17 @@ export function SettingsView() {
   }
 
   // ── Views (content) ──────────────────────────────────────────────────
-  async function handleAddView(name: string, kind: ViewKind) {
+  async function handleAddView(name: string, kind: ViewKind): Promise<string | null> {
     try {
       const next = await ipc<StageState>("views:add", { name, kind });
       queryClient.setQueryData(["stage:getState"], next);
       // Select the newly-created view (last in the list).
       const created = next.views?.[next.views.length - 1];
       if (created) setSelectedViewId(created.id);
+      return created?.id ?? null;
     } catch (err) {
       toast.error(`Failed to add view: ${String(err)}`);
+      return null;
     }
   }
 
@@ -1149,38 +1181,21 @@ export function SettingsView() {
               desktop collapse toggle is hidden on mobile (the drawer is always
               shown expanded). */}
           {railed ? (
-            <div className="flex flex-col items-center gap-1.5 pt-2">
-              {stageState.appLogo && (
+            stageState.appLogo ? (
+              <div className="flex flex-col items-center pt-2">
                 <BrandLogo
                   logo={stageState.appLogo}
                   monochrome={stageState.appLogoMonochrome}
                   className="size-8 rounded-md text-gray-12"
                 />
-              )}
-              <Button variant="transparent" size="small" iconOnly aria-label="Expand sidebar" onClick={toggleCollapsed}>
-                <PanelLeftOpenIcon className="size-4 text-gray-11" />
-              </Button>
-            </div>
-          ) : (
-            <div className="flex items-start">
-              <div className="flex-1 min-w-0">
-                <BrandHeader
-                  name={stageState.appName}
-                  logo={stageState.appLogo}
-                  monochrome={stageState.appLogoMonochrome}
-                />
               </div>
-              <Button
-                variant="transparent"
-                size="small"
-                iconOnly
-                aria-label="Collapse sidebar"
-                onClick={toggleCollapsed}
-                className="max-sm:hidden mt-2.5 mr-1.5 shrink-0"
-              >
-                <PanelLeftCloseIcon className="size-4 text-gray-11" />
-              </Button>
-            </div>
+            ) : null
+          ) : (
+            <BrandHeader
+              name={stageState.appName}
+              logo={stageState.appLogo}
+              monochrome={stageState.appLogoMonochrome}
+            />
           )}
 
           <SidebarList
@@ -1206,40 +1221,38 @@ export function SettingsView() {
             })}
           </SidebarList>
 
-          {/* Rail footer: version + segmented light/dark toggle (matches the mockup:
-              an accent-tint pill; the active segment is just an accent-colored icon). */}
-          <div className="mt-auto flex items-center justify-between px-3 py-2.5">
-            <span className="text-[11.5px] leading-none text-fg-subtle tabular-nums truncate">
-              {updateStatus?.version ? `v${updateStatus.version}` : ""}
-              {updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}
-            </span>
-            <div className="flex items-center gap-px rounded-lg bg-accent/12 p-0.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => theme.isDark && theme.toggle()}
-                aria-label="Light mode"
-                aria-pressed={!theme.isDark}
-                className={cn(
-                  "flex h-5 w-6 items-center justify-center rounded-md transition-colors",
-                  !theme.isDark ? "text-accent" : "text-fg-subtle hover:text-fg",
-                )}
-              >
-                <SunIcon className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => !theme.isDark && theme.toggle()}
-                aria-label="Dark mode"
-                aria-pressed={theme.isDark}
-                className={cn(
-                  "flex h-5 w-6 items-center justify-center rounded-md transition-colors",
-                  theme.isDark ? "text-accent" : "text-fg-subtle hover:text-fg",
-                )}
-              >
-                <MoonIcon className="size-3.5" />
-              </button>
+          {/* Footer: theme toggle + the sidebar collapse control (moved here from
+              the cramped header). Rail-aware — collapsed stacks a compact toggle
+              over the expand button so the wide pill + version never clip the
+              narrow rail. */}
+          {railed ? (
+            <div className="mt-auto flex flex-col items-center gap-1.5 px-2 py-2.5">
+              <ThemeTogglePill isDark={theme.isDark} toggle={theme.toggle} vertical />
+              <Button variant="transparent" size="small" iconOnly aria-label="Expand sidebar" onClick={toggleCollapsed}>
+                <PanelLeftOpenIcon className="size-4 text-gray-11" />
+              </Button>
             </div>
-          </div>
+          ) : (
+            <div className="mt-auto flex items-center justify-between gap-2 px-3 py-2.5">
+              <span className="text-[11.5px] leading-none text-fg-subtle tabular-nums truncate">
+                {updateStatus?.version ? `v${updateStatus.version}` : ""}
+                {updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}
+              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <ThemeTogglePill isDark={theme.isDark} toggle={theme.toggle} />
+                <Button
+                  variant="transparent"
+                  size="small"
+                  iconOnly
+                  aria-label="Collapse sidebar"
+                  onClick={toggleCollapsed}
+                  className="max-sm:hidden"
+                >
+                  <PanelLeftCloseIcon className="size-4 text-gray-11" />
+                </Button>
+              </div>
+            </div>
+          )}
         </Sidebar>
       }
     >

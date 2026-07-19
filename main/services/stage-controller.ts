@@ -102,27 +102,14 @@ function defaultViewName(kind: ViewKind): string {
 
 /** A sensible starting layout for a new custom View — proves the schema and
  *  gives the editor something to manipulate (clock, countdown, slide text). */
+// A new custom view starts BLANK — the operator builds from scratch, or picks a
+// starter template in the create dialog / editor. (It used to seed 5 objects,
+// which meant every new custom layout had to be cleared by hand first.)
 function defaultCustomLayout(): LayoutDTO {
-  const obj = (
-    config: LayoutDTO["objects"][number]["config"],
-    x: number, y: number, w: number, h: number,
-    style: LayoutDTO["objects"][number]["style"],
-  ): LayoutDTO["objects"][number] => ({ id: randomUUID(), x, y, w, h, z: 1, config, style });
   return {
     version: 1,
-    canvas: { width: 1920, height: 1080, background: "#080810" },
-    objects: [
-      obj({ type: "clock", showSeconds: true, format: "12h" }, 0.04, 0.05, 0.34, 0.13,
-        { fontSize: 0.11, fontWeight: 600, color: "#ffffff", textAlign: "left", vAlign: "middle" }),
-      obj({ type: "countdown-timer" }, 0.62, 0.05, 0.34, 0.13,
-        { fontSize: 0.11, fontWeight: 600, color: "#7fe3c4", textAlign: "right", vAlign: "middle" }),
-      obj({ type: "current-slide-text" }, 0.08, 0.34, 0.84, 0.34,
-        { fontSize: 0.11, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", textShadow: 0.6, lineClamp: 4 }),
-      obj({ type: "next-slide-text" }, 0.08, 0.72, 0.84, 0.10,
-        { fontSize: 0.05, color: "rgba(255,255,255,0.6)", textAlign: "center", vAlign: "middle", lineClamp: 2 }),
-      obj({ type: "transcript-strip", mode: "latest" }, 0.08, 0.86, 0.84, 0.09,
-        { fontSize: 0.038, color: "rgba(255,255,255,0.85)", textAlign: "center", vAlign: "middle" }),
-    ],
+    canvas: { width: 1920, height: 1080, background: null },
+    objects: [],
   };
 }
 

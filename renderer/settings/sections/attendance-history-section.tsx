@@ -408,7 +408,7 @@ function AttendanceChart({
       </div>
     );
   }
-  const W = 600, H = 240, padL = 40, padR = 12, padT = 16, padB = 26;
+  const W = 600, H = 264, padL = 40, padR = 12, padT = 16, padB = 50;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const n = samples.length;
@@ -459,6 +459,24 @@ function AttendanceChart({
     if (mx - lastAxisX >= 30 && mx > padL + 22 && mx < W - padR - 22) {
       axisTimes.push({ x: mx, t: m.t });
       lastAxisX = mx;
+    }
+  }
+  // Vertical NAME labels for items that start close together stack on the same x
+  // and become unreadable (e.g. "MEDIA" under "VIDEO: Pre-roll"). Push each into a
+  // horizontal "lane" — a label within CLUSTER_GAP of the previous shifts one lane
+  // right so a cluster fans out side-by-side instead of overlapping. Lone labels
+  // (lane 0) stay on their own line.
+  const LANE_W = 11;
+  const CLUSTER_GAP = 12;
+  const laneByIdx = new Map<number, number>();
+  {
+    const order = inRange.map((m, i) => ({ i, mx: xt(m.t) })).sort((a, b) => a.mx - b.mx);
+    let lastX = -Infinity;
+    let lane = 0;
+    for (const { i, mx } of order) {
+      lane = mx - lastX < CLUSTER_GAP ? lane + 1 : 0;
+      laneByIdx.set(i, lane);
+      lastX = mx;
     }
   }
 
@@ -516,10 +534,12 @@ function AttendanceChart({
           {/* PCO plan-item markers — item NAME on the line; the time drops to the x-axis */}
           {inRange.map((m, i) => {
             const mx = xt(m.t);
+            // Shift clustered labels into their lane so vertical names don't stack.
+            const tx = mx + 2 + (laneByIdx.get(i) ?? 0) * LANE_W;
             return (
               <g key={`${m.t}-${i}`}>
                 <line x1={mx} y1={padT} x2={mx} y2={padT + plotH} stroke="var(--gray-a6)" strokeWidth={1} strokeDasharray="3 3" />
-                <text x={mx + 2} y={padT + 8} fontSize={9} fill="var(--gray-10)" transform={`rotate(90 ${mx + 2} ${padT + 8})`}>
+                <text x={tx} y={padT + 8} fontSize={9} fill="var(--gray-10)" transform={`rotate(90 ${tx} ${padT + 8})`}>
                   {m.label.length > 22 ? `${m.label.slice(0, 21)}…` : m.label}
                 </text>
               </g>
@@ -532,13 +552,15 @@ function AttendanceChart({
           {avgOccupancy != null && (
             <line x1={padL} y1={y(avgOccupancy)} x2={W - padR} y2={y(avgOccupancy)} stroke="var(--green-9)" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} vectorEffect="non-scaling-stroke" />
           )}
-          <text x={padL} y={H - 8} textAnchor="start" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[0].t)}</text>
-          <text x={W - padR} y={H - 8} textAnchor="end" fontSize={10} fill="var(--gray-9)">{fmtTime(samples[n - 1].t)}</text>
+          {/* Service start/end times — vertical (matching the item times) but in a
+              distinct, brighter tone so they read as boundaries, not plan items. */}
+          <text x={padL} y={padT + plotH + 6} fontSize={9} fill="var(--su-fg-muted)" transform={`rotate(90 ${padL} ${padT + plotH + 6})`}>{fmtTime(samples[0].t)}</text>
+          <text x={W - padR} y={padT + plotH + 6} fontSize={9} fill="var(--su-fg-muted)" transform={`rotate(90 ${W - padR} ${padT + plotH + 6})`}>{fmtTime(samples[n - 1].t)}</text>
           {/* PCO item times on the x-axis (thinned), each ticking up to its marker line */}
           {axisTimes.map((a, i) => (
             <g key={`axt-${i}`}>
               <line x1={a.x} y1={padT + plotH} x2={a.x} y2={padT + plotH + 3} stroke="var(--gray-a6)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-              <text x={a.x} y={H - 8} textAnchor="middle" fontSize={9} fill="var(--gray-10)">{fmtTime(a.t)}</text>
+              <text x={a.x} y={padT + plotH + 6} fontSize={9} fill="var(--su-fg-subtle)" transform={`rotate(90 ${a.x} ${padT + plotH + 6})`}>{fmtTime(a.t)}</text>
             </g>
           ))}
           {showOccupancy && <polyline points={line("occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />}

@@ -16,6 +16,8 @@ import { fileURLToPath } from "url";
 import type { DisplayKind, LayoutDTO, LayoutObject, ScriptViewLayout, Slot, SlotsLayout } from "../types/stage.js";
 import type { OscArg } from "../types/osc.js";
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
+import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
+import { buildHistoryWorkbook, type HistorySheet } from "./history-export.js";
 import { getLogLines } from "./log-buffer.js";
 import { editServiceWindow, mergeServiceRecords, recalcAttendance, setItemCounted } from "./history-edit.js";
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
@@ -674,6 +676,7 @@ export class RemoteServer {
       sseWrite(res, "obs:status", obsService.getLatest());
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
+      sseWrite(res, "displays:presence", presenceSnapshot());
       sseClients.add(res);
       // Correlate this stream to its client id so POST /api/events/subscribe can set
       // its channel filter. No cid (or no report yet) → the fan-out sends everything.
@@ -707,6 +710,39 @@ export class RemoteServer {
         : null;
       if (cid && channels) clientChannels.set(cid, new Set(channels));
       json(res, { ok: cid != null && channels != null });
+      return;
+    }
+    // Display presence heartbeat — a kiosk page reports it's alive (or leaving).
+    // Powers the Connected/Offline dot on Settings → Displays.
+    if (method === "POST" && pathname === "/api/displays/presence") {
+      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const outputId = typeof body.outputId === "string" ? body.outputId : null;
+      if (outputId) {
+        if (body.leaving === true) displayLeaving(outputId);
+        else displayHeartbeat(outputId);
+      }
+      json(res, { ok: outputId != null });
+      return;
+    }
+    // Multi-sheet .xlsx export of service history — date range + which sheets via
+    // query params (?from=&to=&include=services,attendance,items,spl).
+    if (method === "GET" && pathname === "/api/history/export") {
+      const VALID: HistorySheet[] = ["services", "attendance", "items", "spl"];
+      const include = (_url.searchParams.get("include") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s): s is HistorySheet => (VALID as string[]).includes(s));
+      const buf = await buildHistoryWorkbook({
+        from: _url.searchParams.get("from"),
+        to: _url.searchParams.get("to"),
+        include,
+      });
+      const fname = `stage-utility-history-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      res.writeHead(200, {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${fname}"`,
+      });
+      res.end(buf);
       return;
     }
 

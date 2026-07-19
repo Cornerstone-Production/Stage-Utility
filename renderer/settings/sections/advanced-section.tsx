@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon } from "lucide-react";
 import { invoke, onNotification } from "../../lib/api";
-import { CompanionInfoPanel } from "../../components/companion-info-panel";
 import {
   FieldSet,
   FieldGroup,
@@ -10,6 +9,7 @@ import {
   FieldContent,
   FieldLabel,
   FieldDescription,
+  Collapsible,
   Switch,
   Input,
   NumberInput,
@@ -132,10 +132,27 @@ function UpdatesPanel({
   }
 
   async function onRestart() {
-    if (await confirm({ title: "Restart the server?", message: "The displays will go blank and reload for a few seconds while the server restarts. No update is installed.", confirmLabel: "Restart" })) {
+    const doRestart = () =>
       void invoke("update:restart").catch((e) =>
         window.alert(`Restart failed: ${e instanceof Error ? e.message : String(e)}`),
       );
+    // Locked during a live service / recording, same as self-update — a manual
+    // restart interrupts displays too. Overridable for a genuine emergency.
+    if (lock?.active) {
+      if (
+        await confirm({
+          title: "Service in progress",
+          message: `Restarting the server would interrupt: ${lock.reasons.join(", ")}. It's safest to wait until the service is over.`,
+          confirmLabel: "Override & restart anyway",
+          destructive: true,
+        })
+      ) {
+        doRestart();
+      }
+      return;
+    }
+    if (await confirm({ title: "Restart the server?", message: "The displays will go blank and reload for a few seconds while the server restarts. No update is installed.", confirmLabel: "Restart" })) {
+      doRestart();
     }
   }
 
@@ -264,7 +281,7 @@ function UpdatesPanel({
             ) : null}
             {lock?.active && !updating ? (
               <p className="mt-1 flex items-center gap-1.5 text-caption2 text-amber-11">
-                <LockIcon className="size-3.5" /> Update locked — {lock.reasons.join(" · ")}. Finish the service, or override in the dialog.
+                <LockIcon className="size-3.5" /> Update &amp; restart locked — {lock.reasons.join(" · ")}. Finish the service, or override in the dialog.
               </p>
             ) : null}
           </FieldContent>
@@ -369,35 +386,6 @@ function UpdatesPanel({
   );
 }
 
-// Bitfocus Companion lives here (not on Integrations) — there's nothing to dial;
-// Companion connects TO this app, so this just shows the URL + live client count.
-function CompanionPanel() {
-  const queryClient = useQueryClient();
-  const { data } = useQuery({
-    queryKey: ["integrations:list"],
-    queryFn: () =>
-      invoke<{ descriptors: IntegrationDescriptor[]; states: IntegrationState[] }>("integrations:list"),
-  });
-  useEffect(() => {
-    return onNotification("integrations:state-changed", (payload: unknown) => {
-      const states = payload as IntegrationState[];
-      queryClient.setQueryData(
-        ["integrations:list"],
-        (prev: { descriptors: IntegrationDescriptor[]; states: IntegrationState[] } | undefined) =>
-          prev ? { ...prev, states } : prev,
-      );
-    });
-  }, [queryClient]);
-
-  const state = data?.states.find((s) => s.id === "companion");
-  if (!state) return null;
-  return (
-    <FieldSet>
-      <CompanionInfoPanel state={state} />
-    </FieldSet>
-  );
-}
-
 interface SnapshotMeta {
   id: string;
   name: string;
@@ -478,7 +466,7 @@ function ConfigSnapshotPanel() {
   }
 
   return (
-    <FieldSet title="Backup & restore">
+    <FieldSet flat>
       <FieldGroup>
         <Field orientation="vertical">
           <FieldContent>
@@ -581,7 +569,9 @@ export function AdvancedSection({
         onDismissJustUpdated={onDismissJustUpdated}
       />
 
-      <FieldSet title="Advanced">
+      <FieldSet>
+        <Collapsible label="Network & behavior" summary="Public address, reconnects, attendance" headerClassName="px-4 pt-3.5 pb-1">
+          <FieldSet flat>
         <FieldGroup>
           <Field orientation="vertical">
             <FieldContent>
@@ -607,7 +597,7 @@ export function AdvancedSection({
         </FieldGroup>
       </FieldSet>
 
-      <FieldSet title="Integration reconnects">
+          <FieldSet flat>
         <FieldGroup>
           <Field orientation="horizontal">
             <FieldContent>
@@ -656,7 +646,7 @@ export function AdvancedSection({
         </FieldGroup>
       </FieldSet>
 
-      <FieldSet title="Attendance capture">
+          <FieldSet flat>
         <FieldGroup>
           <Field orientation="horizontal">
             <FieldContent>
@@ -677,11 +667,15 @@ export function AdvancedSection({
               aria-label="Post-service taper (minutes)" />
           </Field>
         </FieldGroup>
+          </FieldSet>
+        </Collapsible>
       </FieldSet>
 
-      <ConfigSnapshotPanel />
-
-      <CompanionPanel />
+      <FieldSet>
+        <Collapsible label="Backup & restore" summary="Save, download & recall config snapshots" headerClassName="px-4 pt-3.5 pb-1">
+          <ConfigSnapshotPanel />
+        </Collapsible>
+      </FieldSet>
     </div>
   );
 }

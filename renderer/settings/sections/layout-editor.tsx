@@ -26,7 +26,9 @@ import {
   UnlockIcon,
   PackagePlusIcon,
   FilterIcon,
+  FilePlusIcon,
 } from "lucide-react";
+import { DropdownMenu, Popover } from "radix-ui";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import {
   Button,
@@ -226,7 +228,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "integration-status": return { type: "integration-status", integrationId: null, showLabel: true };
     case "wireless-summary": return { type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" };
     case "wireless-channel": return { type: "wireless-channel", channelId: null, show: { rf: true, battery: true, frequency: true, audio: false }, showLabel: true };
-    case "service-pacing": return { type: "service-pacing", scope: "item", hideWhenIdle: false, showLabel: false };
+    case "service-pacing": return { type: "service-pacing", hideWhenIdle: false, showLabel: false };
     case "pp-timer": return { type: "pp-timer", timerName: null, propresenterInstanceId: null, warnStates: true, hideWhenIdle: false, showLabel: true };
     case "slide-progress": return { type: "slide-progress", propresenterInstanceId: null, display: "fraction", showLabel: false };
     case "people-counter": return { type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true };
@@ -306,7 +308,7 @@ function makeObject(
 // 2×2 grid of glass tiles (clock / PCO timer / current + next item) plus SPL and
 // captions strips, mirroring renderer/main/dashboard-view.tsx. All coords are
 // canvas fractions, so it works on any canvas (designed for 16:9). Fresh ids.
-function dashboardTemplate(): LayoutObject[] {
+export function dashboardTemplate(): LayoutObject[] {
   let z = 0;
   const caption = (text: string): LayoutObject => ({
     id: uid(), x: 0.06, y: 0.1, w: 0.88, h: 0.2, z: 1,
@@ -361,7 +363,7 @@ function dashboardTemplate(): LayoutObject[] {
 // the mockup's abstract item-progress bar. The scripture reference + QR code in the
 // mockup have no backing object type, so the reference is a plain text label and the
 // QR is omitted.
-function confidenceMonitorTemplate(): LayoutObject[] {
+export function confidenceMonitorTemplate(): LayoutObject[] {
   const GREEN = "#46c47e";
   const FG = "rgba(255,255,255,0.95)";
   const FG_MUTED = "rgba(255,255,255,0.56)";
@@ -599,25 +601,30 @@ interface DragState {
   canReparent: boolean;
   /** Container drop targets captured at drag start. */
   targets: DropTarget[];
+  /** For a multi-selection move: start rects of all selected top-level objects
+   *  (incl. the dragged one). Present → move the whole group by the same delta. */
+  group?: { id: string; x: number; y: number; w: number; h: number }[];
 }
 
 // One overlay box (selection outline + move/resize handles), positioned in % of
 // its parent overlay node so nested children resolve correctly. Recurses for a
 // container's children.
 function OverlayNode({
-  o, parentAbs, depth, selectedId, draggingId = null, onStart, parentLocked = false,
+  o, parentAbs, depth, selectedId, selectedIds, draggingId = null, onStart, parentLocked = false,
 }: {
   o: LayoutObject;
   parentAbs: FracRect;
   depth: number;
   selectedId: string | null;
+  selectedIds: Set<string>;
   /** Id of the object currently being dragged, for a "lifting" cue. */
   draggingId?: string | null;
   onStart: (e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) => void;
   /** True when an ancestor container is locked, so this node is locked too. */
   parentLocked?: boolean;
 }) {
-  const sel = o.id === selectedId;
+  const sel = o.id === selectedId; // single "primary" → resize handles
+  const inSel = selectedIds.has(o.id); // any selected → highlight outline
   const dragging = o.id === draggingId;
   const locked = parentLocked || !!o.locked;
   const abs = depth === 0 ? { x: o.x, y: o.y, w: o.w, h: o.h } : composeRect(parentAbs, o);
@@ -630,10 +637,10 @@ function OverlayNode({
         left: `${o.x * 100}%`, top: `${o.y * 100}%`,
         width: `${o.w * 100}%`, height: `${o.h * 100}%`,
         cursor: locked ? "default" : "move",
-        outline: dragging ? "2px dashed #3b82f6" : sel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
+        outline: dragging ? "2px dashed #3b82f6" : inSel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
         outlineOffset: 0,
         opacity: dragging ? 0.7 : 1,
-        boxShadow: sel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
+        boxShadow: inSel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
       }}
     >
       <span
@@ -642,7 +649,7 @@ function OverlayNode({
           display: "inline-flex", alignItems: "center", gap: 3,
           fontSize: 10, lineHeight: "14px", padding: "0 5px", maxWidth: "100%",
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          background: sel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
+          background: inSel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
           borderRadius: "4px 4px 0 0", pointerEvents: "none",
         }}
       >
@@ -661,26 +668,31 @@ function OverlayNode({
           return <div key={h} onPointerDown={(e) => onStart(e, o, h, parentAbs, depth)} style={{ ...pos, cursor: handleCursor(h) }} />;
         })}
       {kids?.map((c) => (
-        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} draggingId={draggingId} onStart={onStart} parentLocked={locked} />
+        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} selectedIds={selectedIds} draggingId={draggingId} onStart={onStart} parentLocked={locked} />
       ))}
     </div>
   );
 }
 
 function EditorCanvas({
-  canvas, objects, selectedId, gridOn, ctx, ndiSource, interactive,
-  onSelect, onGeom, onCommitStart, onReparent, onBoxSize,
+  canvas, objects, selectedId, selectedIds, gridOn, ctx, ndiSource, interactive,
+  onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
 }: {
   canvas: LayoutCanvas;
   objects: LayoutObject[];
   selectedId: string | null;
+  selectedIds: Set<string>;
   gridOn: boolean;
   ctx: Omit<LayoutRenderCtx, "H" | "ndiSource" | "interactive">;
   ndiSource: string | null;
   /** When false the canvas is a read-only preview (no overlay, handles, or drag). */
   interactive: boolean;
-  onSelect: (id: string | null) => void;
+  onSelect: (id: string | null, additive?: boolean) => void;
+  /** Marquee drag on empty canvas → select all top-level objects it intersects. */
+  onMarqueeSelect: (ids: string[], additive: boolean) => void;
   onGeom: (id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => void;
+  /** Apply geometry to several objects at once (group move). */
+  onGeomMany: (updates: { id: string; geom: Pick<LayoutObject, "x" | "y" | "w" | "h"> }[]) => void;
   onCommitStart: () => void;
   /** Reports the rendered canvas box size so the parent's snap actions (Snap all /
    *  Snap to grid) use the same grid aspect as the canvas. */
@@ -736,6 +748,9 @@ function EditorCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boxW, boxH]);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // Marquee (rubber-band) selection on empty canvas: fractional rect while dragging.
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   // The container the dragged object would drop into right now (for the live
   // highlight). Null when not hovering a valid target.
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
@@ -762,6 +777,19 @@ function EditorCanvas({
         geom = gridOn ? snapRectToGrid(g, drag.parentAbs, boxW, boxH, true) : g;
       }
       dragGeom.current = geom;
+      // Group move: shift every selected top-level object by the same delta as the
+      // dragged (primary) one. No reparenting while moving a group.
+      if (drag.group) {
+        const ddx = geom.x - drag.start.x;
+        const ddy = geom.y - drag.start.y;
+        onGeomMany(
+          drag.group.map((g) => ({
+            id: g.id,
+            geom: { x: clamp(g.x + ddx, 0, 1 - g.w), y: clamp(g.y + ddy, 0, 1 - g.h), w: g.w, h: g.h },
+          })),
+        );
+        return;
+      }
       // Live drop-target highlight while moving a reparentable object.
       if (drag.mode === "move" && drag.canReparent) {
         const target = findDropContainer(drag.targets, drag.start.config.type === "container", geom.x + geom.w / 2, geom.y + geom.h / 2);
@@ -771,8 +799,8 @@ function EditorCanvas({
     };
     const onUp = () => {
       const g = dragGeom.current;
-      // Only a top-level object dropped onto a container reparents into it.
-      if (drag.mode === "move" && drag.canReparent && g) {
+      // Only a lone top-level object dropped onto a container reparents into it.
+      if (drag.mode === "move" && drag.canReparent && !drag.group && g) {
         const cx = g.x + g.w / 2;
         const cy = g.y + g.h / 2;
         const target = findDropContainer(drag.targets, drag.start.config.type === "container", cx, cy);
@@ -790,12 +818,18 @@ function EditorCanvas({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [drag, boxW, boxH, gridOn, canvas, onGeom, onReparent]);
+  }, [drag, boxW, boxH, gridOn, canvas, onGeom, onGeomMany, onReparent]);
 
   function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) {
     e.stopPropagation();
     e.preventDefault();
-    onSelect(o.id);
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    // Shift/Cmd-click toggles selection only — don't start a drag.
+    if (additive) { onSelect(o.id, true); return; }
+    // Plain click: keep the selection if this object is already part of a multi-
+    // selection (so we drag the whole group); otherwise select just this one.
+    const inGroup = selectedIds.has(o.id) && selectedIds.size > 1;
+    if (!inGroup) onSelect(o.id, false);
     // Locked objects (and anything inside a locked container) select but never move.
     if (isLockedInTree(objects, o.id)) return;
     onCommitStart();
@@ -811,11 +845,50 @@ function EditorCanvas({
       if (n.o.config.type === "container" && !excluded.has(n.o.id) && !isLockedInTree(objects, n.o.id)) targets.push({ id: n.o.id, abs: n.abs, depth: n.depth });
     });
     dragGeom.current = { x: o.x, y: o.y, w: o.w, h: o.h };
+    const group = mode === "move" && depth === 0 && inGroup
+      ? objects
+          .filter((obj) => selectedIds.has(obj.id) && !isLockedInTree(objects, obj.id))
+          .map((obj) => ({ id: obj.id, x: obj.x, y: obj.y, w: obj.w, h: obj.h }))
+      : undefined;
     setDrag({
       id: o.id, mode, start: o, px: e.clientX, py: e.clientY,
       parentW: parentAbs.w * boxW, parentH: parentAbs.h * boxH,
-      parentAbs, depth, canReparent: depth === 0, targets,
+      parentAbs, depth, canReparent: depth === 0, targets, group,
     });
+  }
+
+  // Rubber-band select: pointerdown on empty canvas (objects stopPropagation, so
+  // only the background reaches here) drags a rectangle; on release, select every
+  // top-level object it intersects. A plain click (no drag) clears the selection.
+  function startMarquee(e: ReactPointerEvent) {
+    const box = boxRef.current;
+    if (!box) { onSelect(null); return; }
+    const rect = box.getBoundingClientRect();
+    const x0 = (e.clientX - rect.left) / boxW;
+    const y0 = (e.clientY - rect.top) / boxH;
+    let moved = false;
+    const move = (ev: globalThis.PointerEvent) => {
+      const x1 = (ev.clientX - rect.left) / boxW;
+      const y1 = (ev.clientY - rect.top) / boxH;
+      if (Math.abs(x1 - x0) > 0.004 || Math.abs(y1 - y0) > 0.004) moved = true;
+      setMarquee({ x0, y0, x1, y1 });
+    };
+    const up = (ev: globalThis.PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setMarquee(null);
+      if (!moved) { onSelect(null); return; }
+      const x1 = (ev.clientX - rect.left) / boxW;
+      const y1 = (ev.clientY - rect.top) / boxH;
+      const rx0 = Math.min(x0, x1), rx1 = Math.max(x0, x1);
+      const ry0 = Math.min(y0, y1), ry1 = Math.max(y0, y1);
+      const hits = objects
+        .filter((o) => o.x < rx1 && o.x + o.w > rx0 && o.y < ry1 && o.y + o.h > ry0)
+        .map((o) => o.id);
+      onMarqueeSelect(hits, ev.shiftKey);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   }
 
   const sorted = [...objects].sort((a, b) => a.z - b.z);
@@ -852,6 +925,7 @@ function EditorCanvas({
     <div ref={setWrap} className="relative w-full h-full flex items-start justify-center select-none">
       {boxW > 0 && boxH > 0 && (
         <div
+          ref={boxRef}
           className="relative overflow-hidden rounded-xl"
           style={{
             width: boxW,
@@ -871,7 +945,7 @@ function EditorCanvas({
                 ? "var(--kiosk-bg)"
                 : canvas.background,
           }}
-          onPointerDown={interactive ? () => onSelect(null) : undefined}
+          onPointerDown={interactive ? startMarquee : undefined}
         >
           {/* Content layer (visual only). Letterbox: design dims scaled. Fill: the
               layer IS the box (objects positioned by % of the live box). The grid
@@ -929,11 +1003,27 @@ function EditorCanvas({
                   parentAbs={CANVAS_FRAC}
                   depth={0}
                   selectedId={selectedId}
+                  selectedIds={selectedIds}
                   draggingId={drag?.id ?? null}
                   onStart={startDrag}
                 />
               ))}
             </div>
+          )}
+          {interactive && marquee && (
+            <div
+              style={{
+                position: "absolute",
+                left: `${Math.min(marquee.x0, marquee.x1) * 100}%`,
+                top: `${Math.min(marquee.y0, marquee.y1) * 100}%`,
+                width: `${Math.abs(marquee.x1 - marquee.x0) * 100}%`,
+                height: `${Math.abs(marquee.y1 - marquee.y0) * 100}%`,
+                border: "1px solid #3b82f6",
+                background: "rgba(59,130,246,0.12)",
+                pointerEvents: "none",
+                zIndex: 20,
+              }}
+            />
           )}
         </div>
       )}
@@ -946,7 +1036,7 @@ function EditorCanvas({
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-caption2 text-gray-9 w-24 shrink-0 flex items-center gap-1">
+      <span className="text-caption2 text-fg-muted w-24 shrink-0 flex items-center gap-1">
         <span className="truncate">{label}</span>
         {hint && <InfoHint className="shrink-0">{hint}</InfoHint>}
       </span>
@@ -967,7 +1057,7 @@ function RowSwitch({ label, hint, checked, onChange }: { label: string; hint?: s
 function RowText({ label, hint, value, placeholder, onChange }: { label: string; hint?: string; value: string; placeholder?: string; onChange: (v: string) => void }) {
   return (
     <Row label={label} hint={hint}>
-      <Input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className="text-gray-12" />
+      <Input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className="text-fg" />
     </Row>
   );
 }
@@ -1121,7 +1211,7 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
       <RowSwitch label="Plan-item markers" hint="Overlay a dashed line + time where each PCO item started." checked={c.showMarkers ?? true} onChange={(v) => onConfig({ ...c, showMarkers: v })} />
       <RowSwitch label="Hover tooltip" hint="Show the value + time at the pointer." checked={c.showTooltip ?? true} onChange={(v) => onConfig({ ...c, showTooltip: v })} />
       <RowSwitch label="Kiosk live/recorded toggle" hint="Show an on-screen pill so a viewer can flip between live and the last recorded service." checked={c.kioskToggle ?? false} onChange={(v) => onConfig({ ...c, kioskToggle: v })} />
-      <p className="text-caption2 text-gray-9 leading-snug">Live builds a rolling trend while the server runs; Recorded replays a finished service. Line color is the object's text color below.</p>
+      <p className="text-caption2 text-fg-muted leading-snug">Live builds a rolling trend while the server runs; Recorded replays a finished service. Line color is the object's text color below.</p>
     </>
   );
 }
@@ -1141,7 +1231,7 @@ function NumberInput({ value, onChange, step = 0.01, min, max }: { value: number
 function PixelField({ label, value, dim, onChange }: { label: string; value: number; dim: number; onChange: (frac: number) => void }) {
   return (
     <label className="flex items-center gap-2">
-      <span className="text-caption2 text-gray-9 w-3.5 shrink-0">{label}</span>
+      <span className="text-caption2 text-fg-muted w-3.5 shrink-0">{label}</span>
       <NumberField
         value={Math.round((Number.isFinite(value) ? value : 0) * dim)}
         step={1}
@@ -1178,7 +1268,37 @@ export function LayoutEditor({
   const initial = view.layout ?? { version: 1 as const, canvas: { width: 1920, height: 1080, background: null }, objects: [] };
   const [canvas, setCanvas] = useState<LayoutCanvas>(initial.canvas);
   const [objects, setObjects] = useState<LayoutObject[]>(initial.objects);
-  const [selectedId, setSelectedId] = useState<string | null>(initial.objects[0]?.id ?? null);
+  // Multi-selection is the source of truth; `selectedId` is the single primary
+  // (for the inspector + resize handles) and is null unless exactly one is picked.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(initial.objects[0] ? [initial.objects[0].id] : []),
+  );
+  const selectedId = selectedIds.size === 1 ? [...selectedIds][0] : null;
+  // Select an object; additive (shift/ctrl/cmd) toggles it in/out of the selection.
+  function selectObject(id: string | null, additive = false) {
+    if (id === null) {
+      setSelectedIds(new Set());
+      return;
+    }
+    setSelectedIds((prev) => {
+      if (!additive) return new Set([id]);
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  // Select several objects at once (marquee). Additive (shift) keeps the current set.
+  function selectMany(ids: string[], additive: boolean) {
+    setSelectedIds((prev) => {
+      if (!additive) return new Set(ids);
+      const next = new Set(prev);
+      ids.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+  // In-editor clipboard for Cmd/Ctrl-C / -V (stores fresh-id clones).
+  const clipboard = useRef<LayoutObject[]>([]);
   // Layers-panel drag-to-reorder: the row currently being hovered as a drop target.
   const [dragLayerOver, setDragLayerOver] = useState<string | null>(null);
   const [history, setHistory] = useState<LayoutObject[][]>([]);
@@ -1230,6 +1350,10 @@ export function LayoutEditor({
   // don't depend on the height we set, so this isn't circular.
   const canvasCellRef = useRef<HTMLDivElement>(null);
   const [canvasH, setCanvasH] = useState<number | null>(null);
+  // Available height from the canvas/panel row's top to the viewport bottom — the
+  // inspector panel is capped to this so it scrolls INTERNALLY (see the side panel
+  // below) instead of growing the editor and scrolling the preview out of view.
+  const [availH, setAvailH] = useState<number | null>(null);
   useEffect(() => {
     const el = canvasCellRef.current;
     if (!el) return;
@@ -1246,6 +1370,9 @@ export function LayoutEditor({
       // the read-only ViewPreview so a custom preview isn't shrunk vs other kinds.
       const cap = isEditing ? maxH : Infinity;
       setCanvasH(Math.round(fillMode ? maxH : Math.min(fit, cap)));
+      // A touch shorter than the raw available height so the section's own bottom
+      // padding doesn't tip the page into a few px of scroll.
+      setAvailH(Math.max(240, Math.round(maxH) - 12));
     };
     measure();
     window.addEventListener("resize", measure);
@@ -1260,7 +1387,7 @@ export function LayoutEditor({
   function discardChanges() {
     setObjects(initial.objects);
     setCanvas(initial.canvas);
-    setSelectedId(initial.objects[0]?.id ?? null);
+    setSelectedIds(new Set(initial.objects[0] ? [initial.objects[0].id] : []));
     setHistory([]);
     setDirty(false);
   }
@@ -1273,14 +1400,22 @@ export function LayoutEditor({
   function loadTemplate(t: LayoutTemplate) {
     pushHistory();
     setObjects(t.layout.objects.map((o) => deepCloneFreshIds(o, uid)));
-    setSelectedId(null);
+    setSelectedIds(new Set());
+    setDirty(true);
+  }
+  // Clear to an empty canvas. Blank is the default for a new custom view; this is
+  // the explicit way back to it (templates are optional, not a required start).
+  function startFromBlank() {
+    pushHistory();
+    setObjects([]);
+    setSelectedIds(new Set());
     setDirty(true);
   }
   // Replace the layout with the built-in dashboard starter (editable nested tiles).
   function startFromDashboard() {
     pushHistory();
     setObjects(dashboardTemplate());
-    setSelectedId(null);
+    setSelectedIds(new Set());
     setDirty(true);
   }
   // Replace the layout with the built-in "Confidence Monitor" starter (the stage
@@ -1288,7 +1423,7 @@ export function LayoutEditor({
   function startFromConfidenceMonitor() {
     pushHistory();
     setObjects(confidenceMonitorTemplate());
-    setSelectedId(null);
+    setSelectedIds(new Set());
     setDirty(true);
   }
 
@@ -1339,7 +1474,7 @@ export function LayoutEditor({
     pushHistory();
     const copy = { ...deepCloneFreshIds(g.object, uid), z: zTop + 1 };
     setObjects((prev) => [...prev, copy]);
-    setSelectedId(copy.id);
+    setSelectedIds(new Set([copy.id]));
     setDirty(true);
   }
 
@@ -1382,6 +1517,11 @@ export function LayoutEditor({
     setObjects((prev) => mapById(prev, id, (o) => ({ ...o, ...geom })));
     setDirty(true);
   }, []);
+  // Geometry for several objects at once (group move) — one state update.
+  const onGeomMany = useCallback((updates: { id: string; geom: Pick<LayoutObject, "x" | "y" | "w" | "h"> }[]) => {
+    setObjects((prev) => updates.reduce((tree, u) => mapById(tree, u.id, (o) => ({ ...o, ...u.geom })), prev));
+    setDirty(true);
+  }, []);
 
   function addObject(type: LayoutObjectType) {
     pushHistory();
@@ -1397,13 +1537,13 @@ export function LayoutEditor({
       const geom = type === "container" ? { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } : { x: 0.1, y: 0.3, w: 0.8, h: 0.4 };
       const child = makeObject(type, siblingMaxZ + 1, geom);
       setObjects((prev) => insertChild(prev, intoId, child));
-      setSelectedId(child.id);
+      setSelectedIds(new Set([child.id]));
     } else {
       const o = makeObject(type, zTop + 1);
       // Snap a new top-level object onto the square grid so its edges land on lines.
       const sn = snapRectToGrid({ x: o.x, y: o.y, w: o.w, h: o.h }, CANVAS_FRAC, editorBox.w || canvas.width, editorBox.h || canvas.height, true);
       setObjects((prev) => [...prev, { ...o, ...sn }]);
-      setSelectedId(o.id);
+      setSelectedIds(new Set([o.id]));
     }
   }
   /** Snap the selected object's existing position + size onto the grid. */
@@ -1424,7 +1564,12 @@ export function LayoutEditor({
     if (isLockedInTree(objects, id)) return; // locked → must unlock before deleting
     pushHistory();
     setObjects((prev) => removeById(prev, id).tree);
-    if (selectedId === id) setSelectedId(null);
+    setSelectedIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }
   function duplicateObject(id: string) {
     const src = findById(objects, id);
@@ -1440,8 +1585,78 @@ export function LayoutEditor({
     };
     const parent = getParentOf(objects, id);
     setObjects((prev) => (parent ? insertChild(prev, parent.id, copy) : [...prev, copy]));
-    setSelectedId(copy.id);
+    setSelectedIds(new Set([copy.id]));
   }
+  // Clone the given objects (fresh ids, offset) into a working tree; returns the
+  // new tree + the fresh ids. Preserves each object's parent when duplicating.
+  function cloneInto(tree: LayoutObject[], srcs: LayoutObject[], keepParent: boolean): { tree: LayoutObject[]; ids: Set<string> } {
+    let out = tree;
+    const ids = new Set<string>();
+    for (const s of srcs) {
+      const siblings = keepParent ? getSiblings(out, s.id) : out;
+      const z = siblings.reduce((m, o) => Math.max(m, o.z), 0) + 1;
+      const copy: LayoutObject = {
+        ...deepCloneFreshIds(s, uid),
+        x: clamp(s.x + 0.03, 0, 1 - s.w),
+        y: clamp(s.y + 0.03, 0, 1 - s.h),
+        z,
+      };
+      const parent = keepParent ? getParentOf(out, s.id) : null;
+      out = parent ? insertChild(out, parent.id, copy) : [...out, copy];
+      ids.add(copy.id);
+    }
+    return { tree: out, ids };
+  }
+  // Bulk actions over the whole selection (Delete key / Cmd-D / toolbar).
+  function removeSelected() {
+    const ids = [...selectedIds].filter((id) => !isLockedInTree(objects, id));
+    if (ids.length === 0) return;
+    pushHistory();
+    setObjects((prev) => ids.reduce((tree, id) => removeById(tree, id).tree, prev));
+    setSelectedIds(new Set());
+    setDirty(true);
+  }
+  function duplicateSelected() {
+    const srcs = [...selectedIds].map((id) => findById(objects, id)).filter((o): o is LayoutObject => !!o);
+    if (srcs.length === 0) return;
+    pushHistory();
+    const { tree, ids } = cloneInto(objects, srcs, true);
+    setObjects(tree);
+    setSelectedIds(ids);
+    setDirty(true);
+  }
+  // Cmd/Ctrl-C / -V. Copy snapshots the selection; paste drops fresh clones at the
+  // top level (offset) and selects them.
+  function copySelected() {
+    const srcs = [...selectedIds].map((id) => findById(objects, id)).filter((o): o is LayoutObject => !!o);
+    if (srcs.length) clipboard.current = srcs.map((o) => deepCloneFreshIds(o, uid));
+  }
+  function pasteClipboard() {
+    if (clipboard.current.length === 0) return;
+    pushHistory();
+    const { tree, ids } = cloneInto(objects, clipboard.current, false);
+    setObjects(tree);
+    setSelectedIds(ids);
+    setDirty(true);
+  }
+  // Keyboard: Delete/Backspace removes the selection; Cmd/Ctrl-D duplicates,
+  // -C copies, -V pastes. Ignored while typing in a form field.
+  useEffect(() => {
+    if (!isEditing) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      const mod = e.metaKey || e.ctrlKey;
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0) { e.preventDefault(); removeSelected(); }
+      else if (mod && (e.key === "d" || e.key === "D")) { e.preventDefault(); duplicateSelected(); }
+      else if (mod && (e.key === "c" || e.key === "C") && selectedIds.size > 0) { e.preventDefault(); copySelected(); }
+      else if (mod && (e.key === "v" || e.key === "V") && clipboard.current.length > 0) { e.preventDefault(); pasteClipboard(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // Handlers close over selectedIds/objects; re-bind when those change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing, selectedIds, objects]);
   // Move a nested object out to the top level, keeping its on-screen position by
   // converting its parent-local rect to an absolute canvas rect.
   function reparentToRoot(id: string) {
@@ -1473,7 +1688,7 @@ export function LayoutEditor({
       return insertChild(tree, containerId, { ...removed, x: clamp(local.x, 0, 1 - w), y: clamp(local.y, 0, 1 - h), w, h, z });
     });
     setDirty(true);
-    setSelectedId(id);
+    setSelectedIds(new Set([id]));
   }, []);
   function reorder(id: string, dir: "front" | "back" | "up" | "down") {
     pushHistory();
@@ -1626,53 +1841,89 @@ export function LayoutEditor({
         <Button variant="filled" size="small" onClick={snapAllToGrid} aria-label="Snap all objects to grid" title="Snap every object's position + size to the grid">
           Snap all
         </Button>
-        <Select
-          value={CANVAS_PRESETS.find((p) => p.w === canvas.width && p.h === canvas.height)?.id ?? "custom"}
-          onValueChange={(id: string) => {
-            const p = CANVAS_PRESETS.find((x) => x.id === id);
-            if (p) { setCanvas({ ...canvas, width: p.w, height: p.h }); setDirty(true); }
-          }}
-        >
-          <SelectTrigger className="w-40" aria-label="Canvas shape"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {CANVAS_PRESETS.map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
-            {!CANVAS_PRESETS.some((p) => p.w === canvas.width && p.h === canvas.height) && (
-              <SelectItem value="custom" disabled>Custom · {canvas.width}×{canvas.height}</SelectItem>
-            )}
-          </SelectContent>
-        </Select>
-        {/* Custom canvas size */}
-        <div className="flex items-center gap-1" title="Custom canvas size (design width × height)">
-          <NumberField value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
-          <span className="text-caption2 text-gray-9">×</span>
-          <NumberField value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
-        </div>
-        {/* Fit: letterbox the design aspect, or fill the whole window. */}
-        <ButtonGroup>
-          <Button variant={canvas.fit !== "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "contain" }); setDirty(true); }} title="Letterbox: keep the design aspect (adds bars on mismatched screens)">Letterbox</Button>
-          <Button variant={canvas.fit === "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "fill" }); setDirty(true); }} title="Fill: use the whole window; objects reflow to its shape (no bars)">Fill</Button>
-        </ButtonGroup>
+        {/* Canvas size + fit, collapsed into a popover to keep the bar lean. */}
+        <Popover.Root>
+          <Popover.Trigger asChild>
+            <Button variant="filled" size="small" title="Canvas size & fit">
+              Canvas <ChevronDownIcon className="size-3.5 text-fg-muted" />
+            </Button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content align="start" sideOffset={4} className="z-50 flex w-64 flex-col gap-3 rounded-md border border-line-strong bg-popover p-3 shadow-md backdrop-blur-xl">
+              <div className="flex flex-col gap-1.5">
+                <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Shape</span>
+                <div className="flex flex-wrap gap-1">
+                  {CANVAS_PRESETS.map((p) => {
+                    const active = p.w === canvas.width && p.h === canvas.height;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        title={p.label}
+                        onClick={() => { setCanvas({ ...canvas, width: p.w, height: p.h }); setDirty(true); }}
+                        className={`rounded-md px-2 py-1 text-caption2 tabular-nums transition-colors ${active ? "bg-accent text-on-accent" : "bg-fill text-fg-muted hover:bg-fill-hover hover:text-fg"}`}
+                      >
+                        {p.id}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Size (px)</span>
+                <div className="flex items-center gap-1">
+                  <NumberField value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
+                  <span className="text-caption2 text-fg-subtle">×</span>
+                  <NumberField value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Fit</span>
+                <ButtonGroup>
+                  <Button variant={canvas.fit !== "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "contain" }); setDirty(true); }} title="Letterbox: keep the design aspect (adds bars on mismatched screens)">Letterbox</Button>
+                  <Button variant={canvas.fit === "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "fill" }); setDirty(true); }} title="Fill: use the whole window; objects reflow to its shape (no bars)">Fill</Button>
+                </ButtonGroup>
+              </div>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
         <Button variant="filled" size="small" onClick={undo} disabled={history.length === 0}>
           <UndoIcon className="size-3.5" /> Undo
         </Button>
-        <Button variant="filled" size="small" onClick={startFromDashboard} title="Replace the layout with the dashboard design as editable tiles">
-          <LayoutTemplateIcon className="size-3.5" /> Start from Dashboard
-        </Button>
-        <Button variant="filled" size="small" onClick={startFromConfidenceMonitor} title="Replace the layout with the Confidence Monitor design as editable objects">
-          <LayoutTemplateIcon className="size-3.5" /> Start from Confidence Monitor
-        </Button>
-
-        {templates.length > 0 && (
-          <Select
-            value=""
-            onValueChange={(id: string) => { const t = templates.find((x) => x.id === id); if (t) loadTemplate(t); }}
-          >
-            <SelectTrigger className="w-40"><SelectValue placeholder="Load layout…" /></SelectTrigger>
-            <SelectContent>
-              {templates.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
+        {/* Replace the current layout wholesale — starters + saved layouts. */}
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <Button variant="filled" size="small" title="Replace the current layout with a starter or a saved layout">
+              <LayoutTemplateIcon className="size-3.5" /> Replace
+              <ChevronDownIcon className="size-3.5 text-fg-muted" />
+            </Button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content align="start" sideOffset={4} className="z-50 min-w-52 rounded-md border border-line-strong bg-popover p-1 shadow-md backdrop-blur-xl">
+              <DropdownMenu.Label className="px-2 pb-1 pt-1.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Replace with…</DropdownMenu.Label>
+              <DropdownMenu.Item onSelect={startFromBlank} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill">
+                <FilePlusIcon className="size-3.5 text-fg-subtle" /> Blank canvas
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={startFromDashboard} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill">
+                <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Dashboard template
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={startFromConfidenceMonitor} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill">
+                <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Confidence Monitor template
+              </DropdownMenu.Item>
+              {templates.length > 0 && (
+                <>
+                  <DropdownMenu.Separator className="my-1 h-px bg-line" />
+                  <DropdownMenu.Label className="px-2 pb-1 pt-0.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Saved layouts</DropdownMenu.Label>
+                  {templates.map((t) => (
+                    <DropdownMenu.Item key={t.id} onSelect={() => loadTemplate(t)} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill">
+                      {t.name}
+                    </DropdownMenu.Item>
+                  ))}
+                </>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
         <Dialog
           trigger={<Button variant="filled" size="small"><SaveIcon className="size-3.5" /> Save as layout</Button>}
           title="Save layout to library"
@@ -1685,7 +1936,7 @@ export function LayoutEditor({
             value={tplName}
             onChange={(e) => setTplName(e.target.value)}
             placeholder="Layout name (e.g. Lyrics + Timer)"
-            className="text-gray-12"
+            className="text-fg"
             autoFocus
           />
         </Dialog>
@@ -1713,46 +1964,50 @@ export function LayoutEditor({
               canvas={canvas}
               objects={objects}
               selectedId={selectedId}
+              selectedIds={selectedIds}
               gridOn={gridOn && isEditing}
               interactive={isEditing}
               ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels }}
               ndiSource={view.ndiSource ?? null}
-              onSelect={setSelectedId}
+              onSelect={selectObject}
+              onMarqueeSelect={selectMany}
+              onGeomMany={onGeomMany}
               onGeom={onGeom}
               onCommitStart={pushHistory}
               onReparent={reparentIntoContainer}
               onBoxSize={handleBoxSize}
             />
           ) : (
-            <div className="w-full h-full rounded-xl border border-gray-a4 flex items-center justify-center text-gray-7">
+            <div className="w-full h-full rounded-xl border border-line flex items-center justify-center text-fg-subtle">
               Loading…
             </div>
           )}
         </div>
 
-        {/* Side panel: layers + inspector (edit mode only). Fills the full window
-            height (scrolls internally); only capped to the preview height while an
-            inline slots-grid is selected, so its editor below stays reachable. */}
+        {/* Side panel: layers + inspector (edit mode only). Capped to the canvas
+            height (which is measured to reach the viewport bottom) and scrolls
+            INTERNALLY, so paging through inspector options never scrolls the whole
+            editor and pushes the preview out of view. */}
         {isEditing && (
-        <div className="w-80 @6xl:w-96 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: inlineGrid ? (canvasH ?? undefined) : undefined }}>
+        <div className="w-80 @6xl:w-96 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: (inlineGrid ? canvasH : availH) ?? undefined }}>
           {/* Layers */}
           <div className="flex flex-col gap-1">
-            <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Layers</span>
-            {layerRows.length === 0 && <span className="text-caption2 text-gray-7">No objects yet — add one above.</span>}
+            <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Layers</span>
+            {layerRows.length === 0 && <span className="text-caption2 text-fg-subtle">No objects yet — add one above.</span>}
             {layerRows.map(({ o, depth }) => (
               <button
                 key={o.id}
                 type="button"
                 draggable
-                onClick={() => setSelectedId(o.id)}
+                onClick={(e) => selectObject(o.id, e.shiftKey || e.metaKey || e.ctrlKey)}
                 onDragStart={(e) => { e.dataTransfer.setData("text/plain", o.id); e.dataTransfer.effectAllowed = "move"; }}
                 onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragLayerOver !== o.id) setDragLayerOver(o.id); }}
                 onDragLeave={() => setDragLayerOver((cur) => (cur === o.id ? null : cur))}
                 onDrop={(e) => { e.preventDefault(); const src = e.dataTransfer.getData("text/plain"); setDragLayerOver(null); if (src) moveLayer(src, o.id); }}
                 style={{ paddingLeft: 8 + depth * 14 }}
-                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${o.id === selectedId ? "bg-gray-a4" : "hover:bg-gray-a3"} ${dragLayerOver === o.id ? "ring-1 ring-focus" : ""}`}
+                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${selectedIds.has(o.id) ? "bg-fill-active" : "hover:bg-fill"} ${dragLayerOver === o.id ? "ring-1 ring-focus" : ""}`}
               >
-                <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">
+                <span className="text-caption1 text-fg flex-1 min-w-0 truncate">
                   {o.config.type === "container" ? `${TYPE_LABELS[o.config.type]} (${o.children?.length ?? 0})` : TYPE_LABELS[o.config.type]}
                 </span>
                 {depth > 0 && (
@@ -1760,7 +2015,7 @@ export function LayoutEditor({
                     role="button"
                     tabIndex={-1}
                     onClick={(e) => { e.stopPropagation(); reparentToRoot(o.id); }}
-                    className="text-gray-9 hover:text-gray-12"
+                    className="text-fg-muted hover:text-fg"
                     aria-label="Move out of container"
                     title="Move out of container"
                   >
@@ -1771,7 +2026,7 @@ export function LayoutEditor({
                   role="button"
                   tabIndex={-1}
                   onClick={(e) => { e.stopPropagation(); pushHistory(); update(o.id, { locked: !o.locked }); }}
-                  className={o.locked ? "text-amber-10" : "text-gray-9 hover:text-gray-12"}
+                  className={o.locked ? "text-amber-10" : "text-fg-muted hover:text-fg"}
                   aria-label={o.locked ? "Unlock" : "Lock"}
                 >
                   {o.locked ? <LockIcon className="size-3.5" /> : <UnlockIcon className="size-3.5" />}
@@ -1780,7 +2035,7 @@ export function LayoutEditor({
                   role="button"
                   tabIndex={-1}
                   onClick={(e) => { e.stopPropagation(); pushHistory(); update(o.id, { hidden: !o.hidden }); }}
-                  className="text-gray-9 hover:text-gray-12"
+                  className="text-fg-muted hover:text-fg"
                   aria-label={o.hidden ? "Show" : "Hide"}
                 >
                   {o.hidden ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
@@ -1788,6 +2043,24 @@ export function LayoutEditor({
               </button>
             ))}
           </div>
+
+          {selectedIds.size > 1 && (
+            <>
+              <Separator />
+              <div className="flex flex-col gap-2 p-3">
+                <span className="text-caption1 font-medium text-fg">{selectedIds.size} objects selected</span>
+                <span className="text-caption2 text-fg-subtle">Shift-click to add or remove · drag a marquee on the canvas to select.</span>
+                <div className="flex gap-2">
+                  <Button variant="filled" size="small" onClick={duplicateSelected}>
+                    <CopyIcon className="size-3.5" /> Duplicate
+                  </Button>
+                  <Button variant="filled" size="small" onClick={removeSelected}>
+                    <Trash2Icon className="size-3.5 text-red-10" /> Delete
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
 
           {selected && (
             <>
@@ -1820,15 +2093,15 @@ export function LayoutEditor({
             <>
               <Separator />
               <div className="flex flex-col gap-1">
-                <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Saved layouts</span>
+                <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Saved layouts</span>
                 {templates.map((t) => (
-                  <div key={t.id} className="flex items-center gap-0.5 rounded-md px-2 py-1 hover:bg-gray-a3">
-                    <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">{t.name}</span>
+                  <div key={t.id} className="flex items-center gap-0.5 rounded-md px-2 py-1 hover:bg-fill">
+                    <span className="text-caption1 text-fg flex-1 min-w-0 truncate">{t.name}</span>
                     <Button variant="transparent" size="small" iconOnly onClick={() => loadTemplate(t)} aria-label="Load into editor" title="Load into editor">
-                      <DownloadIcon className="size-3.5 text-gray-9" />
+                      <DownloadIcon className="size-3.5 text-fg-muted" />
                     </Button>
                     <Button variant="transparent" size="small" iconOnly onClick={() => onUpdateTemplate(t.id, { layout: currentLayout() })} aria-label="Overwrite with current" title="Overwrite with current layout">
-                      <SaveIcon className="size-3.5 text-gray-9" />
+                      <SaveIcon className="size-3.5 text-fg-muted" />
                     </Button>
                     <Button variant="transparent" size="small" iconOnly onClick={() => onDeleteTemplate(t.id)} aria-label="Delete layout">
                       <Trash2Icon className="size-3.5 text-red-10" />
@@ -1842,15 +2115,15 @@ export function LayoutEditor({
           {/* Saved groups library (reusable containers) */}
           <Separator />
           <div className="flex flex-col gap-1">
-            <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Saved groups</span>
+            <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Saved groups</span>
             {groups.length === 0 ? (
-              <span className="text-caption2 text-gray-9">Select a container and use the package icon in the inspector to save it as a reusable group.</span>
+              <span className="text-caption2 text-fg-muted">Select a container and use the package icon in the inspector to save it as a reusable group.</span>
             ) : (
               groups.map((g) => (
-                <div key={g.id} className="flex items-center gap-0.5 rounded-md px-2 py-1 hover:bg-gray-a3">
-                  <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">{g.name}</span>
+                <div key={g.id} className="flex items-center gap-0.5 rounded-md px-2 py-1 hover:bg-fill">
+                  <span className="text-caption1 text-fg flex-1 min-w-0 truncate">{g.name}</span>
                   <Button variant="transparent" size="small" iconOnly onClick={() => insertGroup(g)} aria-label="Insert group" title="Insert into this view">
-                    <DownloadIcon className="size-3.5 text-gray-9" />
+                    <DownloadIcon className="size-3.5 text-fg-muted" />
                   </Button>
                   <Button variant="transparent" size="small" iconOnly onClick={() => deleteGroup(g.id)} aria-label="Delete group">
                     <Trash2Icon className="size-3.5 text-red-10" />
@@ -1921,7 +2194,7 @@ export function LayoutEditor({
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
             placeholder="Group name (e.g. Vocal notes panel)"
-            className="text-gray-12"
+            className="text-fg"
             autoFocus
           />
           <DialogFooter>
@@ -2017,7 +2290,7 @@ function PlanAttachmentConfig({
           value={c.match ?? "stage plot"}
           onChange={(e) => onConfig({ ...c, match: e.target.value })}
           placeholder="filename contains…"
-          className="text-gray-12"
+          className="text-fg"
         />
       </Row>
       {pickable.length > 0 && (
@@ -2035,7 +2308,7 @@ function PlanAttachmentConfig({
         </Row>
       )}
       {loaded && pickable.length === 0 && (
-        <p className="text-caption2 text-gray-9 leading-snug">
+        <p className="text-caption2 text-fg-muted leading-snug">
           No documents on the current plan (or PCO isn’t connected). The match still
           applies whenever a plan with a matching file goes live.
         </p>
@@ -2064,7 +2337,7 @@ function PlanAttachmentConfig({
           <NumberInput value={Math.round((crop.right ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("right", v)} />
         </div>
       </Row>
-      <p className="text-caption2 text-gray-9 -mt-1">Top · Bottom · Left · Right</p>
+      <p className="text-caption2 text-fg-muted -mt-1">Top · Bottom · Left · Right</p>
       <Button variant="filled" size="small" onClick={fitBoxToFile} disabled={fitting}>
         {fitting ? "Fitting…" : "Fit box to file"}
       </Button>
@@ -2131,20 +2404,20 @@ function Inspector({
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex items-center gap-1">
-        <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 flex-1">{TYPE_LABELS[c.type]}</span>
+        <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted flex-1">{TYPE_LABELS[c.type]}</span>
         {c.type === "container" && (
-          <Button variant="transparent" size="small" iconOnly onClick={onSaveGroup} aria-label="Save as group"><PackagePlusIcon className="size-3.5 text-gray-9" /></Button>
+          <Button variant="transparent" size="small" iconOnly onClick={onSaveGroup} aria-label="Save as group"><PackagePlusIcon className="size-3.5 text-fg-muted" /></Button>
         )}
-        <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onSnapToGrid} aria-label="Snap to grid" title="Snap position + size to the grid"><Grid3x3Icon className="size-3.5 text-gray-9" /></Button>
+        <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onSnapToGrid} aria-label="Snap to grid" title="Snap position + size to the grid"><Grid3x3Icon className="size-3.5 text-fg-muted" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={onToggleLock} aria-label={o.locked ? "Unlock" : "Lock"}>
-          {o.locked ? <LockIcon className="size-3.5 text-amber-10" /> : <UnlockIcon className="size-3.5 text-gray-9" />}
+          {o.locked ? <LockIcon className="size-3.5 text-amber-10" /> : <UnlockIcon className="size-3.5 text-fg-muted" />}
         </Button>
         <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("front")} aria-label="Bring to front" title="Bring to front"><ChevronsUpIcon className="size-3.5" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("up")} aria-label="Bring forward" title="Bring forward"><ChevronUpIcon className="size-3.5" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("down")} aria-label="Send backward" title="Send backward"><ChevronDownIcon className="size-3.5" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("back")} aria-label="Send to back" title="Send to back"><ChevronsDownIcon className="size-3.5" /></Button>
-        <Button variant="transparent" size="small" iconOnly onClick={onDuplicate} aria-label="Duplicate"><CopyIcon className="size-3.5 text-gray-9" /></Button>
-        <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onRemove} aria-label="Delete"><Trash2Icon className={`size-3.5 ${locked ? "text-gray-7" : "text-red-10"}`} /></Button>
+        <Button variant="transparent" size="small" iconOnly onClick={onDuplicate} aria-label="Duplicate"><CopyIcon className="size-3.5 text-fg-muted" /></Button>
+        <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onRemove} aria-label="Delete"><Trash2Icon className={`size-3.5 ${locked ? "text-fg-subtle" : "text-red-10"}`} /></Button>
       </div>
 
       {nested && (
@@ -2242,7 +2515,7 @@ function Inspector({
           {(() => {
             const present = planItems?.noteCategories ?? [];
             if (present.length === 0) {
-              return <span className="text-caption2 text-gray-9">Note categories appear once a plan with notes is loaded.</span>;
+              return <span className="text-caption2 text-fg-muted">Note categories appear once a plan with notes is loaded.</span>;
             }
             // null/undefined = all shown; otherwise the explicit subset.
             const shown = c.noteCategories == null ? present : present.filter((k) => c.noteCategories!.includes(k));
@@ -2252,7 +2525,7 @@ function Inspector({
             };
             return (
               <div className="flex flex-col gap-1">
-                <span className="text-caption2 text-gray-9">Notes shown</span>
+                <span className="text-caption2 text-fg-muted">Notes shown</span>
                 <div className="flex flex-wrap gap-1.5">
                   {present.map((k) => {
                     const on = shown.includes(k);
@@ -2260,7 +2533,7 @@ function Inspector({
                       <button
                         key={k}
                         onClick={() => toggle(k)}
-                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"}`}
+                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-line-strong bg-fill text-fg-muted hover:bg-fill-hover"}`}
                       >
                         {k}
                       </button>
@@ -2284,7 +2557,7 @@ function Inspector({
             <RowNumber label="Lines" value={c.maxLines ?? 3} step={1} min={1} max={10} onChange={(v) => onConfig({ ...c, maxLines: Math.round(v) })} />
           )}
           {captionChannels.length === 0 ? (
-            <span className="text-caption2 text-gray-9">Channels appear here once captions arrive — toggle any to hide.</span>
+            <span className="text-caption2 text-fg-muted">Channels appear here once captions arrive — toggle any to hide.</span>
           ) : (() => {
             const hidden = c.hideChannels ?? [];
             const toggle = (ch: string) => {
@@ -2293,7 +2566,7 @@ function Inspector({
             };
             return (
               <div className="flex flex-col gap-1">
-                <span className="text-caption2 text-gray-9">Channels shown</span>
+                <span className="text-caption2 text-fg-muted">Channels shown</span>
                 <div className="flex flex-wrap gap-1.5">
                   {captionChannels.map((ch) => {
                     const on = !hidden.includes(ch);
@@ -2301,7 +2574,7 @@ function Inspector({
                       <button
                         key={ch}
                         onClick={() => toggle(ch)}
-                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"}`}
+                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-line-strong bg-fill text-fg-muted hover:bg-fill-hover"}`}
                       >
                         {ch}
                       </button>
@@ -2363,15 +2636,23 @@ function Inspector({
       )}
       {c.type === "service-pacing" && (
         <>
-          <RowToggle
-            label="Scope"
-            hint="Current item compares the live item's elapsed time to its planned length. Whole service sums how far ahead/behind the entire service is running (needs a service timeline recording)."
-            value={c.scope ?? "item"}
-            options={[{ value: "item", label: "Current item" }, { value: "service", label: "Whole service" }]}
-            onChange={(v) => onConfig({ ...c, scope: v })}
-          />
-          <RowSwitch label="Show scope label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-          <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
+          <div className="px-1 pb-1 text-xs text-fg-subtle">
+            Shows how far ahead or behind the whole schedule the service is running right now — carries over slippage from earlier items and grows live if the current item runs long. Needs a service-timeline recording.
+          </div>
+          <Row label="Ahead color">
+            <div className="flex items-center gap-2">
+              <input type="color" value={hexForInput(c.aheadColor, "#30a46c")} onChange={(e) => onConfig({ ...c, aheadColor: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" />
+              {c.aheadColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, aheadColor: null })}>Reset</button>}
+            </div>
+          </Row>
+          <Row label="Behind color">
+            <div className="flex items-center gap-2">
+              <input type="color" value={hexForInput(c.behindColor, "#e5484d")} onChange={(e) => onConfig({ ...c, behindColor: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" />
+              {c.behindColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, behindColor: null })}>Reset</button>}
+            </div>
+          </Row>
+          <RowSwitch label="Show ahead/behind label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+          <RowSwitch label="Show dash when idle" checked={!(c.hideWhenIdle ?? false)} onChange={(v) => onConfig({ ...c, hideWhenIdle: !v })} />
         </>
       )}
       {c.type === "slots-grid" && (() => {
@@ -2388,7 +2669,7 @@ function Inspector({
               </Select>
             </Row>
             {isInline ? (
-              <p className="text-caption2 text-gray-9 leading-snug">Edit this grid's slots below the canvas.</p>
+              <p className="text-caption2 text-fg-muted leading-snug">Edit this grid's slots below the canvas.</p>
             ) : (
               <Row label="View">
                 <Select value={c.sourceViewId ?? ""} onValueChange={(v: string) => onConfig({ ...c, source: "view", sourceViewId: v || null })}>
@@ -2410,7 +2691,7 @@ function Inspector({
           <RowSwitch label="Health" checked={c.show.health ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, health: v } })} />
           <RowSwitch label="Temp" checked={c.show.temp ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, temp: v } })} />
           <div className="flex flex-col gap-1.5 pt-1">
-            <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Bays</span>
+            <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Bays</span>
             {c.bays.map((b, i) => {
               const bay = chargerBays.find((x) => x.id === b.id);
               const placeholder = bay ? `${bay.connectionName ?? `Charger ${bay.chargerIndex}`} · Bay ${bay.bay}` : "Bay";
@@ -2423,7 +2704,7 @@ function Inspector({
                       const label = e.target.value;
                       onConfig({ ...c, bays: c.bays.map((x, j) => (j === i ? { ...x, label: label || undefined } : x)) });
                     }}
-                    className="text-gray-12 flex-1"
+                    className="text-fg flex-1"
                   />
                   <Button variant="transparent" size="small" iconOnly onClick={() => onConfig({ ...c, bays: c.bays.filter((_, j) => j !== i) })} aria-label="Remove bay"><Trash2Icon className="size-3.5 text-red-10" /></Button>
                 </div>
@@ -2504,7 +2785,7 @@ function Inspector({
                 </SelectContent>
               </Select>
             </Row>
-            <Row label="OBS"><span className="text-caption2 text-gray-10">{liveLabel}</span></Row>
+            <Row label="OBS"><span className="text-caption2 text-fg-muted">{liveLabel}</span></Row>
             <RowText label="Active text" value={c.recordingText ?? ""} placeholder={activePlaceholder} onChange={(v) => onConfig({ ...c, recordingText: v })} />
             <RowText label="Idle text" value={c.idleText ?? ""} placeholder={idlePlaceholder} onChange={(v) => onConfig({ ...c, idleText: v })} />
             <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="OBS: Offline" onChange={(v) => onConfig({ ...c, offlineText: v })} />
@@ -2546,7 +2827,7 @@ function Inspector({
             <RowText label="Label" value={c.label ?? ""} placeholder="Button" onChange={(v) => onConfig({ ...c, label: v })} />
             <RowText label="Address" hint="The OSC path to send when tapped, e.g. /ch/01/mix/on — copy it from your device's OSC documentation. No spaces." value={c.address} placeholder="/ch/01/mix/on" onChange={(v) => onConfig({ ...c, address: v })} />
             <div className="flex flex-col gap-1.5">
-              <span className="flex items-center gap-1 text-caption2 font-semibold uppercase tracking-wider text-gray-9">
+              <span className="flex items-center gap-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">
                 Arguments
                 <InfoHint>
                   Values sent with the OSC message, in order. Pick each type — int (whole number), float
@@ -2567,9 +2848,9 @@ function Inspector({
                     </SelectContent>
                   </Select>
                   {a.type !== "T" && a.type !== "F" && (
-                    <Input value={String(a.value ?? "")} onChange={(e) => setArg(i, { value: e.target.value })} placeholder="value" className="flex-1 min-w-0 text-gray-12" />
+                    <Input value={String(a.value ?? "")} onChange={(e) => setArg(i, { value: e.target.value })} placeholder="value" className="flex-1 min-w-0 text-fg" />
                   )}
-                  <Button variant="transparent" size="small" iconOnly onClick={() => onConfig({ ...c, args: args.filter((_, idx) => idx !== i) })} aria-label="Remove argument"><Trash2Icon className="size-3.5 text-gray-9" /></Button>
+                  <Button variant="transparent" size="small" iconOnly onClick={() => onConfig({ ...c, args: args.filter((_, idx) => idx !== i) })} aria-label="Remove argument"><Trash2Icon className="size-3.5 text-fg-muted" /></Button>
                 </div>
               ))}
               <Button variant="transparent" size="small" className="self-start" onClick={() => onConfig({ ...c, args: [...args, { type: "i", value: "1" }] })}>Add argument</Button>
@@ -2623,7 +2904,7 @@ function Inspector({
                 </Select>
               </Row>
             ) : (
-              <p className="text-caption2 text-gray-9 leading-snug">Peak, low and average are building-wide (today), from the occupancy sensor.</p>
+              <p className="text-caption2 text-fg-muted leading-snug">Peak, low and average are building-wide (today), from the occupancy sensor.</p>
             )}
             <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
             {(c.showLabel ?? true) && (
@@ -2656,7 +2937,7 @@ function Inspector({
         };
         return (
           <>
-            <p className="text-caption2 text-gray-9 leading-snug">Building-wide people metrics, shown side by side. Toggle each:</p>
+            <p className="text-caption2 text-fg-muted leading-snug">Building-wide people metrics, shown side by side. Toggle each:</p>
             {ORDER.map((k) => (
               <RowSwitch key={k} label={LABEL[k]} hint={HINT[k]} checked={cur.includes(k)} onChange={(v) => toggle(k, v)} />
             ))}
@@ -2688,7 +2969,7 @@ function Inspector({
           {(c.showLabel ?? true) && (
             <RowText label="Label" value={c.label ?? ""} placeholder="(auto)" onChange={(v) => onConfig({ ...c, label: v })} />
           )}
-          <p className="text-caption2 text-gray-9 leading-snug">Driven by the Baptisms tab. &ldquo;Live&rdquo; ticks the current testimony/baptism; others summarize the session.</p>
+          <p className="text-caption2 text-fg-muted leading-snug">Driven by the Baptisms tab. &ldquo;Live&rdquo; ticks the current testimony/baptism; others summarize the session.</p>
         </>
       )}
       {c.type === "image" && (
@@ -2709,7 +2990,7 @@ function Inspector({
         <RowSwitch label="Empty logo" checked={c.useEmptySlotLogo ?? false} onChange={(v) => onConfig({ type: "brand-logo", useEmptySlotLogo: v })} />
       )}
       {NO_CONFIG_TYPES.has(c.type) && (
-        <p className="text-caption2 text-gray-9 leading-snug">Updates automatically — no options. Use the styling controls below.</p>
+        <p className="text-caption2 text-fg-muted leading-snug">Updates automatically — no options. Use the styling controls below.</p>
       )}
 
       <Separator />
@@ -2728,7 +3009,7 @@ function Inspector({
       {/* Style */}
       {isText && (
         <>
-          <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 mt-1">Type</span>
+          <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Type</span>
           <Row label="Font size"><NumberField value={pxOf(s.fontSize, 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
           <Row label="Weight">
             <Select value={String(s.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
@@ -2736,7 +3017,7 @@ function Inspector({
               <SelectContent>{WEIGHTS.map((w) => <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
             </Select>
           </Row>
-          <Row label="Color"><input type="color" value={hexForInput(s.color, "#ffffff")} onChange={(e) => onStyle({ color: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent" /></Row>
+          <Row label="Color"><input type="color" value={hexForInput(s.color, "#ffffff")} onChange={(e) => onStyle({ color: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" /></Row>
           <Row label="Align">
             <ButtonGroup>
               {(["left", "center", "right"] as const).map((a) => (
@@ -2756,8 +3037,8 @@ function Inspector({
           <Row label="Max lines"><NumberInput value={s.lineClamp ?? 0} step={1} min={0} max={10} onChange={(v) => onStyle({ lineClamp: v > 0 ? Math.round(v) : null })} /></Row>
         </>
       )}
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 mt-1">Fill</span>
-      <Row label="Fill"><input type="color" value={hexForInput(s.background, "#000000")} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent" />
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Fill</span>
+      <Row label="Fill"><input type="color" value={hexForInput(s.background, "#000000")} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" />
         <Button variant="transparent" size="small" onClick={() => onStyle({ background: null })}>Clear</Button>
       </Row>
       <Row label="Opacity">
@@ -2771,17 +3052,17 @@ function Inspector({
           className="flex-1 min-w-0 accent-accent"
           aria-label="Opacity"
         />
-        <span className="w-9 shrink-0 text-right tabular-nums text-caption2 text-gray-11">{Math.round((s.opacity ?? 1) * 100)}%</span>
+        <span className="w-9 shrink-0 text-right tabular-nums text-caption2 text-fg">{Math.round((s.opacity ?? 1) * 100)}%</span>
       </Row>
       <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
       <Row label="Padding"><NumberField value={pxOf(s.padding, 0)} step={1} min={0} max={Math.round(0.3 * canvas.height)} suffix="px" onChange={(px) => onStyle({ padding: px / canvas.height })} /></Row>
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 mt-1">Border</span>
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Border</span>
       <Row label="Border">
         <input
           type="color"
           value={hexForInput(s.borderColor, "#ffffff")}
           onChange={(e) => onStyle({ borderColor: e.target.value, borderWidth: s.borderWidth ?? 0 })}
-          className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent"
+          className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent"
           aria-label="Border color"
         />
         <NumberField
@@ -2793,7 +3074,7 @@ function Inspector({
           onChange={(px) => onStyle({ borderWidth: px / canvas.height, borderColor: s.borderColor ?? "#ffffff" })}
         />
       </Row>
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 mt-1">Elevation</span>
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Elevation</span>
       {/* Elevation: one slider with labeled None/Low/Med/High stops (ticks), fine
           values allowed in between. Drives the box's drop shadow for layered depth. */}
       <Row label="Elevation" hint="Soft drop shadow under this object's box — lifts it above whatever it overlaps. Snaps toward None/Low/Med/High; drag for in-between.">
@@ -2814,7 +3095,7 @@ function Inspector({
           <option value="0.65" />
           <option value="1" />
         </datalist>
-        <span className="w-10 shrink-0 text-caption2 text-gray-9 text-right tabular-nums">{elevationLabel(s.boxShadow ?? 0)}</span>
+        <span className="w-10 shrink-0 text-caption2 text-fg-muted text-right tabular-nums">{elevationLabel(s.boxShadow ?? 0)}</span>
       </Row>
 
       <Separator />
@@ -2834,7 +3115,7 @@ function Inspector({
       </Row>
 
       {/* Position & size in design-px of the parent box (canvas for top-level) */}
-      <span className="text-caption2 text-gray-9">
+      <span className="text-caption2 text-fg-muted">
         Position &amp; size ({Math.round(parentW)}×{Math.round(parentH)}{nested ? " · in container" : ""})
       </span>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">

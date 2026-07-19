@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, DownloadIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
-import { confirm, EmptyState, SkeletonRows, Button, toast } from "../../components/ui";
+import { confirm, EmptyState, SkeletonRows, Button, Collapsible, toast } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { HistoryCalendar } from "../../components/history-calendar";
 import { AttendanceDetail, servicePeakAttendance } from "./attendance-history-section";
@@ -141,7 +141,7 @@ function isCountedItem(it: ServiceTimelineItem, rec: ServiceTimeline): boolean {
 }
 
 /** Derived service-level timing from a record. */
-function summarize(rec: ServiceTimeline) {
+function summarize(rec: ServiceTimeline, now = Date.now()) {
   const counted = rec.items.filter((it) => isCountedItem(it, rec));
   // "Started" = when the service proper began (first counted item), not doors.
   const firstStart = counted[0]?.startedAt ?? rec.items[0]?.startedAt ?? rec.startedAt;
@@ -157,6 +157,11 @@ function summarize(rec: ServiceTimeline) {
   for (const it of counted) {
     if (it.plannedLengthSec != null) { planned += it.plannedLengthSec; plannedKnown = true; }
     if (it.actualDurationSec != null) actual += it.actualDurationSec;
+    else if (it.endedAt == null && it.startedAt) {
+      // Live (in-progress) item: count its elapsed time so "Actual" ticks up live.
+      const el = (now - Date.parse(it.startedAt)) / 1000;
+      if (Number.isFinite(el) && el > 0) actual += el;
+    }
   }
   return { lateStartSec, planned: plannedKnown ? planned : null, actual, firstStart };
 }
@@ -229,7 +234,14 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
  * started late and total over/under. One record per PCO service-time occurrence
  * (same scheme as SPL History / Attendance), grouped by day.
  */
-export function ServiceHistorySection() {
+const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
+  { id: "services", label: "Services summary", hint: "one row per service" },
+  { id: "attendance", label: "Attendance polls", hint: "every poll sample" },
+  { id: "items", label: "PCO item timings", hint: "planned vs actual per item" },
+  { id: "spl", label: "SPL", hint: "max / avg per item + metric" },
+];
+
+export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean } = {}) {
   const [list, setList] = useState<ServiceTimeline[] | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<ServiceTimeline | null>(null);
@@ -241,8 +253,6 @@ export function ServiceHistorySection() {
   // Attendance records for all services — for the Overview card's avg in-room.
   const [attList, setAttList] = useState<ServiceAttendance[]>([]);
   const [day, setDay] = useState<string | null>(null);
-  // Active service-type filter (serviceTypeId), or null for all types.
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
   // Editing the service window (times) in the detail view.
   const [editingTimes, setEditingTimes] = useState(false);
   const [editStart, setEditStart] = useState("");
@@ -250,6 +260,26 @@ export function ServiceHistorySection() {
   const [merging, setMerging] = useState(false);
   const [mergeTarget, setMergeTarget] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  // Export builder: date range + which sheets. None checked by default — the user
+  // picks what they want. Read-only, so it's available on the public /history page too.
+  const [expFrom, setExpFrom] = useState("");
+  const [expTo, setExpTo] = useState("");
+  const [expSheets, setExpSheets] = useState<Set<string>>(new Set());
+  function toggleSheet(id: string) {
+    setExpSheets((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function downloadExport() {
+    const params = new URLSearchParams();
+    if (expFrom) params.set("from", expFrom);
+    if (expTo) params.set("to", expTo);
+    params.set("include", [...expSheets].join(","));
+    window.location.assign(`/api/history/export?${params.toString()}`);
+  }
 
   function reload() {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
@@ -263,9 +293,10 @@ export function ServiceHistorySection() {
       .catch(() => setAttList([]));
   }, []);
 
-  // Live updates while a service is recording — refresh the open detail/list.
+  // Live updates while a service is recording — refresh the open detail/list, the
+  // attendance chart (samples), and SPL, all without a page reload.
   useEffect(() => {
-    return onNotification("service-timeline:history", (p) => {
+    const offTl = onNotification("service-timeline:history", (p) => {
       const rec = p as ServiceTimeline | null;
       if (!rec) return;
       setList((prev) => {
@@ -278,7 +309,37 @@ export function ServiceHistorySection() {
       });
       setDetail((d) => (d && d.serviceKey === rec.serviceKey ? rec : d));
     });
+    const offAtt = onNotification("attendance:history", (p) => {
+      const rec = p as ServiceAttendance | null;
+      if (!rec) return;
+      setAttList((prev) => {
+        const i = prev.findIndex((a) => a.serviceKey === rec.serviceKey);
+        if (i === -1) return [rec, ...prev];
+        const next = prev.slice();
+        next[i] = rec;
+        return next;
+      });
+      setAttendance((a) => (a && a.serviceKey === rec.serviceKey ? rec : a));
+    });
+    const offSpl = onNotification("spl:history", (p) => {
+      const rec = p as ServiceSplHistory | null;
+      if (!rec) return;
+      setSpl((s) => (s && s.serviceKey === rec.serviceKey ? rec : s));
+    });
+    return () => { offTl(); offAtt(); offSpl(); };
   }, []);
+
+  // While a service is still recording — the open detail OR any row in the day
+  // list — tick every second so the live "Actual"/"running" durations count up
+  // between attendance/timeline broadcasts. (The Overview stays finished-only.)
+  const detailLive = detail != null && detail.endedAt == null;
+  const listLive = (list ?? []).some((t) => t.endedAt == null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!detailLive && !listLive) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [detailLive, listLive]);
 
   useEffect(() => {
     if (!selectedKey) {
@@ -307,23 +368,31 @@ export function ServiceHistorySection() {
     };
   }, [selectedKey, reloadKey]);
 
-  // Distinct service types present, labeled by their PCO name (a record with the
-  // name wins over the bare id fallback). Drives the filter; only shown at 2+ types.
-  const typeOptions = useMemo(() => {
-    const byId = new Map<string, string>();
-    for (const s of list ?? []) {
-      if (!s.serviceTypeId) continue;
-      if (s.serviceTypeName) byId.set(s.serviceTypeId, s.serviceTypeName);
-      else if (!byId.has(s.serviceTypeId)) byId.set(s.serviceTypeId, s.serviceTypeId);
+  // The service type the overview reflects — derived, not user-picked. It follows
+  // whatever you've selected (a drilled-in service, else the selected calendar
+  // day's service), and defaults to the most recent service's type (list is sorted
+  // newest-first; `day` auto-selects the newest day, so this lands on "most recent"
+  // out of the box). Keeps each type's averages separate without a manual filter.
+  const activeType = useMemo<string | null>(() => {
+    if (selectedKey) {
+      const s = (list ?? []).find((x) => x.serviceKey === selectedKey);
+      if (s) return s.serviceTypeId;
     }
-    return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [list]);
+    if (day) {
+      const s = (list ?? []).find((x) => x.serviceDate === day);
+      if (s) return s.serviceTypeId;
+    }
+    return (list ?? [])[0]?.serviceTypeId ?? null;
+  }, [selectedKey, day, list]);
+  const activeTypeName = useMemo<string | null>(() => {
+    if (!activeType) return null;
+    const s = (list ?? []).find((x) => x.serviceTypeId === activeType);
+    return s?.serviceTypeName ?? activeType;
+  }, [list, activeType]);
 
-  // Records scoped to the active service-type filter (null = all types).
-  const filtered = useMemo(
-    () => (list ?? []).filter((s) => !typeFilter || s.serviceTypeId === typeFilter),
-    [list, typeFilter],
-  );
+  // All services — the calendar and day list stay global so you can navigate to any
+  // service; only the overview scopes to activeType (below).
+  const filtered = useMemo(() => list ?? [], [list]);
 
   const days = useMemo(() => {
     const set = new Set<string>();
@@ -345,11 +414,11 @@ export function ServiceHistorySection() {
   }, [filtered]);
 
   // Per-day attendance intensity (0..1) for the calendar heatmap: a day's peak
-  // in-room count, normalized to the busiest recorded day (type-filter aware).
+  // in-room count, normalized to the busiest recorded day. Global (all types) — the
+  // calendar is a stable navigation surface; the overview does the type scoping.
   const dateIntensity = useMemo(() => {
     const peak = new Map<string, number>();
     for (const a of attList) {
-      if (typeFilter && a.serviceTypeId !== typeFilter) continue;
       if (a.peakOccupancy <= 0) continue;
       peak.set(a.serviceDate, Math.max(peak.get(a.serviceDate) ?? 0, a.peakOccupancy));
     }
@@ -357,17 +426,17 @@ export function ServiceHistorySection() {
     const m = new Map<string, number>();
     if (max > 0) for (const [d, v] of peak) m.set(d, v / max);
     return m;
-  }, [attList, typeFilter]);
+  }, [attList]);
 
   // Small summary shown beneath the calendar for the selected day: how many
   // services + their average peak in-room (scoped to the active type filter).
   const daySummary = useMemo(() => {
     if (!day) return null;
     const count = dayServices.length;
-    const occ = attList.filter((a) => a.serviceDate === day && (!typeFilter || a.serviceTypeId === typeFilter) && a.peakOccupancy > 0);
+    const occ = attList.filter((a) => a.serviceDate === day && a.peakOccupancy > 0);
     const avg = occ.length ? Math.round(occ.reduce((s, a) => s + a.peakOccupancy, 0) / occ.length) : null;
     return { count, avg };
-  }, [day, dayServices, attList, typeFilter]);
+  }, [day, dayServices, attList]);
 
   // Overview stats, cumulative THROUGH the selected day (serviceDate <= day) so
   // picking a past date shows how things looked as of then; scoped to the type
@@ -377,7 +446,7 @@ export function ServiceHistorySection() {
   const overview = useMemo<OverviewData>(() => {
     const asOf = day;
     const inScope = (typeId: string | null, date: string, ended: unknown) =>
-      ended != null && (!typeFilter || typeId === typeFilter) && (!asOf || date <= asOf);
+      ended != null && (!activeType || typeId === activeType) && (!asOf || date <= asOf);
     const tl = (list ?? []).filter((t) => inScope(t.serviceTypeId, t.serviceDate, t.endedAt));
     const att = attList.filter((a) => inScope(a.serviceTypeId, a.serviceDate, a.endedAt));
     const mean = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
@@ -424,7 +493,7 @@ export function ServiceHistorySection() {
       peakAttendance: maxOcc ? maxOcc.peakOccupancy.toLocaleString() : "—",
       peakSub: maxOcc ? shortDay(maxOcc.serviceDate) : undefined,
     };
-  }, [list, attList, day, typeFilter]);
+  }, [list, attList, day, activeType]);
 
   async function deleteService(key: string, title: string) {
     if (!(await confirm({ title: "Delete recording?", message: `Delete the service-timing recording for "${title}"? This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
@@ -460,7 +529,7 @@ export function ServiceHistorySection() {
   // ── Detail: one service's actual rundown. ──
   if (detail) {
     const live = detail.endedAt == null;
-    const sum = summarize(detail);
+    const sum = summarize(detail, live ? nowTick : undefined);
     const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
     const over = overrunStats(detail);
     // Projected end = actual start + planned length; actual end = the record's
@@ -567,13 +636,15 @@ export function ServiceHistorySection() {
             </span>
           </div>
           <div className="flex items-center gap-2 flex-wrap sm:shrink-0">
-            <Button variant="filled" size="small" onClick={startEditTimes} tooltip="Fix the recorded start/end (trims samples + items outside the window)">
-              <ClockIcon className="size-3.5 text-gray-9" /> Edit times
-            </Button>
+            {!readOnly && (
+              <Button variant="filled" size="small" onClick={startEditTimes} tooltip="Fix the recorded start/end (trims samples + items outside the window)">
+                <ClockIcon className="size-3.5 text-gray-9" /> Edit times
+              </Button>
+            )}
             <Button variant="filled" size="small" onClick={copyReport} tooltip="Copy a full text report (timing + attendance + audio)">
               <CopyIcon className="size-3.5 text-gray-9" /> Copy report
             </Button>
-            {mergeCandidates.length > 0 && (
+            {!readOnly && mergeCandidates.length > 0 && (
               <Button variant="filled" size="small" onClick={() => { setMerging((v) => !v); setEditingTimes(false); }} tooltip="Merge this recording into another service (fixes a split service), then delete this one">
                 <GitMergeIcon className="size-3.5 text-gray-9" /> Merge…
               </Button>
@@ -697,21 +768,58 @@ export function ServiceHistorySection() {
   // ── List view: services for the selected day. ──
   return (
     <div className="flex flex-col gap-3">
-      {typeOptions.length >= 2 && (
-        <div className="flex flex-wrap gap-1.5">
-          <TypeChip active={typeFilter === null} onClick={() => setTypeFilter(null)}>All</TypeChip>
-          {typeOptions.map((o) => (
-            <TypeChip key={o.id} active={typeFilter === o.id} onClick={() => setTypeFilter(o.id)}>
-              {o.name}
-            </TypeChip>
-          ))}
+      {/* Export builder — a collapsed disclosure so it never crowds the overview.
+          Read-only, so it's available on the public /history page too. */}
+      <Collapsible label="Export" summary="date range · pick sheets" className="su-card px-4 py-2.5">
+        <div className="flex flex-col gap-3 pt-1">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
+              From
+              <input
+                type="date"
+                value={expFrom}
+                onChange={(e) => setExpFrom(e.target.value)}
+                className="rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
+              To
+              <input
+                type="date"
+                value={expTo}
+                onChange={(e) => setExpTo(e.target.value)}
+                className="rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg"
+              />
+            </label>
+            <span className="self-end pb-1.5 text-caption2 text-fg-subtle">Blank = all dates.</span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {EXPORT_SHEETS.map((s) => (
+              <label key={s.id} className="flex cursor-pointer items-center gap-2 text-footnote text-fg">
+                <input
+                  type="checkbox"
+                  checked={expSheets.has(s.id)}
+                  onChange={() => toggleSheet(s.id)}
+                  className="size-4 accent-[var(--su-accent)]"
+                />
+                {s.label}
+                <span className="text-caption2 text-fg-subtle">{s.hint}</span>
+              </label>
+            ))}
+          </div>
+          <div>
+            <Button variant="accent" size="small" disabled={expSheets.size === 0} onClick={downloadExport}>
+              <DownloadIcon className="size-3.5" /> Download .xlsx
+            </Button>
+          </div>
         </div>
-      )}
+      </Collapsible>
       {/* Overview blend — full width. Lead stat + real trend chart, then a divided
-          instrument strip. Replaces the old customizable KPI-tile grid. */}
+          instrument strip. Scoped to the active service type (from the selection /
+          most-recent), labeled so the numbers are never a silent blend of types. */}
       <div className="flex flex-col gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">
-          Overview{day ? ` · through ${fmtDay(day)}` : " · all time"}
+          Overview{activeTypeName ? ` · ${activeTypeName}` : ""}{day ? ` · through ${fmtDay(day)}` : " · all time"}
         </span>
         <OverviewBlend overview={overview} />
       </div>
@@ -740,7 +848,10 @@ export function ServiceHistorySection() {
         <div className="min-w-0 flex flex-col gap-2">
           {day && <span className="text-body font-semibold text-gray-12">{fmtDay(day)}</span>}
           {dayServices.map((s) => {
-            const sum = summarize(s);
+            const live = s.endedAt == null;
+            // Live rows count up (summarize adds the in-progress item's elapsed);
+            // finished rows show the settled total.
+            const sum = summarize(s, live ? nowTick : undefined);
             const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
             return (
               <div key={s.serviceKey} className="flex items-center gap-1 rounded-lg border border-gray-5 bg-gray-2 pr-1.5 hover:bg-gray-3 transition-colors">
@@ -754,18 +865,22 @@ export function ServiceHistorySection() {
                   </div>
                   <span className="shrink-0 tabular-nums text-caption1 text-right">
                     {sum.lateStartSec != null && sum.lateStartSec >= 30 && <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">late </span><span className="text-amber-11">{fmtDelta(sum.lateStartSec)}</span></span>}
-                    <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">ran </span><span className="text-blue-11">{fmtDur(sum.actual)}</span></span>
-                    {totalDelta != null && <span className="ml-3 whitespace-nowrap"><span className={totalDelta > 0 ? "text-red-11" : "text-gray-11"}>{fmtDelta(totalDelta)}</span></span>}
+                    <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">{live ? "running " : "ran "}</span><span className="text-blue-11">{fmtDur(sum.actual)}</span></span>
+                    {/* Delta vs plan only once finished — a live "−38:45" (most of
+                        the plan not yet run) reads as misleading. */}
+                    {!live && totalDelta != null && <span className="ml-3 whitespace-nowrap"><span className={totalDelta > 0 ? "text-red-11" : "text-gray-11"}>{fmtDelta(totalDelta)}</span></span>}
                   </span>
                 </button>
-                <button
-                  className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
-                  onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
-                  aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
-                  title="Delete recording"
-                >
-                  <Trash2Icon className="size-4" />
-                </button>
+                {!readOnly && (
+                  <button
+                    className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                    onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
+                    aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
+                    title="Delete recording"
+                  >
+                    <Trash2Icon className="size-4" />
+                  </button>
+                )}
               </div>
             );
           })}
@@ -855,6 +970,8 @@ function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   const padTop = 16;
   const padBottom = 26;
   const padX = 10;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [hover, setHover] = useState<number | null>(null);
   if (points.length < 2) {
     return (
       <div className="flex h-[130px] items-center justify-center text-caption1 text-fg-subtle">
@@ -872,42 +989,66 @@ function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   const lastX = x(points.length - 1);
   const lastY = y(points[points.length - 1].value);
   const latest = points[points.length - 1].value;
+  const hp = hover != null ? points[hover] : null;
+  const hx = hover != null ? x(hover) : 0;
+  const hy = hp ? y(hp.value) : 0;
   return (
     <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img" aria-label="Attendance trend across recent services">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} ${H}`}
+        width="100%"
+        height={H}
+        preserveAspectRatio="none"
+        onPointerMove={(e) => {
+          const svg = svgRef.current;
+          if (!svg) return;
+          const r = svg.getBoundingClientRect();
+          const frac = (e.clientX - r.left) / r.width; // 0..1 across the plotted width
+          setHover(Math.min(points.length - 1, Math.max(0, Math.round(frac * (points.length - 1)))));
+        }}
+        onPointerLeave={() => setHover(null)}
+        role="img"
+        aria-label="Attendance trend across recent services"
+      >
         <line x1={0} y1={H - padBottom} x2={W} y2={H - padBottom} stroke="var(--su-line)" />
         <polyline points={poly} fill="none" stroke="var(--su-accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         <circle cx={lastX} cy={lastY} r={4} fill="var(--su-accent)" />
+        {hp && (
+          <g pointerEvents="none">
+            <line x1={hx} y1={padTop} x2={hx} y2={H - padBottom} stroke="var(--su-line-strong)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+            <circle cx={hx} cy={hy} r={4} fill="var(--su-accent)" stroke="var(--su-bg)" strokeWidth={1.5} />
+          </g>
+        )}
         <text x={padX} y={H - 8} fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[0].day)}</text>
         <text x={W - padX} y={H - 8} textAnchor="end" fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[points.length - 1].day)}</text>
       </svg>
-      {/* Latest attendance, pinned just above the most recent point (height maps
-          1:1 to the viewBox, so lastY is a px offset). Only this one value —
+      {/* Hover tooltip — HTML overlay positioned by % so its text isn't stretched
+          by the chart's non-uniform (preserveAspectRatio="none") X scale. */}
+      {hp && (
+        <div
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border border-line-strong bg-popover px-2 py-1 shadow-md backdrop-blur-xl"
+          style={{ left: `${(hx / W) * 100}%`, top: `${Math.max(hy - 8, 4)}px` }}
+        >
+          <div className="font-mono text-caption2 tabular-nums text-fg-subtle whitespace-nowrap">{shortDay(hp.day)}</div>
+          <div className="font-mono text-caption1 font-medium tabular-nums text-fg text-center">{hp.value.toLocaleString()}</div>
+        </div>
+      )}
+      {/* Latest attendance, pinned above the most recent point (hidden while
+          hovering so it doesn't collide with the tooltip). Only this one value —
           labeling every point would clutter. */}
-      <span
-        className="pointer-events-none absolute right-1 font-mono text-caption1 font-medium tabular-nums text-fg"
-        style={{ top: `${Math.max(0, lastY - 20)}px` }}
-      >
-        {latest.toLocaleString()}
-      </span>
+      {!hp && (
+        <span
+          className="pointer-events-none absolute right-1 font-mono text-caption1 font-medium tabular-nums text-fg"
+          style={{ top: `${Math.max(0, lastY - 20)}px` }}
+        >
+          {latest.toLocaleString()}
+        </span>
+      )}
     </div>
   );
 }
 
-
-/** Service-type filter chip (shown only when 2+ types have recordings). */
-function TypeChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${
-        active ? "border-blue-7 bg-blue-3 text-blue-11" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
 
 function Stat({ label, value, accent, sub }: { label: string; value: string; accent: string; sub?: string }) {
   return (

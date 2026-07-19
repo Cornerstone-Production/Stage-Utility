@@ -117,9 +117,9 @@ function ConnectionBadge({ connection, message }: { connection: ConnectionState;
     // Truncate a long error (e.g. "Can't reach 192.168.x.x — ECONNREFUSED…") so it
     // never overflows its row; the full text shows on hover via the native title.
     return (
-      <span className="flex items-center gap-1 min-w-0" title={message ?? "Error"}>
+      <span className="flex items-center gap-1 min-w-0 max-w-[9rem] sm:max-w-md" title={message ?? "Error"}>
         <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
-        <span className="text-caption1 text-red-10 truncate">{message ?? "Error"}</span>
+        <span className="text-caption1 text-red-10 truncate min-w-0">{message ?? "Error"}</span>
       </span>
     );
   }

@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FieldSet,
   FieldGroup,
@@ -9,6 +11,8 @@ import {
   toast,
 } from "../../components/ui";
 import { QrHint } from "../../components/qr-hint";
+import { CompanionInfoPanel } from "../../components/companion-info-panel";
+import { invoke, onNotification } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
 import type { SectionProps } from "../types";
 
@@ -53,6 +57,38 @@ export function ConnectSection({ stageState, handlers }: Pick<SectionProps, "sta
           )}
         </FieldGroup>
       </FieldSet>
+
+      <CompanionPanel />
     </div>
+  );
+}
+
+// Bitfocus Companion connects TO this app, so this just shows the URL + live
+// client count — it lives on Connect (alongside the phone-connect flow), not on
+// Integrations (there's nothing to dial) or Advanced.
+function CompanionPanel() {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["integrations:list"],
+    queryFn: () =>
+      invoke<{ descriptors: IntegrationDescriptor[]; states: IntegrationState[] }>("integrations:list"),
+  });
+  useEffect(() => {
+    return onNotification("integrations:state-changed", (payload: unknown) => {
+      const states = payload as IntegrationState[];
+      queryClient.setQueryData(
+        ["integrations:list"],
+        (prev: { descriptors: IntegrationDescriptor[]; states: IntegrationState[] } | undefined) =>
+          prev ? { ...prev, states } : prev,
+      );
+    });
+  }, [queryClient]);
+
+  const state = data?.states.find((s) => s.id === "companion");
+  if (!state) return null;
+  return (
+    <FieldSet>
+      <CompanionInfoPanel state={state} />
+    </FieldSet>
   );
 }

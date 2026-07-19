@@ -2,7 +2,7 @@ import { useState, type ChangeEvent, type CSSProperties } from "react";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { PlusIcon, TrashIcon, CopyIcon, GripVerticalIcon, ChevronLeftIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, CopyIcon, ChevronLeftIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { useIsMobile } from "../../lib/use-media-query";
 import {
@@ -23,7 +23,7 @@ import { invoke } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { SlotEditor } from "./slots-section";
 import { ViewPreview } from "./view-preview";
-import { LayoutEditor } from "./layout-editor";
+import { LayoutEditor, dashboardTemplate, confidenceMonitorTemplate } from "./layout-editor";
 
 const KIND_LABELS: Record<ViewKind, string> = {
   slots: "Mic Slots",
@@ -91,30 +91,23 @@ function SortableViewItem({
     opacity: isDragging ? 0.5 : 1,
   };
 
+  // No grip: the whole row is the drag handle (the 5px sensor activation distance
+  // lets a click still select without starting a reorder) and click-to-select.
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-1 rounded-lg pr-1 transition-colors ${
-        selected ? "bg-gray-a4" : "hover:bg-gray-a3"
-      }`}
+      className={`rounded-lg transition-colors ${selected ? "bg-fill-active" : "hover:bg-fill"}`}
     >
-      <button
-        {...attributes}
-        {...listeners}
-        className="cursor-grab active:cursor-grabbing touch-none py-2 pl-2 shrink-0"
-        aria-label="Drag to reorder"
-        tabIndex={-1}
-      >
-        <GripVerticalIcon className="size-4 text-gray-7" />
-      </button>
       <button
         type="button"
         onClick={onSelect}
-        className="flex flex-col items-start gap-0.5 py-2 pr-2 text-left flex-1 min-w-0"
+        {...attributes}
+        {...listeners}
+        className="flex w-full min-w-0 cursor-grab touch-none flex-col items-start gap-0.5 px-3 py-2 text-left active:cursor-grabbing"
       >
-        <span className="text-body text-gray-12 truncate w-full">{view.name}</span>
-        <span className="text-caption2 text-gray-9">{KIND_LABELS[view.kind]}</span>
+        <span className="w-full truncate text-body text-fg">{view.name}</span>
+        <span className="text-caption2 text-fg-subtle">{KIND_LABELS[view.kind]}</span>
       </button>
     </div>
   );
@@ -175,7 +168,7 @@ function ViewDetail({
           value={editName}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
           onBlur={handleNameBlur}
-          className="flex-1 min-w-0 max-sm:basis-full text-headline font-semibold text-gray-12"
+          className="flex-1 min-w-0 max-sm:basis-full text-headline font-semibold text-fg"
           aria-label="View name"
         />
         <Select value={view.kind} onValueChange={(k: string) => handlers.handleSetViewKind(view.id, k as ViewKind)}>
@@ -191,7 +184,7 @@ function ViewDetail({
           </SelectContent>
         </Select>
         <Button variant="filled" size="small" onClick={() => handlers.handleDuplicateView(view.id)}>
-          <CopyIcon className="size-3.5 text-gray-9" />
+          <CopyIcon className="size-3.5 text-fg-muted" />
           Duplicate
         </Button>
         <Button
@@ -224,7 +217,7 @@ function ViewDetail({
       ) : (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-caption1 text-gray-9">Preview shape</span>
+            <span className="text-caption1 text-fg-muted">Preview shape</span>
             <Select value={String(previewAspect)} onValueChange={(v: string) => setPreviewAspect(Number(v))}>
               <SelectTrigger className="w-full sm:w-48"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -248,7 +241,7 @@ function ViewDetail({
           <Separator />
           {slotViews.length > 0 && (
             <div className="flex flex-col items-start gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="text-caption1 text-gray-9 shrink-0">Copy slots from:</span>
+              <span className="text-caption1 text-fg-muted shrink-0">Copy slots from:</span>
               <Select
                 value=""
                 onValueChange={(fromId: string) => {
@@ -284,8 +277,8 @@ function ViewDetail({
           <Separator />
           <div className="flex items-center justify-between gap-3">
             <div className="flex flex-col">
-              <span className="text-caption1 text-gray-12">Show PCO Prev/Next controls</span>
-              <span className="text-caption2 text-gray-9">
+              <span className="text-caption1 text-fg">Show PCO Prev/Next controls</span>
+              <span className="text-caption2 text-fg-muted">
                 Adds the Planning Center Live Prev/Next buttons to this script display.
               </span>
             </div>
@@ -294,13 +287,13 @@ function ViewDetail({
               onCheckedChange={(v) => void invoke("views:setShowLiveControls", { id: view.id, showLiveControls: v })}
             />
           </div>
-          <p className="text-caption2 text-gray-9">
+          <p className="text-caption2 text-fg-muted">
             The Script view renders the live plan rundown (items + note columns) with the clock,
             the PCO countdown, and a max-SPL column per item.
           </p>
         </>
       ) : (
-        <p className="text-caption1 text-gray-9">
+        <p className="text-caption1 text-fg-muted">
           {KIND_LABELS[view.kind]} views render a fixed layout from live Planning Center / ProPresenter
           data — there's nothing to configure here yet besides the name.
         </p>
@@ -355,6 +348,8 @@ export function ViewsSection({
   // Create-view dialog state
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState<ViewKind>("slots");
+  // Starter template for a new custom view (blank by default; templates optional).
+  const [newTemplate, setNewTemplate] = useState<"blank" | "dashboard" | "confidence">("blank");
 
   function handleViewDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -384,9 +379,9 @@ export function ViewsSection({
       >
         {/* Collapse the list (desktop only) to give the editor/preview more room. */}
         <div className="hidden sm:flex items-center justify-between pl-1">
-          <span className="text-caption2 font-medium uppercase tracking-wide text-gray-9">Views</span>
+          <span className="text-caption2 font-medium uppercase tracking-wide text-fg-muted">Views</span>
           <Button variant="transparent" size="small" iconOnly aria-label="Collapse views list" onClick={toggleList}>
-            <PanelLeftCloseIcon className="size-4 text-gray-11" />
+            <PanelLeftCloseIcon className="size-4 text-fg" />
           </Button>
         </div>
         <DndContext sensors={handlers.sensors} collisionDetection={closestCenter} onDragEnd={handleViewDragEnd}>
@@ -408,7 +403,7 @@ export function ViewsSection({
         <Dialog
           trigger={
             <Button variant="filled" size="small" className="mt-1 self-start">
-              <PlusIcon className="size-3.5 text-gray-9" />
+              <PlusIcon className="size-3.5 text-fg-muted" />
               Add view
             </Button>
           }
@@ -417,9 +412,18 @@ export function ViewsSection({
           confirmLabel="Create"
           confirmDisabled={false}
           onConfirm={async () => {
-            await handlers.handleAddView(newName.trim(), newKind);
+            const id = await handlers.handleAddView(newName.trim(), newKind);
+            if (id && newKind === "custom" && newTemplate !== "blank") {
+              const objects = newTemplate === "dashboard" ? dashboardTemplate() : confidenceMonitorTemplate();
+              await handlers.handleSetViewLayout(id, {
+                version: 1,
+                canvas: { width: 1920, height: 1080, background: null },
+                objects,
+              });
+            }
             setNewName("");
             setNewKind("slots");
+            setNewTemplate("blank");
           }}
         >
           <div className="flex flex-col gap-3">
@@ -427,7 +431,7 @@ export function ViewsSection({
               value={newName}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setNewName(e.target.value)}
               placeholder="View name (e.g. Main Mic Slots)"
-              className="text-gray-12"
+              className="text-fg"
               autoFocus
             />
             <Select value={newKind} onValueChange={(v: string) => setNewKind(v as ViewKind)}>
@@ -442,6 +446,21 @@ export function ViewsSection({
                 ))}
               </SelectContent>
             </Select>
+            {newKind === "custom" && (
+              <label className="flex flex-col gap-1.5">
+                <span className="text-caption2 text-fg-subtle">Start from</span>
+                <Select value={newTemplate} onValueChange={(v: string) => setNewTemplate(v as "blank" | "dashboard" | "confidence")}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="blank">Blank canvas</SelectItem>
+                    <SelectItem value="dashboard">Dashboard template</SelectItem>
+                    <SelectItem value="confidence">Confidence Monitor template</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+            )}
           </div>
         </Dialog>
       </div>
@@ -451,7 +470,7 @@ export function ViewsSection({
         {/* Mobile-only back affordance to the view list. */}
         <button
           type="button"
-          className="sm:hidden mb-3 flex items-center gap-1 text-footnote font-medium text-gray-11"
+          className="sm:hidden mb-3 flex items-center gap-1 text-footnote font-medium text-fg"
           onClick={() => setMobileShowDetail(false)}
         >
           <ChevronLeftIcon className="size-4" />
@@ -461,7 +480,7 @@ export function ViewsSection({
         {listCollapsed && (
           <button
             type="button"
-            className="hidden sm:flex mb-3 items-center gap-1 text-footnote font-medium text-gray-11 hover:text-gray-12 self-start"
+            className="hidden sm:flex mb-3 items-center gap-1 text-footnote font-medium text-fg hover:text-fg self-start"
             onClick={toggleList}
           >
             <PanelLeftOpenIcon className="size-4" />

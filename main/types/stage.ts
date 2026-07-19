@@ -174,7 +174,7 @@ export type LayoutObjectConfig =
   // compares the current live item's elapsed time to its planned length (from
   // pco:live); `scope: "service"` sums actual-vs-planned across the recorded service
   // timeline for a running whole-service total. Over plan reads red, under reads green.
-  | { type: "service-pacing"; scope?: "item" | "service"; hideWhenIdle?: boolean; showLabel?: boolean }
+  | { type: "service-pacing"; scope?: "item" | "service"; hideWhenIdle?: boolean; showLabel?: boolean; aheadColor?: string | null; behindColor?: string | null }
   // ProPresenter-fed objects. `propresenterInstanceId` picks which configured
   // instance to read (omitted / "default" = the primary) — lets separate custom
   // views per auditorium point at different ProPresenter machines.

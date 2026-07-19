@@ -14,6 +14,7 @@ import {
   SelectItem,
   SelectValue,
   Switch,
+  Collapsible,
 } from "../../components/ui";
 import type { SectionProps } from "../types";
 
@@ -158,36 +159,50 @@ export function PlanSection({
         </FieldGroup>
       </FieldSet>
 
-      {serviceTypes.length > 0 && (
-        <FieldSet>
-          <FieldGroup>
-            <Field orientation="vertical">
-              <FieldContent>
-                <FieldLabel>Active Service Types</FieldLabel>
-                <FieldDescription>
-                  Auto plan mode follows only active types, and the manual picker is limited to them.
-                  Turning all off is the same as having them all active.
-                </FieldDescription>
-              </FieldContent>
-            </Field>
-            {serviceTypes.map((st) => {
-              const isOn = allowed.length === 0 || allowed.includes(st.id);
-              return (
-                <Field key={st.id} orientation="horizontal">
-                  <FieldContent>
-                    <FieldLabel>{st.name}</FieldLabel>
-                  </FieldContent>
-                  <Switch
-                    checked={isOn}
-                    onCheckedChange={(v: boolean) => toggleActive(st.id, v)}
-                    aria-label={`Activate ${st.name}`}
-                  />
-                </Field>
-              );
-            })}
-          </FieldGroup>
-        </FieldSet>
-      )}
+      {serviceTypes.length > 0 && (() => {
+        // Active types (or all, when none are singled out) stay visible; the rest
+        // collapse behind a disclosure so a short active set isn't buried under a
+        // wall of off-switches for types you never run.
+        const isActive = (id: string) => allowed.length === 0 || allowed.includes(id);
+        const active = serviceTypes.filter((st) => isActive(st.id));
+        const inactive = serviceTypes.filter((st) => !isActive(st.id));
+        const row = (st: (typeof serviceTypes)[number]) => (
+          <Field key={st.id} orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>{st.name}</FieldLabel>
+            </FieldContent>
+            <Switch
+              checked={isActive(st.id)}
+              onCheckedChange={(v: boolean) => toggleActive(st.id, v)}
+              aria-label={`Activate ${st.name}`}
+            />
+          </Field>
+        );
+        return (
+          <FieldSet>
+            <FieldGroup>
+              <Field orientation="vertical">
+                <FieldContent>
+                  <FieldLabel>Active Service Types</FieldLabel>
+                  <FieldDescription>
+                    Auto plan mode follows only active types, and the manual picker is limited to
+                    them. Turning all off is the same as having them all active.
+                  </FieldDescription>
+                </FieldContent>
+              </Field>
+              {active.map(row)}
+              {inactive.length > 0 && (
+                <Collapsible
+                  label="Inactive service types"
+                  summary={`${inactive.length} hidden`}
+                >
+                  {inactive.map(row)}
+                </Collapsible>
+              )}
+            </FieldGroup>
+          </FieldSet>
+        );
+      })()}
     </div>
   );
 }

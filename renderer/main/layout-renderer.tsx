@@ -241,38 +241,45 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       );
     }
     case "service-pacing": {
-      const scope = c.scope ?? "item";
-      const tol = 3; // within ±3s of plan reads "On time"
+      // Live cumulative drift: how far ahead/behind the whole schedule we are
+      // right NOW. actualElapsed (wall-clock since the service began) minus the
+      // planned position (sum of planned lengths of finished items + the live
+      // item's elapsed, capped at its planned length). Result carries slippage
+      // from earlier items and only grows "behind" once the current item runs
+      // past its plan. Negative = ahead (green), positive = behind (red).
+      const tol = 3; // within ±3s of plan reads "0:00"
+      const serverNow = ctx.now + ctx.skewMs;
       let deltaSec: number | null = null;
-      if (scope === "service") {
-        // Sum actual-vs-planned across completed items, plus the live item's delta.
-        let sum = 0;
-        let any = false;
-        for (const it of ctx.serviceTimeline?.items ?? []) {
-          if (it.actualDurationSec != null && it.plannedLengthSec != null) {
-            sum += it.actualDurationSec - it.plannedLengthSec;
-            any = true;
-          }
+      const tl = ctx.serviceTimeline;
+      if (tl) {
+        // Counted items only — exclude pre-service/buffer padding (a per-item
+        // override wins, else default to not-pre-service), mirroring History.
+        const items = tl.items.filter((it) => (typeof it.counted === "boolean" ? it.counted : !(it.preService ?? false)));
+        const startMs = items[0]?.startedAt ? Date.parse(items[0].startedAt) : NaN;
+        let plannedElapsed = 0;
+        let live: { startedAt: string; plannedLengthSec: number | null } | null = null;
+        for (const it of items) {
+          // Finished items add their planned length; an item PCO gave no planned
+          // time falls back to its actual so it reads neutral (not "behind").
+          if (it.endedAt != null) plannedElapsed += it.plannedLengthSec ?? it.actualDurationSec ?? 0;
+          else if (it.startedAt) live = it;
         }
-        const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
-        if (t && t.mode === "item" && !t.countUp) {
-          sum += -t.seconds; // remaining<0 ⇒ over ⇒ positive delta
-          any = true;
+        if (live && Number.isFinite(startMs)) {
+          const liveElapsed = Math.max(0, (serverNow - Date.parse(live.startedAt)) / 1000);
+          const livePlanned = live.plannedLengthSec ?? liveElapsed;
+          plannedElapsed += Math.min(liveElapsed, livePlanned);
+          deltaSec = (serverNow - startMs) / 1000 - plannedElapsed;
         }
-        deltaSec = any ? sum : null;
-      } else {
-        const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
-        if (t && t.mode === "item" && !t.countUp) deltaSec = -t.seconds;
       }
       if (deltaSec == null) return (c.hideWhenIdle ?? false) ? null : <span style={{ ...ts, opacity: 0.4 }}>—</span>;
-      const over = deltaSec > tol;
-      const under = deltaSec < -tol;
-      const color = over ? "var(--red-10)" : under ? "var(--green-10)" : null;
-      const text = !over && !under ? "On time" : fmtSignedDuration(deltaSec);
+      const behind = deltaSec > tol;
+      const ahead = deltaSec < -tol;
+      const color = behind ? c.behindColor ?? "var(--red-10)" : ahead ? c.aheadColor ?? "var(--green-10)" : null;
+      const text = !behind && !ahead ? "0:00" : fmtSignedDuration(deltaSec);
       return (
         <span style={color ? { ...ts, color } : ts}>
           {text}
-          {(c.showLabel ?? false) && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{scope === "service" ? " service" : " item"}</span>}
+          {(c.showLabel ?? false) && (behind || ahead) && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{behind ? " behind" : " ahead"}</span>}
         </span>
       );
     }

@@ -37,16 +37,16 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3">
-        <Loader2Icon className="size-8 text-gray-7 animate-spin" />
-        <p className="text-headline text-gray-7">Loading…</p>
+        <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
+        <p className="text-headline text-fg-subtle">Loading…</p>
       </div>
     );
   }
   if (error || !state) {
     return (
       <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3 px-12 text-center">
-        <p className="text-title3 text-gray-9 font-semibold">Could not load dashboard</p>
-        {error && <p className="text-caption1 text-gray-7">{error}</p>}
+        <p className="text-title3 text-fg-muted font-semibold">Could not load dashboard</p>
+        {error && <p className="text-caption1 text-fg-subtle">{error}</p>}
       </div>
     );
   }
