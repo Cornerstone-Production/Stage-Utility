@@ -16,8 +16,8 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
   if (isLoading || !state) {
     return (
       <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3">
-        <Loader2Icon className="size-8 text-gray-7 animate-spin" />
-        <p className="text-headline text-gray-7">Loading…</p>
+        <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
+        <p className="text-headline text-fg-subtle">Loading…</p>
       </div>
     );
   }

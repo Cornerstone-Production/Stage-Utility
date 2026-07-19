@@ -47,13 +47,13 @@ export function ScriptView({ displayId, showLiveControls }: ScriptViewProps) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-[100dvh] kiosk-surface">
-        <Loader2Icon className="size-8 text-gray-7 animate-spin" />
+        <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
       </div>
     );
   }
   if (error || !state) {
     return (
-      <div className="flex items-center justify-center h-[100dvh] kiosk-surface text-gray-7">
+      <div className="flex items-center justify-center h-[100dvh] kiosk-surface text-fg-subtle">
         Could not load script
       </div>
     );
