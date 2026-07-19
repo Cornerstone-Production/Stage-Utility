@@ -1036,7 +1036,7 @@ function EditorCanvas({
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-caption2 text-gray-9 w-24 shrink-0 flex items-center gap-1">
+      <span className="text-caption2 text-fg-muted w-24 shrink-0 flex items-center gap-1">
         <span className="truncate">{label}</span>
         {hint && <InfoHint className="shrink-0">{hint}</InfoHint>}
       </span>
@@ -1057,7 +1057,7 @@ function RowSwitch({ label, hint, checked, onChange }: { label: string; hint?: s
 function RowText({ label, hint, value, placeholder, onChange }: { label: string; hint?: string; value: string; placeholder?: string; onChange: (v: string) => void }) {
   return (
     <Row label={label} hint={hint}>
-      <Input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className="text-gray-12" />
+      <Input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className="text-fg" />
     </Row>
   );
 }
@@ -1211,7 +1211,7 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
       <RowSwitch label="Plan-item markers" hint="Overlay a dashed line + time where each PCO item started." checked={c.showMarkers ?? true} onChange={(v) => onConfig({ ...c, showMarkers: v })} />
       <RowSwitch label="Hover tooltip" hint="Show the value + time at the pointer." checked={c.showTooltip ?? true} onChange={(v) => onConfig({ ...c, showTooltip: v })} />
       <RowSwitch label="Kiosk live/recorded toggle" hint="Show an on-screen pill so a viewer can flip between live and the last recorded service." checked={c.kioskToggle ?? false} onChange={(v) => onConfig({ ...c, kioskToggle: v })} />
-      <p className="text-caption2 text-gray-9 leading-snug">Live builds a rolling trend while the server runs; Recorded replays a finished service. Line color is the object's text color below.</p>
+      <p className="text-caption2 text-fg-muted leading-snug">Live builds a rolling trend while the server runs; Recorded replays a finished service. Line color is the object's text color below.</p>
     </>
   );
 }
@@ -1231,7 +1231,7 @@ function NumberInput({ value, onChange, step = 0.01, min, max }: { value: number
 function PixelField({ label, value, dim, onChange }: { label: string; value: number; dim: number; onChange: (frac: number) => void }) {
   return (
     <label className="flex items-center gap-2">
-      <span className="text-caption2 text-gray-9 w-3.5 shrink-0">{label}</span>
+      <span className="text-caption2 text-fg-muted w-3.5 shrink-0">{label}</span>
       <NumberField
         value={Math.round((Number.isFinite(value) ? value : 0) * dim)}
         step={1}
@@ -1838,7 +1838,7 @@ export function LayoutEditor({
         <Popover.Root>
           <Popover.Trigger asChild>
             <Button variant="filled" size="small" title="Canvas size & fit">
-              Canvas <ChevronDownIcon className="size-3.5 text-gray-9" />
+              Canvas <ChevronDownIcon className="size-3.5 text-fg-muted" />
             </Button>
           </Popover.Trigger>
           <Popover.Portal>
@@ -1888,7 +1888,7 @@ export function LayoutEditor({
           <DropdownMenu.Trigger asChild>
             <Button variant="filled" size="small" title="Replace the current layout with a starter or a saved layout">
               <LayoutTemplateIcon className="size-3.5" /> Replace
-              <ChevronDownIcon className="size-3.5 text-gray-9" />
+              <ChevronDownIcon className="size-3.5 text-fg-muted" />
             </Button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
@@ -1929,7 +1929,7 @@ export function LayoutEditor({
             value={tplName}
             onChange={(e) => setTplName(e.target.value)}
             placeholder="Layout name (e.g. Lyrics + Timer)"
-            className="text-gray-12"
+            className="text-fg"
             autoFocus
           />
         </Dialog>
@@ -1971,7 +1971,7 @@ export function LayoutEditor({
               onBoxSize={handleBoxSize}
             />
           ) : (
-            <div className="w-full h-full rounded-xl border border-gray-a4 flex items-center justify-center text-gray-7">
+            <div className="w-full h-full rounded-xl border border-line flex items-center justify-center text-fg-subtle">
               Loading…
             </div>
           )}
@@ -1984,8 +1984,8 @@ export function LayoutEditor({
         <div className="w-80 @6xl:w-96 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: inlineGrid ? (canvasH ?? undefined) : undefined }}>
           {/* Layers */}
           <div className="flex flex-col gap-1">
-            <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Layers</span>
-            {layerRows.length === 0 && <span className="text-caption2 text-gray-7">No objects yet — add one above.</span>}
+            <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Layers</span>
+            {layerRows.length === 0 && <span className="text-caption2 text-fg-subtle">No objects yet — add one above.</span>}
             {layerRows.map(({ o, depth }) => (
               <button
                 key={o.id}
@@ -1997,9 +1997,9 @@ export function LayoutEditor({
                 onDragLeave={() => setDragLayerOver((cur) => (cur === o.id ? null : cur))}
                 onDrop={(e) => { e.preventDefault(); const src = e.dataTransfer.getData("text/plain"); setDragLayerOver(null); if (src) moveLayer(src, o.id); }}
                 style={{ paddingLeft: 8 + depth * 14 }}
-                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${selectedIds.has(o.id) ? "bg-gray-a4" : "hover:bg-gray-a3"} ${dragLayerOver === o.id ? "ring-1 ring-focus" : ""}`}
+                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${selectedIds.has(o.id) ? "bg-fill-active" : "hover:bg-fill"} ${dragLayerOver === o.id ? "ring-1 ring-focus" : ""}`}
               >
-                <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">
+                <span className="text-caption1 text-fg flex-1 min-w-0 truncate">
                   {o.config.type === "container" ? `${TYPE_LABELS[o.config.type]} (${o.children?.length ?? 0})` : TYPE_LABELS[o.config.type]}
                 </span>
                 {depth > 0 && (
@@ -2007,7 +2007,7 @@ export function LayoutEditor({
                     role="button"
                     tabIndex={-1}
                     onClick={(e) => { e.stopPropagation(); reparentToRoot(o.id); }}
-                    className="text-gray-9 hover:text-gray-12"
+                    className="text-fg-muted hover:text-fg"
                     aria-label="Move out of container"
                     title="Move out of container"
                   >
@@ -2018,7 +2018,7 @@ export function LayoutEditor({
                   role="button"
                   tabIndex={-1}
                   onClick={(e) => { e.stopPropagation(); pushHistory(); update(o.id, { locked: !o.locked }); }}
-                  className={o.locked ? "text-amber-10" : "text-gray-9 hover:text-gray-12"}
+                  className={o.locked ? "text-amber-10" : "text-fg-muted hover:text-fg"}
                   aria-label={o.locked ? "Unlock" : "Lock"}
                 >
                   {o.locked ? <LockIcon className="size-3.5" /> : <UnlockIcon className="size-3.5" />}
@@ -2027,7 +2027,7 @@ export function LayoutEditor({
                   role="button"
                   tabIndex={-1}
                   onClick={(e) => { e.stopPropagation(); pushHistory(); update(o.id, { hidden: !o.hidden }); }}
-                  className="text-gray-9 hover:text-gray-12"
+                  className="text-fg-muted hover:text-fg"
                   aria-label={o.hidden ? "Show" : "Hide"}
                 >
                   {o.hidden ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
@@ -2085,15 +2085,15 @@ export function LayoutEditor({
             <>
               <Separator />
               <div className="flex flex-col gap-1">
-                <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Saved layouts</span>
+                <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Saved layouts</span>
                 {templates.map((t) => (
-                  <div key={t.id} className="flex items-center gap-0.5 rounded-md px-2 py-1 hover:bg-gray-a3">
-                    <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">{t.name}</span>
+                  <div key={t.id} className="flex items-center gap-0.5 rounded-md px-2 py-1 hover:bg-fill">
+                    <span className="text-caption1 text-fg flex-1 min-w-0 truncate">{t.name}</span>
                     <Button variant="transparent" size="small" iconOnly onClick={() => loadTemplate(t)} aria-label="Load into editor" title="Load into editor">
-                      <DownloadIcon className="size-3.5 text-gray-9" />
+                      <DownloadIcon className="size-3.5 text-fg-muted" />
                     </Button>
                     <Button variant="transparent" size="small" iconOnly onClick={() => onUpdateTemplate(t.id, { layout: currentLayout() })} aria-label="Overwrite with current" title="Overwrite with current layout">
-                      <SaveIcon className="size-3.5 text-gray-9" />
+                      <SaveIcon className="size-3.5 text-fg-muted" />
                     </Button>
                     <Button variant="transparent" size="small" iconOnly onClick={() => onDeleteTemplate(t.id)} aria-label="Delete layout">
                       <Trash2Icon className="size-3.5 text-red-10" />
@@ -2107,15 +2107,15 @@ export function LayoutEditor({
           {/* Saved groups library (reusable containers) */}
           <Separator />
           <div className="flex flex-col gap-1">
-            <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Saved groups</span>
+            <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Saved groups</span>
             {groups.length === 0 ? (
-              <span className="text-caption2 text-gray-9">Select a container and use the package icon in the inspector to save it as a reusable group.</span>
+              <span className="text-caption2 text-fg-muted">Select a container and use the package icon in the inspector to save it as a reusable group.</span>
             ) : (
               groups.map((g) => (
-                <div key={g.id} className="flex items-center gap-0.5 rounded-md px-2 py-1 hover:bg-gray-a3">
-                  <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">{g.name}</span>
+                <div key={g.id} className="flex items-center gap-0.5 rounded-md px-2 py-1 hover:bg-fill">
+                  <span className="text-caption1 text-fg flex-1 min-w-0 truncate">{g.name}</span>
                   <Button variant="transparent" size="small" iconOnly onClick={() => insertGroup(g)} aria-label="Insert group" title="Insert into this view">
-                    <DownloadIcon className="size-3.5 text-gray-9" />
+                    <DownloadIcon className="size-3.5 text-fg-muted" />
                   </Button>
                   <Button variant="transparent" size="small" iconOnly onClick={() => deleteGroup(g.id)} aria-label="Delete group">
                     <Trash2Icon className="size-3.5 text-red-10" />
@@ -2186,7 +2186,7 @@ export function LayoutEditor({
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
             placeholder="Group name (e.g. Vocal notes panel)"
-            className="text-gray-12"
+            className="text-fg"
             autoFocus
           />
           <DialogFooter>
@@ -2282,7 +2282,7 @@ function PlanAttachmentConfig({
           value={c.match ?? "stage plot"}
           onChange={(e) => onConfig({ ...c, match: e.target.value })}
           placeholder="filename contains…"
-          className="text-gray-12"
+          className="text-fg"
         />
       </Row>
       {pickable.length > 0 && (
@@ -2300,7 +2300,7 @@ function PlanAttachmentConfig({
         </Row>
       )}
       {loaded && pickable.length === 0 && (
-        <p className="text-caption2 text-gray-9 leading-snug">
+        <p className="text-caption2 text-fg-muted leading-snug">
           No documents on the current plan (or PCO isn’t connected). The match still
           applies whenever a plan with a matching file goes live.
         </p>
@@ -2329,7 +2329,7 @@ function PlanAttachmentConfig({
           <NumberInput value={Math.round((crop.right ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("right", v)} />
         </div>
       </Row>
-      <p className="text-caption2 text-gray-9 -mt-1">Top · Bottom · Left · Right</p>
+      <p className="text-caption2 text-fg-muted -mt-1">Top · Bottom · Left · Right</p>
       <Button variant="filled" size="small" onClick={fitBoxToFile} disabled={fitting}>
         {fitting ? "Fitting…" : "Fit box to file"}
       </Button>
@@ -2396,20 +2396,20 @@ function Inspector({
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex items-center gap-1">
-        <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 flex-1">{TYPE_LABELS[c.type]}</span>
+        <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted flex-1">{TYPE_LABELS[c.type]}</span>
         {c.type === "container" && (
-          <Button variant="transparent" size="small" iconOnly onClick={onSaveGroup} aria-label="Save as group"><PackagePlusIcon className="size-3.5 text-gray-9" /></Button>
+          <Button variant="transparent" size="small" iconOnly onClick={onSaveGroup} aria-label="Save as group"><PackagePlusIcon className="size-3.5 text-fg-muted" /></Button>
         )}
-        <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onSnapToGrid} aria-label="Snap to grid" title="Snap position + size to the grid"><Grid3x3Icon className="size-3.5 text-gray-9" /></Button>
+        <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onSnapToGrid} aria-label="Snap to grid" title="Snap position + size to the grid"><Grid3x3Icon className="size-3.5 text-fg-muted" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={onToggleLock} aria-label={o.locked ? "Unlock" : "Lock"}>
-          {o.locked ? <LockIcon className="size-3.5 text-amber-10" /> : <UnlockIcon className="size-3.5 text-gray-9" />}
+          {o.locked ? <LockIcon className="size-3.5 text-amber-10" /> : <UnlockIcon className="size-3.5 text-fg-muted" />}
         </Button>
         <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("front")} aria-label="Bring to front" title="Bring to front"><ChevronsUpIcon className="size-3.5" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("up")} aria-label="Bring forward" title="Bring forward"><ChevronUpIcon className="size-3.5" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("down")} aria-label="Send backward" title="Send backward"><ChevronDownIcon className="size-3.5" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("back")} aria-label="Send to back" title="Send to back"><ChevronsDownIcon className="size-3.5" /></Button>
-        <Button variant="transparent" size="small" iconOnly onClick={onDuplicate} aria-label="Duplicate"><CopyIcon className="size-3.5 text-gray-9" /></Button>
-        <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onRemove} aria-label="Delete"><Trash2Icon className={`size-3.5 ${locked ? "text-gray-7" : "text-red-10"}`} /></Button>
+        <Button variant="transparent" size="small" iconOnly onClick={onDuplicate} aria-label="Duplicate"><CopyIcon className="size-3.5 text-fg-muted" /></Button>
+        <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onRemove} aria-label="Delete"><Trash2Icon className={`size-3.5 ${locked ? "text-fg-subtle" : "text-red-10"}`} /></Button>
       </div>
 
       {nested && (
@@ -2507,7 +2507,7 @@ function Inspector({
           {(() => {
             const present = planItems?.noteCategories ?? [];
             if (present.length === 0) {
-              return <span className="text-caption2 text-gray-9">Note categories appear once a plan with notes is loaded.</span>;
+              return <span className="text-caption2 text-fg-muted">Note categories appear once a plan with notes is loaded.</span>;
             }
             // null/undefined = all shown; otherwise the explicit subset.
             const shown = c.noteCategories == null ? present : present.filter((k) => c.noteCategories!.includes(k));
@@ -2517,7 +2517,7 @@ function Inspector({
             };
             return (
               <div className="flex flex-col gap-1">
-                <span className="text-caption2 text-gray-9">Notes shown</span>
+                <span className="text-caption2 text-fg-muted">Notes shown</span>
                 <div className="flex flex-wrap gap-1.5">
                   {present.map((k) => {
                     const on = shown.includes(k);
@@ -2525,7 +2525,7 @@ function Inspector({
                       <button
                         key={k}
                         onClick={() => toggle(k)}
-                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"}`}
+                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-line-strong bg-fill text-fg-muted hover:bg-fill-hover"}`}
                       >
                         {k}
                       </button>
@@ -2549,7 +2549,7 @@ function Inspector({
             <RowNumber label="Lines" value={c.maxLines ?? 3} step={1} min={1} max={10} onChange={(v) => onConfig({ ...c, maxLines: Math.round(v) })} />
           )}
           {captionChannels.length === 0 ? (
-            <span className="text-caption2 text-gray-9">Channels appear here once captions arrive — toggle any to hide.</span>
+            <span className="text-caption2 text-fg-muted">Channels appear here once captions arrive — toggle any to hide.</span>
           ) : (() => {
             const hidden = c.hideChannels ?? [];
             const toggle = (ch: string) => {
@@ -2558,7 +2558,7 @@ function Inspector({
             };
             return (
               <div className="flex flex-col gap-1">
-                <span className="text-caption2 text-gray-9">Channels shown</span>
+                <span className="text-caption2 text-fg-muted">Channels shown</span>
                 <div className="flex flex-wrap gap-1.5">
                   {captionChannels.map((ch) => {
                     const on = !hidden.includes(ch);
@@ -2566,7 +2566,7 @@ function Inspector({
                       <button
                         key={ch}
                         onClick={() => toggle(ch)}
-                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"}`}
+                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-line-strong bg-fill text-fg-muted hover:bg-fill-hover"}`}
                       >
                         {ch}
                       </button>
@@ -2653,7 +2653,7 @@ function Inspector({
               </Select>
             </Row>
             {isInline ? (
-              <p className="text-caption2 text-gray-9 leading-snug">Edit this grid's slots below the canvas.</p>
+              <p className="text-caption2 text-fg-muted leading-snug">Edit this grid's slots below the canvas.</p>
             ) : (
               <Row label="View">
                 <Select value={c.sourceViewId ?? ""} onValueChange={(v: string) => onConfig({ ...c, source: "view", sourceViewId: v || null })}>
@@ -2675,7 +2675,7 @@ function Inspector({
           <RowSwitch label="Health" checked={c.show.health ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, health: v } })} />
           <RowSwitch label="Temp" checked={c.show.temp ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, temp: v } })} />
           <div className="flex flex-col gap-1.5 pt-1">
-            <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Bays</span>
+            <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Bays</span>
             {c.bays.map((b, i) => {
               const bay = chargerBays.find((x) => x.id === b.id);
               const placeholder = bay ? `${bay.connectionName ?? `Charger ${bay.chargerIndex}`} · Bay ${bay.bay}` : "Bay";
@@ -2688,7 +2688,7 @@ function Inspector({
                       const label = e.target.value;
                       onConfig({ ...c, bays: c.bays.map((x, j) => (j === i ? { ...x, label: label || undefined } : x)) });
                     }}
-                    className="text-gray-12 flex-1"
+                    className="text-fg flex-1"
                   />
                   <Button variant="transparent" size="small" iconOnly onClick={() => onConfig({ ...c, bays: c.bays.filter((_, j) => j !== i) })} aria-label="Remove bay"><Trash2Icon className="size-3.5 text-red-10" /></Button>
                 </div>
@@ -2769,7 +2769,7 @@ function Inspector({
                 </SelectContent>
               </Select>
             </Row>
-            <Row label="OBS"><span className="text-caption2 text-gray-10">{liveLabel}</span></Row>
+            <Row label="OBS"><span className="text-caption2 text-fg-muted">{liveLabel}</span></Row>
             <RowText label="Active text" value={c.recordingText ?? ""} placeholder={activePlaceholder} onChange={(v) => onConfig({ ...c, recordingText: v })} />
             <RowText label="Idle text" value={c.idleText ?? ""} placeholder={idlePlaceholder} onChange={(v) => onConfig({ ...c, idleText: v })} />
             <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="OBS: Offline" onChange={(v) => onConfig({ ...c, offlineText: v })} />
@@ -2811,7 +2811,7 @@ function Inspector({
             <RowText label="Label" value={c.label ?? ""} placeholder="Button" onChange={(v) => onConfig({ ...c, label: v })} />
             <RowText label="Address" hint="The OSC path to send when tapped, e.g. /ch/01/mix/on — copy it from your device's OSC documentation. No spaces." value={c.address} placeholder="/ch/01/mix/on" onChange={(v) => onConfig({ ...c, address: v })} />
             <div className="flex flex-col gap-1.5">
-              <span className="flex items-center gap-1 text-caption2 font-semibold uppercase tracking-wider text-gray-9">
+              <span className="flex items-center gap-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">
                 Arguments
                 <InfoHint>
                   Values sent with the OSC message, in order. Pick each type — int (whole number), float
@@ -2832,9 +2832,9 @@ function Inspector({
                     </SelectContent>
                   </Select>
                   {a.type !== "T" && a.type !== "F" && (
-                    <Input value={String(a.value ?? "")} onChange={(e) => setArg(i, { value: e.target.value })} placeholder="value" className="flex-1 min-w-0 text-gray-12" />
+                    <Input value={String(a.value ?? "")} onChange={(e) => setArg(i, { value: e.target.value })} placeholder="value" className="flex-1 min-w-0 text-fg" />
                   )}
-                  <Button variant="transparent" size="small" iconOnly onClick={() => onConfig({ ...c, args: args.filter((_, idx) => idx !== i) })} aria-label="Remove argument"><Trash2Icon className="size-3.5 text-gray-9" /></Button>
+                  <Button variant="transparent" size="small" iconOnly onClick={() => onConfig({ ...c, args: args.filter((_, idx) => idx !== i) })} aria-label="Remove argument"><Trash2Icon className="size-3.5 text-fg-muted" /></Button>
                 </div>
               ))}
               <Button variant="transparent" size="small" className="self-start" onClick={() => onConfig({ ...c, args: [...args, { type: "i", value: "1" }] })}>Add argument</Button>
@@ -2888,7 +2888,7 @@ function Inspector({
                 </Select>
               </Row>
             ) : (
-              <p className="text-caption2 text-gray-9 leading-snug">Peak, low and average are building-wide (today), from the occupancy sensor.</p>
+              <p className="text-caption2 text-fg-muted leading-snug">Peak, low and average are building-wide (today), from the occupancy sensor.</p>
             )}
             <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
             {(c.showLabel ?? true) && (
@@ -2921,7 +2921,7 @@ function Inspector({
         };
         return (
           <>
-            <p className="text-caption2 text-gray-9 leading-snug">Building-wide people metrics, shown side by side. Toggle each:</p>
+            <p className="text-caption2 text-fg-muted leading-snug">Building-wide people metrics, shown side by side. Toggle each:</p>
             {ORDER.map((k) => (
               <RowSwitch key={k} label={LABEL[k]} hint={HINT[k]} checked={cur.includes(k)} onChange={(v) => toggle(k, v)} />
             ))}
@@ -2953,7 +2953,7 @@ function Inspector({
           {(c.showLabel ?? true) && (
             <RowText label="Label" value={c.label ?? ""} placeholder="(auto)" onChange={(v) => onConfig({ ...c, label: v })} />
           )}
-          <p className="text-caption2 text-gray-9 leading-snug">Driven by the Baptisms tab. &ldquo;Live&rdquo; ticks the current testimony/baptism; others summarize the session.</p>
+          <p className="text-caption2 text-fg-muted leading-snug">Driven by the Baptisms tab. &ldquo;Live&rdquo; ticks the current testimony/baptism; others summarize the session.</p>
         </>
       )}
       {c.type === "image" && (
@@ -2974,7 +2974,7 @@ function Inspector({
         <RowSwitch label="Empty logo" checked={c.useEmptySlotLogo ?? false} onChange={(v) => onConfig({ type: "brand-logo", useEmptySlotLogo: v })} />
       )}
       {NO_CONFIG_TYPES.has(c.type) && (
-        <p className="text-caption2 text-gray-9 leading-snug">Updates automatically — no options. Use the styling controls below.</p>
+        <p className="text-caption2 text-fg-muted leading-snug">Updates automatically — no options. Use the styling controls below.</p>
       )}
 
       <Separator />
@@ -2993,7 +2993,7 @@ function Inspector({
       {/* Style */}
       {isText && (
         <>
-          <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 mt-1">Type</span>
+          <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Type</span>
           <Row label="Font size"><NumberField value={pxOf(s.fontSize, 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
           <Row label="Weight">
             <Select value={String(s.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
@@ -3001,7 +3001,7 @@ function Inspector({
               <SelectContent>{WEIGHTS.map((w) => <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
             </Select>
           </Row>
-          <Row label="Color"><input type="color" value={hexForInput(s.color, "#ffffff")} onChange={(e) => onStyle({ color: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent" /></Row>
+          <Row label="Color"><input type="color" value={hexForInput(s.color, "#ffffff")} onChange={(e) => onStyle({ color: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" /></Row>
           <Row label="Align">
             <ButtonGroup>
               {(["left", "center", "right"] as const).map((a) => (
@@ -3021,8 +3021,8 @@ function Inspector({
           <Row label="Max lines"><NumberInput value={s.lineClamp ?? 0} step={1} min={0} max={10} onChange={(v) => onStyle({ lineClamp: v > 0 ? Math.round(v) : null })} /></Row>
         </>
       )}
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 mt-1">Fill</span>
-      <Row label="Fill"><input type="color" value={hexForInput(s.background, "#000000")} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent" />
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Fill</span>
+      <Row label="Fill"><input type="color" value={hexForInput(s.background, "#000000")} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" />
         <Button variant="transparent" size="small" onClick={() => onStyle({ background: null })}>Clear</Button>
       </Row>
       <Row label="Opacity">
@@ -3036,17 +3036,17 @@ function Inspector({
           className="flex-1 min-w-0 accent-accent"
           aria-label="Opacity"
         />
-        <span className="w-9 shrink-0 text-right tabular-nums text-caption2 text-gray-11">{Math.round((s.opacity ?? 1) * 100)}%</span>
+        <span className="w-9 shrink-0 text-right tabular-nums text-caption2 text-fg">{Math.round((s.opacity ?? 1) * 100)}%</span>
       </Row>
       <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
       <Row label="Padding"><NumberField value={pxOf(s.padding, 0)} step={1} min={0} max={Math.round(0.3 * canvas.height)} suffix="px" onChange={(px) => onStyle({ padding: px / canvas.height })} /></Row>
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 mt-1">Border</span>
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Border</span>
       <Row label="Border">
         <input
           type="color"
           value={hexForInput(s.borderColor, "#ffffff")}
           onChange={(e) => onStyle({ borderColor: e.target.value, borderWidth: s.borderWidth ?? 0 })}
-          className="w-9 h-7 rounded cursor-pointer border border-gray-a4 bg-transparent"
+          className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent"
           aria-label="Border color"
         />
         <NumberField
@@ -3058,7 +3058,7 @@ function Inspector({
           onChange={(px) => onStyle({ borderWidth: px / canvas.height, borderColor: s.borderColor ?? "#ffffff" })}
         />
       </Row>
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9 mt-1">Elevation</span>
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Elevation</span>
       {/* Elevation: one slider with labeled None/Low/Med/High stops (ticks), fine
           values allowed in between. Drives the box's drop shadow for layered depth. */}
       <Row label="Elevation" hint="Soft drop shadow under this object's box — lifts it above whatever it overlaps. Snaps toward None/Low/Med/High; drag for in-between.">
@@ -3079,7 +3079,7 @@ function Inspector({
           <option value="0.65" />
           <option value="1" />
         </datalist>
-        <span className="w-10 shrink-0 text-caption2 text-gray-9 text-right tabular-nums">{elevationLabel(s.boxShadow ?? 0)}</span>
+        <span className="w-10 shrink-0 text-caption2 text-fg-muted text-right tabular-nums">{elevationLabel(s.boxShadow ?? 0)}</span>
       </Row>
 
       <Separator />
@@ -3099,7 +3099,7 @@ function Inspector({
       </Row>
 
       {/* Position & size in design-px of the parent box (canvas for top-level) */}
-      <span className="text-caption2 text-gray-9">
+      <span className="text-caption2 text-fg-muted">
         Position &amp; size ({Math.round(parentW)}×{Math.round(parentH)}{nested ? " · in container" : ""})
       </span>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">

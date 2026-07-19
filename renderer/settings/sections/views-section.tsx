@@ -168,7 +168,7 @@ function ViewDetail({
           value={editName}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
           onBlur={handleNameBlur}
-          className="flex-1 min-w-0 max-sm:basis-full text-headline font-semibold text-gray-12"
+          className="flex-1 min-w-0 max-sm:basis-full text-headline font-semibold text-fg"
           aria-label="View name"
         />
         <Select value={view.kind} onValueChange={(k: string) => handlers.handleSetViewKind(view.id, k as ViewKind)}>
@@ -184,7 +184,7 @@ function ViewDetail({
           </SelectContent>
         </Select>
         <Button variant="filled" size="small" onClick={() => handlers.handleDuplicateView(view.id)}>
-          <CopyIcon className="size-3.5 text-gray-9" />
+          <CopyIcon className="size-3.5 text-fg-muted" />
           Duplicate
         </Button>
         <Button
@@ -217,7 +217,7 @@ function ViewDetail({
       ) : (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-caption1 text-gray-9">Preview shape</span>
+            <span className="text-caption1 text-fg-muted">Preview shape</span>
             <Select value={String(previewAspect)} onValueChange={(v: string) => setPreviewAspect(Number(v))}>
               <SelectTrigger className="w-full sm:w-48"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -241,7 +241,7 @@ function ViewDetail({
           <Separator />
           {slotViews.length > 0 && (
             <div className="flex flex-col items-start gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="text-caption1 text-gray-9 shrink-0">Copy slots from:</span>
+              <span className="text-caption1 text-fg-muted shrink-0">Copy slots from:</span>
               <Select
                 value=""
                 onValueChange={(fromId: string) => {
@@ -277,8 +277,8 @@ function ViewDetail({
           <Separator />
           <div className="flex items-center justify-between gap-3">
             <div className="flex flex-col">
-              <span className="text-caption1 text-gray-12">Show PCO Prev/Next controls</span>
-              <span className="text-caption2 text-gray-9">
+              <span className="text-caption1 text-fg">Show PCO Prev/Next controls</span>
+              <span className="text-caption2 text-fg-muted">
                 Adds the Planning Center Live Prev/Next buttons to this script display.
               </span>
             </div>
@@ -287,13 +287,13 @@ function ViewDetail({
               onCheckedChange={(v) => void invoke("views:setShowLiveControls", { id: view.id, showLiveControls: v })}
             />
           </div>
-          <p className="text-caption2 text-gray-9">
+          <p className="text-caption2 text-fg-muted">
             The Script view renders the live plan rundown (items + note columns) with the clock,
             the PCO countdown, and a max-SPL column per item.
           </p>
         </>
       ) : (
-        <p className="text-caption1 text-gray-9">
+        <p className="text-caption1 text-fg-muted">
           {KIND_LABELS[view.kind]} views render a fixed layout from live Planning Center / ProPresenter
           data — there's nothing to configure here yet besides the name.
         </p>
@@ -379,9 +379,9 @@ export function ViewsSection({
       >
         {/* Collapse the list (desktop only) to give the editor/preview more room. */}
         <div className="hidden sm:flex items-center justify-between pl-1">
-          <span className="text-caption2 font-medium uppercase tracking-wide text-gray-9">Views</span>
+          <span className="text-caption2 font-medium uppercase tracking-wide text-fg-muted">Views</span>
           <Button variant="transparent" size="small" iconOnly aria-label="Collapse views list" onClick={toggleList}>
-            <PanelLeftCloseIcon className="size-4 text-gray-11" />
+            <PanelLeftCloseIcon className="size-4 text-fg" />
           </Button>
         </div>
         <DndContext sensors={handlers.sensors} collisionDetection={closestCenter} onDragEnd={handleViewDragEnd}>
@@ -403,7 +403,7 @@ export function ViewsSection({
         <Dialog
           trigger={
             <Button variant="filled" size="small" className="mt-1 self-start">
-              <PlusIcon className="size-3.5 text-gray-9" />
+              <PlusIcon className="size-3.5 text-fg-muted" />
               Add view
             </Button>
           }
@@ -431,7 +431,7 @@ export function ViewsSection({
               value={newName}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setNewName(e.target.value)}
               placeholder="View name (e.g. Main Mic Slots)"
-              className="text-gray-12"
+              className="text-fg"
               autoFocus
             />
             <Select value={newKind} onValueChange={(v: string) => setNewKind(v as ViewKind)}>
@@ -470,7 +470,7 @@ export function ViewsSection({
         {/* Mobile-only back affordance to the view list. */}
         <button
           type="button"
-          className="sm:hidden mb-3 flex items-center gap-1 text-footnote font-medium text-gray-11"
+          className="sm:hidden mb-3 flex items-center gap-1 text-footnote font-medium text-fg"
           onClick={() => setMobileShowDetail(false)}
         >
           <ChevronLeftIcon className="size-4" />
@@ -480,7 +480,7 @@ export function ViewsSection({
         {listCollapsed && (
           <button
             type="button"
-            className="hidden sm:flex mb-3 items-center gap-1 text-footnote font-medium text-gray-11 hover:text-gray-12 self-start"
+            className="hidden sm:flex mb-3 items-center gap-1 text-footnote font-medium text-fg hover:text-fg self-start"
             onClick={toggleList}
           >
             <PanelLeftOpenIcon className="size-4" />
