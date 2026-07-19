@@ -570,7 +570,7 @@ export function AdvancedSection({
       />
 
       <FieldSet>
-        <Collapsible label="Network & behavior" summary="Public address, reconnects, attendance" headerClassName="px-4 pt-3.5 pb-1">
+        <Collapsible label="Network & behavior" summary="Public address, reconnects, attendance" headerClassName="px-4 py-2.5">
           <FieldSet flat>
         <FieldGroup>
           <Field orientation="vertical">
@@ -672,7 +672,7 @@ export function AdvancedSection({
       </FieldSet>
 
       <FieldSet>
-        <Collapsible label="Backup & restore" summary="Save, download & recall config snapshots" headerClassName="px-4 pt-3.5 pb-1">
+        <Collapsible label="Backup & restore" summary="Save, download & recall config snapshots" headerClassName="px-4 py-2.5">
           <ConfigSnapshotPanel />
         </Collapsible>
       </FieldSet>
