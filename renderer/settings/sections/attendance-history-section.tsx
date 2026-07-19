@@ -461,6 +461,24 @@ function AttendanceChart({
       lastAxisX = mx;
     }
   }
+  // Vertical NAME labels for items that start close together stack on the same x
+  // and become unreadable (e.g. "MEDIA" under "VIDEO: Pre-roll"). Push each into a
+  // horizontal "lane" — a label within CLUSTER_GAP of the previous shifts one lane
+  // right so a cluster fans out side-by-side instead of overlapping. Lone labels
+  // (lane 0) stay on their own line.
+  const LANE_W = 11;
+  const CLUSTER_GAP = 12;
+  const laneByIdx = new Map<number, number>();
+  {
+    const order = inRange.map((m, i) => ({ i, mx: xt(m.t) })).sort((a, b) => a.mx - b.mx);
+    let lastX = -Infinity;
+    let lane = 0;
+    for (const { i, mx } of order) {
+      lane = mx - lastX < CLUSTER_GAP ? lane + 1 : 0;
+      laneByIdx.set(i, lane);
+      lastX = mx;
+    }
+  }
 
   // Hover tooltip: map the pointer to the nearest sample and show its values + time.
   function onMove(e: React.PointerEvent<SVGSVGElement>) {
@@ -516,10 +534,12 @@ function AttendanceChart({
           {/* PCO plan-item markers — item NAME on the line; the time drops to the x-axis */}
           {inRange.map((m, i) => {
             const mx = xt(m.t);
+            // Shift clustered labels into their lane so vertical names don't stack.
+            const tx = mx + 2 + (laneByIdx.get(i) ?? 0) * LANE_W;
             return (
               <g key={`${m.t}-${i}`}>
                 <line x1={mx} y1={padT} x2={mx} y2={padT + plotH} stroke="var(--gray-a6)" strokeWidth={1} strokeDasharray="3 3" />
-                <text x={mx + 2} y={padT + 8} fontSize={9} fill="var(--gray-10)" transform={`rotate(90 ${mx + 2} ${padT + 8})`}>
+                <text x={tx} y={padT + 8} fontSize={9} fill="var(--gray-10)" transform={`rotate(90 ${tx} ${padT + 8})`}>
                   {m.label.length > 22 ? `${m.label.slice(0, 21)}…` : m.label}
                 </text>
               </g>
