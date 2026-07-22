@@ -11,10 +11,12 @@ import { Collapsible } from "../../components/ui";
 export function PatchWeekly({
   variants,
   assignments,
+  plan,
   onChange,
 }: {
   variants: PatchVariant[];
   assignments: PatchAssignments;
+  plan: { serviceTypeId: string | null; planId: string | null; planTitle: string | null } | null;
   onChange: (a: PatchAssignments) => void;
 }) {
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
@@ -31,6 +33,20 @@ export function PatchWeekly({
     onChange({ ...assignments, byServiceType });
   }
 
+  // Per-plan override: set/clear the variant for this specific plan (keeps any
+  // week tweaks already stored under it). Empty = fall back to the service-type.
+  function setPlanVariant(planId: string, variantId: string) {
+    const byPlan = { ...assignments.byPlan };
+    const entry = { ...(byPlan[planId] ?? {}) };
+    if (variantId) entry.variantId = variantId;
+    else delete entry.variantId;
+    if (Object.keys(entry).length) byPlan[planId] = entry;
+    else delete byPlan[planId];
+    onChange({ ...assignments, byPlan });
+  }
+
+  const standingForPlan = plan?.serviceTypeId ? assignments.byServiceType[plan.serviceTypeId] : undefined;
+  const planEntry = plan?.planId ? assignments.byPlan[plan.planId] : undefined;
   const setCount = Object.keys(assignments.byServiceType).length;
 
   return (
@@ -56,7 +72,25 @@ export function PatchWeekly({
               </div>
             ))
           )}
-          <p className="text-caption2 text-fg-subtle">Each service type falls back to the Default patch unless a variant is assigned.</p>
+          {plan?.planId && (
+            <div className="mt-1 flex flex-col gap-1 rounded-lg border border-line-strong bg-surface-raised px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-footnote font-medium text-fg">This week{plan.planTitle ? ` · ${plan.planTitle}` : ""}</span>
+                <select
+                  value={planEntry?.variantId ?? ""}
+                  onChange={(e) => setPlanVariant(plan.planId!, e.target.value)}
+                  className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote text-fg focus:outline-none focus:border-focus"
+                >
+                  <option value="">Use standing{standingForPlan ? ` — ${variants.find((v) => v.id === standingForPlan)?.name ?? "variant"}` : " — Default"}</option>
+                  {variants.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </select>
+              </div>
+              {planEntry?.tweaks && Object.keys(planEntry.tweaks).length > 0 && (
+                <span className="text-caption2 text-fg-subtle">{Object.keys(planEntry.tweaks).length} one-off tweak{Object.keys(planEntry.tweaks).length === 1 ? "" : "s"} this week — edit via the “This week” target above the table.</span>
+              )}
+            </div>
+          )}
+          <p className="text-caption2 text-fg-subtle">Each service type falls back to the Default patch unless a variant is assigned; a specific week can override that.</p>
         </div>
       </Collapsible>
     </div>

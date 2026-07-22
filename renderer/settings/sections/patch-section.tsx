@@ -27,6 +27,7 @@ export function PatchSection() {
   const [importing, setImporting] = useState(false);
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
   const [group, setGroup] = useState<"rack" | "device">("rack");
+  const [plan, setPlan] = useState<{ serviceTypeId: string | null; planId: string | null; planTitle: string | null } | null>(null);
 
   const dirty = useMemo(() => (draft && saved ? JSON.stringify(draft) !== JSON.stringify(saved) : false), [draft, saved]);
   const dirtyRef = useRef(false);
@@ -36,6 +37,9 @@ export function PatchSection() {
     invoke<PatchFile>("patch:get")
       .then((f) => { setSaved(f); setDraft(f); })
       .catch(() => { setSaved(EMPTY); setDraft(EMPTY); });
+    invoke<StageState>("stage:getState")
+      .then((s) => setPlan({ serviceTypeId: s.serviceTypeId, planId: s.planId, planTitle: s.planTitle }))
+      .catch(() => setPlan(null));
     return onNotification("patch:updated", (p) => {
       const f = p as PatchFile;
       setSaved(f);
@@ -73,12 +77,42 @@ export function PatchSection() {
 
   const racks = draft.devices.filter((d) => d.kind === "rack");
   const stageDevices = draft.devices.filter((d) => d.kind !== "rack");
-  const editingVariant = editingVariantId ? draft.variants.find((v) => v.id === editingVariantId) ?? null : null;
+  const isWeek = editingVariantId === "__week" && !!plan?.planId;
+  const editingVariant = editingVariantId && editingVariantId !== "__week" ? draft.variants.find((v) => v.id === editingVariantId) ?? null : null;
 
-  // What the table shows + where its edits go: the Default patch, or a variant
-  // rendered as (default + overrides) whose edits are diffed back into overrides.
-  const tableEndpoints = editingVariant ? mergeOverrides(draft.endpoints, editingVariant.overrides) : draft.endpoints;
+  // A week's one-off tweaks layer over: default + the plan's assigned variant.
+  const weekBase = (() => {
+    if (!plan?.planId) return draft.endpoints;
+    const vid = draft.assignments.byPlan[plan.planId]?.variantId ?? (plan.serviceTypeId ? draft.assignments.byServiceType[plan.serviceTypeId] : undefined);
+    const v = vid ? draft.variants.find((x) => x.id === vid) : undefined;
+    return v ? mergeOverrides(draft.endpoints, v.overrides) : draft.endpoints;
+  })();
+  const weekTweaks = plan?.planId ? draft.assignments.byPlan[plan.planId]?.tweaks ?? {} : {};
+
+  // What the table shows + where edits go: Default, a variant (diffed vs default),
+  // or this week's tweaks (diffed vs default+variant, stored under the plan).
+  const tableEndpoints = isWeek
+    ? mergeOverrides(weekBase, weekTweaks)
+    : editingVariant
+      ? mergeOverrides(draft.endpoints, editingVariant.overrides)
+      : draft.endpoints;
+
   const onTableChange = (next: PatchEndpoint[]) => {
+    if (isWeek && plan?.planId) {
+      const tweaks = diffEndpoints(next, weekBase);
+      const pid = plan.planId;
+      setDraft((d) => {
+        if (!d) return d;
+        const byPlan = { ...d.assignments.byPlan };
+        const entry = { ...(byPlan[pid] ?? {}) };
+        if (Object.keys(tweaks).length) entry.tweaks = tweaks;
+        else delete entry.tweaks;
+        if (Object.keys(entry).length) byPlan[pid] = entry;
+        else delete byPlan[pid];
+        return { ...d, assignments: { ...d.assignments, byPlan } };
+      });
+      return;
+    }
     if (!editingVariant) { setEndpoints(next); return; }
     const overrides = diffEndpoints(next, draft.endpoints);
     setVariants(draft.variants.map((v) => (v.id === editingVariant.id ? { ...v, overrides } : v)));
@@ -146,6 +180,7 @@ export function PatchSection() {
           className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote text-fg focus:outline-none focus:border-focus"
         >
           <option value="">Default patch</option>
+          {plan?.planId && <option value="__week">This week{plan.planTitle ? ` — ${plan.planTitle}` : ""}</option>}
           {draft.variants.map((v) => (
             <option key={v.id} value={v.id}>{v.name}</option>
           ))}
@@ -158,6 +193,8 @@ export function PatchSection() {
             </button>
             <span className="text-caption2 text-fg-muted">Only changes vs the default are saved.</span>
           </>
+        ) : isWeek ? (
+          <span className="text-caption2 text-fg-muted">One-off tweaks for this week only — saved over the assigned base.</span>
         ) : (
           <Button variant="transparent" size="small" onClick={newVariant}>
             <PlusIcon className="size-3.5" /> New variant
@@ -174,7 +211,7 @@ export function PatchSection() {
 
       <PatchTable dir={tab} group={group} racks={racks} stageDevices={stageDevices} endpoints={tableEndpoints} onChange={onTableChange} />
 
-      <PatchWeekly variants={draft.variants} assignments={draft.assignments} onChange={setAssignments} />
+      <PatchWeekly variants={draft.variants} assignments={draft.assignments} plan={plan} onChange={setAssignments} />
     </div>
   );
 }
