@@ -199,3 +199,21 @@ Per the approved mock (`patch-volunteer-view` artifact) and the "+more" decision
 - Unit: resolution precedence (default → service-type → plan → tweaks), change-flagging, import column-mapping parsing.
 - Manual/Playwright: editor add/remove device + edit rows + persistence; variant diff storage; `/patch` renders resolved week + changes; SSE live update; CSV round-trip.
 - Regression: no secrets in `/api/patch`; SSE broadcasts only on change.
+
+## 15. Implementation status (2026-07-22)
+
+v1 built on `feat/patch-sheet` (commits c8e01c7 → 157fa62, **not pushed**):
+- **A** — types + `patch.json` store; `GET`/`POST /api/patch` + `patch:updated` SSE; Settings → Patch section; device manager + editable Inputs/Outputs table with path editor + save.
+- **B** — CSV import with column auto-mapping + preview.
+- **C** — variants (minimal-diff overlays) + weekly per-service-type assignment + shared resolve util.
+- **D** — public read-only `/patch` volunteer view: resolved week, changes-first card, filter/changes-only, collapsible rack groups, per-row chain, live via SSE.
+
+Verified throughout: build/tsc clean; API round-trip, CSV import, variant minimal-diff storage, and `/patch` resolution against the live PCO plan all confirmed (Playwright + curl).
+
+**Deferred within v1** (data model already supports; UI/refinement to follow):
+- xlsx import (CSV shipped; xlsx via a server-side exceljs parse route).
+- Editor "By device / By rack" grouping toggle (rack-grouped shipped).
+- Per-plan override + week-tweaks UI (resolve + assignments support them; only per-service-type standing assignment has UI so far).
+- Graphical SVG connection diagram (path currently shown as a text chain per row).
+
+Plus the spec's explicitly-deferred future phases: mic-slot name display (`micSlotRef`), PCO scheduling suggestions (`pcoPosition`), and the other domains (Dante, WSG, Monitoring, rack elevations).
