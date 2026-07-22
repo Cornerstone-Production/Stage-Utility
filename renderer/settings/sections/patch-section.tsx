@@ -26,6 +26,7 @@ export function PatchSection() {
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
+  const [group, setGroup] = useState<"rack" | "device">("rack");
 
   const dirty = useMemo(() => (draft && saved ? JSON.stringify(draft) !== JSON.stringify(saved) : false), [draft, saved]);
   const dirtyRef = useRef(false);
@@ -162,9 +163,16 @@ export function PatchSection() {
             <PlusIcon className="size-3.5" /> New variant
           </Button>
         )}
+        <div className="ml-auto inline-flex rounded-lg border border-line bg-surface p-1">
+          {(["rack", "device"] as const).map((g) => (
+            <button key={g} type="button" onClick={() => setGroup(g)} className={`rounded-md px-3 py-1 text-caption1 transition-colors ${group === g ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}>
+              {g === "rack" ? "By rack" : "By device"}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <PatchTable dir={tab} racks={racks} stageDevices={stageDevices} endpoints={tableEndpoints} onChange={onTableChange} />
+      <PatchTable dir={tab} group={group} racks={racks} stageDevices={stageDevices} endpoints={tableEndpoints} onChange={onTableChange} />
 
       <PatchWeekly variants={draft.variants} assignments={draft.assignments} onChange={setAssignments} />
     </div>
