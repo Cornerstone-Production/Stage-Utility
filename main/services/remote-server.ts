@@ -13,9 +13,9 @@ import * as path from "path";
 import * as zlib from "node:zlib";
 import { fileURLToPath } from "url";
 
-import type { DisplayKind, LayoutDTO, LayoutObject, ScriptViewLayout, Slot, SlotsLayout } from "../types/stage.js";
+import type { DisplayKind, LayoutDTO, LayoutObject, PatchFile, ScriptViewLayout, Slot, SlotsLayout } from "../types/stage.js";
 import type { OscArg } from "../types/osc.js";
-import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
+import { addBroadcastListener, setSubscriberCheck, broadcast } from "./broadcaster.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
 import { buildHistoryWorkbook, type HistorySheet } from "./history-export.js";
 import { getLogLines } from "./log-buffer.js";
@@ -35,6 +35,7 @@ import { splRecorder } from "./spl-recorder.js";
 import { attendanceStore } from "./attendance-store.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
+import { patchStore } from "./patch-store.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { stageController } from "./stage-controller.js";
@@ -1163,6 +1164,26 @@ export class RemoteServer {
         return;
       }
       json(res, await stageController.setScriptViewConfig(body.serviceTypeIds.map(String)));
+      return;
+    }
+
+    // Stage patch sheet — full file (devices + default endpoints + variants +
+    // assignments). Editor GETs on mount then listens for the change broadcast.
+    if (method === "GET" && pathname === "/api/patch") {
+      json(res, await patchStore.load());
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/patch") {
+      const body = (await readBody(req)) as Record<string, unknown>;
+      const file = body.file as PatchFile | undefined;
+      if (!file || typeof file !== "object" || !Array.isArray(file.devices) || !Array.isArray(file.endpoints)) {
+        error(res, "body.file (PatchFile) required");
+        return;
+      }
+      const saved = await patchStore.save(file);
+      broadcast("patch:updated", saved); // change-driven; editor + /patch live-update
+      json(res, saved);
       return;
     }
 
