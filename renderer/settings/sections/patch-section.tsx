@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { UploadIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { Button, SkeletonRows, toast } from "../../components/ui";
 import { PatchDeviceManager } from "./patch-device-manager";
 import { PatchTable } from "./patch-table";
+import { PatchImport } from "./patch-import";
 
 const EMPTY: PatchFile = { devices: [], endpoints: [], variants: [], assignments: { byServiceType: {}, byPlan: {} }, updatedAt: "" };
 
@@ -18,6 +20,7 @@ export function PatchSection() {
   const [draft, setDraft] = useState<PatchFile | null>(null);
   const [tab, setTab] = useState<"in" | "out">("in");
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const dirty = useMemo(() => (draft && saved ? JSON.stringify(draft) !== JSON.stringify(saved) : false), [draft, saved]);
   const dirtyRef = useRef(false);
@@ -76,19 +79,28 @@ export function PatchSection() {
         </div>
       )}
 
-      {/* Inputs / Outputs tabs (peers) */}
-      <div className="inline-flex self-start rounded-lg border border-line bg-surface p-1">
-        {(["in", "out"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className={`rounded-md px-3.5 py-1.5 text-footnote transition-colors ${tab === t ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}
-          >
-            {t === "in" ? "Inputs" : "Outputs"}
-          </button>
-        ))}
+      {/* Inputs / Outputs tabs (peers) + import */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="inline-flex rounded-lg border border-line bg-surface p-1">
+          {(["in", "out"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={`rounded-md px-3.5 py-1.5 text-footnote transition-colors ${tab === t ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}
+            >
+              {t === "in" ? "Inputs" : "Outputs"}
+            </button>
+          ))}
+        </div>
+        <Button variant="filled" size="small" onClick={() => setImporting((v) => !v)}>
+          <UploadIcon className="size-3.5" /> Import CSV
+        </Button>
       </div>
+
+      {importing && (
+        <PatchImport devices={draft.devices} endpoints={draft.endpoints} dir={tab} onChange={setEndpoints} onClose={() => setImporting(false)} />
+      )}
 
       <PatchDeviceManager devices={draft.devices} onChange={setDevices} />
 
