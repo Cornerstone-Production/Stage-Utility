@@ -18,6 +18,7 @@ import {
   MonitorIcon,
   CalendarIcon,
   LayoutTemplateIcon,
+  CableIcon,
   PlugIcon,
   QrCodeIcon,
   PaletteIcon,
@@ -45,6 +46,7 @@ import { applyAccentVar } from "../lib/apply-accent";
 import { cn } from "../lib/cn";
 import { AdvancedSection } from "./sections/advanced-section";
 import { ServiceHistorySection } from "./sections/service-history-section";
+import { PatchSection } from "./sections/patch-section";
 import { ScriptViewSection } from "./sections/scriptview-section";
 import { BaptismsSection } from "./sections/baptisms-section";
 import { GettingStarted } from "./getting-started";
@@ -177,6 +179,7 @@ const SECTIONS: SectionItem[] = [
   { id: "scriptview", label: "ScriptView", icon: <ListChecksIcon className="size-4" /> },
   { id: "displays", label: "Displays", icon: <MonitorIcon className="size-4" /> },
   { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4" /> },
+  { id: "patch", label: "Patch", icon: <CableIcon className="size-4" /> },
   { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4" /> },
   { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4" /> },
   { id: "service-history", label: "History", icon: <ClockIcon className="size-4" /> },
@@ -195,13 +198,14 @@ const SECTION_DESC: Record<string, string> = {
   branding: "Your organization's name, logo, and accent color.",
   "service-history": "Every service you've run — timing and attendance.",
   baptisms: "Time testimonies and baptisms live.",
+  patch: "Stage input & output patch — record it, and surface each week's to volunteers.",
   advanced: "Updates, network address, capture windows, and full config.",
 };
 
 // Nav clusters — keeps the flat 10-item list within a scannable 7±2 per group.
 const NAV_GROUPS: { label: string; ids: string[] }[] = [
   { label: "Content", ids: ["plan", "views", "scriptview"] },
-  { label: "Output", ids: ["displays", "connect", "integrations"] },
+  { label: "Output", ids: ["displays", "connect", "integrations", "patch"] },
   { label: "Identity", ids: ["branding", "baptisms"] },
   { label: "System", ids: ["service-history", "advanced"] },
 ];
@@ -1164,6 +1168,12 @@ export function SettingsView() {
         return (
           <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
             <BaptismsSection stageState={stageState} />
+          </div>
+        );
+      case "patch":
+        return (
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+            <PatchSection />
           </div>
         );
       case "advanced":

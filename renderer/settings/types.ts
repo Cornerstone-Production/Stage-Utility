@@ -15,6 +15,7 @@ export type SectionId =
   | "attendance"
   | "service-history"
   | "baptisms"
+  | "patch"
   | "advanced";
 
 export interface SectionItem {
