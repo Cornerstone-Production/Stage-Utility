@@ -9,7 +9,7 @@
 
 ## 1. Purpose & context
 
-A living, per-week stage patch reference for the Main Auditorium, accessible at `/patch` like `/history` and `/baptism`. It records the physical input patch (what source lands on which console input, via which stage boxes) as a single source of truth, and surfaces a **simple, read-only diagram to volunteers each week** showing the resolved patch and — most importantly — **what changed** vs. the standard, so they know exactly what to re-patch.
+A living, per-week stage patch reference for the Main Auditorium, accessible at `/patch` like `/history` and `/baptism`. It records the physical input **and output** patch (what source lands on which console input, and where each console output feeds, via the stage boxes) as a single source of truth, and surfaces a **simple, read-only diagram to volunteers each week** showing the resolved patch and — most importantly — **what changed** vs. the standard, so they know exactly what to re-patch.
 
 The design is grounded in the church's real patch spreadsheet (7 tabs: Analog Input Patch, Dante, FOH Waves SoundGrid, Monitoring, Preamp Mapping, Future 2-SD-Rack Mapping, Rack Layouts). The **Preamp Mapping** tab (`SD Rack input → source → stage input`) is exactly the rack-centric model this spec adopts.
 
@@ -17,7 +17,8 @@ The design is grounded in the church's real patch spreadsheet (7 tabs: Analog In
 
 **In scope (v1):**
 - Add/remove devices (SD racks, snakes, drop snakes, floor pockets, wireless/RF banks, arrays) with per-device input/output counts and connector labels.
-- The **input patch** as one row per SD rack input: source name, mic/DI, 48V, console channel, and a flexible physical **path** (ordered hops back to the stage box). Rack **outputs** use the same record shape (dir = `out`) but are secondary in v1.
+- The **input patch** as one row per SD rack input: source name, mic/DI, 48V, console channel, and a flexible physical **path** (ordered hops back to the stage box).
+- The **output patch** as a full peer — one row per rack/console output: destination, feed type (IEM / wedge / amp / stream / record), console channel, and a **To** path (ordered hops out, e.g. console → snake return → wedge). Inputs and outputs are **equal, separate tabs**, not one mixed list.
 - Auto-drawn **connection diagram** derived from the path (no hand-wiring).
 - **Variants** — reusable named overlays of overrides on the default (unifies "templates" and "event patches").
 - **Weekly resolution** driven by PCO: service-type standing variant → per-plan override → per-week tweaks.
@@ -29,7 +30,6 @@ The design is grounded in the church's real patch spreadsheet (7 tabs: Analog In
 - Additional domains: Dante patch, Waves SoundGrid I/O, Monitoring (IEM packs/roles/weekly), rack elevations.
 - Displaying the mic-board name on vocal/RF rows (uses the `micSlotRef` hook).
 - **PCO-scheduling suggestions** (uses the `pcoPosition` hook) — see §12; deliberately **suggestion-first, never auto-removal**.
-- Rich output patching UI beyond the parallel spine.
 
 **Non-goals:**
 - Not live console control (no writes to any console/DSP).
@@ -72,7 +72,8 @@ interface PatchEndpoint {
   consoleChannel?: string; // console/session channel label or number
   label?: string;          // source (in) / destination (out) — the name
   mic?: string;            // input metadata: mic / DI model
-  phantom?: boolean;       // 48V
+  phantom?: boolean;       // 48V (input only)
+  feedType?: string;       // output metadata: "IEM" | "wedge" | "amp" | "stream" | "record" | …
   path?: Hop[];            // ordered upstream (in) / downstream (out) hops; [] = direct
   unused?: boolean;        // "pulled this week" / not patched
   notes?: string;
@@ -136,7 +137,10 @@ Precedence (low → high): **default → service-type standing variant → per-p
 Matches existing settings patterns (`FieldSet`/`Field`, `Collapsible`, `NumberInput`, `su-card`, semantic tokens, all-Plex type, zero purple).
 
 1. **Device manager** — add/remove devices; set kind, input/output counts (`NumberInput`), and connector labels (default numeric, editable to `B-1`, `S11`, …).
-2. **Patch table** (rack-centric, the default view) — rows = rack inputs; columns: `#`, Console ch, Source, Mic, 48V, **From** (path builder that references device connectors), notes. Inline-editable. An **outputs** toggle shows rack outputs (Destination + "To"). A **By device / By rack** segmented control regroups by the first hop's device (mirrors the Analog tab).
+2. **Patch table** with top-level **Inputs / Outputs tabs** (peers):
+   - **Inputs** tab — rows = rack inputs; columns `#`, Console ch, Source, Mic, 48V, **From** (path builder referencing device connectors), notes.
+   - **Outputs** tab — rows = rack/console outputs; columns `#`, Console ch, Destination, Feed type, **To**, notes.
+   Both inline-editable, both with a **By device / By rack** segmented control that regroups by the path's stage device (mirrors the Analog tab's snake / return sections).
 3. **Variant switcher** — edit the **Default**, or pick/create a variant. When editing a variant, changed rows are highlighted vs. the default and only diffs are stored.
 4. **Weekly** panel — assign a standing variant per service type; override a specific upcoming plan; add week tweaks. Reflects the resolution in §5.
 5. **Import** — CSV/Excel with column mapping (§8).
@@ -145,6 +149,7 @@ Matches existing settings patterns (`FieldSet`/`Field`, `Collapsible`, `NumberIn
 
 Per the approved mock (`patch-volunteer-view` artifact) and the "+more" decision:
 
+- **Inputs / Outputs tabs** — same split as the editor, so monitor world can check output feeds (IEM/wedge) too. Each tab is independently changes-first and filterable.
 - **Context strip** — service type + date, active base variant, "Following Planning Center" live indicator.
 - **Changes-first card** — "N changes from the standard patch," each showing old → new with a `Re-patch` / `Unused` tag. This is the hero — the "what do I actually do" answer.
 - **"How to read"** legend — the resolved chain as connected nodes: `Source → Snake B/1 → SD 1.11 in 12 → Console 12` (the auto-diagram in its simplest form).
@@ -176,7 +181,7 @@ Per the approved mock (`patch-volunteer-view` artifact) and the "+more" decision
 - **Phase B — Import:** CSV/Excel column-mapping importer.
 - **Phase C — Variants + weekly:** variant overlays; service-type/plan/week resolution; weekly panel.
 - **Phase D — Volunteer view:** `/patch` route, changes-first layout, auto-diagram, filter/collapse, live.
-- Rack **outputs** are supported in the table from Phase A; the diagram and variants apply to them too, but inputs lead.
+- **Outputs** are a peer tab, built in Phase A alongside inputs (same table engine, output columns); variants, weekly resolution, and the diagram apply to them equally.
 
 ## 12. Future phases (hooks → features)
 
@@ -186,7 +191,7 @@ Per the approved mock (`patch-volunteer-view` artifact) and the "+more" decision
 
 ## 13. Assumptions & open questions
 
-- **Assumptions:** editing lives in Settings, `/patch` is read-only (like History); one environment (Main Auditorium) for now; outputs share the endpoint record but inputs lead in v1; `/patch` needs no auth (LAN, matches app).
+- **Assumptions:** editing lives in Settings, `/patch` is read-only (like History); one environment (Main Auditorium) for now; inputs and outputs are peer tabs with equal treatment; `/patch` needs no auth (LAN, matches app).
 - **Open:** exact `micSlotRef` identity (wireless `channelId` vs. slot index) — finalized when the display feature is built; whether the volunteer view should also be embeddable as a custom-layout object (later); whether variants need ordering/grouping in the UI for many events.
 
 ## 14. Testing
