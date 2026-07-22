@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { UploadIcon, XIcon } from "lucide-react";
 
 import { Button } from "../../components/ui";
+import { invoke } from "../../lib/api";
 
 /** Minimal RFC-4180-ish CSV parser (handles quoted fields + embedded commas/newlines). */
 function parseCsv(text: string): { headers: string[]; rows: string[][] } {
@@ -85,15 +86,23 @@ export function PatchImport({
 
   async function onFile(file: File) {
     setErr(null);
-    if (/\.xlsx$/i.test(file.name)) {
-      setErr("Excel import is coming soon — export the sheet as CSV for now.");
-      return;
+    try {
+      let p: { headers: string[]; rows: string[][] };
+      if (/\.xlsx$/i.test(file.name)) {
+        // Parse server-side with exceljs (avoids bundling it into the renderer).
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let bin = "";
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        p = await invoke<{ headers: string[]; rows: string[][] }>("patch:parseXlsx", { xlsx: btoa(bin) });
+      } else {
+        p = parseCsv(await file.text());
+      }
+      if (!p.headers.length) { setErr("Couldn't read any columns from that file."); return; }
+      setParsed(p);
+      setMap(autoMap(p.headers));
+    } catch {
+      setErr("Couldn't read that file. Try exporting a clean CSV.");
     }
-    const text = await file.text();
-    const p = parseCsv(text);
-    if (!p.headers.length) { setErr("Couldn't read any columns from that file."); return; }
-    setParsed(p);
-    setMap(autoMap(p.headers));
   }
 
   const preview = useMemo(() => (parsed ? parsed.rows.slice(0, 3) : []), [parsed]);
@@ -125,7 +134,7 @@ export function PatchImport({
   return (
     <div className="rounded-xl border border-line-strong bg-surface-raised p-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-footnote font-semibold text-fg">Import from CSV — {dir === "in" ? "Inputs" : "Outputs"}</h3>
+        <h3 className="text-footnote font-semibold text-fg">Import — {dir === "in" ? "Inputs" : "Outputs"}</h3>
         <button type="button" onClick={onClose} className="rounded p-1 text-fg-subtle hover:text-fg" aria-label="Close import"><XIcon className="size-4" /></button>
       </div>
 
@@ -134,9 +143,9 @@ export function PatchImport({
       ) : !parsed ? (
         <div className="mt-3 flex flex-col items-start gap-2">
           <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }} />
-          <Button variant="filled" size="small" onClick={() => fileRef.current?.click()}><UploadIcon className="size-3.5" /> Choose CSV file</Button>
+          <Button variant="filled" size="small" onClick={() => fileRef.current?.click()}><UploadIcon className="size-3.5" /> Choose CSV / Excel file</Button>
           {err && <p className="text-footnote text-warn-11">{err}</p>}
-          <p className="text-caption2 text-fg-subtle">Export your patch sheet tab as CSV, then map the columns here.</p>
+          <p className="text-caption2 text-fg-subtle">Import a CSV or .xlsx export of your patch sheet, then map the columns here.</p>
         </div>
       ) : (
         <div className="mt-3 flex flex-col gap-3">

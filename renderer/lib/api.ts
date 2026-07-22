@@ -106,6 +106,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "patch:save":
       return post<T>("/api/patch", { file: p.file });
 
+    case "patch:parseXlsx":
+      return post<T>("/api/patch/parse-xlsx", { xlsx: p.xlsx });
+
     case "scriptview:rundown": {
       const id = p.serviceTypeId as string;
       const qs = p.planId ? `&planId=${encodeURIComponent(p.planId as string)}` : "";

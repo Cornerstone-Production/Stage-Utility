@@ -36,6 +36,7 @@ import { attendanceStore } from "./attendance-store.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { patchStore } from "./patch-store.js";
+import { parseXlsx } from "./patch-xlsx.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { stageController } from "./stage-controller.js";
@@ -1184,6 +1185,22 @@ export class RemoteServer {
       const saved = await patchStore.save(file);
       broadcast("patch:updated", saved); // change-driven; editor + /patch live-update
       json(res, saved);
+      return;
+    }
+
+    // Parse an uploaded .xlsx (base64) → { headers, rows } for the patch importer.
+    if (method === "POST" && pathname === "/api/patch/parse-xlsx") {
+      const body = (await readBody(req)) as Record<string, unknown>;
+      const b64 = typeof body.xlsx === "string" ? body.xlsx : "";
+      if (!b64) {
+        error(res, "body.xlsx (base64) required");
+        return;
+      }
+      try {
+        json(res, await parseXlsx(b64));
+      } catch {
+        error(res, "Couldn't parse that .xlsx file");
+      }
       return;
     }
 
