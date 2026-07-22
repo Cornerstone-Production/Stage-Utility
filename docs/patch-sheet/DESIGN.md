@@ -217,3 +217,14 @@ Verified throughout: build/tsc clean; API round-trip, CSV import, variant minima
 - Graphical SVG connection diagram (path currently shown as a text chain per row).
 
 Plus the spec's explicitly-deferred future phases: mic-slot name display (`micSlotRef`), PCO scheduling suggestions (`pcoPosition`), and the other domains (Dante, WSG, Monitoring, rack elevations).
+
+### Update — within-v1 deferrals now closed (2026-07-22)
+
+All four "deferred within v1" items are implemented + verified:
+- **xlsx import** — server route `POST /api/patch/parse-xlsx` (exceljs) → `{headers, rows}`; the import panel routes `.xlsx` through it and reuses the CSV mapping. Verified: parse round-trip.
+- **By rack / By device toggle** — the editor table groups by rack (all channels) or by the stage device each endpoint's path starts at.
+- **Per-plan override** — the Weekly panel assigns a variant to the current plan (`assignments.byPlan[planId].variantId`), beating the service-type standing.
+- **This-week tweaks** — the variant switcher gains a "This week" target editing `assignments.byPlan[planId].tweaks` as diffs over the resolved (default + variant) base. Verified: stored a minimal per-plan tweak, default untouched.
+- **Graphical diagram** — the `/patch` view renders each path as connected node pills + SVG chevron connectors (source → hops → rack → console), with a "How to read" legend.
+
+Still deferred (explicit future phases): mic-slot name display (`micSlotRef`), PCO scheduling suggestions (`pcoPosition`), and the other domains (Dante, WSG, Monitoring, rack elevations).
