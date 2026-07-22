@@ -875,3 +875,52 @@ interface WirelessConnection {
   message: string | null;
   config: Record<string, unknown>;
 }
+
+// ── Stage patch sheet (mirrors main/types/stage.ts; see docs/patch-sheet/DESIGN.md) ──
+type PatchDeviceKind = "rack" | "snake" | "drop-snake" | "pocket" | "wireless" | "array" | "other";
+interface PatchDevice {
+  id: string;
+  name: string;
+  kind: PatchDeviceKind;
+  inputs: number;
+  outputs: number;
+  inLabels?: string[];
+  outLabels?: string[];
+}
+interface PatchHop {
+  deviceId: string;
+  connector: string;
+}
+interface PatchEndpoint {
+  rackId: string;
+  dir: "in" | "out";
+  index: number;
+  consoleChannel?: string;
+  label?: string;
+  mic?: string;
+  phantom?: boolean;
+  feedType?: string;
+  path?: PatchHop[];
+  unused?: boolean;
+  notes?: string;
+  /** HOOK: link a vocal/RF endpoint to a mic-board channel (feature later). */
+  micSlotRef?: string | null;
+  /** HOOK: PCO team position tag for scheduling suggestions (feature later). */
+  pcoPosition?: string | null;
+}
+interface PatchVariant {
+  id: string;
+  name: string;
+  overrides: Record<string, Partial<PatchEndpoint>>;
+}
+interface PatchAssignments {
+  byServiceType: Record<string, string>;
+  byPlan: Record<string, { variantId?: string; tweaks?: Record<string, Partial<PatchEndpoint>> }>;
+}
+interface PatchFile {
+  devices: PatchDevice[];
+  endpoints: PatchEndpoint[];
+  variants: PatchVariant[];
+  assignments: PatchAssignments;
+  updatedAt: string;
+}

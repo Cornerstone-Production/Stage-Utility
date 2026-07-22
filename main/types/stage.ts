@@ -1158,3 +1158,71 @@ export interface UpdateStatus {
   /** Non-null when the last check failed (e.g. no network). */
   error: string | null;
 }
+
+// ── Stage patch sheet (see docs/patch-sheet/DESIGN.md) ───────────────────────
+export type PatchDeviceKind = "rack" | "snake" | "drop-snake" | "pocket" | "wireless" | "array" | "other";
+
+/** A physical device that carries channels (SD rack, snake, pocket, RF bank, …). */
+export interface PatchDevice {
+  id: string;
+  name: string;
+  kind: PatchDeviceKind;
+  inputs: number;
+  outputs: number;
+  /** Optional custom connector labels; default = "1".."N" (supports "B-1", "S11", …). */
+  inLabels?: string[];
+  outLabels?: string[];
+}
+
+/** One hop in a signal path: a specific connector on a device. */
+export interface PatchHop {
+  deviceId: string;
+  connector: string;
+}
+
+/** One console endpoint on a rack — the spine of the patch. */
+export interface PatchEndpoint {
+  rackId: string;
+  dir: "in" | "out";
+  index: number;
+  consoleChannel?: string;
+  /** Source (in) / destination (out) name. */
+  label?: string;
+  /** Input metadata. */
+  mic?: string;
+  phantom?: boolean;
+  /** Output metadata: "IEM" | "wedge" | "amp" | "stream" | "record" | … */
+  feedType?: string;
+  /** Ordered upstream (in) / downstream (out) hops; empty/absent = direct. */
+  path?: PatchHop[];
+  unused?: boolean;
+  notes?: string;
+  /** HOOK: link a vocal/RF endpoint to a mic-board channel (feature later). */
+  micSlotRef?: string | null;
+  /** HOOK: PCO team position tag for scheduling suggestions (feature later). */
+  pcoPosition?: string | null;
+}
+
+/** A named overlay of endpoint overrides on the default patch (template == event). */
+export interface PatchVariant {
+  id: string;
+  name: string;
+  /** key = `${rackId}:${dir}:${index}`; value = only the changed fields. */
+  overrides: Record<string, Partial<PatchEndpoint>>;
+}
+
+export interface PatchAssignments {
+  /** Standing variant per PCO service type. */
+  byServiceType: Record<string, string>;
+  /** Per specific PCO plan: override variant + one-off week tweaks. */
+  byPlan: Record<string, { variantId?: string; tweaks?: Record<string, Partial<PatchEndpoint>> }>;
+}
+
+export interface PatchFile {
+  devices: PatchDevice[];
+  /** The DEFAULT patch (source of truth). */
+  endpoints: PatchEndpoint[];
+  variants: PatchVariant[];
+  assignments: PatchAssignments;
+  updatedAt: string;
+}
