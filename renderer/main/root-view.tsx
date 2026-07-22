@@ -4,6 +4,7 @@ import { BaptismOperatorView } from "./baptism-operator-view";
 import { ScriptViewIndex } from "./scriptview-index-view";
 import { ScriptViewPlan } from "./scriptview-plan-view";
 import { HistoryView } from "./history-view";
+import { PatchView } from "./patch-view";
 
 export function RootView() {
   // The router uses memory history (ignores the URL), so branch on the real
@@ -17,6 +18,7 @@ export function RootView() {
   if (slug === "") content = <DisplayPickerView />;
   else if (slug === "baptism") content = <BaptismOperatorView />;
   else if (slug === "history") content = <HistoryView />;
+  else if (slug === "patch") content = <PatchView />;
   else if (parts[0] === "scriptview") {
     content = parts.length >= 3
       ? <ScriptViewPlan serviceTypeParam={parts[1]} layoutParam={parts[2]} />
