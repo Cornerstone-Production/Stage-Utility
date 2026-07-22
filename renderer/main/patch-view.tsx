@@ -1,10 +1,41 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { CableIcon, ChevronRightIcon, TriangleAlertIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../lib/api";
 import { BrandLogo } from "../components/brand-logo";
 import { useStageState } from "./use-stage-state";
 import { resolvePatch, endpointKey } from "../lib/patch-resolve";
+
+type ChainNode = { text: string; kind: "source" | "hop" | "rack" | "console" };
+const PILL: Record<ChainNode["kind"], string> = {
+  source: "border-line-strong bg-fill-active text-fg font-medium",
+  hop: "border-line bg-surface text-fg-muted font-mono",
+  rack: "border-line-strong bg-surface text-fg font-mono",
+  console: "border-line bg-transparent text-fg-subtle font-mono",
+};
+
+/** SVG chevron connector between diagram nodes. */
+function Arrow() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" className="shrink-0 text-fg-faint" aria-hidden="true">
+      <path d="M4 2.5 L7.5 6 L4 9.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** A signal path drawn as connected nodes: source → hops → rack → console. */
+function PatchChain({ nodes }: { nodes: ChainNode[] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {nodes.map((n, i) => (
+        <Fragment key={i}>
+          {i > 0 && <Arrow />}
+          <span className={`rounded-md border px-2 py-0.5 text-caption2 whitespace-nowrap ${PILL[n.kind]}`}>{n.text}</span>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Public, read-only stage patch at /patch — a shareable link so volunteers see
@@ -37,12 +68,14 @@ export function PatchView() {
   const racks = useMemo(() => (file?.devices ?? []).filter((d) => d.kind === "rack"), [file]);
   const baseByKey = useMemo(() => new Map((file?.endpoints ?? []).map((e) => [endpointKey(e), e] as const)), [file]);
 
-  function chain(e: PatchEndpoint): string {
-    const parts = (e.path ?? []).map((h) => `${devName(h.deviceId)} ${h.connector}`.trim());
+  function chainNodes(e: PatchEndpoint): ChainNode[] {
+    const hops: ChainNode[] = (e.path ?? []).map((h) => ({ text: `${devName(h.deviceId)} ${h.connector}`.trim(), kind: "hop" }));
     const rk = racks.find((r) => r.id === e.rackId);
-    parts.push(`${rk?.name ?? "rack"} ${e.dir === "in" ? "in" : "out"} ${e.index}`);
-    if (e.consoleChannel) parts.push(`console ${e.consoleChannel}`);
-    return parts.join(" → ");
+    const rack: ChainNode = { text: `${rk?.name ?? "rack"} ${e.dir === "in" ? "in" : "out"} ${e.index}`, kind: "rack" };
+    const console: ChainNode[] = e.consoleChannel ? [{ text: `console ${e.consoleChannel}`, kind: "console" }] : [];
+    const src: ChainNode[] = e.label ? [{ text: e.label, kind: "source" }] : [];
+    // Signal flows source → stage boxes → rack → console (outputs flow the other way).
+    return e.dir === "in" ? [...src, ...hops, rack, ...console] : [...console, rack, ...hops, ...src];
   }
   function meaningful(e: PatchEndpoint): boolean {
     return Boolean(e.label || e.consoleChannel || (e.path && e.path.length) || e.unused);
@@ -96,6 +129,11 @@ export function PatchView() {
           </div>
         ) : (
           <>
+            {/* How to read the diagram */}
+            <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3">
+              <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">How to read</span>
+              <PatchChain nodes={[{ text: "Kick In", kind: "source" }, { text: "Snake B 1", kind: "hop" }, { text: "SD Rack in 12", kind: "rack" }, { text: "console 12", kind: "console" }]} />
+            </div>
             {/* Changes-first */}
             {changes.length > 0 && (
               <div className="mt-4 overflow-hidden rounded-xl border border-warn-6 bg-warn-2/40">
@@ -168,7 +206,7 @@ export function PatchView() {
                                   {tab === "in" && e.phantom && <span className="rounded border border-accent/40 px-1 font-mono text-[10px] text-accent">48V</span>}
                                   {tab === "out" && e.feedType && <span className="text-caption1 text-fg-muted">{e.feedType}</span>}
                                 </div>
-                                <div className="truncate font-mono text-caption2 text-fg-subtle">{chain(e)}</div>
+                                <div className="mt-1"><PatchChain nodes={chainNodes(e)} /></div>
                               </div>
                             </div>
                           );
