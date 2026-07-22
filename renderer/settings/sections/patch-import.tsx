@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { UploadIcon, XIcon } from "lucide-react";
+import { UploadIcon, XIcon, DownloadIcon } from "lucide-react";
 
 import { Button } from "../../components/ui";
 import { invoke } from "../../lib/api";
@@ -41,7 +41,7 @@ const FIELDS: { key: FieldKey; label: string; required?: boolean }[] = [
   { key: "mic", label: "Mic / DI" },
   { key: "phantom", label: "48V" },
   { key: "console", label: "Console ch" },
-  { key: "from", label: "From (note)" },
+  { key: "from", label: "From (routing)" },
 ];
 
 /** Guess a column for each field from the header text. */
@@ -53,11 +53,29 @@ function autoMap(headers: string[]): Record<FieldKey, number> {
     mic: find(/mic|\bdi\b/),
     phantom: find(/48|phantom/),
     console: find(/console/),
-    from: find(/snake|stage input|pocket|from|path/),
+    from: find(/snake|stage input|pocket|from|path|\bto\b/),
   };
 }
 
 const truthy = (v: string) => /^(x|y|yes|true|1|48v?)$/i.test(v.trim());
+
+/** Best-effort parse of a "From" cell ("Snake B-1", "SL Drop Snake - 1", or an
+ *  "A → B" chain) into path hops, matching device names by longest prefix. The
+ *  remainder after the device name is the connector. Segments matching no device
+ *  are returned as leftover text (kept as a note so nothing is lost). */
+function parseHops(raw: string, devices: PatchDevice[]): { hops: PatchHop[]; leftover: string } {
+  const segments = raw.split(/→|->|>|;/).map((s) => s.trim()).filter(Boolean);
+  const byLen = [...devices].filter((d) => d.name).sort((a, b) => b.name.length - a.name.length);
+  const hops: PatchHop[] = [];
+  const unmatched: string[] = [];
+  for (const seg of segments) {
+    const low = seg.toLowerCase();
+    const dev = byLen.find((d) => low.startsWith(d.name.toLowerCase()));
+    if (dev) hops.push({ deviceId: dev.id, connector: seg.slice(dev.name.length).replace(/^[\s\-/:·|]+/, "").trim() });
+    else unmatched.push(seg);
+  }
+  return { hops, leftover: unmatched.join(" ") };
+}
 
 /**
  * CSV import with column mapping (Phase B). Parses a CSV client-side, lets the
@@ -105,6 +123,26 @@ export function PatchImport({
     }
   }
 
+  // A ready-to-fill starter CSV whose headers auto-map, using a real device name
+  // in the routing example so it parses straight into the diagram on import.
+  function downloadTemplate() {
+    const box = devices.find((d) => d.kind !== "rack");
+    const sn = box?.name ?? "Snake B";
+    const header = dir === "in" ? ["Ch", "Source", "Mic", "48V", "Console", "From"] : ["Ch", "Name", "Console", "To"];
+    const rows =
+      dir === "in"
+        ? [["1", "Kick In", "e901", "X", "1", `${sn} 1`], ["2", "Kick Out", "Beta 52", "", "2", `${sn} 2`], ["41", "Wireless 1", "", "", "41", ""]]
+        : [["1", "Mains L", "1", `${sn} 1`], ["2", "IEM Vox 1", "2", ""]];
+    const esc = (c: string) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c);
+    const csv = [header, ...rows].map((r) => r.map(esc).join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `patch-${dir === "in" ? "inputs" : "outputs"}-template.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const preview = useMemo(() => (parsed ? parsed.rows.slice(0, 3) : []), [parsed]);
 
   function apply() {
@@ -117,13 +155,17 @@ export function PatchImport({
       if (!Number.isFinite(idx) || idx <= 0) continue;
       const cur = next.get(key(idx)) ?? { rackId, dir, index: idx };
       const cell = (k: FieldKey) => (map[k] >= 0 ? (r[map[k]] ?? "").trim() : "");
+      const fromRaw = cell("from");
+      const { hops, leftover } = fromRaw ? parseHops(fromRaw, devices) : { hops: [], leftover: "" };
       next.set(key(idx), {
         ...cur,
         label: cell("label") || cur.label,
         mic: dir === "in" ? cell("mic") || cur.mic : cur.mic,
         phantom: dir === "in" && map.phantom >= 0 ? truthy(cell("phantom")) : cur.phantom,
         consoleChannel: cell("console") || cur.consoleChannel,
-        notes: cell("from") || cur.notes,
+        // Parse the routing column into path hops; unmatched text stays as a note.
+        path: hops.length ? hops : cur.path,
+        notes: fromRaw ? (hops.length ? leftover || cur.notes : fromRaw) : cur.notes,
       });
       added++;
     }
@@ -143,9 +185,12 @@ export function PatchImport({
       ) : !parsed ? (
         <div className="mt-3 flex flex-col items-start gap-2">
           <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }} />
-          <Button variant="filled" size="small" onClick={() => fileRef.current?.click()}><UploadIcon className="size-3.5" /> Choose CSV / Excel file</Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="filled" size="small" onClick={() => fileRef.current?.click()}><UploadIcon className="size-3.5" /> Choose CSV / Excel file</Button>
+            <Button variant="transparent" size="small" onClick={downloadTemplate}><DownloadIcon className="size-3.5" /> Download template</Button>
+          </div>
           {err && <p className="text-footnote text-warn-11">{err}</p>}
-          <p className="text-caption2 text-fg-subtle">Import a CSV or .xlsx export of your patch sheet, then map the columns here.</p>
+          <p className="text-caption2 text-fg-subtle">Import a CSV or .xlsx export of your patch sheet, then map the columns here — or start from the template.</p>
         </div>
       ) : (
         <div className="mt-3 flex flex-col gap-3">
