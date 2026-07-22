@@ -48,34 +48,51 @@ export function useStageState(): UseStageStateResult {
     });
   }, []);
 
-  // Auto-reload after an update: the server sends "server:hello" with its code
-  // version on every (re)connect. The browser's EventSource auto-reconnects when
-  // the server restarts (install.sh or the in-app updater), so a display that
-  // reconnects to a *newer* version reloads itself to pick up the new assets — no
-  // manual refresh needed. A plain crash-restart keeps the same version (no
-  // reload). Skipped for the settings preview iframe.
+  // Auto-reload after an update — including for an installed Home-Screen PWA.
+  // The server stamps the version the page was built at into the served HTML
+  // (window.__APP_VERSION__) and reports the live version over SSE ("server:hello")
+  // and at /api/version. If a page's stamped version differs from the live one it
+  // is running a stale (cached) shell, so it reloads to pull the new assets — no
+  // manual refresh, no re-adding to the Home Screen. Re-checked on foreground so a
+  // PWA opened after a deploy self-heals on relaunch. Falls back to detecting a
+  // change while open for pre-stamp shells (which have no __APP_VERSION__).
   useEffect(() => {
     const path = window.location.pathname;
-    // Only the kiosk display screens self-reload after an update. The settings
-    // UI is an operator console (and hosts live-preview iframes that are each a
-    // full app instance) — reloading it on every server restart is disruptive
-    // and makes those iframes stampede the just-restarted server. The preview
-    // iframes themselves never reload either.
+    // The settings console (+ its live-preview iframes) must not reload out from
+    // under an operator mid-edit; only the display / volunteer surfaces self-reload.
     if (path.startsWith("/preview-") || path.startsWith("/settings")) return;
-    let seen: string | null = null;
+    const own = (window as unknown as { __APP_VERSION__?: string }).__APP_VERSION__ ?? null;
     let reloading = false;
-    return onNotification("server:hello", (payload: unknown) => {
-      const version = (payload as { version?: string } | null)?.version ?? null;
-      if (!version || version === "unknown") return;
-      if (seen === null) {
-        seen = version;
-      } else if (version !== seen && !reloading) {
-        reloading = true;
-        // Small random delay so a wall of displays doesn't reload in lockstep
-        // and hammer the server the instant it comes back up.
-        setTimeout(() => window.location.reload(), 250 + Math.random() * 1000);
+    let seen: string | null = null;
+    const reload = () => {
+      if (reloading) return;
+      reloading = true;
+      // Small random delay so a wall of displays doesn't reload in lockstep.
+      setTimeout(() => window.location.reload(), 250 + Math.random() * 1000);
+    };
+    const check = (v: string | null) => {
+      if (!v || v === "unknown") return;
+      if (own) {
+        if (v !== own) reload();
+      } else if (seen === null) {
+        seen = v;
+      } else if (v !== seen) {
+        reload();
       }
-    });
+    };
+    const off = onNotification("server:hello", (payload: unknown) => check((payload as { version?: string } | null)?.version ?? null));
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || !own) return;
+      fetch("/api/version")
+        .then((r) => r.json())
+        .then((d: { version?: string }) => check(d?.version ?? null))
+        .catch(() => {});
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      off();
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   // Push the themeable brand accent into --brand-accent whenever it changes.
