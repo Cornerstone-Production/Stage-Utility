@@ -676,6 +676,11 @@ export class RemoteServer {
       sseWrite(res, "service-timeline:history", serviceTimelineRecorder.getCurrent());
       sseWrite(res, "baptism:state", baptismTimerService.getState());
       sseWrite(res, "obs:status", obsService.getLatest());
+      // Update status must hydrate on (re)connect: every update ends by restarting
+      // the server, which drops+reconnects this socket. Without this, the settings
+      // Updates panel never learns the post-restart state and stays stuck on its
+      // last-seen step ("Downloading…") until a manual refresh.
+      sseWrite(res, "update:status", updater.getStatus());
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
       sseWrite(res, "displays:presence", presenceSnapshot());

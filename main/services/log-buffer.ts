@@ -56,3 +56,12 @@ export function initLogCapture(): void {
 export function getLogLines(): LogLine[] {
   return lines.slice();
 }
+
+/** Push a line directly into the buffer (bypassing console). Used to seed the
+ *  buffer at startup with logs that pre-date this process — e.g. replaying the
+ *  last update's activity from the persisted update.log so it survives the
+ *  restart. `t` preserves the original timestamp when known. */
+export function addLogLine(level: LogLine["level"], msg: string, t?: string): void {
+  lines.push({ t: t ?? new Date().toISOString(), level, msg });
+  if (lines.length > MAX) lines.splice(0, lines.length - MAX);
+}

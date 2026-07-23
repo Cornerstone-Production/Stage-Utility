@@ -19,6 +19,7 @@ import { promisify } from "node:util";
 import type { UpdateStatus } from "../types/stage.js";
 import { getUserDataPath } from "./app-paths.js";
 import { broadcast } from "./broadcaster.js";
+import { appendUpdateLog, updateLogPath } from "./update-log.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -64,6 +65,13 @@ class Updater {
   // pull/install/build and is only killed at the very end).
   private progressTimer: ReturnType<typeof setInterval> | null = null;
   private applyStartedAt = 0;
+
+  /** Log an update lifecycle event to stdout (captured live in the /log buffer)
+   *  and to the persisted update.log (survives the post-update restart). */
+  private logEvent(msg: string): void {
+    console.log(`[updater] ${msg}`);
+    appendUpdateLog(`[updater] ${msg}`);
+  }
 
   private resultFile(): string {
     return path.join(getUserDataPath(), "update-result.json");
@@ -266,9 +274,12 @@ class Updater {
       STAGE_UPDATE_SERVER_PID: String(process.pid),
       STAGE_UPDATE_RESULT: this.resultFile(),
       STAGE_UPDATE_PROGRESS: this.progressFile(),
+      STAGE_UPDATE_LOG: updateLogPath(),
     };
 
-    console.log(`[updater] ${checkout ? "switching to" : "applying update on"} ${branch} via ${script}`);
+    this.logEvent(
+      `${checkout ? "switching to" : "applying update on"} ${branch} — from ${this.status.currentSha ?? "?"} to ${this.status.latestSha ?? "?"} (${this.status.behind} commit${this.status.behind === 1 ? "" : "s"} behind)`,
+    );
     const child = isWin
       ? spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], {
           cwd: REPO_ROOT,
@@ -307,11 +318,13 @@ class Updater {
       if (result && Date.parse(result.finishedAt || "") >= this.applyStartedAt) {
         if (result.ok) {
           if (this.status.step !== "restarting") {
+            this.logEvent("build succeeded — restarting into the new version");
             this.status = { ...this.status, step: "restarting" };
             this.broadcast();
           }
         } else {
           // Failed apply — server lives on. Drop back to idle and show why.
+          this.logEvent(`update FAILED — server left running on the current version${result.log ? ` (see update.log)` : ""}`);
           this.status = { ...this.status, phase: "idle", step: null };
           this.stopProgressPolling();
           this.broadcast();
@@ -320,6 +333,7 @@ class Updater {
       }
       const step = this.readProgressStep();
       if (step && step !== this.status.step) {
+        this.logEvent(`step: ${step}`);
         this.status = { ...this.status, step };
         this.broadcast();
       }

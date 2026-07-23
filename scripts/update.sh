@@ -22,6 +22,9 @@ REPO="${STAGE_UPDATE_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BRANCH="${STAGE_UPDATE_BRANCH:-$(git -C "$REPO" rev-parse --abbrev-ref HEAD)}"
 RESULT="${STAGE_UPDATE_RESULT:-$REPO/update-result.json}"
 PROGRESS="${STAGE_UPDATE_PROGRESS:-$REPO/update-progress.json}"
+# Persistent, size-capped update log (server trims it; we only append a bounded
+# tail per run so it can't balloon). Empty = don't persist (e.g. run by hand).
+ULOG="${STAGE_UPDATE_LOG:-}"
 
 cd "$REPO" || exit 1
 LOG="$(mktemp)"
@@ -36,9 +39,24 @@ write_progress() {
 
 # Write {ok, finishedAt, log} via node (guaranteed present — we're updating a
 # node app and NODE_DIR is on PATH), which handles JSON escaping safely.
+# Append this run's outcome + a bounded tail of its output to the persistent
+# update log, so the git/npm detail survives the restart and shows in /log. The
+# server hard-caps the file's size; the `tail -c` keeps any single run small.
+persist_run() {
+  [ -n "$ULOG" ] || return 0
+  {
+    printf '%s [update.sh] ==== %s on %s finished: %s ====\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      "${STAGE_UPDATE_CHECKOUT:+track-switch}${STAGE_UPDATE_CHECKOUT:-update}" \
+      "$BRANCH" "$1"
+    tail -c 8000 "$LOG" 2>/dev/null
+  } >>"$ULOG" 2>/dev/null || true
+}
+
 write_result() {
   node -e 'const fs=require("fs");let log="";try{log=fs.readFileSync(process.argv[3],"utf8").slice(-4000)}catch{}fs.writeFileSync(process.argv[2],JSON.stringify({ok:process.argv[1]==="true",finishedAt:new Date().toISOString(),log}))' \
     "$1" "$RESULT" "$LOG" 2>/dev/null || true
+  persist_run "$([ "$1" = "true" ] && echo success || echo FAILED)"
 }
 
 {

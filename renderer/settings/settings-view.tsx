@@ -350,6 +350,30 @@ export function SettingsView() {
       return null;
     }
   });
+  // One-shot guard so the two completion signals (server:hello version change and
+  // update:status returning to idle after the restart) can't double-reload.
+  const reloadScheduledRef = useRef(false);
+  const hasPendingUpdate = () => {
+    try {
+      return !!sessionStorage.getItem(UPDATE_PENDING_KEY);
+    } catch {
+      return false;
+    }
+  };
+  /** The update we kicked off has finished and the new build is live → record the
+   *  success banner and reload once to swap in the new assets. */
+  const finishUpdateAndReload = (version: string | null) => {
+    if (reloadScheduledRef.current) return;
+    reloadScheduledRef.current = true;
+    try {
+      sessionStorage.removeItem(UPDATE_PENDING_KEY);
+      if (version) sessionStorage.setItem(UPDATE_DONE_KEY, JSON.stringify({ version }));
+    } catch {
+      /* ignore */
+    }
+    // Brief beat so the "restarting" step paints before the reload.
+    setTimeout(() => window.location.reload(), 900);
+  };
 
   // Detect update completion across the server restart: a server:hello whose
   // version differs from the one captured when we pressed "Update now" means the
@@ -367,14 +391,7 @@ export function SettingsView() {
         pending = null;
       }
       if (pending && version !== pending.fromVersion) {
-        try {
-          sessionStorage.removeItem(UPDATE_PENDING_KEY);
-          sessionStorage.setItem(UPDATE_DONE_KEY, JSON.stringify({ version }));
-        } catch {
-          /* ignore */
-        }
-        // Brief beat so the "restarting" step paints before the reload.
-        setTimeout(() => window.location.reload(), 900);
+        finishUpdateAndReload(version);
       }
     });
   }, []);
@@ -439,10 +456,29 @@ export function SettingsView() {
     return unsub;
   }, [queryClient]);
 
-  // Live update-status pushes (availability check, apply progress).
+  // Live update-status pushes (availability check, apply progress). This channel
+  // now hydrates on every SSE (re)connect, so the post-restart reconnect delivers
+  // the finished state here even if the server:hello reload was missed: if we had
+  // an update in flight and it's no longer "updating" (and didn't error), the new
+  // build is live → reload to pick up its assets. This is the durable completion
+  // signal; the server:hello handler above is the faster path when it fires.
   useEffect(() => {
     const unsub = onNotification("update:status", (payload: unknown) => {
-      queryClient.setQueryData(["update:status"], payload as UpdateStatus);
+      const status = payload as UpdateStatus;
+      queryClient.setQueryData(["update:status"], status);
+      if (hasPendingUpdate() && status.phase !== "updating") {
+        if (status.error) {
+          // Failed apply — server stayed on the old build. Clear the flag and let
+          // the panel show the error rather than reloading.
+          try {
+            sessionStorage.removeItem(UPDATE_PENDING_KEY);
+          } catch {
+            /* ignore */
+          }
+        } else {
+          finishUpdateAndReload(status.version ?? null);
+        }
+      }
     });
     return unsub;
   }, [queryClient]);

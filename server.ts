@@ -18,6 +18,11 @@ import { initLogCapture } from "./main/services/log-buffer.js";
 // Capture logs into the ring buffer (exposed at /log) as early as possible.
 initLogCapture();
 
+import { initUpdateLog } from "./main/services/update-log.js";
+// Replay the last update's persisted activity into the /log buffer (and trim the
+// on-disk log) so an update that just restarted us is still visible at /log.
+initUpdateLog();
+
 import { getUserDataPath } from "./main/services/app-paths.js";
 import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";
