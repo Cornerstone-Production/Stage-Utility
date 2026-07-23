@@ -22,6 +22,14 @@ touch.
 The increment is trailing-number aware and preserves prefix + zero-padding:
 `1→2`, `B-1→B-2`, `09→10`; a value with no number (e.g. `L`) copies unchanged.
 
+**Device rollover (From/To):** the source hop is device-aware — it respects each
+device's channel count (set at the top of the tab) and rolls over to the next
+source device when one runs out. Rippling `From Snake A / 1` down a rack with two
+12-channel snakes fills `Snake A 1…12` then `Snake B 1…12`, then stops (no
+phantom sources). It walks each device's generated labels when present
+(`A-1…A-4` → `B-1…B-4`), else `1..count`, in device-list order. A free-typed
+connector not matching any device slot falls back to a plain numeric increment.
+
 No data-model change — ripple writes ordinary endpoint values; the armed
 count/fields are ephemeral UI state, so it can never corrupt a saved patch.
 

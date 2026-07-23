@@ -905,6 +905,7 @@ interface PatchDevice {
   outputs: number;
   inLabels?: string[];
   outLabels?: string[];
+  color?: string;
 }
 interface PatchHop {
   deviceId: string;
@@ -922,6 +923,7 @@ interface PatchEndpoint {
   path?: PatchHop[];
   unused?: boolean;
   notes?: string;
+  owner?: string;
   /** HOOK: link a vocal/RF endpoint to a mic-board channel (feature later). */
   micSlotRef?: string | null;
   /** HOOK: PCO team position tag for scheduling suggestions (feature later). */
@@ -936,10 +938,17 @@ interface PatchAssignments {
   byServiceType: Record<string, string>;
   byPlan: Record<string, { variantId?: string; tweaks?: Record<string, Partial<PatchEndpoint>> }>;
 }
-interface PatchFile {
+type PatchSheetKind = "analog" | "dante" | "network" | "monitor" | "custom";
+interface PatchSheet {
+  id: string;
+  name: string;
+  kind: PatchSheetKind;
   devices: PatchDevice[];
   endpoints: PatchEndpoint[];
   variants: PatchVariant[];
   assignments: PatchAssignments;
+}
+interface PatchFile {
+  sheets: PatchSheet[];
   updatedAt: string;
 }

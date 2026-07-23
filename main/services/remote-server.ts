@@ -1207,7 +1207,7 @@ export class RemoteServer {
     if (method === "POST" && pathname === "/api/patch") {
       const body = (await readBody(req)) as Record<string, unknown>;
       const file = body.file as PatchFile | undefined;
-      if (!file || typeof file !== "object" || !Array.isArray(file.devices) || !Array.isArray(file.endpoints)) {
+      if (!file || typeof file !== "object" || !Array.isArray(file.sheets)) {
         error(res, "body.file (PatchFile) required");
         return;
       }

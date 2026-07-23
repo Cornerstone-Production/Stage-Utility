@@ -1201,6 +1201,8 @@ export interface PatchDevice {
   /** Optional custom connector labels; default = "1".."N" (supports "B-1", "S11", …). */
   inLabels?: string[];
   outLabels?: string[];
+  /** Optional color ("#rrggbb") to tint every channel sourced from this device. */
+  color?: string;
 }
 
 /** One hop in a signal path: a specific connector on a device. */
@@ -1226,6 +1228,9 @@ export interface PatchEndpoint {
   path?: PatchHop[];
   unused?: boolean;
   notes?: string;
+  /** Optional ownership/section tag (e.g. "338 @ FOH") — groups channels under a
+   *  subheading, mirroring the ownership bands on a Dante patch sheet. */
+  owner?: string;
   /** HOOK: link a vocal/RF endpoint to a mic-board channel (feature later). */
   micSlotRef?: string | null;
   /** HOOK: PCO team position tag for scheduling suggestions (feature later). */
@@ -1247,11 +1252,25 @@ export interface PatchAssignments {
   byPlan: Record<string, { variantId?: string; tweaks?: Record<string, Partial<PatchEndpoint>> }>;
 }
 
-export interface PatchFile {
+/** What kind of patch a sheet documents — drives labels/cosmetics only. */
+export type PatchSheetKind = "analog" | "dante" | "network" | "monitor" | "custom";
+
+/** One patch surface (a tab): its own devices, default endpoints, variants, and
+ *  weekly assignments. Analog stage patch, Dante, Waves SoundGrid, monitors, etc.
+ *  each are a sheet of this same shape. */
+export interface PatchSheet {
+  id: string;
+  name: string;
+  kind: PatchSheetKind;
   devices: PatchDevice[];
-  /** The DEFAULT patch (source of truth). */
+  /** The DEFAULT patch for this sheet (source of truth). */
   endpoints: PatchEndpoint[];
   variants: PatchVariant[];
   assignments: PatchAssignments;
+}
+
+export interface PatchFile {
+  /** All patch sheets (tabs). At least one; the first is the default view. */
+  sheets: PatchSheet[];
   updatedAt: string;
 }
