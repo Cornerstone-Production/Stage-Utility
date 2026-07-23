@@ -15,6 +15,8 @@ if ($env:STAGE_UPDATE_NODE_DIR) { $env:PATH = "$($env:STAGE_UPDATE_NODE_DIR);$($
 $branch = if ($env:STAGE_UPDATE_BRANCH) { $env:STAGE_UPDATE_BRANCH } else { (git -C $repo rev-parse --abbrev-ref HEAD).Trim() }
 $result = if ($env:STAGE_UPDATE_RESULT) { $env:STAGE_UPDATE_RESULT } else { Join-Path $repo "update-result.json" }
 $progress = if ($env:STAGE_UPDATE_PROGRESS) { $env:STAGE_UPDATE_PROGRESS } else { Join-Path $repo "update-progress.json" }
+# Persistent, size-capped update log (server trims it; we append a bounded tail).
+$ulog = $env:STAGE_UPDATE_LOG
 
 Set-Location $repo
 $log = New-TemporaryFile
@@ -23,12 +25,27 @@ $log = New-TemporaryFile
 $oldRev = (git rev-parse HEAD 2>$null)
 if (-not $oldRev) { $oldRev = "none" }
 
+# Append this run's outcome + a bounded tail of its output to the persistent
+# update log, so the git/npm detail survives the restart and shows in /log.
+function Persist-Run($outcome) {
+  if (-not $ulog) { return }
+  try {
+    $kind = if ($env:STAGE_UPDATE_CHECKOUT) { "track-switch" } else { "update" }
+    $stamp = (Get-Date).ToUniversalTime().ToString("o")
+    $tail = ""
+    try { $tail = Get-Content -Raw $log } catch {}
+    if ($tail -and $tail.Length -gt 8000) { $tail = $tail.Substring($tail.Length - 8000) }
+    "$stamp [update.ps1] ==== $kind on $branch finished: $outcome ====`n$tail" | Out-File -Append -Encoding utf8 $ulog
+  } catch {}
+}
+
 function Write-Result($ok) {
   $logText = ""
   try { $logText = Get-Content -Raw $log } catch {}
   if ($logText -and $logText.Length -gt 4000) { $logText = $logText.Substring($logText.Length - 4000) }
   @{ ok = [bool]$ok; finishedAt = (Get-Date).ToUniversalTime().ToString("o"); log = $logText } |
     ConvertTo-Json -Compress | Set-Content -Encoding utf8 $result
+  Persist-Run $(if ($ok) { "success" } else { "FAILED" })
 }
 
 # Publish the current step so the (still-running) server can broadcast progress.
