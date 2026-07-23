@@ -20,11 +20,18 @@ export function PatchWeekly({
   onChange: (a: PatchAssignments) => void;
 }) {
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
+  // Only offer the service types enabled on the Plan tab (allowedServiceTypeIds).
+  // Empty list = "all active", matching the Plan section's own filter.
+  const [allowed, setAllowed] = useState<string[]>([]);
   useEffect(() => {
     invoke<ServiceTypeDTO[]>("stage:listServiceTypes")
       .then(setTypes)
       .catch(() => setTypes([]));
+    invoke<StageState>("stage:getState")
+      .then((s) => setAllowed(s.allowedServiceTypeIds ?? []))
+      .catch(() => setAllowed([]));
   }, []);
+  const visibleTypes = allowed.length === 0 ? types : types.filter((t) => allowed.includes(t.id));
 
   function setStanding(stId: string, variantId: string) {
     const byServiceType = { ...assignments.byServiceType };
@@ -53,10 +60,10 @@ export function PatchWeekly({
     <div className="rounded-xl border border-line bg-surface">
       <Collapsible label="Weekly assignment" summary={`${setCount} set`} headerClassName="px-4 py-2.5">
         <div className="flex flex-col gap-2 px-3 pb-3">
-          {types.length === 0 ? (
+          {visibleTypes.length === 0 ? (
             <p className="text-footnote text-fg-subtle">Connect Planning Center to assign a standing patch per service type.</p>
           ) : (
-            types.map((t) => (
+            visibleTypes.map((t) => (
               <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface-raised px-3 py-2">
                 <span className="text-footnote text-fg">{t.name}</span>
                 <select
