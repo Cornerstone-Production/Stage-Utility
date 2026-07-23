@@ -158,7 +158,7 @@ export function PatchView() {
             {/* How to read the diagram */}
             <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3">
               <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">How to read</span>
-              <PatchChain nodes={[{ text: "Kick In", kind: "source" }, { text: "Snake B 1", kind: "hop" }, { text: "SD Rack in 12", kind: "rack" }, { text: "console 12", kind: "console" }]} />
+              <PatchChain nodes={[{ text: "Kick In", kind: "source" }, { text: "Snake B 1", kind: "hop" }, { text: "Input Rack in 12", kind: "rack" }, { text: "console 12", kind: "console" }]} />
             </div>
             {/* Changes-first */}
             {changes.length > 0 && (

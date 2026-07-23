@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { XIcon, PlusIcon, WavesIcon } from "lucide-react";
 
 import { Input, Switch } from "../../components/ui";
@@ -157,6 +157,13 @@ export function PatchTable({
   const [ripple, setRipple] = useState<RippleState>(DEFAULT_RIPPLE);
   // The row whose cell is focused, so we can highlight the ripple's reach.
   const [focus, setFocus] = useState<{ rackId: string; index: number } | null>(null);
+  // Ripple is one-shot: after a fill actually happens, it disarms when the edited
+  // cell loses focus (on blur, not on keystroke — so a multi-digit start like "12"
+  // still ripples fully before disarming). This flag tracks "a fill happened".
+  const rippledRef = useRef(false);
+  useEffect(() => {
+    if (!ripple.on) rippledRef.current = false;
+  }, [ripple.on]);
   const rippleActive = group === "rack" && ripple.on;
   const grid = showOwner ? GRID_OWNER : GRID;
   const minW = showOwner ? "min-w-[784px]" : "min-w-[680px]";
@@ -177,6 +184,7 @@ export function PatchTable({
   function edit(rackId: string, index: number, field: RippleField, value: unknown, patch: Partial<PatchEndpoint>, rackChannels: number) {
     if (rippleActive && ripple.fields[field] && rippleHasValue(field, value)) {
       onChange(rippleEndpoints({ endpoints, rackId, dir, startIndex: index, field, value, count: ripple.count, rackChannels, stageDevices }));
+      rippledRef.current = true; // disarm on the next blur
     } else {
       upsert(rackId, index, patch);
     }
@@ -208,7 +216,10 @@ export function PatchTable({
       <div
         key={`${rackId}:${idx}`}
         onFocus={() => rippleActive && setFocus({ rackId, index: idx })}
-        onBlur={() => setFocus(null)}
+        onBlur={() => {
+          setFocus(null);
+          if (rippledRef.current) setRipple((r) => ({ ...r, on: false })); // one-shot: disarm after a fill
+        }}
         style={srcColor ? { boxShadow: `inset 3px 0 0 ${srcColor}` } : undefined}
         className={cn(`${grid} items-start border-b border-line/60 px-3 py-1.5 transition-colors`, isInFocusRun(rackId, idx, rackChannels) && "bg-accent/5")}
       >

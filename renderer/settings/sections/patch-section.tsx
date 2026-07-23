@@ -170,8 +170,11 @@ export function PatchSection() {
   return (
     <div className="flex flex-col gap-4">
       {dirty && (
-        <div className="sticky top-1 z-30 flex justify-end">
-          <div className="flex items-center gap-2 rounded-lg border border-line-strong bg-popover px-2.5 py-1.5 shadow-md backdrop-blur-xl">
+        // pointer-events-none on the full-width wrapper so its transparent area
+        // doesn't swallow clicks meant for the sticky ripple bar beneath it; only
+        // the banner box itself (pointer-events-auto) is interactive.
+        <div className="pointer-events-none sticky top-1 z-30 flex justify-end">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-line-strong bg-popover px-2.5 py-1.5 shadow-md backdrop-blur-xl">
             <span className="text-caption1 text-fg-muted">Unsaved changes</span>
             <Button variant="transparent" size="small" onClick={() => saved && setDraft(saved)} disabled={saving}>Discard</Button>
             <Button variant="accent" size="small" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
