@@ -100,8 +100,8 @@ export function PatchView() {
   const hasPatch = (file?.devices.length ?? 0) > 0;
 
   return (
-    <div className="dark min-h-[100dvh] bg-bg text-fg">
-      <div className="mx-auto max-w-3xl px-4 py-6">
+    <div className="dark h-full overflow-y-auto bg-bg text-fg">
+      <div className="mx-auto max-w-3xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
         {/* Header */}
         <div className="flex items-center gap-2">
           {state?.appLogo && <BrandLogo logo={state.appLogo} monochrome className="size-5 rounded text-fg" />}

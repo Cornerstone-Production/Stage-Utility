@@ -1321,6 +1321,16 @@ export function SettingsView() {
               Open ScriptView <ExternalLinkIcon className="size-3.5" />
             </a>
           )}
+          {activeSection.id === "patch" && (
+            <a
+              href="/patch"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-caption1 text-fg-muted transition-colors hover:bg-fill hover:text-fg"
+            >
+              Open patch sheet <ExternalLinkIcon className="size-3.5" />
+            </a>
+          )}
         </header>
         {/* Keep a render error in one section from blanking the whole window. Keyed
             by the active tab so switching sections resets the boundary. */}
