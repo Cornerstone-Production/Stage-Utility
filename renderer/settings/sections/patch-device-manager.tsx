@@ -6,7 +6,7 @@ import { uid } from "../../lib/uid";
 import { generateLabels } from "../../lib/patch-ripple";
 
 const KINDS: { value: PatchDeviceKind; label: string }[] = [
-  { value: "rack", label: "SD Rack" },
+  { value: "rack", label: "Input Rack" },
   { value: "snake", label: "Snake" },
   { value: "drop-snake", label: "Drop snake" },
   { value: "pocket", label: "Floor pocket" },
