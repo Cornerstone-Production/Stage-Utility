@@ -5,6 +5,7 @@ import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
+import { useReaperState } from "./use-reaper-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance } from "./use-people-count-state";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
@@ -33,6 +34,7 @@ export interface LayoutRenderCtx {
   transcript: TranscriptLineDTO[];
   spl: SplMetricsDTO | null;
   obs: ObsStatusDTO | null;
+  reaper: ReaperStatusDTO | null;
   osc: OscFeedbackDTO | null;
   /** Live SenSource Vea people counts — for the people-counter object. */
   peopleCount: PeopleCountDTO | null;
@@ -570,6 +572,36 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       return (
         <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
           {connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? "OBS: Offline")}
+        </span>
+      );
+    }
+    case "reaper-status": {
+      const reaper = ctx.reaper;
+      const connected = reaper?.connected ?? false;
+      const recording = reaper?.recording ?? false;
+      // Pure tally-light mode: nothing on screen unless REAPER is recording.
+      if (!recording && (c.hideWhenIdle ?? false)) return null;
+      if (recording) {
+        // Position ticks while recording — trim REAPER's ".mmm" to whole seconds.
+        const posRaw = reaper?.positionString ?? "";
+        const dot = posRaw.indexOf(".");
+        const pos = c.showPosition && posRaw ? ` ${dot === -1 ? posRaw : posRaw.slice(0, dot)}` : "";
+        const label = `${c.recordingText ?? "REAPER: Recording"}${pos}`;
+        // Fill the whole box red (a strong room cue) or just color the text.
+        if (c.fillWhenRecording ?? true) {
+          return (
+            <div style={{ ...ts, color: "#ffffff", background: "var(--red-9)", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "inherit" }}>
+              {label}
+            </div>
+          );
+        }
+        return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
+      }
+      // Idle: dim when offline so a neutral badge is never mistaken for "not
+      // recording" when REAPER is merely unreachable.
+      return (
+        <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
+          {connected ? (c.idleText ?? "REAPER: Standby") : (c.offlineText ?? "REAPER: Offline")}
         </span>
       );
     }
@@ -1623,6 +1655,7 @@ export function useLayoutData(layout?: LayoutDTO) {
   const transcript = useTranscript(want(["transcript-strip"]));
   const spl = useSplState(want(["spl-meter"]));
   const obs = useObsState(want(["obs-status"]));
+  const reaper = useReaperState(want(["reaper-status"]));
   const osc = useOscState(want(["osc-button"]));
   const peopleCount = usePeopleCountState(peopleWanted);
   const serviceLow = useLiveServiceLow(peopleWanted);
@@ -1644,7 +1677,7 @@ export function useLayoutData(layout?: LayoutDTO) {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   }, [pcoLive?.serverNow]);
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -1652,7 +1685,7 @@ export function useLayoutData(layout?: LayoutDTO) {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -1696,7 +1729,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // with the window instead of the design canvas.
   const fill = canvas.fit === "fill";
   const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

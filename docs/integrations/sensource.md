@@ -1,0 +1,53 @@
+# SenSource Vea integration
+
+Polls the SenSource Vea people-counter API for live attendance and occupancy and
+surfaces them on stage displays via the **people-counter**, **people-graph**, and
+**people-panel** custom-layout objects.
+
+## How it works
+
+SenSource has no real-time endpoint, so the poller
+(`main/services/sensource-service.ts`) queries the Vea REST API on an interval
+(default 45s; counts lag a few minutes server-side, so lower values add API calls
+without fresher data).
+
+- Auth is transparent to the operator: they enter an API client **id + secret**
+  (created in the Vea app) and Stage exchanges those for a short-lived Bearer
+  token via the client-credentials call, refreshing before expiry. A directly
+  pasted long-lived static token is also accepted and skips the exchange.
+- Per-zone breakdown comes from `/data/traffic` (`entityType=zone`), summed per
+  zone. The Vea traffic endpoint has no working server-side location/zone filter,
+  so Stage always requests every zone and narrows to the selected zones
+  client-side. `attendance = Σ ins`, per-zone `occupancy = ins − outs` (clamped ≥0).
+- The building total is overridden from the authoritative `/data/occupancy`
+  (`entityType=space`) endpoint when a space exists — matching the Vea dashboard's
+  live "Most Recent Occupancy" — with peak/min/avg/capacity. It falls back to the
+  zone-derived net when a site has no spaces.
+- Counts broadcast on the SSE channel **`people:count`** (skipping re-broadcasts
+  when the substantive counts are unchanged); `GET /api/people/count` hydrates a
+  freshly loaded display. A rolling trend buffer backs the people-graph.
+
+## Setup
+
+**In Vea:** Settings → API clients → create a client. It gives you a Client ID
+and Secret — you enter both.
+
+**In Stage:** Settings → Integrations → **SenSource Vea** → enter the **API Client
+ID** and **API Client Secret** (leave the static token blank in the normal case),
+set the **Poll interval**, enable it, and **Test connection** (authenticates and
+reports how many locations are visible). Optionally pick a **location** and/or
+specific **zones** to scope the count — zones are the reliable scoping mechanism.
+The location/zone selection is saved as non-secret config; the client secret and
+static token are stored encrypted.
+
+**On a layout:** add object → **SenSource → people-counter / people-graph /
+people-panel**.
+
+## Files
+
+- `main/services/sensource-service.ts` — poll loop, token exchange, `reduceTraffic()` / `reduceSpaceOccupancy()` / `latestSpaceOccupancy()`, `people:count` broadcast
+- `main/services/integration-manager.ts` — `SENSOURCE_DESCRIPTOR`, `applySensource()`, `getSensourceConfig()`, `getSensourceLocations()` / `getSensourceZones()`, test
+- `main/services/remote-server.ts` — `GET /api/people/count`, `/api/sensource/locations`, `/api/sensource/zones` + `people:count` SSE hydrate
+- `renderer/main/layout-renderer.tsx` — `people-counter` / `people-graph` / `people-panel` render cases
+- `renderer/settings/sections/layout-editor.tsx` — object palette + inspector
+- `renderer/components/integrations-panel.tsx` — location/zone pickers

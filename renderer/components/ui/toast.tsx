@@ -66,7 +66,7 @@ export function Toaster() {
           }}
           className={cn(
             "flex items-center gap-2 rounded-lg border px-4 py-3 shadow-lg",
-            "bg-surface border-line-strong text-fg",
+            "bg-popover border-line-strong text-fg backdrop-blur-xl",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-bottom-full",
             "data-[state=closed]:fade-out-80",

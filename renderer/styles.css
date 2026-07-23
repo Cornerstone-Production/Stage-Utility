@@ -226,7 +226,7 @@
   --su-surface-raised: #ffffff;
   /* Popover/menu surface (Select, MultiSelect). Near-opaque glass — a touch of
      translucency + backdrop-blur where supported; still legible without it. */
-  --su-popover:        rgba(255, 255, 255, 0.92);
+  --su-popover:        rgba(255, 255, 255, 0.97);
   --su-rail:           #f1f2f4;   /* sidebar — slightly grayer than content in light */
   --su-line:           #e7e9ec;
   --su-line-strong:    #d8dce1;
@@ -272,7 +272,7 @@
   --su-surface-raised: rgba(255, 255, 255, 0.055);
   /* Popover/menu surface — solid PURE-neutral (R=G=B) so menus never read
      transparent or purple over content; blur adds glass depth where supported. */
-  --su-popover:        rgba(28, 28, 28, 0.82);
+  --su-popover:        rgba(28, 28, 28, 0.97);
   --su-rail:           #0e0e0e;   /* seamless with content in dark */
   --su-line:           rgba(255, 255, 255, 0.08);
   --su-line-strong:    rgba(255, 255, 255, 0.14);

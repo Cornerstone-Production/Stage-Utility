@@ -6,6 +6,7 @@ import type { IntegrationDescriptor, IntegrationState } from "../types/integrati
 import type { PeopleCountDTO } from "../types/stage.js";
 import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
+import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, propresenterManager, type PropInstanceConfig } from "./propresenter-service.js";
@@ -22,6 +23,8 @@ const PCO_DESCRIPTOR: IntegrationDescriptor = {
   id: "planning-center",
   kind: "lineup",
   label: "Planning Center",
+  description:
+    "Pulls your Planning Center service plans into Stage — the live rundown, item order, and pre-service countdown. Connects to Planning Center Online over the internet with a Personal Access Token (App ID + Secret). Create the token at api.planningcenteronline.com and paste both halves below.",
   configSchema: [
     {
       key: "appId",
@@ -71,6 +74,8 @@ const WIRELESS_DESCRIPTOR: IntegrationDescriptor = {
   id: "wireless",
   kind: "wireless",
   label: "Wireless Gear",
+  description:
+    "Monitors your wireless mics — RF, audio, and battery/charger status — on stage displays. Connects to receivers over your LAN (Shure and Sennheiser supported). Add one connection per receiver below; each channel can then be placed on a layout.",
   configSchema: [],
 };
 
@@ -82,6 +87,8 @@ const COMPANION_DESCRIPTOR: IntegrationDescriptor = {
   id: "companion",
   kind: "control",
   label: "Bitfocus Companion",
+  description:
+    "Lets a Bitfocus Companion (Stream Deck) surface control and read Stage. The Companion module connects to this app, so there's nothing to configure here — just point the module at this server's IP and port, shown below. This row reflects how many Companion clients are connected.",
   configSchema: [],
 };
 
@@ -91,6 +98,8 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
   id: "propresenter",
   kind: "control",
   label: "ProPresenter",
+  description:
+    "Shows the current and next slide, section, and slide thumbnails from ProPresenter. Connects to ProPresenter's local network API over your LAN (7.9+). Enable the API under ProPresenter → Preferences → Network, then add each instance below.",
   configSchema: [
     {
       key: "name",
@@ -154,6 +163,8 @@ const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
   id: "prodcom",
   kind: "lineup",
   label: "ProdCom",
+  description:
+    "Streams live production transcription (captions) onto a stage display. Connects to ProdCom's Application API over your LAN. Enter the host and port below; an API key is optional depending on your ProdCom setup.",
   configSchema: [
     {
       key: "host",
@@ -185,6 +196,8 @@ const SMAART_DESCRIPTOR: IntegrationDescriptor = {
   id: "smaart",
   kind: "control",
   label: "Smaart (SPL)",
+  description:
+    "Brings FOH sound-level (SPL) readings from Rational Acoustics Smaart onto stage displays. Connects to Smaart v8's API over your LAN (8.3+, JSON over WebSocket). Turn the API on in Smaart, then enter its host, port, and password below.",
   configSchema: [
     {
       key: "host",
@@ -217,6 +230,8 @@ const OBS_DESCRIPTOR: IntegrationDescriptor = {
   id: "obs",
   kind: "control",
   label: "OBS Studio",
+  description:
+    "Shows whether OBS is recording, streaming, or running its virtual camera, on a stage display. Connects to OBS's built-in obs-websocket server over your LAN. Enable it under OBS → Tools → WebSocket Server Settings, then enter the host, port, and password below.",
   configSchema: [
     {
       key: "host",
@@ -242,6 +257,34 @@ const OBS_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+// REAPER integration — polls REAPER's built-in Web Interface (Preferences →
+// Control/OSC/web → "Web browser interface") for live transport state (e.g.
+// recording), shown by the custom-layout "REAPER status" object. No secret: the
+// LAN web interface runs without auth in the common setup.
+const REAPER_DESCRIPTOR: IntegrationDescriptor = {
+  id: "reaper",
+  kind: "control",
+  label: "REAPER",
+  description:
+    "Shows whether REAPER is recording, on a stage display. Polls REAPER's built-in Web Interface over your LAN. Turn it on under REAPER → Preferences → Control/OSC/web (Web browser interface), then enter the host and port below.",
+  configSchema: [
+    {
+      key: "host",
+      label: "REAPER Host",
+      type: "text",
+      placeholder: "192.168.1.50",
+      help: "IP or hostname of the machine running REAPER, on the same network as this server (the Access URL shown in REAPER's web interface settings).",
+    },
+    {
+      key: "port",
+      label: "Web Interface Port",
+      type: "number",
+      placeholder: "8080",
+      help: "The port from REAPER → Preferences → Control/OSC/web → Web browser interface (\"Run web server on port\"). Leave the Username:password field blank there.",
+    },
+  ],
+};
+
 // OSC integration — sends OSC to LAN gear from custom-layout buttons and reflects
 // device state back. Targets are managed as a separate list (like wireless), so
 // the descriptor itself carries no config fields.
@@ -249,6 +292,8 @@ const OSC_DESCRIPTOR: IntegrationDescriptor = {
   id: "osc",
   kind: "control",
   label: "OSC",
+  description:
+    "Adds layout buttons that send OSC commands to LAN gear (consoles, media servers) and reflect device state back. There's nothing to enter here — manage OSC targets in the list below, then add an OSC button object to a layout.",
   configSchema: [],
 };
 
@@ -261,6 +306,8 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
   id: "sensource",
   kind: "control",
   label: "SenSource Vea",
+  description:
+    "Brings live people counts — attendance and room occupancy — from SenSource Vea onto displays and graphs. Connects to the Vea cloud API with an API client ID + secret (created in Vea → API clients). Pick which zones to count below.",
   configSchema: [
     {
       key: "clientId",
@@ -302,6 +349,8 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
   id: "ross-tsl",
   kind: "control",
   label: "Ross MultiViewer (TSL UMD)",
+  description:
+    "Pushes a people count onto a Ross multiviewer tile as on-tile text, over your LAN using TSL UMD. Enter the switcher host and TSL port below, then map a count to a tile's TSL address in the feeds panel.",
   configSchema: [
     {
       key: "host",
@@ -328,6 +377,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   PRODCOM_DESCRIPTOR,
   SMAART_DESCRIPTOR,
   OBS_DESCRIPTOR,
+  REAPER_DESCRIPTOR,
   OSC_DESCRIPTOR,
   SENSOURCE_DESCRIPTOR,
   ROSS_TSL_DESCRIPTOR,
@@ -342,6 +392,7 @@ const SECRET_KEYS: Record<string, string[]> = {
   prodcom: ["apiKey"],
   smaart: ["password"],
   obs: ["password"],
+  reaper: [],
   sensource: ["clientSecret", "apiToken"],
   "ross-tsl": [],
 };
@@ -396,6 +447,8 @@ class IntegrationManager {
     await this.applySmaart();
     // Start the OBS connection if enabled + configured.
     await this.applyObs();
+    // Start the REAPER web-interface poller if enabled + configured.
+    await this.applyReaper();
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
     await oscManager.init();
     this.refreshOscSummary();
@@ -537,6 +590,10 @@ class IntegrationManager {
       await this.applyObs();
     }
 
+    if (id === "reaper") {
+      await this.applyReaper();
+    }
+
     if (id === "sensource") {
       await this.applySensource();
     }
@@ -585,6 +642,10 @@ class IntegrationManager {
 
     if (id === "obs") {
       await this.applyObs();
+    }
+
+    if (id === "reaper") {
+      await this.applyReaper();
     }
 
     if (id === "sensource") {
@@ -689,6 +750,17 @@ class IntegrationManager {
         const secrets = await secretsStore.getSecrets("obs");
         const result = await obsService.test(host, port, secrets.password ?? null);
         this.setConnectionState("obs", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "reaper") {
+        const { host, port } = this.getReaperTarget();
+        if (!host || !port) {
+          return { ok: false, message: "Host and Port are required" };
+        }
+        const result = await reaperService.test(host, port);
+        this.setConnectionState("reaper", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
         return result;
       }
@@ -872,6 +944,38 @@ class IntegrationManager {
           : NaN;
     // Default to obs-websocket's standard port when only a host is given.
     return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 4455 : null };
+  }
+
+  private getReaperTarget(): { host: string | null; port: number | null } {
+    const cfg = this.states.get("reaper")?.config ?? {};
+    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
+    const rawPort = cfg.port;
+    const port =
+      typeof rawPort === "number"
+        ? rawPort
+        : typeof rawPort === "string" && rawPort.trim()
+          ? parseInt(rawPort, 10)
+          : NaN;
+    // Default to REAPER's suggested web-interface port when only a host is given.
+    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 8080 : null };
+  }
+
+  /** Start/stop the REAPER web-interface poll to match enabled + configured state. */
+  private async applyReaper(): Promise<void> {
+    reaperService.setConnectionListener((state, message) => {
+      this.setConnectionState("reaper", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("reaper")?.enabled ?? false;
+    const { host, port } = this.getReaperTarget();
+    if (enabled && host && port) {
+      this.setConnectionState("reaper", "connecting", `Connecting ${host}:${port}`);
+      reaperService.configure(host, port);
+    } else {
+      reaperService.stop();
+      this.setConnectionState("reaper", "disconnected", null);
+    }
   }
 
   /** Start/stop the OBS connection to match enabled + configured state. */
