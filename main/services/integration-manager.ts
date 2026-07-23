@@ -23,6 +23,8 @@ const PCO_DESCRIPTOR: IntegrationDescriptor = {
   id: "planning-center",
   kind: "lineup",
   label: "Planning Center",
+  description:
+    "Pulls your Planning Center service plans into Stage — the live rundown, item order, and pre-service countdown. Connects to Planning Center Online over the internet with a Personal Access Token (App ID + Secret). Create the token at api.planningcenteronline.com and paste both halves below.",
   configSchema: [
     {
       key: "appId",
@@ -72,6 +74,8 @@ const WIRELESS_DESCRIPTOR: IntegrationDescriptor = {
   id: "wireless",
   kind: "wireless",
   label: "Wireless Gear",
+  description:
+    "Monitors your wireless mics — RF, audio, and battery/charger status — on stage displays. Connects to receivers over your LAN (Shure and Sennheiser supported). Add one connection per receiver below; each channel can then be placed on a layout.",
   configSchema: [],
 };
 
@@ -83,6 +87,8 @@ const COMPANION_DESCRIPTOR: IntegrationDescriptor = {
   id: "companion",
   kind: "control",
   label: "Bitfocus Companion",
+  description:
+    "Lets a Bitfocus Companion (Stream Deck) surface control and read Stage. The Companion module connects to this app, so there's nothing to configure here — just point the module at this server's IP and port, shown below. This row reflects how many Companion clients are connected.",
   configSchema: [],
 };
 
@@ -92,6 +98,8 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
   id: "propresenter",
   kind: "control",
   label: "ProPresenter",
+  description:
+    "Shows the current and next slide, section, and slide thumbnails from ProPresenter. Connects to ProPresenter's local network API over your LAN (7.9+). Enable the API under ProPresenter → Preferences → Network, then add each instance below.",
   configSchema: [
     {
       key: "name",
@@ -155,6 +163,8 @@ const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
   id: "prodcom",
   kind: "lineup",
   label: "ProdCom",
+  description:
+    "Streams live production transcription (captions) onto a stage display. Connects to ProdCom's Application API over your LAN. Enter the host and port below; an API key is optional depending on your ProdCom setup.",
   configSchema: [
     {
       key: "host",
@@ -186,6 +196,8 @@ const SMAART_DESCRIPTOR: IntegrationDescriptor = {
   id: "smaart",
   kind: "control",
   label: "Smaart (SPL)",
+  description:
+    "Brings FOH sound-level (SPL) readings from Rational Acoustics Smaart onto stage displays. Connects to Smaart v8's API over your LAN (8.3+, JSON over WebSocket). Turn the API on in Smaart, then enter its host, port, and password below.",
   configSchema: [
     {
       key: "host",
@@ -218,6 +230,8 @@ const OBS_DESCRIPTOR: IntegrationDescriptor = {
   id: "obs",
   kind: "control",
   label: "OBS Studio",
+  description:
+    "Shows whether OBS is recording, streaming, or running its virtual camera, on a stage display. Connects to OBS's built-in obs-websocket server over your LAN. Enable it under OBS → Tools → WebSocket Server Settings, then enter the host, port, and password below.",
   configSchema: [
     {
       key: "host",
@@ -251,6 +265,8 @@ const REAPER_DESCRIPTOR: IntegrationDescriptor = {
   id: "reaper",
   kind: "control",
   label: "REAPER",
+  description:
+    "Shows whether REAPER is recording, on a stage display. Polls REAPER's built-in Web Interface over your LAN. Turn it on under REAPER → Preferences → Control/OSC/web (Web browser interface), then enter the host and port below.",
   configSchema: [
     {
       key: "host",
@@ -276,6 +292,8 @@ const OSC_DESCRIPTOR: IntegrationDescriptor = {
   id: "osc",
   kind: "control",
   label: "OSC",
+  description:
+    "Adds layout buttons that send OSC commands to LAN gear (consoles, media servers) and reflect device state back. There's nothing to enter here — manage OSC targets in the list below, then add an OSC button object to a layout.",
   configSchema: [],
 };
 
@@ -288,6 +306,8 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
   id: "sensource",
   kind: "control",
   label: "SenSource Vea",
+  description:
+    "Brings live people counts — attendance and room occupancy — from SenSource Vea onto displays and graphs. Connects to the Vea cloud API with an API client ID + secret (created in Vea → API clients). Pick which zones to count below.",
   configSchema: [
     {
       key: "clientId",
@@ -329,6 +349,8 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
   id: "ross-tsl",
   kind: "control",
   label: "Ross MultiViewer (TSL UMD)",
+  description:
+    "Pushes a people count onto a Ross multiviewer tile as on-tile text, over your LAN using TSL UMD. Enter the switcher host and TSL port below, then map a count to a tile's TSL address in the feeds panel.",
   configSchema: [
     {
       key: "host",

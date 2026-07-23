@@ -882,6 +882,7 @@ function IntegrationRow({
       <Collapsible
         defaultOpen={!state.configured}
         label={<span className="text-callout font-semibold text-fg truncate">{descriptor.label}</span>}
+        afterLabel={descriptor.description ? <InfoHint>{descriptor.description}</InfoHint> : undefined}
         right={
           <div className="flex items-center gap-3 shrink-0">
             <ConnectionBadge connection={state.connection} message={state.message} />

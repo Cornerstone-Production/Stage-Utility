@@ -17,6 +17,7 @@ interface IntegrationDescriptor {
   id: string;
   kind: "lineup" | "wireless" | "control";
   label: string;
+  description?: string;
   configSchema: ConfigField[];
 }
 
