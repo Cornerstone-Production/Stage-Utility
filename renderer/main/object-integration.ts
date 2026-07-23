@@ -7,6 +7,7 @@
 export const OBJECT_INTEGRATION: Partial<Record<LayoutObjectType, { id: string; label: string }>> = {
   "spl-meter": { id: "smaart", label: "Smaart SPL" },
   "obs-status": { id: "obs", label: "OBS" },
+  "reaper-status": { id: "reaper", label: "REAPER" },
   "people-counter": { id: "sensource", label: "SenSource" },
   "people-graph": { id: "sensource", label: "SenSource" },
   "osc-button": { id: "osc", label: "OSC" },

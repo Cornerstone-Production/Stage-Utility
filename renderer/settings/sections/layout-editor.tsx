@@ -73,6 +73,7 @@ import { useSplState } from "../../main/use-spl-state";
 import { useWirelessChannels } from "../../main/use-wireless-channels";
 import { usePeopleCountState } from "../../main/use-people-count-state";
 import { useObsState } from "../../main/use-obs-state";
+import { useReaperState } from "../../main/use-reaper-state";
 import { useOscTargets } from "../../main/use-osc-state";
 import { useStageState } from "../../main/use-stage-state";
 import { usePlanItems } from "../../main/use-plan-items";
@@ -106,6 +107,7 @@ const TYPE_LABELS: Record<LayoutObjectType, string> = {
   "charger-battery": "Charger battery",
   "spl-meter": "SPL meter",
   "obs-status": "OBS status",
+  "reaper-status": "REAPER status",
   "osc-button": "OSC button",
   "integration-status": "Integration status",
   "wireless-summary": "Wireless summary",
@@ -135,6 +137,7 @@ const PALETTE_GROUPS: { label: string; types: LayoutObjectType[] }[] = [
   { label: "People", types: ["people-counter", "people-panel", "people-graph"] },
   { label: "Baptisms", types: ["baptism-timer"] },
   { label: "OBS", types: ["obs-status"] },
+  { label: "REAPER", types: ["reaper-status"] },
   { label: "Control", types: ["osc-button"] },
   { label: "Status", types: ["integration-status"] },
 ];
@@ -224,6 +227,7 @@ function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
     case "charger-battery": return { type: "charger-battery", bays: [], show: { battery: true, charging: true } };
     case "spl-meter": return { type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null };
     case "obs-status": return { type: "obs-status", mode: "recording", showTimecode: false, hideWhenIdle: false, fillWhenRecording: true };
+    case "reaper-status": return { type: "reaper-status", showPosition: false, hideWhenIdle: false, fillWhenRecording: true };
     case "osc-button": return { type: "osc-button", targetId: null, label: "Button", address: "/", args: [], feedback: null };
     case "integration-status": return { type: "integration-status", integrationId: null, showLabel: true };
     case "wireless-summary": return { type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" };
@@ -256,6 +260,8 @@ function defaultStyle(type: LayoutObjectType): LayoutStyle {
   if (type === "service-order") return { fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" };
   // OBS status reads as a bold pill (glass when idle, fills red when recording).
   if (type === "obs-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_PRESETS.neutral };
+  // REAPER status reads as a bold pill (glass when idle, fills red when recording).
+  if (type === "reaper-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_PRESETS.neutral };
   // OSC button reads as a tappable pill.
   if (type === "osc-button") return { fontSize: 0.045, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
   // People counter reads as a big bold number.
@@ -2390,6 +2396,7 @@ function Inspector({
   const spl = useSplState();
   const wirelessChannels = useWirelessChannels();
   const obs = useObsState();
+  const reaper = useReaperState();
   const peopleCount = usePeopleCountState();
   const oscTargets = useOscTargets();
   const planItems = usePlanItems();
@@ -2793,6 +2800,24 @@ function Inspector({
             {mode === "recording" && (
               <RowSwitch label="Show timecode" checked={c.showTimecode ?? false} onChange={(v) => onConfig({ ...c, showTimecode: v })} />
             )}
+            <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
+          </>
+        );
+      })()}
+      {c.type === "reaper-status" && (() => {
+        const liveLabel = !reaper?.connected
+          ? "Not connected"
+          : reaper.recording
+            ? "Recording now"
+            : "Connected · idle";
+        return (
+          <>
+            <Row label="REAPER"><span className="text-caption2 text-fg-muted">{liveLabel}</span></Row>
+            <RowText label="Recording text" value={c.recordingText ?? ""} placeholder="REAPER: Recording" onChange={(v) => onConfig({ ...c, recordingText: v })} />
+            <RowText label="Idle text" value={c.idleText ?? ""} placeholder="REAPER: Standby" onChange={(v) => onConfig({ ...c, idleText: v })} />
+            <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="REAPER: Offline" onChange={(v) => onConfig({ ...c, offlineText: v })} />
+            <RowSwitch label="Fill red when recording" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
+            <RowSwitch label="Show position" checked={c.showPosition ?? false} onChange={(v) => onConfig({ ...c, showPosition: v })} />
             <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
           </>
         );

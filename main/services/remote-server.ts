@@ -25,6 +25,7 @@ import { deviceManager } from "./device-manager.js";
 import { configSnapshot } from "./config-snapshot.js";
 import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
+import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, propresenterManager, THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "./propresenter-service.js";
@@ -676,6 +677,7 @@ export class RemoteServer {
       sseWrite(res, "service-timeline:history", serviceTimelineRecorder.getCurrent());
       sseWrite(res, "baptism:state", baptismTimerService.getState());
       sseWrite(res, "obs:status", obsService.getLatest());
+      sseWrite(res, "reaper:status", reaperService.getLatest());
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
       sseWrite(res, "displays:presence", presenceSnapshot());
@@ -767,6 +769,10 @@ export class RemoteServer {
     }
     if (method === "GET" && pathname === "/api/obs/status") {
       json(res, obsService.getLatest());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/reaper/status") {
+      json(res, reaperService.getLatest());
       return;
     }
     if (method === "GET" && pathname === "/api/osc/feedback") {

@@ -6,6 +6,7 @@ import type { IntegrationDescriptor, IntegrationState } from "../types/integrati
 import type { PeopleCountDTO } from "../types/stage.js";
 import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
+import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, propresenterManager, type PropInstanceConfig } from "./propresenter-service.js";
@@ -242,6 +243,32 @@ const OBS_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+// REAPER integration — polls REAPER's built-in Web Interface (Preferences →
+// Control/OSC/web → "Web browser interface") for live transport state (e.g.
+// recording), shown by the custom-layout "REAPER status" object. No secret: the
+// LAN web interface runs without auth in the common setup.
+const REAPER_DESCRIPTOR: IntegrationDescriptor = {
+  id: "reaper",
+  kind: "control",
+  label: "REAPER",
+  configSchema: [
+    {
+      key: "host",
+      label: "REAPER Host",
+      type: "text",
+      placeholder: "192.168.1.50",
+      help: "IP or hostname of the machine running REAPER, on the same network as this server (the Access URL shown in REAPER's web interface settings).",
+    },
+    {
+      key: "port",
+      label: "Web Interface Port",
+      type: "number",
+      placeholder: "8080",
+      help: "The port from REAPER → Preferences → Control/OSC/web → Web browser interface (\"Run web server on port\"). Leave the Username:password field blank there.",
+    },
+  ],
+};
+
 // OSC integration — sends OSC to LAN gear from custom-layout buttons and reflects
 // device state back. Targets are managed as a separate list (like wireless), so
 // the descriptor itself carries no config fields.
@@ -328,6 +355,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   PRODCOM_DESCRIPTOR,
   SMAART_DESCRIPTOR,
   OBS_DESCRIPTOR,
+  REAPER_DESCRIPTOR,
   OSC_DESCRIPTOR,
   SENSOURCE_DESCRIPTOR,
   ROSS_TSL_DESCRIPTOR,
@@ -342,6 +370,7 @@ const SECRET_KEYS: Record<string, string[]> = {
   prodcom: ["apiKey"],
   smaart: ["password"],
   obs: ["password"],
+  reaper: [],
   sensource: ["clientSecret", "apiToken"],
   "ross-tsl": [],
 };
@@ -396,6 +425,8 @@ class IntegrationManager {
     await this.applySmaart();
     // Start the OBS connection if enabled + configured.
     await this.applyObs();
+    // Start the REAPER web-interface poller if enabled + configured.
+    await this.applyReaper();
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
     await oscManager.init();
     this.refreshOscSummary();
@@ -537,6 +568,10 @@ class IntegrationManager {
       await this.applyObs();
     }
 
+    if (id === "reaper") {
+      await this.applyReaper();
+    }
+
     if (id === "sensource") {
       await this.applySensource();
     }
@@ -585,6 +620,10 @@ class IntegrationManager {
 
     if (id === "obs") {
       await this.applyObs();
+    }
+
+    if (id === "reaper") {
+      await this.applyReaper();
     }
 
     if (id === "sensource") {
@@ -689,6 +728,17 @@ class IntegrationManager {
         const secrets = await secretsStore.getSecrets("obs");
         const result = await obsService.test(host, port, secrets.password ?? null);
         this.setConnectionState("obs", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "reaper") {
+        const { host, port } = this.getReaperTarget();
+        if (!host || !port) {
+          return { ok: false, message: "Host and Port are required" };
+        }
+        const result = await reaperService.test(host, port);
+        this.setConnectionState("reaper", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
         return result;
       }
@@ -872,6 +922,38 @@ class IntegrationManager {
           : NaN;
     // Default to obs-websocket's standard port when only a host is given.
     return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 4455 : null };
+  }
+
+  private getReaperTarget(): { host: string | null; port: number | null } {
+    const cfg = this.states.get("reaper")?.config ?? {};
+    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
+    const rawPort = cfg.port;
+    const port =
+      typeof rawPort === "number"
+        ? rawPort
+        : typeof rawPort === "string" && rawPort.trim()
+          ? parseInt(rawPort, 10)
+          : NaN;
+    // Default to REAPER's suggested web-interface port when only a host is given.
+    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 8080 : null };
+  }
+
+  /** Start/stop the REAPER web-interface poll to match enabled + configured state. */
+  private async applyReaper(): Promise<void> {
+    reaperService.setConnectionListener((state, message) => {
+      this.setConnectionState("reaper", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("reaper")?.enabled ?? false;
+    const { host, port } = this.getReaperTarget();
+    if (enabled && host && port) {
+      this.setConnectionState("reaper", "connecting", `Connecting ${host}:${port}`);
+      reaperService.configure(host, port);
+    } else {
+      reaperService.stop();
+      this.setConnectionState("reaper", "disconnected", null);
+    }
   }
 
   /** Start/stop the OBS connection to match enabled + configured state. */

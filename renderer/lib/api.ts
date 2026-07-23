@@ -155,6 +155,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "obs:getStatus":
       return apiFetch<T>("/api/obs/status");
+    case "reaper:getStatus":
+      return apiFetch<T>("/api/reaper/status");
 
     case "spl:getHistoryCurrent":
       return apiFetch<T>("/api/spl/history/current");

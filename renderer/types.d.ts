@@ -67,6 +67,15 @@ interface ObsStatusDTO {
   recordTimecode: string | null;
 }
 
+interface ReaperStatusDTO {
+  connected: boolean;
+  recording: boolean;
+  recordPaused: boolean;
+  playing: boolean;
+  positionSeconds: number | null;
+  positionString: string | null;
+}
+
 interface OscArg {
   type: "i" | "f" | "s" | "T" | "F";
   value?: number | string;
@@ -508,6 +517,15 @@ type LayoutObjectConfig =
       idleText?: string;
       offlineText?: string;
       showTimecode?: boolean;
+      hideWhenIdle?: boolean;
+      fillWhenRecording?: boolean;
+    }
+  | {
+      type: "reaper-status";
+      recordingText?: string;
+      idleText?: string;
+      offlineText?: string;
+      showPosition?: boolean;
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
     }
