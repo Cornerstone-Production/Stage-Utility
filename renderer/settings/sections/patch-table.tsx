@@ -168,7 +168,7 @@ export function PatchTable({
   // value worth spreading; otherwise a plain single-cell upsert.
   function edit(rackId: string, index: number, field: RippleField, value: unknown, patch: Partial<PatchEndpoint>, rackChannels: number) {
     if (rippleActive && ripple.fields[field] && rippleHasValue(field, value)) {
-      onChange(rippleEndpoints({ endpoints, rackId, dir, startIndex: index, field, value, count: ripple.count, rackChannels }));
+      onChange(rippleEndpoints({ endpoints, rackId, dir, startIndex: index, field, value, count: ripple.count, rackChannels, stageDevices }));
     } else {
       upsert(rackId, index, patch);
     }
