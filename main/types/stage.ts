@@ -258,6 +258,21 @@ export type LayoutObjectConfig =
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
     }
+  // Live REAPER recording indicator (from the REAPER integration, `reaper:status`
+  // channel). Turns red while REAPER is recording. Label texts override the
+  // defaults ("REAPER: Recording" / "REAPER: Standby" / "REAPER: Offline");
+  // `hideWhenIdle` makes it a pure tally light (render nothing unless recording);
+  // `fillWhenRecording` fills the whole box red instead of just coloring the text;
+  // `showPosition` appends REAPER's transport position while recording.
+  | {
+      type: "reaper-status";
+      recordingText?: string;
+      idleText?: string;
+      offlineText?: string;
+      showPosition?: boolean;
+      hideWhenIdle?: boolean;
+      fillWhenRecording?: boolean;
+    }
   // An OSC control button. Tapping it (on a real display / operator surface, never
   // in the editor) sends `address` + `args` to the chosen OSC target. `feedback`
   // optionally lights the button from incoming OSC. Send-only if no feedback bind.
@@ -553,6 +568,20 @@ export interface ObsStatusDTO {
   virtualCam: boolean;
   /** "HH:MM:SS" record duration while recording, else null. */
   recordTimecode: string | null;
+}
+
+/** Live REAPER transport state (pushed on "reaper:status"). `connected` is the
+ *  web-interface HTTP link; the rest reflect REAPER's transport. v1 surfaces
+ *  recording for the layout object. */
+export interface ReaperStatusDTO {
+  connected: boolean;
+  recording: boolean;
+  recordPaused: boolean;
+  playing: boolean;
+  /** Transport position in seconds, or null when unknown. */
+  positionSeconds: number | null;
+  /** REAPER's position string (e.g. "0:02.123"), or null. */
+  positionString: string | null;
 }
 
 /** Live people counts from the SenSource Vea integration (pushed on

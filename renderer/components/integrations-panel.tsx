@@ -848,7 +848,7 @@ const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
   { title: "Audio", ids: ["smaart"] },
   { title: "People", ids: ["sensource"] },
   { title: "Wireless", ids: ["wireless"] },
-  { title: "Control & output", ids: ["obs", "osc", "ross-tsl"] },
+  { title: "Control & output", ids: ["obs", "reaper", "osc", "ross-tsl"] },
 ];
 
 /** One integration as a collapsible card: header (name · status · enable) that
@@ -882,6 +882,7 @@ function IntegrationRow({
       <Collapsible
         defaultOpen={!state.configured}
         label={<span className="text-callout font-semibold text-fg truncate">{descriptor.label}</span>}
+        afterLabel={descriptor.description ? <InfoHint>{descriptor.description}</InfoHint> : undefined}
         right={
           <div className="flex items-center gap-3 shrink-0">
             <ConnectionBadge connection={state.connection} message={state.message} />
