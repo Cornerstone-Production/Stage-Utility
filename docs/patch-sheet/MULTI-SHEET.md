@@ -32,10 +32,15 @@ owner changes — matching the ownership band on a Dante patch sheet.
 ## Color coding
 
 `PatchDevice.color` (`#rrggbb`, chosen from a preset palette in the device
-manager) tints every channel sourced from that device: a colored left stripe on
-the row in both the editor table and the `/patch` view (the "what changed" warn
-stripe takes precedence on changed rows). So all inputs off "Snake A" read as one
-color at a glance.
+manager) is shown on two separate visual channels so a rack's color and its
+snakes' colors never fight:
+
+- **Source device (snake/pocket) color → the per-row left stripe** — every channel
+  fed by "Snake A" reads as one color (the "what changed" warn stripe takes
+  precedence on changed rows).
+- **Rack color → the rack's section header** (a color dot + a left stripe on the
+  card), since the rack is the container the rows are grouped under, not a row
+  source. In "By device" mode the group header carries the source device's color.
 
 ## Files
 

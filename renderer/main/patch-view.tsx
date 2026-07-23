@@ -213,9 +213,10 @@ export function PatchView() {
                 const isCollapsed = collapsed[rack.id];
                 let lastOwner: string | undefined;
                 return (
-                  <div key={rack.id} className="overflow-hidden rounded-xl border border-line bg-surface">
+                  <div key={rack.id} style={rack.color ? { boxShadow: `inset 3px 0 0 ${rack.color}` } : undefined} className="overflow-hidden rounded-xl border border-line bg-surface">
                     <button type="button" onClick={() => setCollapsed((c) => ({ ...c, [rack.id]: !c[rack.id] }))} className="flex w-full items-center gap-2 px-4 py-2.5 text-left">
                       <ChevronRightIcon className={`size-4 text-fg-subtle transition-transform ${isCollapsed ? "" : "rotate-90"}`} />
+                      {rack.color && <span className="size-2.5 shrink-0 rounded-full" style={{ background: rack.color }} />}
                       <span className="text-footnote font-semibold">{rack.name}</span>
                       <span className="text-caption2 text-fg-subtle">{rows.length}</span>
                     </button>

@@ -274,10 +274,11 @@ export function PatchTable({
       <div className="flex flex-col gap-4">
         {orderedKeys.map((gk) => {
           const list = groups.get(gk)!.slice().sort((a, b) => a.rackId.localeCompare(b.rackId) || a.index - b.index);
-          const name = gk === "__direct" ? "Direct to rack" : stageDevices.find((d) => d.id === gk)?.name ?? gk;
+          const gdev = stageDevices.find((d) => d.id === gk);
+          const name = gk === "__direct" ? "Direct to rack" : gdev?.name ?? gk;
           return (
-            <div key={gk} className="overflow-hidden rounded-xl border border-line bg-surface">
-              <div className="border-b border-line px-4 py-2 text-footnote font-semibold text-fg">{name} <span className="text-caption2 font-normal text-fg-subtle">{list.length}</span></div>
+            <div key={gk} style={gdev?.color ? { boxShadow: `inset 3px 0 0 ${gdev.color}` } : undefined} className="overflow-hidden rounded-xl border border-line bg-surface">
+              <div className="flex items-center gap-2 border-b border-line px-4 py-2 text-footnote font-semibold text-fg">{gdev?.color && <span className="size-2.5 shrink-0 rounded-full" style={{ background: gdev.color }} />}{name} <span className="text-caption2 font-normal text-fg-subtle">{list.length}</span></div>
               <div className="overflow-x-auto"><div className={minW}><HeaderRow />{list.map((e) => Row(e.rackId, e.index, racks.length > 1, dir === "in" ? racks.find((r) => r.id === e.rackId)?.inputs ?? 0 : racks.find((r) => r.id === e.rackId)?.outputs ?? 0))}</div></div>
             </div>
           );
@@ -293,8 +294,11 @@ export function PatchTable({
       {racks.map((rack) => {
         const count = dir === "in" ? rack.inputs : rack.outputs;
         return (
-          <div key={rack.id} className="overflow-hidden rounded-xl border border-line bg-surface">
-            <div className="border-b border-line px-4 py-2 text-footnote font-semibold text-fg">{rack.name}</div>
+          <div key={rack.id} style={rack.color ? { boxShadow: `inset 3px 0 0 ${rack.color}` } : undefined} className="overflow-hidden rounded-xl border border-line bg-surface">
+            <div className="flex items-center gap-2 border-b border-line px-4 py-2 text-footnote font-semibold text-fg">
+              {rack.color && <span className="size-2.5 shrink-0 rounded-full" style={{ background: rack.color }} />}
+              {rack.name}
+            </div>
             <div className="overflow-x-auto">
               <div className={minW}>
                 <HeaderRow />
