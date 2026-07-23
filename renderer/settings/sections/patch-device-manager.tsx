@@ -1,7 +1,9 @@
-import { Trash2Icon, PlusIcon } from "lucide-react";
+import { useState } from "react";
+import { Trash2Icon, PlusIcon, ListOrderedIcon } from "lucide-react";
 
 import { Button, NumberInput, Input, Collapsible } from "../../components/ui";
 import { uid } from "../../lib/uid";
+import { generateLabels } from "../../lib/patch-ripple";
 
 const KINDS: { value: PatchDeviceKind; label: string }[] = [
   { value: "rack", label: "SD Rack" },
@@ -13,12 +15,27 @@ const KINDS: { value: PatchDeviceKind; label: string }[] = [
   { value: "other", label: "Other" },
 ];
 
+/** One-line summary of a device's current connector labels, e.g. "B-1…B-12". */
+function labelSummary(labels: string[] | undefined): string | null {
+  if (!labels || labels.length === 0) return null;
+  return labels.length === 1 ? labels[0] : `${labels[0]}…${labels[labels.length - 1]}`;
+}
+
 /**
  * Device manager for the patch editor — add/remove racks and stage boxes and set
  * their input/output channel counts. Racks are the endpoint spine; the others
  * (snakes, pockets, drops, RF) are referenced by each endpoint's From/To path.
+ *
+ * Each device can also generate sequential connector labels (prefix + 1..N, e.g.
+ * "B-1…B-12"), which then autocomplete in the From/To path cells and ripple
+ * cleanly ("B-1" → "B-2") in the patch table.
  */
 export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice[]; onChange: (d: PatchDevice[]) => void }) {
+  // Inline label generator state: which device's panel is open, + its inputs.
+  const [labelFor, setLabelFor] = useState<string | null>(null);
+  const [prefix, setPrefix] = useState("");
+  const [start, setStart] = useState(1);
+
   function update(id: string, patch: Partial<PatchDevice>) {
     onChange(devices.map((d) => (d.id === id ? { ...d, ...patch } : d)));
   }
@@ -27,40 +44,88 @@ export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice
   }
   function remove(id: string) {
     onChange(devices.filter((d) => d.id !== id));
+    if (labelFor === id) setLabelFor(null);
   }
 
   return (
     <div className="rounded-xl border border-line bg-surface">
       <Collapsible label="Devices" summary={`${devices.length}`} defaultOpen={devices.length === 0} headerClassName="px-4 py-2.5">
         <div className="flex flex-col gap-2 px-3 pb-3">
-          {devices.map((d) => (
-            <div key={d.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-raised px-3 py-2">
-              <Input value={d.name} onChange={(e) => update(d.id, { name: e.target.value })} className="w-44" placeholder="Device name" />
-              <select
-                value={d.kind}
-                onChange={(e) => update(d.id, { kind: e.target.value as PatchDeviceKind })}
-                className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote text-fg focus:outline-none focus:border-focus"
-              >
-                {KINDS.map((k) => (
-                  <option key={k.value} value={k.value}>{k.label}</option>
-                ))}
-              </select>
-              <label className="flex items-center gap-1.5 text-caption2 text-fg-muted">
-                in <NumberInput value={d.inputs} min={0} max={256} onChange={(v) => update(d.id, { inputs: v })} />
-              </label>
-              <label className="flex items-center gap-1.5 text-caption2 text-fg-muted">
-                out <NumberInput value={d.outputs} min={0} max={256} onChange={(v) => update(d.id, { outputs: v })} />
-              </label>
-              <button
-                type="button"
-                onClick={() => remove(d.id)}
-                className="ml-auto rounded-md p-1.5 text-fg-subtle hover:bg-fill hover:text-warn-11 transition-colors"
-                aria-label={`Remove ${d.name}`}
-              >
-                <Trash2Icon className="size-4" />
-              </button>
-            </div>
-          ))}
+          {devices.map((d) => {
+            const inSum = labelSummary(d.inLabels);
+            const outSum = labelSummary(d.outLabels);
+            const open = labelFor === d.id;
+            return (
+              <div key={d.id} className="rounded-lg border border-line bg-surface-raised">
+                <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+                  <Input value={d.name} onChange={(e) => update(d.id, { name: e.target.value })} className="w-44" placeholder="Device name" />
+                  <select
+                    value={d.kind}
+                    onChange={(e) => update(d.id, { kind: e.target.value as PatchDeviceKind })}
+                    className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote text-fg focus:outline-none focus:border-focus"
+                  >
+                    {KINDS.map((k) => (
+                      <option key={k.value} value={k.value}>{k.label}</option>
+                    ))}
+                  </select>
+                  <label className="flex items-center gap-1.5 text-caption2 text-fg-muted">
+                    in <NumberInput value={d.inputs} min={0} max={256} onChange={(v) => update(d.id, { inputs: v })} />
+                  </label>
+                  <label className="flex items-center gap-1.5 text-caption2 text-fg-muted">
+                    out <NumberInput value={d.outputs} min={0} max={256} onChange={(v) => update(d.id, { outputs: v })} />
+                  </label>
+                  {(inSum || outSum) && (
+                    <span className="text-caption2 tabular-nums text-fg-faint">
+                      {inSum && `in ${inSum}`}{inSum && outSum && " · "}{outSum && `out ${outSum}`}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setLabelFor(open ? null : d.id)}
+                    className={`ml-auto rounded-md p-1.5 transition-colors ${open ? "bg-fill text-fg" : "text-fg-subtle hover:bg-fill hover:text-fg"}`}
+                    aria-label={`Generate connector labels for ${d.name}`}
+                    aria-expanded={open}
+                  >
+                    <ListOrderedIcon className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => remove(d.id)}
+                    className="rounded-md p-1.5 text-fg-subtle hover:bg-fill hover:text-warn-11 transition-colors"
+                    aria-label={`Remove ${d.name}`}
+                  >
+                    <Trash2Icon className="size-4" />
+                  </button>
+                </div>
+                {open && (
+                  <div className="flex flex-wrap items-end gap-2 border-t border-line px-3 py-2.5">
+                    <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
+                      Prefix
+                      <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} className="w-24" placeholder="e.g. B-" />
+                    </label>
+                    <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
+                      Start #
+                      <NumberInput value={start} min={0} max={999} onChange={setStart} />
+                    </label>
+                    <Button variant="filled" size="small" disabled={d.inputs <= 0} onClick={() => update(d.id, { inLabels: generateLabels(d.inputs, prefix, start) })}>
+                      Label {d.inputs} inputs
+                    </Button>
+                    <Button variant="filled" size="small" disabled={d.outputs <= 0} onClick={() => update(d.id, { outLabels: generateLabels(d.outputs, prefix, start) })}>
+                      Label {d.outputs} outputs
+                    </Button>
+                    {(inSum || outSum) && (
+                      <Button variant="transparent" size="small" onClick={() => update(d.id, { inLabels: undefined, outLabels: undefined })}>
+                        Clear
+                      </Button>
+                    )}
+                    <p className="w-full text-caption2 text-fg-faint">
+                      Generates connectors {prefix}{start}…{prefix}{start + Math.max(d.inputs, d.outputs, 1) - 1}. They autocomplete in From/To cells and ripple cleanly in the table.
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
           <Button variant="filled" size="small" onClick={add}>
             <PlusIcon className="size-3.5" /> Add device
           </Button>
