@@ -10,9 +10,11 @@ const keyOf = (rackId: string, dir: Dir, index: number) => `${rackId}:${dir}:${i
 const meaningful = (e: PatchEndpoint) => Boolean(e.label || e.consoleChannel || (e.path && e.path.length) || e.unused || e.mic || e.feedType);
 
 const GRID = "grid grid-cols-[52px_64px_1fr_110px_44px_1.4fr] gap-2";
+const GRID_OWNER = "grid grid-cols-[52px_64px_1fr_110px_44px_1.4fr_104px] gap-2";
 
 const RIPPLE_COUNTS: RippleCount[] = [2, 4, 6, 8, 10, 12, "end"];
-// Which columns can ripple, per direction, and their chip label.
+// Which columns can ripple, per direction, and their chip label. Owner is appended
+// only for sheets that use ownership bands (see showOwner).
 const RIPPLE_FIELDS_IN: { field: RippleField; label: string }[] = [
   { field: "path", label: "From" },
   { field: "consoleChannel", label: "Console" },
@@ -35,7 +37,7 @@ interface RippleState {
 const DEFAULT_RIPPLE: RippleState = {
   on: false,
   count: 8,
-  fields: { path: true, consoleChannel: true, label: false, mic: false, phantom: false, feedType: false },
+  fields: { path: true, consoleChannel: true, label: false, mic: false, phantom: false, feedType: false, owner: false },
 };
 
 /** Whether a value is worth rippling (don't fan an empty edit down a rack). */
@@ -76,8 +78,9 @@ function PathCell({ path, stageDevices, onChange }: { path: PatchHop[] | undefin
 }
 
 /** The armed-ripple control bar (by-rack mode only). */
-function RippleBar({ dir, ripple, setRipple }: { dir: Dir; ripple: RippleState; setRipple: (r: RippleState) => void }) {
-  const fields = dir === "in" ? RIPPLE_FIELDS_IN : RIPPLE_FIELDS_OUT;
+function RippleBar({ dir, ripple, setRipple, showOwner }: { dir: Dir; ripple: RippleState; setRipple: (r: RippleState) => void; showOwner: boolean }) {
+  const base = dir === "in" ? RIPPLE_FIELDS_IN : RIPPLE_FIELDS_OUT;
+  const fields = showOwner ? [...base, { field: "owner" as RippleField, label: "Owner" }] : base;
   return (
     <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-line-strong bg-popover px-3 py-2 shadow-sm backdrop-blur-xl">
       <label className="flex items-center gap-1.5 text-footnote font-medium text-fg">
@@ -140,6 +143,7 @@ export function PatchTable({
   stageDevices,
   endpoints,
   onChange,
+  showOwner = false,
 }: {
   dir: Dir;
   group: "rack" | "device";
@@ -147,11 +151,15 @@ export function PatchTable({
   stageDevices: PatchDevice[];
   endpoints: PatchEndpoint[];
   onChange: (next: PatchEndpoint[]) => void;
+  /** Show the ownership column + ripple chip (non-analog sheets). */
+  showOwner?: boolean;
 }) {
   const [ripple, setRipple] = useState<RippleState>(DEFAULT_RIPPLE);
   // The row whose cell is focused, so we can highlight the ripple's reach.
   const [focus, setFocus] = useState<{ rackId: string; index: number } | null>(null);
   const rippleActive = group === "rack" && ripple.on;
+  const grid = showOwner ? GRID_OWNER : GRID;
+  const minW = showOwner ? "min-w-[784px]" : "min-w-[680px]";
 
   const byKey = new Map(endpoints.map((e) => [keyOf(e.rackId, e.dir, e.index), e] as const));
   const rackName = (id: string) => racks.find((r) => r.id === id)?.name ?? id;
@@ -182,11 +190,11 @@ export function PatchTable({
     return rippleActive && focus != null && focus.rackId === rackId && index >= focus.index && index <= lastRippleIndex(focus.index, rackChannels);
   }
 
-  const headCols = dir === "in" ? ["#", "Console", "Source", "Mic", "48V", "From"] : ["#", "Console", "Destination", "Feed", "To", ""];
+  const headCols = (dir === "in" ? ["#", "Console", "Source", "Mic", "48V", "From"] : ["#", "Console", "Destination", "Feed", "To", ""]).concat(showOwner ? ["Owner"] : []);
 
   function HeaderRow() {
     return (
-      <div className={`${GRID} border-b border-line px-3 py-1.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle`}>
+      <div className={`${grid} border-b border-line px-3 py-1.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle`}>
         {headCols.map((c, i) => <div key={i} className={i === 4 && dir === "in" ? "text-center" : ""}>{c}</div>)}
       </div>
     );
@@ -194,12 +202,15 @@ export function PatchTable({
 
   function Row(rackId: string, idx: number, showRack: boolean, rackChannels: number) {
     const e = byKey.get(keyOf(rackId, dir, idx));
+    // Tint the row's left edge with the color of the device it's sourced from.
+    const srcColor = stageDevices.find((dv) => dv.id === e?.path?.[0]?.deviceId)?.color;
     return (
       <div
         key={`${rackId}:${idx}`}
         onFocus={() => rippleActive && setFocus({ rackId, index: idx })}
         onBlur={() => setFocus(null)}
-        className={cn(`${GRID} items-start border-b border-line/60 px-3 py-1.5 transition-colors`, isInFocusRun(rackId, idx, rackChannels) && "bg-accent/5")}
+        style={srcColor ? { boxShadow: `inset 3px 0 0 ${srcColor}` } : undefined}
+        className={cn(`${grid} items-start border-b border-line/60 px-3 py-1.5 transition-colors`, isInFocusRun(rackId, idx, rackChannels) && "bg-accent/5")}
       >
         <div className="pt-1.5 font-mono text-caption1 tabular-nums text-fg-subtle">
           {idx}
@@ -219,6 +230,9 @@ export function PatchTable({
           </>
         )}
         <PathCell path={e?.path} stageDevices={stageDevices} onChange={(hops) => edit(rackId, idx, "path", hops, { path: hops }, rackChannels)} />
+        {showOwner && (
+          <Input value={e?.owner ?? ""} onChange={(ev) => edit(rackId, idx, "owner", ev.target.value, { owner: ev.target.value }, rackChannels)} placeholder="Owner" />
+        )}
       </div>
     );
   }
@@ -253,7 +267,7 @@ export function PatchTable({
           return (
             <div key={gk} className="overflow-hidden rounded-xl border border-line bg-surface">
               <div className="border-b border-line px-4 py-2 text-footnote font-semibold text-fg">{name} <span className="text-caption2 font-normal text-fg-subtle">{list.length}</span></div>
-              <div className="overflow-x-auto"><div className="min-w-[680px]"><HeaderRow />{list.map((e) => Row(e.rackId, e.index, racks.length > 1, dir === "in" ? racks.find((r) => r.id === e.rackId)?.inputs ?? 0 : racks.find((r) => r.id === e.rackId)?.outputs ?? 0))}</div></div>
+              <div className="overflow-x-auto"><div className={minW}><HeaderRow />{list.map((e) => Row(e.rackId, e.index, racks.length > 1, dir === "in" ? racks.find((r) => r.id === e.rackId)?.inputs ?? 0 : racks.find((r) => r.id === e.rackId)?.outputs ?? 0))}</div></div>
             </div>
           );
         })}
@@ -264,14 +278,14 @@ export function PatchTable({
   // ── By rack: every channel of every rack ──
   return (
     <div className="flex flex-col gap-4">
-      <RippleBar dir={dir} ripple={ripple} setRipple={setRipple} />
+      <RippleBar dir={dir} ripple={ripple} setRipple={setRipple} showOwner={showOwner} />
       {racks.map((rack) => {
         const count = dir === "in" ? rack.inputs : rack.outputs;
         return (
           <div key={rack.id} className="overflow-hidden rounded-xl border border-line bg-surface">
             <div className="border-b border-line px-4 py-2 text-footnote font-semibold text-fg">{rack.name}</div>
             <div className="overflow-x-auto">
-              <div className="min-w-[680px]">
+              <div className={minW}>
                 <HeaderRow />
                 {Array.from({ length: Math.max(0, count) }, (_, i) => i + 1).map((idx) => Row(rack.id, idx, false, count))}
               </div>

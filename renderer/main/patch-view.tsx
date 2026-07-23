@@ -40,12 +40,14 @@ function PatchChain({ nodes }: { nodes: ChainNode[] }) {
 /**
  * Public, read-only stage patch at /patch — a shareable link so volunteers see
  * THIS week's resolved patch (default → service-type variant → plan/week tweaks)
- * and, front and center, what changed vs the default. Auto-follows the live/next
- * PCO plan via stage state; live-updates via the patch:updated SSE channel.
+ * and, front and center, what changed vs the default. One tab per populated patch
+ * sheet (Analog / Dante / WSG / Monitoring). Auto-follows the live/next PCO plan
+ * via stage state; live-updates via the patch:updated SSE channel.
  */
 export function PatchView() {
   const { state } = useStageState();
   const [file, setFile] = useState<PatchFile | null>(null);
+  const [sheetId, setSheetId] = useState<string>("");
   const [tab, setTab] = useState<"in" | "out">("in");
   const [changesOnly, setChangesOnly] = useState(false);
   const [q, setQ] = useState("");
@@ -59,14 +61,22 @@ export function PatchView() {
     document.title = `${state?.appName ?? "Stage Utility"} — Patch`;
   }, [state?.appName]);
 
+  // Only surface sheets that actually have a patch built; volunteers shouldn't see
+  // empty seeded tabs. Keep the selected sheet valid as data loads/changes.
+  const sheets = useMemo(() => (file?.sheets ?? []).filter((s) => s.devices.length > 0), [file]);
+  const sheet = sheets.find((s) => s.id === sheetId) ?? sheets[0] ?? null;
+  useEffect(() => {
+    if (sheet && sheet.id !== sheetId) setSheetId(sheet.id);
+  }, [sheet, sheetId]);
+
   const resolved = useMemo(
-    () => (file ? resolvePatch(file, { serviceTypeId: state?.serviceTypeId, planId: state?.planId }) : null),
-    [file, state?.serviceTypeId, state?.planId],
+    () => (sheet ? resolvePatch(sheet, { serviceTypeId: state?.serviceTypeId, planId: state?.planId }) : null),
+    [sheet, state?.serviceTypeId, state?.planId],
   );
 
-  const devName = (id: string) => file?.devices.find((d) => d.id === id)?.name ?? id;
-  const racks = useMemo(() => (file?.devices ?? []).filter((d) => d.kind === "rack"), [file]);
-  const baseByKey = useMemo(() => new Map((file?.endpoints ?? []).map((e) => [endpointKey(e), e] as const)), [file]);
+  const devName = (id: string) => sheet?.devices.find((d) => d.id === id)?.name ?? id;
+  const racks = useMemo(() => (sheet?.devices ?? []).filter((d) => d.kind === "rack"), [sheet]);
+  const baseByKey = useMemo(() => new Map((sheet?.endpoints ?? []).map((e) => [endpointKey(e), e] as const)), [sheet]);
 
   function chainNodes(e: PatchEndpoint): ChainNode[] {
     const hops: ChainNode[] = (e.path ?? []).map((h) => ({ text: `${devName(h.deviceId)} ${h.connector}`.trim(), kind: "hop" }));
@@ -97,7 +107,7 @@ export function PatchView() {
       });
   }, [resolved, tab, baseByKey]);
 
-  const hasPatch = (file?.devices.length ?? 0) > 0;
+  const hasPatch = sheets.length > 0;
 
   return (
     <div className="dark h-full overflow-y-auto bg-bg text-fg">
@@ -122,6 +132,22 @@ export function PatchView() {
           )}
           {state?.planTitle && <span className="text-footnote text-fg-muted">{state.planTitle}</span>}
         </div>
+
+        {/* Sheet tabs (only when more than one sheet has a patch) */}
+        {sheets.length > 1 && (
+          <div className="mt-4 flex items-center gap-1 overflow-x-auto">
+            {sheets.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSheetId(s.id)}
+                className={`shrink-0 rounded-md px-3 py-1.5 text-footnote font-medium transition-colors ${s.id === sheet?.id ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+        )}
 
         {!hasPatch ? (
           <div className="mt-6 rounded-xl border border-line bg-surface px-4 py-10 text-center text-footnote text-fg-subtle">
@@ -171,7 +197,7 @@ export function PatchView() {
               </div>
             </div>
 
-            {/* Full patch, grouped by rack */}
+            {/* Full patch, grouped by rack (and by owner within a rack) */}
             <div className="mt-4 flex flex-col gap-3">
               {racks.map((rack) => {
                 const rows = (resolved?.endpoints ?? [])
@@ -179,12 +205,13 @@ export function PatchView() {
                   .filter((e) => !changesOnly || resolved?.changed.has(endpointKey(e)))
                   .filter((e) => {
                     if (!q.trim()) return true;
-                    const hay = `${e.index} ${e.label ?? ""} ${e.mic ?? ""} ${e.feedType ?? ""} ${e.consoleChannel ?? ""}`.toLowerCase();
+                    const hay = `${e.index} ${e.label ?? ""} ${e.mic ?? ""} ${e.feedType ?? ""} ${e.consoleChannel ?? ""} ${e.owner ?? ""}`.toLowerCase();
                     return hay.includes(q.toLowerCase());
                   })
                   .sort((a, b) => a.index - b.index);
                 if (rows.length === 0) return null;
                 const isCollapsed = collapsed[rack.id];
+                let lastOwner: string | undefined;
                 return (
                   <div key={rack.id} className="overflow-hidden rounded-xl border border-line bg-surface">
                     <button type="button" onClick={() => setCollapsed((c) => ({ ...c, [rack.id]: !c[rack.id] }))} className="flex w-full items-center gap-2 px-4 py-2.5 text-left">
@@ -196,19 +223,33 @@ export function PatchView() {
                       <div className="divide-y divide-line/60">
                         {rows.map((e) => {
                           const changed = resolved?.changed.has(endpointKey(e));
+                          const owner = e.owner?.trim() || undefined;
+                          const showOwner = owner !== lastOwner && owner !== undefined;
+                          lastOwner = owner;
+                          const srcColor = sheet?.devices.find((dv) => dv.id === e.path?.[0]?.deviceId)?.color;
                           return (
-                            <div key={endpointKey(e)} className={`flex items-baseline gap-3 px-4 py-2 ${changed ? "bg-warn-2/25 shadow-[inset_2px_0_0_var(--warn-9)]" : ""} ${e.unused ? "opacity-55" : ""}`}>
-                              <span className="w-14 shrink-0 font-mono text-caption1 tabular-nums text-fg-subtle">{e.index}{e.consoleChannel ? ` · ${e.consoleChannel}` : ""}</span>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-baseline gap-x-2">
-                                  <span className={`font-medium ${e.unused ? "line-through text-fg-subtle" : ""}`}>{e.label || "—"}</span>
-                                  {tab === "in" && e.mic && <span className="text-caption1 text-fg-muted">{e.mic}</span>}
-                                  {tab === "in" && e.phantom && <span className="rounded border border-accent/40 px-1 font-mono text-[10px] text-accent">48V</span>}
-                                  {tab === "out" && e.feedType && <span className="text-caption1 text-fg-muted">{e.feedType}</span>}
+                            <Fragment key={endpointKey(e)}>
+                              {showOwner && (
+                                <div className="bg-fill/60 px-4 py-1 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+                                  Owned by {owner}
                                 </div>
-                                <div className="mt-1"><PatchChain nodes={chainNodes(e)} /></div>
+                              )}
+                              <div
+                                style={!changed && srcColor ? { boxShadow: `inset 3px 0 0 ${srcColor}` } : undefined}
+                                className={`flex items-baseline gap-3 px-4 py-2 ${changed ? "bg-warn-2/25 shadow-[inset_2px_0_0_var(--warn-9)]" : ""} ${e.unused ? "opacity-55" : ""}`}
+                              >
+                                <span className="w-14 shrink-0 font-mono text-caption1 tabular-nums text-fg-subtle">{e.index}{e.consoleChannel ? ` · ${e.consoleChannel}` : ""}</span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-baseline gap-x-2">
+                                    <span className={`font-medium ${e.unused ? "line-through text-fg-subtle" : ""}`}>{e.label || "—"}</span>
+                                    {tab === "in" && e.mic && <span className="text-caption1 text-fg-muted">{e.mic}</span>}
+                                    {tab === "in" && e.phantom && <span className="rounded border border-accent/40 px-1 font-mono text-[10px] text-accent">48V</span>}
+                                    {tab === "out" && e.feedType && <span className="text-caption1 text-fg-muted">{e.feedType}</span>}
+                                  </div>
+                                  <div className="mt-1"><PatchChain nodes={chainNodes(e)} /></div>
+                                </div>
                               </div>
-                            </div>
+                            </Fragment>
                           );
                         })}
                       </div>

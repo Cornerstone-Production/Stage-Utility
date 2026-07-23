@@ -15,6 +15,9 @@ const KINDS: { value: PatchDeviceKind; label: string }[] = [
   { value: "other", label: "Other" },
 ];
 
+// A curated, dark-legible palette for tinting a device's channels.
+const PATCH_COLORS = ["#e5484d", "#f76b15", "#ffb224", "#46a758", "#12a594", "#0091ff", "#3e63dd", "#8e4ec6", "#e93d82", "#8b8d98"];
+
 /** One-line summary of a device's current connector labels, e.g. "B-1…B-12". */
 function labelSummary(labels: string[] | undefined): string | null {
   if (!labels || labels.length === 0) return null;
@@ -31,10 +34,15 @@ function labelSummary(labels: string[] | undefined): string | null {
  * cleanly ("B-1" → "B-2") in the patch table.
  */
 export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice[]; onChange: (d: PatchDevice[]) => void }) {
-  // Inline label generator state: which device's panel is open, + its inputs.
+  // Inline panels: which device has its label-generator / color panel open.
   const [labelFor, setLabelFor] = useState<string | null>(null);
+  const [colorFor, setColorFor] = useState<string | null>(null);
   const [prefix, setPrefix] = useState("");
   const [start, setStart] = useState(1);
+
+  // The two inline panels are mutually exclusive per row.
+  const openLabel = (id: string) => { setLabelFor((v) => (v === id ? null : id)); setColorFor(null); };
+  const openColor = (id: string) => { setColorFor((v) => (v === id ? null : id)); setLabelFor(null); };
 
   function update(id: string, patch: Partial<PatchDevice>) {
     onChange(devices.map((d) => (d.id === id ? { ...d, ...patch } : d)));
@@ -45,6 +53,7 @@ export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice
   function remove(id: string) {
     onChange(devices.filter((d) => d.id !== id));
     if (labelFor === id) setLabelFor(null);
+    if (colorFor === id) setColorFor(null);
   }
 
   return (
@@ -81,8 +90,17 @@ export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice
                   )}
                   <button
                     type="button"
-                    onClick={() => setLabelFor(open ? null : d.id)}
-                    className={`ml-auto rounded-md p-1.5 transition-colors ${open ? "bg-fill text-fg" : "text-fg-subtle hover:bg-fill hover:text-fg"}`}
+                    onClick={() => openColor(d.id)}
+                    className={`ml-auto flex size-7 items-center justify-center rounded-md transition-colors ${colorFor === d.id ? "bg-fill" : "hover:bg-fill"}`}
+                    aria-label={`Set color for ${d.name}`}
+                    aria-expanded={colorFor === d.id}
+                  >
+                    <span className="size-4 rounded-full border" style={{ background: d.color ?? "transparent", borderColor: d.color ?? "var(--su-line-strong)" }} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openLabel(d.id)}
+                    className={`rounded-md p-1.5 transition-colors ${open ? "bg-fill text-fg" : "text-fg-subtle hover:bg-fill hover:text-fg"}`}
                     aria-label={`Generate connector labels for ${d.name}`}
                     aria-expanded={open}
                   >
@@ -97,6 +115,27 @@ export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice
                     <Trash2Icon className="size-4" />
                   </button>
                 </div>
+                {colorFor === d.id && (
+                  <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2.5">
+                    <span className="text-caption2 text-fg-subtle">Color</span>
+                    {PATCH_COLORS.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => update(d.id, { color: c })}
+                        className={`size-5 rounded-full transition-transform hover:scale-110 ${d.color === c ? "ring-2 ring-fg ring-offset-2 ring-offset-surface-raised" : ""}`}
+                        style={{ background: c }}
+                        aria-label={`Use ${c}`}
+                      />
+                    ))}
+                    {d.color && (
+                      <button type="button" onClick={() => update(d.id, { color: undefined })} className="rounded-md px-2 py-1 text-caption2 text-fg-subtle hover:text-fg">
+                        None
+                      </button>
+                    )}
+                    <span className="w-full text-caption2 text-fg-faint">Tints every channel sourced from this device in the table and the /patch view.</span>
+                  </div>
+                )}
                 {open && (
                   <div className="flex flex-wrap items-end gap-2 border-t border-line px-3 py-2.5">
                     <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">

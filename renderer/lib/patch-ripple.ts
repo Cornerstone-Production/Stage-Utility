@@ -5,7 +5,7 @@
 // framework-free so the increment and fill logic can be unit-tested directly.
 
 /** Fields of a PatchEndpoint that ripple can fill. */
-export type RippleField = "path" | "consoleChannel" | "label" | "mic" | "phantom" | "feedType";
+export type RippleField = "path" | "consoleChannel" | "label" | "mic" | "phantom" | "feedType" | "owner";
 
 /** How far a ripple reaches from the edited row: a fixed run, or to the rack end. */
 export type RippleCount = number | "end";
@@ -73,6 +73,8 @@ function valueAt(field: RippleField, value: unknown, offset: number): Partial<Pa
       return { mic: String(value ?? "") };
     case "feedType":
       return { feedType: String(value ?? "") };
+    case "owner":
+      return { owner: String(value ?? "") };
     case "phantom":
       return { phantom: Boolean(value) };
   }

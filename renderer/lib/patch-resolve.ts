@@ -58,13 +58,13 @@ export interface ResolvedPatch {
   variantName: string | null;
 }
 
-/** Resolve the effective patch for a service type / plan:
+/** Resolve the effective patch for a service type / plan, for ONE sheet:
  *  default → service-type standing variant → per-plan variant → per-plan week tweaks. */
-export function resolvePatch(file: PatchFile, ctx: { serviceTypeId?: string | null; planId?: string | null }): ResolvedPatch {
-  const base = file.endpoints;
-  const planEntry = ctx.planId ? file.assignments.byPlan[ctx.planId] : undefined;
-  const variantId = planEntry?.variantId ?? (ctx.serviceTypeId ? file.assignments.byServiceType[ctx.serviceTypeId] : undefined) ?? null;
-  const variant = variantId ? file.variants.find((v) => v.id === variantId) ?? null : null;
+export function resolvePatch(sheet: PatchSheet, ctx: { serviceTypeId?: string | null; planId?: string | null }): ResolvedPatch {
+  const base = sheet.endpoints;
+  const planEntry = ctx.planId ? sheet.assignments.byPlan[ctx.planId] : undefined;
+  const variantId = planEntry?.variantId ?? (ctx.serviceTypeId ? sheet.assignments.byServiceType[ctx.serviceTypeId] : undefined) ?? null;
+  const variant = variantId ? sheet.variants.find((v) => v.id === variantId) ?? null : null;
   const tweaks = planEntry?.tweaks ?? {};
 
   let endpoints = base;

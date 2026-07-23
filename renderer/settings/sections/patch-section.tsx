@@ -10,18 +10,24 @@ import { PatchTable } from "./patch-table";
 import { PatchImport } from "./patch-import";
 import { PatchWeekly } from "./patch-weekly";
 
-const EMPTY: PatchFile = { devices: [], endpoints: [], variants: [], assignments: { byServiceType: {}, byPlan: {} }, updatedAt: "" };
+const emptyAssignments = (): PatchAssignments => ({ byServiceType: {}, byPlan: {} });
+const EMPTY: PatchFile = {
+  sheets: [{ id: "analog", name: "Analog", kind: "analog", devices: [], endpoints: [], variants: [], assignments: emptyAssignments() }],
+  updatedAt: "",
+};
 
 /**
- * Stage patch sheet editor (Settings → Patch). Rack-centric input/output patch
- * with named variants and per-service-type weekly assignment — see
- * docs/patch-sheet/DESIGN.md. Edits a local draft and saves the whole file via
- * patch:save (which broadcasts patch:updated for live sync). Editing "Default"
- * changes the base patch; editing a variant stores only the diffs vs the default.
+ * Stage patch editor (Settings → Patch). The patch is a set of SHEETS (tabs) —
+ * Analog, Dante, WSG, Monitoring, … — each a rack-centric input/output patch with
+ * its own devices, named variants, and per-service-type weekly assignment (see
+ * docs/patch-sheet/DESIGN.md). Edits a local draft and saves the whole file via
+ * patch:save (broadcasts patch:updated for live sync). Within a sheet, editing
+ * "Default" changes its base patch; editing a variant stores only diffs.
  */
 export function PatchSection() {
   const [saved, setSaved] = useState<PatchFile | null>(null);
   const [draft, setDraft] = useState<PatchFile | null>(null);
+  const [activeSheetId, setActiveSheetId] = useState<string>("");
   const [tab, setTab] = useState<"in" | "out">("in");
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -35,8 +41,8 @@ export function PatchSection() {
 
   useEffect(() => {
     invoke<PatchFile>("patch:get")
-      .then((f) => { setSaved(f); setDraft(f); })
-      .catch(() => { setSaved(EMPTY); setDraft(EMPTY); });
+      .then((f) => { setSaved(f); setDraft(f); setActiveSheetId(f.sheets[0]?.id ?? ""); })
+      .catch(() => { setSaved(EMPTY); setDraft(EMPTY); setActiveSheetId(EMPTY.sheets[0].id); });
     invoke<StageState>("stage:getState")
       .then((s) => setPlan({ serviceTypeId: s.serviceTypeId, planId: s.planId, planTitle: s.planTitle }))
       .catch(() => setPlan(null));
@@ -70,74 +76,101 @@ export function PatchSection() {
     );
   }
 
-  const setDevices = (devices: PatchDevice[]) => setDraft((d) => (d ? { ...d, devices } : d));
-  const setEndpoints = (endpoints: PatchEndpoint[]) => setDraft((d) => (d ? { ...d, endpoints } : d));
-  const setAssignments = (assignments: PatchAssignments) => setDraft((d) => (d ? { ...d, assignments } : d));
-  const setVariants = (variants: PatchVariant[]) => setDraft((d) => (d ? { ...d, variants } : d));
+  // Active sheet (fall back to the first if the id drifted, e.g. after a delete).
+  const sheet = draft.sheets.find((s) => s.id === activeSheetId) ?? draft.sheets[0];
 
-  const racks = draft.devices.filter((d) => d.kind === "rack");
-  const stageDevices = draft.devices.filter((d) => d.kind !== "rack");
+  // Slice setters write back into the active sheet within the file.
+  const patchSheet = (fn: (s: PatchSheet) => PatchSheet) =>
+    setDraft((d) => (d ? { ...d, sheets: d.sheets.map((s) => (s.id === sheet.id ? fn(s) : s)) } : d));
+  const setDevices = (devices: PatchDevice[]) => patchSheet((s) => ({ ...s, devices }));
+  const setEndpoints = (endpoints: PatchEndpoint[]) => patchSheet((s) => ({ ...s, endpoints }));
+  const setAssignments = (assignments: PatchAssignments) => patchSheet((s) => ({ ...s, assignments }));
+  const setVariants = (variants: PatchVariant[]) => patchSheet((s) => ({ ...s, variants }));
+
+  // Sheet management (tabs).
+  function switchSheet(id: string) {
+    setActiveSheetId(id);
+    setEditingVariantId(null);
+  }
+  function addSheet() {
+    const id = uid("sheet");
+    const s: PatchSheet = { id, name: `Sheet ${draft!.sheets.length + 1}`, kind: "custom", devices: [], endpoints: [], variants: [], assignments: emptyAssignments() };
+    setDraft((d) => (d ? { ...d, sheets: [...d.sheets, s] } : d));
+    switchSheet(id);
+  }
+  function renameSheet(name: string) {
+    patchSheet((s) => ({ ...s, name }));
+  }
+  async function deleteSheet() {
+    if (draft!.sheets.length <= 1) return;
+    if (!(await confirm({ title: "Delete sheet?", message: `Delete the "${sheet.name}" sheet, including its devices and patch?`, confirmLabel: "Delete", destructive: true }))) return;
+    const remaining = draft!.sheets.filter((s) => s.id !== sheet.id);
+    setDraft((d) => (d ? { ...d, sheets: remaining } : d));
+    switchSheet(remaining[0].id);
+  }
+
+  const racks = sheet.devices.filter((d) => d.kind === "rack");
+  const stageDevices = sheet.devices.filter((d) => d.kind !== "rack");
   const isWeek = editingVariantId === "__week" && !!plan?.planId;
-  const editingVariant = editingVariantId && editingVariantId !== "__week" ? draft.variants.find((v) => v.id === editingVariantId) ?? null : null;
+  const editingVariant = editingVariantId && editingVariantId !== "__week" ? sheet.variants.find((v) => v.id === editingVariantId) ?? null : null;
 
   // A week's one-off tweaks layer over: default + the plan's assigned variant.
   const weekBase = (() => {
-    if (!plan?.planId) return draft.endpoints;
-    const vid = draft.assignments.byPlan[plan.planId]?.variantId ?? (plan.serviceTypeId ? draft.assignments.byServiceType[plan.serviceTypeId] : undefined);
-    const v = vid ? draft.variants.find((x) => x.id === vid) : undefined;
-    return v ? mergeOverrides(draft.endpoints, v.overrides) : draft.endpoints;
+    if (!plan?.planId) return sheet.endpoints;
+    const vid = sheet.assignments.byPlan[plan.planId]?.variantId ?? (plan.serviceTypeId ? sheet.assignments.byServiceType[plan.serviceTypeId] : undefined);
+    const v = vid ? sheet.variants.find((x) => x.id === vid) : undefined;
+    return v ? mergeOverrides(sheet.endpoints, v.overrides) : sheet.endpoints;
   })();
-  const weekTweaks = plan?.planId ? draft.assignments.byPlan[plan.planId]?.tweaks ?? {} : {};
+  const weekTweaks = plan?.planId ? sheet.assignments.byPlan[plan.planId]?.tweaks ?? {} : {};
 
   // What the table shows + where edits go: Default, a variant (diffed vs default),
   // or this week's tweaks (diffed vs default+variant, stored under the plan).
   const tableEndpoints = isWeek
     ? mergeOverrides(weekBase, weekTweaks)
     : editingVariant
-      ? mergeOverrides(draft.endpoints, editingVariant.overrides)
-      : draft.endpoints;
+      ? mergeOverrides(sheet.endpoints, editingVariant.overrides)
+      : sheet.endpoints;
 
   const onTableChange = (next: PatchEndpoint[]) => {
     if (isWeek && plan?.planId) {
       const tweaks = diffEndpoints(next, weekBase);
       const pid = plan.planId;
-      setDraft((d) => {
-        if (!d) return d;
-        const byPlan = { ...d.assignments.byPlan };
+      patchSheet((s) => {
+        const byPlan = { ...s.assignments.byPlan };
         const entry = { ...(byPlan[pid] ?? {}) };
         if (Object.keys(tweaks).length) entry.tweaks = tweaks;
         else delete entry.tweaks;
         if (Object.keys(entry).length) byPlan[pid] = entry;
         else delete byPlan[pid];
-        return { ...d, assignments: { ...d.assignments, byPlan } };
+        return { ...s, assignments: { ...s.assignments, byPlan } };
       });
       return;
     }
     if (!editingVariant) { setEndpoints(next); return; }
-    const overrides = diffEndpoints(next, draft.endpoints);
-    setVariants(draft.variants.map((v) => (v.id === editingVariant.id ? { ...v, overrides } : v)));
+    const overrides = diffEndpoints(next, sheet.endpoints);
+    setVariants(sheet.variants.map((v) => (v.id === editingVariant.id ? { ...v, overrides } : v)));
   };
 
   function newVariant() {
-    const v: PatchVariant = { id: uid("var"), name: `Variant ${draft!.variants.length + 1}`, overrides: {} };
-    setVariants([...draft!.variants, v]);
+    const v: PatchVariant = { id: uid("var"), name: `Variant ${sheet.variants.length + 1}`, overrides: {} };
+    setVariants([...sheet.variants, v]);
     setEditingVariantId(v.id);
   }
   function renameVariant(id: string, name: string) {
-    setVariants(draft!.variants.map((v) => (v.id === id ? { ...v, name } : v)));
+    setVariants(sheet.variants.map((v) => (v.id === id ? { ...v, name } : v)));
   }
   async function deleteVariant(id: string) {
-    const v = draft!.variants.find((x) => x.id === id);
+    const v = sheet.variants.find((x) => x.id === id);
     if (!(await confirm({ title: "Delete variant?", message: `Delete "${v?.name ?? "variant"}"? Weeks using it fall back to the default.`, confirmLabel: "Delete", destructive: true }))) return;
-    const byServiceType = Object.fromEntries(Object.entries(draft!.assignments.byServiceType).filter(([, vid]) => vid !== id));
-    setDraft((d) => (d ? { ...d, variants: d.variants.filter((x) => x.id !== id), assignments: { ...d.assignments, byServiceType } } : d));
+    const byServiceType = Object.fromEntries(Object.entries(sheet.assignments.byServiceType).filter(([, vid]) => vid !== id));
+    patchSheet((s) => ({ ...s, variants: s.variants.filter((x) => x.id !== id), assignments: { ...s.assignments, byServiceType } }));
     setEditingVariantId(null);
   }
 
   return (
     <div className="flex flex-col gap-4">
       {dirty && (
-        <div className="sticky top-1 z-20 flex justify-end">
+        <div className="sticky top-1 z-30 flex justify-end">
           <div className="flex items-center gap-2 rounded-lg border border-line-strong bg-popover px-2.5 py-1.5 shadow-md backdrop-blur-xl">
             <span className="text-caption1 text-fg-muted">Unsaved changes</span>
             <Button variant="transparent" size="small" onClick={() => saved && setDraft(saved)} disabled={saving}>Discard</Button>
@@ -145,6 +178,33 @@ export function PatchSection() {
           </div>
         </div>
       )}
+
+      {/* Sheet tabs (Analog / Dante / WSG / Monitoring / …) + add / rename / delete */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-line pb-3">
+        <div className="flex items-center gap-1 overflow-x-auto">
+          {draft.sheets.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => switchSheet(s.id)}
+              className={`shrink-0 rounded-md px-3 py-1.5 text-footnote font-medium transition-colors ${s.id === sheet.id ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}
+            >
+              {s.name}
+            </button>
+          ))}
+          <button type="button" onClick={addSheet} className="shrink-0 rounded-md px-2 py-1.5 text-fg-subtle hover:text-fg transition-colors" aria-label="Add sheet">
+            <PlusIcon className="size-4" />
+          </button>
+        </div>
+        <div className="ml-auto flex items-center gap-1">
+          <Input value={sheet.name} onChange={(e) => renameSheet(e.target.value)} className="w-36" placeholder="Sheet name" aria-label="Sheet name" />
+          {draft.sheets.length > 1 && (
+            <button type="button" onClick={deleteSheet} className="rounded-md p-1.5 text-fg-subtle hover:bg-fill hover:text-warn-11 transition-colors" aria-label={`Delete ${sheet.name} sheet`}>
+              <Trash2Icon className="size-4" />
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Inputs / Outputs tabs (peers) + import */}
       <div className="flex items-center justify-between gap-2">
@@ -166,10 +226,10 @@ export function PatchSection() {
       </div>
 
       {importing && (
-        <PatchImport devices={draft.devices} endpoints={draft.endpoints} dir={tab} onChange={setEndpoints} onClose={() => setImporting(false)} />
+        <PatchImport devices={sheet.devices} endpoints={sheet.endpoints} dir={tab} onChange={setEndpoints} onClose={() => setImporting(false)} />
       )}
 
-      <PatchDeviceManager devices={draft.devices} onChange={setDevices} />
+      <PatchDeviceManager devices={sheet.devices} onChange={setDevices} />
 
       {/* Variant switcher — Default patch vs a named overlay */}
       <div className="flex flex-wrap items-center gap-2">
@@ -181,7 +241,7 @@ export function PatchSection() {
         >
           <option value="">Default patch</option>
           {plan?.planId && <option value="__week">This week{plan.planTitle ? ` — ${plan.planTitle}` : ""}</option>}
-          {draft.variants.map((v) => (
+          {sheet.variants.map((v) => (
             <option key={v.id} value={v.id}>{v.name}</option>
           ))}
         </select>
@@ -209,9 +269,9 @@ export function PatchSection() {
         </div>
       </div>
 
-      <PatchTable dir={tab} group={group} racks={racks} stageDevices={stageDevices} endpoints={tableEndpoints} onChange={onTableChange} />
+      <PatchTable dir={tab} group={group} racks={racks} stageDevices={stageDevices} endpoints={tableEndpoints} onChange={onTableChange} showOwner={sheet.kind !== "analog"} />
 
-      <PatchWeekly variants={draft.variants} assignments={draft.assignments} plan={plan} onChange={setAssignments} />
+      <PatchWeekly variants={sheet.variants} assignments={sheet.assignments} plan={plan} onChange={setAssignments} />
     </div>
   );
 }
