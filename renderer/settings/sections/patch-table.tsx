@@ -79,7 +79,7 @@ function PathCell({ path, stageDevices, onChange }: { path: PatchHop[] | undefin
 function RippleBar({ dir, ripple, setRipple }: { dir: Dir; ripple: RippleState; setRipple: (r: RippleState) => void }) {
   const fields = dir === "in" ? RIPPLE_FIELDS_IN : RIPPLE_FIELDS_OUT;
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-line bg-surface-raised px-3 py-2">
+    <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-line-strong bg-popover px-3 py-2 shadow-sm backdrop-blur-xl">
       <label className="flex items-center gap-1.5 text-footnote font-medium text-fg">
         <Switch checked={ripple.on} onCheckedChange={(v) => setRipple({ ...ripple, on: v })} />
         <WavesIcon className="size-3.5 text-fg-subtle" /> Ripple
