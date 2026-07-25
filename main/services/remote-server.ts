@@ -111,6 +111,46 @@ function cors(res: http.ServerResponse): void {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
+/** Hostname of an Origin header ("http://host:port") or a Host header ("host:port"). */
+function hostnameOf(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value.includes("://") ? value : `http://${value}`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a request is a browser cross-site request. Pure + exported so the
+ * matrix below can be unit-tested without a socket.
+ *
+ * The app is deliberately unauthenticated: it's a LAN appliance, and displays,
+ * phones and the Companion module all reach it without credentials. That is fine
+ * for peers on the network — but a browser is a confused deputy. Any page an
+ * operator visits can POST here, and with permissive CORS the preflight passes,
+ * so a drive-by page could hit POST /api/update/apply and rebuild + restart every
+ * display mid-service. DNS rebinding makes that reachable from the open internet.
+ *
+ * No Origin header  → not a browser cross-site request (Companion, curl, a
+ *                     script, or a same-origin navigation). Allowed.
+ * Origin present    → its hostname must match the Host it was sent to.
+ * Origin: "null"    → a sandboxed iframe or opaque origin. Rejected.
+ *
+ * Ports are ignored so the Vite dev proxy (:3000 → :8788) keeps working. The
+ * check rests on hostname, which an attacker cannot serve the appliance's own
+ * address from.
+ */
+export function isCrossOrigin(origin: string | undefined, host: string | undefined): boolean {
+  if (!origin) return false;
+  const from = hostnameOf(origin);
+  const to = hostnameOf(host);
+  return from === null || to === null || from !== to;
+}
+
+/** Methods that change server state, and so must be same-origin. */
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 function json(res: http.ServerResponse, data: unknown, status = 200): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
@@ -467,15 +507,27 @@ export class RemoteServer {
 
       if (DEBUG_HTTP) console.log(`[remote-server] ${req.method} ${pathname}`);
 
-      // CORS preflight
+      // CORS preflight. A cross-site caller is only offered the safe methods, so
+      // the browser blocks a state-changing request before it is ever sent.
       if (req.method === "OPTIONS") {
         cors(res);
+        if (isCrossOrigin(req.headers.origin, req.headers.host)) {
+          res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+        }
         res.writeHead(204);
         res.end();
         return;
       }
 
       cors(res);
+
+      // Enforcement, independent of whatever the preflight advertised: reads stay
+      // open (LAN appliance), writes must be same-origin.
+      if (MUTATING_METHODS.has(req.method ?? "") && isCrossOrigin(req.headers.origin, req.headers.host)) {
+        console.warn(`[remote-server] rejected cross-origin ${req.method} ${pathname} from ${req.headers.origin}`);
+        error(res, "cross-origin request rejected", 403);
+        return;
+      }
 
       try {
         await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
