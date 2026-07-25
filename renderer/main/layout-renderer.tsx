@@ -665,8 +665,16 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         </div>
       );
     }
-    default:
+    default: {
+      // Exhaustiveness guard: every LayoutObjectType must have a case above. Add
+      // a type to the registry without a renderer here and this assignment stops
+      // compiling, instead of the object silently rendering as an empty box on a
+      // stage monitor. (Runtime still returns null — an older layout may hold a
+      // type this build has since dropped.)
+      const _never: never = c;
+      void _never;
       return null;
+    }
   }
 }
 
