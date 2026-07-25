@@ -33,7 +33,7 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
         style={
           {
             background: "rgba(0,0,0,0.50)",
-            backdropFilter: "blur(20px) saturate(1.6)",
+            backdropFilter: "blur(20px)",
             borderBottom: "1px solid rgba(255,255,255,0.09)",
           } as React.CSSProperties
         }

@@ -140,8 +140,8 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
             className="rounded-lg border border-line bg-black/30 px-3 py-1.5 text-caption1 text-fg outline-none focus:border-line-strong"
             title="Layout"
           >
-            {allLayouts.map((l) => <option key={l.id} value={l.id} className="bg-[#14161c]">{l.name}</option>)}
-            <option value={ALL_COLUMNS_LAYOUT_ID} className="bg-[#14161c]">All columns</option>
+            {allLayouts.map((l) => <option key={l.id} value={l.id} className="bg-[var(--kiosk-surface-1)]">{l.name}</option>)}
+            <option value={ALL_COLUMNS_LAYOUT_ID} className="bg-[var(--kiosk-surface-1)]">All columns</option>
           </select>
         </div>
       </div>

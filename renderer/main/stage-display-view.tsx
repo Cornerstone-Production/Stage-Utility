@@ -20,7 +20,7 @@ function chipText(hex: string): string {
   const n = parseInt(m[1], 16);
   const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
   const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return lum > 0.6 ? "#11131a" : "#fff";
+  return lum > 0.6 ? "#111111" : "#fff";
 }
 
 function SectionChip({ section, size = "md" }: { section: ProSection | null; size?: "sm" | "md" }) {
@@ -105,7 +105,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
         style={
           {
             background: "rgba(0,0,0,0.50)",
-            backdropFilter: "blur(20px) saturate(1.6)",
+            backdropFilter: "blur(20px)",
             borderBottom: "1px solid rgba(255,255,255,0.09)",
           } as React.CSSProperties
         }
