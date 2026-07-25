@@ -20,7 +20,8 @@ import { serviceWindow } from "./service-window.js";
 /** Connection state as reported to the Integrations panel. */
 export type ConnState = "connected" | "error" | "disconnected";
 
-/** First retry delay; doubles per attempt, then clamped by serviceWindow. */
+/** Default first retry delay; doubles per attempt, then clamped by serviceWindow.
+ *  A subclass can raise it via `reconnectBaseMs` (ProPresenter waits 5s). */
 const RECONNECT_BASE_MS = 3000;
 
 export abstract class ConnectionLifecycle {
@@ -49,6 +50,11 @@ export abstract class ConnectionLifecycle {
 
   /** Extra teardown on stop() — poll timers, stream closers. */
   protected teardown(): void {}
+
+  /** First retry delay for this integration; doubles per consecutive failure. */
+  protected get reconnectBaseMs(): number {
+    return RECONNECT_BASE_MS;
+  }
 
   setConnectionListener(cb: (state: ConnState, message: string | null) => void): void {
     this.onConn = cb;
@@ -111,7 +117,7 @@ export abstract class ConnectionLifecycle {
   protected scheduleReconnect(): void {
     if (!this.running) return;
     const delay = serviceWindow.capDelayMs(
-      RECONNECT_BASE_MS * 2 ** this.reconnectAttempt,
+      this.reconnectBaseMs * 2 ** this.reconnectAttempt,
       channelHasSubscribers(this.channel),
     );
     this.reconnectAttempt++;

@@ -15,6 +15,7 @@ import * as http from "http";
 
 import type { TranscriptLineDTO } from "../types/stage.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
+import { ConnectionLifecycle } from "./integration-base.js";
 
 const RECONNECT_MS = 4000;
 const MAX_LINES = 100;
@@ -22,7 +23,6 @@ const MAX_LINES = 100;
 // one full-buffer broadcast per this window; finals still push immediately.
 const TRANSCRIPT_THROTTLE_MS = 250;
 
-type ProdComConnState = "connected" | "error" | "disconnected";
 
 function pick(obj: unknown, ...keys: string[]): unknown {
   let cur: unknown = obj;
@@ -60,13 +60,12 @@ function normalizeColor(raw: string | null): string | null {
   return /^[a-z]+$/i.test(s) ? s : null; // CSS named color, else ignore
 }
 
-class ProdComService {
+class ProdComService extends ConnectionLifecycle {
   private host: string | null = null;
   private port: number | null = null;
   private apiKey: string | null = null;
   private req: http.ClientRequest | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private running = false;
+
   private seq = 0;
   private transcriptTimer: ReturnType<typeof setTimeout> | null = null;
   private transcriptDirty = false;
@@ -75,47 +74,33 @@ class ProdComService {
   private finals: TranscriptLineDTO[] = [];
   private partials = new Map<string, TranscriptLineDTO>();
 
-  private onConn: ((state: ProdComConnState, message: string | null) => void) | null = null;
-  private reported: ProdComConnState | null = null;
-
-  setConnectionListener(cb: (state: ProdComConnState, message: string | null) => void): void {
-    this.onConn = cb;
+  constructor() {
+    super("prodcom", "prodcom:transcript");
   }
-  private report(state: ProdComConnState, message: string | null): void {
-    if (this.reported === state) return;
-    this.reported = state;
-    this.onConn?.(state, message);
+
+  protected get configured(): boolean {
+    return !!this.host && !!this.port;
   }
 
   configure(host: string, port: number, apiKey: string | null): void {
     this.host = host?.trim() || null;
     this.port = port > 0 ? Math.floor(port) : null;
     this.apiKey = apiKey?.trim() || null;
-    this.reported = null;
+    this.resetReport();
     this.restart();
   }
 
-  start(): void {
-    if (this.running || !this.host || !this.port) return;
-    this.running = true;
+  override start(): void {
+    if (this.running || !this.configured) return;
     console.log(`[prodcom] connecting ${this.host}:${this.port}`);
-    this.connect();
+    super.start();
   }
 
-  stop(): void {
-    this.running = false;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+  protected override teardown(): void {
     this.req?.destroy();
     this.req = null;
   }
 
-  private restart(): void {
-    this.stop();
-    if (this.host && this.port) this.start();
-  }
 
   /** Current rolling buffer (finals + active partials), oldest → newest. */
   getBuffer(): TranscriptLineDTO[] {
@@ -150,15 +135,17 @@ class ProdComService {
     return h;
   }
 
-  private scheduleReconnect(): void {
-    if (!this.running || this.reconnectTimer) return;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      if (this.running) this.connect();
-    }, RECONNECT_MS);
+  /**
+   * ProdCom streams live captions, so it keeps its flat 4s retry rather than the
+   * base's exponential window-aware back-off: a transcript that reconnects
+   * minutes late has already missed the sentence it existed to show.
+   */
+  protected override scheduleReconnect(): void {
+    if (!this.running) return;
+    this.scheduleIn(RECONNECT_MS);
   }
 
-  private connect(): void {
+  protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
     const host = this.host;
     const port = this.port;

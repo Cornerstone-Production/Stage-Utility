@@ -14,8 +14,8 @@
 import * as http from "http";
 
 import type { ProPresenterStatusDTO, ProSection, ProTimer, PropInstancesDTO, PropInstanceMeta, PropInstanceConn } from "../types/stage.js";
-import { broadcast, channelHasSubscribers } from "./broadcaster.js";
-import { serviceWindow } from "./service-window.js";
+import { broadcast } from "./broadcaster.js";
+import { StatusIntegration } from "./integration-base.js";
 
 const POLL_INTERVAL_MS = 1000; // once/sec is plenty for slide/timer changes (was 500)
 // Reconnect back-off when the machine is unreachable (off for the week, etc.): start
@@ -52,7 +52,6 @@ const OFFLINE: ProPresenterStatusDTO = {
 
 // Reported to the IntegrationManager so the Integrations card badge reflects
 // reachability (separate from the "propresenter:status" data channel).
-type ProConnState = "connected" | "error" | "disconnected";
 
 function getJson(host: string, port: number, path: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -207,17 +206,11 @@ function playOrderSections(active: unknown): { name: string; colorHex: string }[
   return groups.flatMap(expand);
 }
 
-class ProPresenterService {
+class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   private host: string | null = null;
   private port: number | null = null;
   private pollMs = POLL_INTERVAL_MS;
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private errorAttempts = 0; // consecutive poll failures, for exponential back-off
-  private running = false;
-  private last: ProPresenterStatusDTO = OFFLINE;
   private lastJson = "";
-  private onConn: ((state: ProConnState, message: string | null) => void) | null = null;
-  private reported: ProConnState | null = null;
 
   // Preview target for the /api/propresenter/thumbnail proxy.
   private activeUuid: string | null = null;
@@ -228,18 +221,22 @@ class ProPresenterService {
   private playlistItems: { name: string; index: number }[] = [];
 
   readonly id: string;
-  private readonly channel: string;
   private onEmitCb: (() => void) | null = null;
 
   constructor(id = "default") {
-    this.id = id;
     // The primary instance keeps the original channel so built-in views + existing
     // consumers are untouched; extra instances get a per-id channel.
-    this.channel = id === "default" ? "propresenter:status" : `propresenter:status:${id}`;
+    super("propresenter", id === "default" ? "propresenter:status" : `propresenter:status:${id}`, OFFLINE);
+    this.id = id;
   }
 
-  setConnectionListener(cb: (state: ProConnState, message: string | null) => void): void {
-    this.onConn = cb;
+  protected get configured(): boolean {
+    return !!this.host && !!this.port;
+  }
+
+  /** ProPresenter waits 5s before the first retry, not the shared 3s. */
+  protected override get reconnectBaseMs(): number {
+    return ERROR_BASE_MS;
   }
 
   /** Notified after this instance's status changes — the manager uses it to
@@ -251,13 +248,7 @@ class ProPresenterService {
   /** Latest polled status — lets a freshly-loaded dashboard hydrate immediately
    *  (we only broadcast on change, so otherwise it'd wait for the next slide). */
   getStatus(): ProPresenterStatusDTO {
-    return this.last;
-  }
-
-  private report(state: ProConnState, message: string | null): void {
-    if (this.reported === state) return;
-    this.reported = state;
-    this.onConn?.(state, message);
+    return this.getLatest();
   }
 
   configure(host: string, port: number, pollMs?: number): void {
@@ -265,36 +256,23 @@ class ProPresenterService {
     this.port = port > 0 ? Math.floor(port) : null;
     // Clamp to a sane floor so a bad setting can't hammer ProPresenter.
     this.pollMs = pollMs && pollMs >= 200 ? Math.floor(pollMs) : POLL_INTERVAL_MS;
-    this.reported = null;
+    this.resetReport();
     this.restart();
   }
 
-  start(): void {
-    if (this.running || !this.host || !this.port) return;
-    this.running = true;
-    this.errorAttempts = 0;
+  override start(): void {
+    if (this.running || !this.configured) return;
     console.log(`[propresenter] polling ${this.host}:${this.port}`);
-    void this.tick();
+    super.start();
   }
 
-  stop(): void {
-    this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
+  protected override teardown(): void {
     this.activeUuid = null;
     this.slideIdxZero = null;
     // Drop the playlist-items cache too, so a reconnect to a different (or edited)
     // service can't leak a stale "next item" from the previous playlist.
     this.playlistUuid = null;
     this.playlistItems = [];
-    if (this.last.connected) this.emit(OFFLINE);
-  }
-
-  private restart(): void {
-    this.stop();
-    if (this.host && this.port) this.start();
   }
 
   /** Current thumbnail source for the proxy route, or null when unavailable. */
@@ -314,12 +292,7 @@ class ProPresenterService {
     }
   }
 
-  private schedule(ms: number): void {
-    if (!this.running) return;
-    this.timer = setTimeout(() => void this.tick(), ms);
-  }
-
-  private async tick(): Promise<void> {
+  protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
     const host = this.host;
     const port = this.port;
@@ -340,19 +313,17 @@ class ProPresenterService {
 
       this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
       this.report("connected", `Connected to ${host}:${port}`);
-      this.errorAttempts = 0; // reconnected — reset back-off
+      this.resetBackoff(); // reconnected
       // Fast poll only while a display/panel renders this instance; else keepalive.
-      this.schedule(channelHasSubscribers(this.channel) ? this.pollMs : IDLE_INTERVAL_MS);
+      this.scheduleIn(this.hasSubscribers ? this.pollMs : IDLE_INTERVAL_MS);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       // Log only the first failure of an outage, then stay quiet until it recovers —
       // a machine off all week shouldn't spam the log every retry.
-      if (this.errorAttempts === 0) console.warn(`[propresenter] ${host}:${port} unreachable (${msg}) — backing off, will keep retrying quietly`);
-      if (this.last.connected) this.emit(OFFLINE);
+      if (this.attempt === 0) console.warn(`[propresenter] ${host}:${port} unreachable (${msg}) — backing off, will keep retrying quietly`);
+      this.goOffline();
       this.report("error", `Can't reach ${host}:${port} — ${msg}`);
-      const delay = serviceWindow.capDelayMs(ERROR_BASE_MS * 2 ** this.errorAttempts, channelHasSubscribers(this.channel));
-      this.errorAttempts++;
-      this.schedule(delay);
+      this.scheduleReconnect();
     }
   }
 
@@ -509,7 +480,7 @@ class ProPresenterService {
     };
   }
 
-  private emit(status: ProPresenterStatusDTO): void {
+  protected override emit(status: ProPresenterStatusDTO): void {
     this.last = status;
     // Only push when something actually changed — at 2 Hz an unchanged broadcast
     // would re-render every dashboard for nothing.
