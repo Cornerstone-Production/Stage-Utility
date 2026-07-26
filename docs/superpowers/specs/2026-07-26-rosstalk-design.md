@@ -18,6 +18,22 @@ and both are wanted — they are a **rule engine**, a separate subsystem with it
 event model, edit UI and misfire risk, and they get their own spec. Scheduling is a
 time-triggered rule, so it belongs with automation rather than here.
 
+**Driving use case (revised 2026-07-26).** This spec was written assuming an operator
+taps a button. The actual primary use is **status indication on the Ultrix/Carbonite
+multiviewer, driven by Stage's own state** — route a source into a multiview window
+(`XPT`), or fire a salvo / custom control that switches a prebuilt layout (`GPI`, `CC`).
+That is rule-driven, not operator-driven, and it arrives via the automation engine
+(`2026-07-26-automation-engine-design.md`).
+
+Nothing in the transport, catalogue or target model changes as a result — they are
+trigger-agnostic by construction, which is why this stayed a foundation slice. The
+`rosstalk-button` remains in scope as a secondary surface (manual override, and the
+Companion path), but it is no longer the reason to build this.
+
+Tile TEXT and tally colour are **not** RossTalk's job — the protocol cannot set them.
+That is TSL UMD, which already exists and gets extended as its own action provider in
+the engine spec.
+
 **Prerequisite:** this design builds on `ConnectionLifecycle`
 (`main/services/integration-base.ts`) and the layout-object registry
 (`renderer/main/layout-objects.ts`). Neither is on `beta` yet — both land with PRs
@@ -162,7 +178,7 @@ prove the device is reachable. That is a genuine improvement over OSC, where
 ### Send path
 
 ```
-button tap / Companion  →  POST /api/rosstalk/send
+button tap / Companion / rule  →  POST /api/rosstalk/send
                         →  manager.send(targetId, commandId, params | raw)
                         →  validate params against the command spec
                         →  format() → "CC 1:05"
@@ -198,6 +214,14 @@ Two decisions worth stating explicitly:
 
 **The integration ships disabled**, so a fresh install and an unconfigured upgrade
 both produce zero traffic.
+
+**Two simulate switches, and that is fine.** The automation engine has its own global
+simulate. They compose by AND: a command reaches the wire only when BOTH are off.
+Engine simulate stops a rule's action from running at all (and logs what it would have
+done); RossTalk simulate stops the write even when something else calls `send()`
+directly — a button, Companion, or curl. Neither is redundant: the engine's does not
+cover manual sends, and RossTalk's does not cover the other action providers. The UI
+must show which one is suppressing a send, or an operator will chase the wrong switch.
 
 **Raw command sanitising.** A raw string containing CR or LF would smuggle multiple
 commands onto the wire in one send. Raw input has its line terminators stripped and
