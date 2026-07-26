@@ -26,8 +26,18 @@ export interface RouteCtx {
  * A handler returns once it has responded; the dispatcher uses `res.headersSent`
  * to decide whether the request is finished, so a module that matches nothing
  * simply falls through to the next one. That is the same contract the routes had
- * as one long if-chain — a bare `return` still means "handled, stop" — which is
- * why the bodies did not have to change when they moved out here.
+ * as one long if-chain — a bare `return` still means "handled, stop".
+ *
+ * ⚠️ THE ONE RULE: a route MUST finish responding before it returns. `await` the
+ * upstream call; never fire a callback-style request and return, expecting the
+ * callback to reply later.
+ *
+ * Why it matters: on return the dispatcher checks `res.headersSent`. A route that
+ * has not replied yet looks unhandled, so the dispatcher continues, the 404 arm
+ * ends the response, and the late `res.writeHead()` throws ERR_HTTP_HEADERS_SENT
+ * from an event callback — which is unhandled and TAKES THE PROCESS DOWN, blanking
+ * every display. The ProPresenter thumbnail proxy did exactly this; it now awaits
+ * (see fetchThumbnail in proxy-routes.ts).
  */
 export type RouteModule = (c: RouteCtx) => Promise<void>;
 

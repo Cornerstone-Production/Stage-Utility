@@ -20,6 +20,36 @@ import { THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "../proprese
 // upstream fetch instead of each hitting ProPresenter.
 const thumbnailCache = new Map<string, { buf: Buffer; contentType: string }>();
 
+type Thumbnail = { buf: Buffer; contentType: string } | { error: string };
+
+/** GET one thumbnail from ProPresenter, resolving only once the body is complete.
+ *  Never rejects — the caller turns an `error` into a 502. */
+function fetchThumbnail(host: string, port: number, path: string): Promise<Thumbnail> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (r: Thumbnail) => {
+      if (!settled) {
+        settled = true;
+        resolve(r);
+      }
+    };
+    const upstream = http.get({ host, port, path, timeout: 5000 }, (up) => {
+      if ((up.statusCode ?? 0) >= 400) {
+        up.resume();
+        done({ error: `HTTP ${up.statusCode}` });
+        return;
+      }
+      const contentType = up.headers["content-type"] ?? "image/jpeg";
+      const chunks: Buffer[] = [];
+      up.on("data", (c: Buffer) => chunks.push(c));
+      up.on("end", () => done({ buf: Buffer.concat(chunks), contentType }));
+      up.on("error", (e) => done({ error: e.message }));
+    });
+    upstream.on("timeout", () => upstream.destroy(new Error("timeout")));
+    upstream.on("error", (e) => done({ error: e.message }));
+  });
+}
+
 export async function proxyRoutes(c: RouteCtx): Promise<void> {
   const { res, pathname, url, method } = c;
     // ── PCO plan-attachment proxy (e.g. the stage plot) ──────────────────────
@@ -115,35 +145,26 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       const path = `/v1/presentation/${target.uuid}/thumbnail/${target.index}?quality=${PROPRESENTER_THUMBNAIL_QUALITY}`;
-      const upstream = http.get({ host: target.host, port: target.port, path, timeout: 5000 }, (up) => {
-        if ((up.statusCode ?? 0) >= 400) {
-          up.resume();
-          res.writeHead(502);
-          res.end(`ProPresenter thumbnail HTTP ${up.statusCode}`);
-          return;
-        }
-        const contentType = up.headers["content-type"] ?? "image/jpeg";
-        const chunks: Buffer[] = [];
-        up.on("data", (c: Buffer) => chunks.push(c));
-        up.on("end", () => {
-          const buf = Buffer.concat(chunks);
-          // Bound the cache (FIFO) — slide keys are short-lived, a few is plenty.
-          if (thumbnailCache.size >= 16) {
-            const firstKey = thumbnailCache.keys().next().value;
-            if (firstKey !== undefined) thumbnailCache.delete(firstKey);
-          }
-          thumbnailCache.set(cacheKey, { buf, contentType });
-          res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-store" });
-          res.end(buf);
-        });
-      });
-      upstream.on("timeout", () => upstream.destroy(new Error("timeout")));
-      upstream.on("error", (e) => {
-        if (!res.headersSent) {
-          res.writeHead(502);
-          res.end(`ProPresenter thumbnail error: ${e.message}`);
-        }
-      });
+      // AWAIT the upstream fetch before replying. This used to fire http.get and
+      // return immediately, letting the callback answer later — which the route
+      // dispatcher reads as "not handled" (nothing sent yet), so it fell through
+      // to the 404 arm, ended the response, and the late writeHead then threw
+      // ERR_HTTP_HEADERS_SENT from an event callback and killed the process.
+      // Every route must finish responding before it returns; see RouteCtx.
+      const fetched = await fetchThumbnail(target.host, target.port, path);
+      if ("error" in fetched) {
+        res.writeHead(502);
+        res.end(`ProPresenter thumbnail error: ${fetched.error}`);
+        return;
+      }
+      // Bound the cache (FIFO) — slide keys are short-lived, a few is plenty.
+      if (thumbnailCache.size >= 16) {
+        const firstKey = thumbnailCache.keys().next().value;
+        if (firstKey !== undefined) thumbnailCache.delete(firstKey);
+      }
+      thumbnailCache.set(cacheKey, { buf: fetched.buf, contentType: fetched.contentType });
+      res.writeHead(200, { "Content-Type": fetched.contentType, "Cache-Control": "no-store" });
+      res.end(fetched.buf);
       return;
     }
 
