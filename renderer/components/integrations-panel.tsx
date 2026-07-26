@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, type ChangeEvent, type ReactNode } fr
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { OscTargetsPanel } from "./osc-targets-panel";
+import { RossTalkTargetsPanel } from "./rosstalk-targets-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
 import {
   Button,
@@ -978,6 +979,7 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   const bodyFor = (descriptor: IntegrationDescriptor, state: IntegrationState): ReactNode => {
     if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
     if (descriptor.id === "osc") return <OscTargetsPanel />;
+    if (descriptor.id === "rosstalk") return <RossTalkTargetsPanel />;
     return (
       <>
         <IntegrationCard
