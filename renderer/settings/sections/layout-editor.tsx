@@ -2644,6 +2644,27 @@ function Inspector({
           </>
         );
       })()}
+      {c.type === "record-status" && (
+        <>
+          <RowSelect
+            label="Recorder"
+            hint="Any = red whenever either OBS or REAPER is recording"
+            value={c.source ?? "any"}
+            options={[
+              { value: "any", label: "Any recorder" },
+              { value: "obs", label: "OBS only" },
+              { value: "reaper", label: "REAPER only" },
+            ]}
+            onChange={(v) => onConfig({ ...c, source: v as "any" | "obs" | "reaper" })}
+          />
+          <RowText label="Recording text" value={c.recordingText ?? ""} placeholder="RECORDING" onChange={(v) => onConfig({ ...c, recordingText: v })} />
+          <RowText label="Idle text" value={c.idleText ?? ""} placeholder="STANDBY" onChange={(v) => onConfig({ ...c, idleText: v })} />
+          <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="NO RECORDER" onChange={(v) => onConfig({ ...c, offlineText: v })} />
+          <RowSwitch label="Fill red while recording" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
+          <RowSwitch label="Hide when idle" hint="Pure tally light — nothing on screen unless recording" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
+        </>
+      )}
+
       {c.type === "obs-status" && (() => {
         const mode = c.mode ?? "recording";
         const liveLabel = !obs?.connected

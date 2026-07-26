@@ -544,6 +544,38 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} ts={ts} H={ctx.H} />;
     case "baptism-timer":
       return <BaptismTimer state={ctx.baptism} config={c} ts={ts} now={ctx.now} />;
+    case "record-status": {
+      // "Is anything recording?" — one indicator regardless of which recorder the
+      // campus uses, so a layout survives a switch from OBS to REAPER unchanged.
+      const src = c.source ?? "any";
+      const obsRec = ctx.obs?.recording ?? false;
+      const reaRec = ctx.reaper?.recording ?? false;
+      const obsUp = ctx.obs?.connected ?? false;
+      const reaUp = ctx.reaper?.connected ?? false;
+      const active = src === "obs" ? obsRec : src === "reaper" ? reaRec : obsRec || reaRec;
+      // "Connected" for `any` means at least one recorder is reachable — otherwise a
+      // dim badge would claim "not recording" when nothing can actually report.
+      const connected = src === "obs" ? obsUp : src === "reaper" ? reaUp : obsUp || reaUp;
+
+      if (!active && (c.hideWhenIdle ?? false)) return null;
+
+      if (active) {
+        const label = c.recordingText ?? "RECORDING";
+        if (c.fillWhenRecording ?? true) {
+          return (
+            <div style={{ ...ts, color: "#ffffff", background: "var(--red-9)", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "inherit" }}>
+              {label}
+            </div>
+          );
+        }
+        return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
+      }
+      return (
+        <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
+          {connected ? (c.idleText ?? "STANDBY") : (c.offlineText ?? "NO RECORDER")}
+        </span>
+      );
+    }
     case "obs-status": {
       const obs = ctx.obs;
       const connected = obs?.connected ?? false;

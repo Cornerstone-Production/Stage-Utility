@@ -309,6 +309,15 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     style: () => READOUT(0.14),
   },
 
+  // Recording state. `record-status` answers "is anything recording?" across both
+  // recorders; the two device-specific objects below are for when you want one.
+  "record-status": {
+    label: "Record status",
+    group: "Status",
+    config: () => ({ type: "record-status", source: "any", hideWhenIdle: false, fillWhenRecording: true }),
+    style: () => PILL({ fontWeight: 700, uppercase: true }),
+  },
+
   // OBS / REAPER — bold pills that fill red while recording.
   "obs-status": {
     label: "OBS status",
