@@ -427,8 +427,12 @@ class IntegrationManager {
       });
     }
 
-    // Apply PCO credentials to stage controller if already configured.
+    // Apply PCO credentials to stage controller if already configured. This
+    // leaves the badge on "connecting" and kicks the real check off in the
+    // background — startup must not block on a round-trip to PCO over the
+    // internet (a slow or down link would delay every display coming up).
     await this.applyPcoCredentials();
+    void this.verifyPcoCredentials();
 
     // Start auto-refresh with the persisted interval (defaults to 60 min).
     stageController.startAutoRefresh(this.getPcoRefreshIntervalMs());
@@ -553,24 +557,11 @@ class IntegrationManager {
       await this.applyPcoCredentials();
       // Restart auto-refresh with the (possibly updated) interval.
       stageController.startAutoRefresh(this.getPcoRefreshIntervalMs());
-      // Validate the credentials against PCO and load the lineup so the kiosk
-      // updates immediately. A failure here reports an error status but never
-      // fails the save (the credentials are already persisted).
-      const appId = await this.getPcoAppId();
-      const secret = await this.getPcoSecret();
-      if (appId && secret) {
-        try {
-          const types = await stageController.listServiceTypes();
-          this.setConnectionState(
-            "planning-center",
-            "connected",
-            `Connected — ${types.length} service type(s)`,
-          );
-          await stageController.refresh();
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.setConnectionState("planning-center", "error", msg);
-        }
+      // Validate against PCO and, if it accepts, load the lineup so the kiosk
+      // updates immediately. A failure reports an error status but never fails
+      // the save — the credentials are already persisted either way.
+      if (await this.verifyPcoCredentials()) {
+        await stageController.refresh();
       }
     }
 
@@ -1107,10 +1098,46 @@ class IntegrationManager {
     const target = settings.integrationConfigs["planning-center"]?.countdownTarget === "service-time" ? "service-time" : "plan-start";
     stageController.setPcoCredentials(appId, secret, target);
 
-    if (appId && secret) {
-      this.setConnectionState("planning-center", "connected", "Credentials configured");
-    } else {
+    if (!appId || !secret) {
       this.setConnectionState("planning-center", "disconnected", null);
+      return;
+    }
+    // Credentials being PRESENT is not the same as them being VALID. This used to
+    // report "connected" on any non-empty pair, so a revoked or mistyped token
+    // showed a green badge while every refresh failed with "PCO auth failed" —
+    // the panel and the app disagreed and the panel was the convincing one.
+    // Ask PCO instead. Unlike the other integrations there is no socket whose
+    // success speaks for itself: PCO is stateless HTTPS, so a request IS the check.
+    this.setConnectionState("planning-center", "connecting", "Checking credentials…");
+  }
+
+  /**
+   * Ask PCO whether the stored credentials actually work and report the truth.
+   * Never throws — a failure is a reported state, not an exception, so it can be
+   * called at startup without risking init.
+   *
+   * @returns true when PCO accepted the credentials.
+   */
+  private async verifyPcoCredentials(): Promise<boolean> {
+    const appId = await this.getPcoAppId();
+    const secret = await this.getPcoSecret();
+    if (!appId || !secret) {
+      this.setConnectionState("planning-center", "disconnected", null);
+      this.broadcastStates();
+      return false;
+    }
+    try {
+      const { pcoService } = await import("./pco-service.js");
+      const types = await pcoService.listServiceTypes(appId, secret);
+      this.setConnectionState("planning-center", "connected", `Connected — ${types.length} service type(s)`);
+      this.broadcastStates();
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[integration-manager] PCO credential check failed: ${msg}`);
+      this.setConnectionState("planning-center", "error", msg);
+      this.broadcastStates();
+      return false;
     }
   }
 
