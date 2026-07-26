@@ -8,6 +8,7 @@ import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
 import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
+import { rosstalkManager } from "./rosstalk-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, propresenterManager, type PropInstanceConfig } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
@@ -297,6 +298,17 @@ const OSC_DESCRIPTOR: IntegrationDescriptor = {
   configSchema: [],
 };
 
+// RossTalk — outbound command control of Ross gear. Like OSC, targets are a
+// separately managed list, so the descriptor carries no config fields.
+const ROSSTALK_DESCRIPTOR: IntegrationDescriptor = {
+  id: "rosstalk",
+  kind: "control",
+  label: "RossTalk (Carbonite / Ultrix)",
+  description:
+    "Sends RossTalk commands to Ross gear — custom controls and switching on a Carbonite, routing and salvos on an Ultrix. Connects over your LAN on TCP 7788. Add one target per device below, then place a RossTalk button on a layout or drive it from an automation rule. Simulate mode logs commands without sending them.",
+  configSchema: [],
+};
+
 // SenSource Vea people-counter integration — polls the Vea API for live people
 // counts (attendance / occupancy), shown by the custom-layout "People counter"
 // object. The operator enters an API client id + secret (created in the Vea
@@ -379,6 +391,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   OBS_DESCRIPTOR,
   REAPER_DESCRIPTOR,
   OSC_DESCRIPTOR,
+  ROSSTALK_DESCRIPTOR,
   SENSOURCE_DESCRIPTOR,
   ROSS_TSL_DESCRIPTOR,
 ];
@@ -456,12 +469,17 @@ class IntegrationManager {
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
     await oscManager.init();
     this.refreshOscSummary();
+
+    await rosstalkManager.init();
+    this.refreshRossTalkSummary();
     // Start the SenSource Vea poller if it's enabled + has credentials.
     await this.applySensource();
     // Forward live people counts to the Ross TSL sender (it ignores them when
     // disconnected), then start it if enabled + configured.
     addBroadcastListener((channel, payload) => {
       if (channel === "people:count") tslService.onPeopleCount(payload as PeopleCountDTO);
+      // Keep the master RossTalk row in step with its targets (and simulate mode).
+      if (channel === "rosstalk:targets-changed") this.refreshRossTalkSummary();
     });
     await this.applyRossTsl();
 
@@ -1156,6 +1174,26 @@ class IntegrationManager {
       );
     } else {
       this.setConnectionState("wireless", "disconnected", null);
+    }
+  }
+
+  /**
+   * Reflect the RossTalk targets on the master "rosstalk" row. Unlike OSC this is
+   * TCP, so "connected" here means a socket is genuinely open — and the message
+   * carries simulate mode, because a connected badge would otherwise imply commands
+   * are reaching the device when they are being swallowed.
+   */
+  refreshRossTalkSummary(): void {
+    const targets = rosstalkManager.listTargets();
+    const enabled = targets.filter((t) => t.enabled);
+    const connected = enabled.filter((t) => t.connection === "connected").length;
+    const sim = rosstalkManager.getSimulate() ? " — simulate mode" : "";
+    if (enabled.length === 0) {
+      this.setConnectionState("rosstalk", "disconnected", targets.length ? `${targets.length} target(s)` : null);
+    } else if (connected > 0) {
+      this.setConnectionState("rosstalk", "connected", `${connected} of ${enabled.length} target(s)${sim}`);
+    } else {
+      this.setConnectionState("rosstalk", "error", `0 of ${enabled.length} target(s) reachable${sim}`);
     }
   }
 
