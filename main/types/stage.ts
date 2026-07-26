@@ -273,6 +273,18 @@ export type LayoutObjectConfig =
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
     }
+  // A RossTalk control button. Tapping it (on a real display / operator surface,
+  // never in the editor) fires `commandId` with `params` at `targetId`, or `raw`
+  // when no catalogue command is chosen. No feedback bind: RossTalk is send-only,
+  // so a button is a trigger and never an indicator.
+  | {
+      type: "rosstalk-button";
+      targetId: string | null;
+      commandId: string | null;
+      params: Record<string, string | number>;
+      label: string;
+      raw?: string;
+    }
   // An OSC control button. Tapping it (on a real display / operator surface, never
   // in the editor) sends `address` + `args` to the chosen OSC target. `feedback`
   // optionally lights the button from incoming OSC. Send-only if no feedback bind.

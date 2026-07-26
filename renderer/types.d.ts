@@ -10,6 +10,7 @@
 
 import type * as Stage from "@main/types/stage";
 import type * as Osc from "@main/types/osc";
+import type * as RossTalk from "@main/types/rosstalk";
 import type * as Integrations from "@main/types/integrations";
 import type * as Devices from "@main/types/devices";
 
@@ -88,6 +89,13 @@ declare global {
   type UpdateStatus = Stage.UpdateStatus;
   type View = Stage.View;
   type ViewKind = Stage.ViewKind;
+
+  // ── RossTalk (main/types/rosstalk.ts) ──
+  type RossTalkFamily = RossTalk.RossTalkFamily;
+  type RossTalkParam = RossTalk.RossTalkParam;
+  type RossTalkCommand = RossTalk.RossTalkCommand;
+  type RossTalkTargetConfig = RossTalk.RossTalkTargetConfig;
+  type RossTalkTarget = RossTalk.RossTalkTarget;
 
   // ── OSC (main/types/osc.ts) ──
   type OscArg = Osc.OscArg;

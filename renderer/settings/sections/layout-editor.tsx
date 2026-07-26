@@ -2256,6 +2256,22 @@ function Inspector({
   const reaper = useReaperState();
   const peopleCount = usePeopleCountState();
   const oscTargets = useOscTargets();
+  // RossTalk targets + command catalogue for the rosstalk-button inspector. Loaded
+  // once here rather than per-object; both are small and change rarely.
+  const [rosstalkTargets, setRosstalkTargets] = useState<RossTalkTarget[]>([]);
+  const [rosstalkCommands, setRosstalkCommands] = useState<
+    { id: string; label: string; family: string; params: RossTalkParam[]; help?: string }[]
+  >([]);
+  useEffect(() => {
+    void invoke<{ targets: RossTalkTarget[] }>("rosstalk:targets")
+      .then((r) => setRosstalkTargets(r.targets))
+      .catch(() => {});
+    void invoke<{ id: string; label: string; family: string; params: RossTalkParam[]; help?: string }[]>(
+      "rosstalk:commands",
+    )
+      .then(setRosstalkCommands)
+      .catch(() => {});
+  }, []);
   const planItems = usePlanItems();
   const propInstances = usePropInstances();
   const integrationsSnap = useIntegrations();
@@ -2688,6 +2704,72 @@ function Inspector({
           <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
         </>
       )}
+      {c.type === "rosstalk-button" && (() => {
+        const target = rosstalkTargets.find((t) => t.id === c.targetId) ?? null;
+        const family = target?.config.family ?? "carbonite";
+        // Only ever offer commands for THIS target's family — a Carbonite XPT sent
+        // to an Ultrix is a different command entirely.
+        const commands = rosstalkCommands.filter((cmd) => cmd.family === family);
+        const command = commands.find((cmd) => cmd.id === c.commandId) ?? null;
+        return (
+          <>
+            <RowSelect
+              label="Target"
+              value={c.targetId ?? ""}
+              options={[
+                { value: "", label: "Pick a target…" },
+                ...rosstalkTargets.map((t) => ({
+                  value: t.id,
+                  label: `${t.name} (${t.config.family ?? "carbonite"})`,
+                })),
+              ]}
+              onChange={(v) => onConfig({ ...c, targetId: v || null, commandId: null, params: {} })}
+            />
+            <RowSelect
+              label="Command"
+              hint={target ? undefined : "Pick a target first"}
+              value={c.commandId ?? ""}
+              options={[
+                { value: "", label: "Pick a command…" },
+                ...commands.map((cmd) => ({ value: cmd.id, label: cmd.label })),
+              ]}
+              onChange={(v) => onConfig({ ...c, commandId: v || null, params: {} })}
+            />
+            {command?.params.map((p) =>
+              p.type === "number" ? (
+                <RowNumber
+                  key={p.key}
+                  label={p.label}
+                  hint={p.help}
+                  value={Number(c.params[p.key] ?? p.min ?? 0)}
+                  min={p.min}
+                  max={p.max}
+                  onChange={(n) => onConfig({ ...c, params: { ...c.params, [p.key]: n } })}
+                />
+              ) : p.type === "enum" ? (
+                <RowSelect
+                  key={p.key}
+                  label={p.label}
+                  hint={p.help}
+                  value={String(c.params[p.key] ?? "")}
+                  options={(p.options ?? []).map((o) => ({ value: o, label: o }))}
+                  onChange={(v) => onConfig({ ...c, params: { ...c.params, [p.key]: v } })}
+                />
+              ) : (
+                <RowText
+                  key={p.key}
+                  label={p.label}
+                  hint={p.help}
+                  value={String(c.params[p.key] ?? "")}
+                  onChange={(v) => onConfig({ ...c, params: { ...c.params, [p.key]: v } })}
+                />
+              ),
+            )}
+            <RowText label="Label" value={c.label} onChange={(v) => onConfig({ ...c, label: v })} />
+          </>
+        );
+      })()}
+
       {c.type === "osc-button" && (() => {
         const oc = c; // narrowed osc-button config (preserved into nested fns)
         const args = oc.args ?? [];

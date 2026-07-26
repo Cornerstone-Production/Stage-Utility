@@ -12,6 +12,7 @@ import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessChannels } from "./use-wireless-channels";
 import { OscButton } from "./osc-button";
+import { RossTalkButton } from "./rosstalk-button";
 import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
@@ -36,6 +37,9 @@ export interface LayoutRenderCtx {
   obs: ObsStatusDTO | null;
   reaper: ReaperStatusDTO | null;
   osc: OscFeedbackDTO | null;
+  /** Global RossTalk simulate mode, so a button can show it is not really sending.
+   *  Defaults to TRUE when unknown — the direction that cannot cause a stray send. */
+  rosstalkSimulate?: boolean;
   /** Live SenSource Vea people counts — for the people-counter object. */
   peopleCount: PeopleCountDTO | null;
   /** Lowest in-room occupancy during the current/most-recent live service — the
@@ -605,6 +609,15 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         </span>
       );
     }
+    case "rosstalk-button":
+      return (
+        <RossTalkButton
+          config={c}
+          interactive={ctx.interactive ?? false}
+          simulate={ctx.rosstalkSimulate ?? true}
+          ts={ts}
+        />
+      );
     case "osc-button":
       return (
         <OscButton

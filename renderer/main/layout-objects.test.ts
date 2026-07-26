@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
+import type { LayoutObjectType } from "../../main/types/stage.js";
 import {
   LAYOUT_OBJECTS,
   PALETTE_GROUPS,
@@ -145,22 +146,56 @@ const ORIGINAL_CONFIG: Record<string, unknown> = {
 
 const ALL = Object.keys(TYPE_LABELS);
 
+/**
+ * Types added deliberately AFTER the consolidation. The originals above stay pinned
+ * so they can never drift; new entries are listed here so the guard keeps working
+ * instead of being weakened every time an object type is added.
+ */
+const ADDED_SINCE: { type: string; label: string; group: string; after: string }[] = [
+  { type: "rosstalk-button", label: "RossTalk button", group: "Control", after: "osc-button" },
+];
+
 // ── Assertions ────────────────────────────────────────────────────────────────
 
 describe("layout-object registry vs. the structures it replaced", () => {
-  test("covers exactly the same set of types", () => {
-    assert.deepEqual(Object.keys(LAYOUT_OBJECTS).sort(), ALL.sort());
+  test("still covers every original type, plus only deliberate additions", () => {
+    const actual = Object.keys(LAYOUT_OBJECTS).sort();
+    const expected = [...ALL, ...ADDED_SINCE.map((a) => a.type)].sort();
+    assert.deepEqual(actual, expected,
+      "an unexpected type appeared or an original vanished — add it to ADDED_SINCE if intended");
+  });
+
+  test("deliberate additions carry the label and group they claim", () => {
+    for (const a of ADDED_SINCE) {
+      assert.equal(typeLabel(a.type as never), a.label);
+      assert.equal(LAYOUT_OBJECTS[a.type as LayoutObjectType].group, a.group);
+    }
   });
 
   test("labels are unchanged", () => {
     for (const t of ALL) assert.equal(typeLabel(t as never), TYPE_LABELS[t], `label for ${t}`);
   });
 
-  test("palette groups and their order are unchanged", () => {
-    assert.deepEqual(
-      PALETTE_GROUPS.map((g) => ({ label: g.label as string, types: g.types as string[] })),
-      ORIGINAL_PALETTE,
-    );
+  test("palette groups and their order are unchanged for the original types", () => {
+    // Filter out deliberate additions, then the palette must match the original
+    // exactly — same groups, same order within each group.
+    const added = new Set(ADDED_SINCE.map((a) => a.type));
+    const actual = PALETTE_GROUPS.map((g) => ({
+      label: g.label as string,
+      types: (g.types as string[]).filter((t) => !added.has(t)),
+    })).filter((g) => g.types.length > 0);
+    assert.deepEqual(actual, ORIGINAL_PALETTE);
+  });
+
+  test("each addition sits directly after the type it claims to follow", () => {
+    // Pins placement too, so a new object cannot silently reorder the palette.
+    for (const a of ADDED_SINCE) {
+      const group = PALETTE_GROUPS.find((g) => (g.types as string[]).includes(a.type));
+      assert.ok(group, `${a.type} is not in the palette`);
+      const types = group!.types as string[];
+      assert.equal(types[types.indexOf(a.after) + 1], a.type,
+        `${a.type} should sit immediately after ${a.after}`);
+    }
   });
 
   test("ndi-video stays OUT of the palette", () => {
