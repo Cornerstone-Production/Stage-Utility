@@ -1,8 +1,15 @@
+# Dependency updates target `beta`, not the default branch.
+#
+# The branching model is main <- beta <- feature branches, and `main` only ever
+# receives `beta`. Letting dependabot open PRs against `main` puts dependency
+# bumps ahead of beta, so every beta -> main release has to reconcile changes
+# that never went through beta. Targeting beta keeps everything flowing one way.
 version: 2
 updates:
   # 1. Node.js / NPM Dependencies
   - package-ecosystem: "npm"
     directory: "/"
+    target-branch: "beta"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
@@ -13,6 +20,7 @@ updates:
   # 2. GitHub Actions Dependencies
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "beta"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
