@@ -80,6 +80,32 @@ Claude-Session: https://claude.ai/code/session_…
 
 These are informational and do not affect the release level.
 
+## Releases
+
+Automated from the commit types above, by `.github/workflows/release.yml`.
+
+| Push to | Produces |
+|---|---|
+| `beta` | a prerelease `X.Y.Z-beta.N`, tagged, published as a GitHub prerelease |
+| `main` | the release `X.Y.Z`, tagged, published as the latest GitHub release |
+
+The level is the **highest** severity among the commits since the last tag — one
+`feat` among twenty `docs` still makes it a minor. A push containing only
+`docs`/`chore`/`refactor`/`test`/`ci`/`build` produces **no release at all**, so
+documentation churn does not mint versions.
+
+`package.json` is bumped and committed forward, then tagged. **Nothing is ever
+force-pushed** — deployments track `beta` and a rewrite breaks their in-app updater.
+The workflow re-runs lint, type-check, tests and build before it tags, so a red build
+cannot become a release.
+
+The first run will produce **v1.1.0**: there are 333 commits since the `v1.0.0` tag,
+including features but no breaking changes, and the level is the maximum severity
+rather than a count.
+
+To force a major, mark the commit breaking — `feat(types)!: …` plus an explanation in
+the body.
+
 ## Branching
 
 `main` ← `beta` ← feature branches.

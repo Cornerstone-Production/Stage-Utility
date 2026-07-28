@@ -55,7 +55,7 @@ export interface SettingsData {
    *  or channelId when unnamed). Overrides the auto/ProdCom color. */
   captionChannelColors: Record<string, string>;
   /** Scheduled in-app auto-update window. */
-  autoUpdate: { enabled: boolean; dayOfWeek: number | null; hour: number };
+  autoUpdate: { mode?: "manual" | "auto-install" | "auto-full"; enabled?: boolean; dayOfWeek: number | null; hour: number };
   /** Time-aware integration reconnect tunables (leadMin/tailMin/dormantMin). */
   reconnectSchedule?: { enabled: boolean; leadMin: number; tailMin: number; dormantMin: number };
   /** Attendance ramp/taper capture windows in minutes (preMin/postMin). */
@@ -96,7 +96,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   ndiEnabled: false,
   publicUrl: null,
   captionChannelColors: {},
-  autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
+  autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
   oscFeedbackPort: 9000,
   splVisibleMetrics: [],
   onboardingDismissed: false,

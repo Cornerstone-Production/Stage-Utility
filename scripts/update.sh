@@ -109,6 +109,18 @@ write_result() {
   fi
 } >>"$LOG" 2>&1
 
+# auto-install mode: the build is applied but the operator chooses when the
+# displays go dark. Leave a marker the app reports as "restart pending" and stop
+# here — the running process keeps serving the OLD build until someone restarts.
+if [ -n "${STAGE_UPDATE_DEFER_RESTART:-}" ]; then
+  write_result true
+  if [ -n "${STAGE_UPDATE_RESTART_PENDING:-}" ]; then
+    date -u +%Y-%m-%dT%H:%M:%SZ > "$STAGE_UPDATE_RESTART_PENDING" 2>/dev/null || true
+  fi
+  echo "[update] build applied; restart deferred (auto-install mode)" >>"$LOG" 2>&1
+  exit 0
+fi
+
 write_progress restarting
 write_result true
 

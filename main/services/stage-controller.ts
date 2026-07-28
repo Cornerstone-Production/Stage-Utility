@@ -21,6 +21,26 @@ import { updater } from "./updater.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
 
+/**
+ * Read the persisted auto-update settings, migrating the pre-mode boolean.
+ * `enabled: true` meant "apply and restart in the window", which is auto-full;
+ * `false`/absent meant nothing automatic at all, which is manual.
+ */
+function migrateAutoUpdate(saved: unknown): AutoUpdateSettings {
+  const o = (saved ?? {}) as Partial<AutoUpdateSettings> & { enabled?: boolean };
+  const mode: AutoUpdateSettings["mode"] =
+    o.mode === "auto-install" || o.mode === "auto-full" || o.mode === "manual"
+      ? o.mode
+      : o.enabled === true
+        ? "auto-full"
+        : "manual";
+  return {
+    mode,
+    dayOfWeek: typeof o.dayOfWeek === "number" ? o.dayOfWeek : null,
+    hour: typeof o.hour === "number" ? o.hour : 3,
+  };
+}
+
 // Coalescing window (ms) for live device-status updates. Wireless metering arrives
 // ~1/sec per channel; we collapse bursts into one re-resolve+broadcast per window
 // so the event loop isn't saturated, while keeping the RF bars visually live.
@@ -145,7 +165,7 @@ export class StageController {
     ndiEnabled: false,
     publicUrl: null,
     captionChannelColors: {},
-    autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
+    autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
     reconnectSchedule: { ...DEFAULT_RECONNECT_SCHEDULE },
     taperWindow: { ...DEFAULT_TAPER_WINDOW },
     onboardingDismissed: false,
@@ -217,7 +237,7 @@ export class StageController {
       ndiEnabled: settings.ndiEnabled ?? false,
       publicUrl: settings.publicUrl ?? null,
       captionChannelColors: settings.captionChannelColors ?? {},
-      autoUpdate: settings.autoUpdate ?? { enabled: false, dayOfWeek: null, hour: 3 },
+      autoUpdate: migrateAutoUpdate(settings.autoUpdate),
       reconnectSchedule: settings.reconnectSchedule ?? { ...DEFAULT_RECONNECT_SCHEDULE },
       taperWindow: settings.taperWindow ?? { ...DEFAULT_TAPER_WINDOW },
       onboardingDismissed: settings.onboardingDismissed ?? false,
@@ -1009,7 +1029,9 @@ export class StageController {
       const status = await updater.checkForUpdate();
       if (this.shouldAutoApply(status.behind, new Date())) {
         console.log("[stage-controller] auto-update window — applying update");
-        await updater.applyUpdate();
+        // auto-install applies the build but leaves the restart to the operator,
+        // so an update can land on Saturday and be taken on Monday.
+        await updater.applyUpdate({ deferRestart: this.state.autoUpdate.mode === "auto-install" });
       }
     } catch (err) {
       console.error("[stage-controller] update check failed:", err);
@@ -1020,7 +1042,7 @@ export class StageController {
    *  day/hour window + not mid-service. Exposed for unit testing. */
   shouldAutoApply(behind: number, now: Date): boolean {
     const cfg = this.state.autoUpdate;
-    if (!cfg.enabled || behind <= 0) return false;
+    if (cfg.mode === "manual" || behind <= 0) return false;
     if (updater.phase === "updating") return false;
     if (this.isServiceLive()) return false;
     if (cfg.dayOfWeek != null && now.getDay() !== cfg.dayOfWeek) return false;

@@ -1155,8 +1155,19 @@ export interface ChargerBayDTO {
 
 /** Scheduled auto-update config. When enabled, the server applies an available
  *  update during the weekly window (skipping while a PCO service is live). */
+/**
+ * How updates are applied.
+ *   manual       — operator checks, applies and restarts by hand
+ *   auto-install — apply automatically in the window, but WAIT for an operator
+ *                  to restart (the new build sits ready; nothing interrupts)
+ *   auto-full    — apply and restart in the window (the original behaviour)
+ */
+export type UpdateMode = "manual" | "auto-install" | "auto-full";
+
 export interface AutoUpdateSettings {
-  enabled: boolean;
+  mode: UpdateMode;
+  /** @deprecated Pre-mode boolean, read once to migrate. true -> auto-full. */
+  enabled?: boolean;
   /** Day of week 0–6 (Sun–Sat), or null for any day. */
   dayOfWeek: number | null;
   /** Hour of day 0–23 (local time) the update window opens. */
@@ -1207,6 +1218,9 @@ export interface UpdateStatus {
   phase: "idle" | "checking" | "updating";
   /** Sub-phase while `phase==="updating"`, for the progress bar. Null otherwise. */
   step: "pull" | "install" | "build" | "restarting" | null;
+  /** A build has been installed but the process is still running the old code —
+   *  set by an auto-install update that deferred its restart. */
+  restartPending: boolean;
   /** Outcome of the most recent apply (read from the updater's result file). */
   lastResult: { ok: boolean; finishedAt: string; log: string | null } | null;
   /** Non-null when the last check failed (e.g. no network). */
