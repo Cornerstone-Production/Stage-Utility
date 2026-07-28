@@ -872,7 +872,16 @@ const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
   { title: "Audio", ids: ["smaart"] },
   { title: "People", ids: ["sensource"] },
   { title: "Wireless", ids: ["wireless"] },
-  { title: "Control & output", ids: ["obs", "reaper", "osc", "ross-tsl"] },
+  { title: "Control & output", ids: ["obs", "reaper", "osc", "rosstalk", "ross-tsl"] },
+];
+
+/** Two integrations that present as one card. RossTalk (commands, TCP 7788) and
+ *  Ross MultiViewer (TSL UMD) are different protocols that usually address the
+ *  same Carbonite, so two separate cards read as clutter. This is presentation
+ *  only — each keeps its own id, enable flag, config and connection state, so
+ *  layout buttons and automation actions referencing "rosstalk" are untouched. */
+const PAIRS: { title: string; ids: [string, string] }[] = [
+  { title: "Ross", ids: ["rosstalk", "ross-tsl"] },
 ];
 
 /** One integration as a collapsible card: header (name · status · enable) that
@@ -903,24 +912,94 @@ function IntegrationRow({
   }
   return (
     <div className="su-card px-3 py-2">
-      <Collapsible
-        defaultOpen={!state.configured}
-        label={<span className="text-callout font-semibold text-fg truncate">{descriptor.label}</span>}
-        afterLabel={descriptor.description ? <InfoHint>{descriptor.description}</InfoHint> : undefined}
-        right={
-          <div className="flex items-center gap-3 shrink-0">
-            <ConnectionBadge connection={state.connection} message={state.message} />
-            <Switch
-              checked={state.enabled}
-              onCheckedChange={toggleEnabled}
-              disabled={toggling}
-              aria-label={`Enable ${descriptor.label}`}
-            />
-          </div>
-        }
-      >
-        <div className="pt-1">{body}</div>
-      </Collapsible>
+      <IntegrationEntry
+        descriptor={descriptor}
+        state={state}
+        body={body}
+        toggling={toggling}
+        onToggle={toggleEnabled}
+      />
+    </div>
+  );
+}
+
+/** The collapsible header + body for one integration, without a card wrapper —
+ *  so it can sit alone in its own card or beside a sibling inside a pair card. */
+function IntegrationEntry({
+  descriptor,
+  state,
+  body,
+  toggling,
+  onToggle,
+}: {
+  descriptor: IntegrationDescriptor;
+  state: IntegrationState;
+  body: ReactNode;
+  toggling: boolean;
+  onToggle: (enabled: boolean) => void;
+}) {
+  return (
+    <Collapsible
+      defaultOpen={!state.configured}
+      label={<span className="text-callout font-semibold text-fg truncate">{descriptor.label}</span>}
+      afterLabel={descriptor.description ? <InfoHint>{descriptor.description}</InfoHint> : undefined}
+      right={
+        <div className="flex items-center gap-3 shrink-0">
+          <ConnectionBadge connection={state.connection} message={state.message} />
+          <Switch
+            checked={state.enabled}
+            onCheckedChange={onToggle}
+            disabled={toggling}
+            aria-label={`Enable ${descriptor.label}`}
+          />
+        </div>
+      }
+    >
+      <div className="pt-1">{body}</div>
+    </Collapsible>
+  );
+}
+
+/** One card holding two related integrations as sections. Each section keeps its
+ *  own status badge and enable switch — this groups them visually, it does not
+ *  merge them. */
+function IntegrationPairRow({
+  title,
+  entries,
+  onStateChange,
+}: {
+  title: string;
+  entries: { descriptor: IntegrationDescriptor; state: IntegrationState; body: ReactNode }[];
+  onStateChange: (id: string, s: IntegrationState) => void;
+}) {
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  async function toggle(id: string, label: string, enabled: boolean) {
+    setTogglingId(id);
+    try {
+      const next = await ipc<IntegrationState>("integrations:setEnabled", { id, enabled });
+      onStateChange(id, next);
+    } catch (err) {
+      toast.error(`Failed to ${enabled ? "enable" : "disable"} ${label}: ${String(err)}`);
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  return (
+    <div className="su-card flex flex-col gap-1 px-3 py-2">
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">{title}</span>
+      {entries.map(({ descriptor, state, body }, i) => (
+        <div key={descriptor.id} className={i > 0 ? "border-t border-line pt-1" : undefined}>
+          <IntegrationEntry
+            descriptor={descriptor}
+            state={state}
+            body={body}
+            toggling={togglingId === descriptor.id}
+            onToggle={(enabled) => toggle(descriptor.id, descriptor.label, enabled)}
+          />
+        </div>
+      ))}
     </div>
   );
 }
@@ -1062,6 +1141,33 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
           {g.items.map((descriptor) => {
             const state = stateMap.get(descriptor.id);
             if (!state) return null;
+
+            // Paired integrations render once, as a single card, in the position of
+            // whichever id comes first; the sibling is skipped where it would have
+            // rendered on its own.
+            const pair = PAIRS.find((p) => p.ids.includes(descriptor.id));
+            if (pair) {
+              // Anchor to the first id actually in this group, not ids[0] — when one
+              // half is dormant the card must still render for the half that isn't.
+              const anchor = pair.ids.find((id) => g.items.some((d) => d.id === id));
+              if (descriptor.id !== anchor) return null;
+              const entries = pair.ids
+                .map((id) => {
+                  const d = byId.get(id);
+                  const s = stateMap.get(id);
+                  return d && s ? { descriptor: d, state: s, body: bodyFor(d, s) } : null;
+                })
+                .filter((e): e is { descriptor: IntegrationDescriptor; state: IntegrationState; body: ReactNode } => e !== null);
+              return (
+                <IntegrationPairRow
+                  key={pair.title}
+                  title={pair.title}
+                  entries={entries}
+                  onStateChange={(_id, s) => handleStateChange(s)}
+                />
+              );
+            }
+
             return (
               <IntegrationRow
                 key={descriptor.id}
