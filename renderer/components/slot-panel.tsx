@@ -126,7 +126,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           ) : (
             <div
               className="absolute inset-0"
-              style={{ backgroundColor: solidColor ?? "#1a1a2e" }}
+              style={{ backgroundColor: solidColor ?? "var(--kiosk-surface-1)" }}
             />
           )}
 

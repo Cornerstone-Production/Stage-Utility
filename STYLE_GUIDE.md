@@ -110,7 +110,7 @@ The two-tier structure:
 | `--su-fill` / `-hover` / `-active` | interaction fill (ghost / filled) |
 | `--su-live-9` / `-11` | **live / on-pace** (green) |
 | `--su-danger-9` / `-11` | **over / error** (red) |
-| `--su-warn-9` / `-11` | **caution / unsaved** (amber) |
+| `--su-warn-9` / `-11` | **caution** (amber) — over-time, warnings. NOT unsaved: see below |
 | `--su-ok-*`, `--su-info-*` | success / informational |
 
 **Theming per world:**
@@ -122,6 +122,12 @@ The two-tier structure:
   (`#0a0a0a`, a neutral near-black chosen over a blue-tinted one); surfaces and text
   become white-opacity steps (`rgba(255,255,255,0.04 … 0.92)`); accent + status tokens
   inherit the brand values.
+
+**Unsaved state is neutral, not amber.** `UnsavedBanner` uses the popover surface
+(`bg-popover` + `border-line-strong`) on every surface that has one — the patch sheet,
+the layout editor and Integrations. "You have not pressed Save" is *pending*, not
+*wrong*; amber earns more as a signal when it is reserved for things that are actually
+wrong, and on the kiosk it already means "over/caution".
 
 ### 2.4 Themeable brand accent
 
@@ -210,6 +216,20 @@ Collapsible, Toast, UnsavedBanner, ButtonGroup, TooltipProvider, ErrorBoundary).
 Every display sits on `.kiosk-surface` (`--kiosk-bg` `#0a0a0a`, flat — no gradient — so
 all view kinds match the slots view). Most open with a brand top bar (logo + app name
 in `text-caption1 font-title`, optional QR).
+
+`--kiosk-surface-1` (`#171717`) is the one step up, for sticky table chrome (rundown
+header/footer bands) and empty-image placeholders. Both are strictly R=G=B: a near-black
+with any blue bias reads "blueish" beside the neutral app shell, so ad-hoc darks like
+`#14161c` or `#1a1a2e` must not come back — reach for the token.
+
+Glass bars use `backdrop-filter: blur(20px)` **without** `saturate()`: over a coloured
+stage background the saturation boost amplifies exactly the hue cast the neutral rule
+exists to prevent.
+
+**Department accents** (`rundown-table.tsx` `departmentColor`) are drawn from the same
+palette the patch sheet offers, spread amber / green / blue / teal / red with a neutral
+grey fallback — no purple or magenta. They must stay 6-digit hex: callers append an
+alpha suffix (`` `${color}1f` ``).
 
 **Hero readouts** (`stage-display-view.tsx`, `dashboard-view.tsx`): clock / countdown /
 SPL / RF render in **IBM Plex Mono** at fluid `clamp()`+`vmin` scale with

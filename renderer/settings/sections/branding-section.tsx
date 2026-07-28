@@ -286,7 +286,7 @@ export function BrandingSection({
               </FieldDescription>
             </FieldContent>
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center size-12 rounded-md border border-gray-a4 overflow-hidden shrink-0 bg-[#13131a] text-white/45">
+              <div className="flex items-center justify-center size-12 rounded-md border border-gray-a4 overflow-hidden shrink-0 bg-[var(--kiosk-surface-1)] text-white/45">
                 {stageState.emptySlotLogo ? (
                   <BrandLogo logo={stageState.emptySlotLogo} monochrome className="size-full p-1" />
                 ) : (
@@ -327,7 +327,7 @@ export function BrandingSection({
               </FieldDescription>
             </FieldContent>
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center size-12 rounded-md border border-gray-a4 overflow-hidden shrink-0 bg-[#13131a] text-white/45">
+              <div className="flex items-center justify-center size-12 rounded-md border border-gray-a4 overflow-hidden shrink-0 bg-[var(--kiosk-surface-1)] text-white/45">
                 {stageState.defaultAvatar ? (
                   <BrandLogo logo={stageState.defaultAvatar} monochrome className="size-full p-1" />
                 ) : (

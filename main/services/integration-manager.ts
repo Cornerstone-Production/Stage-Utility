@@ -8,6 +8,7 @@ import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
 import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
+import { rosstalkManager } from "./rosstalk-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, propresenterManager, type PropInstanceConfig } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
@@ -297,6 +298,17 @@ const OSC_DESCRIPTOR: IntegrationDescriptor = {
   configSchema: [],
 };
 
+// RossTalk — outbound command control of Ross gear. Like OSC, targets are a
+// separately managed list, so the descriptor carries no config fields.
+const ROSSTALK_DESCRIPTOR: IntegrationDescriptor = {
+  id: "rosstalk",
+  kind: "control",
+  label: "RossTalk (Carbonite / Ultrix)",
+  description:
+    "Sends RossTalk commands to Ross gear — custom controls and switching on a Carbonite, routing and salvos on an Ultrix. Connects over your LAN on TCP 7788. Add one target per device below, then place a RossTalk button on a layout or drive it from an automation rule. Simulate mode logs commands without sending them.",
+  configSchema: [],
+};
+
 // SenSource Vea people-counter integration — polls the Vea API for live people
 // counts (attendance / occupancy), shown by the custom-layout "People counter"
 // object. The operator enters an API client id + secret (created in the Vea
@@ -379,6 +391,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   OBS_DESCRIPTOR,
   REAPER_DESCRIPTOR,
   OSC_DESCRIPTOR,
+  ROSSTALK_DESCRIPTOR,
   SENSOURCE_DESCRIPTOR,
   ROSS_TSL_DESCRIPTOR,
 ];
@@ -427,8 +440,12 @@ class IntegrationManager {
       });
     }
 
-    // Apply PCO credentials to stage controller if already configured.
+    // Apply PCO credentials to stage controller if already configured. This
+    // leaves the badge on "connecting" and kicks the real check off in the
+    // background — startup must not block on a round-trip to PCO over the
+    // internet (a slow or down link would delay every display coming up).
     await this.applyPcoCredentials();
+    void this.verifyPcoCredentials();
 
     // Start auto-refresh with the persisted interval (defaults to 60 min).
     stageController.startAutoRefresh(this.getPcoRefreshIntervalMs());
@@ -452,12 +469,17 @@ class IntegrationManager {
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
     await oscManager.init();
     this.refreshOscSummary();
+
+    await rosstalkManager.init();
+    this.refreshRossTalkSummary();
     // Start the SenSource Vea poller if it's enabled + has credentials.
     await this.applySensource();
     // Forward live people counts to the Ross TSL sender (it ignores them when
     // disconnected), then start it if enabled + configured.
     addBroadcastListener((channel, payload) => {
       if (channel === "people:count") tslService.onPeopleCount(payload as PeopleCountDTO);
+      // Keep the master RossTalk row in step with its targets (and simulate mode).
+      if (channel === "rosstalk:targets-changed") this.refreshRossTalkSummary();
     });
     await this.applyRossTsl();
 
@@ -553,24 +575,11 @@ class IntegrationManager {
       await this.applyPcoCredentials();
       // Restart auto-refresh with the (possibly updated) interval.
       stageController.startAutoRefresh(this.getPcoRefreshIntervalMs());
-      // Validate the credentials against PCO and load the lineup so the kiosk
-      // updates immediately. A failure here reports an error status but never
-      // fails the save (the credentials are already persisted).
-      const appId = await this.getPcoAppId();
-      const secret = await this.getPcoSecret();
-      if (appId && secret) {
-        try {
-          const types = await stageController.listServiceTypes();
-          this.setConnectionState(
-            "planning-center",
-            "connected",
-            `Connected — ${types.length} service type(s)`,
-          );
-          await stageController.refresh();
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.setConnectionState("planning-center", "error", msg);
-        }
+      // Validate against PCO and, if it accepts, load the lineup so the kiosk
+      // updates immediately. A failure reports an error status but never fails
+      // the save — the credentials are already persisted either way.
+      if (await this.verifyPcoCredentials()) {
+        await stageController.refresh();
       }
     }
 
@@ -1107,10 +1116,46 @@ class IntegrationManager {
     const target = settings.integrationConfigs["planning-center"]?.countdownTarget === "service-time" ? "service-time" : "plan-start";
     stageController.setPcoCredentials(appId, secret, target);
 
-    if (appId && secret) {
-      this.setConnectionState("planning-center", "connected", "Credentials configured");
-    } else {
+    if (!appId || !secret) {
       this.setConnectionState("planning-center", "disconnected", null);
+      return;
+    }
+    // Credentials being PRESENT is not the same as them being VALID. This used to
+    // report "connected" on any non-empty pair, so a revoked or mistyped token
+    // showed a green badge while every refresh failed with "PCO auth failed" —
+    // the panel and the app disagreed and the panel was the convincing one.
+    // Ask PCO instead. Unlike the other integrations there is no socket whose
+    // success speaks for itself: PCO is stateless HTTPS, so a request IS the check.
+    this.setConnectionState("planning-center", "connecting", "Checking credentials…");
+  }
+
+  /**
+   * Ask PCO whether the stored credentials actually work and report the truth.
+   * Never throws — a failure is a reported state, not an exception, so it can be
+   * called at startup without risking init.
+   *
+   * @returns true when PCO accepted the credentials.
+   */
+  private async verifyPcoCredentials(): Promise<boolean> {
+    const appId = await this.getPcoAppId();
+    const secret = await this.getPcoSecret();
+    if (!appId || !secret) {
+      this.setConnectionState("planning-center", "disconnected", null);
+      this.broadcastStates();
+      return false;
+    }
+    try {
+      const { pcoService } = await import("./pco-service.js");
+      const types = await pcoService.listServiceTypes(appId, secret);
+      this.setConnectionState("planning-center", "connected", `Connected — ${types.length} service type(s)`);
+      this.broadcastStates();
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[integration-manager] PCO credential check failed: ${msg}`);
+      this.setConnectionState("planning-center", "error", msg);
+      this.broadcastStates();
+      return false;
     }
   }
 
@@ -1129,6 +1174,26 @@ class IntegrationManager {
       );
     } else {
       this.setConnectionState("wireless", "disconnected", null);
+    }
+  }
+
+  /**
+   * Reflect the RossTalk targets on the master "rosstalk" row. Unlike OSC this is
+   * TCP, so "connected" here means a socket is genuinely open — and the message
+   * carries simulate mode, because a connected badge would otherwise imply commands
+   * are reaching the device when they are being swallowed.
+   */
+  refreshRossTalkSummary(): void {
+    const targets = rosstalkManager.listTargets();
+    const enabled = targets.filter((t) => t.enabled);
+    const connected = enabled.filter((t) => t.connection === "connected").length;
+    const sim = rosstalkManager.getSimulate() ? " — simulate mode" : "";
+    if (enabled.length === 0) {
+      this.setConnectionState("rosstalk", "disconnected", targets.length ? `${targets.length} target(s)` : null);
+    } else if (connected > 0) {
+      this.setConnectionState("rosstalk", "connected", `${connected} of ${enabled.length} target(s)${sim}`);
+    } else {
+      this.setConnectionState("rosstalk", "error", `0 of ${enabled.length} target(s) reachable${sim}`);
     }
   }
 

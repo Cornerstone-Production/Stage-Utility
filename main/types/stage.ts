@@ -258,6 +258,19 @@ export type LayoutObjectConfig =
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
     }
+  // "Is anything recording?" — one indicator across every recorder, so a layout does
+  // not need to know whether the campus records on OBS or REAPER. `source: "any"`
+  // is red when EITHER is recording. The device-specific obs-status/reaper-status
+  // objects remain for when you want exactly one machine.
+  | {
+      type: "record-status";
+      source?: "any" | "obs" | "reaper";
+      recordingText?: string;
+      idleText?: string;
+      offlineText?: string;
+      hideWhenIdle?: boolean;
+      fillWhenRecording?: boolean;
+    }
   // Live REAPER recording indicator (from the REAPER integration, `reaper:status`
   // channel). Turns red while REAPER is recording. Label texts override the
   // defaults ("REAPER: Recording" / "REAPER: Standby" / "REAPER: Offline");
@@ -272,6 +285,18 @@ export type LayoutObjectConfig =
       showPosition?: boolean;
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
+    }
+  // A RossTalk control button. Tapping it (on a real display / operator surface,
+  // never in the editor) fires `commandId` with `params` at `targetId`, or `raw`
+  // when no catalogue command is chosen. No feedback bind: RossTalk is send-only,
+  // so a button is a trigger and never an indicator.
+  | {
+      type: "rosstalk-button";
+      targetId: string | null;
+      commandId: string | null;
+      params: Record<string, string | number>;
+      label: string;
+      raw?: string;
     }
   // An OSC control button. Tapping it (on a real display / operator surface, never
   // in the editor) sends `address` + `args` to the chosen OSC target. `feedback`

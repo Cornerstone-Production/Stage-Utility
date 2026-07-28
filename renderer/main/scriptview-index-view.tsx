@@ -73,7 +73,7 @@ export function ScriptViewIndex() {
         className="relative flex items-center h-10 shrink-0"
         style={{
           background: "rgba(0,0,0,0.50)",
-          backdropFilter: "blur(20px) saturate(1.6)",
+          backdropFilter: "blur(20px)",
           borderBottom: "1px solid rgba(255,255,255,0.09)",
           boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 8px rgba(0,0,0,0.40)",
         }}
@@ -129,7 +129,7 @@ export function ScriptViewIndex() {
                       onChange={(e) => setSel((s) => ({ ...s, [type.id]: e.target.value }))}
                       className="appearance-none cursor-pointer rounded-lg bg-white/[0.06] py-1.5 pl-3 pr-8 text-caption1 font-medium text-fg-muted outline-none transition-colors hover:bg-white/10 hover:text-fg focus:text-fg"
                     >
-                      {options.map((o) => <option key={o.value} value={o.value} className="bg-[#14161c] font-medium">{o.label}</option>)}
+                      {options.map((o) => <option key={o.value} value={o.value} className="bg-[var(--kiosk-surface-1)] font-medium">{o.label}</option>)}
                     </select>
                     <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 text-fg-subtle" />
                   </div>

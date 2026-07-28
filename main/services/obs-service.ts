@@ -9,13 +9,9 @@
 // refreshes the record timecode.
 
 import type { ObsStatusDTO } from "../types/stage.js";
-import { broadcast, channelHasSubscribers } from "./broadcaster.js";
-import { serviceWindow } from "./service-window.js";
+import { StatusIntegration } from "./integration-base.js";
 import { ObsWebSocketAdapter, type ObsEvent } from "./obs-protocol.js";
 
-type ObsConnState = "connected" | "error" | "disconnected";
-
-const RECONNECT_BASE_MS = 3000;
 const TIMECODE_POLL_MS = 1000;
 
 const OFFLINE: ObsStatusDTO = {
@@ -61,65 +57,42 @@ export function reduceObsEvent(prev: ObsStatusDTO, evt: ObsEvent): ObsStatusDTO 
   }
 }
 
-class ObsService {
+class ObsService extends StatusIntegration<ObsStatusDTO> {
   private host: string | null = null;
   private port: number | null = null;
   private password: string | null = null;
 
-  private running = false;
   private adapter: ObsWebSocketAdapter | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectAttempt = 0;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
-  private last: ObsStatusDTO = OFFLINE;
-
-  private onConn: ((state: ObsConnState, message: string | null) => void) | null = null;
-  private reported: ObsConnState | null = null;
-
-  setConnectionListener(cb: (state: ObsConnState, message: string | null) => void): void {
-    this.onConn = cb;
+  constructor() {
+    super("obs", "obs:status", OFFLINE);
   }
 
-  /** Latest snapshot — lets a freshly-loaded display hydrate immediately. */
-  getLatest(): ObsStatusDTO {
-    return this.last;
-  }
-
-  private report(state: ObsConnState, message: string | null): void {
-    if (this.reported === state) return;
-    this.reported = state;
-    this.onConn?.(state, message);
+  protected get configured(): boolean {
+    return !!this.host && !!this.port;
   }
 
   configure(host: string, port: number, password: string | null): void {
     this.host = host?.trim() || null;
     this.port = port > 0 ? Math.floor(port) : null;
     this.password = password?.trim() || null;
-    this.reported = null;
+    this.resetReport();
     this.restart();
   }
 
-  start(): void {
-    if (this.running || !this.host || !this.port) return;
-    this.running = true;
-    this.reconnectAttempt = 0;
+  override start(): void {
+    if (this.running || !this.configured) return;
     console.log(`[obs] connecting ${this.host}:${this.port}`);
-    void this.connect();
+    super.start();
   }
 
-  stop(): void {
-    this.running = false;
-    this.clearReconnect();
+  /** Close the socket and the timecode poll; the base clears the retry timer
+   *  and drops the snapshot to OFFLINE. */
+  protected override teardown(): void {
     this.clearPoll();
     this.adapter?.close();
     this.adapter = null;
-    if (this.last.connected) this.emit(OFFLINE);
-  }
-
-  private restart(): void {
-    this.stop();
-    if (this.host && this.port) this.start();
   }
 
   /** One-shot reachability check for the Integrations "Test connection" button. */
@@ -142,7 +115,7 @@ class ObsService {
     }
   }
 
-  private async connect(): Promise<void> {
+  protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
     const adapter = new ObsWebSocketAdapter(this.host, this.port);
     this.adapter = adapter;
@@ -177,17 +150,17 @@ class ObsService {
         /* ignore */
       }
       if (this.adapter !== adapter) return; // superseded while awaiting
-      this.reconnectAttempt = 0;
+      this.resetBackoff();
       this.report("connected", `Connected to OBS at ${this.host}:${this.port}`);
       this.emit(snap);
       this.startPoll();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (this.reconnectAttempt === 0) console.warn(`[obs] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
+      if (this.attempt === 0) console.warn(`[obs] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
       adapter.close();
       if (this.adapter === adapter) this.adapter = null;
-      if (this.last.connected) this.emit(OFFLINE);
+      this.goOffline();
       this.scheduleReconnect();
     }
   }
@@ -200,11 +173,11 @@ class ObsService {
 
   private onClose(adapter: ObsWebSocketAdapter): void {
     if (!this.running || this.adapter !== adapter) return;
-    if (this.reconnectAttempt === 0) console.warn("[obs] connection closed — reconnecting");
+    if (this.attempt === 0) console.warn("[obs] connection closed — reconnecting");
     this.clearPoll();
     if (this.adapter === adapter) this.adapter = null;
     this.report("error", "OBS connection dropped — reconnecting");
-    if (this.last.connected) this.emit(OFFLINE);
+    this.goOffline();
     this.scheduleReconnect();
   }
 
@@ -235,25 +208,6 @@ class ObsService {
     }
   }
 
-  private scheduleReconnect(): void {
-    if (!this.running) return;
-    this.clearReconnect();
-    const delay = serviceWindow.capDelayMs(RECONNECT_BASE_MS * 2 ** this.reconnectAttempt, channelHasSubscribers("obs:status"));
-    this.reconnectAttempt++;
-    this.reconnectTimer = setTimeout(() => void this.connect(), delay);
-  }
-
-  private clearReconnect(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-  }
-
-  private emit(snapshot: ObsStatusDTO): void {
-    this.last = snapshot;
-    broadcast("obs:status", snapshot);
-  }
 }
 
 export const obsService = new ObsService();

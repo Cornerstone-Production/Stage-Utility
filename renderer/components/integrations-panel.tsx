@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, type ChangeEvent, type ReactNode } fr
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { OscTargetsPanel } from "./osc-targets-panel";
+import { RossTalkTargetsPanel } from "./rosstalk-targets-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
 import {
   Button,
@@ -28,6 +29,7 @@ import {
   toast,
   SkeletonRows,
   InfoHint,
+  UnsavedBanner,
 } from "../components/ui";
 import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -150,34 +152,48 @@ function fmtSynced(iso: string | null | undefined): string {
   return `Synced ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
+/** The form's starting values for an integration — the saved config, with password
+ *  fields masked and unset numbers prefilled from their default/placeholder.
+ *  Hoisted out of the component so Discard can rebuild exactly the same thing. */
+function initialConfig(
+  descriptor: IntegrationDescriptor,
+  state: IntegrationState,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const field of descriptor.configSchema) {
+    const raw = state.config[field.key];
+    if (field.type === "password" && typeof raw === "string" && raw !== "") {
+      out[field.key] = MASKED_PASSWORD;
+    } else if (field.type === "number") {
+      // Unset numeric fields (e.g. an API port) prefill the integration's
+      // default — field.default if declared, else the numeric placeholder
+      // (the shown default) — so the field displays and saves the real port
+      // instead of a bare 0.
+      const fallback =
+        field.default ?? (field.placeholder != null && field.placeholder !== "" ? Number(field.placeholder) : undefined);
+      const rawNum = raw == null || raw === "" ? NaN : Number(raw);
+      out[field.key] = Number.isFinite(rawNum) && rawNum > 0 ? rawNum : (fallback ?? "");
+    } else {
+      out[field.key] = raw ?? field.default ?? "";
+    }
+  }
+  return out;
+}
+
 function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: IntegrationCardProps) {
   // Local config mirrors state.config but tracks in-progress edits
-  const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(() => {
-    // Mask password fields coming from backend
-    const out: Record<string, unknown> = {};
-    for (const field of descriptor.configSchema) {
-      const raw = state.config[field.key];
-      if (field.type === "password" && typeof raw === "string" && raw !== "") {
-        out[field.key] = MASKED_PASSWORD;
-      } else if (field.type === "number") {
-        // Unset numeric fields (e.g. an API port) prefill the integration's
-        // default — field.default if declared, else the numeric placeholder
-        // (the shown default) — so the field displays and saves the real port
-        // instead of a bare 0.
-        const fallback =
-          field.default ?? (field.placeholder != null && field.placeholder !== "" ? Number(field.placeholder) : undefined);
-        const rawNum = raw == null || raw === "" ? NaN : Number(raw);
-        out[field.key] = Number.isFinite(rawNum) && rawNum > 0 ? rawNum : (fallback ?? "");
-      } else {
-        out[field.key] = raw ?? field.default ?? "";
-      }
-    }
-    return out;
-  });
+  const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(() =>
+    initialConfig(descriptor, state),
+  );
 
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Compare against the saved config rather than tracking a flag, so Save/Discard
+  // appear only for genuine edits — and disappear again on their own after a save.
+  const pristine = initialConfig(descriptor, state);
+  const dirty = JSON.stringify(localConfig) !== JSON.stringify(pristine);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   function setField(key: string, value: unknown) {
@@ -313,12 +329,20 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
         <ProPresenterInstancesPanel state={state} onStateChange={onStateChange} />
       )}
 
+      {/* Unsaved changes — same bar as the patch sheet and the layout editor, so
+          "you have edits" reads identically everywhere in the app. */}
+      {dirty && (
+        <UnsavedBanner
+          compact
+          className="self-start"
+          saving={isSaving}
+          onSave={handleSave}
+          onDiscard={() => setLocalConfig(initialConfig(descriptor, state))}
+        />
+      )}
+
       {/* Actions row */}
       <div className="flex items-center gap-2">
-        <Button variant="filled" size="small" onClick={handleSave} disabled={isSaving}>
-          {isSaving ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
-          Save
-        </Button>
         <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting}>
           {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
           Test connection
@@ -978,6 +1002,7 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   const bodyFor = (descriptor: IntegrationDescriptor, state: IntegrationState): ReactNode => {
     if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
     if (descriptor.id === "osc") return <OscTargetsPanel />;
+    if (descriptor.id === "rosstalk") return <RossTalkTargetsPanel />;
     return (
       <>
         <IntegrationCard
@@ -995,12 +1020,29 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   const connectedCount = descriptors.filter((d) => stateMap.get(d.id)?.connection === "connected").length;
   const needsSetup = descriptors.filter((d) => stateMap.get(d.id)?.configured === false).length;
   const categorized = new Set(CATEGORY_ORDER.flatMap((c) => c.ids));
+  /**
+   * An integration is "in use" if it is enabled or has been configured. Everything
+   * else is noise on this page — a site running three integrations should not scroll
+   * past eleven. Nothing is hidden permanently and there is no preference to store:
+   * the state already says which are in use, so the list reorganises itself as soon
+   * as one is set up. An ERRORING integration always stays in the main list, since an
+   * error is exactly what you want to see.
+   */
+  const inUse = (d: IntegrationDescriptor) => {
+    const st = stateMap.get(d.id);
+    return !!st && (st.enabled || st.configured !== false || st.connection === "error");
+  };
+  const dormant = descriptors.filter((d) => !inUse(d));
+  const dormantIds = new Set(dormant.map((d) => d.id));
+
   const groups = [
     ...CATEGORY_ORDER.map((c) => ({
       title: c.title,
-      items: c.ids.map((id) => byId.get(id)).filter((d): d is IntegrationDescriptor => !!d),
+      items: c.ids
+        .map((id) => byId.get(id))
+        .filter((d): d is IntegrationDescriptor => !!d && !dormantIds.has(d.id)),
     })),
-    { title: "Other", items: descriptors.filter((d) => !categorized.has(d.id)) },
+    { title: "Other", items: descriptors.filter((d) => !categorized.has(d.id) && !dormantIds.has(d.id)) },
   ].filter((g) => g.items.length > 0);
 
   return (
@@ -1009,6 +1051,11 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
         <span className="font-medium text-accent">{connectedCount} connected</span>
         {needsSetup > 0 ? ` · ${needsSetup} to set up` : ""}
       </p>
+      {groups.length === 0 && dormant.length > 0 && (
+        <p className="text-caption1 text-fg-muted">
+          Nothing set up yet — pick one below to get started.
+        </p>
+      )}
       {groups.map((g) => (
         <div key={g.title} className="flex flex-col gap-2">
           <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">{g.title}</span>
@@ -1027,6 +1074,26 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
           })}
         </div>
       ))}
+
+      {dormant.length > 0 && (
+        <Collapsible label={`Not set up (${dormant.length})`} summary="integrations you are not using">
+          <div className="flex flex-col gap-2 pt-2">
+            {dormant.map((descriptor) => {
+              const state = stateMap.get(descriptor.id);
+              if (!state) return null;
+              return (
+                <IntegrationRow
+                  key={descriptor.id}
+                  descriptor={descriptor}
+                  state={state}
+                  onStateChange={handleStateChange}
+                  body={bodyFor(descriptor, state)}
+                />
+              );
+            })}
+          </div>
+        </Collapsible>
+      )}
     </div>
   );
 }

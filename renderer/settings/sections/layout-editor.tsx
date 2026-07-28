@@ -79,76 +79,20 @@ import { useStageState } from "../../main/use-stage-state";
 import { usePlanItems } from "../../main/use-plan-items";
 import { usePropInstances } from "../../main/use-dashboard-state";
 import { useConfiguredIntegrations, useIntegrations } from "../../main/use-integration-states";
-import { OBJECT_INTEGRATION } from "../../main/object-integration";
+import {
+  CARD_PRESETS,
+  PALETTE_GROUPS,
+  defaultConfig,
+  defaultStyle,
+  isStylingOnly,
+  objectIntegration,
+  typeLabel,
+  usesPropInstance,
+} from "../../main/layout-objects";
 import { invoke } from "../../lib/api";
 import { InlineSlotsEditor } from "./inline-slots-editor";
 
 // ── object metadata ──────────────────────────────────────────────────────────
-
-const TYPE_LABELS: Record<LayoutObjectType, string> = {
-  text: "Text",
-  clock: "Clock",
-  "countdown-timer": "PCO countdown",
-  "service-pacing": "Service pacing",
-  "pp-timer": "ProPresenter timer",
-  "slide-progress": "Slide progress",
-  "wireless-channel": "Mic channel",
-  "current-slide-text": "Current slide",
-  "next-slide-text": "Next slide",
-  "current-service-item": "Current item",
-  "next-service-item": "Next item",
-  "service-order": "Service order",
-  "current-slide-notes": "Slide notes",
-  "slide-thumbnail": "Slide image",
-  "section-chip": "Section chip",
-  "slots-grid": "Mic slots",
-  "transcript-strip": "Transcription",
-  "live-controls": "PCO Prev/Next",
-  "charger-battery": "Charger battery",
-  "spl-meter": "SPL meter",
-  "obs-status": "OBS status",
-  "reaper-status": "REAPER status",
-  "osc-button": "OSC button",
-  "integration-status": "Integration status",
-  "wireless-summary": "Wireless summary",
-  "people-counter": "People counter",
-  "people-graph": "People graph",
-  "people-panel": "People summary",
-  "baptism-timer": "Baptism timer",
-  "brand-logo": "Logo",
-  "ndi-video": "NDI video",
-  image: "Image",
-  "plan-attachment": "Plan file",
-  shape: "Shape",
-  container: "Container",
-};
-// Add-object palette, grouped by domain so the dropdown reads as a short menu of
-// categories instead of one long flat list. Integration-backed types are dimmed
-// (not hidden) in the dropdown when their integration isn't set up — see
-// OBJECT_INTEGRATION + the toolbar's hide toggle.
-const PALETTE_GROUPS: { label: string; types: LayoutObjectType[] }[] = [
-  { label: "Layout", types: ["container", "shape", "image", "brand-logo"] },
-  { label: "Text & time", types: ["text", "clock", "countdown-timer"] },
-  { label: "PCO / service", types: ["live-controls", "current-service-item", "next-service-item", "service-order", "service-pacing", "plan-attachment"] },
-  { label: "ProPresenter", types: ["current-slide-text", "next-slide-text", "current-slide-notes", "slide-thumbnail", "section-chip", "pp-timer", "slide-progress"] },
-  { label: "Mics & RF", types: ["slots-grid", "charger-battery", "wireless-summary", "wireless-channel"] },
-  { label: "Audio (SPL)", types: ["spl-meter"] },
-  { label: "Transcription", types: ["transcript-strip"] },
-  { label: "People", types: ["people-counter", "people-panel", "people-graph"] },
-  { label: "Baptisms", types: ["baptism-timer"] },
-  { label: "OBS", types: ["obs-status"] },
-  { label: "REAPER", types: ["reaper-status"] },
-  { label: "Control", types: ["osc-button"] },
-  { label: "Status", types: ["integration-status"] },
-];
-
-// Object types that have no per-object options — the inspector shows a "styling
-// only" hint for these instead of a blank gap. (They update automatically from
-// their data source; there's nothing meaningful to configure.)
-const NO_CONFIG_TYPES = new Set<LayoutObjectType>([
-  "current-slide-text", "next-slide-text", "current-service-item", "next-service-item",
-  "current-slide-notes", "slide-thumbnail", "live-controls", "ndi-video",
-]);
 
 const HIDE_UNCONFIGURED_KEY = "layout-hide-unconfigured";
 
@@ -162,15 +106,6 @@ const CANVAS_FRAC: FracRect = { x: 0, y: 0, w: 1, h: 1 };
 // Dashboard "glass tile" look, expressed in the style fields every object shares.
 // Border/radius/padding are fractions of canvas HEIGHT (≈1px / 16px on a 1080 canvas).
 // Reused by the container default style and the Phase C preset buttons.
-type CardAccent = "neutral" | "green" | "red" | "amber" | "flat";
-const CARD_PRESETS: Record<CardAccent, LayoutStyle> = {
-  neutral: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  green: { background: "rgba(45,212,150,0.08)", borderColor: "rgba(45,212,150,0.13)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  red: { background: "rgba(229,72,77,0.10)", borderColor: "rgba(229,72,77,0.25)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  amber: { background: "rgba(255,197,61,0.08)", borderColor: "rgba(255,197,61,0.20)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  flat: { background: null, borderColor: null, borderWidth: 0, cornerRadius: 0, padding: 0 },
-};
-
 // Surface/elevation presets — a "style type" picker. Orthogonal to the color
 // accents above: these set fill/border/elevation as a one-click "look" and leave
 // the text color alone. They write the shared style fields, so the Fill / Border /
@@ -217,72 +152,6 @@ function elevationLabel(v: number): string {
   return "High";
 }
 
-function defaultConfig(type: LayoutObjectType): LayoutObjectConfig {
-  switch (type) {
-    case "text": return { type: "text", text: "Text" };
-    case "clock": return { type: "clock", showSeconds: true, format: "12h" };
-    case "section-chip": return { type: "section-chip", which: "current" };
-    case "slots-grid": return { type: "slots-grid", source: "inline", sourceViewId: null };
-    case "transcript-strip": return { type: "transcript-strip", mode: "rolling" };
-    case "charger-battery": return { type: "charger-battery", bays: [], show: { battery: true, charging: true } };
-    case "spl-meter": return { type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null };
-    case "obs-status": return { type: "obs-status", mode: "recording", showTimecode: false, hideWhenIdle: false, fillWhenRecording: true };
-    case "reaper-status": return { type: "reaper-status", showPosition: false, hideWhenIdle: false, fillWhenRecording: true };
-    case "osc-button": return { type: "osc-button", targetId: null, label: "Button", address: "/", args: [], feedback: null };
-    case "integration-status": return { type: "integration-status", integrationId: null, showLabel: true };
-    case "wireless-summary": return { type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" };
-    case "wireless-channel": return { type: "wireless-channel", channelId: null, show: { rf: true, battery: true, frequency: true, audio: false }, showLabel: true };
-    case "service-pacing": return { type: "service-pacing", hideWhenIdle: false, showLabel: false };
-    case "pp-timer": return { type: "pp-timer", timerName: null, propresenterInstanceId: null, warnStates: true, hideWhenIdle: false, showLabel: true };
-    case "slide-progress": return { type: "slide-progress", propresenterInstanceId: null, display: "fraction", showLabel: false };
-    case "people-counter": return { type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true };
-    case "people-graph": return { type: "people-graph", metric: "occupancy", showLabel: true, label: "In room" };
-    case "people-panel": return { type: "people-panel", metrics: ["occupancy", "peak", "attendance"], showLabels: true, orientation: "row" };
-    case "baptism-timer": return { type: "baptism-timer", field: "live", showLabel: true, label: "" };
-    case "brand-logo": return { type: "brand-logo", useEmptySlotLogo: false };
-    case "image": return { type: "image", src: "" };
-    case "plan-attachment": return { type: "plan-attachment", match: "stage plot", page: 1 };
-    case "shape": return { type: "shape", shape: "rect" };
-    case "service-order": return { type: "service-order", noteCategories: null, showLength: false, highlightLive: true, scroll: "auto", autoFit: true };
-    case "container": return { type: "container" };
-    default: return { type } as LayoutObjectConfig;
-  }
-}
-
-function defaultStyle(type: LayoutObjectType): LayoutStyle {
-  if (type === "shape") return { background: "#3b82f6", opacity: 1 };
-  if (type === "container") return { ...CARD_PRESETS.neutral };
-  if (type === "ndi-video" || type === "slide-thumbnail" || type === "image" || type === "plan-attachment" || type === "brand-logo" || type === "live-controls") return {};
-  // Captions read left-aligned and bottom-anchored, like the dedicated display.
-  if (type === "transcript-strip") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "bottom" };
-  if (type === "charger-battery") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "middle" };
-  // Service order is a left-aligned, top-anchored list.
-  if (type === "service-order") return { fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" };
-  // OBS status reads as a bold pill (glass when idle, fills red when recording).
-  if (type === "obs-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_PRESETS.neutral };
-  // REAPER status reads as a bold pill (glass when idle, fills red when recording).
-  if (type === "reaper-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_PRESETS.neutral };
-  // OSC button reads as a tappable pill.
-  if (type === "osc-button") return { fontSize: 0.045, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
-  // People counter reads as a big bold number.
-  if (type === "people-counter") return { fontSize: 0.12, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
-  if (type === "baptism-timer") return { fontSize: 0.14, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
-  // ProPresenter timer + service pacing read as big bold tabular numbers, like the clock/countdown.
-  if (type === "pp-timer" || type === "service-pacing") return { fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
-  // A single mic channel reads as a compact glass tile.
-  if (type === "wireless-channel") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
-  if (type === "people-panel") return { fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
-  // Status / wireless summary read as a compact label-sized pill.
-  if (type === "integration-status" || type === "wireless-summary") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_PRESETS.neutral };
-  // People graph: a glass card; `color` is the sparkline's line/fill color.
-  if (type === "people-graph") return { color: "#5b9cff", ...CARD_PRESETS.neutral };
-  return { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
-}
-
-// crypto.randomUUID() only exists in a SECURE context (https / localhost). Kiosk
-// servers run over plain HTTP on a LAN address, where it's undefined — calling it
-// throws and silently aborts the click (the dropdown closes, nothing is added).
-// getRandomValues is available everywhere; fall back further just in case.
 function uid(): string {
   const c = globalThis.crypto;
   if (c?.randomUUID) return c.randomUUID();
@@ -660,7 +529,7 @@ function OverlayNode({
         }}
       >
         {locked && <LockIcon style={{ width: 9, height: 9 }} />}
-        {TYPE_LABELS[o.config.type]}
+        {typeLabel(o.config.type)}
       </span>
       {sel && !locked &&
         HANDLES.map((h) => {
@@ -1806,7 +1675,7 @@ export function LayoutEditor({
           <SelectContent>
             {PALETTE_GROUPS.map((g) => {
               const types = g.types.filter((t) => {
-                const need = OBJECT_INTEGRATION[t];
+                const need = objectIntegration(t);
                 // When the hide toggle is on, drop types whose integration isn't set up.
                 return !(hideUnconfigured && need && !configuredIntegrations.has(need.id));
               });
@@ -1815,14 +1684,14 @@ export function LayoutEditor({
                 <SelectGroup key={g.label}>
                   <SelectLabel>{g.label}</SelectLabel>
                   {types.map((t) => {
-                    const need = OBJECT_INTEGRATION[t];
+                    const need = objectIntegration(t);
                     // Dim (but keep selectable) when the backing integration isn't set up.
                     // Based on "configured", not connection — a set-up-but-offline
                     // integration's objects stay un-dimmed.
                     const dim = need && !configuredIntegrations.has(need.id);
                     return (
                       <SelectItem key={t} value={t} className={dim ? "opacity-50" : undefined}>
-                        {TYPE_LABELS[t]}{dim ? ` · set up ${need!.label}` : ""}
+                        {typeLabel(t)}{dim ? ` · set up ${need!.label}` : ""}
                       </SelectItem>
                     );
                   })}
@@ -2014,7 +1883,7 @@ export function LayoutEditor({
                 className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${selectedIds.has(o.id) ? "bg-fill-active" : "hover:bg-fill"} ${dragLayerOver === o.id ? "ring-1 ring-focus" : ""}`}
               >
                 <span className="text-caption1 text-fg flex-1 min-w-0 truncate">
-                  {o.config.type === "container" ? `${TYPE_LABELS[o.config.type]} (${o.children?.length ?? 0})` : TYPE_LABELS[o.config.type]}
+                  {o.config.type === "container" ? `${typeLabel(o.config.type)} (${o.children?.length ?? 0})` : typeLabel(o.config.type)}
                 </span>
                 {depth > 0 && (
                   <span
@@ -2352,18 +2221,6 @@ function PlanAttachmentConfig({
 }
 
 /** Object types fed by ProPresenter — they get the per-object instance picker. */
-const PROP_OBJECT_TYPES = new Set<LayoutObjectConfig["type"]>([
-  "current-slide-text",
-  "next-slide-text",
-  "current-service-item",
-  "next-service-item",
-  "current-slide-notes",
-  "slide-thumbnail",
-  "section-chip",
-  "pp-timer",
-  "slide-progress",
-]);
-
 function Inspector({
   o, canvas, parentW, parentH, nested, locked, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
 }: {
@@ -2399,6 +2256,22 @@ function Inspector({
   const reaper = useReaperState();
   const peopleCount = usePeopleCountState();
   const oscTargets = useOscTargets();
+  // RossTalk targets + command catalogue for the rosstalk-button inspector. Loaded
+  // once here rather than per-object; both are small and change rarely.
+  const [rosstalkTargets, setRosstalkTargets] = useState<RossTalkTarget[]>([]);
+  const [rosstalkCommands, setRosstalkCommands] = useState<
+    { id: string; label: string; family: string; params: RossTalkParam[]; help?: string }[]
+  >([]);
+  useEffect(() => {
+    void invoke<{ targets: RossTalkTarget[] }>("rosstalk:targets")
+      .then((r) => setRosstalkTargets(r.targets))
+      .catch(() => {});
+    void invoke<{ id: string; label: string; family: string; params: RossTalkParam[]; help?: string }[]>(
+      "rosstalk:commands",
+    )
+      .then(setRosstalkCommands)
+      .catch(() => {});
+  }, []);
   const planItems = usePlanItems();
   const propInstances = usePropInstances();
   const integrationsSnap = useIntegrations();
@@ -2411,7 +2284,7 @@ function Inspector({
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex items-center gap-1">
-        <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted flex-1">{TYPE_LABELS[c.type]}</span>
+        <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted flex-1">{typeLabel(c.type)}</span>
         {c.type === "container" && (
           <Button variant="transparent" size="small" iconOnly onClick={onSaveGroup} aria-label="Save as group"><PackagePlusIcon className="size-3.5 text-fg-muted" /></Button>
         )}
@@ -2435,7 +2308,7 @@ function Inspector({
 
       {/* ProPresenter instance picker — only when >1 instance is configured
           (two-auditorium setups); otherwise everything reads the primary. */}
-      {PROP_OBJECT_TYPES.has(c.type) && propInstances && propInstances.list.length > 1 && (
+      {usesPropInstance(c.type) && propInstances && propInstances.list.length > 1 && (
         <RowSelect
           label="ProPresenter"
           hint="Which ProPresenter machine this object reads from — for multi-auditorium setups. Defaults to the primary instance; pick another to point this object at a second room's ProPresenter."
@@ -2771,6 +2644,27 @@ function Inspector({
           </>
         );
       })()}
+      {c.type === "record-status" && (
+        <>
+          <RowSelect
+            label="Recorder"
+            hint="Any = red whenever either OBS or REAPER is recording"
+            value={c.source ?? "any"}
+            options={[
+              { value: "any", label: "Any recorder" },
+              { value: "obs", label: "OBS only" },
+              { value: "reaper", label: "REAPER only" },
+            ]}
+            onChange={(v) => onConfig({ ...c, source: v as "any" | "obs" | "reaper" })}
+          />
+          <RowText label="Recording text" value={c.recordingText ?? ""} placeholder="RECORDING" onChange={(v) => onConfig({ ...c, recordingText: v })} />
+          <RowText label="Idle text" value={c.idleText ?? ""} placeholder="STANDBY" onChange={(v) => onConfig({ ...c, idleText: v })} />
+          <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="NO RECORDER" onChange={(v) => onConfig({ ...c, offlineText: v })} />
+          <RowSwitch label="Fill red while recording" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
+          <RowSwitch label="Hide when idle" hint="Pure tally light — nothing on screen unless recording" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
+        </>
+      )}
+
       {c.type === "obs-status" && (() => {
         const mode = c.mode ?? "recording";
         const liveLabel = !obs?.connected
@@ -2831,6 +2725,72 @@ function Inspector({
           <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
         </>
       )}
+      {c.type === "rosstalk-button" && (() => {
+        const target = rosstalkTargets.find((t) => t.id === c.targetId) ?? null;
+        const family = target?.config.family ?? "carbonite";
+        // Only ever offer commands for THIS target's family — a Carbonite XPT sent
+        // to an Ultrix is a different command entirely.
+        const commands = rosstalkCommands.filter((cmd) => cmd.family === family);
+        const command = commands.find((cmd) => cmd.id === c.commandId) ?? null;
+        return (
+          <>
+            <RowSelect
+              label="Target"
+              value={c.targetId ?? ""}
+              options={[
+                { value: "", label: "Pick a target…" },
+                ...rosstalkTargets.map((t) => ({
+                  value: t.id,
+                  label: `${t.name} (${t.config.family ?? "carbonite"})`,
+                })),
+              ]}
+              onChange={(v) => onConfig({ ...c, targetId: v || null, commandId: null, params: {} })}
+            />
+            <RowSelect
+              label="Command"
+              hint={target ? undefined : "Pick a target first"}
+              value={c.commandId ?? ""}
+              options={[
+                { value: "", label: "Pick a command…" },
+                ...commands.map((cmd) => ({ value: cmd.id, label: cmd.label })),
+              ]}
+              onChange={(v) => onConfig({ ...c, commandId: v || null, params: {} })}
+            />
+            {command?.params.map((p) =>
+              p.type === "number" ? (
+                <RowNumber
+                  key={p.key}
+                  label={p.label}
+                  hint={p.help}
+                  value={Number(c.params[p.key] ?? p.min ?? 0)}
+                  min={p.min}
+                  max={p.max}
+                  onChange={(n) => onConfig({ ...c, params: { ...c.params, [p.key]: n } })}
+                />
+              ) : p.type === "enum" ? (
+                <RowSelect
+                  key={p.key}
+                  label={p.label}
+                  hint={p.help}
+                  value={String(c.params[p.key] ?? "")}
+                  options={(p.options ?? []).map((o) => ({ value: o, label: o }))}
+                  onChange={(v) => onConfig({ ...c, params: { ...c.params, [p.key]: v } })}
+                />
+              ) : (
+                <RowText
+                  key={p.key}
+                  label={p.label}
+                  hint={p.help}
+                  value={String(c.params[p.key] ?? "")}
+                  onChange={(v) => onConfig({ ...c, params: { ...c.params, [p.key]: v } })}
+                />
+              ),
+            )}
+            <RowText label="Label" value={c.label} onChange={(v) => onConfig({ ...c, label: v })} />
+          </>
+        );
+      })()}
+
       {c.type === "osc-button" && (() => {
         const oc = c; // narrowed osc-button config (preserved into nested fns)
         const args = oc.args ?? [];
@@ -3014,7 +2974,7 @@ function Inspector({
       {c.type === "brand-logo" && (
         <RowSwitch label="Empty logo" checked={c.useEmptySlotLogo ?? false} onChange={(v) => onConfig({ type: "brand-logo", useEmptySlotLogo: v })} />
       )}
-      {NO_CONFIG_TYPES.has(c.type) && (
+      {isStylingOnly(c.type) && (
         <p className="text-caption2 text-fg-muted leading-snug">Updates automatically — no options. Use the styling controls below.</p>
       )}
 

@@ -15,16 +15,19 @@ export function rundownHeaderKind(title: string): "start" | "end" | null {
 }
 
 // Department → accent hue for row tinting. Keyword-matched (categories are named
-// freely per org) with a neutral-blue fallback, in our palette — subtler than
-// ScriptViewer's saturated fills.
+// freely per org) with a NEUTRAL fallback, drawn from the same palette the patch
+// sheet offers (patch-device-manager PATCH_COLORS) so departments and devices read
+// as one system. Hues are spread amber/green/blue/teal/red for separation at the
+// 12%-alpha tint these are used at; no purple or magenta, per the palette rule.
+// Must stay 6-digit hex — callers concatenate an alpha suffix (`${color}1f`).
 export function departmentColor(dept: string): string {
   const d = dept.toLowerCase();
-  if (d.includes("light")) return "#f59e0b";
-  if (d.includes("video") || d.includes("graphic") || d.includes("pro") || d.includes("screen")) return "#22c55e";
-  if (d.includes("audio") || d.includes("sound") || d.includes("foh")) return "#38bdf8";
-  if (d.includes("vocal") || d.includes("band") || d.includes("music") || d.includes("md") || d.includes("key") || d.includes("drum")) return "#a78bfa";
-  if (d.includes("stage") || d.includes("cam") || d.includes("director")) return "#ec4899";
-  return "#5b9cff";
+  if (d.includes("light")) return "#ffb224";
+  if (d.includes("video") || d.includes("graphic") || d.includes("pro") || d.includes("screen")) return "#46a758";
+  if (d.includes("audio") || d.includes("sound") || d.includes("foh")) return "#0091ff";
+  if (d.includes("vocal") || d.includes("band") || d.includes("music") || d.includes("md") || d.includes("key") || d.includes("drum")) return "#12a594";
+  if (d.includes("stage") || d.includes("cam") || d.includes("director")) return "#e5484d";
+  return "#8b8d98";
 }
 
 export interface RundownColumn {
@@ -65,7 +68,7 @@ export function RundownTable({
 
   return (
     <table className={`w-full border-collapse ${textSizeClass}`}>
-      <thead className="sticky top-0 z-10 bg-[#14161c] text-fg-subtle">
+      <thead className="sticky top-0 z-10 bg-[var(--kiosk-surface-1)] text-fg-subtle">
         <tr className="text-left">
           {columns.map((c) => (
             <th
@@ -117,7 +120,7 @@ export function RundownTable({
         })}
       </tbody>
       {footer != null && (
-        <tfoot className="sticky bottom-0 z-10 bg-[#14161c]">
+        <tfoot className="sticky bottom-0 z-10 bg-[var(--kiosk-surface-1)]">
           <tr>
             <td colSpan={columns.length} className="px-3 py-2 border-t border-line text-caption1 font-semibold uppercase tracking-wider text-fg-muted">
               {footer}

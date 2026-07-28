@@ -363,6 +363,10 @@
    read as "blueish" next to the neutral app shell. Everything derives from this. */
 :root {
   --kiosk-bg: #0a0a0a;
+  /* One step up from the backdrop, for sticky table chrome (rundown header and
+     footer bands) and empty-image placeholders. Strictly R=G=B like --kiosk-bg —
+     the values this replaced (#14161c, #13131a, #1a1a2e) all carried a blue bias. */
+  --kiosk-surface-1: #171717;
 }
 
 /* The kiosk backdrop. Applied behind every view + the embedded "Mic slots"

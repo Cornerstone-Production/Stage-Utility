@@ -610,6 +610,15 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>(`/api/osc/targets/${encodeURIComponent(id)}/test`);
     }
 
+    case "rosstalk:targets": return apiFetch("/api/rosstalk/targets");
+    case "rosstalk:addTarget": return post("/api/rosstalk/targets", params);
+    case "rosstalk:updateTarget": return patch(`/api/rosstalk/targets/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);
+    case "rosstalk:removeTarget": return del(`/api/rosstalk/targets/${(params as { id: string }).id}`);
+    case "rosstalk:test": return post(`/api/rosstalk/targets/${(params as { id: string }).id}/test`);
+    case "rosstalk:commands": return apiFetch("/api/rosstalk/commands");
+    case "rosstalk:send": return post("/api/rosstalk/send", params);
+    case "rosstalk:simulate": return apiFetch("/api/rosstalk/simulate");
+    case "rosstalk:setSimulate": return post("/api/rosstalk/simulate", params);
     case "osc:send":
       return post<T>("/api/osc/send", p);
 

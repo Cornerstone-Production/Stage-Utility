@@ -14,14 +14,10 @@
 // channel, and backs off exponentially while REAPER is unreachable.
 
 import type { ReaperStatusDTO } from "../types/stage.js";
-import { broadcast, channelHasSubscribers } from "./broadcaster.js";
-import { serviceWindow } from "./service-window.js";
-
-type ReaperConnState = "connected" | "error" | "disconnected";
+import { StatusIntegration } from "./integration-base.js";
 
 const POLL_MS = 1000; // active cadence (someone is watching the channel)
 const IDLE_POLL_MS = 5000; // no subscribers — keep the connection badge warm, cheaply
-const RECONNECT_BASE_MS = 3000;
 const REQUEST_TIMEOUT_MS = 4000;
 
 const OFFLINE: ReaperStatusDTO = {
@@ -55,58 +51,29 @@ export function parseTransport(body: string): ReaperStatusDTO {
   };
 }
 
-class ReaperService {
+class ReaperService extends StatusIntegration<ReaperStatusDTO> {
   private host: string | null = null;
   private port: number | null = null;
 
-  private running = false;
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectAttempt = 0;
-
-  private last: ReaperStatusDTO = OFFLINE;
-
-  private onConn: ((state: ReaperConnState, message: string | null) => void) | null = null;
-  private reported: ReaperConnState | null = null;
-
-  setConnectionListener(cb: (state: ReaperConnState, message: string | null) => void): void {
-    this.onConn = cb;
+  constructor() {
+    super("reaper", "reaper:status", OFFLINE);
   }
 
-  /** Latest snapshot — lets a freshly-loaded display hydrate immediately. */
-  getLatest(): ReaperStatusDTO {
-    return this.last;
-  }
-
-  private report(state: ReaperConnState, message: string | null): void {
-    if (this.reported === state) return;
-    this.reported = state;
-    this.onConn?.(state, message);
+  protected get configured(): boolean {
+    return !!this.host && !!this.port;
   }
 
   configure(host: string, port: number): void {
     this.host = host?.trim() || null;
     this.port = port > 0 ? Math.floor(port) : null;
-    this.reported = null;
+    this.resetReport();
     this.restart();
   }
 
-  start(): void {
-    if (this.running || !this.host || !this.port) return;
-    this.running = true;
-    this.reconnectAttempt = 0;
+  override start(): void {
+    if (this.running || !this.configured) return;
     console.log(`[reaper] polling ${this.host}:${this.port}`);
-    void this.poll();
-  }
-
-  stop(): void {
-    this.running = false;
-    this.clearTimer();
-    if (this.last.connected) this.emit(OFFLINE);
-  }
-
-  private restart(): void {
-    this.stop();
-    if (this.host && this.port) this.start();
+    super.start();
   }
 
   /** One-shot reachability check for the Integrations "Test connection" button. */
@@ -134,44 +101,24 @@ class ReaperService {
     }
   }
 
-  private async poll(): Promise<void> {
+  protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
     try {
       const body = await this.fetchTransport(this.host, this.port);
       if (!this.running) return;
       if (!this.last.connected) {
-        this.reconnectAttempt = 0;
+        this.resetBackoff();
         this.report("connected", `Connected to REAPER at ${this.host}:${this.port}`);
       }
       this.emitIfChanged(parseTransport(body));
       // Poll fast while a display is watching; idle slowly otherwise.
-      this.schedule(channelHasSubscribers("reaper:status") ? POLL_MS : IDLE_POLL_MS);
+      this.scheduleIn(this.hasSubscribers ? POLL_MS : IDLE_POLL_MS);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (this.reconnectAttempt === 0) console.warn(`[reaper] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
+      if (this.attempt === 0) console.warn(`[reaper] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
-      if (this.last.connected) this.emit(OFFLINE);
+      this.goOffline();
       this.scheduleReconnect();
-    }
-  }
-
-  private schedule(delay: number): void {
-    if (!this.running) return;
-    this.clearTimer();
-    this.timer = setTimeout(() => void this.poll(), delay);
-  }
-
-  private scheduleReconnect(): void {
-    if (!this.running) return;
-    const delay = serviceWindow.capDelayMs(RECONNECT_BASE_MS * 2 ** this.reconnectAttempt, channelHasSubscribers("reaper:status"));
-    this.reconnectAttempt++;
-    this.schedule(delay);
-  }
-
-  private clearTimer(): void {
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
     }
   }
 
@@ -190,10 +137,6 @@ class ReaperService {
     else this.last = next;
   }
 
-  private emit(snapshot: ReaperStatusDTO): void {
-    this.last = snapshot;
-    broadcast("reaper:status", snapshot);
-  }
 }
 
 export const reaperService = new ReaperService();

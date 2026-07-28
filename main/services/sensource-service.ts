@@ -23,8 +23,8 @@
 
 import type { PeopleCountDTO, PeopleHistoryPoint, PeopleZoneCount } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
+import { StatusIntegration } from "./integration-base.js";
 
-type ConnState = "connected" | "error" | "disconnected";
 
 const AUTH_URL = "https://auth.sensourceinc.com/oauth/token";
 const API_BASE = "https://vea.sensourceinc.com/api";
@@ -266,15 +266,13 @@ function buildDto(reduced: ReducedTraffic, updatedAt: string): PeopleCountDTO {
   };
 }
 
-class SenSourceService {
+class SenSourceService extends StatusIntegration<PeopleCountDTO> {
   private cfg: SenSourceConfig | null = null;
-  private running = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   private token: string | null = null;
   private tokenExpiresAt = 0;
 
-  private last: PeopleCountDTO = OFFLINE;
   private lastCountSig: string | null = null;
   /** Rolling building-total samples for the people-graph trend object. */
   private history: PeopleHistoryPoint[] = [];
@@ -283,59 +281,39 @@ class SenSourceService {
   /** Cached /space listing for the authoritative building occupancy. */
   private spacesCache: { at: number; spaces: VeaSpace[] } | null = null;
 
-  private onConn: ((state: ConnState, message: string | null) => void) | null = null;
-  private reported: ConnState | null = null;
-
-  setConnectionListener(cb: (state: ConnState, message: string | null) => void): void {
-    this.onConn = cb;
+  constructor() {
+    super("sensource", "people:count", OFFLINE);
   }
 
-  /** Latest snapshot — lets a freshly-loaded display hydrate immediately. */
-  getLatest(): PeopleCountDTO {
-    return this.last;
-  }
-
-  private report(state: ConnState, message: string | null): void {
-    if (this.reported === state) return;
-    this.reported = state;
-    this.onConn?.(state, message);
+  /** Polls on a fixed interval rather than reconnecting with back-off, so the
+   *  base's retry timer is unused here — connect() is one poll. */
+  protected get configured(): boolean {
+    return !!this.cfg && (!!this.cfg.apiToken || (!!this.cfg.clientId && !!this.cfg.clientSecret));
   }
 
   configure(cfg: SenSourceConfig): void {
     this.cfg = cfg;
     this.token = null;
     this.tokenExpiresAt = 0;
-    this.reported = null;
+    this.resetReport();
     this.zonesCache = null;
     this.spacesCache = null;
     this.restart();
   }
 
-  private hasCreds(): boolean {
-    return !!this.cfg && (!!this.cfg.apiToken || (!!this.cfg.clientId && !!this.cfg.clientSecret));
-  }
-
-  start(): void {
-    if (this.running || !this.hasCreds()) return;
-    this.running = true;
+  override start(): void {
+    if (this.running || !this.configured) return;
     const sec = Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
     console.log(`[sensource] polling every ${sec}s`);
-    void this.poll();
-    this.pollTimer = setInterval(() => void this.poll(), sec * 1000);
+    super.start(); // runs the first poll
+    this.pollTimer = setInterval(() => void this.connect(), sec * 1000);
   }
 
-  stop(): void {
-    this.running = false;
+  protected override teardown(): void {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
-    if (this.last.connected) this.emit(OFFLINE);
-  }
-
-  private restart(): void {
-    this.stop();
-    if (this.hasCreds()) this.start();
   }
 
   /** One-shot reachability check for the Integrations "Test connection" button. */
@@ -568,7 +546,7 @@ class SenSourceService {
 
   // ── Poll ──────────────────────────────────────────────────────────────────
 
-  private async poll(): Promise<void> {
+  protected async connect(): Promise<void> {
     if (!this.running || !this.cfg) return;
     try {
       // The Vea /data/traffic endpoint has NO working location/zone filter param
@@ -662,11 +640,11 @@ class SenSourceService {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[sensource] poll error:", msg);
       this.report("error", msg);
-      if (this.last.connected) this.emit(OFFLINE);
+      this.goOffline();
     }
   }
 
-  private emit(snapshot: PeopleCountDTO): void {
+  protected override emit(snapshot: PeopleCountDTO): void {
     // Carry the rolling history on every snapshot (incl. OFFLINE) so the trend
     // graph holds its shape through a transient disconnect.
     this.last = { ...snapshot, history: this.history.slice() };
@@ -676,7 +654,7 @@ class SenSourceService {
     const sig = JSON.stringify([snapshot.connected, snapshot.total, snapshot.zones]);
     if (sig === this.lastCountSig) return;
     this.lastCountSig = sig;
-    broadcast("people:count", this.last);
+    broadcast(this.channel, this.last);
   }
 }
 
