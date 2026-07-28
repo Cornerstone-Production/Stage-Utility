@@ -202,6 +202,7 @@ const SECTION_DESC: Record<string, string> = {
   "service-history": "Every service you've run — timing and attendance.",
   baptisms: "Time testimonies and baptisms live.",
   patch: "Stage input & output patch — record it, and surface each week's to volunteers.",
+  automation: "When something happens in Stage, do something to a device.",
   advanced: "Updates, network address, capture windows, and full config.",
 };
 
