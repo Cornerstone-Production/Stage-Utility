@@ -610,6 +610,16 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>(`/api/osc/targets/${encodeURIComponent(id)}/test`);
     }
 
+    case "automation:registry": return apiFetch("/api/automation/registry");
+    case "automation:rules": return apiFetch("/api/automation/rules");
+    case "automation:addRule": return post("/api/automation/rules", params);
+    case "automation:updateRule": return patch(`/api/automation/rules/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);
+    case "automation:removeRule": return del(`/api/automation/rules/${(params as { id: string }).id}`);
+    case "automation:testRule": return post(`/api/automation/rules/${(params as { id: string }).id}/test`);
+    case "automation:settings": return apiFetch("/api/automation/settings");
+    case "automation:setSettings": return post("/api/automation/settings", params);
+    case "automation:log": return apiFetch("/api/automation/log");
+    case "automation:clearLog": return del("/api/automation/log");
     case "rosstalk:targets": return apiFetch("/api/rosstalk/targets");
     case "rosstalk:addTarget": return post("/api/rosstalk/targets", params);
     case "rosstalk:updateTarget": return patch(`/api/rosstalk/targets/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);

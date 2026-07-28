@@ -43,6 +43,7 @@ import { scriptviewRoutes } from "./routes/scriptview-routes.js";
 import { viewRoutes } from "./routes/view-routes.js";
 import { integrationRoutes } from "./routes/integration-routes.js";
 import { rosstalkRoutes } from "./routes/rosstalk-routes.js";
+import { automationRoutes } from "./routes/automation-routes.js";
 import { displaySettingsRoutes } from "./routes/display-settings-routes.js";
 import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
@@ -754,6 +755,8 @@ export class RemoteServer {
     await integrationRoutes(c);
     if (res.headersSent) return;
     await rosstalkRoutes(c);
+    if (res.headersSent) return;
+    await automationRoutes(c);
     if (res.headersSent) return;
     await displaySettingsRoutes(c);
     if (res.headersSent) return;
