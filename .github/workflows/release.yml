@@ -103,6 +103,7 @@ jobs:
         run: npm ci --include=dev && npm run lint && npm run type-check && npm test && npm run build
 
       - name: Bump, tag and push
+        id: push
         if: steps.version.outputs.skip == 'false'
         env:
           V: ${{ steps.version.outputs.version }}
@@ -114,12 +115,28 @@ jobs:
           git add package.json package-lock.json
           git commit -m "chore(release): v$V [skip ci]"
           git tag "v$V"
-          # Push the branch fast-forward only, then the tag. Never a force.
-          git push origin "HEAD:${GITHUB_REF_NAME}"
-          git push origin "v$V"
 
+          # Push the branch fast-forward only, then the tag. Never a force.
+          #
+          # A rejection here means the branch moved while we were verifying —
+          # someone merged another PR during the several minutes of ci + build.
+          # That is not a failure: this run's version was computed against a HEAD
+          # that is now stale, and the queued run for the newer commit will
+          # release everything since the last tag, at the correct level for the
+          # combined set. So stand down rather than erroring (or force-pushing:
+          # deployments track beta and a rewrite breaks their in-app updater).
+          if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+            git push origin "v$V"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${GITHUB_REF_NAME} advanced during this run — skipping v$V. The run for the newer commit will release it."
+          fi
+
+      # Only when the tag actually reached the remote — a skipped push means this
+      # run stood down and there is no tag to publish against.
       - name: Publish the release
-        if: steps.version.outputs.skip == 'false'
+        if: steps.version.outputs.skip == 'false' && steps.push.outputs.pushed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           V: ${{ steps.version.outputs.version }}
