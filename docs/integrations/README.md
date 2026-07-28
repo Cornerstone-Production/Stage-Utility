@@ -37,3 +37,7 @@ template — see [reaper.md](reaper.md) for the full file map. The pattern:
 
 Build integrations efficiency-first: change-driven broadcasts, reuse the shared
 SSE stream, gate polling on subscribers, back off when unreachable.
+
+## Automation
+
+Rules that fire integrations from Stage's own state — see [Automation](../automation.md).
