@@ -3,6 +3,11 @@
 Pushes a live people count onto a Ross multiviewer tile as on-tile text using the
 TSL UMD 3.1 protocol over TCP.
 
+Both Ross integrations share one **Ross** card on the Integrations page. That is a
+visual grouping only: each keeps its own id, enable switch, config and connection
+state, so layout buttons and automation actions referencing either one are
+unaffected.
+
 ## How it works
 
 RossTalk can't set arbitrary multiviewer text, so the sender
