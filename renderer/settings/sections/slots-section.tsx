@@ -138,7 +138,10 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
     } else if (!channelId || channelId === "__none__") {
       onChange({ ...slot, deviceBinding: null, deviceLabel: null });
     } else {
-      onChange({ ...slot, deviceBinding: { providerId: "wireless", channelId }, deviceLabel: null });
+      // A live channel keeps any label already typed — the label stands in for the
+      // frequency on the cell, so it is meaningful for live devices too, not just
+      // offline ones.
+      onChange({ ...slot, deviceBinding: { providerId: "wireless", channelId }, deviceLabel: slot.deviceLabel });
     }
   }
 
@@ -148,11 +151,23 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
     } else if (!channelId || channelId === "__none__") {
       onChange({ ...slot, iemBinding: null, iemLabel: null });
     } else {
-      onChange({ ...slot, iemBinding: { providerId: "wireless", channelId }, iemLabel: null });
+      onChange({ ...slot, iemBinding: { providerId: "wireless", channelId }, iemLabel: slot.iemLabel });
     }
   }
 
   const currentMode: "pco" | "static" | "empty" = isPco ? "pco" : isStatic ? "static" : "empty";
+
+  // The receiver's own channel name, offered as a one-click fill for the mic label.
+  // listChannels already uses CHAN_NAME as the channel's label (shure-base.ts), so
+  // there is nothing extra to fetch — but it falls back to "Ch N" when the receiver
+  // reports no name, and that is not worth putting on a display.
+  const boundChannel = slot.deviceBinding
+    ? wirelessChannels.find((c) => c.id === slot.deviceBinding!.channelId)
+    : undefined;
+  const receiverName =
+    boundChannel && !/^Ch \d+$/.test(boundChannel.label) && boundChannel.label !== slot.deviceLabel
+      ? boundChannel.label
+      : null;
 
   // Collapsed-state hint for the "Options" drop-down — surfaces what's set so an
   // operator doesn't have to expand every slot to see its wiring.
@@ -427,15 +442,31 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
               </SelectContent>
             </Select>
           </div>
-          {slot.deviceLabel != null && (
+          {(slot.deviceLabel != null || slot.deviceBinding != null) && (
             <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="text-caption1 text-gray-9 shrink-0">Offline label:</span>
+              <span className="flex items-center gap-1 text-caption1 text-gray-9 shrink-0">
+                Mic label:
+                <InfoHint>
+                  Shown on the cell in place of the frequency. Leave blank to keep the frequency. On an
+                  offline mic this is the whole pill, since there is no telemetry to show.
+                </InfoHint>
+              </span>
               <Input
-                value={slot.deviceLabel}
+                value={slot.deviceLabel ?? ""}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => onChange({ ...slot, deviceLabel: e.target.value })}
-                placeholder="e.g. PSM 900 — Lead"
+                placeholder="e.g. VOX 3"
                 className="w-full sm:w-40"
               />
+              {receiverName && (
+                <Button
+                  variant="transparent"
+                  size="small"
+                  onClick={() => onChange({ ...slot, deviceLabel: receiverName })}
+                  title={`Use the receiver's own channel name (${receiverName})`}
+                >
+                  Use receiver name
+                </Button>
+              )}
             </div>
           )}
 
@@ -463,13 +494,19 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
               </SelectContent>
             </Select>
           </div>
-          {slot.iemLabel != null && (
+          {(slot.iemLabel != null || slot.iemBinding != null) && (
             <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="text-caption1 text-gray-9 shrink-0">Offline IEM label:</span>
+              <span className="flex items-center gap-1 text-caption1 text-gray-9 shrink-0">
+                IEM label:
+                <InfoHint>
+                  Shown on a second line under the mic label, so a player can see both their vocal mix
+                  and their IEM mix on one cell. Leave blank to show nothing.
+                </InfoHint>
+              </span>
               <Input
-                value={slot.iemLabel}
+                value={slot.iemLabel ?? ""}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => onChange({ ...slot, iemLabel: e.target.value })}
-                placeholder="e.g. PSM 900 — Lead"
+                placeholder="e.g. IEM 2"
                 className="w-full sm:w-40"
               />
             </div>

@@ -151,17 +151,32 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
         {hasIem && <ChargeBar level={iemCharge} />}
       </div>
 
-      {/* ── Frequency segment — only with the RF bars (it's RF info). ── */}
+      {/* ── Label / frequency segment — only with the RF bars (it's RF info).
+          A manual label takes the frequency's place; the label's presence IS the
+          toggle, so leaving it blank keeps the frequency showing. An IEM label
+          sits on a second line, present only when set. ── */}
       {showFreq && (
         <>
           <Divider />
-          <div className="flex items-center flex-1 min-w-0">
-            {device.freq !== null ? (
+          <div className="flex flex-col justify-center flex-1 min-w-0" style={{ gap: "calc(var(--rf) * 0.12)" }}>
+            {device.label ? (
+              <span className={cn("font-bold truncate leading-none", statusColor)} style={valueTextStyle}>
+                {device.label}
+              </span>
+            ) : device.freq !== null ? (
               <span className={cn("font-mono font-bold tabular-nums truncate leading-none", statusColor)} style={valueTextStyle}>
                 {device.freq}
               </span>
             ) : (
               <span className="font-bold text-fg-faint leading-none" style={valueTextStyle}>—</span>
+            )}
+            {device.iemLabel && (
+              <span
+                className="text-fg-muted truncate leading-none"
+                style={{ fontSize: "calc(var(--rf) * 0.78)" }}
+              >
+                {device.iemLabel}
+              </span>
             )}
           </div>
         </>

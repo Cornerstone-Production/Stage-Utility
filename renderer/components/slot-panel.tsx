@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { UserRoundIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { StatusStrip, OfflinePill } from "./status-strip";
+import { slotStripMode } from "./slot-strip-mode";
 import { BrandLogo } from "./brand-logo";
 
 interface SlotPanelProps {
@@ -206,21 +207,20 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             )}
           </div>
 
-          {/* Offline pill — a manually-assigned (offline) mic and/or IEM shows as
-              its own pill in place of the RF pill; only surfaces when an offline
-              device is set (Device channel → Offline). */}
-          {(slot.device.label !== null || slot.device.iemLabel !== null) && (
-            <OfflinePill micLabel={slot.device.label} iemLabel={slot.device.iemLabel} />
-          )}
-
-          {/* Status strip — live telemetry (RF / charge / IEM battery). Suppressed
-              when the mic itself is offline (the offline pill takes its place). */}
-          {slot.device.label === null &&
-            ((slot.device.status !== "none" && !slot.hideRf) ||
-              slot.device.charge !== null ||
-              slot.device.iemCharge !== null) && (
-              <StatusStrip device={slot.device} hideRf={slot.hideRf} />
-            )}
+          {/* One of two pills, never both. A live device shows the telemetry strip
+              — with any manual label standing in for the frequency inside it — and
+              a manually-assigned (offline) device shows the label-only pill in the
+              same spot. See slot-strip-mode.ts. */}
+          {(() => {
+            const mode = slotStripMode(slot.device, slot.hideRf);
+            if (mode === "pill") {
+              return <OfflinePill micLabel={slot.device.label} iemLabel={slot.device.iemLabel} />;
+            }
+            if (mode === "strip") {
+              return <StatusStrip device={slot.device} hideRf={slot.hideRf} />;
+            }
+            return null;
+          })()}
         </div>
       </div>
     </div>
