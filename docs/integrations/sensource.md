@@ -43,9 +43,25 @@ static token are stored encrypted.
 **On a layout:** add object → **SenSource → people-counter / people-graph /
 people-panel**.
 
+## Service history
+
+`attendance-recorder.ts` folds the live counts into a per-service record: it samples
+every 30 s, keeps running peak/min/last, and broadcasts the open record on
+**`attendance:history`** every 5 s so the History tab updates during a service rather
+than only after it.
+
+On the History **Overview**, the attendance trend chart includes the service that is
+recording — its point is drawn hollow and its tooltip reads "recording", because that
+weekend total is a partial that keeps climbing. Every computed stat (average, peak,
+trend direction) is taken over finished services only; folding a partial peak into a
+cross-service mean would understate it all morning and "recover" by noon. The two
+scopes live in `renderer/settings/sections/overview-scope.ts`.
+
 ## Files
 
 - `main/services/sensource-service.ts` — poll loop, token exchange, `reduceTraffic()` / `reduceSpaceOccupancy()` / `latestSpaceOccupancy()`, `people:count` broadcast
+- `main/services/attendance-recorder.ts` — per-service sampling, peak folding, `attendance:history` broadcast
+- `renderer/settings/sections/overview-scope.ts` — `inTrendScope()` / `inAverageScope()` (chart shows the recording service, stats don't)
 - `main/services/integration-manager.ts` — `SENSOURCE_DESCRIPTOR`, `applySensource()`, `getSensourceConfig()`, `getSensourceLocations()` / `getSensourceZones()`, test
 - `main/services/remote-server.ts` — `GET /api/people/count`, `/api/sensource/locations`, `/api/sensource/zones` + `people:count` SSE hydrate
 - `renderer/main/layout-renderer.tsx` — `people-counter` / `people-graph` / `people-panel` render cases

@@ -7,6 +7,7 @@ import { copyText } from "../../lib/clipboard";
 import { HistoryCalendar } from "../../components/history-calendar";
 import { AttendanceDetail, servicePeakAttendance } from "./attendance-history-section";
 import { SplDetail } from "./spl-history-section";
+import { inTrendScope, inAverageScope } from "./overview-scope";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -32,7 +33,7 @@ function shortDay(day: string): string {
 
 /** One point on the attendance trend chart — a service occurrence with its peak
  *  in-room count and the day it happened (for the axis labels). */
-interface TrendPoint { day: string; value: number; parts?: { label: string; value: number }[] }
+interface TrendPoint { day: string; value: number; parts?: { label: string; value: number }[]; live?: boolean }
 
 /** A trend indicator: which direction the latest value moved vs the mean of the
  *  prior window, and whether that direction is good or bad for THIS metric.
@@ -331,7 +332,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
 
   // While a service is still recording — the open detail OR any row in the day
   // list — tick every second so the live "Actual"/"running" durations count up
-  // between attendance/timeline broadcasts. (The Overview stays finished-only.)
+  // between attendance/timeline broadcasts. (The Overview trend includes the
+  // recording service; its computed stats stay over finished ones.)
   const detailLive = detail != null && detail.endedAt == null;
   const listLive = (list ?? []).some((t) => t.endedAt == null);
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -440,15 +442,18 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
 
   // Overview stats, cumulative THROUGH the selected day (serviceDate <= day) so
   // picking a past date shows how things looked as of then; scoped to the type
-  // filter so a Youth service's numbers don't blend into Sunday's. Finished only.
+  // filter so a Youth service's numbers don't blend into Sunday's.
   // Produces the blend's lead stat, the instrument strip, and the attendance
   // trend chart series — plus honest trend indicators (latest vs prior window).
+  //
+  // The chart INCLUDES the service recording right now (its point climbs through
+  // the morning); every computed stat — average, peak, trend direction — is taken
+  // over finished services only, so a partial peak can't drag the headline number
+  // down and then "recover" by noon. See overview-scope.ts.
   const overview = useMemo<OverviewData>(() => {
     const asOf = day;
-    const inScope = (typeId: string | null, date: string, ended: unknown) =>
-      ended != null && (!activeType || typeId === activeType) && (!asOf || date <= asOf);
-    const tl = (list ?? []).filter((t) => inScope(t.serviceTypeId, t.serviceDate, t.endedAt));
-    const att = attList.filter((a) => inScope(a.serviceTypeId, a.serviceDate, a.endedAt));
+    const tl = (list ?? []).filter((t) => inAverageScope(t, activeType, asOf));
+    const att = attList.filter((a) => inTrendScope(a, activeType, asOf));
     const mean = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
     const sums = tl.map((t) => ({ t, s: summarize(t) }));
     const lens = sums.filter((x) => x.s.actual > 0);
@@ -477,12 +482,19 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           day: d,
           value: svcs.reduce((s, a) => s + a.peakOccupancy, 0),
           parts: svcs.map((a) => ({ label: fmtTime(a.serviceTimeStartsAt ?? a.startedAt) || "service", value: a.peakOccupancy })),
+          // A weekend is "live" while any of its services is still recording — its
+          // total is a partial that will keep climbing.
+          live: svcs.some((a) => a.endedAt == null),
         };
       });
-    const attSeries = attPoints.map((p) => p.value);
+    // Stats are computed over SETTLED weekends only. A weekend still recording has
+    // a partial total, so folding it in would understate the average, misreport the
+    // peak, and fake a downward trend for the first half of the morning.
+    const settledPoints = attPoints.filter((p) => !p.live);
+    const settledSeries = settledPoints.map((p) => p.value);
     // Lead stat + peak are WEEKEND totals now, to stay coherent with the chart.
-    const avgAttendance = mean(attSeries);
-    const peakWeekend = attPoints.length ? attPoints.reduce((m, p) => (p.value > m.value ? p : m)) : null;
+    const avgAttendance = mean(settledSeries);
+    const peakWeekend = settledPoints.length ? settledPoints.reduce((m, p) => (p.value > m.value ? p : m)) : null;
     // Overrun series (chronological) for its own trend indicator.
     const overrunChron = [...sums]
       .sort((a, b) => Date.parse(a.t.startedAt) - Date.parse(b.t.startedAt))
@@ -490,7 +502,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       .filter((v): v is number => v != null);
 
     // Attendance up = good; overrun up = bad.
-    const attTrend = computeTrend(attSeries, true);
+    const attTrend = computeTrend(settledSeries, true);
     const overrunTrend = computeTrend(overrunChron, false);
 
     return {
@@ -1029,7 +1041,14 @@ function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
       >
         <line x1={0} y1={H - padBottom} x2={W} y2={H - padBottom} stroke="var(--su-line)" />
         <polyline points={poly} fill="none" stroke="var(--su-accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-        <circle cx={lastX} cy={lastY} r={4} fill="var(--su-accent)" />
+        {/* The newest point is hollow while its service is still recording — that
+            total is a partial and will keep climbing, so it must not read as a
+            settled weekend. */}
+        {points[points.length - 1].live ? (
+          <circle cx={lastX} cy={lastY} r={4} fill="var(--su-bg)" stroke="var(--su-accent)" strokeWidth={2} />
+        ) : (
+          <circle cx={lastX} cy={lastY} r={4} fill="var(--su-accent)" />
+        )}
         {hp && (
           <g pointerEvents="none">
             <line x1={hx} y1={padTop} x2={hx} y2={H - padBottom} stroke="var(--su-line-strong)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
@@ -1046,7 +1065,9 @@ function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
           className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border border-line-strong bg-popover px-2 py-1 shadow-md backdrop-blur-xl"
           style={{ left: `${(hx / W) * 100}%`, top: `${Math.max(hy - 8, 4)}px` }}
         >
-          <div className="font-mono text-caption2 tabular-nums text-fg-subtle whitespace-nowrap">{shortDay(hp.day)}</div>
+          <div className="font-mono text-caption2 tabular-nums text-fg-subtle whitespace-nowrap">
+            {shortDay(hp.day)}{hp.live ? " · recording" : ""}
+          </div>
           <div className="font-mono text-caption1 font-medium tabular-nums text-fg text-center">{hp.value.toLocaleString()}</div>
           {hp.parts && hp.parts.length > 1 && (
             <div className="mt-1 flex flex-col gap-0.5 border-t border-line pt-1">
