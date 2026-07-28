@@ -24,7 +24,8 @@
   "include": [
     "renderer",
     "server.ts",
-    "vite.config.ts"
+    "vite.config.ts",
+    "main/**/*.test.ts"
   ],
   "exclude": [
     "node_modules"
