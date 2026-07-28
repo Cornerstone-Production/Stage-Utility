@@ -716,7 +716,7 @@ export function SettingsView() {
       id: `slot-${Date.now()}`,
       channel: String(maxChannel + 1).padStart(2, "0"),
       order: localSlots.length,
-      link: { kind: "pco", matchBy: "position", teamPositionName: "" },
+      link: { kind: "pco", matchBy: "position", positions: [] },
       deviceBinding: null,
       displayName: null,
       photoUrl: null,

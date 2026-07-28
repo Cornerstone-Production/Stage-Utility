@@ -196,12 +196,12 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             >
               {displayName ?? "—"}
             </span>
-            {!isStatic && slot.link.kind === "pco" && slot.link.matchBy === "position" && (
+            {!isStatic && slot.link.kind === "pco" && slot.link.matchBy === "position" && slot.link.positions.length > 0 && (
               <span
                 className="text-fg-muted block leading-tight truncate mt-0.5"
                 style={{ fontSize: "clamp(0.72rem, 8.5cqi, 1.75rem)" }}
               >
-                {slot.link.teamPositionName}
+                {slot.link.positions.map((p) => p.name ?? "Any").join(" / ")}
               </span>
             )}
           </div>
