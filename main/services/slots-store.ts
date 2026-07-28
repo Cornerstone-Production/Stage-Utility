@@ -5,8 +5,33 @@
 // Migration from v1:  Record<serviceTypeId, Slot[]>  → placed under "display-1"
 // Migration from v0:  Slot[] (flat array)             → placed under "display-1" / "default"
 
-import type { Slot } from "../types/stage.js";
+import type { Slot, SlotLink } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+
+/** v2 -> v3: a single `teamPositionName` + `notesStartsWith` becomes a `positions`
+ *  range. Exported for tests. Total by design — DataStore does not deep-merge on
+ *  load, so anything on disk must come back as a valid SlotLink. */
+export function migrateSlotLink(link: unknown): SlotLink {
+  const l = link as Record<string, unknown> | null;
+  if (!l || typeof l !== "object") return { kind: "pco", matchBy: "position", positions: [] };
+
+  if (l.kind === "static" || l.kind === "empty" || l.kind === "spacer") return l as unknown as SlotLink;
+  if (l.kind === "pco" && l.matchBy === "person") return l as unknown as SlotLink;
+
+  if (l.kind === "pco" && l.matchBy === "position") {
+    if (Array.isArray(l.positions)) return l as unknown as SlotLink; // already v3
+    const name = typeof l.teamPositionName === "string" ? l.teamPositionName.trim() : "";
+    const note = typeof l.notesStartsWith === "string" ? l.notesStartsWith.trim() : "";
+    if (!name) return { kind: "pco", matchBy: "position", positions: [] };
+    return {
+      kind: "pco",
+      matchBy: "position",
+      positions: [note ? { name, notesStartsWith: note } : { name }],
+    };
+  }
+
+  return { kind: "pco", matchBy: "position", positions: [] };
+}
 
 // Outer key = displayId, inner key = serviceTypeId.
 type SlotsMap = Record<string, Record<string, Slot[]>>;
@@ -35,8 +60,26 @@ async function loadNormalised(): Promise<SlotsMap> {
     return migrated;
   }
 
-  // v2: already correct shape.
-  return raw as SlotsMap;
+  // v3: rewrite every slot's link into the positions-range shape. Cheap and
+  // idempotent, so it runs on every load rather than needing a version stamp.
+  const map = raw as SlotsMap;
+  let changed = false;
+  for (const byType of Object.values(map)) {
+    for (const slots of Object.values(byType)) {
+      for (const slot of slots as Slot[]) {
+        const next = migrateSlotLink(slot.link);
+        if (JSON.stringify(next) !== JSON.stringify(slot.link)) {
+          slot.link = next;
+          changed = true;
+        }
+      }
+    }
+  }
+  if (changed) {
+    await store.save(map);
+    console.log("[slots-store] migrated v2 links -> v3 position ranges");
+  }
+  return map;
 }
 
 export const slotsStore = {

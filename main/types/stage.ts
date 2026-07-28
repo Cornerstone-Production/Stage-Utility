@@ -987,9 +987,19 @@ export interface TeamPositionDTO {
   positionName: string;
 }
 
+/** One position a slot will accept, with an optional note filter scoped to it.
+ *  `name` omitted = any position (the note is then the only constraint). An entry
+ *  with neither is a misconfiguration and never matches — see slot-resolver. */
+export interface SlotPositionMatch {
+  name?: string;
+  notesStartsWith?: string;
+}
+
 export type SlotLink =
   | { kind: "pco"; matchBy: "person"; personId: string }
-  | { kind: "pco"; matchBy: "position"; teamPositionName: string; notesStartsWith?: string }
+  // A range: the first listed position with someone available fills the slot. A
+  // per-position note pins that entry to one person (e.g. Vocals note "4").
+  | { kind: "pco"; matchBy: "position"; positions: SlotPositionMatch[] }
   | { kind: "static"; label: string; color: string }
   | { kind: "empty" }
   // A horizontal gap used to align slot columns with physical chargers. Occupies
