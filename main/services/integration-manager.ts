@@ -483,6 +483,11 @@ class IntegrationManager {
     });
     await this.applyRossTsl();
 
+    // Last, so the engine's seeding sees a settled system. Its own seeding guard
+    // means these first snapshots cannot fire anything regardless.
+    const { automationEngine } = await import("./automation-engine.js");
+    await automationEngine.init();
+
     console.log("[integration-manager] init complete", {
       integrations: Array.from(this.states.keys()),
     });

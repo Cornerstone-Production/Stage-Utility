@@ -25,6 +25,7 @@ import {
   ClockIcon,
   DropletIcon,
   ListChecksIcon,
+  ZapIcon,
   SlidersHorizontalIcon,
   SunIcon,
   MoonIcon,
@@ -45,6 +46,7 @@ import { BrandingSection } from "./sections/branding-section";
 import { applyAccentVar } from "../lib/apply-accent";
 import { cn } from "../lib/cn";
 import { AdvancedSection } from "./sections/advanced-section";
+import { AutomationSection } from "./sections/automation-section";
 import { ServiceHistorySection } from "./sections/service-history-section";
 import { PatchSection } from "./sections/patch-section";
 import { ScriptViewSection } from "./sections/scriptview-section";
@@ -184,6 +186,7 @@ const SECTIONS: SectionItem[] = [
   { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4" /> },
   { id: "service-history", label: "History", icon: <ClockIcon className="size-4" /> },
   { id: "baptisms", label: "Baptisms", icon: <DropletIcon className="size-4" /> },
+  { id: "automation", label: "Automation", icon: <ZapIcon className="size-4" /> },
   { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4" /> },
 ];
 
@@ -207,7 +210,7 @@ const NAV_GROUPS: { label: string; ids: string[] }[] = [
   { label: "Content", ids: ["plan", "views", "scriptview"] },
   { label: "Output", ids: ["displays", "connect", "integrations", "patch"] },
   { label: "Identity", ids: ["branding", "baptisms"] },
-  { label: "System", ids: ["service-history", "advanced"] },
+  { label: "System", ids: ["service-history", "automation", "advanced"] },
 ];
 
 // ---- main settings view -----------------------------------------------------
@@ -1212,6 +1215,8 @@ export function SettingsView() {
             <PatchSection />
           </div>
         );
+      case "automation":
+        return <AutomationSection />;
       case "advanced":
         return <AdvancedSection stageState={stageState} updateStatus={updateStatus} handlers={handlers} justUpdated={justUpdated} onDismissJustUpdated={() => setJustUpdated(null)} />;
     }
