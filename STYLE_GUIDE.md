@@ -110,7 +110,7 @@ The two-tier structure:
 | `--su-fill` / `-hover` / `-active` | interaction fill (ghost / filled) |
 | `--su-live-9` / `-11` | **live / on-pace** (green) |
 | `--su-danger-9` / `-11` | **over / error** (red) |
-| `--su-warn-9` / `-11` | **caution / unsaved** (amber) |
+| `--su-warn-9` / `-11` | **caution** (amber) — over-time, warnings. NOT unsaved: see below |
 | `--su-ok-*`, `--su-info-*` | success / informational |
 
 **Theming per world:**
@@ -122,6 +122,12 @@ The two-tier structure:
   (`#0a0a0a`, a neutral near-black chosen over a blue-tinted one); surfaces and text
   become white-opacity steps (`rgba(255,255,255,0.04 … 0.92)`); accent + status tokens
   inherit the brand values.
+
+**Unsaved state is neutral, not amber.** `UnsavedBanner` uses the popover surface
+(`bg-popover` + `border-line-strong`) on every surface that has one — the patch sheet,
+the layout editor and Integrations. "You have not pressed Save" is *pending*, not
+*wrong*; amber earns more as a signal when it is reserved for things that are actually
+wrong, and on the kiosk it already means "over/caution".
 
 ### 2.4 Themeable brand accent
 

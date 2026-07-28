@@ -151,8 +151,9 @@ const ALL = Object.keys(TYPE_LABELS);
  * so they can never drift; new entries are listed here so the guard keeps working
  * instead of being weakened every time an object type is added.
  */
-const ADDED_SINCE: { type: string; label: string; group: string; after: string }[] = [
+const ADDED_SINCE: { type: string; label: string; group: string; after: string | null }[] = [
   { type: "rosstalk-button", label: "RossTalk button", group: "Control", after: "osc-button" },
+  { type: "record-status", label: "Record status", group: "Status", after: null },
 ];
 
 // ── Assertions ────────────────────────────────────────────────────────────────
@@ -189,7 +190,14 @@ describe("layout-object registry vs. the structures it replaced", () => {
 
   test("each addition sits directly after the type it claims to follow", () => {
     // Pins placement too, so a new object cannot silently reorder the palette.
+    // `after: null` means it leads its group.
     for (const a of ADDED_SINCE) {
+      if (a.after === null) {
+        const g = PALETTE_GROUPS.find((x) => (x.types as string[]).includes(a.type));
+        assert.ok(g, `${a.type} is not in the palette`);
+        assert.equal((g!.types as string[])[0], a.type, `${a.type} should lead its group`);
+        continue;
+      }
       const group = PALETTE_GROUPS.find((g) => (g.types as string[]).includes(a.type));
       assert.ok(group, `${a.type} is not in the palette`);
       const types = group!.types as string[];

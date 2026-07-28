@@ -258,6 +258,19 @@ export type LayoutObjectConfig =
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
     }
+  // "Is anything recording?" — one indicator across every recorder, so a layout does
+  // not need to know whether the campus records on OBS or REAPER. `source: "any"`
+  // is red when EITHER is recording. The device-specific obs-status/reaper-status
+  // objects remain for when you want exactly one machine.
+  | {
+      type: "record-status";
+      source?: "any" | "obs" | "reaper";
+      recordingText?: string;
+      idleText?: string;
+      offlineText?: string;
+      hideWhenIdle?: boolean;
+      fillWhenRecording?: boolean;
+    }
   // Live REAPER recording indicator (from the REAPER integration, `reaper:status`
   // channel). Turns red while REAPER is recording. Label texts override the
   // defaults ("REAPER: Recording" / "REAPER: Standby" / "REAPER: Offline");
