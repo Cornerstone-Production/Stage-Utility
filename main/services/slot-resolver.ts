@@ -1,7 +1,7 @@
 // Pure function: merges saved slots + PCO team members + device status.
 // No I/O — takes data already fetched and returns resolved Slot[].
 
-import type { Slot, SlotDevice, TeamMemberDTO } from "../types/stage.js";
+import type { Slot, SlotDevice, SlotPositionMatch, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 
 const EMPTY_DEVICE: SlotDevice = {
@@ -72,45 +72,63 @@ function normalizePosition(name: string | null | undefined): string {
   return (name ?? "").replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase();
 }
 
-function matchMember(
-  slot: Slot,
+/** Canonical identity of a positions range. Two slots compete for people only when
+ *  these are equal — same (position, note) pairs, order-insensitive. Notes are part
+ *  of the identity, so "Vocals note 1" and "Vocals note 2" never compete. */
+function positionSignature(positions: SlotPositionMatch[]): string {
+  return JSON.stringify(
+    positions
+      .map((p) => [normalizePosition(p.name), (p.notesStartsWith ?? "").trim().toLowerCase()] as const)
+      .sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0]))),
+  );
+}
+
+/** Claim key for a team member. Person-level where PCO gives us a person id, so
+ *  someone scheduled in two positions still only fills one of a set of identical
+ *  slots; falls back to the team-member row id when it doesn't. */
+function claimKey(m: TeamMemberDTO): string {
+  return m.personId ?? m.id;
+}
+
+/** First unclaimed person matching any entry, entries tried in configured order.
+ *  `taken` holds people already claimed by slots with the SAME signature. */
+function matchByPositions(
+  positions: SlotPositionMatch[],
   members: TeamMemberDTO[],
+  taken: Set<string>,
 ): TeamMemberDTO | null {
-  const { link } = slot;
-  if (link.kind !== "pco") return null;
+  for (const entry of positions) {
+    const wantPos = entry.name && entry.name.trim() ? normalizePosition(entry.name) : null;
+    const prefix = entry.notesStartsWith?.trim().toLowerCase() || null;
 
-  if (link.matchBy === "person") {
-    return members.find((m) => m.personId === link.personId) ?? null;
-  }
+    // Neither constraint = a misconfigured entry. Skip it rather than claim the
+    // first person on the team.
+    if (wantPos === null && prefix === null) continue;
 
-  if (link.matchBy === "position") {
     // Match on the normalized position so sub-variants group with their base
     // (e.g. "Vocals (BGVs)" → "Vocals"), disambiguated by notes.
-    const pos = normalizePosition(link.teamPositionName);
-    const prefix = link.notesStartsWith?.trim().toLowerCase() ?? null;
-
-    const byPosition = members.filter(
-      (m) => normalizePosition(m.teamPositionName) === pos,
-    );
+    const pool = (
+      wantPos === null ? members : members.filter((m) => normalizePosition(m.teamPositionName) === wantPos)
+    ).filter((m) => !taken.has(claimKey(m)));
 
     if (prefix) {
-      // A notes prefix pins this slot to a specific person within the position
-      // (e.g. "1".."10" for vocals, "HS"/"HH" for Teaching Pastor). Require an
-      // actual notes match — do NOT fall back to an arbitrary person in the
-      // position, or every unmatched slot would duplicate the first member and
-      // appear to ignore the note (e.g. the HH slot showing the HS pastor).
-      const matches = byPosition.filter(
+      // A notes prefix pins this entry to a specific person (e.g. "1".."10" for
+      // vocals, "HS"/"HH" for Teaching Pastor). Require an actual notes match — do
+      // NOT fall back to an arbitrary person in the position, or every unmatched
+      // slot would duplicate the first member and appear to ignore the note (e.g.
+      // the HH slot showing the HS pastor).
+      const matches = pool.filter(
         (m) => m.notes != null && m.notes.trim().toLowerCase().startsWith(prefix),
       );
-      // Prefer an exact note match so "1" doesn't grab "10"; else the first
-      // prefix match (handles notes like "1 - lead vocal").
-      const exact = matches.find((m) => m.notes!.trim().toLowerCase() === prefix);
-      return exact ?? matches[0] ?? null;
+      // Prefer an exact note match so "1" doesn't grab "10"; else the first prefix
+      // match (handles notes like "1 - lead vocal").
+      const hit = matches.find((m) => m.notes!.trim().toLowerCase() === prefix) ?? matches[0];
+      if (hit) return hit;
+      continue;
     }
 
-    return byPosition[0] ?? null;
+    if (pool[0]) return pool[0];
   }
-
   return null;
 }
 
@@ -119,6 +137,12 @@ export function resolveSlots(
   members: TeamMemberDTO[],
   deviceStatuses: Map<string, DeviceStatus>,
 ): Slot[] {
+  // Claimed people, keyed by positions-signature. Slots with the same signature
+  // compete for distinct people; slots with different signatures are independent,
+  // so a player with two devices still appears in both of their slots. Board order
+  // is the array order the caller passes.
+  const claimed = new Map<string, Set<string>>();
+
   return slots.map((slot): Slot => {
     // Spacers + empty slots: no display name, no photo, no PCO lookup.
     if (slot.link.kind === "spacer" || slot.link.kind === "empty") {
@@ -144,7 +168,21 @@ export function resolveSlots(
     }
 
     // PCO-linked slots.
-    const member = matchMember(slot, members);
+    const { link } = slot;
+    let member: TeamMemberDTO | null = null;
+    if (link.kind === "pco" && link.matchBy === "person") {
+      member = members.find((m) => m.personId === link.personId) ?? null;
+    } else if (link.kind === "pco" && link.matchBy === "position") {
+      const sig = positionSignature(link.positions);
+      let taken = claimed.get(sig);
+      if (!taken) {
+        taken = new Set<string>();
+        claimed.set(sig, taken);
+      }
+      member = matchByPositions(link.positions, members, taken);
+      if (member) taken.add(claimKey(member));
+    }
+
     let device = EMPTY_DEVICE;
     if (slot.deviceBinding) {
       const ds = deviceStatuses.get(slot.deviceBinding.channelId);

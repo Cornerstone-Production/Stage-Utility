@@ -75,6 +75,7 @@ declare global {
   type Slot = Stage.Slot;
   type SlotDevice = Stage.SlotDevice;
   type SlotLink = Stage.SlotLink;
+  type SlotPositionMatch = Stage.SlotPositionMatch;
   type SlotPreset = Stage.SlotPreset;
   type SlotsLayout = Stage.SlotsLayout;
   type SplItemHistory = Stage.SplItemHistory;

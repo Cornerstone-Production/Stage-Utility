@@ -6,7 +6,7 @@ import { Button, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, 
 import { invoke as ipc } from "../../lib/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useStageState } from "../../main/use-stage-state";
-import { SortableSlotGroup, AlignmentPanel, PresetsPanel, type PresetHandlers } from "./slots-section";
+import { SortableSlotGroup, AlignmentPanel, PresetsPanel, makeSharesWith, type PresetHandlers } from "./slots-section";
 import type { WirelessChannel } from "../types";
 
 function freshSlotId(): string {
@@ -77,7 +77,7 @@ export function InlineSlotsEditor({
       id: freshSlotId(),
       channel: String(maxChannel + 1).padStart(2, "0"),
       order: localSlots.length,
-      link: { kind: "pco", matchBy: "position", teamPositionName: "" },
+      link: { kind: "pco", matchBy: "position", positions: [] },
       deviceBinding: null,
       displayName: null,
       photoUrl: null,
@@ -221,6 +221,8 @@ export function InlineSlotsEditor({
     else groups.push({ slots: [slot], start: i });
   });
 
+  const sharesWith = makeSharesWith(localSlots);
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
@@ -258,6 +260,7 @@ export function InlineSlotsEditor({
                   startIndex={g.start}
                   wirelessChannels={wirelessChannels}
                   teamPositions={teamPositions}
+                  sharesWith={sharesWith}
                   onChange={updateSlot}
                   onRemove={removeSlot}
                 />
