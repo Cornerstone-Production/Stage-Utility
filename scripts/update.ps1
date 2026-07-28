@@ -107,6 +107,19 @@ try {
   exit 1
 }
 
+# auto-install mode: the build is applied but the operator chooses when the
+# displays go dark. Leave the marker the app reports as "restart pending" and stop
+# here — the running process keeps serving the OLD build until someone restarts.
+if ($env:STAGE_UPDATE_DEFER_RESTART) {
+  Write-Result $true
+  if ($env:STAGE_UPDATE_RESTART_PENDING) {
+    (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") |
+      Out-File -FilePath $env:STAGE_UPDATE_RESTART_PENDING -Encoding ascii -Force
+  }
+  "[update] build applied; restart deferred (auto-install mode)" | Out-File -Append $log
+  exit 0
+}
+
 Write-Progress-Step "restarting"
 Write-Result $true
 

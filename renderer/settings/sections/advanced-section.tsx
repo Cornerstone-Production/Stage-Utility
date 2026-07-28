@@ -32,7 +32,7 @@ const ANY_DAY = "any";
 // — e.g. a server that hasn't been restarted after a frontend deploy, or the brief
 // window during an in-app self-update. Mirrors the backend default so a newer bundle
 // never crashes against an older API. Keep in sync with settings-store DEFAULT_SETTINGS.
-const DEFAULT_AUTO_UPDATE: StageState["autoUpdate"] = { enabled: false, dayOfWeek: null, hour: 3 };
+const DEFAULT_AUTO_UPDATE: StageState["autoUpdate"] = { mode: "manual", dayOfWeek: null, hour: 3 };
 
 function formatHour(h: number): string {
   const am = h < 12;
@@ -331,22 +331,58 @@ function UpdatesPanel({
           </Field>
         ) : null}
 
-        {/* Automatic updates */}
+        {/* A build is installed but not running yet — auto-install deferred the
+            restart, so the operator decides when the displays blink. */}
+        {updateStatus?.restartPending ? (
+          <div className="flex items-start gap-3 rounded-lg border border-line-strong bg-popover p-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-footnote font-medium text-fg">Update installed — restart to use it</div>
+              <p className="mt-0.5 text-caption1 text-fg-muted">
+                The new build is ready. Displays are still running the previous one and will reload
+                when you restart.
+              </p>
+            </div>
+            {/* Reuses onRestart, which already refuses (with an override) during a
+                live service or an active recording — a deferred update must not be
+                the thing that finally interrupts one. */}
+            <Button variant="accent" size="small" onClick={() => void onRestart()}>
+              Restart now
+            </Button>
+          </div>
+        ) : null}
+
+        {/* Update mode */}
         <Field orientation="horizontal">
           <FieldContent>
-            <FieldLabel>Automatic updates</FieldLabel>
+            <FieldLabel>Updates</FieldLabel>
             <FieldDescription>
-              Install available updates automatically during the chosen weekly window. Updates are
-              skipped while a Planning Center service is live, so a display never restarts mid-service.
+              How updates are applied. Nothing is applied or restarted while a Planning Center
+              service is live, whichever mode you pick.
             </FieldDescription>
           </FieldContent>
-          <Switch
-            checked={autoUpdate.enabled}
-            onCheckedChange={(v: boolean) => handlers.handleSetAutoUpdate({ enabled: v })}
-          />
+          <Select
+            value={autoUpdate.mode}
+            onValueChange={(v: string) =>
+              handlers.handleSetAutoUpdate({ mode: v as StageState["autoUpdate"]["mode"] })
+            }
+          >
+            <SelectTrigger className="w-56" aria-label="Update mode"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="manual">Manual — I check and apply</SelectItem>
+              <SelectItem value="auto-install">Install automatically, restart when I say</SelectItem>
+              <SelectItem value="auto-full">Install and restart automatically</SelectItem>
+            </SelectContent>
+          </Select>
         </Field>
 
-        {autoUpdate.enabled ? (
+        {autoUpdate.mode === "auto-install" ? (
+          <p className="text-caption1 text-fg-muted">
+            The new build is applied in the window and then waits. Displays keep running the old one
+            until you press Restart, so an update can land on Saturday and be taken on Monday.
+          </p>
+        ) : null}
+
+        {autoUpdate.mode !== "manual" ? (
           <Field orientation="horizontal">
             <FieldContent>
               <FieldLabel>Update window</FieldLabel>

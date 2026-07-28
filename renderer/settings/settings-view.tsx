@@ -637,7 +637,7 @@ export function SettingsView() {
     }
   }
 
-  async function handleSetAutoUpdate(partial: { enabled?: boolean; dayOfWeek?: number | null; hour?: number }) {
+  async function handleSetAutoUpdate(partial: { mode?: "manual" | "auto-install" | "auto-full"; enabled?: boolean; dayOfWeek?: number | null; hour?: number }) {
     try {
       const next = await ipc<StageState>("update:setAuto", partial);
       queryClient.setQueryData(["stage:getState"], next);

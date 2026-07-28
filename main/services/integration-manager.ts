@@ -421,8 +421,12 @@ class IntegrationManager {
     const settings = await settingsStore.load();
 
     for (const descriptor of DESCRIPTORS) {
-      const savedConfig = settings.integrationConfigs[descriptor.id] ?? {};
-      const enabled = settings.integrationEnabled[descriptor.id] ?? false;
+      // Tolerate a settings.json missing this key entirely. DataStore does not
+      // deep-merge on load (deliberately — it keeps migrations honest), so an older
+      // config snapshot restored over a newer build can arrive without keys added
+      // since. Crashing init over it takes every display down.
+      const savedConfig = settings.integrationConfigs?.[descriptor.id] ?? {};
+      const enabled = settings.integrationEnabled?.[descriptor.id] ?? false;
       const secrets = await secretsStore.getSecrets(descriptor.id);
 
       // Merge saved non-secret config with any secret keys (masked).
@@ -547,8 +551,9 @@ class IntegrationManager {
 
     // Persist non-secret config.
     const settings = await settingsStore.load();
+    settings.integrationConfigs ??= {};
     settings.integrationConfigs[id] = {
-      ...(settings.integrationConfigs[id] ?? {}),
+      ...(settings.integrationConfigs?.[id] ?? {}),
       ...nonSecretConfig,
     };
     await settingsStore.save(settings);
@@ -562,7 +567,7 @@ class IntegrationManager {
     // Rebuild masked config for state.
     const allSecrets = await secretsStore.getSecrets(id);
     const maskedConfig: Record<string, unknown> = {
-      ...(settings.integrationConfigs[id] ?? {}),
+      ...(settings.integrationConfigs?.[id] ?? {}),
     };
     for (const key of secretKeys) {
       maskedConfig[key] = allSecrets[key] ? "••••" : "";
@@ -623,6 +628,7 @@ class IntegrationManager {
     this.states.set(id, { ...state, enabled });
 
     const settings = await settingsStore.load();
+    settings.integrationEnabled ??= {};
     settings.integrationEnabled[id] = enabled;
     await settingsStore.save(settings);
 
@@ -1101,7 +1107,7 @@ class IntegrationManager {
 
   private async getPcoAppId(): Promise<string | null> {
     const settings = await settingsStore.load();
-    return String(settings.integrationConfigs["planning-center"]?.appId ?? "") || null;
+    return String(settings.integrationConfigs?.["planning-center"]?.appId ?? "") || null;
   }
 
   private async getPcoSecret(): Promise<string | null> {
@@ -1113,7 +1119,7 @@ class IntegrationManager {
     const appId = await this.getPcoAppId();
     const secret = await this.getPcoSecret();
     const settings = await settingsStore.load();
-    const target = settings.integrationConfigs["planning-center"]?.countdownTarget === "service-time" ? "service-time" : "plan-start";
+    const target = settings.integrationConfigs?.["planning-center"]?.countdownTarget === "service-time" ? "service-time" : "plan-start";
     stageController.setPcoCredentials(appId, secret, target);
 
     if (!appId || !secret) {

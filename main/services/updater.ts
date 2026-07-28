@@ -56,6 +56,7 @@ class Updater {
     lastCheckedAt: null,
     phase: "idle",
     step: null,
+    restartPending: false,
     lastResult: null,
     error: null,
   };
@@ -71,6 +72,12 @@ class Updater {
   private logEvent(msg: string): void {
     console.log(`[updater] ${msg}`);
     appendUpdateLog(`[updater] ${msg}`);
+  }
+
+  /** Written by the update script when it applied a build but deliberately did
+   *  NOT restart. Its presence is what makes "restart pending" survive polling. */
+  private restartPendingFile(): string {
+    return path.join(getUserDataPath(), "update-restart-pending");
   }
 
   private resultFile(): string {
@@ -116,6 +123,7 @@ class Updater {
       ...this.status,
       version: pkgVersion(),
       step: this.status.phase === "updating" ? this.status.step : null,
+      restartPending: this.isRestartPending(),
       lastResult: this.readResult(),
     };
   }
@@ -185,6 +193,15 @@ class Updater {
     return this.status.behind;
   }
 
+  /** True when a build is installed but this process is still the old code. */
+  private isRestartPending(): boolean {
+    try {
+      return fs.existsSync(this.restartPendingFile());
+    } catch {
+      return false;
+    }
+  }
+
   get phase(): UpdateStatus["phase"] {
     return this.status.phase;
   }
@@ -194,7 +211,7 @@ class Updater {
    * builds, and (on success) kills this process so the service manager restarts
    * it with the new build. Returns immediately; progress arrives via SSE.
    */
-  async applyUpdate(): Promise<UpdateStatus> {
+  async applyUpdate(opts: { deferRestart?: boolean } = {}): Promise<UpdateStatus> {
     if (this.status.phase === "updating") throw new Error("An update is already running.");
     if (!this.status.isGitRepo) {
       // Re-check in case we never fetched.
@@ -204,7 +221,7 @@ class Updater {
     const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
     if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before updating.");
 
-    return this.launch(this.status.branch ?? "main", false);
+    return this.launch(this.status.branch ?? "main", false, opts.deferRestart === true);
   }
 
   /**
@@ -226,7 +243,7 @@ class Updater {
     const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
     if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before switching tracks.");
 
-    return this.launch(branch, true);
+    return this.launch(branch, true, false);
   }
 
   /**
@@ -236,6 +253,13 @@ class Updater {
    * exits after the HTTP response has flushed.
    */
   restart(): UpdateStatus {
+    // Taking the restart resolves the pending state; clear it before we exit so a
+    // relaunch does not come up still claiming an update is waiting.
+    try {
+      fs.rmSync(this.restartPendingFile(), { force: true });
+    } catch {
+      /* best-effort */
+    }
     if (this.status.phase === "updating") throw new Error("An update is already running.");
     console.log("[updater] manual restart requested — exiting for the service manager to relaunch");
     this.status = { ...this.status, phase: "updating", step: "restarting" };
@@ -245,7 +269,7 @@ class Updater {
   }
 
   /** Spawn the detached update/switch script and enter the "updating" phase. */
-  private launch(branch: string, checkout: boolean): UpdateStatus {
+  private launch(branch: string, checkout: boolean, deferRestart: boolean): UpdateStatus {
     const isWin = process.platform === "win32";
     const script = path.join(REPO_ROOT, "scripts", isWin ? "update.ps1" : "update.sh");
 
@@ -269,6 +293,10 @@ class Updater {
       // When set, the script checks out the branch (force-points it at origin)
       // before building — used for switching tracks, not a same-branch update.
       STAGE_UPDATE_CHECKOUT: checkout ? "1" : "",
+      // auto-install: build everything, then stop short of the kill and leave a
+      // marker, so the operator chooses when the displays go dark.
+      STAGE_UPDATE_DEFER_RESTART: deferRestart ? "1" : "",
+      STAGE_UPDATE_RESTART_PENDING: this.restartPendingFile(),
       // So `npm`/`node` resolve under a service manager's minimal PATH.
       STAGE_UPDATE_NODE_DIR: path.dirname(process.execPath),
       STAGE_UPDATE_SERVER_PID: String(process.pid),
