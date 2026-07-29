@@ -459,12 +459,8 @@ export function AutomationSection() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-title3 font-semibold text-fg">Automation</h1>
-        <p className="text-caption1 text-fg-muted">
-          When something happens in Stage, do something to a device.
-        </p>
-      </div>
+      {/* No title here — settings-view renders the page heading and its blurb from
+          SECTION_DESC, same as every other section. A local h1 duplicated it. */}
 
       {/* Safety first: these are the controls that decide whether anything real happens. */}
       <div
