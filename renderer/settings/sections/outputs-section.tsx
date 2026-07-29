@@ -169,13 +169,16 @@ function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetS
         </DropdownMenu.Root>
       </div>
 
-      {/* Shows → View: the one prominent control */}
+      {/* Shows → View. Sized like every other select in the app: an oversized
+          trigger here (17px in a 36px control, against 13px/28px elsewhere) made
+          the whole tab read as a different scale. The card layout and the "Shows"
+          label already identify it as the primary control. */}
       <div className="flex items-center gap-3 px-3 py-2.5">
         <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-subtle">
           Shows
         </span>
         <Select value={output.viewId ?? UNROUTED} onValueChange={(v: string) => onSetView(v === UNROUTED ? null : v)}>
-          <SelectTrigger className="h-9 flex-1 text-body">
+          <SelectTrigger className="flex-1">
             <SelectValue placeholder="Pick a view…" />
           </SelectTrigger>
           <SelectContent>
