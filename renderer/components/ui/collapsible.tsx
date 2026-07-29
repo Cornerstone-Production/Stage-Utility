@@ -45,24 +45,33 @@ export function Collapsible({
             present, and a phantom flex-1 spacer pushed the trailing content — so
             an over-wide label had nothing bounding it. */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          {/* The button is NOT the flex container. Safari wraps the contents of a
+              <button> in an anonymous box, so flex children inside one frequently
+              refuse to shrink — the label then keeps its full width, overflows,
+              and paints over the status and toggle. Chromium and headless WebKit
+              do not reproduce it; iOS Safari does. Putting an ordinary <span>
+              inside the button and making THAT the flex container is the standard
+              workaround. */}
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
             aria-expanded={open}
             className={cn(
-              "flex min-w-0 items-center gap-1.5 py-1 text-caption1 font-medium text-fg-subtle hover:text-fg transition-colors text-left",
+              "block min-w-0 py-1 text-caption1 font-medium text-fg-subtle hover:text-fg transition-colors text-left",
               // Fill the group so the whole row toggles — unless an afterLabel has
               // to sit immediately after the text.
               !afterLabel && "flex-1",
             )}
           >
-            <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
-            {/* overflow-hidden here as well as on whatever `label` is: min-w-0
-                only permits shrinking, it does not clip. */}
-            <span className="min-w-0 truncate">{label}</span>
-            {!open && summary != null && (
-              <span className="truncate text-caption2 font-normal text-gray-8">{summary}</span>
-            )}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
+              {/* overflow-hidden here as well as on whatever `label` is: min-w-0
+                  only permits shrinking, it does not clip. */}
+              <span className="min-w-0 truncate">{label}</span>
+              {!open && summary != null && (
+                <span className="truncate text-caption2 font-normal text-gray-8">{summary}</span>
+              )}
+            </span>
           </button>
           {afterLabel}
         </div>

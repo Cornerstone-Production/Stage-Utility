@@ -175,8 +175,12 @@ export function PositionRangeEditor({ positions, teamPositions, onChange }: Posi
             const key = keyOf(p);
             return (
               <div key={key === ANY ? "__any__" : key} className="flex items-center gap-2">
+                {/* With one position ticked the trigger above already names it, so
+                    repeating it here is just noise — the row only needs to say what
+                    the field is. Name each row once there is more than one, since
+                    then the note has to be attributable to a position. */}
                 <span className="flex-1 min-w-0 truncate text-caption1 text-gray-11">
-                  {p.name ?? "Any position"}
+                  {positions.length === 1 ? "Note starts with" : (p.name ?? "Any position")}
                 </span>
                 <input
                   value={p.notesStartsWith ?? ""}
