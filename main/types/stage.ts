@@ -869,9 +869,23 @@ export interface BaptismSession {
   planId: string | null;
 }
 
+/** One of PCO's item row colours, from ServiceType.standard_item_types /
+ *  custom_item_types. Standard entries match an item's `itemType`; custom entries
+ *  match text CONTAINED in the title ("Items that include this text in the title
+ *  will be highlighted"). */
+export interface PcoItemTypeColor {
+  /** "Header" / "Song" / "Media" for standard; the operator's text for custom. */
+  name: string;
+  /** "#rrggbb". PCO stores #ffffff to mean "no colour". */
+  color: string;
+  custom: boolean;
+}
+
 export interface ServiceTypeDTO {
   id: string;
   name: string;
+  /** Item row colours configured on this service type in PCO. */
+  itemTypeColors?: PcoItemTypeColor[];
 }
 
 export interface PlanDTO {
@@ -949,6 +963,8 @@ export interface ScriptViewRundownDTO {
   planDates: string | null;
   items: PlanItemDTO[];
   noteCategories: string[];
+  /** Item row colours for this rundown's service type (see PcoItemTypeColor). */
+  itemTypeColors?: PcoItemTypeColor[];
   /** Scheduled service start time(s), ISO (from PCO plan_times type=service).
    *  serviceTimes[0] anchors the projected per-item clock. */
   serviceTimes: string[];

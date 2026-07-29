@@ -580,11 +580,14 @@ export class StageController {
     else plan = plans[0] ?? null;
     if (!plan) return empty;
 
-    const [items, categories, serviceTimes, timeZone] = await Promise.all([
+    // serviceTypes is cached for 15 minutes, so pulling the item row colours here
+    // costs nothing — the colours ride along on a request already being made.
+    const [items, categories, serviceTimes, timeZone, serviceTypes] = await Promise.all([
       pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
       pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId),
       pcoService.listPlanServiceTimes(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
       pcoService.listOrgTimeZone(this.pcoAppId, this.pcoSecret),
+      pcoService.listServiceTypes(this.pcoAppId, this.pcoSecret),
     ]);
     const used = new Set<string>();
     for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
@@ -599,6 +602,7 @@ export class StageController {
       planDates: plan.dates,
       items,
       noteCategories: ordered,
+      itemTypeColors: serviceTypes.find((t) => t.id === serviceTypeId)?.itemTypeColors ?? [],
       serviceTimes,
       timeZone,
       isActivePlan: isActiveType && plan.id === this.state.planId,

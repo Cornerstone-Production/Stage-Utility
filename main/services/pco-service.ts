@@ -1,7 +1,7 @@
 // Planning Center Online client (Basic Auth: App ID + Secret).
 // Flattens JSON:API responses to slim DTOs. ~30s in-memory cache.
 
-import type { PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
+import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
@@ -109,6 +109,20 @@ interface PcoNode {
 interface PcoResponse<T extends PcoNode = PcoNode> {
   data: T | T[];
   included?: PcoNode[];
+}
+
+/** Normalise PCO's item-type arrays. Anything without a usable name + #rrggbb is
+ *  dropped rather than guessed at. */
+function toItemColors(raw: unknown, custom: boolean): PcoItemTypeColor[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PcoItemTypeColor[] = [];
+  for (const e of raw) {
+    const name = typeof e?.name === "string" ? e.name.trim() : "";
+    const color = typeof e?.color === "string" ? e.color.trim().toLowerCase() : "";
+    if (!name || !/^#[0-9a-f]{6}$/.test(color)) continue;
+    out.push({ name, color, custom });
+  }
+  return out;
 }
 
 class PcoService {
@@ -404,6 +418,12 @@ class PcoService {
     const result: ServiceTypeDTO[] = items.map((item) => ({
       id: item.id,
       name: String(item.attributes.name ?? "Unknown"),
+      // Free: this resource already carries the colours, we just stopped throwing
+      // them away. `index` is PCO's palette slot and is not useful to us.
+      itemTypeColors: [
+        ...toItemColors(item.attributes.standard_item_types, false),
+        ...toItemColors(item.attributes.custom_item_types, true),
+      ],
     }));
 
     this.cacheSet(cacheKey, result, TTL_LONG_MS);
