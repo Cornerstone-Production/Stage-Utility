@@ -67,6 +67,19 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // ── Icon tint (display id or tool path) ─────────────────────────────────
+    if (method === "POST" && pathname === "/api/icon-color") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const key = typeof body.key === "string" ? body.key : "";
+      const color = typeof body.color === "string" ? body.color : "";
+      try {
+        json(res, await stageController.setIconColor(key, color));
+      } catch (err) {
+        error(res, err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
     // ── Caption channel colors ──────────────────────────────────────────────
     if (method === "POST" && pathname === "/api/caption-colors") {
       const body = await readBody(req) as Record<string, unknown>;

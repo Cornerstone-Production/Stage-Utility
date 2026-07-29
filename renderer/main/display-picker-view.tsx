@@ -1,7 +1,7 @@
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useStageState } from "./use-stage-state";
-import { Loader2Icon, MonitorIcon, ChevronRightIcon, DropletIcon, ListChecksIcon, CableIcon } from "lucide-react";
+import { Loader2Icon, MonitorIcon, ChevronRightIcon, DropletIcon, ListChecksIcon, CableIcon, ClockIcon } from "lucide-react";
 
 // Landing page at "/". Lists the configured displays so a freshly-pointed
 // monitor can pick which display it should show. Styled to match the kiosk
@@ -32,6 +32,10 @@ export function DisplayPickerView() {
 
   const centerLogo = state.emptySlotLogo ?? state.appLogo;
   const displays = state.displays ?? [];
+  // Icon tints are stored once, keyed by display id or tool path, and set from the
+  // Displays / Connect tabs — so a colour chosen there shows here too. Falling back
+  // to the theme accent keeps every untinted tile consistent.
+  const tintOf = (key: string) => ({ color: state.iconColors?.[key] || "var(--su-accent)" });
 
   return (
     <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
@@ -105,7 +109,7 @@ export function DisplayPickerView() {
                 href={`/${d.id}`}
                 className="flex items-center gap-3 su-card px-4 py-3 transition-colors hover:bg-white/10"
               >
-                <MonitorIcon className="size-5 text-fg-subtle shrink-0" />
+                <MonitorIcon className="size-5 shrink-0" style={tintOf(d.id)} />
                 <span className="text-body font-medium text-fg truncate">{d.name}</span>
                 <ChevronRightIcon className="size-4 text-fg-faint ml-auto shrink-0" />
               </a>
@@ -118,7 +122,7 @@ export function DisplayPickerView() {
             href="/scriptview"
             className="flex items-center gap-3 su-card px-4 py-3 transition-colors hover:bg-white/10"
           >
-            <ListChecksIcon className="size-5 text-fg-subtle shrink-0" />
+            <ListChecksIcon className="size-5 shrink-0" style={tintOf("/scriptview")} />
             <span className="text-body font-medium text-fg truncate">ScriptView</span>
             <ChevronRightIcon className="size-4 text-fg-faint ml-auto shrink-0" />
           </a>
@@ -126,7 +130,7 @@ export function DisplayPickerView() {
             href="/baptism"
             className="flex items-center gap-3 su-card px-4 py-3 transition-colors hover:bg-white/10"
           >
-            <DropletIcon className="size-5 text-accent shrink-0" />
+            <DropletIcon className="size-5 shrink-0" style={tintOf("/baptism")} />
             <span className="text-body font-medium text-fg truncate">Baptisms</span>
             <ChevronRightIcon className="size-4 text-fg-faint ml-auto shrink-0" />
           </a>
@@ -134,8 +138,18 @@ export function DisplayPickerView() {
             href="/patch"
             className="flex items-center gap-3 su-card px-4 py-3 transition-colors hover:bg-white/10"
           >
-            <CableIcon className="size-5 text-fg-subtle shrink-0" />
+            <CableIcon className="size-5 shrink-0" style={tintOf("/patch")} />
             <span className="text-body font-medium text-fg truncate">Patch</span>
+            <ChevronRightIcon className="size-4 text-fg-faint ml-auto shrink-0" />
+          </a>
+          {/* /log is deliberately absent — it's an operator diagnostic surface, not
+              a volunteer destination. It's listed on Settings → Connect instead. */}
+          <a
+            href="/history"
+            className="flex items-center gap-3 su-card px-4 py-3 transition-colors hover:bg-white/10"
+          >
+            <ClockIcon className="size-5 shrink-0" style={tintOf("/history")} />
+            <span className="text-body font-medium text-fg truncate">Service history</span>
             <ChevronRightIcon className="size-4 text-fg-faint ml-auto shrink-0" />
           </a>
         </div>

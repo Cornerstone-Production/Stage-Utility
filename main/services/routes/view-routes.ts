@@ -274,7 +274,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     }
 
     // PATCH /api/outputs/:id — { name? }, { viewId? } (string|null = routing),
-    // and/or { blackout? } (boolean = full black screen)
+    // { blackout? } (boolean = full black screen), { locked? }, and/or { slug? }
+    // (string; "" clears the friendly URL alias)
     const outputPatchMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
     if (method === "PATCH" && outputPatchMatch) {
       const id = outputPatchMatch[1];
@@ -284,8 +285,9 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         && (typeof body.viewId === "string" || body.viewId === null);
       const hasBlackout = typeof body.blackout === "boolean";
       const hasLocked = typeof body.locked === "boolean";
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), or body.locked (boolean) required");
+      const hasSlug = typeof body.slug === "string";
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasSlug) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
@@ -293,6 +295,16 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null);
       if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
       if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
+      // A rejected slug is a 400 with the reason, not a silent no-op — the operator
+      // has to see WHY "/history" cannot be used.
+      if (hasSlug) {
+        try {
+          state = await stageController.setOutputSlug(id, body.slug as string);
+        } catch (err) {
+          error(res, err instanceof Error ? err.message : String(err));
+          return;
+        }
+      }
       json(res, state);
       return;
     }

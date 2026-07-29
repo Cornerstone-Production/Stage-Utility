@@ -452,8 +452,14 @@ export interface LayoutGroup {
 
 /** A physical screen at a URL slug, routed to exactly one View (or none). */
 export interface Output {
+  /** Permanent. Never rewritten after creation — slots.json and every other store
+   *  is keyed by this, and Pis/bookmarks/QR codes point at `/<id>`. */
   id: string;
   name: string;
+  /** Optional friendly URL. `/<id>` always resolves; when this is set, `/<slug>`
+   *  resolves to the same display. Never used as a storage key, so clearing it
+   *  cannot orphan anything. Validated against RESERVED_SLUGS on save. */
+  slug?: string;
   /** The View this screen currently shows, or null when unrouted (renders a placeholder). */
   viewId: string | null;
   /** When true, this screen renders a full black "blackout" regardless of its
@@ -1126,6 +1132,10 @@ export interface StageState {
   ndiEnabled: boolean;
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */
   publicUrl: string | null;
+  /** Icon tint per display id or tool path (e.g. "display-1", "/baptism"), as
+   *  "#rrggbb". One map covers the Displays cards, the Connect tool cards and the
+   *  picker tiles, so a colour set anywhere shows everywhere that item appears. */
+  iconColors?: Record<string, string>;
   /** User-assigned caption colors, keyed by ProdCom channel label. */
   captionChannelColors: Record<string, string>;
   /** Live battery bays from any Shure SBC charger connections. */

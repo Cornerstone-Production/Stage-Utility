@@ -51,6 +51,7 @@ export interface SettingsData {
   /** Public base URL (e.g. a DNS name behind a reverse proxy) used for the connect
    *  QR code and display links instead of the LAN IP. Null = use the LAN IP. */
   publicUrl: string | null;
+  iconColors?: Record<string, string>;
   /** User-assigned caption colors, keyed by ProdCom channel label (channelName,
    *  or channelId when unnamed). Overrides the auto/ProdCom color. */
   captionChannelColors: Record<string, string>;
@@ -95,6 +96,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   defaultAvatarCrop: null,
   ndiEnabled: false,
   publicUrl: null,
+  iconColors: {},
   captionChannelColors: {},
   autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
   oscFeedbackPort: 9000,
