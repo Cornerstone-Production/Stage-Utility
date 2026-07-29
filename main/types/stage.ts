@@ -452,8 +452,14 @@ export interface LayoutGroup {
 
 /** A physical screen at a URL slug, routed to exactly one View (or none). */
 export interface Output {
+  /** Permanent. Never rewritten after creation — slots.json and every other store
+   *  is keyed by this, and Pis/bookmarks/QR codes point at `/<id>`. */
   id: string;
   name: string;
+  /** Optional friendly URL. `/<id>` always resolves; when this is set, `/<slug>`
+   *  resolves to the same display. Never used as a storage key, so clearing it
+   *  cannot orphan anything. Validated against RESERVED_SLUGS on save. */
+  slug?: string;
   /** The View this screen currently shows, or null when unrouted (renders a placeholder). */
   viewId: string | null;
   /** When true, this screen renders a full black "blackout" regardless of its

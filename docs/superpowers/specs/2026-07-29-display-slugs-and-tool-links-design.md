@@ -61,12 +61,21 @@ what every downstream consumer uses — slot lookup, reload targeting (`stage-vi
 Because the id path never stops working, anything already pointed at `/display-1` — Pis,
 bookmarks, printed QR codes — keeps working forever. That is the whole point of the design.
 
-### Resolution must be server-side as well
+### Where resolution actually happens
 
-The server takes a `displayId` for `slotsStore.getSlots(displayId, serviceTypeId)`. If only
-the renderer resolved slugs, `/left-mic` would render the correct shell with the **wrong
-board** — a failure that looks like data loss. Slug → canonical id resolution therefore
-happens on both sides, from the same list.
+Client-side only, and that is enough. `/api/state` takes no display parameter — it returns
+the whole state and the kiosk selects its own slice with `state.slotsByDisplay[displayId]`
+and `state.resolvedByOutput[displayId]` (`stage-view.tsx:415-531`). The server's other
+`displayId` callers (`preset-routes.ts`, `scriptview-routes.ts`) take it from a POST body
+sent by the settings UI, which always holds the real id.
+
+So the renderer resolves the path slug to a canonical id **once**, as soon as state is
+available, and every existing consumer keeps using ids exactly as it does today. Nothing on
+the server changes for the render path.
+
+The server still validates slugs on save — that is authoritative, and the settings UI simply
+reports the rejection reason it returns rather than keeping its own copy of the reserved
+list. No list-fetching endpoint is needed, and there is no second copy to drift.
 
 ### One authority for reserved words
 
@@ -77,8 +86,8 @@ design exists to prevent.
 The canonical list lives in **`main`**. The renderer cannot import it at runtime: the
 `@main/*` tsconfig alias is types-only and Vite has no matching resolve alias, so adding one
 would let renderer code pull in node-dependent backend modules. Rather than keep a second
-copy in the renderer, **the settings UI fetches the list** and pre-validates against it. The
-server validation is authoritative regardless.
+copy that can drift, the renderer keeps **none** — it saves, and displays whatever rejection
+reason the server returns.
 
 Reserved: `""`, `settings`, `log`, `baptism`, `history`, `patch`, `scriptview`, `photos`,
 plus any slug beginning `preview-`.

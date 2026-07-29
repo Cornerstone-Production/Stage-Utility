@@ -13,6 +13,7 @@ import { ScriptView } from "./script-view";
 import { SplRundownView } from "./spl-rundown-view";
 import { LayoutRenderer } from "./layout-renderer";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
+import { resolveDisplayId } from "./resolve-display";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
 // form (/display-1), falling back to the legacy ?display= query, then default.
@@ -328,7 +329,13 @@ function usePreviewDraftSlots(previewViewId: string | null): Slot[] | null {
 
 export function StageView() {
   const { state, isLoading, error } = useStageState();
-  const displayId = getDisplayId();
+  const pathSlug = getDisplayId();
+  // A display may carry an optional friendly slug (/left-mic) alongside its
+  // permanent id (/display-1). Resolve to the canonical id ONCE, here — everything
+  // downstream (slotsByDisplay, resolvedByOutput, reload targeting) keys off the id,
+  // so a slug must never reach them. Falling back to the raw path keeps every
+  // pre-slug behaviour intact, including the preview- prefix.
+  const displayId = resolveDisplayId(pathSlug, state?.outputs) ?? pathSlug;
   // Preview slug → view id (null on a real display). Computed before any early
   // return so the draft-bridge hook is called unconditionally.
   const previewViewId = displayId.startsWith("preview-") ? displayId.slice("preview-".length) : null;
