@@ -334,6 +334,29 @@ export class StageController {
   }
 
   /** Set (or clear with null) the public base URL — persisted + broadcast. */
+  /**
+   * Tint one item's icon. `key` is a display id ("display-1") or a tool path
+   * ("/baptism"); one map so a colour set on the Displays tab or Connect also
+   * shows on the picker at /. An empty colour clears the entry back to the theme
+   * default rather than storing a sentinel.
+   */
+  async setIconColor(key: string, color: string): Promise<StageState> {
+    const k = key.trim();
+    if (!k) throw new Error("icon-color — key required");
+    const c = color.trim().toLowerCase();
+    if (c !== "" && !/^#[0-9a-f]{6}$/.test(c)) {
+      throw new Error('icon-color — color must be "#rrggbb" or "" to clear');
+    }
+    const next = { ...(this.state.iconColors ?? {}) };
+    if (c === "") delete next[k];
+    else next[k] = c;
+    console.log(`[stage-controller] setIconColor ${k} → ${c || "(cleared)"}`);
+    this.state = { ...this.state, iconColors: next };
+    await settingsStore.patch({ iconColors: next });
+    this.broadcast();
+    return this.state;
+  }
+
   async setPublicUrl(url: string | null): Promise<StageState> {
     const normalized = normalizeBaseUrl(url);
     console.log(`[stage-controller] setPublicUrl → ${normalized ?? "(cleared)"}`);

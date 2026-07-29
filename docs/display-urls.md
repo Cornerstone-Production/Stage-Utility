@@ -59,12 +59,29 @@ The display picker at `/` tiles `/scriptview`, `/baptism`, `/patch` and `/histor
 is deliberately absent** from the picker: it is an operator diagnostic surface, not a
 volunteer destination.
 
-**QR codes encode the `/<id>` address, never a slug.** A printed QR outlives the session it
+Each tool renders as a card in the same style as a display: title, description, and
+a click-to-copy URL footer. **No per-tool QR codes** — these are links you send
+someone rather than codes you print and mount, and a column of QR codes buries the
+list. The Remote Connection QR above them is unchanged.
+
+**Where a QR does appear, it encodes the `/<id>` address, never a slug.** A printed QR outlives the session it
 was made in; if it encoded `/left-mic` and someone later cleared that slug, every printed copy
 would break.
 
 These are not on the Displays tab on purpose. That tab answers one question — which View does
 this physical screen show — and these are not outputs.
+
+## Icon colours
+
+Every display and tool icon can be retinted by clicking it, on the Displays tab or
+on Connect. Colours live in one map keyed by **display id** ("display-1") or **tool
+path** ("/baptism"), so a colour set on either tab also shows on the picker at `/` —
+the icon belongs to the thing, not to the screen it is rendered on.
+
+Untinted icons use the theme accent, so the set stays consistent until someone
+chooses otherwise. (Baptisms used to be the only hardcoded coloured icon on the
+picker; that is now the same default as everything else.) An empty colour clears the
+entry rather than storing a sentinel. Values must be `#rrggbb`.
 
 ## Files
 
@@ -74,4 +91,6 @@ this physical screen show — and these are not outputs.
 - `renderer/main/resolve-display.ts` — `resolveDisplayId()`
 - `renderer/settings/sections/outputs-section.tsx` — the "Also at" field
 - `renderer/settings/sections/connect-section.tsx` — the Tools panel
-- `renderer/main/display-picker-view.tsx` — the `/` tiles
+- `renderer/main/display-picker-view.tsx` — the `/` tiles + `tintOf()`
+- `renderer/components/icon-tint.tsx` — `IconTint`, the click-to-retint icon
+- `main/services/stage-controller.ts` — `setIconColor()`

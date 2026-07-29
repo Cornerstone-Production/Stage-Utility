@@ -1132,6 +1132,10 @@ export interface StageState {
   ndiEnabled: boolean;
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */
   publicUrl: string | null;
+  /** Icon tint per display id or tool path (e.g. "display-1", "/baptism"), as
+   *  "#rrggbb". One map covers the Displays cards, the Connect tool cards and the
+   *  picker tiles, so a colour set anywhere shows everywhere that item appears. */
+  iconColors?: Record<string, string>;
   /** User-assigned caption colors, keyed by ProdCom channel label. */
   captionChannelColors: Record<string, string>;
   /** Live battery bays from any Shure SBC charger connections. */

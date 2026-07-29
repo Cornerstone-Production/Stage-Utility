@@ -11,9 +11,20 @@ import {
   toast,
 } from "../../components/ui";
 import { QrHint } from "../../components/qr-hint";
+import {
+  CopyIcon,
+  ExternalLinkIcon,
+  ListChecksIcon,
+  DropletIcon,
+  CableIcon,
+  ClockIcon,
+  ScrollTextIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { CompanionInfoPanel } from "../../components/companion-info-panel";
 import { invoke, onNotification } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
+import { IconTint } from "../../components/icon-tint";
 import type { SectionProps } from "../types";
 
 export function ConnectSection({ stageState, handlers }: Pick<SectionProps, "stageState" | "handlers">) {
@@ -58,7 +69,7 @@ export function ConnectSection({ stageState, handlers }: Pick<SectionProps, "sta
         </FieldGroup>
       </FieldSet>
 
-      <ToolsPanel baseUrl={stageState.publicUrl || window.location.origin} />
+      <ToolsPanel baseUrl={stageState.publicUrl || window.location.origin} iconColors={stageState.iconColors} />
 
       <CompanionPanel />
     </div>
@@ -68,43 +79,62 @@ export function ConnectSection({ stageState, handlers }: Pick<SectionProps, "sta
 // The app's standalone pages, in the one place whose job is already handing out
 // links. They are not displays, so they don't belong on the Displays tab — that
 // tab answers "which View does this screen show", and these aren't outputs.
-const TOOLS: { path: string; label: string; description: string }[] = [
-  { path: "/baptism", label: "Baptism operator", description: "Time testimonies and baptisms live." },
-  { path: "/patch", label: "Patch sheet", description: "This week's stage input and output patch." },
-  { path: "/scriptview", label: "ScriptView", description: "Rundown dashboard, per service type." },
-  { path: "/history", label: "Service history", description: "Timing, attendance and audio for past services." },
-  { path: "/log", label: "Log", description: "Raw server log — for diagnosing a problem, not for volunteers." },
+const TOOLS: { path: string; label: string; description: string; icon: LucideIcon }[] = [
+  { path: "/scriptview", label: "ScriptView", description: "Rundown dashboard, per service type.", icon: ListChecksIcon },
+  { path: "/baptism", label: "Baptisms", description: "Time testimonies and baptisms live.", icon: DropletIcon },
+  { path: "/patch", label: "Patch", description: "This week's stage input and output patch.", icon: CableIcon },
+  { path: "/history", label: "Service history", description: "Timing, attendance and audio for past services.", icon: ClockIcon },
+  { path: "/log", label: "Log", description: "Raw server log — for diagnosing a problem, not for volunteers.", icon: ScrollTextIcon },
 ];
 
-function ToolsPanel({ baseUrl }: { baseUrl: string }) {
+// Styled as the Displays tab styles a display: a titled card whose footer is the
+// URL, click to copy. No QR per tool — these are links you send someone, not codes
+// you print and mount, and a wall of QR codes buries the list.
+function ToolsPanel({ baseUrl, iconColors }: { baseUrl: string; iconColors?: Record<string, string> }) {
   return (
-    <FieldSet title="Tools">
-      <FieldGroup>
-        {TOOLS.map((t) => {
-          const url = `${baseUrl}${t.path}`;
-          return (
-            <Field key={t.path} orientation="horizontal">
-              <FieldContent>
-                <FieldLabel>{t.label}</FieldLabel>
-                <FieldDescription>{t.description}</FieldDescription>
-                <button
-                  type="button"
-                  className="mt-1.5 self-start text-left text-caption2 font-mono text-gray-a9 hover:text-gray-11 transition-colors truncate max-w-full"
-                  title="Click to copy URL"
-                  onClick={async () => {
-                    if (await copyText(url)) toast.success("URL copied");
-                    else toast.error("Couldn't copy — select the address manually");
-                  }}
-                >
-                  {url}
-                </button>
-              </FieldContent>
-              <QrHint url={url} />
-            </Field>
-          );
-        })}
-      </FieldGroup>
-    </FieldSet>
+    <div className="flex flex-col gap-2">
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">Tools</span>
+      {TOOLS.map((t) => {
+        const url = `${baseUrl}${t.path}`;
+        const Icon = t.icon;
+        return (
+          <div
+            key={t.path}
+            className="overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]"
+          >
+            <div className="flex items-center gap-2.5 px-3 pt-2">
+              <IconTint itemKey={t.path} icon={Icon} color={iconColors?.[t.path]} label={t.label} />
+              <span className="min-w-0 flex-1 truncate text-callout font-semibold leading-tight text-fg">
+                {t.label}
+              </span>
+              <a
+                href={t.path}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 rounded-md p-1 text-fg-subtle transition-colors hover:bg-fill hover:text-fg"
+                aria-label={`Open ${t.label}`}
+                title={`Open ${t.label}`}
+              >
+                <ExternalLinkIcon className="size-4" />
+              </a>
+            </div>
+            <p className="px-3 pb-2 pt-1 text-caption2 text-fg-muted">{t.description}</p>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 border-t border-line px-3 py-2 text-left transition-colors hover:bg-fill"
+              title="Click to copy URL"
+              onClick={async () => {
+                if (await copyText(url)) toast.success("URL copied");
+                else toast.error("Couldn't copy — select the URL manually");
+              }}
+            >
+              <span className="min-w-0 flex-1 truncate font-mono text-caption2 text-fg-subtle">{url}</span>
+              <CopyIcon className="size-3.5 shrink-0 text-fg-subtle" />
+            </button>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

@@ -16,6 +16,7 @@ import {
   toast,
 } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
+import { IconTint } from "../../components/icon-tint";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 
@@ -40,6 +41,8 @@ interface OutputRowProps {
   online: boolean;
   canRemove: boolean;
   onRename: (name: string) => void;
+  /** This display's icon tint, or undefined for the theme default. */
+  iconColor?: string;
   /** Save the friendly URL slug ("" clears it). Rejects with a reason the card shows. */
   onSetSlug: (slug: string) => Promise<void>;
   onSetView: (viewId: string | null) => void;
@@ -52,7 +55,7 @@ interface OutputRowProps {
 // One card per display: the name reads as a title, the View it shows is the one
 // prominent control, Open + Lock stay in reach, and the URL sits quietly in the
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
-function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetSlug, onSetView, onSetLocked, onOpenWindow, onRefresh, onRemove }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onSetSlug, onSetView, onSetLocked, onOpenWindow, onRefresh, onRemove }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const [editSlug, setEditSlug] = useState(output.slug ?? "");
   const [slugError, setSlugError] = useState<string | null>(null);
@@ -117,9 +120,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetS
         >
           <GripVerticalIcon className="size-4" />
         </button>
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent/12 text-accent">
-          <MonitorIcon className="size-4" />
-        </span>
+        <IconTint itemKey={output.id} icon={MonitorIcon} color={iconColor} label={output.name} />
         <Input
           value={editName}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
@@ -290,6 +291,7 @@ export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "sta
                 baseUrl={baseUrl}
                 online={connected.has(output.id)}
                 canRemove={outputs.length > 1}
+                iconColor={stageState.iconColors?.[output.id]}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
                 onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}

@@ -472,6 +472,10 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     // "" clears the friendly URL. Rejections come back as a 400 with the reason
     // (reserved page, already taken, bad characters) — the caller surfaces it.
+    // Icon tint for a display id or tool path; "" clears it.
+    case "icons:setColor":
+      return post<T>("/api/icon-color", { key: p.key, color: p.color });
+
     case "outputs:setSlug": {
       const id = p.id as string;
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { slug: p.slug });
