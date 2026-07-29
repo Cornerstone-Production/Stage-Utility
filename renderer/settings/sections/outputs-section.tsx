@@ -83,7 +83,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetV
       className="overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]"
     >
       {/* Header: drag handle + display icon + editable name + overflow menu */}
-      <div className="flex items-center gap-2.5 px-3 pt-2.5">
+      <div className="flex items-center gap-2.5 px-3 pt-2">
         <button
           {...attributes}
           {...listeners}
@@ -100,7 +100,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetV
           value={editName}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
           onBlur={handleBlur}
-          className="h-8 flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 text-callout font-semibold text-fg focus:bg-fill focus:ring-0"
+          className="h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0"
           aria-label="Display name"
         />
         <span
@@ -149,7 +149,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetV
           trigger here (17px in a 36px control, against 13px/28px elsewhere) made
           the whole tab read as a different scale. The card layout and the "Shows"
           label already identify it as the primary control. */}
-      <div className="flex items-center gap-3 px-3 py-2.5">
+      <div className="flex items-center gap-3 px-3 py-2">
         <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-subtle">
           Shows
         </span>
@@ -169,7 +169,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetV
       </div>
 
       {/* Primary action + lock */}
-      <div className="flex items-center gap-3 px-3 pb-2.5">
+      <div className="flex items-center gap-3 px-3 pb-2">
         <Button variant="filled" size="small" onClick={onOpenWindow} aria-label={`Open window for ${output.name}`}>
           <ExternalLinkIcon className="size-3.5 text-gray-9" />
           Open window
