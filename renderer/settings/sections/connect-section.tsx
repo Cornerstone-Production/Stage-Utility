@@ -58,8 +58,53 @@ export function ConnectSection({ stageState, handlers }: Pick<SectionProps, "sta
         </FieldGroup>
       </FieldSet>
 
+      <ToolsPanel baseUrl={stageState.publicUrl || window.location.origin} />
+
       <CompanionPanel />
     </div>
+  );
+}
+
+// The app's standalone pages, in the one place whose job is already handing out
+// links. They are not displays, so they don't belong on the Displays tab — that
+// tab answers "which View does this screen show", and these aren't outputs.
+const TOOLS: { path: string; label: string; description: string }[] = [
+  { path: "/baptism", label: "Baptism operator", description: "Time testimonies and baptisms live." },
+  { path: "/patch", label: "Patch sheet", description: "This week's stage input and output patch." },
+  { path: "/scriptview", label: "ScriptView", description: "Rundown dashboard, per service type." },
+  { path: "/history", label: "Service history", description: "Timing, attendance and audio for past services." },
+  { path: "/log", label: "Log", description: "Raw server log — for diagnosing a problem, not for volunteers." },
+];
+
+function ToolsPanel({ baseUrl }: { baseUrl: string }) {
+  return (
+    <FieldSet title="Tools">
+      <FieldGroup>
+        {TOOLS.map((t) => {
+          const url = `${baseUrl}${t.path}`;
+          return (
+            <Field key={t.path} orientation="horizontal">
+              <FieldContent>
+                <FieldLabel>{t.label}</FieldLabel>
+                <FieldDescription>{t.description}</FieldDescription>
+                <button
+                  type="button"
+                  className="mt-1.5 self-start text-left text-caption2 font-mono text-gray-a9 hover:text-gray-11 transition-colors truncate max-w-full"
+                  title="Click to copy URL"
+                  onClick={async () => {
+                    if (await copyText(url)) toast.success("URL copied");
+                    else toast.error("Couldn't copy — select the address manually");
+                  }}
+                >
+                  {url}
+                </button>
+              </FieldContent>
+              <QrHint url={url} />
+            </Field>
+          );
+        })}
+      </FieldGroup>
+    </FieldSet>
   );
 }
 

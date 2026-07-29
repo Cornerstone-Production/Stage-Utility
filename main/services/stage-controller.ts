@@ -18,6 +18,7 @@ import { scriptViewConfigStore } from "./scriptview-config-store.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { updater } from "./updater.js";
+import { validateSlug } from "./reserved-slugs.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
 
@@ -1606,6 +1607,42 @@ export class StageController {
     }
     const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, name: trimmed } : o));
     console.log(`[stage-controller] renameOutput id=${id} name="${trimmed}"`);
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * Set (or clear, with "") an output's optional friendly URL slug.
+   *
+   * The id is never touched — `/{id}` keeps resolving forever, so a Pi or printed
+   * QR pointed at it cannot break, and nothing is rekeyed so slots stay intact.
+   * Validation is authoritative here rather than in the UI: a slug that collides
+   * with a built-in page would not error at request time, it would silently render
+   * that page instead of the display.
+   */
+  async setOutputSlug(id: string, slug: string): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:slug — output ${id} not found`);
+    }
+    const trimmed = slug.trim().toLowerCase();
+
+    // Every id and slug in use EXCEPT this output's own, or re-saving would reject
+    // its existing slug.
+    const taken: string[] = [];
+    for (const o of this.state.outputs) {
+      if (o.id !== id) taken.push(o.id);
+      if (o.slug && o.id !== id) taken.push(o.slug);
+    }
+    const verdict = validateSlug(trimmed, taken);
+    if (!verdict.ok) throw new Error(verdict.reason);
+
+    const outputs = this.state.outputs.map((o) =>
+      o.id === id ? { ...o, slug: trimmed === "" ? undefined : trimmed } : o,
+    );
+    console.log(`[stage-controller] setOutputSlug id=${id} slug="${trimmed}"`);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
     this.recomputeResolved();

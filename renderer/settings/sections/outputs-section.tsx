@@ -16,7 +16,7 @@ import {
   toast,
 } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
-import { onNotification } from "../../lib/api";
+import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 
 const KIND_LABELS: Record<ViewKind, string> = {
@@ -40,6 +40,8 @@ interface OutputRowProps {
   online: boolean;
   canRemove: boolean;
   onRename: (name: string) => void;
+  /** Save the friendly URL slug ("" clears it). Rejects with a reason the card shows. */
+  onSetSlug: (slug: string) => Promise<void>;
   onSetView: (viewId: string | null) => void;
   onSetLocked: (locked: boolean) => void;
   onOpenWindow: () => void;
@@ -50,8 +52,26 @@ interface OutputRowProps {
 // One card per display: the name reads as a title, the View it shows is the one
 // prominent control, Open + Lock stay in reach, and the URL sits quietly in the
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
-function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetView, onSetLocked, onOpenWindow, onRefresh, onRemove }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetSlug, onSetView, onSetLocked, onOpenWindow, onRefresh, onRemove }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
+  const [editSlug, setEditSlug] = useState(output.slug ?? "");
+  const [slugError, setSlugError] = useState<string | null>(null);
+
+  // The server is the authority on what a slug may be — a reserved page like
+  // "history" wouldn't error at request time, it would silently render that page
+  // instead of the display. So save, and show whatever reason comes back.
+  async function handleSlugBlur() {
+    const next = editSlug.trim().toLowerCase();
+    if (next === (output.slug ?? "")) { setSlugError(null); return; }
+    try {
+      await onSetSlug(next);
+      setSlugError(null);
+      setEditSlug(next);
+    } catch (err) {
+      setSlugError(err instanceof Error ? err.message : String(err));
+      setEditSlug(output.slug ?? "");
+    }
+  }
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: output.id,
   });
@@ -64,6 +84,10 @@ function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetV
   useEffect(() => {
     setEditName(output.name);
   }, [output.name]);
+
+  useEffect(() => {
+    setEditSlug(output.slug ?? "");
+  }, [output.slug]);
 
   function handleBlur() {
     const trimmed = editName.trim();
@@ -181,7 +205,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetV
         </label>
       </div>
 
-      {/* Footer: the display URL, quiet — click to copy */}
+      {/* Footer: the permanent URL, quiet — click to copy */}
       <button
         type="button"
         className="flex w-full items-center gap-2 border-t border-line px-3 py-2 text-left transition-colors hover:bg-fill"
@@ -191,6 +215,26 @@ function OutputRow({ output, views, baseUrl, online, canRemove, onRename, onSetV
         <span className="min-w-0 flex-1 truncate font-mono text-caption2 text-fg-subtle">{outputUrl}</span>
         <CopyIcon className="size-3.5 shrink-0 text-fg-subtle" />
       </button>
+
+      {/* Optional friendly URL. The address above never changes, so anything
+          already pointed at it — a Pi, a bookmark, a printed QR — keeps working
+          whatever is typed here. */}
+      <div className="flex items-center gap-2 border-t border-line px-3 py-2">
+        <span className="shrink-0 text-caption2 text-fg-subtle">Also at</span>
+        <span className="shrink-0 font-mono text-caption2 text-fg-subtle">{baseUrl}/</span>
+        <Input
+          value={editSlug}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setEditSlug(e.target.value)}
+          onBlur={handleSlugBlur}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          placeholder="optional"
+          aria-label={`Custom URL for ${output.name}`}
+          className="h-7 min-w-0 flex-1 font-mono text-caption2"
+        />
+        {slugError && (
+          <span className="shrink-0 text-caption2 text-red-10" role="alert">{slugError}</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -244,6 +288,7 @@ export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "sta
                 online={connected.has(output.id)}
                 canRemove={outputs.length > 1}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
+                onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
                 onOpenWindow={() => handlers.handleOpenOutputWindow(output.id)}

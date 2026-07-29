@@ -470,6 +470,13 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { name: p.name });
     }
 
+    // "" clears the friendly URL. Rejections come back as a 400 with the reason
+    // (reserved page, already taken, bad characters) — the caller surfaces it.
+    case "outputs:setSlug": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { slug: p.slug });
+    }
+
     case "outputs:setView": {
       const id = p.id as string;
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { viewId: p.viewId });

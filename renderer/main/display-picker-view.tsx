@@ -1,7 +1,7 @@
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useStageState } from "./use-stage-state";
-import { Loader2Icon, MonitorIcon, ChevronRightIcon, DropletIcon, ListChecksIcon, CableIcon } from "lucide-react";
+import { Loader2Icon, MonitorIcon, ChevronRightIcon, DropletIcon, ListChecksIcon, CableIcon, ClockIcon } from "lucide-react";
 
 // Landing page at "/". Lists the configured displays so a freshly-pointed
 // monitor can pick which display it should show. Styled to match the kiosk
@@ -136,6 +136,16 @@ export function DisplayPickerView() {
           >
             <CableIcon className="size-5 text-fg-subtle shrink-0" />
             <span className="text-body font-medium text-fg truncate">Patch</span>
+            <ChevronRightIcon className="size-4 text-fg-faint ml-auto shrink-0" />
+          </a>
+          {/* /log is deliberately absent — it's an operator diagnostic surface, not
+              a volunteer destination. It's listed on Settings → Connect instead. */}
+          <a
+            href="/history"
+            className="flex items-center gap-3 su-card px-4 py-3 transition-colors hover:bg-white/10"
+          >
+            <ClockIcon className="size-5 text-fg-subtle shrink-0" />
+            <span className="text-body font-medium text-fg truncate">Service history</span>
             <ChevronRightIcon className="size-4 text-fg-faint ml-auto shrink-0" />
           </a>
         </div>
