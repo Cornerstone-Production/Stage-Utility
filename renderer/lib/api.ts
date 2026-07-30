@@ -94,6 +94,10 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "scriptview:setConfig":
       return post<T>("/api/scriptview/config", { serviceTypeIds: p.serviceTypeIds });
 
+    // "" clears the colour; the category then falls back to its suggestion.
+    case "scriptview:setCategoryColor":
+      return post<T>("/api/scriptview/category-color", { category: p.category, color: p.color });
+
     case "scriptview:noteCategories": {
       const id = p.serviceTypeId as string;
       return apiFetch<T>(`/api/scriptview/note-categories?serviceTypeId=${encodeURIComponent(id)}`);

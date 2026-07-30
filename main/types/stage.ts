@@ -1152,6 +1152,8 @@ export interface StageState {
    *  "#rrggbb". One map covers the Displays cards, the Connect tool cards and the
    *  picker tiles, so a colour set anywhere shows everywhere that item appears. */
   iconColors?: Record<string, string>;
+  /** Note category (normalised) -> "#rrggbb", app-wide. See category-colour.ts. */
+  scriptViewCategoryColors?: Record<string, string>;
   /** User-assigned caption colors, keyed by ProdCom channel label. */
   captionChannelColors: Record<string, string>;
   /** Live battery bays from any Shure SBC charger connections. */

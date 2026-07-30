@@ -1677,6 +1677,29 @@ export class StageController {
     return this.state;
   }
 
+  /**
+   * Set (or clear, with "") one note category's colour. Stored app-wide and keyed by
+   * the normalised name, so Audio is the same colour under every service type.
+   * Clearing removes the entry and the category falls back to its suggestion — it
+   * does not hide the category, which PCO owns.
+   */
+  async setCategoryColor(category: string, color: string): Promise<StageState> {
+    const key = category.trim().toLowerCase();
+    if (!key) throw new Error("category-color — category required");
+    const c = color.trim().toLowerCase();
+    if (c !== "" && !/^#[0-9a-f]{6}$/.test(c)) {
+      throw new Error('category-color — color must be "#rrggbb" or "" to clear');
+    }
+    const next = { ...(this.state.scriptViewCategoryColors ?? {}) };
+    if (c === "") delete next[key];
+    else next[key] = c;
+    console.log(`[stage-controller] setCategoryColor ${key} → ${c || "(cleared)"}`);
+    this.state = { ...this.state, scriptViewCategoryColors: next };
+    await settingsStore.patch({ scriptViewCategoryColors: next });
+    this.broadcast();
+    return this.state;
+  }
+
   /** Route an output to a View (or null to unroute). The recall operation. */
   async setOutputView(id: string, viewId: string | null): Promise<StageState> {
     if (!this.state.outputs.find((o) => o.id === id)) {
