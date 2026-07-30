@@ -167,7 +167,7 @@ class ConfigSnapshotService {
   }
 
   async list(): Promise<SnapshotMeta[]> {
-    let entries: string[] = [];
+    let entries: string[];
     try {
       entries = (await fs.readdir(this.snapshotsDir())).filter((f) => f.endsWith(".json"));
     } catch {

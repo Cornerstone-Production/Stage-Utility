@@ -19,6 +19,7 @@ import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 const KIND_LABELS: Record<ViewKind, string> = {
   slots: "Mic Slots",
@@ -84,13 +85,13 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
     opacity: isDragging ? 0.5 : 1,
   };
 
-  useEffect(() => {
+  useResyncOn([output.name], () => {
     setEditName(output.name);
-  }, [output.name]);
+  });
 
-  useEffect(() => {
+  useResyncOn([output.slug], () => {
     setEditSlug(output.slug ?? "");
-  }, [output.slug]);
+  });
 
   function handleBlur() {
     const trimmed = editName.trim();

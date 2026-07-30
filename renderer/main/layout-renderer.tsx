@@ -1,4 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import { advancePeakHold, type PeakHold } from "./peak-hold.js";
+import { useLatestRef } from "@renderer/lib/use-latest-ref";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { invoke } from "../lib/api";
 import { BrandLogo } from "../components/brand-logo";
 import { SlotsColumns } from "../components/slots-columns";
@@ -190,8 +193,9 @@ function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const elRef = useRef<HTMLSpanElement | null>(null);
   const [scale, setScale] = useState(1);
-  const scaleRef = useRef(1);
-  scaleRef.current = scale;
+  // The ResizeObserver below is subscribed once per text/size change, so its
+  // callback would otherwise close over a stale `scale`.
+  const scaleRef = useLatestRef(scale);
   const basePx = parseFloat(String(ts.fontSize)) || 16;
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
@@ -212,7 +216,7 @@ function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign
     const ro = new ResizeObserver(measure);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [text, basePx, ts.fontWeight]);
+  }, [text, basePx, ts.fontWeight, scaleRef]);
   const justify = vAlign === "top" ? "flex-start" : vAlign === "bottom" ? "flex-end" : "center";
   const align = ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center";
   return (
@@ -736,14 +740,16 @@ function SplMeterValue({
   ts: CSSProperties;
 }) {
   const r = resolveSplValue(spl, config.meterId, config.metricKey);
-  const peak = useRef<number | null>(null);
-  useEffect(() => {
-    peak.current = null; // reset the hold when the source or mode changes
-  }, [config.meterId, config.metricKey, config.peakHold]);
-  if (config.peakHold && r) {
-    peak.current = peak.current == null ? r.value : Math.max(peak.current, r.value);
-  }
-  const shown = config.peakHold ? peak.current : (r?.value ?? null);
+  // Peak hold is a running max over samples, so it has to survive renders — but it
+  // must also rise on the very render a louder sample lands, or the meter reads a
+  // frame behind the room. Advanced during render for that reason; see peak-hold.ts
+  // for why the step is written to be idempotent.
+  const holdKey = `${config.meterId ?? ""}|${config.metricKey ?? ""}|${config.peakHold ? "1" : "0"}`;
+  const [hold, setHold] = useState<PeakHold>({ key: holdKey, peak: null });
+  const nextHold = advancePeakHold(hold, holdKey, r?.value ?? null, !!config.peakHold);
+  if (nextHold !== hold) setHold(nextHold);
+
+  const shown = config.peakHold ? nextHold.peak : (r?.value ?? null);
   if (shown == null) return <span style={{ ...ts, opacity: 0.4 }}>— dB</span>;
   const color = splThresholdColor(shown, config.thresholds);
   return (
@@ -780,8 +786,11 @@ function niceStepInt(target: number): number {
  *  "recorded" mode. serviceKey null → most recent finished service. */
 function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefined) {
   const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[]; serviceStartedAt: string | null; serviceEndedAt: string | null } | null>(null);
+  useResyncOn([enabled], () => {
+    if (!enabled) setData(null);
+  });
   useEffect(() => {
-    if (!enabled) { setData(null); return; }
+    if (!enabled) return;
     let cancelled = false;
     void (async () => {
       let key = serviceKey ?? null;
@@ -810,7 +819,7 @@ function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefine
 function PeopleGraphObject({ ctx, config, ts }: { ctx: LayoutRenderCtx; config: Extract<LayoutObjectConfig, { type: "people-graph" }>; ts: CSSProperties }) {
   const cfgSource = config.source ?? "live";
   const [mode, setMode] = useState<"live" | "recorded">(cfgSource);
-  useEffect(() => setMode(cfgSource), [cfgSource]);
+  useResyncOn([cfgSource], () => setMode(cfgSource));
   const recorded = useRecordedGraph(mode === "recorded", config.recordedServiceKey);
   const liveMarkers = (ctx.serviceTimeline?.items ?? []).filter((it) => it.title && it.startedAt).map((it) => ({ t: it.startedAt, label: it.title }));
   const points = mode === "recorded" ? (recorded?.points ?? []) : (ctx.peopleCount?.history ?? []);
@@ -1475,10 +1484,15 @@ function PlanAttachment({
   // Stable dep for the options object (crop is nested).
   const optsKey = JSON.stringify(opts);
 
-  useEffect(() => {
-    let cancelled = false;
+  // Reset to the loading placeholder in the same render the target changes, so a
+  // stale image never lingers over the new one.
+  useResyncOn([match, optsKey, planId], () => {
     setSrc(null);
     setStatus("loading");
+  });
+
+  useEffect(() => {
+    let cancelled = false;
     void (async () => {
       try {
         const result = await loadProcessedAttachment(match, JSON.parse(optsKey) as AttachmentProcessOpts, planId);
@@ -1554,8 +1568,7 @@ function ServiceOrderObject({
   // back-derived from the live scrollHeight so it converges in a pass or two.
   const MIN_FIT = 0.5;
   const [fitScale, setFitScale] = useState(1);
-  const fitRef = useRef(1);
-  fitRef.current = fitScale;
+  const fitRef = useLatestRef(fitScale);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -1576,7 +1589,7 @@ function ServiceOrderObject({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [autoFit, contentKey, H, fitScale]);
+  }, [autoFit, contentKey, H, fitScale, fitRef]);
 
   // Auto-hide scrollbar: only show the thin bar while actively scrolling.
   const [scrolling, setScrolling] = useState(false);
@@ -1726,9 +1739,9 @@ export function useLayoutData(layout?: LayoutDTO) {
     return () => clearInterval(t);
   }, []);
   const [skewMs, setSkewMs] = useState(0);
-  useEffect(() => {
+  useResyncOn([pcoLive?.serverNow], () => {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  }, [pcoLive?.serverNow]);
+  });
 
   return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
 }

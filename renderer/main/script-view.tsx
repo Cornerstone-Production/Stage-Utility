@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { Loader2Icon } from "lucide-react";
 
 import { BrandLogo } from "../components/brand-logo";
@@ -40,9 +41,9 @@ export function ScriptView({ displayId, showLiveControls }: ScriptViewProps) {
     return () => clearInterval(t);
   }, []);
   const [skewMs, setSkewMs] = useState(0);
-  useEffect(() => {
+  useResyncOn([pcoLive?.serverNow], () => {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  }, [pcoLive?.serverNow]);
+  });
 
   if (isLoading) {
     return (

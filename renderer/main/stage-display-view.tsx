@@ -8,6 +8,7 @@ import { channelColor, channelLabel } from "./channel-color";
 import { LiveControls } from "./live-controls";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 interface StageDisplayViewProps {
   displayId: string;
@@ -54,9 +55,9 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   }, []);
 
   const [skewMs, setSkewMs] = useState(0);
-  useEffect(() => {
+  useResyncOn([pcoLive?.serverNow], () => {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  }, [pcoLive?.serverNow]);
+  });
 
   if (isLoading) {
     return (

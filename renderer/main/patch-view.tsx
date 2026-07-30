@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { CableIcon, ChevronRightIcon, TriangleAlertIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../lib/api";
@@ -65,9 +66,9 @@ export function PatchView() {
   // empty seeded tabs. Keep the selected sheet valid as data loads/changes.
   const sheets = useMemo(() => (file?.sheets ?? []).filter((s) => s.devices.length > 0), [file]);
   const sheet = sheets.find((s) => s.id === sheetId) ?? sheets[0] ?? null;
-  useEffect(() => {
+  useResyncOn([sheet, sheetId], () => {
     if (sheet && sheet.id !== sheetId) setSheetId(sheet.id);
-  }, [sheet, sheetId]);
+  });
 
   const resolved = useMemo(
     () => (sheet ? resolvePatch(sheet, { serviceTypeId: state?.serviceTypeId, planId: state?.planId }) : null),

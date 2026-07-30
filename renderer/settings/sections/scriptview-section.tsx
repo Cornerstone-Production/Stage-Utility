@@ -6,6 +6,7 @@ import { invoke } from "../../lib/api";
 import { RundownTable } from "../../main/rundown-table";
 import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLengthSec, fmtTotal } from "../../main/scriptview-columns";
 import type { CategoryRole } from "../../../main/types/scriptview-roles.js";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 // crypto.randomUUID is undefined in an insecure (plain-HTTP) context, which prod
 // is served over — fall back so layout creation never throws there.
@@ -66,9 +67,14 @@ export function ScriptViewSection() {
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   }
 
+  // Drop the previous type's rundown in the same render the type changes, so the
+  // preview never shows the old plan while the new one is still in flight.
+  useResyncOn([typeId], () => {
+    if (typeId) setRundown(null);
+  });
+
   useEffect(() => {
     if (!typeId) return;
-    setRundown(null);
     invoke<string[]>("scriptview:noteCategories", { serviceTypeId: typeId }).then(setNoteCats).catch(() => setNoteCats([]));
     invoke<ScriptViewRundownDTO>("scriptview:rundown", { serviceTypeId: typeId }).then(setRundown).catch(() => setRundown(null));
   }, [typeId]);

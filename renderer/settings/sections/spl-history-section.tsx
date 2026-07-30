@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { ChevronLeftIcon, ChevronRightIcon, Trash2Icon, Volume2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
@@ -79,11 +80,12 @@ export function SplHistorySection() {
       .catch(() => setVisible([]));
   }, []);
 
+  useResyncOn([selectedKey], () => {
+    if (!selectedKey) setDetail(null);
+  });
+
   useEffect(() => {
-    if (!selectedKey) {
-      setDetail(null);
-      return;
-    }
+    if (!selectedKey) return;
     let cancelled = false;
     invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: selectedKey })
       .then((d) => !cancelled && setDetail(d))
@@ -115,9 +117,9 @@ export function SplHistorySection() {
     return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
   }, [list]);
 
-  useEffect(() => {
+  useResyncOn([days, day], () => {
     if (day == null && days.length > 0) setDay(days[0]);
-  }, [days, day]);
+  });
 
   const dayServices = useMemo(
     () => (list ?? []).filter((s) => s.serviceDate === day),

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ChangeEvent } from "react";
+import { useState, useRef, type ChangeEvent } from "react";
 import { UploadIcon, TrashIcon, CropIcon, UserRoundIcon } from "lucide-react";
 import {
   FieldSet,
@@ -17,6 +17,7 @@ import { BrandLogo } from "../../components/brand-logo";
 import type { SectionProps } from "../types";
 import { LogoCropper } from "./logo-cropper";
 import { cn } from "../../lib/cn";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 // Convenience presets for the brand accent (any org can also pick a custom hex).
 // Kept non-generic: a considered blue plus a few distinct hues. Semantic status
@@ -43,13 +44,13 @@ export function BrandingSection({
   const pickTarget = useRef<Target>("app");
   const [accentDraft, setAccentDraft] = useState(stageState.accentColor ?? "#2e6691");
 
-  useEffect(() => {
+  useResyncOn([stageState.accentColor], () => {
     setAccentDraft(stageState.accentColor ?? "#2e6691");
-  }, [stageState.accentColor]);
+  });
 
-  useEffect(() => {
+  useResyncOn([stageState.appName], () => {
     setName(stageState.appName);
-  }, [stageState.appName]);
+  });
 
   function commitName() {
     const trimmed = name.trim();

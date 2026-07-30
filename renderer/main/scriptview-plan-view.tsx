@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { Loader2Icon, ArrowLeftIcon } from "lucide-react";
 
 import { BrandLogo } from "../components/brand-logo";
@@ -62,9 +63,9 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     return () => clearInterval(t);
   }, []);
   const [skewMs, setSkewMs] = useState(0);
-  useEffect(() => {
+  useResyncOn([pcoLive?.serverNow], () => {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  }, [pcoLive?.serverNow]);
+  });
 
   const allLayouts = useMemo(() => [...layouts].sort((a, b) => a.order - b.order), [layouts]);
   // Resolve the layout slug (or raw id) to a layout; the All-columns slug/id → null.

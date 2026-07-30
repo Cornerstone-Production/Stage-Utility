@@ -6,6 +6,7 @@ import { useIsMobile } from "../../lib/use-media-query";
 import { DialogOverlay } from "./dialog";
 import { Button } from "./button";
 import { SidebarChromeProvider } from "./sidebar";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 interface SplitViewProps {
   sidebar: React.ReactNode;
@@ -45,9 +46,9 @@ export function SplitView({
   const railed = collapsed && !isMobile;
 
   // Never leave a drawer open when we transition back to desktop.
-  React.useEffect(() => {
+  useResyncOn([isMobile], () => {
     if (!isMobile) setDrawerOpen(false);
-  }, [isMobile]);
+  });
 
   const closeDrawer = React.useCallback(() => setDrawerOpen(false), []);
   const chrome = { collapsed: railed, isMobile, closeDrawer };

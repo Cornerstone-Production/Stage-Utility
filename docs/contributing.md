@@ -125,6 +125,36 @@ npm run lint && npm run type-check && npm test && npm run build
 CI runs the same four. There is one long-standing lint warning
 (`patch-import.tsx:170`); anything beyond that is yours.
 
+## React state
+
+Do not mirror a prop or a server value into state with an effect:
+
+```tsx
+// no
+useEffect(() => setDraft(rule), [rule]);
+```
+
+That renders twice for every change — once with the stale value, then again once
+the effect fires — so a stage display briefly paints the previous value. Prefer, in
+order:
+
+1. **Derive it.** State that is purely a function of props needs no state.
+2. **`useResyncOn([deps], fn)`** (`renderer/lib/use-resync-on.ts`) when the state
+   genuinely has to persist between changes — a draft being edited, a retry
+   counter. It adjusts state during render, so the re-render happens before the
+   browser paints and the stale frame never reaches the screen.
+
+Where an effect both clears state synchronously and starts an async fetch, split
+it: the clear goes in `useResyncOn`, the fetch stays in the effect.
+
+Never write a ref during render (`ref.current = value` in the component body) — a
+render may be discarded or replayed, and the write would outlive it. Use
+**`useLatestRef(value)`** (`renderer/lib/use-latest-ref.ts`) for a value that must
+escape the render that produced it, such as one read by a `ResizeObserver`
+subscribed once. Anything rendered from belongs in state.
+
+`react-hooks/set-state-in-effect` and `react-hooks/refs` enforce both of these.
+
 ## Dependencies
 
 Two rules, and they are not negotiable.

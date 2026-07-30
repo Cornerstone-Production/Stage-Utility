@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { UserRoundIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { StatusStrip, OfflinePill } from "./status-strip";
 import { slotStripMode } from "./slot-strip-mode";
 import { BrandLogo } from "./brand-logo";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 interface SlotPanelProps {
   slot: Slot;
@@ -36,10 +37,10 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
   const [imgAttempt, setImgAttempt] = useState(0);
   const [imgFailed, setImgFailed] = useState(false);
   // Reset retry/fail state whenever the underlying photo URL changes.
-  useEffect(() => {
+  useResyncOn([slot.photoUrl], () => {
     setImgAttempt(0);
     setImgFailed(false);
-  }, [slot.photoUrl]);
+  });
 
   const photoSrc =
     hasPhoto && !imgFailed

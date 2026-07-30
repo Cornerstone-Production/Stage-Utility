@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { UploadIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
@@ -36,8 +37,7 @@ export function PatchSection() {
   const [plan, setPlan] = useState<{ serviceTypeId: string | null; planId: string | null; planTitle: string | null } | null>(null);
 
   const dirty = useMemo(() => (draft && saved ? JSON.stringify(draft) !== JSON.stringify(saved) : false), [draft, saved]);
-  const dirtyRef = useRef(false);
-  dirtyRef.current = dirty;
+  const dirtyRef = useLatestRef(dirty);
 
   useEffect(() => {
     invoke<PatchFile>("patch:get")
@@ -51,7 +51,7 @@ export function PatchSection() {
       setSaved(f);
       if (!dirtyRef.current) setDraft(f);
     });
-  }, []);
+  }, [dirtyRef]);
 
   async function save() {
     if (!draft) return;

@@ -130,7 +130,7 @@ class AutomationEngine {
       const trigger = AUTOMATION_TRIGGERS[rule.trigger.id];
       if (!trigger || trigger.channel !== channel) continue;
 
-      let fired = false;
+      let fired: boolean;
       try {
         fired = trigger.didFire(prev, payload, rule.trigger.params, now);
       } catch {

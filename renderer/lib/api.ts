@@ -24,7 +24,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === "TimeoutError") {
-      throw new Error(`Request to ${path} timed out`);
+      throw new Error(`Request to ${path} timed out`, { cause: err });
     }
     throw err;
   }
