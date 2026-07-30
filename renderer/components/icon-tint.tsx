@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
-import { invoke } from "../lib/api";
 import { Tooltip } from "./ui/tooltip";
+import { invoke } from "../lib/api";
 
 /** The theme accent, used when an item has no color of its own. Kept as a CSS
  *  var so a tinted and an untinted icon still agree with the rest of the theme. */

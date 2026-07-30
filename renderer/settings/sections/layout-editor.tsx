@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { Tooltip } from "../../components/ui/tooltip";
 import {
   UndoIcon,
   Trash2Icon,
@@ -1706,20 +1707,20 @@ export function LayoutEditor({
           iconOnly
           onClick={toggleHideUnconfigured}
           aria-label={hideUnconfigured ? "Show all objects" : "Hide objects for integrations that aren't set up"}
-          title={hideUnconfigured ? "Showing all objects" : "Hide objects for integrations that aren't set up"}
+          tooltip={hideUnconfigured ? "Show objects for integrations that aren't set up" : "Hide objects for integrations that aren't set up"}
         >
           <FilterIcon className="size-3.5" />
         </Button>
         <Button variant={gridOn ? "accent" : "filled"} size="small" onClick={() => setGridOn((v) => !v)} aria-label="Toggle snap grid">
           <Grid3x3Icon className="size-3.5" /> Grid
         </Button>
-        <Button variant="filled" size="small" onClick={snapAllToGrid} aria-label="Snap all objects to grid" title="Snap every object's position + size to the grid">
+        <Button variant="filled" size="small" onClick={snapAllToGrid} aria-label="Snap all objects to grid" tooltip="Snap every object's position + size to the grid">
           Snap all
         </Button>
         {/* Canvas size + fit, collapsed into a popover to keep the bar lean. */}
         <Popover.Root>
           <Popover.Trigger asChild>
-            <Button variant="filled" size="small" title="Canvas size & fit">
+            <Button variant="filled" size="small" tooltip="Canvas size & fit">
               Canvas <ChevronDownIcon className="size-3.5 text-fg-muted" />
             </Button>
           </Popover.Trigger>
@@ -1731,15 +1732,15 @@ export function LayoutEditor({
                   {CANVAS_PRESETS.map((p) => {
                     const active = p.w === canvas.width && p.h === canvas.height;
                     return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        title={p.label}
-                        onClick={() => { setCanvas({ ...canvas, width: p.w, height: p.h }); setDirty(true); }}
-                        className={`rounded-md px-2 py-1 text-caption2 tabular-nums transition-colors ${active ? "bg-accent text-on-accent" : "bg-fill text-fg-muted hover:bg-fill-hover hover:text-fg"}`}
-                      >
-                        {p.id}
-                      </button>
+                      <Tooltip label={p.label}>
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => { setCanvas({ ...canvas, width: p.w, height: p.h }); setDirty(true); }}
+                          className={`rounded-md px-2 py-1 text-caption2 tabular-nums transition-colors ${active ? "bg-accent text-on-accent" : "bg-fill text-fg-muted hover:bg-fill-hover hover:text-fg"}`} aria-label={p.label}>
+                          {p.id}
+                        </button>
+                      </Tooltip>
                     );
                   })}
                 </div>
@@ -1755,8 +1756,8 @@ export function LayoutEditor({
               <div className="flex flex-col gap-1.5">
                 <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Fit</span>
                 <ButtonGroup>
-                  <Button variant={canvas.fit !== "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "contain" }); setDirty(true); }} title="Letterbox: keep the design aspect (adds bars on mismatched screens)">Letterbox</Button>
-                  <Button variant={canvas.fit === "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "fill" }); setDirty(true); }} title="Fill: use the whole window; objects reflow to its shape (no bars)">Fill</Button>
+                  <Button variant={canvas.fit !== "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "contain" }); setDirty(true); }} tooltip="Letterbox: keep the design aspect (adds bars on mismatched screens)">Letterbox</Button>
+                  <Button variant={canvas.fit === "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "fill" }); setDirty(true); }} tooltip="Fill: use the whole window; objects reflow to its shape (no bars)">Fill</Button>
                 </ButtonGroup>
               </div>
             </Popover.Content>
@@ -1768,7 +1769,7 @@ export function LayoutEditor({
         {/* Replace the current layout wholesale — starters + saved layouts. */}
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
-            <Button variant="filled" size="small" title="Replace the current layout with a starter or a saved layout">
+            <Button variant="filled" size="small" tooltip="Replace the current layout with a starter or a saved layout">
               <LayoutTemplateIcon className="size-3.5" /> Replace
               <ChevronDownIcon className="size-3.5 text-fg-muted" />
             </Button>
@@ -1886,16 +1887,17 @@ export function LayoutEditor({
                   {o.config.type === "container" ? `${typeLabel(o.config.type)} (${o.children?.length ?? 0})` : typeLabel(o.config.type)}
                 </span>
                 {depth > 0 && (
-                  <span
-                    role="button"
-                    tabIndex={-1}
-                    onClick={(e) => { e.stopPropagation(); reparentToRoot(o.id); }}
-                    className="text-fg-muted hover:text-fg"
-                    aria-label="Move out of container"
-                    title="Move out of container"
-                  >
-                    <CornerLeftUpIcon className="size-3.5" />
-                  </span>
+                  <Tooltip label="Move out of container">
+                    <span
+                      role="button"
+                      tabIndex={-1}
+                      onClick={(e) => { e.stopPropagation(); reparentToRoot(o.id); }}
+                      className="text-fg-muted hover:text-fg"
+                      aria-label="Move out of container"
+                    >
+                      <CornerLeftUpIcon className="size-3.5" />
+                    </span>
+                  </Tooltip>
                 )}
                 <span
                   role="button"
@@ -1972,10 +1974,10 @@ export function LayoutEditor({
                 {templates.map((t) => (
                   <div key={t.id} className="flex items-center gap-0.5 rounded-md px-2 py-1 hover:bg-fill">
                     <span className="text-caption1 text-fg flex-1 min-w-0 truncate">{t.name}</span>
-                    <Button variant="transparent" size="small" iconOnly onClick={() => loadTemplate(t)} aria-label="Load into editor" title="Load into editor">
+                    <Button variant="transparent" size="small" iconOnly onClick={() => loadTemplate(t)} aria-label="Load into editor" tooltip="Load into editor">
                       <DownloadIcon className="size-3.5 text-fg-muted" />
                     </Button>
-                    <Button variant="transparent" size="small" iconOnly onClick={() => onUpdateTemplate(t.id, { layout: currentLayout() })} aria-label="Overwrite with current" title="Overwrite with current layout">
+                    <Button variant="transparent" size="small" iconOnly onClick={() => onUpdateTemplate(t.id, { layout: currentLayout() })} aria-label="Overwrite with current" tooltip="Overwrite with current layout">
                       <SaveIcon className="size-3.5 text-fg-muted" />
                     </Button>
                     <Button variant="transparent" size="small" iconOnly onClick={() => onDeleteTemplate(t.id)} aria-label="Delete layout">
@@ -1997,7 +1999,7 @@ export function LayoutEditor({
               groups.map((g) => (
                 <div key={g.id} className="flex items-center gap-0.5 rounded-md px-2 py-1 hover:bg-fill">
                   <span className="text-caption1 text-fg flex-1 min-w-0 truncate">{g.name}</span>
-                  <Button variant="transparent" size="small" iconOnly onClick={() => insertGroup(g)} aria-label="Insert group" title="Insert into this view">
+                  <Button variant="transparent" size="small" iconOnly onClick={() => insertGroup(g)} aria-label="Insert group" tooltip="Insert into this view">
                     <DownloadIcon className="size-3.5 text-fg-muted" />
                   </Button>
                   <Button variant="transparent" size="small" iconOnly onClick={() => deleteGroup(g.id)} aria-label="Delete group">
@@ -2288,14 +2290,14 @@ function Inspector({
         {c.type === "container" && (
           <Button variant="transparent" size="small" iconOnly onClick={onSaveGroup} aria-label="Save as group"><PackagePlusIcon className="size-3.5 text-fg-muted" /></Button>
         )}
-        <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onSnapToGrid} aria-label="Snap to grid" title="Snap position + size to the grid"><Grid3x3Icon className="size-3.5 text-fg-muted" /></Button>
+        <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onSnapToGrid} aria-label="Snap to grid" tooltip="Snap position + size to the grid"><Grid3x3Icon className="size-3.5 text-fg-muted" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={onToggleLock} aria-label={o.locked ? "Unlock" : "Lock"}>
           {o.locked ? <LockIcon className="size-3.5 text-amber-10" /> : <UnlockIcon className="size-3.5 text-fg-muted" />}
         </Button>
-        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("front")} aria-label="Bring to front" title="Bring to front"><ChevronsUpIcon className="size-3.5" /></Button>
-        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("up")} aria-label="Bring forward" title="Bring forward"><ChevronUpIcon className="size-3.5" /></Button>
-        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("down")} aria-label="Send backward" title="Send backward"><ChevronDownIcon className="size-3.5" /></Button>
-        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("back")} aria-label="Send to back" title="Send to back"><ChevronsDownIcon className="size-3.5" /></Button>
+        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("front")} aria-label="Bring to front" tooltip="Bring to front"><ChevronsUpIcon className="size-3.5" /></Button>
+        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("up")} aria-label="Bring forward" tooltip="Bring forward"><ChevronUpIcon className="size-3.5" /></Button>
+        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("down")} aria-label="Send backward" tooltip="Send backward"><ChevronDownIcon className="size-3.5" /></Button>
+        <Button variant="transparent" size="small" iconOnly onClick={() => onReorder("back")} aria-label="Send to back" tooltip="Send to back"><ChevronsDownIcon className="size-3.5" /></Button>
         <Button variant="transparent" size="small" iconOnly onClick={onDuplicate} aria-label="Duplicate"><CopyIcon className="size-3.5 text-fg-muted" /></Button>
         <Button variant="transparent" size="small" iconOnly disabled={locked} onClick={onRemove} aria-label="Delete"><Trash2Icon className={`size-3.5 ${locked ? "text-fg-subtle" : "text-red-10"}`} /></Button>
       </div>
@@ -3088,14 +3090,14 @@ function Inspector({
       {/* Align within the parent (canvas for top-level, container box if nested) */}
       <Row label="Align">
         <ButtonGroup>
-          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ x: 0 })} aria-label="Align left" title="Align left"><AlignStartVertical className="size-3.5" /></Button>
-          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ x: (1 - o.w) / 2 })} aria-label="Center horizontally" title="Center horizontally"><AlignCenterVertical className="size-3.5" /></Button>
-          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ x: 1 - o.w })} aria-label="Align right" title="Align right"><AlignEndVertical className="size-3.5" /></Button>
+          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ x: 0 })} aria-label="Align left" tooltip="Align left"><AlignStartVertical className="size-3.5" /></Button>
+          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ x: (1 - o.w) / 2 })} aria-label="Center horizontally" tooltip="Center horizontally"><AlignCenterVertical className="size-3.5" /></Button>
+          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ x: 1 - o.w })} aria-label="Align right" tooltip="Align right"><AlignEndVertical className="size-3.5" /></Button>
         </ButtonGroup>
         <ButtonGroup>
-          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ y: 0 })} aria-label="Align top" title="Align top"><AlignStartHorizontal className="size-3.5" /></Button>
-          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ y: (1 - o.h) / 2 })} aria-label="Center vertically" title="Center vertically"><AlignCenterHorizontal className="size-3.5" /></Button>
-          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ y: 1 - o.h })} aria-label="Align bottom" title="Align bottom"><AlignEndHorizontal className="size-3.5" /></Button>
+          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ y: 0 })} aria-label="Align top" tooltip="Align top"><AlignStartHorizontal className="size-3.5" /></Button>
+          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ y: (1 - o.h) / 2 })} aria-label="Center vertically" tooltip="Center vertically"><AlignCenterHorizontal className="size-3.5" /></Button>
+          <Button variant="filled" size="small" iconOnly onClick={() => onGeom({ y: 1 - o.h })} aria-label="Align bottom" tooltip="Align bottom"><AlignEndHorizontal className="size-3.5" /></Button>
         </ButtonGroup>
       </Row>
 

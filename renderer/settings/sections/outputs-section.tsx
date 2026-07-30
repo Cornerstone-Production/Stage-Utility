@@ -1,4 +1,5 @@
 import { useState, useEffect, type ChangeEvent, type CSSProperties } from "react";
+import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -129,13 +130,13 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           className="h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0"
           aria-label="Display name"
         />
-        <span
-          className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted"
-          title={online ? "A screen is connected to this display" : "No screen is currently connected"}
-        >
-          <span className={`size-2 rounded-full ${online ? "bg-ok-9" : "bg-fg-faint"}`} />
-          {online ? "Connected" : "Offline"}
-        </span>
+        <Tooltip label={online ? "A screen is connected to this display" : "No screen is currently connected"}>
+          <span
+            className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted" aria-label={online ? "A screen is connected to this display" : "No screen is currently connected"}>
+            <span className={`size-2 rounded-full ${online ? "bg-ok-9" : "bg-fg-faint"}`} />
+            {online ? "Connected" : "Offline"}
+          </span>
+        </Tooltip>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
             <button
@@ -200,26 +201,26 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           <ExternalLinkIcon className="size-3.5 text-gray-9" />
           Open window
         </Button>
-        <label
-          className="ml-auto flex shrink-0 cursor-pointer items-center gap-1.5 text-caption1 text-fg-muted"
-          title="Hide the settings/QR link and home logo on this display so a handed-out link can't navigate away"
-        >
-          <LockIcon className="size-3.5" />
-          <span>Locked</span>
-          <Switch checked={output.locked ?? false} onCheckedChange={onSetLocked} aria-label={`Lock display ${output.name}`} />
-        </label>
+        <Tooltip label="Hide the settings/QR link and home logo on this display so a handed-out link can't navigate away">
+          <label
+            className="ml-auto flex shrink-0 cursor-pointer items-center gap-1.5 text-caption1 text-fg-muted" aria-label="Hide the settings/QR link and home logo on this display so a handed-out link can't navigate away">
+            <LockIcon className="size-3.5" />
+            <span>Locked</span>
+            <Switch checked={output.locked ?? false} onCheckedChange={onSetLocked} aria-label={`Lock display ${output.name}`} />
+          </label>
+        </Tooltip>
       </div>
 
       {/* Footer: the permanent URL, quiet — click to copy */}
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 border-t border-line px-3 py-2 text-left transition-colors hover:bg-fill"
-        title="Click to copy URL"
-        onClick={async () => { if (await copyText(outputUrl)) toast.success("URL copied"); else toast.error("Couldn't copy — select the URL manually"); }}
-      >
-        <span className="min-w-0 flex-1 truncate font-mono text-caption2 text-fg-subtle">{outputUrl}</span>
-        <CopyIcon className="size-3.5 shrink-0 text-fg-subtle" />
-      </button>
+      <Tooltip label="Copy URL">
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 border-t border-line px-3 py-2 text-left transition-colors hover:bg-fill"
+          onClick={async () => { if (await copyText(outputUrl)) toast.success("URL copied"); else toast.error("Couldn't copy — select the URL manually"); }} aria-label="Copy URL">
+          <span className="min-w-0 flex-1 truncate font-mono text-caption2 text-fg-subtle">{outputUrl}</span>
+          <CopyIcon className="size-3.5 shrink-0 text-fg-subtle" />
+        </button>
+      </Tooltip>
 
       {/* Optional friendly URL. The address above never changes, so anything
           already pointed at it — a Pi, a bookmark, a printed QR — keeps working
@@ -316,7 +317,7 @@ export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "sta
             variant="transparent"
             size="small"
             onClick={() => handlers.handleRefreshDisplay(null)}
-            title="Reload every connected display remotely"
+            tooltip="Reload every connected display remotely"
           >
             <RefreshCwIcon className="size-3.5 text-gray-9" />
             Refresh all

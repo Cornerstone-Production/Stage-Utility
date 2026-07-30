@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Tooltip } from "../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { Loader2Icon, ArrowLeftIcon } from "lucide-react";
 
@@ -106,9 +107,11 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Header: back + brand + plan · layout switcher · countdown · clock */}
       <div className="flex items-center gap-4 px-4 h-14 shrink-0 border-b border-line bg-black/40">
-        <a href="/scriptview" className="flex items-center justify-center rounded-lg size-8 shrink-0 transition-colors hover:bg-white/10" title="All services" aria-label="All services">
-          <ArrowLeftIcon className="size-4 text-fg-muted" />
-        </a>
+        <Tooltip label="All services">
+          <a href="/scriptview" className="flex items-center justify-center rounded-lg size-8 shrink-0 transition-colors hover:bg-white/10" aria-label="All services">
+            <ArrowLeftIcon className="size-4 text-fg-muted" />
+          </a>
+        </Tooltip>
         <div className="flex items-center gap-2 min-w-0">
           {state?.appLogo && <BrandLogo logo={state.appLogo} monochrome className="size-6 rounded text-fg" />}
           <div className="flex flex-col min-w-0 leading-tight">
@@ -135,18 +138,18 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
             <span className="text-title3 font-medium text-fg">{h12}:{mm}<span className="text-fg-subtle text-[0.7em]">:{ss} {ampm}</span></span>
           </div>
           {/* Layout switcher */}
-          <select
-            value={currentLayoutKey}
-            onChange={(e) => {
-              const id = e.target.value;
-              window.location.href = scriptViewUrl(typeNameForUrl, id, allLayouts.find((l) => l.id === id)?.name);
-            }}
-            className="rounded-lg border border-line bg-black/30 px-3 py-1.5 text-caption1 text-fg outline-none focus:border-line-strong"
-            title="Layout"
-          >
-            {allLayouts.map((l) => <option key={l.id} value={l.id} className="bg-[var(--kiosk-surface-1)]">{l.name}</option>)}
-            <option value={ALL_COLUMNS_LAYOUT_ID} className="bg-[var(--kiosk-surface-1)]">All columns</option>
-          </select>
+          <Tooltip label="Layout">
+            <select
+              value={currentLayoutKey}
+              onChange={(e) => {
+                const id = e.target.value;
+                window.location.href = scriptViewUrl(typeNameForUrl, id, allLayouts.find((l) => l.id === id)?.name);
+              }}
+              className="rounded-lg border border-line bg-black/30 px-3 py-1.5 text-caption1 text-fg outline-none focus:border-line-strong" aria-label="Layout">
+              {allLayouts.map((l) => <option key={l.id} value={l.id} className="bg-[var(--kiosk-surface-1)]">{l.name}</option>)}
+              <option value={ALL_COLUMNS_LAYOUT_ID} className="bg-[var(--kiosk-surface-1)]">All columns</option>
+            </select>
+          </Tooltip>
         </div>
       </div>
 

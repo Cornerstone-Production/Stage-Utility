@@ -438,7 +438,7 @@ function RolesPanel({
               variant="transparent"
               size="small"
               onClick={() => onChange(roles.filter((x) => x.id !== r.id))}
-              title="Delete this role and remove it from every layout"
+              tooltip="Delete this role and remove it from every layout"
             >
               <Trash2Icon className="size-3.5 text-red-10" />
             </Button>
@@ -505,7 +505,7 @@ function RolesPanel({
                 variant="transparent"
                 size="small"
                 onClick={() => onChange([...roles, { id: `role-${c.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name: c, members: [c] }])}
-                title={`Create a "${c}" role`}
+                tooltip={`Create a "${c}" role`}
               >
                 <PlusIcon className="size-3" /> {c}
               </Button>

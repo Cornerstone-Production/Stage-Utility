@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Tooltip } from "../../components/ui/tooltip";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FieldSet,
@@ -50,18 +51,18 @@ export function ConnectSection({ stageState, handlers }: Pick<SectionProps, "sta
                   Scan this code or open the address on a phone on the same network to control the
                   display remotely.
                 </FieldDescription>
-                <button
-                  type="button"
-                  className="mt-1.5 self-start text-left text-caption2 font-mono text-gray-a9 hover:text-gray-11 transition-colors truncate max-w-full"
-                  title="Click to copy URL"
-                  onClick={async () => {
-                    const ok = await copyText(stageState.remoteUrl!);
-                    if (ok) toast.success("URL copied");
-                    else toast.error("Couldn't copy — select the address manually");
-                  }}
-                >
-                  {stageState.remoteUrl}
-                </button>
+                <Tooltip label="Copy URL">
+                  <button
+                    type="button"
+                    className="mt-1.5 self-start text-left text-caption2 font-mono text-gray-a9 hover:text-gray-11 transition-colors truncate max-w-full"
+                    onClick={async () => {
+                      const ok = await copyText(stageState.remoteUrl!);
+                      if (ok) toast.success("URL copied");
+                      else toast.error("Couldn't copy — select the address manually");
+                    }} aria-label="Copy URL">
+                    {stageState.remoteUrl}
+                  </button>
+                </Tooltip>
               </FieldContent>
               <QrHint url={stageState.remoteUrl} />
             </Field>
@@ -107,30 +108,31 @@ function ToolsPanel({ baseUrl, iconColors }: { baseUrl: string; iconColors?: Rec
               <span className="min-w-0 flex-1 truncate text-callout font-semibold leading-tight text-fg">
                 {t.label}
               </span>
-              <a
-                href={t.path}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="shrink-0 rounded-md p-1 text-fg-subtle transition-colors hover:bg-fill hover:text-fg"
-                aria-label={`Open ${t.label}`}
-                title={`Open ${t.label}`}
-              >
-                <ExternalLinkIcon className="size-4" />
-              </a>
+              <Tooltip label={`Open ${t.label}`}>
+                <a
+                  href={t.path}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 rounded-md p-1 text-fg-subtle transition-colors hover:bg-fill hover:text-fg"
+                  aria-label={`Open ${t.label}`}
+                >
+                  <ExternalLinkIcon className="size-4" />
+                </a>
+              </Tooltip>
             </div>
             <p className="px-3 pb-2 pt-1 text-caption2 text-fg-muted">{t.description}</p>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 border-t border-line px-3 py-2 text-left transition-colors hover:bg-fill"
-              title="Click to copy URL"
-              onClick={async () => {
-                if (await copyText(url)) toast.success("URL copied");
-                else toast.error("Couldn't copy — select the URL manually");
-              }}
-            >
-              <span className="min-w-0 flex-1 truncate font-mono text-caption2 text-fg-subtle">{url}</span>
-              <CopyIcon className="size-3.5 shrink-0 text-fg-subtle" />
-            </button>
+            <Tooltip label="Copy URL">
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 border-t border-line px-3 py-2 text-left transition-colors hover:bg-fill"
+                onClick={async () => {
+                  if (await copyText(url)) toast.success("URL copied");
+                  else toast.error("Couldn't copy — select the URL manually");
+                }} aria-label="Copy URL">
+                <span className="min-w-0 flex-1 truncate font-mono text-caption2 text-fg-subtle">{url}</span>
+                <CopyIcon className="size-3.5 shrink-0 text-fg-subtle" />
+              </button>
+            </Tooltip>
           </div>
         );
       })}

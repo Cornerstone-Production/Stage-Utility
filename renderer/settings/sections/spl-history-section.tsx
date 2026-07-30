@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { ChevronLeftIcon, ChevronRightIcon, Trash2Icon, Volume2Icon } from "lucide-react";
 
@@ -293,14 +294,15 @@ export function SplHistorySection() {
                 })}
               </span>
             </button>
-            <button
-              className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
-              onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
-              aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
-              title="Delete recording"
-            >
-              <Trash2Icon className="size-4" />
-            </button>
+            <Tooltip label="Delete recording">
+              <button
+                className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
+                aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
+              >
+                <Trash2Icon className="size-4" />
+              </button>
+            </Tooltip>
           </div>
         ))}
         {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}

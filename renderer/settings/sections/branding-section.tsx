@@ -1,4 +1,5 @@
 import { useState, useRef, type ChangeEvent } from "react";
+import { Tooltip } from "../../components/ui/tooltip";
 import { UploadIcon, TrashIcon, CropIcon, UserRoundIcon } from "lucide-react";
 import {
   FieldSet,
@@ -189,24 +190,25 @@ export function BrandingSection({
                   aria-label={`Set accent ${hex}`}
                 />
               ))}
-              <label
-                className="relative size-6 rounded-md border border-gray-a5 overflow-hidden cursor-pointer"
-                aria-label="Custom accent color"
-                title="Custom color"
-              >
-                <input
-                  type="color"
-                  value={accentDraft}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setAccentDraft(e.target.value)}
-                  onBlur={() => {
-                    if (accentDraft.toLowerCase() !== (stageState.accentColor ?? "").toLowerCase()) {
-                      handlers.handleSetBranding({ accentColor: accentDraft });
-                    }
-                  }}
-                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                />
-                <span className="block h-full w-full bg-[conic-gradient(from_180deg,#c2410c,#0d9488,#5b9bd8,#6e56cf,#c2410c)]" />
-              </label>
+              <Tooltip label="Custom color">
+                <label
+                  className="relative size-6 rounded-md border border-gray-a5 overflow-hidden cursor-pointer"
+                  aria-label="Custom accent color"
+                >
+                  <input
+                    type="color"
+                    value={accentDraft}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setAccentDraft(e.target.value)}
+                    onBlur={() => {
+                      if (accentDraft.toLowerCase() !== (stageState.accentColor ?? "").toLowerCase()) {
+                        handlers.handleSetBranding({ accentColor: accentDraft });
+                      }
+                    }}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  />
+                  <span className="block h-full w-full bg-[conic-gradient(from_180deg,#c2410c,#0d9488,#5b9bd8,#6e56cf,#c2410c)]" />
+                </label>
+              </Tooltip>
               <Button
                 variant="transparent"
                 size="small"
