@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
-import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, confirm } from "../../components/ui";
+import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, Collapsible, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { useStageState } from "../../main/use-stage-state";
 import { RundownTable } from "../../main/rundown-table";
-import { categoryColour, normaliseCategory, suggestedCategoryColour } from "../../main/category-colour";
+import { categoryColour, normaliseCategory } from "../../main/category-colour";
 import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLengthSec, fmtTotal } from "../../main/scriptview-columns";
 
 // crypto.randomUUID is undefined in an insecure (plain-HTTP) context, which prod
@@ -67,6 +67,20 @@ export function ScriptViewSection() {
     () => [...layouts].sort((a, b) => a.order - b.order),
     [layouts],
   );
+
+  // Only the categories actually chosen as a row accent by some layout — that choice is
+  // ours, not PCO's. Colouring every category PCO happens to report would be a long list
+  // of entries that change nothing. Anything already given a colour stays listed so it
+  // can still be reset after its layout stops using it.
+  const accentCategories = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const l of layouts) {
+      const a = l.accentDepartment?.trim();
+      if (a) seen.set(normaliseCategory(a), a);
+    }
+    for (const k of Object.keys(categoryColors ?? {})) if (!seen.has(k)) seen.set(k, k);
+    return [...seen.values()].sort((a, b) => a.localeCompare(b));
+  }, [layouts, categoryColors]);
 
   async function persist(next: ScriptViewLayout[]) {
     setLayouts(next);
@@ -150,8 +164,6 @@ export function ScriptViewSection() {
         </Select>
         <span className="text-caption2 text-gray-9">the plan + note columns used for the previews below</span>
       </div>
-
-      <CategoryColoursPanel categories={noteCats} colors={categoryColors} />
 
       {sortedLayouts.length === 0 ? (
         <EmptyState
@@ -267,6 +279,16 @@ export function ScriptViewSection() {
           <Button variant="filled" size="small" className="self-start" onClick={addLayout}><PlusIcon className="size-4" /> Add layout</Button>
         </div>
       )}
+
+      {/* Last on the page and collapsed: these are set once and rarely revisited, so
+          they should not be the first thing you look at. */}
+      <Collapsible
+        label={<span className="text-callout font-semibold text-fg">Row accent colours</span>}
+        summary={accentCategories.length ? `${accentCategories.length} in use` : "none in use"}
+        className="rounded-xl border border-line bg-surface px-3 py-2"
+      >
+        <CategoryColoursPanel categories={accentCategories} colors={categoryColors} />
+      </Collapsible>
     </div>
   );
 }
@@ -288,87 +310,51 @@ function CategoryColoursPanel({
   categories: string[];
   colors?: Record<string, string>;
 }) {
-  const [adding, setAdding] = useState("");
-
-  // Everything PCO reports for the selected service type, plus anything already given a
-  // colour (which may come from another service type) — so the common case needs no typing.
-  const known = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const c of categories) seen.set(normaliseCategory(c), c);
-    for (const k of Object.keys(colors ?? {})) if (!seen.has(k)) seen.set(k, k);
-    return [...seen.values()].sort((a, b) => a.localeCompare(b));
-  }, [categories, colors]);
-
   const set = (category: string, color: string) =>
     void invoke("scriptview:setCategoryColor", { category, color });
 
+  if (categories.length === 0) {
+    return (
+      <p className="py-1 text-caption1 text-fg-muted">
+        Pick a row accent on a layout above, then its colour appears here.
+      </p>
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3">
-      <div className="flex flex-col gap-0.5">
-        <span className="text-callout font-semibold leading-tight text-fg">Category colours</span>
-        <span className="text-caption2 text-fg-muted">
-          Used for the row accent and each category&apos;s text. Set once — the same colour
-          applies under every service type.
-        </span>
-      </div>
-
-      {known.length === 0 ? (
-        <p className="text-caption1 text-fg-muted">
-          Pick a service type above to load its note categories.
-        </p>
-      ) : (
-        <div className="flex flex-col gap-1">
-          {known.map((cat) => {
-            const key = normaliseCategory(cat);
-            const chosen = colors?.[key];
-            return (
-              <div key={key} className="flex items-center gap-2">
-                <label
-                  className="size-5 shrink-0 cursor-pointer rounded border border-line-strong"
-                  style={{ backgroundColor: categoryColour(cat, colors) }}
-                  title={`Change the ${cat} colour`}
-                >
-                  <input
-                    type="color"
-                    className="sr-only"
-                    value={categoryColour(cat, colors)}
-                    aria-label={`${cat} colour`}
-                    onChange={(e) => set(cat, e.target.value)}
-                  />
-                </label>
-                <span className="min-w-0 flex-1 truncate text-caption1 text-gray-11">{cat}</span>
-                {chosen && (
-                  <Button variant="transparent" size="small" onClick={() => set(cat, "")} title="Back to the default colour">
-                    Reset
-                  </Button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="flex items-center gap-2 border-t border-line pt-2">
-        <Input
-          value={adding}
-          onChange={(e) => setAdding(e.target.value)}
-          placeholder="Add a category PCO hasn't reported yet"
-          className="h-7 flex-1 min-w-0"
-          aria-label="New category name"
-        />
-        <Button
-          variant="filled"
-          size="small"
-          disabled={!adding.trim()}
-          onClick={() => {
-            const name = adding.trim();
-            if (!name) return;
-            set(name, suggestedCategoryColour(name));
-            setAdding("");
-          }}
-        >
-          Add
-        </Button>
+    <div className="flex flex-col gap-2 pt-1">
+      <span className="text-caption2 text-fg-muted">
+        Used for the row stripe when a layout accents this category. Set once — the same
+        colour applies under every service type.
+      </span>
+      <div className="flex flex-col gap-1">
+        {categories.map((cat) => {
+          const key = normaliseCategory(cat);
+          const chosen = colors?.[key];
+          return (
+            <div key={key} className="flex items-center gap-2">
+              <label
+                className="size-5 shrink-0 cursor-pointer rounded border border-line-strong"
+                style={{ backgroundColor: categoryColour(cat, colors) }}
+                title={`Change the ${cat} colour`}
+              >
+                <input
+                  type="color"
+                  className="sr-only"
+                  value={categoryColour(cat, colors)}
+                  aria-label={`${cat} colour`}
+                  onChange={(e) => set(cat, e.target.value)}
+                />
+              </label>
+              <span className="min-w-0 flex-1 truncate text-caption1 text-gray-11">{cat}</span>
+              {chosen && (
+                <Button variant="transparent" size="small" onClick={() => set(cat, "")} title="Back to the default colour">
+                  Reset
+                </Button>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

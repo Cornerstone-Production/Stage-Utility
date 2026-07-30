@@ -61,10 +61,16 @@ is legible at distance; the wash groups the row without lifting the background i
 text. PCO's palette includes lavender and pink — those render as chosen. The project's
 zero-purple rule governs our own chrome, not a colour an operator picked in PCO.
 
-## Category colours
+## Row accent colours
 
-Settings → ScriptView → **Category colours**. One colour per note category, stored
-app-wide in `settings.json` under `scriptViewCategoryColors`.
+Settings → ScriptView → **Row accent colours** (collapsed, at the foot of the page —
+set once and rarely revisited). One colour per category, stored app-wide in
+`settings.json` under `scriptViewCategoryColors`.
+
+Only categories a layout has actually **chosen as its row accent** are listed. That
+choice is ours, not PCO's — listing every category PCO happens to report would be a long
+list of entries that change nothing. A category keeps its place after its layout stops
+accenting it, so a colour can still be reset.
 
 Note categories are fetched **per service type**, so "Audio" exists separately under
 Weekend, Youth and Salt Company. Keys are normalised (trimmed, lowercased), so setting
@@ -72,7 +78,6 @@ Audio once colours it under every service type — which is the point of storing
 rather than on a layout.
 
 - **Edit** — click the swatch; native colour picker.
-- **Add** — for a category PCO has not reported yet.
 - **Reset** — clears the colour so the category falls back to its suggestion. It does not
   remove the category; PCO owns whether one exists.
 
