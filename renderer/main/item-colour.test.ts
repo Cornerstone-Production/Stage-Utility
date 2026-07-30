@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { resolveItemColour } from "./item-colour.js";
+import { resolveItemColour, washFor } from "./item-colour.js";
 
 const STANDARD = [
   { name: "Header", color: "#eaebeb", custom: false },
@@ -77,5 +77,30 @@ describe("absent config", () => {
   test("no colours configured means no colour", () => {
     assert.equal(resolveItemColour({ itemType: "song", title: "x" }, undefined), null);
     assert.equal(resolveItemColour({ itemType: "song", title: "x" }, []), null);
+  });
+});
+
+describe("washFor", () => {
+  test("keeps the hue of a pale PCO colour instead of washing it to grey", () => {
+    // The bug this exists for: #e8f6df mixed into near-black at 10% measured
+    // rgb(33,34,32) on screen — neutral grey. A row has to look GREEN, not lighter.
+    const wash = washFor("#e8f6df");
+    assert.match(wash, /^hsl\(\d+ \d+% \d+%\)$/);
+    const hue = Number(wash.match(/\d+/)![0]);
+    assert.ok(hue > 70 && hue < 160, `expected a green hue, got ${hue}`);
+  });
+
+  test("a blue PCO colour stays blue", () => {
+    const hue = Number(washFor("#e0f7ff").match(/\d+/)![0]);
+    assert.ok(hue > 160 && hue < 240, `expected a cyan/blue hue, got ${hue}`);
+  });
+
+  test("a near-grey has no hue to keep, so it stays neutral", () => {
+    // PCO's Header is #eaebeb — forcing a hue onto it would invent a colour.
+    assert.equal(washFor("#eaebeb"), "rgba(255, 255, 255, 0.05)");
+  });
+
+  test("garbage does not produce a broken colour value", () => {
+    assert.equal(washFor("not-a-colour"), "rgba(255, 255, 255, 0.05)");
   });
 });

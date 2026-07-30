@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { PcoItemTypeColor } from "../../main/types/stage.js";
-import { resolveItemColour } from "./item-colour";
+import { resolveItemColour, washFor } from "./item-colour";
 import { headerColoursFor } from "./category-header-colour";
 
 // Shared PCO plan rundown table. Both the "script" View-kind (ScriptView on a
@@ -112,7 +112,7 @@ export function RundownTable({
               ref={isCurrent ? (currentRef as unknown as React.Ref<HTMLDivElement>) : undefined}
               className={`flex flex-col gap-0.5 border-b border-line px-3 py-2 ${isCurrent ? "bg-live-9/10" : ""}`}
               style={rowColour ? {
-                background: `color-mix(in srgb, ${rowColour} 10%, transparent)`,
+                background: washFor(rowColour),
                 boxShadow: `inset 3px 0 0 0 ${rowColour}`,
               } : undefined}
             >
@@ -194,7 +194,7 @@ export function RundownTable({
               // wash groups the row without lifting the background into the text.
               // PCO's palette is authored for a white table, so both are needed.
               style={rowColour ? {
-                background: `color-mix(in srgb, ${rowColour} 10%, transparent)`,
+                background: washFor(rowColour),
                 boxShadow: `inset 3px 0 0 0 ${rowColour}`,
               } : undefined}
             >

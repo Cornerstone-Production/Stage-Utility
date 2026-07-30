@@ -48,12 +48,20 @@ A live item outranks all three — a running item stays the most prominent row.
 
 ### How they render
 
-A 3px full-strength stripe plus a 10% wash:
+A 3px stripe in the literal PCO colour, plus a hue-matched wash behind the row:
 
 ```css
-box-shadow: inset 3px 0 0 var(--colour);
-background: color-mix(in srgb, var(--colour) 10%, transparent);
+box-shadow: inset 3px 0 0 <pco colour>;   /* literal — reads correctly at full strength */
+background: hsl(<hue of pco colour> 42% 15%);
 ```
+
+The wash cannot be a low-percentage mix of the PCO colour. Those colours are pale
+pastels authored for a white table, and mixing one into a near-black background keeps
+its lightness while losing its hue: `#e8f6df` at 10% over `#0a0a0a` measures
+**rgb(33, 34, 32)** on screen — neutral grey, so a song row just looked lighter rather
+than green. Keeping the hue and substituting a saturation/lightness that works on a dark
+panel is what makes it read as a colour. A near-grey PCO value (Header is `#eaebeb`) has
+no hue worth keeping and falls back to a plain white wash.
 
 PCO's palette is authored against a white table, so used directly as row backgrounds on a
 dark panel two of the three read as near-white blocks. The stripe carries the hue where it

@@ -32,3 +32,38 @@ export function resolveItemColour(
 
   return null;
 }
+
+/**
+ * A row wash for a PCO colour, on a dark surface.
+ *
+ * PCO's palette is authored against a white table — its greens and blues are pale
+ * pastels (Song is #e8f6df). Mixing one of those into a near-black background at a low
+ * percentage keeps its LIGHTNESS but loses its hue: #e8f6df at 10% over #0a0a0a
+ * measures rgb(33,34,32), which is neutral grey, not green.
+ *
+ * So the hue is kept and the saturation/lightness replaced with values that actually
+ * read as a colour on a dark panel. The stripe still uses the literal PCO colour, where
+ * full strength against the background renders it correctly.
+ */
+export function washFor(hex: string): string {
+  const h = hueOf(hex);
+  if (h == null) return "rgba(255, 255, 255, 0.05)"; // greys have no hue to keep
+  return `hsl(${Math.round(h)} 42% 15%)`;
+}
+
+/** Hue in degrees, or null when the colour is effectively neutral. */
+function hueOf(hex: string): number | null {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const d = max - min;
+  // A near-grey (PCO's Header #eaebeb) has no hue worth keeping.
+  if (d < 0.04) return null;
+  let h: number;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return ((h * 60) + 360) % 360;
+}
