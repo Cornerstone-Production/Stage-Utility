@@ -48,6 +48,11 @@ function textOf(node: React.ReactNode): string {
 // Field styling for the closed control; the OS renders the arrow + open list
 // (native picker), matching the patch sheet's native <select>s. Call-site trigger
 // classes (widths etc.) apply directly to the <select> — no wrapper needed.
+//
+// NB: this renders a NATIVE <select>, so arbitrary children of <SelectTrigger> are
+// dropped — only <SelectValue placeholder> survives, as a leading empty <option>.
+// A trigger built from an icon + text renders as nothing, and the browser then shows
+// the first real option, which reads as a selected value rather than a prompt.
 const BASE =
   "h-7 max-w-full rounded-md border border-line-strong bg-field px-2.5 py-1 " +
   "text-footnote text-fg focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus " +

@@ -64,6 +64,7 @@ export function ScriptViewSection() {
     [layouts],
   );
 
+
   async function persist(next: ScriptViewLayout[]) {
     setLayouts(next);
     try { await invoke("scriptview:saveLayouts", { layouts: next }); }
@@ -77,7 +78,7 @@ export function ScriptViewSection() {
     const order = sortedLayouts.length ? Math.max(...sortedLayouts.map((l) => l.order)) + 1 : 0;
     const layout: ScriptViewLayout = {
       id: uid(), name: `Layout ${sortedLayouts.length + 1}`, order,
-      columns: [...noteCats], accentDepartment: null, // all element toggles default on
+      columns: [...noteCats], // all element toggles default on
     };
     setExpandedId(layout.id);
     persist([...layouts, layout]);
@@ -101,7 +102,6 @@ export function ScriptViewSection() {
   const addColumn = (l: ScriptViewLayout, cat: string) => update(l.id, { columns: [...l.columns, cat] });
   const removeColumn = (l: ScriptViewLayout, cat: string) => {
     const patch: Partial<ScriptViewLayout> = { columns: l.columns.filter((c) => c !== cat) };
-    if (l.accentDepartment === cat) patch.accentDepartment = null;
     update(l.id, patch);
   };
   const moveColumn = (l: ScriptViewLayout, idx: number, dir: -1 | 1) => {
@@ -198,8 +198,14 @@ export function ScriptViewSection() {
                           </span>
                         ))}
                         {remaining.length > 0 && (
+                          // Native <select>: a custom trigger child cannot render, so the
+                          // label has to be a placeholder OPTION. Without one the browser
+                          // shows the first real option, which reads as a column this
+                          // layout already has rather than a control that adds one.
                           <Select value="" onValueChange={(v) => addColumn(l, v)}>
-                            <SelectTrigger className="w-auto h-7 px-2 text-caption1"><span className="inline-flex items-center gap-1 text-gray-10"><PlusIcon className="size-3.5" /> Add</span></SelectTrigger>
+                            <SelectTrigger className="w-auto h-7 px-2 text-caption1" aria-label="Add a column">
+                              <SelectValue placeholder="+ Add column" />
+                            </SelectTrigger>
                             <SelectContent>
                               {remaining.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                             </SelectContent>
@@ -216,15 +222,39 @@ export function ScriptViewSection() {
                       <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showArrangement !== false} onCheckedChange={(v: boolean) => update(l.id, { showArrangement: v })} /> Arrangement</label>
                       <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showItemNotes !== false} onCheckedChange={(v: boolean) => update(l.id, { showItemNotes: v })} /> Item notes</label>
                       <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showTotalTime !== false} onCheckedChange={(v: boolean) => update(l.id, { showTotalTime: v })} /> Total time</label>
+
+                      {/* One source per layout, never both — PCO's colour answers "what
+                          kind of item is this", the category answers "does my department
+                          have something to do here". Stacking them is too much per row. */}
                       <div className="flex items-center gap-2 text-caption1 text-gray-11">
-                        Row accent
-                        <Select value={l.accentDepartment ?? "__none__"} onValueChange={(v) => update(l.id, { accentDepartment: v === "__none__" ? null : v })}>
-                          <SelectTrigger className="w-40 h-7"><SelectValue /></SelectTrigger>
+                        Row colour
+                        <Select
+                          value={l.rowColour ?? "pco"}
+                          onValueChange={(v) => update(l.id, { rowColour: v as "pco" | "category" | "none" })}
+                        >
+                          <SelectTrigger className="w-36 h-7"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__none__">None</SelectItem>
-                            {l.columns.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                            <SelectItem value="pco">From PCO</SelectItem>
+                            <SelectItem value="category">By category</SelectItem>
+                            <SelectItem value="none">None</SelectItem>
                           </SelectContent>
                         </Select>
+                        {(l.rowColour ?? "pco") === "category" && (
+                          <Select
+                            value={l.accentDepartment ?? "__none__"}
+                            onValueChange={(v) => update(l.id, { accentDepartment: v === "__none__" ? null : v })}
+                          >
+                            <SelectTrigger className="w-40 h-7"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">Pick a category…</SelectItem>
+                              {/* Every note category the service type defines, not just
+                                  this layout's columns. Tinting by a category the layout
+                                  does not display is legitimate — "Lighting has a cue
+                                  here" is useful without showing the cue text. */}
+                              {noteCats.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        )}
                       </div>
                     </div>
 
@@ -243,6 +273,8 @@ export function ScriptViewSection() {
                           <RundownTable
                             items={rundown.items}
                             columns={buildScriptViewColumns(resolveScriptViewSpec(l, noteCats), computeClocks(rundown.items, rundown.serviceTimes?.[0]), rundown.timeZone)}
+                            itemTypeColors={rundown.itemTypeColors}
+                            rowColour={l.rowColour}
                             accentDepartment={l.accentDepartment ?? null}
                             autoScroll={false}
                             footer={l.showTotalTime !== false ? <span>{fmtTotal(totalLengthSec(rundown.items))} <span className="text-white/40">· total time</span></span> : undefined}
@@ -259,6 +291,18 @@ export function ScriptViewSection() {
           <Button variant="filled" size="small" className="self-start" onClick={addLayout}><PlusIcon className="size-4" /> Add layout</Button>
         </div>
       )}
+
     </div>
   );
 }
+
+/**
+ * One colour per note category, app-wide.
+ *
+ * Note categories are fetched per service type, so "Audio" exists separately under
+ * Weekend, Youth and Salt Company. Storing the colour on a layout would mean setting it
+ * once per layout per service type; storing it here means setting Audio once.
+ *
+ * "Reset" clears the colour so the category falls back to its suggestion — it does not
+ * remove the category, which PCO owns.
+ */
