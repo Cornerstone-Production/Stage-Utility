@@ -21,6 +21,20 @@ server running on the old build.
 `npm ci` and the build only run when the update actually changed the lockfile /
 renderer inputs; a backend-only update just restarts (the backend runs via tsx).
 
+### What's new
+
+The panel lists the pending commits, filtered to what an operator could actually
+notice (`changelog.ts`). Types that produce no release — `chore`, `ci`, `build`,
+`docs`, `test`, `refactor`, `style` — are dropped, along with merge commits and the
+release workflow's own `chore(release): vX.Y.Z [skip ci]` bump. Without that filter
+the commonest thing on offer was an update whose only listed change was the version
+number being written down.
+
+A subject that does not parse as a conventional commit is kept rather than dropped:
+an unrecognised line is more likely to be a real change than something to hide. When
+nothing survives the filter the panel is hidden entirely, rather than showing a
+heading over an empty list.
+
 ### Progress reconciliation across the restart
 
 Because a successful update restarts the server, the settings page's SSE socket

@@ -11,6 +11,7 @@
 // tells the operator to update from the CLI).
 
 import { execFile, spawn } from "node:child_process";
+import { summarizeChangelog } from "./changelog.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -153,13 +154,14 @@ class Updater {
       const latestDate = await this.git(["show", "-s", "--format=%cI", upstream]);
       const behindStr = await this.git(["rev-list", "--count", `HEAD..${upstream}`]);
       const behind = Number.parseInt(behindStr, 10) || 0;
+      // Curated, not raw: see changelog.ts for why the release workflow's own
+      // version bump and the merge commits are not news.
       const changelog =
         behind > 0
-          ? (await this.git(["log", "--format=%s", `HEAD..${upstream}`]))
-              .split("\n")
-              .map((s) => s.trim())
-              .filter(Boolean)
-              .slice(0, CHANGELOG_CAP)
+          ? summarizeChangelog(
+              (await this.git(["log", "--format=%s", `HEAD..${upstream}`])).split("\n"),
+              CHANGELOG_CAP,
+            )
           : [];
 
       this.status = {
