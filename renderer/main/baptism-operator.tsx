@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Tooltip } from "../components/ui/tooltip";
 import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, Trash2Icon, ChevronRightIcon } from "lucide-react";
 
 import { invoke } from "../lib/api";
@@ -242,9 +243,11 @@ function PastSession({ s, open, onToggle, onDelete }: { s: BaptismSession; open:
           </span>
           <span className="shrink-0 tabular-nums text-caption1 text-gray-9">{n} baptized · {fmtClock(tot)}</span>
         </button>
-        <button className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors" onClick={onDelete} aria-label="Delete session" title="Delete session">
-          <Trash2Icon className="size-4" />
-        </button>
+        <Tooltip label="Delete session">
+          <button className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors" onClick={onDelete} aria-label="Delete session">
+            <Trash2Icon className="size-4" />
+          </button>
+        </Tooltip>
       </div>
       {open && (
         <div className="border-t border-gray-5">

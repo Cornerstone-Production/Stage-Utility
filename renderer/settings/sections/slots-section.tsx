@@ -1,4 +1,5 @@
 import { useRef, useState, type ChangeEvent, type CSSProperties } from "react";
+import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent, type DraggableAttributes, type DraggableSyntheticListeners } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -197,20 +198,20 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
           <GripVerticalIcon className="size-4 text-gray-7" />
         </button>
         <span className="text-callout text-gray-9 flex-1 italic">Spacer</span>
-        <label
-          className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0"
-          title="Center the empty-slot image (from Branding) in this spacer"
-        >
-          <ImageIcon className="size-3.5 text-gray-9" />
-          Image
-          <Switch
-            checked={showImage}
-            onCheckedChange={(v: boolean) =>
-              onChange({ ...slot, link: { kind: "spacer", showEmptyImage: v } })
-            }
-            aria-label="Show empty-slot image in spacer"
-          />
-        </label>
+        <Tooltip label="Center the empty-slot image (from Branding) in this spacer">
+          <label
+            className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0" aria-label="Center the empty-slot image (from Branding) in this spacer">
+            <ImageIcon className="size-3.5 text-gray-9" />
+            Image
+            <Switch
+              checked={showImage}
+              onCheckedChange={(v: boolean) =>
+                onChange({ ...slot, link: { kind: "spacer", showEmptyImage: v } })
+              }
+              aria-label="Show empty-slot image in spacer"
+            />
+          </label>
+        </Tooltip>
         <label className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0">
           Width
           <NumberInput
@@ -303,7 +304,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
           disabled={index === 0}
           onClick={() => onChange({ ...slot, stackWithPrevious: !slot.stackWithPrevious })}
           aria-label="Stack into the column above"
-          title={
+          tooltip={
             index === 0
               ? "The first slot can't stack onto a previous one"
               : "Stack into the same column as the slot above (shared charger)"
@@ -324,7 +325,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
         <div className="flex flex-col gap-1.5 pl-4 sm:pl-9">
           <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
             {/* Mode select + its hint stay one row at every width. `self-center` on
-                the hint alone put it on its own centred line once the parent wraps
+                the hint alone put it on its own centerd line once the parent wraps
                 to a column on mobile. */}
             <div className="flex items-center gap-2 shrink-0">
               <Select
@@ -467,7 +468,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
                   variant="transparent"
                   size="small"
                   onClick={() => onChange({ ...slot, deviceLabel: receiverName })}
-                  title={`Use the receiver's own channel name (${receiverName})`}
+                  tooltip={`Use the receiver's own channel name (${receiverName})`}
                 >
                   Use receiver name
                 </Button>
@@ -552,7 +553,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
               </Select>
             )}
             {/* Toggle + its hint stay one row at every width. `self-center` alone
-                would centre the hint on its own line once the parent wraps to a
+                would center the hint on its own line once the parent wraps to a
                 column on mobile. */}
             <div className="flex items-center gap-1.5 shrink-0">
               <label className="flex items-center gap-1.5 text-caption1 text-gray-9">
@@ -845,7 +846,7 @@ function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers:
           if (await confirm({ title: "Overwrite preset?", message: `Overwrite "${preset.name}" with the current slots?`, confirmLabel: "Overwrite" })) handlers.handleOverwritePreset(preset.id);
         }}
         aria-label={`Overwrite ${preset.name} with current slots`}
-        title="Overwrite with current slots"
+        tooltip="Overwrite with current slots"
       >
         <SaveIcon className="size-3.5 text-gray-9" />
       </Button>

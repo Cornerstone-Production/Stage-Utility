@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, DownloadIcon } from "lucide-react";
 
@@ -733,7 +734,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
 
         <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
           <div className={`grid ${gridCols} gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10`}>
-            {editingTimes && <span className="text-center" title="Count toward the service timers">✓</span>}
+            {editingTimes && (
+              <Tooltip label="Whether this item counts toward the service timers">
+                <span className="text-center">✓</span>
+              </Tooltip>
+            )}
             <span className="max-sm:hidden">#</span><span>Item</span><span className="text-right max-sm:hidden">Plan</span><span className="text-right">Actual</span><span className="text-right">Δ</span><span className="text-right max-sm:hidden">Ended</span>
           </div>
           {detail.items.map((it, i) => {
@@ -744,13 +749,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             return (
               <div key={it.itemId} className={`grid ${gridCols} gap-2 px-3 py-1.5 text-caption1 tabular-nums items-center ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${counted ? "" : "opacity-55"}`}>
                 {editingTimes && (
-                  <input
-                    type="checkbox"
-                    checked={counted}
-                    onChange={() => toggleCounted(it)}
-                    className="justify-self-center cursor-pointer"
-                    title={counted ? "Counted in service timers — click to exclude" : "Not counted — click to include"}
-                  />
+                  <Tooltip
+                    label={counted ? "Counted in the service timers — click to exclude" : "Excluded from the service timers — click to include"}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={counted}
+                      onChange={() => toggleCounted(it)}
+                      className="justify-self-center cursor-pointer"
+                      aria-label={counted ? "Counted in the service timers" : "Excluded from the service timers"}
+                    />
+                  </Tooltip>
                 )}
                 <span className="text-gray-9 max-sm:hidden">{i + 1}</span>
                 <span className="text-gray-12 truncate">
@@ -906,14 +915,15 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                   </span>
                 </button>
                 {!readOnly && (
-                  <button
-                    className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
-                    onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
-                    aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
-                    title="Delete recording"
-                  >
-                    <Trash2Icon className="size-4" />
-                  </button>
+                  <Tooltip label="Delete recording">
+                    <button
+                      className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                      onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
+                      aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
+                    >
+                      <Trash2Icon className="size-4" />
+                    </button>
+                  </Tooltip>
                 )}
               </div>
             );

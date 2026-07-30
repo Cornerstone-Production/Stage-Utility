@@ -141,9 +141,9 @@ Pure, no network:
 ## Out of scope
 
 - Per-service-type layouts.
-- Reading roles or colours from PCO — neither exists (`ItemNote` carries only
+- Reading roles or colors from PCO — neither exists (`ItemNote` carries only
   `category_name / content / created_at / updated_at`).
-- Changing the row colour system, which is settled.
+- Changing the row color system, which is settled.
 
 ## Not to be forgotten
 

@@ -1,4 +1,5 @@
 import { Component, useEffect, useState } from "react";
+import { Tooltip } from "../components/ui/tooltip";
 import type { ReactNode, ErrorInfo } from "react";
 import { onNotification } from "../lib/api";
 import { SlotPanel } from "../components/slot-panel";
@@ -149,15 +150,16 @@ function KioskTopBar({
             {brandInner}
           </div>
         ) : (
-          <a
-            href="/"
-            className="flex items-center text-fg-muted rounded hover:opacity-80 transition-opacity"
-            style={{ gap: "0.55em" }}
-            title="Back to home"
-            aria-label="Back to home"
-          >
-            {brandInner}
-          </a>
+          <Tooltip label="Back to home">
+            <a
+              href="/"
+              className="flex items-center text-fg-muted rounded hover:opacity-80 transition-opacity"
+              style={{ gap: "0.55em" }}
+              aria-label="Back to home"
+            >
+              {brandInner}
+            </a>
+          </Tooltip>
         )}
         {displayName && (
           <>
@@ -182,17 +184,18 @@ function KioskTopBar({
       </div>
 
       {showQr && remoteUrl && !locked && (
-        <a
-          href="/settings"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="shrink-0 ml-auto relative z-10 rounded transition-opacity hover:opacity-70"
-          style={{ marginRight: "1em" }}
-          title="Open settings"
-          aria-label="Open settings"
-        >
-          <QrHint url={remoteUrl} compact sizeCss="clamp(1.75rem, 2.6vh, 3.5rem)" />
-        </a>
+        <Tooltip label="Open settings in a new tab">
+          <a
+            href="/settings"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 ml-auto relative z-10 rounded transition-opacity hover:opacity-70"
+            style={{ marginRight: "1em" }}
+            aria-label="Open settings in a new tab"
+          >
+            <QrHint url={remoteUrl} compact sizeCss="clamp(1.75rem, 2.6vh, 3.5rem)" />
+          </a>
+        </Tooltip>
       )}
     </div>
   );
@@ -334,7 +337,7 @@ export function StageView() {
   // permanent id (/display-1). Resolve to the canonical id ONCE, here — everything
   // downstream (slotsByDisplay, resolvedByOutput, reload targeting) keys off the id,
   // so a slug must never reach them. Falling back to the raw path keeps every
-  // pre-slug behaviour intact, including the preview- prefix.
+  // pre-slug behavior intact, including the preview- prefix.
   const displayId = resolveDisplayId(pathSlug, state?.outputs) ?? pathSlug;
   // Preview slug → view id (null on a real display). Computed before any early
   // return so the draft-bridge hook is called unconditionally.

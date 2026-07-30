@@ -867,7 +867,7 @@ Create `renderer/components/slot-strip-mode.ts`:
  *  "strip" — live telemetry (RF bars, charge, battery). A manual label rides
  *            INSIDE this, in place of the frequency; it never suppresses it.
  *  "pill"  — a manually-assigned (offline) device: labels only, no telemetry.
- *  "none"  — nothing bound and nothing labelled. */
+ *  "none"  — nothing bound and nothing labeled. */
 export function slotStripMode(
   device: { status: string; charge: number | null; iemCharge: number | null; label: string | null; iemLabel: string | null },
   hideRf?: boolean,
@@ -1074,7 +1074,7 @@ const ROSS_PAIR = ["rosstalk", "ross-tsl"] as const;
 In the `groups.map(...)` body, before mapping items, pull the Ross pair out and render it through a new `IntegrationPairRow`. Add the component beside `IntegrationRow`:
 
 ```tsx
-/** One card holding two related integrations as labelled sections. Each section
+/** One card holding two related integrations as labeled sections. Each section
  *  keeps its own enable toggle and status — this is a presentation grouping, not
  *  a merged integration. */
 function IntegrationPairRow({
@@ -1137,7 +1137,7 @@ If only one of the two is in use, the other is filtered into `dormant` and `byId
 
 - [ ] **Step 4: Verify in the browser**
 
-Settings → Integrations. Confirm one "Ross" card with two labelled sections, each with a working enable toggle and its own status badge; the MultiViewer feeds panel still renders inside its section; no duplicate Ross entries elsewhere on the page.
+Settings → Integrations. Confirm one "Ross" card with two labeled sections, each with a working enable toggle and its own status badge; the MultiViewer feeds panel still renders inside its section; no duplicate Ross entries elsewhere on the page.
 
 - [ ] **Step 5: Type-check and lint**
 
@@ -1155,7 +1155,7 @@ git commit -m "feat(integrations): group RossTalk and Ross MultiViewer in one ca
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01SjvyJC9Y4Qj4NqPpCF864L"
 gh pr create --base beta --title "feat(integrations): one Ross card" --body "$(cat <<'EOF'
-RossTalk and Ross MultiViewer (TSL UMD) now present as a single "Ross" card with two labelled sections.
+RossTalk and Ross MultiViewer (TSL UMD) now present as a single "Ross" card with two labeled sections.
 
 Presentation only — both keep their own descriptor id, enable flag, config and connection state, so layout buttons and automation actions that reference `rosstalk` are untouched.
 

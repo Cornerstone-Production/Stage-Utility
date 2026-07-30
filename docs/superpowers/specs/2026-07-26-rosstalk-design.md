@@ -30,7 +30,7 @@ trigger-agnostic by construction, which is why this stayed a foundation slice. T
 `rosstalk-button` remains in scope as a secondary surface (manual override, and the
 Companion path), but it is no longer the reason to build this.
 
-Tile TEXT and tally colour are **not** RossTalk's job — the protocol cannot set them.
+Tile TEXT and tally color are **not** RossTalk's job — the protocol cannot set them.
 That is TSL UMD, which already exists and gets extended as its own action provider in
 the engine spec.
 
@@ -192,7 +192,7 @@ from the device — it simply does nothing, silently.
 
 ## Safety
 
-The operator-facing behaviour is deliberately **unguarded**: no per-button
+The operator-facing behavior is deliberately **unguarded**: no per-button
 confirmation, no service-window gating. A switcher panel does not ask twice, and
 adding friction to a live operator's path is its own hazard.
 

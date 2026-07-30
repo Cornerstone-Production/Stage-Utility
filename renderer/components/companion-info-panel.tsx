@@ -58,7 +58,7 @@ function CopyField({ label, value }: { label: string; value: string }) {
             else toast.error(`Couldn't copy — select and copy manually`);
           }}
           aria-label={`Copy ${label}`}
-          title={`Copy ${label}`}
+          tooltip={`Copy ${label}`}
         >
           <CopyIcon className="size-3.5 text-gray-9" />
         </Button>

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Tooltip } from "./ui/tooltip";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 
@@ -115,25 +116,25 @@ export function HistoryCalendar({
               ? { backgroundColor: `color-mix(in srgb, var(--su-accent) ${heatPct}%, transparent)` }
               : undefined;
           return (
-            <button
-              key={dateStr}
-              type="button"
-              disabled={!hasData}
-              onClick={() => onPick(dateStr)}
-              title={hasData ? `${count} service${count === 1 ? "" : "s"}` : undefined}
-              style={style}
-              className={`flex h-9 w-full items-center justify-center rounded-lg font-mono text-[13px] tabular-nums transition ${
-                isSel
-                  ? "bg-accent font-medium text-white"
-                  : isToday
-                    ? "text-fg ring-1 ring-inset ring-line-strong"
-                    : hasData
-                      ? "text-fg hover:brightness-125"
-                      : "cursor-default text-fg-faint"
-              }`}
-            >
-              {d}
-            </button>
+            <Tooltip label={hasData ? `${count} service${count === 1 ? "" : "s"}` : undefined}>
+              <button
+                key={dateStr}
+                type="button"
+                disabled={!hasData}
+                onClick={() => onPick(dateStr)}
+                style={style}
+                className={`flex h-9 w-full items-center justify-center rounded-lg font-mono text-[13px] tabular-nums transition ${
+                  isSel
+                    ? "bg-accent font-medium text-white"
+                    : isToday
+                      ? "text-fg ring-1 ring-inset ring-line-strong"
+                      : hasData
+                        ? "text-fg hover:brightness-125"
+                        : "cursor-default text-fg-faint"
+                }`} aria-label={hasData ? `${count} service${count === 1 ? "" : "s"}` : undefined}>
+                {d}
+              </button>
+            </Tooltip>
           );
         })}
       </div>

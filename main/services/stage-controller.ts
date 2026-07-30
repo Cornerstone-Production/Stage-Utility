@@ -338,8 +338,8 @@ export class StageController {
   /** Set (or clear with null) the public base URL — persisted + broadcast. */
   /**
    * Tint one item's icon. `key` is a display id ("display-1") or a tool path
-   * ("/baptism"); one map so a colour set on the Displays tab or Connect also
-   * shows on the picker at /. An empty colour clears the entry back to the theme
+   * ("/baptism"); one map so a color set on the Displays tab or Connect also
+   * shows on the picker at /. An empty color clears the entry back to the theme
    * default rather than storing a sentinel.
    */
   async setIconColor(key: string, color: string): Promise<StageState> {
@@ -617,8 +617,8 @@ export class StageController {
     else plan = plans[0] ?? null;
     if (!plan) return empty;
 
-    // serviceTypes is cached for 15 minutes, so pulling the item row colours here
-    // costs nothing — the colours ride along on a request already being made.
+    // serviceTypes is cached for 15 minutes, so pulling the item row colors here
+    // costs nothing — the colors ride along on a request already being made.
     const [items, categories, serviceTimes, timeZone, serviceTypes] = await Promise.all([
       pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
       pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId),

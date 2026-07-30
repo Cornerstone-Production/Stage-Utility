@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import { Tooltip } from "../components/ui/tooltip";
 import { advancePeakHold, type PeakHold } from "./peak-hold.js";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -1070,28 +1071,28 @@ function GraphToggle({ mode, onToggle, stroke, H }: { mode: "live" | "recorded";
   const dot = `${Math.max(4, 0.016 * H)}px`;
   const pad = `${0.006 * H}px`;
   return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onToggle(); }}
-      onPointerEnter={() => setHot(true)}
-      onPointerLeave={() => { setHot(false); setDown(false); }}
-      onPointerDown={() => setDown(true)}
-      onPointerUp={() => setDown(false)}
-      title={mode === "live" ? "Showing live — tap for the last recorded service" : "Showing recorded service — tap for live"}
-      style={{
-        position: "absolute", top: `${0.008 * H}px`, right: `${0.008 * H}px`,
-        display: "inline-flex", alignItems: "center", gap: `${0.006 * H}px`,
-        // Faint surface only on hover/press — a touch affordance that stays invisible at rest.
-        background: down ? "rgba(255,255,255,0.16)" : hot ? "rgba(255,255,255,0.08)" : "transparent",
-        color: stroke, border: "none", borderRadius: `${0.02 * H}px`,
-        padding: `${pad} ${0.01 * H}px`, margin: `-${pad} -${0.004 * H}px`,
-        fontSize: `${Math.max(7, 0.03 * H)}px`, fontWeight: 700, letterSpacing: "0.06em",
-        lineHeight: 1, cursor: "pointer", opacity: hot ? 1 : 0.8, zIndex: 3,
-        transition: "background 120ms ease, opacity 120ms ease",
-      }}
-    >
-      <span style={{ width: dot, height: dot, borderRadius: "50%", background: mode === "live" ? "var(--su-live-9)" : "var(--su-warn-9)", flex: "0 0 auto" }} />
-      {mode === "live" ? "LIVE" : "REC"}
-    </button>
+    <Tooltip label={mode === "live" ? "Showing live — tap for the last recorded service" : "Showing recorded service — tap for live"}>
+      <button
+        onClick={(e) => { e.stopPropagation(); onToggle(); }}
+        onPointerEnter={() => setHot(true)}
+        onPointerLeave={() => { setHot(false); setDown(false); }}
+        onPointerDown={() => setDown(true)}
+        onPointerUp={() => setDown(false)}
+        style={{
+          position: "absolute", top: `${0.008 * H}px`, right: `${0.008 * H}px`,
+          display: "inline-flex", alignItems: "center", gap: `${0.006 * H}px`,
+          // Faint surface only on hover/press — a touch affordance that stays invisible at rest.
+          background: down ? "rgba(255,255,255,0.16)" : hot ? "rgba(255,255,255,0.08)" : "transparent",
+          color: stroke, border: "none", borderRadius: `${0.02 * H}px`,
+          padding: `${pad} ${0.01 * H}px`, margin: `-${pad} -${0.004 * H}px`,
+          fontSize: `${Math.max(7, 0.03 * H)}px`, fontWeight: 700, letterSpacing: "0.06em",
+          lineHeight: 1, cursor: "pointer", opacity: hot ? 1 : 0.8, zIndex: 3,
+          transition: "background 120ms ease, opacity 120ms ease",
+        }} aria-label={mode === "live" ? "Showing live — tap for the last recorded service" : "Showing recorded service — tap for live"}>
+        <span style={{ width: dot, height: dot, borderRadius: "50%", background: mode === "live" ? "var(--su-live-9)" : "var(--su-warn-9)", flex: "0 0 auto" }} />
+        {mode === "live" ? "LIVE" : "REC"}
+      </button>
+    </Tooltip>
   );
 }
 

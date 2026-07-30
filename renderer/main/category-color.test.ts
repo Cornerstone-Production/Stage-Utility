@@ -4,39 +4,39 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { categoryColour, NEUTRAL_CATEGORY_COLOUR } from "./category-colour.js";
+import { categoryColor, NEUTRAL_CATEGORY_COLOUR } from "./category-color.js";
 
-describe("categoryColour", () => {
-  test("the categories that matter on a rundown each get their colour", () => {
-    assert.equal(categoryColour("Lighting"), "#ffb224");
-    assert.equal(categoryColour("Video"), "#46a758");
-    assert.equal(categoryColour("Graphics"), "#46a758");
-    assert.equal(categoryColour("Audio"), "#0091ff");
-    assert.equal(categoryColour("Band"), "#12a594");
-    assert.equal(categoryColour("Vocals"), "#12a594");
-    assert.equal(categoryColour("Stage Manager"), "#e5484d");
+describe("categoryColor", () => {
+  test("the categories that matter on a rundown each get their color", () => {
+    assert.equal(categoryColor("Lighting"), "#ffb224");
+    assert.equal(categoryColor("Video"), "#46a758");
+    assert.equal(categoryColor("Graphics"), "#46a758");
+    assert.equal(categoryColor("Audio"), "#0091ff");
+    assert.equal(categoryColor("Band"), "#12a594");
+    assert.equal(categoryColor("Vocals"), "#12a594");
+    assert.equal(categoryColor("Stage Manager"), "#e5484d");
   });
 
   test("matching is case-insensitive, substring, and tolerates padding", () => {
-    assert.equal(categoryColour("  MD + Playback Tech "), "#12a594");
-    assert.equal(categoryColour("FOH"), "#0091ff");
-    assert.equal(categoryColour("LIGHTING"), "#ffb224");
-    assert.equal(categoryColour("Aux Keys"), "#12a594");
+    assert.equal(categoryColor("  MD + Playback Tech "), "#12a594");
+    assert.equal(categoryColor("FOH"), "#0091ff");
+    assert.equal(categoryColor("LIGHTING"), "#ffb224");
+    assert.equal(categoryColor("Aux Keys"), "#12a594");
   });
 
   test("an unmatched category is neutral rather than arbitrary", () => {
-    assert.equal(categoryColour("Hospitality"), NEUTRAL_CATEGORY_COLOUR);
-    assert.equal(categoryColour(""), NEUTRAL_CATEGORY_COLOUR);
+    assert.equal(categoryColor("Hospitality"), NEUTRAL_CATEGORY_COLOUR);
+    assert.equal(categoryColor(""), NEUTRAL_CATEGORY_COLOUR);
   });
 
   test("the real category set produces a usable spread", () => {
     const real = ["Audio", "Band", "Vocals", "Lighting", "Video", "Graphics", "Stage Manager"];
-    assert.ok(new Set(real.map(categoryColour)).size >= 4);
+    assert.ok(new Set(real.map(categoryColor)).size >= 4);
   });
 
-  test("no category colour is purple", () => {
+  test("no category color is purple", () => {
     for (const c of ["Audio", "Band", "Lighting", "Video", "Stage Manager", "Hospitality"]) {
-      const hex = categoryColour(c);
+      const hex = categoryColor(c);
       const n = parseInt(hex.slice(1), 16);
       const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
       const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;

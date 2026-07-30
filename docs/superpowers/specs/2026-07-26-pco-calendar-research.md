@@ -42,7 +42,7 @@ Calendar, Services). A Personal Access Token acts with the permissions of the us
 created it.
 
 So the **existing App ID / Secret should reach Calendar**, provided the account that
-minted the token can see Calendar in the organisation. That is a permission check, not
+minted the token can see Calendar in the organization. That is a permission check, not
 a new integration — considerably cheaper than expected.
 
 **To verify before building:** with the current credentials, `GET

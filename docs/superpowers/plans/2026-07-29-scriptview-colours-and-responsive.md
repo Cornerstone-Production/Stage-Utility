@@ -1,10 +1,10 @@
-# ScriptView colours + responsive layout — Implementation Plan
+# ScriptView colors + responsive layout — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Colour ScriptView rows from PCO's own item row colours, let the operator set one colour per note category app-wide, and reflow the rundown by width instead of centring it.
+**Goal:** Color ScriptView rows from PCO's own item row colors, let the operator set one color per note category app-wide, and reflow the rundown by width instead of centring it.
 
-**Architecture:** PCO's `standard_item_types` / `custom_item_types` ride along on a request `listServiceTypes` already makes, are resolved to a colour by a pure matcher, and render as a 3px stripe plus a 10% wash so a palette authored for a white table survives on a dark panel. Category colours move out of a keyword guess into one app-wide map keyed by normalised name. The table's shape changes at 640px and 1024px; the page never gets a max-width.
+**Architecture:** PCO's `standard_item_types` / `custom_item_types` ride along on a request `listServiceTypes` already makes, are resolved to a color by a pure matcher, and render as a 3px stripe plus a 10% wash so a palette authored for a white table survives on a dark panel. Category colors move out of a keyword guess into one app-wide map keyed by normalised name. The table's shape changes at 640px and 1024px; the page never gets a max-width.
 
 **Tech Stack:** TypeScript, Node ≥24 via `tsx` (no compile step), React 19, `node:test`. Zero third-party runtime deps in `main/`.
 
@@ -12,10 +12,10 @@
 
 - Branch from `beta`. PRs #139/#140/#142/#143/#144 are open; do not stack on them.
 - No emojis anywhere — UI, code, comments, commit messages. Lucide icons or text.
-- Zero purple **in our own chrome**. PCO colours are operator data and render as given, including lavender and pink — see spec §A.
+- Zero purple **in our own chrome**. PCO colors are operator data and render as given, including lavender and pink — see spec §A.
 - Dark surfaces stay strictly R=G=B neutral. No `saturate()` over dark.
 - Numeric inputs use the themed `NumberInput`, never raw `<input type="number">`.
-- Colour inputs use the native `<input type="color">`, matching `slots-section.tsx` and `icon-tint.tsx`.
+- Color inputs use the native `<input type="color">`, matching `slots-section.tsx` and `icon-tint.tsx`.
 - Prod is plain HTTP — no secure-context-only browser APIs.
 - Tests run through `tsx` over `main/**/*.test.ts` and `renderer/**/*.test.ts`. No network, no device I/O.
 - Commits end with the Co-Authored-By + Claude-Session trailers.
@@ -25,21 +25,21 @@
 
 ## File Structure
 
-**Part A — PCO item colours**
+**Part A — PCO item colors**
 - Modify `main/types/stage.ts` — `PcoItemTypeColor`, `ServiceTypeDTO.itemTypeColors`, `ScriptViewRundownDTO.itemTypeColors`
 - Modify `main/services/pco-service.ts:395-411` — stop discarding the two arrays
-- Create `renderer/main/item-colour.ts` — `resolveItemColour()`, the pure matcher
-- Create `renderer/main/item-colour.test.ts`
+- Create `renderer/main/item-color.ts` — `resolveItemColor()`, the pure matcher
+- Create `renderer/main/item-color.test.ts`
 - Modify `renderer/main/rundown-table.tsx` — apply stripe + wash
 
-**Part B — app-wide category colours**
+**Part B — app-wide category colors**
 - Modify `main/services/settings-store.ts` — `scriptViewCategoryColors`
 - Modify `main/types/stage.ts` — same field on `StageState`
 - Modify `main/services/stage-controller.ts` — `setCategoryColor()`
 - Modify `main/services/routes/scriptview-routes.ts` — `POST /api/scriptview/category-color`
 - Modify `renderer/lib/api.ts` — `scriptview:setCategoryColor`
-- Create `renderer/main/category-colour.ts` — `categoryColour()`, normalisation + fallback
-- Create `renderer/main/category-colour.test.ts`
+- Create `renderer/main/category-color.ts` — `categoryColor()`, normalisation + fallback
+- Create `renderer/main/category-color.test.ts`
 - Modify `renderer/settings/sections/scriptview-section.tsx` — the management panel
 - Modify `renderer/main/rundown-table.tsx` — read the map instead of guessing
 
@@ -48,7 +48,7 @@
 
 ---
 
-## Task 1: Carry PCO's item colours through the API
+## Task 1: Carry PCO's item colors through the API
 
 **Files:**
 - Modify: `main/types/stage.ts:872-875`, `:938-961`
@@ -63,14 +63,14 @@
 In `main/types/stage.ts`, above `ServiceTypeDTO`:
 
 ```ts
-/** One of PCO's item row colours, from ServiceType.standard_item_types /
+/** One of PCO's item row colors, from ServiceType.standard_item_types /
  *  custom_item_types. Standard entries match an item's `itemType`; custom entries
  *  match text CONTAINED in the title ("Items that include this text in the title
  *  will be highlighted"). */
 export interface PcoItemTypeColor {
   /** "Header" / "Song" / "Media" for standard; the operator's text for custom. */
   name: string;
-  /** "#rrggbb". PCO stores #ffffff to mean "no colour". */
+  /** "#rrggbb". PCO stores #ffffff to mean "no color". */
   color: string;
   custom: boolean;
 }
@@ -82,7 +82,7 @@ Then extend `ServiceTypeDTO`:
 export interface ServiceTypeDTO {
   id: string;
   name: string;
-  /** Item row colours configured on this service type in PCO. */
+  /** Item row colors configured on this service type in PCO. */
   itemTypeColors?: PcoItemTypeColor[];
 }
 ```
@@ -90,7 +90,7 @@ export interface ServiceTypeDTO {
 And `ScriptViewRundownDTO`, after `noteCategories`:
 
 ```ts
-  /** Item row colours for this rundown's service type (see PcoItemTypeColor). */
+  /** Item row colors for this rundown's service type (see PcoItemTypeColor). */
   itemTypeColors?: PcoItemTypeColor[];
 ```
 
@@ -102,7 +102,7 @@ Replace the `result` mapping in `listServiceTypes` (`pco-service.ts:404-407`):
     const result: ServiceTypeDTO[] = items.map((item) => ({
       id: item.id,
       name: String(item.attributes.name ?? "Unknown"),
-      // Free: this resource already carries the colours, we just stopped throwing
+      // Free: this resource already carries the colors, we just stopped throwing
       // them away. `index` is PCO's palette slot and is not useful to us.
       itemTypeColors: [
         ...toItemColors(item.attributes.standard_item_types, false),
@@ -156,35 +156,35 @@ Expected: the three standard entries — Header `#eaebeb`, Media `#ffffff`, Song
 
 ```bash
 git add main/types/stage.ts main/services/pco-service.ts main/services/stage-controller.ts
-git commit -m "feat(scriptview): carry PCO's item row colours through to the rundown"
+git commit -m "feat(scriptview): carry PCO's item row colors through to the rundown"
 ```
 
 ---
 
-## Task 2: The colour matcher
+## Task 2: The color matcher
 
 **Files:**
-- Create: `renderer/main/item-colour.ts`
-- Create: `renderer/main/item-colour.test.ts`
+- Create: `renderer/main/item-color.ts`
+- Create: `renderer/main/item-color.test.ts`
 
 **Interfaces:**
 - Consumes: `PcoItemTypeColor` (Task 1).
-- Produces: `resolveItemColour(item: {itemType: string; title: string}, colours: PcoItemTypeColor[] | undefined): string | null`.
+- Produces: `resolveItemColor(item: {itemType: string; title: string}, colors: PcoItemTypeColor[] | undefined): string | null`.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `renderer/main/item-colour.test.ts`:
+Create `renderer/main/item-color.test.ts`:
 
 ```ts
-// Matching PCO's item row colours. Two rules that are easy to get backwards: custom
+// Matching PCO's item row colors. Two rules that are easy to get backwards: custom
 // types match text CONTAINED in the title (not the whole title, not the item type),
-// and #ffffff means "no colour" rather than "white" — PCO ships it as the default on
+// and #ffffff means "no color" rather than "white" — PCO ships it as the default on
 // Media, so rendering it would paint a meaningless stripe on every video row.
 
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { resolveItemColour } from "./item-colour.js";
+import { resolveItemColor } from "./item-color.js";
 
 const STANDARD = [
   { name: "Header", color: "#eaebeb", custom: false },
@@ -193,32 +193,32 @@ const STANDARD = [
 ];
 
 describe("standard types match the item type", () => {
-  test("a song gets the Song colour", () => {
-    assert.equal(resolveItemColour({ itemType: "song", title: "He Will Be" }, STANDARD), "#e8f6df");
+  test("a song gets the Song color", () => {
+    assert.equal(resolveItemColor({ itemType: "song", title: "He Will Be" }, STANDARD), "#e8f6df");
   });
 
-  test("a header gets the Header colour", () => {
-    assert.equal(resolveItemColour({ itemType: "header", title: "SERVICE START" }, STANDARD), "#eaebeb");
+  test("a header gets the Header color", () => {
+    assert.equal(resolveItemColor({ itemType: "header", title: "SERVICE START" }, STANDARD), "#eaebeb");
   });
 
   test("matching is case-insensitive on the type name", () => {
     const c = [{ name: "SONG", color: "#e8f6df", custom: false }];
-    assert.equal(resolveItemColour({ itemType: "song", title: "x" }, c), "#e8f6df");
+    assert.equal(resolveItemColor({ itemType: "song", title: "x" }, c), "#e8f6df");
   });
 
   test("a plain item matches nothing", () => {
-    assert.equal(resolveItemColour({ itemType: "item", title: "Welcome" }, STANDARD), null);
+    assert.equal(resolveItemColor({ itemType: "item", title: "Welcome" }, STANDARD), null);
   });
 });
 
 describe("#ffffff means unset", () => {
-  test("Media's default white does not colour the row", () => {
-    assert.equal(resolveItemColour({ itemType: "media", title: "VIDEO: Pre-roll" }, STANDARD), null);
+  test("Media's default white does not color the row", () => {
+    assert.equal(resolveItemColor({ itemType: "media", title: "VIDEO: Pre-roll" }, STANDARD), null);
   });
 
   test("but a near-white is a real choice and is kept", () => {
     const c = [{ name: "Media", color: "#fffffe", custom: false }];
-    assert.equal(resolveItemColour({ itemType: "media", title: "x" }, c), "#fffffe");
+    assert.equal(resolveItemColor({ itemType: "media", title: "x" }, c), "#fffffe");
   });
 });
 
@@ -226,69 +226,69 @@ describe("custom types match text inside the title", () => {
   const CUSTOM = [...STANDARD, { name: "VIDEO", color: "#ffd9b0", custom: true }];
 
   test("a title containing the text matches", () => {
-    assert.equal(resolveItemColour({ itemType: "item", title: "VIDEO: Need To Know" }, CUSTOM), "#ffd9b0");
+    assert.equal(resolveItemColor({ itemType: "item", title: "VIDEO: Need To Know" }, CUSTOM), "#ffd9b0");
   });
 
   test("matching is case-insensitive and substring, not exact", () => {
-    assert.equal(resolveItemColour({ itemType: "item", title: "Roll the video now" }, CUSTOM), "#ffd9b0");
+    assert.equal(resolveItemColor({ itemType: "item", title: "Roll the video now" }, CUSTOM), "#ffd9b0");
   });
 
   test("a custom match beats a standard one", () => {
-    // A song whose title contains the custom text takes the custom colour — the
+    // A song whose title contains the custom text takes the custom color — the
     // operator typed that text deliberately.
-    assert.equal(resolveItemColour({ itemType: "song", title: "VIDEO: Song Intro" }, CUSTOM), "#ffd9b0");
+    assert.equal(resolveItemColor({ itemType: "song", title: "VIDEO: Song Intro" }, CUSTOM), "#ffd9b0");
   });
 
   test("a custom entry set to white is still unset", () => {
     const c = [{ name: "VIDEO", color: "#ffffff", custom: true }];
-    assert.equal(resolveItemColour({ itemType: "item", title: "VIDEO: x" }, c), null);
+    assert.equal(resolveItemColor({ itemType: "item", title: "VIDEO: x" }, c), null);
   });
 
   test("an empty custom name never matches everything", () => {
     // "" is contained in every string; guard against a blank entry painting the plan.
     const c = [{ name: "", color: "#ff0000", custom: true }];
-    assert.equal(resolveItemColour({ itemType: "item", title: "Welcome" }, c), null);
+    assert.equal(resolveItemColor({ itemType: "item", title: "Welcome" }, c), null);
   });
 });
 
 describe("absent config", () => {
-  test("no colours configured means no colour", () => {
-    assert.equal(resolveItemColour({ itemType: "song", title: "x" }, undefined), null);
-    assert.equal(resolveItemColour({ itemType: "song", title: "x" }, []), null);
+  test("no colors configured means no color", () => {
+    assert.equal(resolveItemColor({ itemType: "song", title: "x" }, undefined), null);
+    assert.equal(resolveItemColor({ itemType: "song", title: "x" }, []), null);
   });
 });
 ```
 
 - [ ] **Step 2: Run it and watch it fail**
 
-Run: `npx tsx --test renderer/main/item-colour.test.ts`
+Run: `npx tsx --test renderer/main/item-color.test.ts`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write the matcher**
 
-Create `renderer/main/item-colour.ts`:
+Create `renderer/main/item-color.ts`:
 
 ```ts
 import type { PcoItemTypeColor } from "../../main/types/stage.js";
 
-/** PCO stores #ffffff to mean "no colour" — it is the shipped default on Media. */
+/** PCO stores #ffffff to mean "no color" — it is the shipped default on Media. */
 const UNSET = "#ffffff";
 
 /**
- * The PCO item row colour for one item, or null when PCO says nothing about it.
+ * The PCO item row color for one item, or null when PCO says nothing about it.
  *
  * Custom types are checked first: they match text CONTAINED in the title, which the
  * operator typed deliberately, so they beat the broad standard type match.
  */
-export function resolveItemColour(
+export function resolveItemColor(
   item: { itemType: string; title: string },
-  colours: PcoItemTypeColor[] | undefined,
+  colors: PcoItemTypeColor[] | undefined,
 ): string | null {
-  if (!colours || colours.length === 0) return null;
+  if (!colors || colors.length === 0) return null;
   const title = item.title.toLowerCase();
   const type = item.itemType.trim().toLowerCase();
 
-  for (const c of colours) {
+  for (const c of colors) {
     if (!c.custom) continue;
     const needle = c.name.trim().toLowerCase();
     // "" is contained in every string — a blank entry must not paint the whole plan.
@@ -296,7 +296,7 @@ export function resolveItemColour(
     if (title.includes(needle)) return c.color === UNSET ? null : c.color;
   }
 
-  for (const c of colours) {
+  for (const c of colors) {
     if (c.custom) continue;
     if (c.name.trim().toLowerCase() === type) return c.color === UNSET ? null : c.color;
   }
@@ -307,7 +307,7 @@ export function resolveItemColour(
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx tsx --test renderer/main/item-colour.test.ts`
+Run: `npx tsx --test renderer/main/item-color.test.ts`
 Expected: PASS, 12 tests.
 
 - [ ] **Step 5: Prove they aren't vacuous**
@@ -317,13 +317,13 @@ Change `if (title.includes(needle))` to `if (title === needle)`. Re-run — the 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add renderer/main/item-colour.ts renderer/main/item-colour.test.ts
-git commit -m "feat(scriptview): match PCO item row colours to plan items"
+git add renderer/main/item-color.ts renderer/main/item-color.test.ts
+git commit -m "feat(scriptview): match PCO item row colors to plan items"
 ```
 
 ---
 
-## Task 3: App-wide category colours — storage and resolution
+## Task 3: App-wide category colors — storage and resolution
 
 **Files:**
 - Modify: `main/services/settings-store.ts`
@@ -331,25 +331,25 @@ git commit -m "feat(scriptview): match PCO item row colours to plan items"
 - Modify: `main/services/stage-controller.ts`
 - Modify: `main/services/routes/scriptview-routes.ts`
 - Modify: `renderer/lib/api.ts`
-- Create: `renderer/main/category-colour.ts`
-- Create: `renderer/main/category-colour.test.ts`
+- Create: `renderer/main/category-color.ts`
+- Create: `renderer/main/category-color.test.ts`
 
 **Interfaces:**
-- Produces: `StageState.scriptViewCategoryColors?: Record<string, string>`; `stageController.setCategoryColor(category: string, color: string): Promise<StageState>`; `categoryColour(category: string, map: Record<string,string> | undefined): string`.
+- Produces: `StageState.scriptViewCategoryColors?: Record<string, string>`; `stageController.setCategoryColor(category: string, color: string): Promise<StageState>`; `categoryColor(category: string, map: Record<string,string> | undefined): string`.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `renderer/main/category-colour.test.ts`:
+Create `renderer/main/category-color.test.ts`:
 
 ```ts
-// Category colours are stored once, app-wide, because note categories are fetched per
+// Category colors are stored once, app-wide, because note categories are fetched per
 // service type — "Audio" exists separately under Weekend, Youth and Salt Company. Keys
-// therefore normalise, so setting Audio once colours all of them.
+// therefore normalise, so setting Audio once colors all of them.
 
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { categoryColour, normaliseCategory, DEFAULT_CATEGORY_COLOUR } from "./category-colour.js";
+import { categoryColor, normaliseCategory, DEFAULT_CATEGORY_COLOUR } from "./category-color.js";
 
 describe("normalisation", () => {
   test("case and surrounding space collapse to one key", () => {
@@ -359,60 +359,60 @@ describe("normalisation", () => {
   });
 });
 
-describe("categoryColour", () => {
-  test("uses the configured colour", () => {
-    assert.equal(categoryColour("Audio", { audio: "#0091ff" }), "#0091ff");
+describe("categoryColor", () => {
+  test("uses the configured color", () => {
+    assert.equal(categoryColor("Audio", { audio: "#0091ff" }), "#0091ff");
   });
 
   test("finds it regardless of how the category is cased", () => {
-    assert.equal(categoryColour("  AUDIO ", { audio: "#0091ff" }), "#0091ff");
+    assert.equal(categoryColor("  AUDIO ", { audio: "#0091ff" }), "#0091ff");
   });
 
   test("falls back to the keyword suggestion when unset", () => {
     // departmentColor()'s guess survives ONLY as a fallback, so an existing board
-    // looks identical until someone chooses a colour.
-    assert.equal(categoryColour("Lighting", {}), "#ffb224");
-    assert.equal(categoryColour("Audio", undefined), "#0091ff");
+    // looks identical until someone chooses a color.
+    assert.equal(categoryColor("Lighting", {}), "#ffb224");
+    assert.equal(categoryColor("Audio", undefined), "#0091ff");
   });
 
-  test("an unrecognised category gets the neutral default", () => {
-    assert.equal(categoryColour("Hospitality", {}), DEFAULT_CATEGORY_COLOUR);
+  test("an unrecognized category gets the neutral default", () => {
+    assert.equal(categoryColor("Hospitality", {}), DEFAULT_CATEGORY_COLOUR);
   });
 
-  test("a configured colour beats the keyword guess", () => {
+  test("a configured color beats the keyword guess", () => {
     // The whole point: "Lighting" is no longer forced to amber.
-    assert.equal(categoryColour("Lighting", { lighting: "#12a594" }), "#12a594");
+    assert.equal(categoryColor("Lighting", { lighting: "#12a594" }), "#12a594");
   });
 
   test("deleting an entry reverts to the fallback rather than blanking", () => {
     const map: Record<string, string> = { lighting: "#12a594" };
     delete map.lighting;
-    assert.equal(categoryColour("Lighting", map), "#ffb224");
+    assert.equal(categoryColor("Lighting", map), "#ffb224");
   });
 });
 ```
 
 - [ ] **Step 2: Run it and watch it fail**
 
-Run: `npx tsx --test renderer/main/category-colour.test.ts`
+Run: `npx tsx --test renderer/main/category-color.test.ts`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write the resolver**
 
-Create `renderer/main/category-colour.ts`:
+Create `renderer/main/category-color.ts`:
 
 ```ts
-/** Neutral used when a category has no colour and matches no keyword. */
+/** Neutral used when a category has no color and matches no keyword. */
 export const DEFAULT_CATEGORY_COLOUR = "#8b8d98";
 
 /** One key per category name, regardless of casing or padding — note categories come
  *  from PCO per service type, so "Audio" under Weekend and "audio " under Youth must
- *  resolve to the same colour. */
+ *  resolve to the same color. */
 export function normaliseCategory(name: string): string {
   return name.trim().toLowerCase();
 }
 
-/** The keyword guess that used to BE the colour. It survives only as the suggested
+/** The keyword guess that used to BE the color. It survives only as the suggested
  *  fallback, so boards look identical until someone picks something. */
 function suggestion(name: string): string {
   const d = normaliseCategory(name);
@@ -424,21 +424,21 @@ function suggestion(name: string): string {
   return DEFAULT_CATEGORY_COLOUR;
 }
 
-/** The colour for a note category: the operator's choice, else the keyword suggestion. */
-export function categoryColour(name: string, map: Record<string, string> | undefined): string {
+/** The color for a note category: the operator's choice, else the keyword suggestion. */
+export function categoryColor(name: string, map: Record<string, string> | undefined): string {
   const chosen = map?.[normaliseCategory(name)];
   return chosen || suggestion(name);
 }
 
-/** The value a colour picker should open on for a category with no colour yet. */
-export function suggestedCategoryColour(name: string): string {
+/** The value a color picker should open on for a category with no color yet. */
+export function suggestedCategoryColor(name: string): string {
   return suggestion(name);
 }
 ```
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx tsx --test renderer/main/category-colour.test.ts`
+Run: `npx tsx --test renderer/main/category-color.test.ts`
 Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Add the storage**
@@ -446,7 +446,7 @@ Expected: PASS, 7 tests.
 In `main/services/settings-store.ts`, beside `iconColors`:
 
 ```ts
-  /** Note category (normalised) → "#rrggbb". App-wide so one Audio colour covers
+  /** Note category (normalised) → "#rrggbb". App-wide so one Audio color covers
    *  every service type. */
   scriptViewCategoryColors?: Record<string, string>;
 ```
@@ -465,8 +465,8 @@ In `main/services/stage-controller.ts`, beside `setIconColor`:
 
 ```ts
   /**
-   * Set (or clear, with "") one note category's colour. Stored app-wide and keyed by
-   * the normalised name, so Audio is the same colour under every service type.
+   * Set (or clear, with "") one note category's color. Stored app-wide and keyed by
+   * the normalised name, so Audio is the same color under every service type.
    * Clearing removes the entry and the category falls back to its suggestion — it
    * does not hide the category, which PCO owns.
    */
@@ -509,7 +509,7 @@ In `main/services/routes/scriptview-routes.ts`, beside the other POST routes:
 In `renderer/lib/api.ts`, beside the other scriptview channels:
 
 ```ts
-    // "" clears the colour; the category then falls back to its suggestion.
+    // "" clears the color; the category then falls back to its suggestion.
     case "scriptview:setCategoryColor":
       return post<T>("/api/scriptview/category-color", { category: p.category, color: p.color });
 ```
@@ -527,39 +527,39 @@ Expected: `{'audio': '#ff6600'}` — note the normalised key. Then post `{"categ
 - [ ] **Step 9: Commit**
 
 ```bash
-git add main/ renderer/lib/api.ts renderer/main/category-colour.ts renderer/main/category-colour.test.ts
-git commit -m "feat(scriptview): one colour per note category, stored app-wide"
+git add main/ renderer/lib/api.ts renderer/main/category-color.ts renderer/main/category-color.test.ts
+git commit -m "feat(scriptview): one color per note category, stored app-wide"
 ```
 
 ---
 
-## Task 4: Apply both colour systems to the rundown
+## Task 4: Apply both color systems to the rundown
 
 **Files:**
 - Modify: `renderer/main/rundown-table.tsx:23-31` (delete `departmentColor`), `:86-110` (row render)
 - Modify: `renderer/main/scriptview-plan-view.tsx` (pass the two inputs down)
 
 **Interfaces:**
-- Consumes: `resolveItemColour` (Task 2), `categoryColour` (Task 3), `ScriptViewRundownDTO.itemTypeColors` (Task 1).
+- Consumes: `resolveItemColor` (Task 2), `categoryColor` (Task 3), `ScriptViewRundownDTO.itemTypeColors` (Task 1).
 
 - [ ] **Step 1: Replace departmentColor with the shared resolver**
 
 Delete `departmentColor()` from `rundown-table.tsx` and re-export the new one so existing importers keep working:
 
 ```ts
-export { categoryColour, suggestedCategoryColour } from "./category-colour";
+export { categoryColor, suggestedCategoryColor } from "./category-color";
 ```
 
-Update every `departmentColor(x)` call site to `categoryColour(x, categoryColors)`.
+Update every `departmentColor(x)` call site to `categoryColor(x, categoryColors)`.
 
 - [ ] **Step 2: Take the new props**
 
 Add to the table's props:
 
 ```ts
-  /** PCO's item row colours for this service type. */
+  /** PCO's item row colors for this service type. */
   itemTypeColors?: PcoItemTypeColor[];
-  /** App-wide note category → colour. */
+  /** App-wide note category → color. */
   categoryColors?: Record<string, string>;
 ```
 
@@ -575,10 +575,10 @@ and pass both from `scriptview-plan-view.tsx`:
 In the row render, before the existing accent logic:
 
 ```tsx
-          // PCO's colour wins where it has one; the category accent fills the rest.
-          const pco = resolveItemColour(it, itemTypeColors);
+          // PCO's color wins where it has one; the category accent fills the rest.
+          const pco = resolveItemColor(it, itemTypeColors);
           const accent = pco
-            ?? (accentActive && accentDepartment ? categoryColour(accentDepartment, categoryColors) : null);
+            ?? (accentActive && accentDepartment ? categoryColor(accentDepartment, categoryColors) : null);
 ```
 
 and apply it as stripe + wash — a palette authored for a white table needs both to survive a dark panel:
@@ -602,12 +602,12 @@ green stripe, `VIDEO:` rows carry none (Media is `#ffffff`), and the live row st
 
 ```bash
 git add renderer/main/rundown-table.tsx renderer/main/scriptview-plan-view.tsx
-git commit -m "feat(scriptview): render PCO and category colours as stripe plus wash"
+git commit -m "feat(scriptview): render PCO and category colors as stripe plus wash"
 ```
 
 ---
 
-## Task 5: The category colour panel
+## Task 5: The category color panel
 
 **Files:**
 - Modify: `renderer/settings/sections/scriptview-section.tsx`
@@ -619,9 +619,9 @@ categories reported for the configured service types and any key already in the 
 the common case needs no typing:
 
 ```tsx
-{/* One colour per category, app-wide: note categories are per service type, so
+{/* One color per category, app-wide: note categories are per service type, so
     setting Audio here covers Weekend, Youth and Salt Company at once. */}
-<FieldSet title="Category colours">
+<FieldSet title="Category colors">
   <div className="flex flex-col gap-1">
     {knownCategories.map((cat) => {
       const key = normaliseCategory(cat);
@@ -630,14 +630,14 @@ the common case needs no typing:
         <div key={key} className="flex items-center gap-2">
           <label
             className="size-5 shrink-0 cursor-pointer rounded border border-line-strong"
-            style={{ backgroundColor: categoryColour(cat, colors) }}
-            title={`Change the ${cat} colour`}
+            style={{ backgroundColor: categoryColor(cat, colors) }}
+            title={`Change the ${cat} color`}
           >
             <input
               type="color"
               className="sr-only"
-              value={categoryColour(cat, colors)}
-              aria-label={`${cat} colour`}
+              value={categoryColor(cat, colors)}
+              aria-label={`${cat} color`}
               onChange={(e) => void invoke("scriptview:setCategoryColor", { category: cat, color: e.target.value })}
             />
           </label>
@@ -647,7 +647,7 @@ the common case needs no typing:
               variant="transparent"
               size="small"
               onClick={() => void invoke("scriptview:setCategoryColor", { category: cat, color: "" })}
-              title="Reset to the default colour"
+              title="Reset to the default color"
             >
               Reset
             </Button>
@@ -660,23 +660,23 @@ the common case needs no typing:
 ```
 
 Add a small "Add category" row — an `Input` plus a button that calls
-`scriptview:setCategoryColor` with the typed name and its suggested colour, for a
+`scriptview:setCategoryColor` with the typed name and its suggested color, for a
 category PCO has not reported.
 
-The delete affordance is labelled **Reset**, not Delete: it clears the colour and the
+The delete affordance is labeled **Reset**, not Delete: it clears the color and the
 category falls back to its suggestion. PCO owns whether a category exists.
 
 - [ ] **Step 2: Verify**
 
 Set Audio to orange, confirm it applies on `/scriptview/weekend/audio` **and**
-`/scriptview/cornerstone-youth/audio` — the same colour under both service types is the
+`/scriptview/cornerstone-youth/audio` — the same color under both service types is the
 whole point. Then Reset and confirm it returns to `#0091ff`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add renderer/settings/sections/scriptview-section.tsx
-git commit -m "feat(scriptview): manage category colours from settings"
+git commit -m "feat(scriptview): manage category colors from settings"
 ```
 
 ---
@@ -707,14 +707,14 @@ table's own wrapper:
 
 - [ ] **Step 2: Change the shape, not the width**
 
-No page-level max-width — a centred column leaves dead margins on a stage panel and
+No page-level max-width — a centerd column leaves dead margins on a stage panel and
 shrinks the text relative to the viewport, which is backwards for a surface read at
 distance. Instead:
 
-- `full` — every column, filling the width (today's behaviour).
+- `full` — every column, filling the width (today's behavior).
 - `compact` — drop the Clock column; note-category columns move under the title.
 - `stacked` — one column per row: time as a chip, title, then each note category on its
-  own line labelled with its name.
+  own line labeled with its name.
 
 - [ ] **Step 3: Verify at each width**
 
@@ -739,18 +739,18 @@ git commit -m "feat(scriptview): reflow the rundown by container width"
 
 - [ ] **Step 1: Document all three**
 
-Cover: where PCO's colours come from and that new custom types appear on their own
+Cover: where PCO's colors come from and that new custom types appear on their own
 within the 15-minute service-type cache; that `#ffffff` means unset; the precedence
-(PCO, then category, then plain); that category colours are app-wide and normalised;
-that Reset clears a colour rather than hiding a category; and the three responsive
+(PCO, then category, then plain); that category colors are app-wide and normalised;
+that Reset clears a color rather than hiding a category; and the three responsive
 shapes with the reason there is no page max-width.
 
 - [ ] **Step 2: Commit and open the PR**
 
 ```bash
 git add docs/
-git commit -m "docs(scriptview): colours and responsive layout"
-gh pr create --base beta --title "feat(scriptview): PCO row colours, category colours, responsive layout"
+git commit -m "docs(scriptview): colors and responsive layout"
+gh pr create --base beta --title "feat(scriptview): PCO row colors, category colors, responsive layout"
 ```
 
 ---

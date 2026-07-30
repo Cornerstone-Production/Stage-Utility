@@ -69,7 +69,7 @@ export const CARD_PRESETS: Record<CardAccent, LayoutStyle> = {
   flat: { background: null, borderColor: null, borderWidth: 0, cornerRadius: 0, padding: 0 },
 };
 
-/** The default look: centred white text at body size. */
+/** The default look: centerd white text at body size. */
 const TEXT = (over: LayoutStyle = {}): LayoutStyle => ({
   fontSize: 0.06,
   fontWeight: 500,

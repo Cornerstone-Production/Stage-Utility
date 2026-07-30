@@ -254,7 +254,7 @@ describe("buildHistoryWorkbook", () => {
     const { rows } = await sheetOf(buf, "Attendance polls");
     assert.equal(rows.length, 2);
     assert.equal(rows[0]!["Phase"], "pre");
-    // An omitted phase means in-service; it must be labelled, not left blank.
+    // An omitted phase means in-service; it must be labeled, not left blank.
     assert.equal(rows[1]!["Phase"], "in-service");
     assert.equal(rows[1]!["Attendance"], 412);
   });

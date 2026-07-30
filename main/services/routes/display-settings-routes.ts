@@ -1,7 +1,7 @@
 // display-settings-routes.ts — Per-display toggles
 //
 // Small display-facing switches: QR visibility, onboarding dismissal, forced
-// refresh, NDI visibility, public URL and caption colours.
+// refresh, NDI visibility, public URL and caption colors.
 //
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { PcoItemTypeColor } from "../../main/types/stage.js";
-import { resolveItemColour, mapPcoColour, washFor, stripeFor } from "./item-colour";
-import { categoryColour } from "./category-colour";
+import { resolveItemColor, mapPcoColor, washFor, stripeFor } from "./item-color";
+import { categoryColor } from "./category-color";
 import { resolveRole } from "./role-resolve";
 import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 
@@ -25,9 +25,9 @@ export function rundownHeaderKind(title: string): "start" | "end" | null {
 // as one system. Hues are spread amber/green/blue/teal/red for separation at the
 // 12%-alpha tint these are used at; no purple or magenta, per the palette rule.
 // Must stay 6-digit hex — callers concatenate an alpha suffix (`${color}1f`).
-// Row colour has ONE source: PCO's item row colours. There is deliberately no
-// per-category accent — PCO has no colour for a note category (item_note_categories
-// carries only name/sequence/frequently_used), so any category colour would have been
+// Row color has ONE source: PCO's item row colors. There is deliberately no
+// per-category accent — PCO has no color for a note category (item_note_categories
+// carries only name/sequence/frequently_used), so any category color would have been
 // invented here rather than read from the plan.
 
 export interface RundownColumn {
@@ -46,7 +46,7 @@ export function RundownTable({
   columns,
   currentItemId,
   itemTypeColors,
-  rowColour,
+  rowColor,
   accentRole,
   roles,
   footer,
@@ -57,11 +57,11 @@ export function RundownTable({
   columns: RundownColumn[];
   currentItemId?: string | null;
   /** Tint a row when this note category has content for the item (department focus). */
-  /** PCO's item row colours for this service type (see item-colour.ts). */
+  /** PCO's item row colors for this service type (see item-color.ts). */
   itemTypeColors?: PcoItemTypeColor[];
-  /** What colours this layout's rows. Absent = "pco". */
-  rowColour?: "pco" | "category" | "none";
-  /** Role whose presence tints a row, when rowColour === "category". */
+  /** What colors this layout's rows. Absent = "pco". */
+  rowColor?: "pco" | "category" | "none";
+  /** Role whose presence tints a row, when rowColor === "category". */
   accentRole?: string | null;
   /** Category roles, needed to resolve accentRole against this item's notes. */
   roles?: CategoryRole[];
@@ -84,15 +84,15 @@ export function RundownTable({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  // No page max-width anywhere: a centred column leaves dead margins on a stage panel
+  // No page max-width anywhere: a centerd column leaves dead margins on a stage panel
   // and shrinks the text relative to the viewport. The SHAPE changes instead.
   const shape = width < 640 ? "stacked" : width < 1024 ? "compact" : "full";
   // Compact drops the clock (a projected time, the least load-bearing column) before
   // it touches anything an operator reads off the page.
   const shownColumns = shape === "full" ? columns : columns.filter((c) => c.key !== "clock");
 
-  const source = rowColour ?? "pco";
-  /** The colour for one row, from whichever source this layout selected. */
+  const source = rowColor ?? "pco";
+  /** The color for one row, from whichever source this layout selected. */
   const tintFor = (it: PlanItemDTO): string | null => {
     if (source === "none") return null;
     if (source === "category") {
@@ -100,10 +100,10 @@ export function RundownTable({
       // through the role so it works whatever this service type calls the category.
       const role = roles?.find((r) => r.id === accentRole);
       if (!role || !resolveRole(role, it.notesByCategory)) return null;
-      return categoryColour(role.name);
+      return categoryColor(role.name);
     }
-    const pco = resolveItemColour(it, itemTypeColors);
-    return pco ? mapPcoColour(pco) : null;
+    const pco = resolveItemColor(it, itemTypeColors);
+    return pco ? mapPcoColor(pco) : null;
   };
   useEffect(() => {
     if (autoScroll) currentRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -192,7 +192,7 @@ export function RundownTable({
           // Row tint when the accent department has content here (not while the
           // live-item highlight already owns the row).
           // ONE source per row, chosen by the layout — never both. A row carrying two
-          // colours is more information than a line on a stage display can hold.
+          // colors is more information than a line on a stage display can hold.
           // A live item outranks either: a running item stays the most prominent row.
           const rowTint = isCurrent ? null : tintFor(it);
           return (

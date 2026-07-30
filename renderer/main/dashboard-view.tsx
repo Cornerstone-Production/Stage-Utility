@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Tooltip } from "../components/ui/tooltip";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
@@ -85,23 +86,24 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         }
       >
         <div className="shrink-0 ml-3 flex items-center gap-2.5 relative z-10">
-          <a
-            href="/"
-            className="flex items-center gap-2 text-fg-muted rounded hover:opacity-80 transition-opacity"
-            title="Back to home"
-            aria-label="Back to home"
-          >
-            {state.appLogo && (
-              <BrandLogo
-                logo={state.appLogo}
-                monochrome={state.appLogoMonochrome}
-                className="size-5 rounded select-none"
-              />
-            )}
-            <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
-              {state.appName}
-            </span>
-          </a>
+          <Tooltip label="Back to home">
+            <a
+              href="/"
+              className="flex items-center gap-2 text-fg-muted rounded hover:opacity-80 transition-opacity"
+              aria-label="Back to home"
+            >
+              {state.appLogo && (
+                <BrandLogo
+                  logo={state.appLogo}
+                  monochrome={state.appLogoMonochrome}
+                  className="size-5 rounded select-none"
+                />
+              )}
+              <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
+                {state.appName}
+              </span>
+            </a>
+          </Tooltip>
           {displayName && (
             <>
               <span className="w-px h-4 bg-white/15 shrink-0" aria-hidden="true" />
@@ -113,16 +115,17 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         </div>
 
         {state.showQr && state.remoteUrl && (
-          <a
-            href="/settings"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70"
-            title="Open settings"
-            aria-label="Open settings"
-          >
-            <QrHint url={state.remoteUrl} compact />
-          </a>
+          <Tooltip label="Open settings in a new tab">
+            <a
+              href="/settings"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70"
+              aria-label="Open settings in a new tab"
+            >
+              <QrHint url={state.remoteUrl} compact />
+            </a>
+          </Tooltip>
         )}
       </div>
 

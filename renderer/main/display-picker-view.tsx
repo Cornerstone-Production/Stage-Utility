@@ -1,4 +1,5 @@
 import { QrHint } from "../components/qr-hint";
+import { Tooltip } from "../components/ui/tooltip";
 import { BrandLogo } from "../components/brand-logo";
 import { useStageState } from "./use-stage-state";
 import { Loader2Icon, MonitorIcon, ChevronRightIcon, DropletIcon, ListChecksIcon, CableIcon, ClockIcon } from "lucide-react";
@@ -33,7 +34,7 @@ export function DisplayPickerView() {
   const centerLogo = state.emptySlotLogo ?? state.appLogo;
   const displays = state.displays ?? [];
   // Icon tints are stored once, keyed by display id or tool path, and set from the
-  // Displays / Connect tabs — so a colour chosen there shows here too. Falling back
+  // Displays / Connect tabs — so a color chosen there shows here too. Falling back
   // to the theme accent keeps every untinted tile consistent.
   const tintOf = (key: string) => ({ color: state.iconColors?.[key] || "var(--su-accent)" });
 
@@ -68,16 +69,17 @@ export function DisplayPickerView() {
         </div>
 
         {state.showQr && state.remoteUrl && (
-          <a
-            href="/settings"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70"
-            title="Open settings"
-            aria-label="Open settings"
-          >
-            <QrHint url={state.remoteUrl} compact />
-          </a>
+          <Tooltip label="Open settings in a new tab">
+            <a
+              href="/settings"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70"
+              aria-label="Open settings in a new tab"
+            >
+              <QrHint url={state.remoteUrl} compact />
+            </a>
+          </Tooltip>
         )}
       </div>
 

@@ -1310,7 +1310,7 @@ export function SettingsView() {
         </Sidebar>
       }
     >
-      <ScrollArea className="h-full" title={activeSection.label}>
+      <ScrollArea className="h-full">
         {/* Per-tab header (title + subtitle), matching the mockup. */}
         <header className="px-5 max-sm:px-3 pt-6 max-sm:pt-5 flex items-start justify-between gap-4">
           <div className="min-w-0">

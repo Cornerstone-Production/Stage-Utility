@@ -1,4 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
+import { Tooltip } from "./ui/tooltip";
 import { useStageState } from "../main/use-stage-state";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { usePropInstances } from "../main/use-dashboard-state";
@@ -119,10 +120,12 @@ function ConnectionBadge({ connection, message }: { connection: ConnectionState;
     // Truncate a long error (e.g. "Can't reach 192.168.x.x — ECONNREFUSED…") so it
     // never overflows its row; the full text shows on hover via the native title.
     return (
-      <span className="flex items-center gap-1 min-w-0 max-w-[9rem] sm:max-w-md" title={message ?? "Error"}>
-        <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
-        <span className="text-caption1 text-red-10 truncate min-w-0">{message ?? "Error"}</span>
-      </span>
+      <Tooltip label={message ?? "Error"}>
+        <span className="flex items-center gap-1 min-w-0 max-w-[9rem] sm:max-w-md" aria-label={message ?? "Error"}>
+          <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
+          <span className="text-caption1 text-red-10 truncate min-w-0">{message ?? "Error"}</span>
+        </span>
+      </Tooltip>
     );
   }
   // disconnected
@@ -1125,7 +1128,7 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
    * An integration is "in use" if it is enabled or has been configured. Everything
    * else is noise on this page — a site running three integrations should not scroll
    * past eleven. Nothing is hidden permanently and there is no preference to store:
-   * the state already says which are in use, so the list reorganises itself as soon
+   * the state already says which are in use, so the list reorganizes itself as soon
    * as one is set up. An ERRORING integration always stays in the main list, since an
    * error is exactly what you want to see.
    */

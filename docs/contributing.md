@@ -20,7 +20,7 @@ type(scope): subject
   `recorders`, `layout`, `layout-editor`, `advanced`, `server`, `pco`, `updater`,
   `types`, `rosstalk`.
 - **subject** — imperative mood, no trailing period. Say what the change does, not
-  what you did: "add rack colour to the header", not "added rack colour".
+  what you did: "add rack color to the header", not "added rack color".
 
 Body is free-form and encouraged for anything non-obvious — this repo's habit of
 explaining *why* in the body is worth keeping.
@@ -31,8 +31,8 @@ explaining *why* in the body is worth keeping.
 |---|---|---|
 | `feat` | A new capability a user can see | **minor** |
 | `fix` | A bug fix | **patch** |
-| `perf` | Faster or lighter with no behaviour change | **patch** |
-| `refactor` | Restructuring with no behaviour change | none |
+| `perf` | Faster or lighter with no behavior change | **patch** |
+| `refactor` | Restructuring with no behavior change | none |
 | `docs` | Documentation only | none |
 | `test` | Tests only | none |
 | `build` | Build system, dependencies | none |
@@ -180,6 +180,6 @@ belongs in its own PR.
 ## Docs
 
 Update `docs/` in the same commit as the change it describes. An integration gets a
-page in `docs/integrations/`; a feature that changes operator behaviour gets a note
-wherever that behaviour is documented. Docs that lag the code are worse than no docs,
+page in `docs/integrations/`; a feature that changes operator behavior gets a note
+wherever that behavior is documented. Docs that lag the code are worse than no docs,
 because they are believed.

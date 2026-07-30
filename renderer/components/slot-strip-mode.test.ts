@@ -56,7 +56,7 @@ describe("slotStripMode", () => {
   });
 
   test("an offline device with no labels at all shows nothing", () => {
-    // Device bound but unreachable, nothing manually labelled — the cell stays bare
+    // Device bound but unreachable, nothing manually labeled — the cell stays bare
     // rather than rendering an empty pill.
     assert.equal(slotStripMode(device({ status: "error", rf: null, battery: null, charge: null })), "none");
   });

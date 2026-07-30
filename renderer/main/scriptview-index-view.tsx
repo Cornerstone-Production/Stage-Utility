@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Tooltip } from "../components/ui/tooltip";
 import { Loader2Icon, ListChecksIcon, ArrowRightIcon, ChevronDownIcon } from "lucide-react";
 
 import { BrandLogo } from "../components/brand-logo";
@@ -87,9 +88,11 @@ export function ScriptViewIndex() {
           </span>
         </div>
         {state?.showQr && state.remoteUrl && (
-          <a href="/settings" target="_blank" rel="noopener noreferrer" className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70" title="Open settings">
-            <QrHint url={state.remoteUrl} compact />
-          </a>
+          <Tooltip label="Open settings in a new tab">
+            <a href="/settings" target="_blank" rel="noopener noreferrer" className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70" aria-label="Open settings in a new tab">
+              <QrHint url={state.remoteUrl} compact />
+            </a>
+          </Tooltip>
         )}
       </div>
 
@@ -133,14 +136,15 @@ export function ScriptViewIndex() {
                     </select>
                     <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 text-fg-subtle" />
                   </div>
-                  <a
-                    href={scriptViewUrl(type.name, cur, globalLayouts.find((l) => l.id === cur)?.name)}
-                    className="flex items-center justify-center rounded-lg border border-line bg-surface size-8 shrink-0 transition-colors hover:bg-white/15"
-                    title={`Open ${type.name}`}
-                    aria-label={`Open ${type.name}`}
-                  >
-                    <ArrowRightIcon className="size-4 text-fg-muted" />
-                  </a>
+                  <Tooltip label={`Open ${type.name}`}>
+                    <a
+                      href={scriptViewUrl(type.name, cur, globalLayouts.find((l) => l.id === cur)?.name)}
+                      className="flex items-center justify-center rounded-lg border border-line bg-surface size-8 shrink-0 transition-colors hover:bg-white/15"
+                      aria-label={`Open ${type.name}`}
+                    >
+                      <ArrowRightIcon className="size-4 text-fg-muted" />
+                    </a>
+                  </Tooltip>
                 </div>
               );
             })

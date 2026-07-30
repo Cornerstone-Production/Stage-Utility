@@ -49,11 +49,11 @@ editor this is an "Any position" row at the top of the checkbox list, with its o
 box. An entry with neither `name` nor `notesStartsWith` matches anyone unclaimed and
 should be rejected by the editor as a misconfiguration rather than saved.
 
-Five behaviours from one control:
+Five behaviors from one control:
 
 | `positions` | Result |
 |---|---|
-| `[{name:"Vocals", notesStartsWith:"4"}]` | today's behaviour, unchanged |
+| `[{name:"Vocals", notesStartsWith:"4"}]` | today's behavior, unchanged |
 | `[{name:"Vocals"}]` | whoever is on Vocals |
 | `[{name:"Vocals",notesStartsWith:"4"},{name:"Acoustic"}]` | Vocals #4, else whoever is on Acoustic |
 | `[{notesStartsWith:"IEM 3"}]` | note-only, position-agnostic |

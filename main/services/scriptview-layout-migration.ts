@@ -28,7 +28,17 @@ export function migrateLayouts(
     return created.id;
   };
 
-  const nextLayouts = layouts.map((l) => {
+  const nextLayouts = layouts.map((raw) => {
+    // The field shipped as `rowColour`; the app is US-spelled, so the key moved to
+    // `rowColor`. Only the key changes — same values, same meaning. This has to run
+    // before anything reads the field, or a layout saved under the old name loses
+    // its row coloring and silently falls back to the default.
+    const legacy = raw as ScriptViewLayout & { rowColour?: ScriptViewLayout["rowColor"] };
+    let l: ScriptViewLayout = raw;
+    if (legacy.rowColour !== undefined) {
+      const { rowColour: old, ...rest } = legacy;
+      l = { ...rest, rowColor: rest.rowColor ?? old };
+    }
     if (l.columnRoles) return l; // already migrated
     const columnRoles = (l.columns ?? []).map(roleFor).filter((x): x is string => !!x);
     const accentRole = l.accentDepartment ? roleFor(l.accentDepartment) : null;

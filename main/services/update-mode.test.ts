@@ -46,7 +46,7 @@ function shouldAutoApply(opts: {
 }
 
 describe("migration off the pre-mode boolean", () => {
-  test("enabled:true becomes auto-full — the old behaviour was apply AND restart", () => {
+  test("enabled:true becomes auto-full — the old behavior was apply AND restart", () => {
     assert.equal(migrate({ enabled: true, dayOfWeek: 2, hour: 4 }).mode, "auto-full");
   });
 
