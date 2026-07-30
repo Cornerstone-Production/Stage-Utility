@@ -3,6 +3,7 @@ import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLef
 
 import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
+import { useStageState } from "../../main/use-stage-state";
 import { RundownTable } from "../../main/rundown-table";
 import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLengthSec, fmtTotal } from "../../main/scriptview-columns";
 
@@ -16,6 +17,8 @@ function uid(): string {
 /** ScriptView layouts editor: per-service-type named column presets, with a live
  *  preview against that type's live/next plan. */
 export function ScriptViewSection() {
+  // Category colours are app-wide, so they come off stage state rather than a layout.
+  const categoryColors = useStageState().state?.scriptViewCategoryColors;
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
   const [typeId, setTypeId] = useState<string | null>(null);
@@ -244,6 +247,8 @@ export function ScriptViewSection() {
                             items={rundown.items}
                             columns={buildScriptViewColumns(resolveScriptViewSpec(l, noteCats), computeClocks(rundown.items, rundown.serviceTimes?.[0]), rundown.timeZone)}
                             accentDepartment={l.accentDepartment ?? null}
+                            itemTypeColors={rundown.itemTypeColors}
+                            categoryColors={categoryColors}
                             autoScroll={false}
                             footer={l.showTotalTime !== false ? <span>{fmtTotal(totalLengthSec(rundown.items))} <span className="text-white/40">· total time</span></span> : undefined}
                           />

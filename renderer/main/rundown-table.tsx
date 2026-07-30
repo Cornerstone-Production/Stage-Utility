@@ -1,4 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import type { PcoItemTypeColor } from "../../main/types/stage.js";
+import { resolveItemColour } from "./item-colour";
+import { categoryColour } from "./category-colour";
 
 // Shared PCO plan rundown table. Both the "script" View-kind (ScriptView on a
 // display) and the standalone ScriptView pages render through this so column
@@ -20,15 +23,10 @@ export function rundownHeaderKind(title: string): "start" | "end" | null {
 // as one system. Hues are spread amber/green/blue/teal/red for separation at the
 // 12%-alpha tint these are used at; no purple or magenta, per the palette rule.
 // Must stay 6-digit hex — callers concatenate an alpha suffix (`${color}1f`).
-export function departmentColor(dept: string): string {
-  const d = dept.toLowerCase();
-  if (d.includes("light")) return "#ffb224";
-  if (d.includes("video") || d.includes("graphic") || d.includes("pro") || d.includes("screen")) return "#46a758";
-  if (d.includes("audio") || d.includes("sound") || d.includes("foh")) return "#0091ff";
-  if (d.includes("vocal") || d.includes("band") || d.includes("music") || d.includes("md") || d.includes("key") || d.includes("drum")) return "#12a594";
-  if (d.includes("stage") || d.includes("cam") || d.includes("director")) return "#e5484d";
-  return "#8b8d98";
-}
+// Category colours moved into category-colour.ts: they are stored app-wide now, so a
+// keyword guess could not be the source of truth. Re-exported here because existing
+// importers reach for it through this module.
+export { categoryColour, suggestedCategoryColour, normaliseCategory } from "./category-colour";
 
 export interface RundownColumn {
   key: string;
@@ -46,6 +44,8 @@ export function RundownTable({
   columns,
   currentItemId,
   accentDepartment,
+  itemTypeColors,
+  categoryColors,
   footer,
   autoScroll = true,
   textSizeClass = "text-[clamp(0.8rem,1.6vmin,1.1rem)]",
@@ -55,12 +55,16 @@ export function RundownTable({
   currentItemId?: string | null;
   /** Tint a row when this note category has content for the item (department focus). */
   accentDepartment?: string | null;
+  /** PCO's item row colours for this service type (see item-colour.ts). */
+  itemTypeColors?: PcoItemTypeColor[];
+  /** App-wide note category -> "#rrggbb". */
+  categoryColors?: Record<string, string>;
   /** Optional sticky bottom band (e.g. total time), spanning all columns. */
   footer?: import("react").ReactNode;
   autoScroll?: boolean;
   textSizeClass?: string;
 }) {
-  const accentColor = accentDepartment ? departmentColor(accentDepartment) : null;
+  const accentColor = accentDepartment ? categoryColour(accentDepartment, categoryColors) : null;
   const currentRef = useRef<HTMLTableRowElement | null>(null);
   useEffect(() => {
     if (autoScroll) currentRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -100,12 +104,24 @@ export function RundownTable({
           // Row tint when the accent department has content here (not while the
           // live-item highlight already owns the row).
           const accentActive = !!accentColor && !isCurrent && !!accentDepartment && !!it.notesByCategory[accentDepartment]?.trim();
+          // PCO's own row colour wins where it has one; the category accent fills the
+          // rest. A live item still outranks both — a running item must stay the most
+          // prominent row on the page.
+          const rowColour = isCurrent
+            ? null
+            : (resolveItemColour(it, itemTypeColors) ?? (accentActive ? accentColor : null));
           return (
             <tr
               key={it.id}
               ref={isCurrent ? currentRef : undefined}
               className={`border-b border-line align-top ${isCurrent ? "bg-live-9/10" : ""}`}
-              style={accentActive ? { backgroundColor: `${accentColor}1f`, boxShadow: `inset 3px 0 0 0 ${accentColor}` } : undefined}
+              // Stripe carries the hue at full strength (legible at distance); the
+              // wash groups the row without lifting the background into the text.
+              // PCO's palette is authored for a white table, so both are needed.
+              style={rowColour ? {
+                background: `color-mix(in srgb, ${rowColour} 10%, transparent)`,
+                boxShadow: `inset 3px 0 0 0 ${rowColour}`,
+              } : undefined}
             >
               {columns.map((c) => (
                 <td
