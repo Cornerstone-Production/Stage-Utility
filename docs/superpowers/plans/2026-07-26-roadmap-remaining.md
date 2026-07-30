@@ -21,7 +21,7 @@ notes listed as outstanding (notably the history export) turned out to be fully 
 | UI | Integrations mobile clipping | `min-w-0` fixes, `integrations-panel.tsx` |
 | UI | Clean up Displays page | per-display cards with status dot, `outputs-section.tsx` |
 | UI | Companion → Connect tab | `CompanionInfoPanel` in `connect-section.tsx:91` |
-| History | Export attendance/SPL/history | `history-export.ts` + exceljs + Export builder UI |
+| History | Export attendance/SPL/history | `history-export.ts` + write-excel-file + Export builder UI |
 | History | Stats per service type | `serviceTypeId` scoping in the history section |
 | History | Hover tooltips on graph | crosshair/tooltip in `attendance-history-section.tsx` |
 | History | History on its own URL | `history-view.tsx`, routed at slug `history` |

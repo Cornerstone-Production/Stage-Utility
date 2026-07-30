@@ -125,6 +125,28 @@ npm run lint && npm run type-check && npm test && npm run build
 CI runs the same four. There is one long-standing lint warning
 (`patch-import.tsx:170`); anything beyond that is yours.
 
+## Dependencies
+
+Two rules, and they are not negotiable.
+
+**Only add a dependency that is actively maintained.** Check its last few real releases
+and its own dependency tree before proposing it — a package published recently that still
+pins ancient transitives is not maintained in the way that matters. Prefer small trees.
+
+**Fix vulnerabilities at the root.** No `overrides`, no forced resolutions, no pinning
+around a problem. Trace the advisory to the direct dependency that drags the stale chain
+in (`npm why <pkg>` — the flagged leaf is rarely the cause), then either upgrade that
+dependency properly or replace it and port the code. `npm audit` reaching zero is not
+enough on its own; the feature that used the package needs a functional test too.
+
+The reasoning is that an override leaves the stale package in the tree, so the next
+advisory lands in exactly the same place, and an abandoned package can never be fixed
+upstream — which is why `exceljs` was replaced by `write-excel-file` / `read-excel-file`
+rather than pinned around.
+
+Keep unrelated risk out of a security fix. A major bump that touches live render code
+belongs in its own PR.
+
 ## Docs
 
 Update `docs/` in the same commit as the change it describes. An integration gets a
