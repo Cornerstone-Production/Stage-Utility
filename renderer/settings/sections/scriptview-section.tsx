@@ -198,8 +198,14 @@ export function ScriptViewSection() {
                           </span>
                         ))}
                         {remaining.length > 0 && (
+                          // Native <select>: a custom trigger child cannot render, so the
+                          // label has to be a placeholder OPTION. Without one the browser
+                          // shows the first real option, which reads as a column this
+                          // layout already has rather than a control that adds one.
                           <Select value="" onValueChange={(v) => addColumn(l, v)}>
-                            <SelectTrigger className="w-auto h-7 px-2 text-caption1"><span className="inline-flex items-center gap-1 text-gray-10"><PlusIcon className="size-3.5" /> Add</span></SelectTrigger>
+                            <SelectTrigger className="w-auto h-7 px-2 text-caption1" aria-label="Add a column">
+                              <SelectValue placeholder="+ Add column" />
+                            </SelectTrigger>
                             <SelectContent>
                               {remaining.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                             </SelectContent>
