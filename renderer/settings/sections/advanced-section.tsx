@@ -187,7 +187,7 @@ function UpdatesPanel({
   // before the first check runs.
   if (s && !s.isGitRepo && s.lastCheckedAt) {
     return (
-      <FieldSet title="Updates">
+      <FieldSet>
         <FieldGroup>
           <Field orientation="vertical">
             <FieldContent>
@@ -204,7 +204,7 @@ function UpdatesPanel({
   }
 
   return (
-    <FieldSet title="Updates">
+    <FieldSet>
       <FieldGroup>
         <Field orientation="vertical">
           <FieldContent>

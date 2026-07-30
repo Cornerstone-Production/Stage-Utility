@@ -142,7 +142,7 @@ export function BrandingSection({
         aria-hidden="true"
       />
 
-      <FieldSet title="Branding">
+      <FieldSet>
         <FieldGroup>
           <Field orientation="horizontal">
             <FieldContent>
