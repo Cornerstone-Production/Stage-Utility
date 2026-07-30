@@ -67,10 +67,20 @@ Settings → ScriptView → **Row accent colours** (collapsed, at the foot of th
 set once and rarely revisited). One colour per category, stored app-wide in
 `settings.json` under `scriptViewCategoryColors`.
 
-Only categories a layout has actually **chosen as its row accent** are listed. That
-choice is ours, not PCO's — listing every category PCO happens to report would be a long
-list of entries that change nothing. A category keeps its place after its layout stops
-accenting it, so a colour can still be reset.
+### Where these categories come from
+
+1. **PCO owns the names.** Each service type has item note categories — Audio, Band,
+   Vocals, Lighting — fetched with `listItemNoteCategories(serviceTypeId)`. These become
+   ScriptView's columns.
+2. **A layout picks which columns it shows** (`layout.columns`).
+3. **A layout picks one of those as its Row accent** (`layout.accentDepartment`). This is
+   the Stage Utility concept: tint the row whenever that category has a note on it.
+4. **The colour** is whatever is set here, falling back to the keyword suggestion.
+
+The list is the **union of the layouts' columns** — exactly what fills each layout's Row
+accent dropdown. Not "categories currently accented", which would mean accenting
+something before you could colour it; and not every category PCO reports, since a
+category no layout shows can never accent a row.
 
 Note categories are fetched **per service type**, so "Audio" exists separately under
 Weekend, Youth and Salt Company. Keys are normalised (trimmed, lowercased), so setting

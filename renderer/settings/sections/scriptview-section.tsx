@@ -68,15 +68,18 @@ export function ScriptViewSection() {
     [layouts],
   );
 
-  // Only the categories actually chosen as a row accent by some layout — that choice is
-  // ours, not PCO's. Colouring every category PCO happens to report would be a long list
-  // of entries that change nothing. Anything already given a colour stays listed so it
-  // can still be reset after its layout stops using it.
+  // Every category that COULD be a row accent — the union of the layouts' columns,
+  // which is exactly what fills each layout's Row accent dropdown. Deliberately not
+  // "categories currently accented": that would mean accenting something before you
+  // could colour it. Deliberately not "every category PCO reports" either — a category
+  // no layout shows can never accent a row, so a colour for it would do nothing.
   const accentCategories = useMemo(() => {
     const seen = new Map<string, string>();
     for (const l of layouts) {
-      const a = l.accentDepartment?.trim();
-      if (a) seen.set(normaliseCategory(a), a);
+      for (const c of l.columns) {
+        const name = c.trim();
+        if (name) seen.set(normaliseCategory(name), name);
+      }
     }
     for (const k of Object.keys(categoryColors ?? {})) if (!seen.has(k)) seen.set(k, k);
     return [...seen.values()].sort((a, b) => a.localeCompare(b));
@@ -284,8 +287,8 @@ export function ScriptViewSection() {
           they should not be the first thing you look at. */}
       <Collapsible
         label={<span className="text-callout font-semibold text-fg">Row accent colours</span>}
-        summary={accentCategories.length ? `${accentCategories.length} in use` : "none in use"}
-        className="rounded-xl border border-line bg-surface px-3 py-2"
+        summary={accentCategories.length ? `${accentCategories.length} categories` : "no layouts yet"}
+        className="rounded-xl border border-gray-a5 bg-gray-a2 px-3 py-2"
       >
         <CategoryColoursPanel categories={accentCategories} colors={categoryColors} />
       </Collapsible>
@@ -316,7 +319,7 @@ function CategoryColoursPanel({
   if (categories.length === 0) {
     return (
       <p className="py-1 text-caption1 text-fg-muted">
-        Pick a row accent on a layout above, then its colour appears here.
+        Add a layout above and its note columns appear here.
       </p>
     );
   }
@@ -324,8 +327,8 @@ function CategoryColoursPanel({
   return (
     <div className="flex flex-col gap-2 pt-1">
       <span className="text-caption2 text-fg-muted">
-        Used for the row stripe when a layout accents this category. Set once — the same
-        colour applies under every service type.
+        Each layout picks one of these as its Row accent; this is the colour it uses. Set
+        once — the same colour applies to every layout and every service type.
       </span>
       <div className="flex flex-col gap-1">
         {categories.map((cat) => {
