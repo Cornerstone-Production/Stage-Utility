@@ -23,57 +23,76 @@ workflow** (all testimonies, then all baptisms). Sessions are named by service a
 
 ## Row colours
 
-Three sources, first match wins.
+Each layout picks **one** source for its row colour. Never two: PCO's colour answers
+*what kind of item is this*, the category answers *does my department have something to
+do here*, and stacking both puts more on a line than a stage display can carry.
 
-**1. PCO item row colours.** `ServiceType.standard_item_types` and `custom_item_types`
-carry `{name, color}` and ride along on the `listServiceTypes` request the app already
-makes, so they cost nothing extra. Standard entries match an item's `itemType`
-(header / song / media). Custom entries match text **contained in the title** — PCO's own
-wording is "Items that include this text in the title will be highlighted."
+Settings → ScriptView → a layout → **Row colour**:
 
-`#ffffff` means *unset*, not white: PCO ships it as the default on Media, so rendering it
-would stripe every video row for no reason. Only exact white is special — a near-white is
-treated as a real choice.
+| Setting | Rows are tinted by |
+|---|---|
+| **From PCO** (default) | PCO's item row colours — song, header, media, custom title matches |
+| **By category** | the chosen note category, wherever that category has a note on the item |
+| **None** | nothing |
 
-Because the app renders whatever the arrays contain, **a colour added in PCO needs no
-change here**. It appears within the 15-minute service-type cache, or immediately on a
-manual refresh, including brand-new custom types.
-
-**2. Category accent.** When a layout selects a note category as its row accent and an
-item has a note in it. Colour comes from the app-wide map below.
-
-**3. Nothing.** A plain row.
-
+A layout saved before this existed has no `rowColour` and behaves as **From PCO**.
 A live item outranks all three — a running item stays the most prominent row.
 
-### How they render
+### From PCO — remapped, not literal
 
-A 3px stripe in the literal PCO colour, plus a hue-matched wash behind the row:
+PCO's swatches are pale pastels authored for a white table; used literally on a dark
+panel they read as near-white (`#e0f7ff` is 88% lightness). Each hue **band** maps to a
+colour chosen for a dark surface:
+
+| PCO swatch | Hue band | Renders as |
+|---|---|---|
+| green | 75-160 | `#46a758` |
+| blue | 160-250 | `#4a86c8` |
+| lavender | 250-290 | `#58c1e4` |
+| pink | 290-345 | `#e0729a` |
+| orange / red | 345-75 (wraps) | `#ffb224` |
+| white, grey | no hue | no colour |
+
+Keyed by band rather than exact hex because only four of PCO's seven swatch values have
+ever come back from the API; a band covers the rest without guessing, and holds if PCO
+adjusts a swatch. **Blue and lavender are crossed deliberately** — PCO's blue takes the
+deeper `#4a86c8`, lavender the brighter `#58c1e4`. Lavender never renders purple, which
+the project rule forbids.
+
+`#ffffff` is how PCO stores *no colour* (it is Media's default) and `#eaebeb` (Header) is
+a near-grey with no hue; both leave the row plain rather than drawing a meaningless
+neutral stripe.
+
+Add or change a colour in PCO and rows follow within the 15-minute service-type cache,
+including brand-new custom item types — nothing to configure here.
+
+### By category — a fixed table
+
+| Category name contains | Colour |
+|---|---|
+| light | `#ffb224` amber |
+| video, graphic, pro, screen | `#46a758` green |
+| audio, sound, foh | `#0091ff` blue |
+| vocal, band, music, md, key, drum | `#12a594` teal |
+| stage, cam, director | `#e5484d` red |
+| anything else | `#8b8d98` neutral |
+
+Not configurable, deliberately. PCO has no colour for a note category — `ItemNote`
+carries only `category_name / content / created_at / updated_at`, and `ItemNoteCategory`
+only `name / sequence / frequently_used` — so any category colour is invented here
+either way. A default that needs no setup beats a picker that must be filled in per
+category before the feature does anything. The weakness is that an unmatched name
+("Hospitality") is neutral grey; the categories that matter on a rundown all match.
+
+### How a tint renders
 
 ```css
-box-shadow: inset 3px 0 0 hsl(<hue> 72% 62%);   /* stripe — bright, still coloured */
+box-shadow: inset 3px 0 0 hsl(<hue> 72% 62%);   /* stripe — bright, reads at distance */
 background:              hsl(<hue> 42% 15%);    /* wash  — sits behind the text */
 ```
 
-Neither can use the literal PCO colour. Those colours are pale
-pastels authored for a white table, and mixing one into a near-black background keeps
-its lightness while losing its hue: `#e8f6df` at 10% over `#0a0a0a` measures
-**rgb(33, 34, 32)** on screen — neutral grey, so a song row just looked lighter rather
-than green. Keeping the hue and substituting a saturation/lightness that works on a dark
-panel is what makes it read as a colour.
-
-The stripe has the same problem, less obviously: `#e0f7ff` is 88% lightness, so at full
-strength on a dark panel it reads **white** — the hue is present but there is almost no
-colour in it. It takes the same hue at a brighter, saturated value.
-
-A near-grey PCO value (Header is `#eaebeb`) has no hue worth keeping; the wash falls back
-to plain white and the stripe to a neutral rule.
-
-PCO's palette is authored against a white table, so used directly as row backgrounds on a
-dark panel two of the three read as near-white blocks. The stripe carries the hue where it
-is legible at distance; the wash groups the row without lifting the background into the
-text. PCO's palette includes lavender and pink — those render as chosen. The project's
-zero-purple rule governs our own chrome, not a colour an operator picked in PCO.
+One value cannot serve both a 3px rule and a text background, so the stripe and the wash
+take the same hue at different saturation and lightness.
 
 ## Responsive layout
 

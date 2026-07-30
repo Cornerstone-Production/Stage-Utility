@@ -34,36 +34,55 @@ export function resolveItemColour(
 }
 
 /**
- * A row wash for a PCO colour, on a dark surface.
+ * PCO's swatch mapped to the colour actually rendered.
  *
- * PCO's palette is authored against a white table — its greens and blues are pale
- * pastels (Song is #e8f6df). Mixing one of those into a near-black background at a low
- * percentage keeps its LIGHTNESS but loses its hue: #e8f6df at 10% over #0a0a0a
- * measures rgb(33,34,32), which is neutral grey, not green.
+ * PCO's palette is pale pastels authored for a white table — used literally on a dark
+ * panel they read as near-white (#e0f7ff is 88% lightness). Each hue BAND maps to a
+ * colour chosen for a dark surface.
  *
- * So the hue is kept and the saturation/lightness replaced with values that actually
- * read as a colour on a dark panel.
+ * Keyed by band rather than exact hex because only four of PCO's seven swatch values
+ * have ever come back from the API; a band covers the rest without guessing, and holds
+ * if PCO adjusts a swatch.
+ *
+ * Blue and lavender are crossed on purpose: PCO's blue (hue ~197) takes the deeper
+ * #4a86c8 and PCO's lavender (hue ~265) takes the brighter #58c1e4. Lavender also never
+ * renders as purple, which the project rule forbids.
  */
-export function washFor(hex: string): string {
+const PALETTE: { from: number; to: number; colour: string }[] = [
+  { from: 75, to: 160, colour: "#46a758" },   // green
+  { from: 160, to: 250, colour: "#4a86c8" },  // PCO blue
+  { from: 250, to: 290, colour: "#58c1e4" },  // PCO lavender
+  { from: 290, to: 345, colour: "#e0729a" },  // pink
+];
+/** 345-75 wraps through zero, so it is the fallthrough rather than a band. */
+const WARM = "#ffb224";
+
+/** The curated colour for a PCO swatch, or null when PCO means "no colour". */
+export function mapPcoColour(hex: string): string | null {
+  if (hex.trim().toLowerCase() === UNSET) return null;
   const h = hueOf(hex);
-  if (h == null) return "rgba(255, 255, 255, 0.05)"; // greys have no hue to keep
-  return `hsl(${Math.round(h)} 42% 15%)`;
+  if (h == null) return null; // near-grey (PCO's Header) — nothing to map
+  for (const b of PALETTE) if (h >= b.from && h < b.to) return b.colour;
+  return WARM;
 }
 
 /**
- * The row's left stripe, on a dark surface.
- *
- * The literal PCO colour does not work here either, for the same reason as the wash.
- * #e0f7ff is 88% lightness: at full strength on a near-black panel it reads as WHITE,
- * not as blue. The hue is present but there is almost no colour in it.
- *
- * So the stripe keeps the hue and takes a saturation and lightness that stay bright
- * enough to read at a distance while actually looking like a colour.
+ * The row's left stripe. Bright and saturated so it reads at a distance.
  */
-export function stripeFor(hex: string): string {
-  const h = hueOf(hex);
-  if (h == null) return "rgba(255, 255, 255, 0.45)"; // greys stay a neutral rule
+export function stripeFor(colour: string): string {
+  const h = hueOf(colour);
+  if (h == null) return "rgba(255, 255, 255, 0.45)";
   return `hsl(${Math.round(h)} 72% 62%)`;
+}
+
+/**
+ * The wash behind the row. Same hue, dark enough to sit under text — one value cannot
+ * serve both a 3px rule and a text background.
+ */
+export function washFor(colour: string): string {
+  const h = hueOf(colour);
+  if (h == null) return "rgba(255, 255, 255, 0.05)";
+  return `hsl(${Math.round(h)} 42% 15%)`;
 }
 
 /** Hue in degrees, or null when the colour is effectively neutral. */

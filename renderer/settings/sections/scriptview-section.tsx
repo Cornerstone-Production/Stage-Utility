@@ -215,7 +215,38 @@ export function ScriptViewSection() {
                       <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showBpm !== false} onCheckedChange={(v: boolean) => update(l.id, { showBpm: v })} /> BPM</label>
                       <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showArrangement !== false} onCheckedChange={(v: boolean) => update(l.id, { showArrangement: v })} /> Arrangement</label>
                       <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showItemNotes !== false} onCheckedChange={(v: boolean) => update(l.id, { showItemNotes: v })} /> Item notes</label>
-                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showTotalTime !== false} onCheckedChange={(v: boolean) => update(l.id, { showTotalTime: v })} /> Total time</label>                    </div>
+                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showTotalTime !== false} onCheckedChange={(v: boolean) => update(l.id, { showTotalTime: v })} /> Total time</label>
+
+                      {/* One source per layout, never both — PCO's colour answers "what
+                          kind of item is this", the category answers "does my department
+                          have something to do here". Stacking them is too much per row. */}
+                      <div className="flex items-center gap-2 text-caption1 text-gray-11">
+                        Row colour
+                        <Select
+                          value={l.rowColour ?? "pco"}
+                          onValueChange={(v) => update(l.id, { rowColour: v as "pco" | "category" | "none" })}
+                        >
+                          <SelectTrigger className="w-36 h-7"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="pco">From PCO</SelectItem>
+                            <SelectItem value="category">By category</SelectItem>
+                            <SelectItem value="none">None</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {(l.rowColour ?? "pco") === "category" && (
+                          <Select
+                            value={l.accentDepartment ?? "__none__"}
+                            onValueChange={(v) => update(l.id, { accentDepartment: v === "__none__" ? null : v })}
+                          >
+                            <SelectTrigger className="w-40 h-7"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">Pick a category…</SelectItem>
+                              {l.columns.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+                    </div>
 
                     {/* Inline live preview for this layout (16:9, scrolls internally). */}
                     <div className="flex items-center gap-2 mb-2">
@@ -233,6 +264,8 @@ export function ScriptViewSection() {
                             items={rundown.items}
                             columns={buildScriptViewColumns(resolveScriptViewSpec(l, noteCats), computeClocks(rundown.items, rundown.serviceTimes?.[0]), rundown.timeZone)}
                             itemTypeColors={rundown.itemTypeColors}
+                            rowColour={l.rowColour}
+                            accentDepartment={l.accentDepartment ?? null}
                             autoScroll={false}
                             footer={l.showTotalTime !== false ? <span>{fmtTotal(totalLengthSec(rundown.items))} <span className="text-white/40">· total time</span></span> : undefined}
                           />

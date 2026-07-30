@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { PcoItemTypeColor } from "../../main/types/stage.js";
-import { resolveItemColour, washFor, stripeFor } from "./item-colour";
+import { resolveItemColour, mapPcoColour, washFor, stripeFor } from "./item-colour";
+import { categoryColour } from "./category-colour";
 
 // Shared PCO plan rundown table. Both the "script" View-kind (ScriptView on a
 // display) and the standalone ScriptView pages render through this so column
@@ -43,6 +44,8 @@ export function RundownTable({
   columns,
   currentItemId,
   itemTypeColors,
+  rowColour,
+  accentDepartment,
   footer,
   autoScroll = true,
   textSizeClass = "text-[clamp(0.8rem,1.6vmin,1.1rem)]",
@@ -53,6 +56,10 @@ export function RundownTable({
   /** Tint a row when this note category has content for the item (department focus). */
   /** PCO's item row colours for this service type (see item-colour.ts). */
   itemTypeColors?: PcoItemTypeColor[];
+  /** What colours this layout's rows. Absent = "pco". */
+  rowColour?: "pco" | "category" | "none";
+  /** Category that tints a row, when rowColour === "category". */
+  accentDepartment?: string | null;
   /** Optional sticky bottom band (e.g. total time), spanning all columns. */
   footer?: import("react").ReactNode;
   autoScroll?: boolean;
@@ -78,6 +85,19 @@ export function RundownTable({
   // Compact drops the clock (a projected time, the least load-bearing column) before
   // it touches anything an operator reads off the page.
   const shownColumns = shape === "full" ? columns : columns.filter((c) => c.key !== "clock");
+
+  const source = rowColour ?? "pco";
+  /** The colour for one row, from whichever source this layout selected. */
+  const tintFor = (it: PlanItemDTO): string | null => {
+    if (source === "none") return null;
+    if (source === "category") {
+      // Tinted only where this layout's category actually has something to say.
+      if (!accentDepartment || !it.notesByCategory[accentDepartment]?.trim()) return null;
+      return categoryColour(accentDepartment);
+    }
+    const pco = resolveItemColour(it, itemTypeColors);
+    return pco ? mapPcoColour(pco) : null;
+  };
   useEffect(() => {
     if (autoScroll) currentRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [currentItemId, autoScroll]);
@@ -98,15 +118,15 @@ export function RundownTable({
               </div>
             );
           }
-          const rowColour = isCurrent ? null : resolveItemColour(it, itemTypeColors);
+          const rowTint = isCurrent ? null : tintFor(it);
           return (
             <div
               key={it.id}
               ref={isCurrent ? (currentRef as unknown as React.Ref<HTMLDivElement>) : undefined}
               className={`flex flex-col gap-0.5 border-b border-line px-3 py-2 ${isCurrent ? "bg-live-9/10" : ""}`}
-              style={rowColour ? {
-                background: washFor(rowColour),
-                boxShadow: `inset 3px 0 0 0 ${stripeFor(rowColour)}`,
+              style={rowTint ? {
+                background: washFor(rowTint),
+                boxShadow: `inset 3px 0 0 0 ${stripeFor(rowTint)}`,
               } : undefined}
             >
               {shownColumns.map((c) => {
@@ -164,9 +184,10 @@ export function RundownTable({
           const isCurrent = currentItemId != null && currentItemId === it.id;
           // Row tint when the accent department has content here (not while the
           // live-item highlight already owns the row).
-          // A live item outranks PCO's colour — a running item must stay the most
-          // prominent row on the page.
-          const rowColour = isCurrent ? null : resolveItemColour(it, itemTypeColors);
+          // ONE source per row, chosen by the layout — never both. A row carrying two
+          // colours is more information than a line on a stage display can hold.
+          // A live item outranks either: a running item stays the most prominent row.
+          const rowTint = isCurrent ? null : tintFor(it);
           return (
             <tr
               key={it.id}
@@ -175,9 +196,9 @@ export function RundownTable({
               // Stripe carries the hue at full strength (legible at distance); the
               // wash groups the row without lifting the background into the text.
               // PCO's palette is authored for a white table, so both are needed.
-              style={rowColour ? {
-                background: washFor(rowColour),
-                boxShadow: `inset 3px 0 0 0 ${stripeFor(rowColour)}`,
+              style={rowTint ? {
+                background: washFor(rowTint),
+                boxShadow: `inset 3px 0 0 0 ${stripeFor(rowTint)}`,
               } : undefined}
             >
               {shownColumns.map((c) => (

@@ -944,8 +944,10 @@ export interface ScriptViewLayout {
   showItemNotes?: boolean;    // description line (leader / cues) under the title
   showTotalTime?: boolean;    // total-time footer
   /** Note category whose presence tints the row (department focus), or null. */
-  /** @deprecated Row accents were removed — PCO item row colours are the single
-   *  source of row colour. Kept so older layouts on disk still parse. */
+  /** What colours this layout's rows. Absent = "pco", so a layout saved before this
+   *  existed keeps the behaviour it had. */
+  rowColour?: "pco" | "category" | "none";
+  /** Which note category tints a row, used only when rowColour === "category". */
   accentDepartment?: string | null;
 }
 
