@@ -5,7 +5,8 @@
 // + OSC targets, branding, display options). Secrets are DELIBERATELY excluded —
 // `secrets.bin`/`encryption.key` never leave the box, so a downloaded/saved
 // snapshot is safe to store; on recall the operator re-enters API keys/passwords.
-// History (`spl-history.json`) and caches are runtime data, not config, so excluded.
+// Recorded history (SPL/attendance/timeline, the automation log, baptism sessions) is
+// runtime data rather than config, so it is excluded — see RUNTIME_FILES.
 //
 // Applying a snapshot writes the files then the server restarts (handled by the
 // route) so every integration cleanly re-initializes from the restored config.
@@ -22,16 +23,44 @@ import { getUserDataPath } from "./app-paths.js";
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /** Config stores included in a snapshot (allowlist — anything else is ignored on
- *  apply, which also blocks path traversal). NB: secrets.bin / encryption.key /
- *  spl-history.json / caches are intentionally NOT here. */
-const CONFIG_FILES = [
+ *  apply, which also blocks path traversal). NB: secrets.bin / encryption.key are
+ *  intentionally NOT here.
+ *
+ *  A store missing from this list is silently excluded from export AND import, so
+ *  the omission stays invisible until someone restores a backup and finds their
+ *  work gone. `config-snapshot.test.ts` scans main/services for every DataStore and
+ *  fails unless it appears here or in RUNTIME_FILES — adding a store without
+ *  classifying it breaks CI. */
+export const CONFIG_FILES = [
   "settings.json",
   "views.json",
   "slots.json",
   "layout-templates.json",
+  "layout-groups.json",
   "presets.json",
   "wireless-connections.json",
   "osc-targets.json",
+  "rosstalk-targets.json",
+  "rosstalk-settings.json",
+  "automation-rules.json",
+  "automation-settings.json",
+  "scriptview-layouts.json",
+  "scriptview-config.json",
+  "patch.json",
+] as const;
+
+/** Stores deliberately excluded: recorded history and logs, which are observations
+ *  of what happened rather than configuration. Restoring them onto another install
+ *  would fabricate services that machine never ran. Listed explicitly so the drift
+ *  test can tell "considered and excluded" from "forgotten". */
+export const RUNTIME_FILES = [
+  "spl-history.json",
+  "attendance-history.json",
+  "service-timeline.json",
+  "automation-log.json",
+  // { current, sessions } — an in-progress session plus finished records.
+  // Restoring it onto another install would fabricate baptisms that never happened.
+  "baptism.json",
 ] as const;
 
 const SNAPSHOT_KIND = "stage-utility-config";
