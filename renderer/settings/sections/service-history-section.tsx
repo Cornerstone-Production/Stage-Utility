@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { cn } from "../../lib/cn";
+import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, DownloadIcon } from "lucide-react";
@@ -241,7 +243,7 @@ const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
   { id: "services", label: "Services summary", hint: "one row per service" },
   { id: "attendance", label: "Attendance polls", hint: "every poll sample" },
   { id: "items", label: "PCO item timings", hint: "planned vs actual per item" },
-  { id: "spl", label: "SPL", hint: "max / avg per item + metric" },
+  { id: "spl", label: "SPL", hint: "max + Leq per item; a second sheet for pivots" },
 ];
 
 export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean } = {}) {
@@ -752,11 +754,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                   <Tooltip
                     label={counted ? "Counted in the service timers — click to exclude" : "Excluded from the service timers — click to include"}
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={counted}
-                      onChange={() => toggleCounted(it)}
-                      className="justify-self-center cursor-pointer"
+                      onCheckedChange={() => toggleCounted(it)}
+                      className="justify-self-center"
                       aria-label={counted ? "Counted in the service timers" : "Excluded from the service timers"}
                     />
                   </Tooltip>
@@ -836,19 +837,28 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             </label>
             <span className="self-end pb-1.5 text-caption2 text-fg-subtle">Blank = all dates.</span>
           </div>
-          <div className="flex flex-col gap-1.5">
-            {EXPORT_SHEETS.map((s) => (
-              <label key={s.id} className="flex cursor-pointer items-center gap-2 text-footnote text-fg">
-                <input
-                  type="checkbox"
-                  checked={expSheets.has(s.id)}
-                  onChange={() => toggleSheet(s.id)}
-                  className="size-4 accent-[var(--su-accent)]"
-                />
-                {s.label}
-                <span className="text-caption2 text-fg-subtle">{s.hint}</span>
-              </label>
-            ))}
+          {/* Each option is a whole selectable row rather than a bare control in a
+              column: the hint sits under its label instead of trailing off it, and
+              the target is big enough to hit on a tablet next to a console. */}
+          <div className="flex flex-col gap-1">
+            {EXPORT_SHEETS.map((s) => {
+              const on = expSheets.has(s.id);
+              return (
+                <label
+                  key={s.id}
+                  className={cn(
+                    "flex cursor-pointer items-start gap-2.5 rounded-lg border px-2.5 py-2 transition-colors",
+                    on ? "border-accent/40 bg-accent/8" : "border-transparent hover:bg-fill",
+                  )}
+                >
+                  <Checkbox checked={on} onCheckedChange={() => toggleSheet(s.id)} className="mt-0.5" />
+                  <span className="min-w-0">
+                    <span className="block text-footnote text-fg">{s.label}</span>
+                    <span className="block text-caption2 text-fg-subtle">{s.hint}</span>
+                  </span>
+                </label>
+              );
+            })}
           </div>
           <div>
             <Button variant="accent" size="small" disabled={expSheets.size === 0} onClick={downloadExport}>

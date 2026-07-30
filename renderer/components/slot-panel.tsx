@@ -203,7 +203,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
                 className="text-fg-muted block leading-tight truncate mt-0.5"
                 style={{ fontSize: "clamp(0.72rem, 8.5cqi, 1.75rem)" }}
               >
-                {slot.link.positions.map((p) => p.name ?? "Any").join(" / ")}
+                {(slot.shownPositions ?? slot.link.positions.map((p) => p.name ?? "Any")).join(" / ")}
               </span>
             )}
           </div>

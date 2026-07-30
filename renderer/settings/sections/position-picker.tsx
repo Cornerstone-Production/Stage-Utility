@@ -179,7 +179,7 @@ export function PositionRangeEditor({ positions, teamPositions, onChange }: Posi
                     repeating it here is just noise — the row only needs to say what
                     the field is. Name each row once there is more than one, since
                     then the note has to be attributable to a position. */}
-                <span className="flex-1 min-w-0 truncate text-caption1 text-gray-11">
+                <span className="flex-1 min-w-0 truncate text-right text-caption1 text-gray-11">
                   {positions.length === 1 ? "Note starts with" : (p.name ?? "Any position")}
                 </span>
                 <input

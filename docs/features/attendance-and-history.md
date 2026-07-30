@@ -23,6 +23,25 @@ Recording what happened during a service, and reading it back.
   metric gets its own `<metric> Max` / `<metric> Leq` column pair — one row per plan
   item, rather than one row per metric per item — and songs are prefixed `SONG: ` so
   a filter isolates them.
+- **The attendance curve breaks where sampling stopped.** Samples land every 30s, so
+  a run of missing ones means the counter was unreachable or the server was down —
+  not that the room emptied. The chart used to join straight across such a gap,
+  drawing a confident hour-long decline nobody measured. Gaps over three minutes now
+  render as a break.
+- **SPL exports in two shapes.** `SPL` is wide — one row per plan item with every
+  metric side by side — for reading and for comparing metrics on a line. `SPL data`
+  is long — one row per item per metric — which is the shape a PivotTable wants, so
+  Metric becomes a field you drag rather than a column set at export time. Both are
+  real Excel Tables (`xlsx-table.ts`), so *Insert → PivotTable* opens with the range
+  already filled in.
+- **A `Service time` column** distinguishes a 9am from an 11am on the same date.
+  Without it two services export as identical rows.
+- **Blank metric cells are expected, and mean three different things.** A record made
+  before per-metric stats existed carries only the capture's own metric, so every
+  other column is empty for it. `Leq` is empty on anything recorded before energy
+  averaging shipped, because the stored figure was the arithmetic mean and is not a
+  level. And the columns are the union across the whole export, so a service whose
+  meter reported fewer metrics leaves the rest blank.
 - **Sound levels are energy-averaged (Leq), never arithmetically.** Decibels are
   logarithmic, so a plain mean of dB readings understates a dynamic item by 8-15 dB —
   a sermon with one loud video averaged 77 dB where the true level was 92. For LAeq

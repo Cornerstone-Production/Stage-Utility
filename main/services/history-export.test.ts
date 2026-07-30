@@ -21,7 +21,6 @@ process.env.HOME = path.join(TMP, "home");
 
 const { buildHistoryWorkbook, historyFileName } = await import("./history-export.js");
 const { parseXlsx } = await import("./patch-xlsx.js");
-const { autoFilterFeature } = await import("./xlsx-autofilter.js");
 const { attendanceStore } = await import("./attendance-store.js");
 const { serviceTimelineStore } = await import("./service-timeline-store.js");
 const { splHistoryStore } = await import("./spl-history-store.js");
@@ -168,7 +167,8 @@ describe("buildHistoryWorkbook", () => {
   test("only the requested sheets are written, in a stable order", async () => {
     const buf = await buildHistoryWorkbook({ include: ["spl", "services"] });
     const names = (await readXlsxFile(buf)).map((s) => s.sheet);
-    assert.deepEqual(names, ["About", "Services", "SPL"]);
+    // SPL ships in two shapes: wide to read, long to pivot from.
+    assert.deepEqual(names, ["About", "Services", "SPL", "SPL data"]);
   });
 
   // Each sheet's full heading list is pinned. Values are asserted by heading, so
@@ -214,6 +214,7 @@ describe("buildHistoryWorkbook", () => {
     // One column pair per metric, alphabetical — not one row per metric.
     assert.deepEqual((await sheetOf(buf, "SPL")).headers, [
       "Date",
+      "Service time",
       "Service type",
       "#",
       "Item",
@@ -221,6 +222,18 @@ describe("buildHistoryWorkbook", () => {
       "LAeq Leq",
       "LCeq Max",
       "LCeq Leq",
+      "Samples",
+    ]);
+    // The long shape carries the same identifying columns, then one row per metric.
+    assert.deepEqual((await sheetOf(buf, "SPL data")).headers, [
+      "Date",
+      "Service time",
+      "Service type",
+      "#",
+      "Item",
+      "Metric",
+      "Max",
+      "Leq",
       "Samples",
     ]);
   });
@@ -443,40 +456,42 @@ describe("historyFileName", () => {
   });
 });
 
-describe("autoFilterFeature", () => {
-  const apply = (xml: string): string =>
-    autoFilterFeature.files.transform["xl/worksheets/sheet{id}.xml"].transform(xml);
-  const sheet = (cells: string) => `<worksheet><sheetData>${cells}</sheetData></worksheet>`;
-  const row = (r: number, cols: string[]) => `<row r="${r}">${cols.map((c) => `<c r="${c}${r}"/>`).join("")}</row>`;
 
-  test("a table gets filter arrows across exactly its used range", () => {
-    const out = apply(sheet(row(1, ["A", "B", "C"]) + row(2, ["A", "B", "C"])));
-    assert.match(out, /<autoFilter ref="A1:C2"\/>/);
+describe("the long SPL shape", () => {
+  test("one row per item per metric, so Metric is a field a pivot can drag", async () => {
+    const buf = await buildHistoryWorkbook({ include: ["spl"] });
+    const { rows } = await sheetOf(buf, "SPL data");
+    // Two items: the song reports LAeq + LCeq, the legacy item only its own metric.
+    assert.equal(rows.length, 3);
+    assert.deepEqual(
+      rows.map((r) => `${r["Item"]}/${r["Metric"]}`),
+      ["SONG: Great Are You Lord/LAeq", "SONG: Great Are You Lord/LCeq", "Welcome/LAeq"],
+    );
   });
 
-  test("the element lands after sheetData, where the format requires it", () => {
-    const out = apply(sheet(row(1, ["A"]) + row(2, ["A"])));
-    assert.ok(out.indexOf("<autoFilter") > out.indexOf("</sheetData>"));
-    assert.ok(out.trimEnd().endsWith("</worksheet>"));
+  test("combinations with no reading are dropped — a blank row is noise in a pivot", async () => {
+    const buf = await buildHistoryWorkbook({ include: ["spl"] });
+    const { rows } = await sheetOf(buf, "SPL data");
+    for (const r of rows) {
+      assert.ok(r["Max"] != null || r["Leq"] != null, `${r["Item"]}/${r["Metric"]} has neither`);
+    }
   });
 
-  test("columns past Z are named correctly", () => {
-    const out = apply(sheet(row(1, ["A", "Z", "AA", "AB"]) + row(2, ["A"])));
-    assert.match(out, /ref="A1:AB2"/);
+  test("both shapes agree on the numbers", async () => {
+    const buf = await buildHistoryWorkbook({ include: ["spl"] });
+    const wide = (await sheetOf(buf, "SPL")).rows;
+    const long = (await sheetOf(buf, "SPL data")).rows;
+    const song = long.find((r) => r["Item"] === "SONG: Great Are You Lord" && r["Metric"] === "LAeq")!;
+    assert.equal(song["Max"], wide[0]!["LAeq Max"]);
+    assert.equal(song["Leq"], wide[0]!["LAeq Leq"]);
   });
+});
 
-  test("a header with no rows under it is left alone", () => {
-    const xml = sheet(row(1, ["A", "B"]));
-    assert.equal(apply(xml), xml, "arrows that filter nothing are just noise");
-  });
-
-  test("an empty sheet is left alone", () => {
-    const xml = sheet("");
-    assert.equal(apply(xml), xml);
-  });
-
-  test("applying it twice does not stack elements", () => {
-    const once = apply(sheet(row(1, ["A"]) + row(2, ["A"])));
-    assert.equal(apply(once), once);
+describe("service time", () => {
+  test("two services on one date are told apart", async () => {
+    // Without this column the 9am and the 11am export as identical rows.
+    const buf = await buildHistoryWorkbook({ include: ["spl"] });
+    const { headers } = await sheetOf(buf, "SPL");
+    assert.ok(headers.includes("Service time"));
   });
 });

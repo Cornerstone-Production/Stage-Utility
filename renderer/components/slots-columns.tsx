@@ -1,6 +1,5 @@
 import { cn } from "../lib/cn";
 import { SlotPanel } from "./slot-panel";
-import { BrandLogo } from "./brand-logo";
 
 /**
  * The kiosk's fill-height mic-slot columns. Stacked slots share a column. With a
@@ -37,8 +36,6 @@ export function SlotsColumns({
     return `0 0 ${(inches / slotsLayout.displayWidthIn) * 100}%`;
   };
   const isSpacerColumn = (col: Slot[]) => col.every((s) => s.link.kind === "spacer");
-  const spacerShowsImage = (col: Slot[]) =>
-    col.some((s) => s.link.kind === "spacer" && (s.link as { showEmptyImage?: boolean }).showEmptyImage);
 
   return (
     <div className={cn("flex min-h-0", slotsLayout && "justify-center", className)}>
@@ -50,19 +47,10 @@ export function SlotsColumns({
             className={cn("flex min-w-0 flex-col", !flex && "flex-1")}
             style={flex ? { flex } : undefined}
           >
+            {/* A spacer is a gap for charger alignment and nothing else — it used to
+                be able to hold the empty-slot logo, which was never used. */}
             {isSpacerColumn(column)
-              ? spacerShowsImage(column) && emptySlotLogo
-                ? (
-                    <div className="flex flex-1 items-center justify-center [container-type:inline-size]">
-                      <BrandLogo
-                        logo={emptySlotLogo}
-                        monochrome
-                        className="text-fg-faint"
-                        style={{ width: "clamp(2rem,32cqw,9rem)", height: "clamp(2rem,32cqw,9rem)" }}
-                      />
-                    </div>
-                  )
-                : null
+              ? null
               : column.map((slot) => (
                   <SlotPanel key={slot.id} slot={slot} emptySlotLogo={emptySlotLogo} defaultAvatar={defaultAvatar} />
                 ))}

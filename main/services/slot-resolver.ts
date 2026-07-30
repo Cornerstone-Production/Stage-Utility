@@ -92,6 +92,35 @@ function claimKey(m: TeamMemberDTO): string {
 
 /** First unclaimed person matching any entry, entries tried in configured order.
  *  `taken` holds people already claimed by slots with the SAME signature. */
+/**
+ * The configured positions this person is ACTUALLY scheduled for.
+ *
+ * A slot may accept a range — "EG Ghost or EG Shadow" — but the cell should name
+ * only what the person on it is really doing. Showing the whole range told a guitarist
+ * scheduled on EG Ghost that they were also on EG Shadow.
+ *
+ * Someone scheduled twice appears as two team memberships sharing a person id, so a
+ * genuine double (vocals AND acoustic) still lists both.
+ */
+function heldPositions(
+  positions: SlotPositionMatch[],
+  member: TeamMemberDTO,
+  members: TeamMemberDTO[],
+): string[] {
+  const key = claimKey(member);
+  const held = new Set(
+    members.filter((m) => claimKey(m) === key).map((m) => normalizePosition(m.teamPositionName)),
+  );
+  const named = positions.filter((p) => p.name && p.name.trim());
+  // An entry with no position name matches on notes alone, so it names nothing.
+  const shown = named.filter((p) => held.has(normalizePosition(p.name)));
+  if (shown.length > 0) return shown.map((p) => p.name as string);
+  // Matched on a note rather than a position, or PCO calls it something the slot
+  // does not list. Name what PCO actually says over a configured label the person
+  // is not on — the whole point here is to stop the cell claiming the wrong job.
+  return member.teamPositionName ? [member.teamPositionName] : [];
+}
+
 function matchByPositions(
   positions: SlotPositionMatch[],
   members: TeamMemberDTO[],
@@ -170,6 +199,9 @@ export function resolveSlots(
     // PCO-linked slots.
     const { link } = slot;
     let member: TeamMemberDTO | null = null;
+    // The positions to print on the cell — what this person actually holds, not the
+    // whole range the slot was configured to accept.
+    let shownPositions: string[] | undefined;
     if (link.kind === "pco" && link.matchBy === "person") {
       member = members.find((m) => m.personId === link.personId) ?? null;
     } else if (link.kind === "pco" && link.matchBy === "position") {
@@ -180,7 +212,10 @@ export function resolveSlots(
         claimed.set(sig, taken);
       }
       member = matchByPositions(link.positions, members, taken);
-      if (member) taken.add(claimKey(member));
+      if (member) {
+        taken.add(claimKey(member));
+        shownPositions = heldPositions(link.positions, member, members);
+      }
     }
 
     let device = EMPTY_DEVICE;
@@ -201,6 +236,7 @@ export function resolveSlots(
       ...slot,
       displayName: member?.name ?? null,
       photoUrl: member?.photoUrl ?? null,
+      shownPositions,
       device,
     };
   });

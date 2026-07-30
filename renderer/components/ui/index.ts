@@ -49,4 +49,5 @@ export {
 export { Status } from "./status";
 export { TooltipProvider } from "./tooltip-provider";
 export { Tooltip } from "./tooltip";
+export { Checkbox } from "./checkbox";
 export { ErrorBoundaryView, ErrorBoundary } from "./error-boundary-view";
