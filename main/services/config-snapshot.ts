@@ -46,6 +46,7 @@ export const CONFIG_FILES = [
   "automation-settings.json",
   "scriptview-layouts.json",
   "scriptview-config.json",
+  "scriptview-roles.json",
   "patch.json",
 ] as const;
 
