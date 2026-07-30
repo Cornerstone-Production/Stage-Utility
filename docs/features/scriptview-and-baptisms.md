@@ -109,3 +109,17 @@ which a viewport media query would get exactly backwards.
 - `renderer/main/rundown-table.tsx` — precedence, stripe + wash, the three shapes
 - `main/services/pco-service.ts` — `toItemColors()`, colours off `listServiceTypes`
 - `main/services/stage-controller.ts` — `setCategoryColor()`
+
+## Previews render with kiosk colours
+
+A kiosk preview embedded in the settings page (`.kiosk-surface`) sets the Tailwind
+`--color-*` variables directly rather than the `--su-*` ones.
+
+That looks redundant next to `.kiosk`, and is not. `--color-fg: var(--su-fg)` is declared
+on `:root`, so it **resolves there** and inherits its computed value down — redefining
+`--su-fg` on a nested element changes nothing. `.dark` and `.kiosk` get away with it only
+because they sit on `<html>`, the same element as `:root`.
+
+Without this, a preview inside the light theme drew near-black text on the kiosk's
+near-black panel: measured at **1.14:1**, versus 19.80:1 after. Real displays already
+carry `.kiosk` on `<html>` and are unaffected (measured 17.93:1 before and after).
