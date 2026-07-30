@@ -9,6 +9,7 @@
 // and persisted to disk, so a mid-service restart resumes the same record.
 
 import type { PcoLiveDTO, ServiceSplHistory, SplMetricsDTO } from "../types/stage.js";
+import { addLeqSample } from "./spl-leq.js";
 import { broadcast } from "./broadcaster.js";
 import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
@@ -98,7 +99,12 @@ class SplRecorder {
           this.lastItemId = live.currentItemId;
           itemChanged = true;
         }
-        this.recordSample(live.currentItemId, live.label, pickMeter(smaartService.getLatest()));
+        this.recordSample(
+        live.currentItemId,
+        live.label,
+        live.itemType ?? null,
+        pickMeter(smaartService.getLatest()),
+      );
         // The record is O(n) and item max/avg move slowly — push on an item change,
         // else at most every LIVE_BROADCAST_MS instead of every tick.
         const now = Date.now();
@@ -181,13 +187,19 @@ class SplRecorder {
     this.lastItemId = null; // re-detect the live item on the next sample
   }
 
-  private recordSample(itemId: string, title: string | null, sample: MeterSample | null): void {
+  private recordSample(
+    itemId: string,
+    title: string | null,
+    itemType: string | null,
+    sample: MeterSample | null,
+  ): void {
     if (!this.current) return;
     let item = this.current.items.find((i) => i.itemId === itemId);
     if (!item) {
       item = {
         itemId,
         title: title ?? "",
+        itemType,
         sequence: this.nextSequence++,
         metrics: {},
         maxSpl: null,
@@ -197,8 +209,10 @@ class SplRecorder {
         endedAt: null,
       };
       this.current.items.push(item);
-    } else if (title && item.title !== title) {
-      item.title = title;
+    } else {
+      if (title && item.title !== title) item.title = title;
+      // The plan may not have been loaded when the item first went live.
+      if (itemType && item.itemType !== itemType) item.itemType = itemType;
     }
     if (!item.metrics) item.metrics = {}; // resumed legacy record
 
@@ -208,15 +222,17 @@ class SplRecorder {
         this.current.metricKey =
           PREFERRED_METRICS.find((k) => k in sample.metrics) ?? Object.keys(sample.metrics)[0] ?? null;
       }
-      // Fold EVERY reported metric into its own running max/mean.
+      // Fold EVERY reported metric into its own running max + Leq. The mean is
+      // energy-weighted (see spl-leq.ts): a plain average of decibels understates
+      // a dynamic item badly, and for LAeq/LCeq it would be an average of averages.
       for (const [key, v] of Object.entries(sample.metrics)) {
         let st = item.metrics[key];
         if (!st) {
-          st = { max: null, avg: null, count: 0 };
+          st = { max: null, avg: null, leq: null, count: 0 };
           item.metrics[key] = st;
         }
         st.max = st.max == null ? v : Math.max(st.max, v);
-        st.avg = st.avg == null ? v : (st.avg * st.count + v) / (st.count + 1);
+        st.leq = addLeqSample(st.leq ?? null, st.count, v);
         st.count += 1;
       }
       // Keep the legacy single-metric fields populated (primary metric) for back-compat.
@@ -224,8 +240,7 @@ class SplRecorder {
       if (pk && pk in sample.metrics) {
         const v = sample.metrics[pk];
         item.maxSpl = item.maxSpl == null ? v : Math.max(item.maxSpl, v);
-        item.avgSpl =
-          item.avgSpl == null ? v : (item.avgSpl * item.sampleCount + v) / (item.sampleCount + 1);
+        item.leqSpl = addLeqSample(item.leqSpl ?? null, item.sampleCount, v);
         item.sampleCount += 1;
       }
     }

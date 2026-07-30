@@ -857,6 +857,7 @@ class PcoService {
         serverNow,
         currentItemTitle,
         nextItemTitle,
+        itemType: curIdx >= 0 ? (planItems[curIdx]?.itemType ?? null) : null,
         serviceTimeId,
         serviceTimeStartsAt,
         serviceEnded,
