@@ -19,8 +19,9 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-history-export-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { buildHistoryWorkbook } = await import("./history-export.js");
+const { buildHistoryWorkbook, historyFileName } = await import("./history-export.js");
 const { parseXlsx } = await import("./patch-xlsx.js");
+const { autoFilterFeature } = await import("./xlsx-autofilter.js");
 const { attendanceStore } = await import("./attendance-store.js");
 const { serviceTimelineStore } = await import("./service-timeline-store.js");
 const { splHistoryStore } = await import("./spl-history-store.js");
@@ -118,23 +119,26 @@ before(async () => {
     items: [
       {
         itemId: "i1",
-        title: "Countdown",
+        title: "Great Are You Lord",
+        itemType: "song",
         sequence: 1,
-        metrics: { LAeq: { max: 92.5, avg: 88.1, count: 120 } },
+        metrics: { LAeq: { max: 92.5, avg: 88.1, leq: 90.4, count: 120 }, LCeq: { max: 99, avg: 94, leq: 96.2, count: 120 } },
         maxSpl: 92.5,
         avgSpl: 88.1,
         sampleCount: 120,
         startedAt: "2026-07-26T09:00:00.000Z",
         endedAt: "2026-07-26T09:06:00.000Z",
       },
-      // No named metrics — must still produce a row, carrying the capture's key.
+      // Legacy shape: no per-metric stats, just the capture's own single metric.
       {
         itemId: "i2",
         title: "Welcome",
+        itemType: "item",
         sequence: 2,
         metrics: {},
         maxSpl: 80,
         avgSpl: 76.25,
+        leqSpl: 78.5,
         sampleCount: 30,
         startedAt: "2026-07-26T09:06:00.000Z",
         endedAt: null,
@@ -190,7 +194,6 @@ describe("buildHistoryWorkbook", () => {
     assert.deepEqual((await sheetOf(buf, "Attendance polls")).headers, [
       "Date",
       "Service type",
-      "Service key",
       "Timestamp",
       "Attendance",
       "In-room",
@@ -199,7 +202,6 @@ describe("buildHistoryWorkbook", () => {
     assert.deepEqual((await sheetOf(buf, "PCO items")).headers, [
       "Date",
       "Service type",
-      "Service key",
       "#",
       "Item",
       "Planned (s)",
@@ -209,15 +211,16 @@ describe("buildHistoryWorkbook", () => {
       "Started",
       "Ended",
     ]);
+    // One column pair per metric, alphabetical — not one row per metric.
     assert.deepEqual((await sheetOf(buf, "SPL")).headers, [
       "Date",
       "Service type",
-      "Service key",
       "#",
       "Item",
-      "Metric",
-      "Max (dB)",
-      "Avg (dB)",
+      "LAeq Max",
+      "LAeq Leq",
+      "LCeq Max",
+      "LCeq Leq",
       "Samples",
     ]);
   });
@@ -269,14 +272,94 @@ describe("buildHistoryWorkbook", () => {
     assert.equal(live["Pre-service"], null);
   });
 
-  test("an item with no named metrics still exports, under the capture's key", async () => {
+  test("each item is one row, with every metric side by side", async () => {
     const buf = await buildHistoryWorkbook({ include: ["spl"] });
     const { rows } = await sheetOf(buf, "SPL");
-    assert.equal(rows.length, 2);
-    assert.equal(rows[0]!["Metric"], "LAeq");
-    assert.equal(rows[0]!["Max (dB)"], 92.5);
-    assert.equal(rows[1]!["Metric"], "LAeq", "falls back to the capture's metricKey");
-    assert.equal(rows[1]!["Samples"], 30);
+    assert.equal(rows.length, 2, "two items, not one row per metric per item");
+    const song = rows[0]!;
+    assert.equal(song["LAeq Max"], 92.5);
+    assert.equal(song["LAeq Leq"], 90.4);
+    assert.equal(song["LCeq Max"], 99);
+    assert.equal(song["LCeq Leq"], 96.2);
+  });
+
+  test("songs are prefixed so a filter can isolate them", async () => {
+    const buf = await buildHistoryWorkbook({ include: ["spl"] });
+    const { rows } = await sheetOf(buf, "SPL");
+    assert.equal(rows[0]!["Item"], "SONG: Great Are You Lord");
+    assert.equal(rows[1]!["Item"], "Welcome", "only songs get the prefix");
+  });
+
+  test("a legacy single-metric record still lands in a column", async () => {
+    // Older records kept one metric in maxSpl/leqSpl under the capture's own key,
+    // so the pivot must place them rather than exporting an empty row.
+    const buf = await buildHistoryWorkbook({ include: ["spl"] });
+    const { rows } = await sheetOf(buf, "SPL");
+    assert.equal(rows[1]!["LAeq Max"], 80);
+    assert.equal(rows[1]!["LAeq Leq"], 78.5);
+  });
+
+  test("the arithmetic mean is never exported — it understates by up to 15 dB", async () => {
+    const buf = await buildHistoryWorkbook({ include: ["spl"] });
+    const { headers, rows } = await sheetOf(buf, "SPL");
+    assert.ok(!headers.some((h) => /avg/i.test(h)), `no Avg column, got ${headers.join(", ")}`);
+    for (const r of rows) {
+      assert.ok(!Object.values(r).includes(88.1), "the stored linear mean must not surface");
+      assert.ok(!Object.values(r).includes(76.25), "nor the legacy one");
+    }
+  });
+
+  test("the internal service key is not exported", async () => {
+    const buf = await buildHistoryWorkbook({ include: ["services", "attendance", "items", "spl"] });
+    for (const name of ["Services", "Attendance polls", "PCO items", "SPL"]) {
+      const { headers } = await sheetOf(buf, name);
+      assert.ok(!headers.includes("Service key"), `${name} still exports it`);
+    }
+  });
+
+  test("rows come out chronologically, not in store order", async () => {
+    // Seeded second so the store holds it AFTER the existing service, which is
+    // exactly the case that used to surface out of order.
+    await splHistoryStore.upsert({
+      serviceKey: "earlier",
+      serviceTypeId: "st1",
+      serviceTypeName: "Weekend",
+      planId: "plan0",
+      planTitle: "Earlier",
+      seriesTitle: null,
+      serviceDate: "2026-07-19",
+      serviceTimeId: "t0",
+      serviceTimeStartsAt: "2026-07-19T09:00:00.000Z",
+      meterId: "m1",
+      metricKey: "LAeq",
+      startedAt: "2026-07-19T09:00:00.000Z",
+      endedAt: "2026-07-19T10:00:00.000Z",
+      items: [
+        {
+          itemId: "e1",
+          title: "Opener",
+          itemType: "item",
+          sequence: 1,
+          metrics: { LAeq: { max: 90, avg: 80, leq: 85, count: 10 } },
+          maxSpl: 90,
+          avgSpl: 80,
+          leqSpl: 85,
+          sampleCount: 10,
+          startedAt: "2026-07-19T09:00:00.000Z",
+          endedAt: null,
+        },
+      ],
+    });
+    try {
+      const { rows } = await sheetOf(await buildHistoryWorkbook({ include: ["spl"] }), "SPL");
+      assert.deepEqual(
+        rows.map((r) => r["Date"]),
+        ["2026-07-19", "2026-07-26", "2026-07-26"],
+        "the earlier service must lead",
+      );
+    } finally {
+      await splHistoryStore.delete("earlier");
+    }
   });
 
   test("the date range filters rows out", async () => {
@@ -338,5 +421,62 @@ describe("parseXlsx", () => {
     const buf = await buildHistoryWorkbook({ include: ["services"] });
     const { headers } = await parseXlsx(buf.toString("base64"));
     assert.equal(headers[0], "Stage Utility", "reads the first sheet, which is About");
+  });
+});
+
+describe("historyFileName", () => {
+  test("a range names both ends, so two exports are never confused", () => {
+    assert.equal(historyFileName("2026-01-05", "2026-07-26"), "stage-utility-history-2026-01-05_to_2026-07-26.xlsx");
+  });
+
+  test("a single day is not written twice", () => {
+    assert.equal(historyFileName("2026-07-26", "2026-07-26"), "stage-utility-history-2026-07-26.xlsx");
+  });
+
+  test("an open-ended range says which end is open", () => {
+    assert.equal(historyFileName("2026-01-05", null), "stage-utility-history-from-2026-01-05.xlsx");
+    assert.equal(historyFileName(null, "2026-07-26"), "stage-utility-history-through-2026-07-26.xlsx");
+  });
+
+  test("everything is named as everything, not as today", () => {
+    assert.equal(historyFileName(null, null), "stage-utility-history-all-dates.xlsx");
+  });
+});
+
+describe("autoFilterFeature", () => {
+  const apply = (xml: string): string =>
+    autoFilterFeature.files.transform["xl/worksheets/sheet{id}.xml"].transform(xml);
+  const sheet = (cells: string) => `<worksheet><sheetData>${cells}</sheetData></worksheet>`;
+  const row = (r: number, cols: string[]) => `<row r="${r}">${cols.map((c) => `<c r="${c}${r}"/>`).join("")}</row>`;
+
+  test("a table gets filter arrows across exactly its used range", () => {
+    const out = apply(sheet(row(1, ["A", "B", "C"]) + row(2, ["A", "B", "C"])));
+    assert.match(out, /<autoFilter ref="A1:C2"\/>/);
+  });
+
+  test("the element lands after sheetData, where the format requires it", () => {
+    const out = apply(sheet(row(1, ["A"]) + row(2, ["A"])));
+    assert.ok(out.indexOf("<autoFilter") > out.indexOf("</sheetData>"));
+    assert.ok(out.trimEnd().endsWith("</worksheet>"));
+  });
+
+  test("columns past Z are named correctly", () => {
+    const out = apply(sheet(row(1, ["A", "Z", "AA", "AB"]) + row(2, ["A"])));
+    assert.match(out, /ref="A1:AB2"/);
+  });
+
+  test("a header with no rows under it is left alone", () => {
+    const xml = sheet(row(1, ["A", "B"]));
+    assert.equal(apply(xml), xml, "arrows that filter nothing are just noise");
+  });
+
+  test("an empty sheet is left alone", () => {
+    const xml = sheet("");
+    assert.equal(apply(xml), xml);
+  });
+
+  test("applying it twice does not stack elements", () => {
+    const once = apply(sheet(row(1, ["A"]) + row(2, ["A"])));
+    assert.equal(apply(once), once);
   });
 });

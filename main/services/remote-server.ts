@@ -15,7 +15,7 @@ import { fileURLToPath } from "url";
 
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
-import { buildHistoryWorkbook, type HistorySheet } from "./history-export.js";
+import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
 import { getLogLines } from "./log-buffer.js";
 
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
@@ -720,12 +720,12 @@ export class RemoteServer {
         .split(",")
         .map((s) => s.trim())
         .filter((s): s is HistorySheet => (VALID as string[]).includes(s));
-      const buf = await buildHistoryWorkbook({
-        from: _url.searchParams.get("from"),
-        to: _url.searchParams.get("to"),
-        include,
-      });
-      const fname = `stage-utility-history-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      // Name the file after what is IN it, not the day it was made — an export of
+      // the whole year and one of a single Sunday used to be indistinguishable.
+      const from = _url.searchParams.get("from");
+      const to = _url.searchParams.get("to");
+      const buf = await buildHistoryWorkbook({ from, to, include });
+      const fname = historyFileName(from, to);
       res.writeHead(200, {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="${fname}"`,

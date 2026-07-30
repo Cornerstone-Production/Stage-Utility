@@ -491,6 +491,9 @@ export interface PcoLiveDTO {
   currentItemId: string | null;
   /** Item title ("item") or service label ("preservice"). */
   label: string | null;
+  /** PCO item_type of the live item ("song" | "header" | "media" | "item"), so
+   *  recorders can tag what was playing without re-fetching the plan. */
+  itemType?: string | null;
   /** Item's planned length in seconds ("item" mode). */
   lengthSec: number | null;
   /** ISO timestamp the current item went live — countdown anchor ("item" mode). */
@@ -657,7 +660,14 @@ export interface PeopleCountDTO {
 /** Running max/mean of one Smaart metric over an item (e.g. "LAeq 10"). */
 export interface SplMetricStat {
   max: number | null;
+  /** Arithmetic mean of the dB readings. WRONG for sound levels — decibels are
+   *  logarithmic, so this understates a dynamic passage by 8-15 dB. Kept only so
+   *  records made before `leq` existed still load; never displayed or exported.
+   *  @deprecated use `leq`. */
   avg: number | null;
+  /** Equivalent continuous level (energy average) across the samples — the
+   *  correct way to combine dB. Absent on records made before this existed. */
+  leq?: number | null;
   count: number;
 }
 
@@ -674,8 +684,14 @@ export interface SplItemHistory {
   metrics: Record<string, SplMetricStat>;
   /** Legacy single-metric peak (dB) — kept populated for back-compat reads. */
   maxSpl: number | null;
-  /** Legacy single-metric running mean (dB) — kept populated for back-compat reads. */
+  /** Legacy single-metric arithmetic mean (dB). @deprecated see SplMetricStat.avg. */
   avgSpl: number | null;
+  /** Legacy single-metric energy average (dB). Absent on older records. */
+  leqSpl?: number | null;
+  /** PCO item_type ("song" | "header" | "media" | "item") when it was known at
+   *  record time. Absent on records made before this was captured, so a song
+   *  cannot be identified in older history. */
+  itemType?: string | null;
   sampleCount: number;
   startedAt: string;
   endedAt: string | null;
