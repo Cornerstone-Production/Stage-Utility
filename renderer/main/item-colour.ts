@@ -42,13 +42,28 @@ export function resolveItemColour(
  * measures rgb(33,34,32), which is neutral grey, not green.
  *
  * So the hue is kept and the saturation/lightness replaced with values that actually
- * read as a colour on a dark panel. The stripe still uses the literal PCO colour, where
- * full strength against the background renders it correctly.
+ * read as a colour on a dark panel.
  */
 export function washFor(hex: string): string {
   const h = hueOf(hex);
   if (h == null) return "rgba(255, 255, 255, 0.05)"; // greys have no hue to keep
   return `hsl(${Math.round(h)} 42% 15%)`;
+}
+
+/**
+ * The row's left stripe, on a dark surface.
+ *
+ * The literal PCO colour does not work here either, for the same reason as the wash.
+ * #e0f7ff is 88% lightness: at full strength on a near-black panel it reads as WHITE,
+ * not as blue. The hue is present but there is almost no colour in it.
+ *
+ * So the stripe keeps the hue and takes a saturation and lightness that stay bright
+ * enough to read at a distance while actually looking like a colour.
+ */
+export function stripeFor(hex: string): string {
+  const h = hueOf(hex);
+  if (h == null) return "rgba(255, 255, 255, 0.45)"; // greys stay a neutral rule
+  return `hsl(${Math.round(h)} 72% 62%)`;
 }
 
 /** Hue in degrees, or null when the colour is effectively neutral. */

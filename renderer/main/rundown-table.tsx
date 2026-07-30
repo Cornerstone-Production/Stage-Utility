@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { PcoItemTypeColor } from "../../main/types/stage.js";
-import { resolveItemColour, washFor } from "./item-colour";
-import { headerColoursFor } from "./category-header-colour";
+import { resolveItemColour, washFor, stripeFor } from "./item-colour";
 
 // Shared PCO plan rundown table. Both the "script" View-kind (ScriptView on a
 // display) and the standalone ScriptView pages render through this so column
@@ -79,12 +78,6 @@ export function RundownTable({
   // Compact drops the clock (a projected time, the least load-bearing column) before
   // it touches anything an operator reads off the page.
   const shownColumns = shape === "full" ? columns : columns.filter((c) => c.key !== "clock");
-  // Spread across the columns this layout actually shows, so they are always maximally
-  // distinct from each other — see category-header-colour.ts.
-  const headerColours = useMemo(
-    () => headerColoursFor(shownColumns.map((c) => c.key)),
-    [shownColumns],
-  );
   useEffect(() => {
     if (autoScroll) currentRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [currentItemId, autoScroll]);
@@ -113,7 +106,7 @@ export function RundownTable({
               className={`flex flex-col gap-0.5 border-b border-line px-3 py-2 ${isCurrent ? "bg-live-9/10" : ""}`}
               style={rowColour ? {
                 background: washFor(rowColour),
-                boxShadow: `inset 3px 0 0 0 ${rowColour}`,
+                boxShadow: `inset 3px 0 0 0 ${stripeFor(rowColour)}`,
               } : undefined}
             >
               {shownColumns.map((c) => {
@@ -124,12 +117,7 @@ export function RundownTable({
                   <div key={c.key} className="font-medium">{body}</div>
                 ) : (
                   <div key={c.key} className="flex gap-1.5 text-caption2">
-                    <span
-                      className="shrink-0 text-fg-subtle"
-                      style={headerColours[c.key] ? { color: headerColours[c.key] } : undefined}
-                    >
-                      {c.header}
-                    </span>
+                    <span className="shrink-0 text-fg-subtle">{c.header}</span>
                     <span className="min-w-0 whitespace-pre-line text-fg-muted">{body}</span>
                   </div>
                 );
@@ -147,21 +135,15 @@ export function RundownTable({
     <table className={`w-full border-collapse ${textSizeClass}`}>
       <thead className="sticky top-0 z-10 bg-[var(--kiosk-surface-1)] text-fg-subtle">
         <tr className="text-left">
-          {shownColumns.map((c) => {
-            // Each note column's header carries its own colour so a layout's columns
-            // are told apart at a glance. Structural columns (Clock/Time/Item) stay
-            // default — see category-header-colour.ts.
-            const tint = headerColours[c.key];
-            return (
-              <th
-                key={c.key}
-                className={`px-3 py-2 font-medium ${c.align === "right" ? "text-right" : ""} ${c.headerClassName ?? ""}`}
-                style={{ ...(c.width ? { width: c.width } : {}), ...(tint ? { color: tint } : {}) }}
-              >
-                {c.header}
-              </th>
-            );
-          })}
+          {shownColumns.map((c) => (
+            <th
+              key={c.key}
+              className={`px-3 py-2 font-medium ${c.align === "right" ? "text-right" : ""} ${c.headerClassName ?? ""}`}
+              style={c.width ? { width: c.width } : undefined}
+            >
+              {c.header}
+            </th>
+          ))}
         </tr>
       </thead>
       <tbody>
@@ -195,7 +177,7 @@ export function RundownTable({
               // PCO's palette is authored for a white table, so both are needed.
               style={rowColour ? {
                 background: washFor(rowColour),
-                boxShadow: `inset 3px 0 0 0 ${rowColour}`,
+                boxShadow: `inset 3px 0 0 0 ${stripeFor(rowColour)}`,
               } : undefined}
             >
               {shownColumns.map((c) => (

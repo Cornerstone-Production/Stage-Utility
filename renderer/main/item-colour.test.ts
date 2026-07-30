@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { resolveItemColour, washFor } from "./item-colour.js";
+import { resolveItemColour, washFor, stripeFor } from "./item-colour.js";
 
 const STANDARD = [
   { name: "Header", color: "#eaebeb", custom: false },
@@ -102,5 +102,32 @@ describe("washFor", () => {
 
   test("garbage does not produce a broken colour value", () => {
     assert.equal(washFor("not-a-colour"), "rgba(255, 255, 255, 0.05)");
+  });
+});
+
+describe("stripeFor", () => {
+  test("a pale PCO colour becomes a saturated stripe, not near-white", () => {
+    // #e0f7ff is 88% lightness — at full strength on a dark panel it reads WHITE.
+    const s = stripeFor("#e0f7ff");
+    assert.match(s, /^hsl\(\d+ \d+% \d+%\)$/);
+    const [hue, sat, light] = s.match(/\d+/g)!.map(Number);
+    assert.ok(hue > 160 && hue < 240, `expected a blue hue, got ${hue}`);
+    assert.ok(sat >= 60, `stripe must stay saturated, got ${sat}%`);
+    assert.ok(light < 75, `stripe must not be near-white, got ${light}%`);
+  });
+
+  test("it is brighter than the wash of the same colour", () => {
+    // The stripe carries the colour at a distance; the wash sits behind text.
+    const sl = Number(stripeFor("#e8f6df").match(/\d+/g)![2]);
+    const wl = Number(washFor("#e8f6df").match(/\d+/g)![2]);
+    assert.ok(sl > wl, `stripe (${sl}%) must be lighter than wash (${wl}%)`);
+  });
+
+  test("both keep the same hue", () => {
+    assert.equal(stripeFor("#e8f6df").match(/\d+/)![0], washFor("#e8f6df").match(/\d+/)![0]);
+  });
+
+  test("a near-grey stays a neutral rule rather than inventing a hue", () => {
+    assert.equal(stripeFor("#eaebeb"), "rgba(255, 255, 255, 0.45)");
   });
 });

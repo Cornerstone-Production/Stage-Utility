@@ -51,47 +51,29 @@ A live item outranks all three — a running item stays the most prominent row.
 A 3px stripe in the literal PCO colour, plus a hue-matched wash behind the row:
 
 ```css
-box-shadow: inset 3px 0 0 <pco colour>;   /* literal — reads correctly at full strength */
-background: hsl(<hue of pco colour> 42% 15%);
+box-shadow: inset 3px 0 0 hsl(<hue> 72% 62%);   /* stripe — bright, still coloured */
+background:              hsl(<hue> 42% 15%);    /* wash  — sits behind the text */
 ```
 
-The wash cannot be a low-percentage mix of the PCO colour. Those colours are pale
+Neither can use the literal PCO colour. Those colours are pale
 pastels authored for a white table, and mixing one into a near-black background keeps
 its lightness while losing its hue: `#e8f6df` at 10% over `#0a0a0a` measures
 **rgb(33, 34, 32)** on screen — neutral grey, so a song row just looked lighter rather
 than green. Keeping the hue and substituting a saturation/lightness that works on a dark
-panel is what makes it read as a colour. A near-grey PCO value (Header is `#eaebeb`) has
-no hue worth keeping and falls back to a plain white wash.
+panel is what makes it read as a colour.
+
+The stripe has the same problem, less obviously: `#e0f7ff` is 88% lightness, so at full
+strength on a dark panel it reads **white** — the hue is present but there is almost no
+colour in it. It takes the same hue at a brighter, saturated value.
+
+A near-grey PCO value (Header is `#eaebeb`) has no hue worth keeping; the wash falls back
+to plain white and the stripe to a neutral rule.
 
 PCO's palette is authored against a white table, so used directly as row backgrounds on a
 dark panel two of the three read as near-white blocks. The stripe carries the hue where it
 is legible at distance; the wash groups the row without lifting the background into the
 text. PCO's palette includes lavender and pink — those render as chosen. The project's
 zero-purple rule governs our own chrome, not a colour an operator picked in PCO.
-
-## Column header colours
-
-Each note column's header takes its own colour so a layout's columns are told apart at
-a glance — the Audio layout's Band and Vocals, or a fourteen-column layout's whole set.
-Structural columns (Clock, Time, Item) keep the default.
-
-**Nothing to configure.** PCO has no colour for a note category — `item_note_categories`
-carries only `name` / `sequence` / `frequently_used` — so any configurable colour would
-be invented here rather than read from the plan.
-
-Colours are spread **evenly across the columns a layout shows**, not hashed from the
-category name. Hashing was tried first and cannot guarantee the one thing that matters:
-with fourteen columns in a ~260-degree hue space, collisions are a birthday problem, and
-two columns sharing a colour inside one layout defeats the point. Even spacing
-guarantees maximum separation in every layout, at the cost of a category not keeping the
-same colour across layouts that show different column sets.
-
-Hues 230-330 are skipped for the zero-purple rule. The gap is generous at both ends
-deliberately: 249 reads indigo and 320 reads violet, so a narrow "purple only" gap still
-produced purple headers.
-
-**Rows are never coloured by category.** Row colour has one source — PCO's item row
-colours above — so a plan reads the way PCO shows it. There is no row accent setting.
 
 ## Responsive layout
 
