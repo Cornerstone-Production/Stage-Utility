@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
-import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, Collapsible, confirm } from "../../components/ui";
+import { Button, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, Collapsible, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { RundownTable } from "../../main/rundown-table";
 import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLengthSec, fmtTotal } from "../../main/scriptview-columns";
@@ -16,6 +16,18 @@ function uid(): string {
 
 /** ScriptView layouts editor: per-service-type named column presets, with a live
  *  preview against that type's live/next plan. */
+/** The per-layout element toggles, as one list so the picker and the patch stay in
+ *  step. `show*` is opt-OUT: undefined means shown, only `false` hides. */
+const ELEMENTS = [
+  { key: "showClock", label: "Clock" },
+  { key: "showLength", label: "Time" },
+  { key: "showKey", label: "Song key" },
+  { key: "showBpm", label: "BPM" },
+  { key: "showArrangement", label: "Arrangement" },
+  { key: "showItemNotes", label: "Item notes" },
+  { key: "showTotalTime", label: "Total time" },
+] as const satisfies readonly { key: keyof ScriptViewLayout; label: string }[];
+
 export function ScriptViewSection() {
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
@@ -242,13 +254,26 @@ export function ScriptViewSection() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4">
-                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showClock !== false} onCheckedChange={(v: boolean) => update(l.id, { showClock: v })} /> Clock</label>
-                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showLength !== false} onCheckedChange={(v: boolean) => update(l.id, { showLength: v })} /> Time</label>
-                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showKey !== false} onCheckedChange={(v: boolean) => update(l.id, { showKey: v })} /> Song key</label>
-                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showBpm !== false} onCheckedChange={(v: boolean) => update(l.id, { showBpm: v })} /> BPM</label>
-                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showArrangement !== false} onCheckedChange={(v: boolean) => update(l.id, { showArrangement: v })} /> Arrangement</label>
-                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showItemNotes !== false} onCheckedChange={(v: boolean) => update(l.id, { showItemNotes: v })} /> Item notes</label>
-                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showTotalTime !== false} onCheckedChange={(v: boolean) => update(l.id, { showTotalTime: v })} /> Total time</label>
+                      {/* Seven switches read as seven decisions and filled the row edge
+                          to edge. They are one decision — what this layout shows — so
+                          they collapse into the same checkmark dropdown the service-type
+                          picker above already uses. The trigger names what is on, so the
+                          state is still legible without opening it. */}
+                      <div className="flex items-center gap-2 text-caption1 text-gray-11">
+                        Shows
+                        <MultiSelect
+                          className="w-64"
+                          options={ELEMENTS.map((e) => ({ value: e.key, label: e.label }))}
+                          selected={ELEMENTS.filter((e) => l[e.key] !== false).map((e) => e.key)}
+                          onChange={(next) => {
+                            const on = new Set(next);
+                            update(l.id, Object.fromEntries(
+                              ELEMENTS.map((e) => [e.key, on.has(e.key)]),
+                            ) as Partial<ScriptViewLayout>);
+                          }}
+                          placeholder="Nothing shown"
+                        />
+                      </div>
 
                       {/* One source per layout, never both — PCO's colour answers "what
                           kind of item is this", the category answers "does my department
