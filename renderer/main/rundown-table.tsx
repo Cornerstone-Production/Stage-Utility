@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { PcoItemTypeColor } from "../../main/types/stage.js";
 import { resolveItemColour, mapPcoColour, washFor, stripeFor } from "./item-colour";
 import { categoryColour } from "./category-colour";
+import { resolveRole } from "./role-resolve";
+import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 
 // Shared PCO plan rundown table. Both the "script" View-kind (ScriptView on a
 // display) and the standalone ScriptView pages render through this so column
@@ -45,7 +47,8 @@ export function RundownTable({
   currentItemId,
   itemTypeColors,
   rowColour,
-  accentDepartment,
+  accentRole,
+  roles,
   footer,
   autoScroll = true,
   textSizeClass = "text-[clamp(0.8rem,1.6vmin,1.1rem)]",
@@ -58,8 +61,10 @@ export function RundownTable({
   itemTypeColors?: PcoItemTypeColor[];
   /** What colours this layout's rows. Absent = "pco". */
   rowColour?: "pco" | "category" | "none";
-  /** Category that tints a row, when rowColour === "category". */
-  accentDepartment?: string | null;
+  /** Role whose presence tints a row, when rowColour === "category". */
+  accentRole?: string | null;
+  /** Category roles, needed to resolve accentRole against this item's notes. */
+  roles?: CategoryRole[];
   /** Optional sticky bottom band (e.g. total time), spanning all columns. */
   footer?: import("react").ReactNode;
   autoScroll?: boolean;
@@ -91,9 +96,11 @@ export function RundownTable({
   const tintFor = (it: PlanItemDTO): string | null => {
     if (source === "none") return null;
     if (source === "category") {
-      // Tinted only where this layout's category actually has something to say.
-      if (!accentDepartment || !it.notesByCategory[accentDepartment]?.trim()) return null;
-      return categoryColour(accentDepartment);
+      // Tinted only where this layout's role actually has something to say — resolved
+      // through the role so it works whatever this service type calls the category.
+      const role = roles?.find((r) => r.id === accentRole);
+      if (!role || !resolveRole(role, it.notesByCategory)) return null;
+      return categoryColour(role.name);
     }
     const pco = resolveItemColour(it, itemTypeColors);
     return pco ? mapPcoColour(pco) : null;

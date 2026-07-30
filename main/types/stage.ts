@@ -927,14 +927,20 @@ export interface PlanItemsDTO {
 
 /** A saved ScriptView layout — a named column preset (our in-app ScriptViewer
  *  replacement). GLOBAL: one set of layouts applies across every service type.
- *  Columns reference PCO note categories by name, so a layout works under any
- *  type (a category a type lacks just renders as an empty column). */
+ *  Columns reference category ROLES, not names. Names are defined per service type and
+ *  vary between them, so a name-based column rendered empty wherever that service type
+ *  used a different word for the same thing. A role whose members are all absent is
+ *  hidden instead. */
 export interface ScriptViewLayout {
   id: string;
   name: string;
   order: number;
-  /** Ordered note-category names shown as columns. */
-  columns: string[];
+  /** @deprecated Ordered note-category NAMES. Migrated to `columnRoles` on load and
+   *  kept only so an unmigrated file still parses. Category names vary per service
+   *  type, which is why columns reference roles now. */
+  columns?: string[];
+  /** Ordered role ids shown as columns. See CategoryRole. */
+  columnRoles?: string[];
   // Per-element visibility toggles (undefined = shown; opt-out by setting false).
   showClock?: boolean;        // projected wall-clock column
   showLength?: boolean;       // length / "Time" column
@@ -943,12 +949,13 @@ export interface ScriptViewLayout {
   showArrangement?: boolean;  // arrangement name in the title meta line
   showItemNotes?: boolean;    // description line (leader / cues) under the title
   showTotalTime?: boolean;    // total-time footer
-  /** Note category whose presence tints the row (department focus), or null. */
   /** What colours this layout's rows. Absent = "pco", so a layout saved before this
    *  existed keeps the behaviour it had. */
   rowColour?: "pco" | "category" | "none";
-  /** Which note category tints a row, used only when rowColour === "category". */
+  /** @deprecated Category NAME that tinted the row. Migrated to `accentRole`. */
   accentDepartment?: string | null;
+  /** Role whose presence tints a row, used only when rowColour === "category". */
+  accentRole?: string | null;
 }
 
 /** ScriptView-wide config: which PCO service types appear on the landing page

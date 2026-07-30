@@ -1,27 +1,33 @@
-// Persists ScriptView layouts — named column presets per PCO service type for the
-// in-app ScriptViewer replacement. A flat list; each layout carries its own
-// serviceTypeId, so one store holds every service type's presets.
+// Persists ScriptView layouts — named column presets for the in-app ScriptViewer
+// replacement. A flat list shared across every service type; columns reference category
+// ROLES so one layout resolves correctly whatever a given service type calls a
+// department (see scriptview-roles-store.ts).
 
 import type { ScriptViewLayout } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+import { scriptViewRolesStore } from "./scriptview-roles-store.js";
+import { migrateLayouts } from "./scriptview-layout-migration.js";
 
-/** Starter layouts seeded on a fresh install (when no store file exists yet).
- *  Generic production-role columns any church can rename/reorder/delete; columns
- *  reference PCO note-category names, so a category a plan lacks renders empty.
- *  All element toggles default shown (show* omitted = shown). */
-const DEFAULT_LAYOUTS: ScriptViewLayout[] = [
-  { id: "starter-audio", rowColour: "category", accentDepartment: "Audio", name: "Audio", order: 0, columns: ["Audio", "Band", "MD + Playback Tech", "Vocals"] },
-  { id: "starter-video", rowColour: "category", accentDepartment: "Video", name: "Video", order: 1, columns: ["Graphics", "Video", "Vocals"] },
-  { id: "starter-lighting", rowColour: "category", accentDepartment: "Lighting", name: "Lighting", order: 2, columns: ["Lighting", "Band", "Stage Manager"] },
-  { id: "starter-stage", rowColour: "category", accentDepartment: "Stage Manager", name: "Stage", order: 3, columns: ["Stage Manager"] },
-  { id: "starter-simple", rowColour: "none", name: "Simple", order: 4, columns: [] },
-];
-
-const store = new DataStore<ScriptViewLayout[]>("scriptview-layouts.json", DEFAULT_LAYOUTS);
+// No starter layouts. They used to hardcode category names — "Audio", "Stage Manager",
+// "MD + Playback Tech" — which only exist in some churches, and in this org only in some
+// service types, so a fresh install got layouts whose columns rendered empty. A layout
+// is cheap to add; a wrong one that looks broken is not.
+const store = new DataStore<ScriptViewLayout[]>("scriptview-layouts.json", []);
 
 export const scriptViewLayoutsStore = {
   async load(): Promise<ScriptViewLayout[]> {
-    return store.load();
+    const raw = await store.load();
+    const list = Array.isArray(raw) ? raw : [];
+    const roles = await scriptViewRolesStore.load();
+    const out = migrateLayouts(list, roles);
+    // Runs on every load rather than behind a version stamp, so it must be idempotent —
+    // only persist when it actually changed something.
+    if (JSON.stringify(out.layouts) !== JSON.stringify(list)) {
+      await store.save(out.layouts);
+      await scriptViewRolesStore.save(out.roles);
+      console.log("[scriptview-layouts] migrated columns from category names to roles");
+    }
+    return out.layouts;
   },
 
   async save(layouts: ScriptViewLayout[]): Promise<void> {

@@ -94,6 +94,17 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "scriptview:setConfig":
       return post<T>("/api/scriptview/config", { serviceTypeIds: p.serviceTypeIds });
 
+    case "scriptview:listRoles":
+      return apiFetch<T>("/api/scriptview/roles");
+
+    case "scriptview:saveRoles":
+      return post<T>("/api/scriptview/roles", { roles: p.roles });
+
+    // Adds a role for any category this service type defines that no role covers.
+    // Only ever adds — never merges, never removes.
+    case "scriptview:seedRoles":
+      return post<T>("/api/scriptview/roles/seed", { serviceTypeId: p.serviceTypeId });
+
     case "scriptview:noteCategories": {
       const id = p.serviceTypeId as string;
       return apiFetch<T>(`/api/scriptview/note-categories?serviceTypeId=${encodeURIComponent(id)}`);

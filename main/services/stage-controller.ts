@@ -19,6 +19,8 @@ import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { updater } from "./updater.js";
 import { validateSlug } from "./reserved-slugs.js";
+import { scriptViewRolesStore, seedRoles } from "./scriptview-roles-store.js";
+import type { CategoryRole } from "../types/scriptview-roles.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
 
@@ -557,6 +559,41 @@ export class StageController {
   /** All note-category names PCO knows for a service type (drives the column
    *  picker). Unlike the rundown's `noteCategories`, this is NOT pruned to
    *  categories currently in use, so authors can pre-add a column. */
+  async listScriptViewRoles(): Promise<CategoryRole[]> {
+    return scriptViewRolesStore.load();
+  }
+
+  async saveScriptViewRoles(roles: CategoryRole[]): Promise<CategoryRole[]> {
+    const clean = (roles ?? [])
+      .filter((r) => r && typeof r.id === "string" && typeof r.name === "string" && r.name.trim())
+      .map((r) => ({
+        id: r.id,
+        name: r.name.trim(),
+        members: [...new Set((r.members ?? []).map((m) => String(m).trim()).filter(Boolean))],
+      }));
+    await scriptViewRolesStore.save(clean);
+    this.broadcast();
+    return clean;
+  }
+
+  /**
+   * Add a role for any category this service type defines that no role covers yet.
+   *
+   * Only ever ADDS. Never merges (that guess is the operator's to make) and never
+   * removes (a role may cover a category from a different service type).
+   */
+  async seedScriptViewRoles(serviceTypeId: string): Promise<CategoryRole[]> {
+    const cats = await this.listScriptViewNoteCategories(serviceTypeId);
+    const roles = await scriptViewRolesStore.load();
+    const covered = new Set(roles.flatMap((r) => r.members.map((m) => m.trim().toLowerCase())));
+    const missing = cats.filter((c) => !covered.has(c.trim().toLowerCase()));
+    if (missing.length === 0) return roles;
+    const next = [...roles, ...seedRoles(missing)];
+    await scriptViewRolesStore.save(next);
+    this.broadcast();
+    return next;
+  }
+
   async listScriptViewNoteCategories(serviceTypeId: string): Promise<string[]> {
     if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return [];
     return pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId);

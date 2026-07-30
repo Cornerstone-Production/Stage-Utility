@@ -7,6 +7,7 @@
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import type { PatchFile, ScriptViewLayout, Slot } from "../../types/stage.js";
+import type { CategoryRole } from "../../types/scriptview-roles.js";
 import { stageController } from "../stage-controller.js";
 import { patchStore } from "../patch-store.js";
 import { parseXlsx } from "../patch-xlsx.js";
@@ -78,6 +79,34 @@ export async function scriptviewRoutes(c: RouteCtx): Promise<void> {
       } catch {
         error(res, "Couldn't parse that .xlsx file");
       }
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/scriptview/roles") {
+      json(res, await stageController.listScriptViewRoles());
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/scriptview/roles") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.roles)) {
+        error(res, "body.roles (array) required");
+        return;
+      }
+      json(res, await stageController.saveScriptViewRoles(body.roles as CategoryRole[]));
+      return;
+    }
+
+    // Adds a role for any category this service type defines that no role covers yet.
+    // Only ever adds — never merges, never removes.
+    if (method === "POST" && pathname === "/api/scriptview/roles/seed") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const serviceTypeId = typeof body.serviceTypeId === "string" ? body.serviceTypeId : "";
+      if (!serviceTypeId) {
+        error(res, "body.serviceTypeId (string) required");
+        return;
+      }
+      json(res, await stageController.seedScriptViewRoles(serviceTypeId));
       return;
     }
 

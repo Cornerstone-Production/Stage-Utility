@@ -1,4 +1,9 @@
 import { Popover as PopoverPrimitive } from "radix-ui";
+// A popover rather than a native control, unlike Select. HTML has no native
+// multi-select DROPDOWN: adding `multiple` to a <select> turns it into an inline
+// scrolling list box, not an OS popup, so there is nothing native to opt into. The
+// position picker is custom for the same reason (it also needs a search field).
+// Styling therefore follows that picker — a bare tick, not a filled checkbox.
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -84,14 +89,20 @@ export function MultiSelect({
                 <button
                   key={o.value}
                   onClick={() => toggle(o.value)}
-                  className="flex w-full items-center gap-2.5 rounded-sm px-2 py-1.5 text-left text-footnote text-fg outline-none hover:bg-fill focus:bg-fill"
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-footnote text-fg outline-none",
+                    "hover:bg-fill focus:bg-fill",
+                    on && "bg-fill",
+                  )}
                 >
-                  <span className={cn(
-                    "flex size-4 shrink-0 items-center justify-center rounded border",
-                    on ? "border-accent bg-accent text-on-accent" : "border-line-strong",
-                  )}>
-                    {on && <CheckIcon className="size-3" strokeWidth={3} />}
-                  </span>
+                  {/* A bare tick, not a filled checkbox — matching the position picker,
+                      which is the app's other multi-select. A column of solid blue
+                      squares reads much heavier than the list it is describing. The icon
+                      always occupies its space so labels stay aligned. */}
+                  <CheckIcon
+                    className={cn("size-3.5 shrink-0", on ? "opacity-100 text-blue-10" : "opacity-0")}
+                    strokeWidth={3}
+                  />
                   <span className="truncate">{o.label}</span>
                 </button>
               );

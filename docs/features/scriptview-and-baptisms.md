@@ -21,6 +21,63 @@ workflow** (all testimonies, then all baptisms). Sessions are named by service a
 **cross-linked into Service History** with per-person splits + averages. An on-air
 **"Baptism timer"** layout object shows the live count/timer on a display.
 
+## Category roles
+
+A layout's columns reference **roles**, not PCO category names.
+
+Category names are defined **per service type** and vary. Measured on one church: 20
+service types, 130 category rows, **29 distinct names** — `Audio` and `Audio/Visual` for
+the same department (one service type defines both), three spellings of
+`MD + Playback Tech`, and case variants of `EG 1 (Lead)`. `sequence` is null on 59 of 130
+rows, so it cannot order anything, and counts run 0 to 14.
+
+A role is a named, ordered set of those names:
+
+```
+Audio    -> ["Audio", "Audio/Visual"]
+Guitars  -> ["AG", "EG", "EG 1 (Lead)", "EG 1 (LEAD)"]
+```
+
+### Resolving a role on an item
+
+**The non-empty members joined, in the role's member order.** One rule, three behaviours:
+one member has a note and it shows; the first is blank or absent so the next shows;
+several are populated and they merge, first-listed first. Member order is therefore the
+priority chain, and the panel lets you reorder it.
+
+A role none of whose members this service type defines is **hidden**, not rendered as an
+empty column. That empty column was the bug: a layout with an `Audio` column rendered
+blank on every service type calling it `Audio/Visual`.
+
+### Managing roles
+
+Settings -> ScriptView -> **Category roles** (collapsed, at the foot). Rename a role, add
+or remove member categories, reorder members. Deleting a role also removes it from every
+layout in the same save.
+
+Two diagnostics you would otherwise notice only by absence:
+
+- **In no role** — categories that can never appear as a column.
+- **In more than one role** — ambiguous, since two columns would claim the same note.
+
+### Seeding and migration
+
+Seeding creates **one role per category, named after it, containing only itself**. It
+never merges: keyword matching guesses badly enough to be dangerous — in measurement a
+"band" rule swallowed nine categories in one service type, and `Stage Manager` matched it
+through "man**ag**er". A wrong automatic merge hides a department's notes with no visible
+cause, so merging is always the operator's action. Seeding also only ever *adds* — never
+removes, since a role may cover a category from another service type.
+
+Existing layouts migrate on load: each distinct category name becomes a single-member
+role and columns are rewritten to role ids, preserving order. Lossless — every layout
+renders exactly as before — and idempotent, since it runs on every load rather than
+behind a version stamp.
+
+There are **no starter layouts**. They used to hardcode names like `Audio` and
+`Stage Manager` that exist in some churches and, in this org, only some service types, so
+a fresh install got layouts whose columns rendered empty.
+
 ## Row colours
 
 Each layout picks **one** source for its row colour. Never two: PCO's colour answers
