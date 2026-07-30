@@ -143,3 +143,46 @@ describe("claiming between slots", () => {
     assert.deepEqual(names(out), [null, null, "Sarah"]);
   });
 });
+
+describe("which positions the cell names", () => {
+  const shown = (out: Slot[]) => out.map((s) => s.shownPositions);
+
+  // A guitarist scheduled only on EG Ghost was told he was also on EG Shadow,
+  // because the cell printed the whole range the slot would accept.
+  test("a range names only what the person is actually scheduled for", () => {
+    const team = [member("p1", "Corey", "EG Ghost")];
+    const out = resolveSlots([slot("s", pos({ name: "EG Ghost" }, { name: "EG Shadow" }))], team, NO_DEVICES);
+    assert.deepEqual(names(out), ["Corey"]);
+    assert.deepEqual(shown(out), [["EG Ghost"]]);
+  });
+
+  test("someone genuinely scheduled twice still lists both", () => {
+    // Two team memberships, one person — the acoustic player who also sings.
+    const team = [member("p1", "Jacob", "Vocals", "4"), member("p1", "Jacob", "AG")];
+    const out = resolveSlots([slot("s", pos({ name: "Vocals", notesStartsWith: "4" }, { name: "AG" }))], team, NO_DEVICES);
+    assert.deepEqual(names(out), ["Jacob"]);
+    assert.deepEqual(shown(out), [["Vocals", "AG"]]);
+  });
+
+  test("a sub-variant counts as its base position", () => {
+    // "Vocals (BGVs)" normalises to "Vocals", the same way matching does.
+    const team = [member("p1", "Sam", "Vocals (BGVs)")];
+    const out = resolveSlots([slot("s", pos({ name: "Vocals" }, { name: "AG" }))], team, NO_DEVICES);
+    assert.deepEqual(shown(out), [["Vocals"]]);
+  });
+
+  test("an unfilled slot names nothing", () => {
+    const out = resolveSlots([slot("s", pos({ name: "EG Ghost" }))], [], NO_DEVICES);
+    assert.equal(out[0]!.displayName, null);
+    assert.equal(out[0]!.shownPositions, undefined);
+  });
+
+  test("someone matched by note alone is named by what PCO says they play", () => {
+    // The slot accepts anyone whose note starts with "7". Printing a configured
+    // position here would claim a job this person is not on.
+    const team = [member("p1", "Pat", "Keys", "7")];
+    const out = resolveSlots([slot("s", pos({ notesStartsWith: "7" }))], team, NO_DEVICES);
+    assert.equal(out[0]!.displayName, "Pat");
+    assert.deepEqual(out[0]!.shownPositions, ["Keys"]);
+  });
+});

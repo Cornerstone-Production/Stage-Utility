@@ -23,6 +23,11 @@ Recording what happened during a service, and reading it back.
   metric gets its own `<metric> Max` / `<metric> Leq` column pair — one row per plan
   item, rather than one row per metric per item — and songs are prefixed `SONG: ` so
   a filter isolates them.
+- **The attendance curve breaks where sampling stopped.** Samples land every 30s, so
+  a run of missing ones means the counter was unreachable or the server was down —
+  not that the room emptied. The chart used to join straight across such a gap,
+  drawing a confident hour-long decline nobody measured. Gaps over three minutes now
+  render as a break.
 - **SPL exports in two shapes.** `SPL` is wide — one row per plan item with every
   metric side by side — for reading and for comparing metrics on a line. `SPL data`
   is long — one row per item per metric — which is the shape a PivotTable wants, so

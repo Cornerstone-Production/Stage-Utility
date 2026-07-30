@@ -440,10 +440,28 @@ function AttendanceChart({
   const span = t1 - t0 || 1;
   const xt = (iso: string) => padL + ((Date.parse(iso) - t0) / span) * plotW;
   const y = (v: number) => padT + plotH - (v / hi) * plotH;
-  const line = (key: "attendance" | "occupancy") =>
-    samples.map((s) => `${xt(s.t).toFixed(1)},${y(s[key]).toFixed(1)}`).join(" ");
-  const area = (key: "attendance" | "occupancy") =>
-    `${padL},${padT + plotH} ${line(key)} ${W - padR},${padT + plotH}`;
+  // Break the curve wherever sampling stopped. Samples land every 30s, so a run of
+  // missing ones means the counter was unreachable or the server was down — not that
+  // the room emptied smoothly. Joining across it drew a confident straight line
+  // through an hour nobody measured, which is worse than showing nothing there.
+  const GAP_MS = 3 * 60_000;
+  const runs: (typeof samples)[] = [];
+  for (const s of samples) {
+    const cur = runs[runs.length - 1];
+    const prev = cur?.[cur.length - 1];
+    if (!cur || (prev && Date.parse(s.t) - Date.parse(prev.t) > GAP_MS)) runs.push([s]);
+    else cur.push(s);
+  }
+  const pts = (run: typeof samples, key: "attendance" | "occupancy") =>
+    run.map((s) => `${xt(s.t).toFixed(1)},${y(s[key]).toFixed(1)}`).join(" ");
+  // Each run gets its own fill, dropped to the baseline at its own ends rather than
+  // at the chart's, so the gap reads as absent instead of as zero.
+  const areaOf = (run: typeof samples, key: "attendance" | "occupancy") => {
+    const x0 = xt(run[0].t).toFixed(1);
+    const x1 = xt(run[run.length - 1].t).toFixed(1);
+    const base = (padT + plotH).toFixed(1);
+    return `${x0},${base} ${pts(run, key)} ${x1},${base}`;
+  };
   const inRange = markers.filter((m) => {
     const mt = Date.parse(m.t);
     return Number.isFinite(mt) && mt >= t0 - 1000 && mt <= t1 + 1000;
@@ -564,8 +582,8 @@ function AttendanceChart({
             );
           })}
           {/* filled areas (attendance sits above occupancy, so paint it first/behind) */}
-          {showAttendance && <polygon points={area("attendance")} fill="url(#attFill)" />}
-          {showOccupancy && <polygon points={area("occupancy")} fill="url(#occFill)" />}
+          {showAttendance && runs.map((r, i) => <polygon key={`af${i}`} points={areaOf(r, "attendance")} fill="url(#attFill)" />)}
+          {showOccupancy && runs.map((r, i) => <polygon key={`of${i}`} points={areaOf(r, "occupancy")} fill="url(#occFill)" />)}
           {/* service-average in-room reference */}
           {avgOccupancy != null && (
             <line x1={padL} y1={y(avgOccupancy)} x2={W - padR} y2={y(avgOccupancy)} stroke="var(--green-9)" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} vectorEffect="non-scaling-stroke" />
@@ -581,8 +599,8 @@ function AttendanceChart({
               <text x={a.x} y={padT + plotH + 6} fontSize={9} fill="var(--su-fg-subtle)" transform={`rotate(90 ${a.x} ${padT + plotH + 6})`}>{fmtTime(a.t)}</text>
             </g>
           ))}
-          {showOccupancy && <polyline points={line("occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />}
-          {showAttendance && <polyline points={line("attendance")} fill="none" stroke="var(--blue-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />}
+          {showOccupancy && runs.map((r, i) => <polyline key={`ol${i}`} points={pts(r, "occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />)}
+          {showAttendance && runs.map((r, i) => <polyline key={`al${i}`} points={pts(r, "attendance")} fill="none" stroke="var(--blue-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />)}
           {/* hover crosshair + tooltip */}
           {hs && (
             <g pointerEvents="none">

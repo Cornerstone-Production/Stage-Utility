@@ -1,5 +1,4 @@
 import { useRef, useState, type ChangeEvent, type CSSProperties } from "react";
-import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent, type DraggableAttributes, type DraggableSyntheticListeners } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -9,7 +8,6 @@ import {
   Loader2Icon,
   GripVerticalIcon,
   Rows2Icon,
-  ImageIcon,
   BookmarkIcon,
   RotateCcwIcon,
   DownloadIcon,
@@ -185,7 +183,6 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
   // Spacers are a horizontal gap for charger alignment — width + remove, plus an
   // optional empty-slot image centered in the gap.
   if (isSpacer) {
-    const showImage = (slot.link as { kind: "spacer"; showEmptyImage?: boolean }).showEmptyImage ?? false;
     return (
       <div className="relative flex flex-wrap items-center gap-2 py-3 pl-4">
         <button
@@ -198,20 +195,6 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
           <GripVerticalIcon className="size-4 text-gray-7" />
         </button>
         <span className="text-callout text-gray-9 flex-1 italic">Spacer</span>
-        <Tooltip label="Center the empty-slot image (from Branding) in this spacer">
-          <label
-            className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0" aria-label="Center the empty-slot image (from Branding) in this spacer">
-            <ImageIcon className="size-3.5 text-gray-9" />
-            Image
-            <Switch
-              checked={showImage}
-              onCheckedChange={(v: boolean) =>
-                onChange({ ...slot, link: { kind: "spacer", showEmptyImage: v } })
-              }
-              aria-label="Show empty-slot image in spacer"
-            />
-          </label>
-        </Tooltip>
         <label className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0">
           Width
           <NumberInput
@@ -323,11 +306,21 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
       {/* PCO-linked fields */}
       {isPco && (
         <div className="flex flex-col gap-1.5 pl-4 sm:pl-9">
-          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+          {/* Top-aligned, not centered: the position editor is a trigger with note
+              rows under it, so centering pushed this select down beside the notes
+              instead of level with the trigger it belongs to. */}
+          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start">
             {/* Mode select + its hint stay one row at every width. `self-center` on
-                the hint alone put it on its own centerd line once the parent wraps
+                the hint alone put it on its own centred line once the parent wraps
                 to a column on mobile. */}
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex h-7 items-center gap-2 shrink-0">
+              <InfoHint className="shrink-0">
+                How this slot fills from Planning Center. By position: tick every position this slot may
+                accept — the first one with someone available fills it, so a slot can cover acoustic OR
+                electric week to week. Give a position a note to pin it to one person (e.g. &quot;1&quot; for the
+                vocalist noted 1, &quot;HH&quot; for a handheld). Tick &quot;Any position&quot; to match on the note alone.
+                By person ID: locks to one individual.
+              </InfoHint>
               <Select
                 value={(slot.link as { kind: "pco"; matchBy: string }).matchBy}
                 onValueChange={(v: string) => setPcoMatchBy(v as "person" | "position")}
@@ -340,13 +333,6 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
                   <SelectItem value="person">By person ID</SelectItem>
                 </SelectContent>
               </Select>
-              <InfoHint className="shrink-0">
-                How this slot fills from Planning Center. By position: tick every position this slot may
-                accept — the first one with someone available fills it, so a slot can cover acoustic OR
-                electric week to week. Give a position a note to pin it to one person (e.g. &quot;1&quot; for the
-                vocalist noted 1, &quot;HH&quot; for a handheld). Tick &quot;Any position&quot; to match on the note alone.
-                By person ID: locks to one individual.
-              </InfoHint>
             </div>
 
             {(slot.link as { kind: "pco"; matchBy: string }).matchBy === "position" ? (

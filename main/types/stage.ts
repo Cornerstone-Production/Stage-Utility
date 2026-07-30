@@ -1054,6 +1054,8 @@ export type SlotLink =
   // A horizontal gap used to align slot columns with physical chargers. Occupies
   // width (see Slot.widthIn). Renders nothing unless `showEmptyImage` is set, in
   // which case the empty-slot logo is centered in the gap.
+  /** `showEmptyImage` is no longer read — a spacer is a gap and nothing else. Kept
+   *  on the type so slots saved with it still load. */
   | { kind: "spacer"; showEmptyImage?: boolean };
 
 export interface SlotDevice {
@@ -1100,6 +1102,10 @@ export interface Slot {
    *  to the device's name. */
   iemLabel?: string | null;
   displayName?: string | null;
+  /** Which of a position range's names the resolved person is actually scheduled
+   *  for. A slot may accept "EG Ghost or EG Shadow"; the cell should name only what
+   *  this person is really doing. Absent on non-position slots. */
+  shownPositions?: string[];
   photoUrl?: string | null;
   device: SlotDevice;
   /** When true, this slot stacks into the SAME on-screen column as the previous
