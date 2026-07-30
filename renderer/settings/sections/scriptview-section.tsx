@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
-import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, confirm } from "../../components/ui";
+import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, Collapsible, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { RundownTable } from "../../main/rundown-table";
 import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLengthSec, fmtTotal } from "../../main/scriptview-columns";
@@ -100,6 +100,23 @@ export function ScriptViewSection() {
     if (j < 0 || j >= arr.length) return;
     [arr[i], arr[j]] = [arr[j], arr[i]];
     persist(arr.map((x, idx) => ({ ...x, order: idx })));
+  }
+
+  async function saveRoles(next: CategoryRole[]) {
+    setRoles(next);
+    // Deleting a role must not leave layouts pointing at it.
+    const live = new Set(next.map((r) => r.id));
+    const cleaned = layouts.map((l) => ({
+      ...l,
+      columnRoles: (l.columnRoles ?? []).filter((id) => live.has(id)),
+      accentRole: l.accentRole && live.has(l.accentRole) ? l.accentRole : null,
+    }));
+    if (JSON.stringify(cleaned) !== JSON.stringify(layouts)) await persist(cleaned);
+    try {
+      await invoke("scriptview:saveRoles", { roles: next });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   // Column ops on one layout. Columns are ROLE IDS — a role resolves to whatever the
@@ -300,6 +317,15 @@ export function ScriptViewSection() {
           })}
 
           <Button variant="filled" size="small" className="self-start" onClick={addLayout}><PlusIcon className="size-4" /> Add layout</Button>
+
+      {/* Roles last and collapsed: set up once, rarely revisited. */}
+      <Collapsible
+        label={<span className="text-callout font-semibold text-fg">Category roles</span>}
+        summary={`${roles.length} role${roles.length === 1 ? "" : "s"}`}
+        className="rounded-xl border border-gray-a5 bg-gray-a2 px-3 py-2"
+      >
+        <RolesPanel roles={roles} categories={noteCats} onChange={saveRoles} />
+      </Collapsible>
         </div>
       )}
 
@@ -317,3 +343,152 @@ export function ScriptViewSection() {
  * "Reset" clears the colour so the category falls back to its suggestion — it does not
  * remove the category, which PCO owns.
  */
+
+/**
+ * Category roles — editable alias sets.
+ *
+ * A church's PCO note categories are defined per service type and the names vary: one
+ * org was measured with "Audio" and "Audio/Visual" for the same department, three
+ * spellings of "MD + Playback Tech", and case variants of "EG 1 (Lead)". A role groups
+ * those names so one layout resolves correctly everywhere.
+ *
+ * Member ORDER is the priority chain — the first member with a note wins, and several
+ * populated members merge in this order.
+ */
+function RolesPanel({
+  roles,
+  categories,
+  onChange,
+}: {
+  roles: CategoryRole[];
+  categories: string[];
+  onChange: (next: CategoryRole[]) => void;
+}) {
+  const [adding, setAdding] = useState("");
+  const norm = (s: string) => s.trim().toLowerCase();
+
+  const assigned = new Set(roles.flatMap((r) => r.members.map(norm)));
+  const unassigned = categories.filter((c) => !assigned.has(norm(c)));
+
+  // A category in two roles makes resolution ambiguous — both would claim the note.
+  const counts = new Map<string, number>();
+  for (const r of roles) for (const m of r.members) counts.set(norm(m), (counts.get(norm(m)) ?? 0) + 1);
+  const duplicated = [...counts].filter(([, n]) => n > 1).map(([m]) => m);
+
+  const patch = (id: string, next: Partial<CategoryRole>) =>
+    onChange(roles.map((r) => (r.id === id ? { ...r, ...next } : r)));
+
+  const moveMember = (r: CategoryRole, i: number, dir: -1 | 1) => {
+    const m = [...r.members];
+    const j = i + dir;
+    if (j < 0 || j >= m.length) return;
+    [m[i], m[j]] = [m[j], m[i]];
+    patch(r.id, { members: m });
+  };
+
+  return (
+    <div className="flex flex-col gap-3 pt-2">
+      <span className="text-caption2 text-fg-muted">
+        A role groups the names different service types use for the same thing. Layout
+        columns reference roles, so one layout works across all of them. Member order is
+        the priority chain.
+      </span>
+
+      {roles.map((r) => (
+        <div key={r.id} className="flex flex-col gap-1.5 rounded-lg border border-gray-a5 p-2">
+          <div className="flex items-center gap-2">
+            <Input
+              value={r.name}
+              onChange={(e) => patch(r.id, { name: e.target.value })}
+              className="h-7 flex-1 min-w-0"
+              aria-label={`Role name for ${r.name}`}
+            />
+            <Button
+              variant="transparent"
+              size="small"
+              onClick={() => onChange(roles.filter((x) => x.id !== r.id))}
+              title="Delete this role and remove it from every layout"
+            >
+              <Trash2Icon className="size-3.5 text-red-10" />
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {r.members.map((m, mi) => (
+              <span key={m} className="inline-flex items-center gap-1 rounded-md border border-gray-a5 bg-gray-a3 pl-2 pr-1 py-0.5 text-caption2 text-gray-12">
+                <button className="text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={mi === 0} onClick={() => moveMember(r, mi, -1)} aria-label="Higher priority"><ChevronLeftIcon className="size-3" /></button>
+                {m}
+                <button className="text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={mi === r.members.length - 1} onClick={() => moveMember(r, mi, 1)} aria-label="Lower priority"><ChevronRightIcon className="size-3" /></button>
+                <button className="text-gray-9 hover:text-red-10" onClick={() => patch(r.id, { members: r.members.filter((x) => x !== m) })} aria-label={`Remove ${m}`}><XIcon className="size-3" /></button>
+              </span>
+            ))}
+            {categories.some((c) => !r.members.some((m) => norm(m) === norm(c))) && (
+              // Select renders a NATIVE <select>, so the label must be a placeholder
+              // OPTION — a custom trigger child does not render and the browser would
+              // show the first real option as though it were already a member.
+              <Select value="" onValueChange={(v) => patch(r.id, { members: [...r.members, v] })}>
+                <SelectTrigger className="w-auto h-6 px-2 text-caption2" aria-label={`Add a category to ${r.name}`}>
+                  <SelectValue placeholder="+ Add category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.filter((c) => !r.members.some((m) => norm(m) === norm(c)))
+                    .map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        </div>
+      ))}
+
+      <div className="flex items-center gap-2">
+        <Input
+          value={adding}
+          onChange={(e) => setAdding(e.target.value)}
+          placeholder="New role name"
+          className="h-7 flex-1 min-w-0"
+          aria-label="New role name"
+        />
+        <Button
+          variant="filled"
+          size="small"
+          disabled={!adding.trim()}
+          onClick={() => {
+            const name = adding.trim();
+            if (!name) return;
+            onChange([...roles, { id: `role-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${roles.length}`, name, members: [] }]);
+            setAdding("");
+          }}
+        >
+          Add role
+        </Button>
+      </div>
+
+      {unassigned.length > 0 && (
+        <div className="flex flex-col gap-1 border-t border-line pt-2">
+          <span className="text-caption2 text-fg-muted">
+            In no role — these categories can never appear as a column:
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {unassigned.map((c) => (
+              <Button
+                key={c}
+                variant="transparent"
+                size="small"
+                onClick={() => onChange([...roles, { id: `role-${c.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name: c, members: [c] }])}
+                title={`Create a "${c}" role`}
+              >
+                <PlusIcon className="size-3" /> {c}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {duplicated.length > 0 && (
+        <p className="border-t border-line pt-2 text-caption2 text-amber-10" role="alert">
+          In more than one role, so which column shows its note is ambiguous:{" "}
+          {duplicated.join(", ")}
+        </p>
+      )}
+    </div>
+  );
+}
