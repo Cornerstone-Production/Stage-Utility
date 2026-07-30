@@ -11,7 +11,7 @@
 
 import writeXlsxFile, { type Cell, type Row } from "write-excel-file/node";
 
-import { autoFilterFeature } from "./xlsx-autofilter.js";
+import { tableFeature, type TableSpec } from "./xlsx-table.js";
 
 import { attendanceStore } from "./attendance-store.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
@@ -48,6 +48,14 @@ interface Column<T> {
 function cell(v: Scalar): Cell {
   if (v == null || v === "") return null;
   return typeof v === "number" ? { value: v, type: Number } : { value: String(v), type: String };
+}
+
+/** "9:00 AM" from an ISO occurrence start, for telling same-day services apart. */
+function serviceTimeLabel(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  return new Date(t).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
 /** Songs are prefixed so a filter on the Item column isolates them — the recorded
@@ -98,9 +106,13 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
   type Attendance = (typeof att)[number];
 
   const sheets: ReturnType<typeof sheet>[] = [];
+  // Which sheets are datasets. The About page is label/value pairs, so it gets no
+  // table — Excel would happily make one and name its columns after the first row.
+  const tabular: boolean[] = [];
 
   // About sheet — always included so the file is self-describing. Label/value
   // pairs rather than a table, so it is built directly instead of via `sheet()`.
+  tabular.push(false);
   sheets.push({
     sheet: "About",
     columns: [{ width: 22 }, { width: 60 }],
@@ -128,6 +140,7 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
     // A service is present if either store saw it, so the shared fields read
     // from whichever arrived — timeline first.
     const meta = (r: { t?: Timeline; a?: Attendance }) => (r.t ?? r.a)!;
+    tabular.push(true);
     sheets.push(
       sheet<{ t?: Timeline; a?: Attendance }>(
         "Services",
@@ -160,6 +173,7 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
     const rows = att
       .flatMap((a) => a.samples.map((s) => ({ a, s })))
       .sort((x, y) => x.a.serviceDate.localeCompare(y.a.serviceDate) || x.s.t.localeCompare(y.s.t));
+    tabular.push(true);
     sheets.push(
       sheet<(typeof rows)[number]>(
         "Attendance polls",
@@ -181,6 +195,7 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
     const rows = tl
       .flatMap((t) => t.items.map((it) => ({ t, it })))
       .sort((a, b) => a.t.serviceDate.localeCompare(b.t.serviceDate) || a.it.sequence - b.it.sequence);
+    tabular.push(true);
     sheets.push(
       sheet<(typeof rows)[number]>(
         "PCO items",
@@ -209,10 +224,6 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
   }
 
   if (include.includes("spl")) {
-    // One row per plan item, not per metric: the old shape repeated an item once
-    // for every metric the meter reported, which made comparing metrics a matter of
-    // reading down 200 rows. Metrics become column pairs instead, so a single row
-    // holds everything measured for that item and the columns line up for sorting.
     // Records made before per-metric stats existed hold a single metric in
     // maxSpl/leqSpl, named by the capture's own metricKey — so they still have a
     // column to land in rather than exporting as blanks.
@@ -228,28 +239,76 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
     ].sort();
     const rows = spl
       .flatMap((s) => s.items.map((it) => ({ s, it })))
-      // Chronological, then plan order — a sheet meant for analysis should not
-      // arrive in whatever order the store happened to hold.
-      .sort((a, b) => a.s.serviceDate.localeCompare(b.s.serviceDate) || a.it.sequence - b.it.sequence);
-    const metricColumns = metricKeys.flatMap((key): Column<(typeof rows)[number]>[] => [
-      { header: `${key} Max`, width: 12, value: ({ s, it }) => statOf(s, it, key)?.max ?? null },
-      { header: `${key} Leq`, width: 12, value: ({ s, it }) => statOf(s, it, key)?.leq ?? null },
-    ]);
+      // Chronological, then service, then plan order — a sheet meant for analysis
+      // should not arrive in whatever order the store happened to hold.
+      .sort(
+        (a, b) =>
+          a.s.serviceDate.localeCompare(b.s.serviceDate) ||
+          (a.s.serviceTimeStartsAt ?? "").localeCompare(b.s.serviceTimeStartsAt ?? "") ||
+          a.it.sequence - b.it.sequence,
+      );
+
+    // Identifying columns, shared by both shapes. Service time is what separates a
+    // 9am from an 11am on the same date — without it the two are identical rows.
+    const idColumns: Column<(typeof rows)[number]>[] = [
+      { header: "Date", width: 12, value: ({ s }) => s.serviceDate },
+      { header: "Service time", width: 13, value: ({ s }) => serviceTimeLabel(s.serviceTimeStartsAt) },
+      { header: "Service type", width: 20, value: ({ s }) => s.serviceTypeName ?? s.serviceTypeId ?? "" },
+      { header: "#", width: 6, value: ({ it }) => it.sequence },
+      { header: "Item", width: 40, value: ({ it }) => itemLabel(it.title, it.itemType) },
+    ];
+
+    // WIDE — one row per item, every metric side by side. For reading, and for
+    // comparing metrics on a single line.
+    tabular.push(true);
     sheets.push(
       sheet<(typeof rows)[number]>(
         "SPL",
         [
-          { header: "Date", width: 12, value: ({ s }) => s.serviceDate },
-          { header: "Service type", width: 20, value: ({ s }) => s.serviceTypeName ?? s.serviceTypeId ?? "" },
-          { header: "#", width: 6, value: ({ it }) => it.sequence },
-          { header: "Item", width: 40, value: ({ it }) => itemLabel(it.title, it.itemType) },
-          ...metricColumns,
+          ...idColumns,
+          ...metricKeys.flatMap((key): Column<(typeof rows)[number]>[] => [
+            { header: `${key} Max`, width: 12, value: ({ s, it }) => statOf(s, it, key)?.max ?? null },
+            { header: `${key} Leq`, width: 12, value: ({ s, it }) => statOf(s, it, key)?.leq ?? null },
+          ]),
           { header: "Samples", width: 10, value: ({ it }) => it.sampleCount },
         ],
         rows,
       ),
     );
+
+    // LONG — one row per item per metric. Harder to read, but it is the shape a
+    // PivotTable wants: Metric becomes a field you drag, so any arrangement of
+    // metric against date, service or item is a drag rather than a fresh export.
+    // Combinations with no reading are dropped; a blank row is noise in a pivot.
+    const longRows = rows.flatMap(({ s, it }) =>
+      metricKeys
+        .map((metric) => ({ s, it, metric, stat: statOf(s, it, metric) }))
+        .filter((r) => r.stat && (r.stat.max != null || r.stat.leq != null)),
+    );
+    tabular.push(true);
+    sheets.push(
+      sheet<(typeof longRows)[number]>(
+        "SPL data",
+        [
+          ...(idColumns as unknown as Column<(typeof longRows)[number]>[]),
+          { header: "Metric", width: 16, value: (r) => r.metric },
+          { header: "Max", width: 10, value: (r) => r.stat?.max ?? null },
+          { header: "Leq", width: 10, value: (r) => r.stat?.leq ?? null },
+          { header: "Samples", width: 10, value: ({ it }) => it.sampleCount },
+        ],
+        longRows,
+      ),
+    );
   }
 
-  return writeXlsxFile(sheets, { features: [autoFilterFeature] }).toBuffer();
+  // Each sheet's shape, in sheet order, so the table parts name their columns
+  // exactly as row 1 does. Derived from what was just built rather than read back
+  // out of the XML, where the header strings are not resolvable yet.
+  const specs: TableSpec[] = sheets.map((s, i) => ({
+    headers: tabular[i]
+      ? (s.data[0] ?? []).map((c) => (c && typeof c === "object" && "value" in c ? String(c.value ?? "") : ""))
+      : [],
+    rowCount: tabular[i] ? Math.max(0, s.data.length - 1) : 0,
+  }));
+  return writeXlsxFile(sheets, { features: [tableFeature(specs)] }).toBuffer();
 }
