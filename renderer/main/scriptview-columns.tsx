@@ -1,11 +1,14 @@
 import type { RundownColumn } from "./rundown-table";
+import type { CategoryRole } from "../../main/types/scriptview-roles.js";
+import { resolveRole, roleAppliesTo } from "./role-resolve";
 
 // Shared column/clock logic for ScriptView, used by both the standalone page and
 // the settings preview so they render identically. Resolves a layout's per-element
 // toggles, projects the wall-clock per item, and builds the RundownTable columns.
 
 export interface ScriptViewSpec {
-  columns: string[];
+  /** Roles to render, already filtered to those this service type defines. */
+  columns: CategoryRole[];
   showClock: boolean;
   showLength: boolean;
   showKey: boolean;
@@ -16,11 +19,23 @@ export interface ScriptViewSpec {
 }
 
 /** Resolve a layout (or the implicit "All columns" default when null) into a spec.
- *  Toggles default ON — undefined means shown, only `false` hides. */
-export function resolveScriptViewSpec(layout: ScriptViewLayout | null, allCats: string[]): ScriptViewSpec {
+ *  Toggles default ON — undefined means shown, only `false` hides.
+ *
+ *  `categories` is what THIS service type defines. A role none of whose members appear
+ *  there is dropped rather than rendered as an empty column — a name-based column used
+ *  to render blank on every service type that called the same thing something else. */
+export function resolveScriptViewSpec(
+  layout: ScriptViewLayout | null,
+  roles: CategoryRole[],
+  categories: string[],
+): ScriptViewSpec {
   const on = (v: boolean | undefined) => v !== false;
+  const byId = new Map(roles.map((r) => [r.id, r]));
+  const chosen = layout
+    ? (layout.columnRoles ?? []).map((id) => byId.get(id)).filter((r): r is CategoryRole => !!r)
+    : roles;
   return {
-    columns: layout ? layout.columns : allCats,
+    columns: chosen.filter((r) => roleAppliesTo(r, categories)),
     showClock: layout ? on(layout.showClock) : true,
     showLength: layout ? on(layout.showLength) : true,
     showKey: layout ? on(layout.showKey) : true,
@@ -118,8 +133,13 @@ export function buildScriptViewColumns(spec: ScriptViewSpec, clocks: Map<string,
     },
   });
 
-  for (const c of spec.columns) {
-    cols.push({ key: `note:${c}`, header: c, cellClassName: "text-fg-muted whitespace-pre-line", render: (it) => it.notesByCategory[c] ?? "" });
+  for (const role of spec.columns) {
+    cols.push({
+      key: `role:${role.id}`,
+      header: role.name,
+      cellClassName: "text-fg-muted whitespace-pre-line",
+      render: (it) => resolveRole(role, it.notesByCategory),
+    });
   }
 
   return cols;

@@ -8,6 +8,7 @@ import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLeng
 import { useDashboardState } from "./use-dashboard-state";
 import { invoke } from "../lib/api";
 import { ALL_COLUMNS_LAYOUT_ID, ALL_COLUMNS_SLUG, slugify, scriptViewUrl } from "./scriptview-index-view";
+import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 
 function fmtSvcTime(iso: string, timeZone?: string | null): string {
   const d = new Date(iso);
@@ -23,11 +24,13 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
   const [rundown, setRundown] = useState<ScriptViewRundownDTO | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
+  const [roles, setRoles] = useState<CategoryRole[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<ServiceTypeDTO[]>("stage:listServiceTypes").then(setTypes).catch(() => setTypes([]));
     invoke<ScriptViewLayout[]>("scriptview:listLayouts").then(setLayouts).catch(() => setLayouts([]));
+    invoke<CategoryRole[]>("scriptview:listRoles").then(setRoles).catch(() => setRoles([]));
   }, []);
 
   // Resolve the service-type slug (or raw id) to an id.
@@ -78,7 +81,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   }, [rundown?.planTitle, rundown?.planSeriesTitle, layoutName]);
 
   const items = useMemo(() => rundown?.items ?? [], [rundown?.items]);
-  const spec = useMemo(() => resolveScriptViewSpec(layout, rundown?.noteCategories ?? []), [layout, rundown?.noteCategories]);
+  const spec = useMemo(() => resolveScriptViewSpec(layout, roles, rundown?.noteCategories ?? []), [layout, roles, rundown?.noteCategories]);
   const clocks = useMemo(() => computeClocks(items, rundown?.serviceTimes?.[0]), [items, rundown?.serviceTimes]);
   const columns = useMemo(() => buildScriptViewColumns(spec, clocks, rundown?.timeZone), [spec, clocks, rundown?.timeZone]);
 
@@ -162,7 +165,8 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
             currentItemId={currentItemId}
             itemTypeColors={rundown?.itemTypeColors}
             rowColour={layout?.rowColour}
-            accentDepartment={layout?.accentDepartment ?? null}
+            accentRole={layout?.accentRole ?? null}
+            roles={roles}
             footer={spec.showTotalTime ? <span>{fmtTotal(totalLengthSec(items))} <span className="text-fg-subtle">· total time</span></span> : undefined}
           />
         )}
