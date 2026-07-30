@@ -158,7 +158,7 @@ Per the approved mock (`patch-volunteer-view` artifact) and the "+more" decision
 
 ## 8. CSV/Excel import
 
-- Uses `exceljs` (already a dependency; chosen over SheetJS for the clean-audit repo) for `.xlsx`; plain parse for `.csv`.
+- Uses `read-excel-file` (already a dependency, shared with the history export) for `.xlsx`; plain parse for `.csv`.
 - **Column-mapping step**: the operator maps their columns → fields (channel #, source, mic, 48V, path/snake, console ch, target rack). Handles per-device sections (import one snake/pocket at a time) or a full sheet with a device column.
 - Import targets the **default patch** (or a chosen variant). Existing rows are matched by rack + index; the operator confirms adds/overwrites before applying.
 
@@ -211,7 +211,7 @@ v1 built on `feat/patch-sheet` (commits c8e01c7 → 157fa62, **not pushed**):
 Verified throughout: build/tsc clean; API round-trip, CSV import, variant minimal-diff storage, and `/patch` resolution against the live PCO plan all confirmed (Playwright + curl).
 
 **Deferred within v1** (data model already supports; UI/refinement to follow):
-- xlsx import (CSV shipped; xlsx via a server-side exceljs parse route).
+- xlsx import (CSV shipped; xlsx via a server-side parse route).
 - Editor "By device / By rack" grouping toggle (rack-grouped shipped).
 - Per-plan override + week-tweaks UI (resolve + assignments support them; only per-service-type standing assignment has UI so far).
 - Graphical SVG connection diagram (path currently shown as a text chain per row).
@@ -221,7 +221,7 @@ Plus the spec's explicitly-deferred future phases: mic-slot name display (`micSl
 ### Update — within-v1 deferrals now closed (2026-07-22)
 
 All four "deferred within v1" items are implemented + verified:
-- **xlsx import** — server route `POST /api/patch/parse-xlsx` (exceljs) → `{headers, rows}`; the import panel routes `.xlsx` through it and reuses the CSV mapping. Verified: parse round-trip.
+- **xlsx import** — server route `POST /api/patch/parse-xlsx` (read-excel-file) → `{headers, rows}`; the import panel routes `.xlsx` through it and reuses the CSV mapping. Verified: parse round-trip.
 - **By rack / By device toggle** — the editor table groups by rack (all channels) or by the stage device each endpoint's path starts at.
 - **Per-plan override** — the Weekly panel assigns a variant to the current plan (`assignments.byPlan[planId].variantId`), beating the service-type standing.
 - **This-week tweaks** — the variant switcher gains a "This week" target editing `assignments.byPlan[planId].tweaks` as diffs over the resolved (default + variant) base. Verified: stored a minimal per-plan tweak, default untouched.

@@ -107,7 +107,7 @@ export function PatchImport({
     try {
       let p: { headers: string[]; rows: string[][] };
       if (/\.xlsx$/i.test(file.name)) {
-        // Parse server-side with exceljs (avoids bundling it into the renderer).
+        // Parse server-side (avoids bundling a spreadsheet reader into the renderer).
         const bytes = new Uint8Array(await file.arrayBuffer());
         let bin = "";
         for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
