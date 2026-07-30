@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { PcoItemTypeColor } from "../../main/types/stage.js";
 import { resolveItemColour } from "./item-colour";
 import { categoryColour } from "./category-colour";
@@ -66,15 +66,86 @@ export function RundownTable({
 }) {
   const accentColor = accentDepartment ? categoryColour(accentDepartment, categoryColors) : null;
   const currentRef = useRef<HTMLTableRowElement | null>(null);
+
+  // Measured on the table's own wrapper, not the viewport: this also renders inside
+  // the settings live preview, which is a narrow container on a wide screen — a
+  // viewport media query would get that case exactly backwards.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(1280);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setWidth(e.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // No page max-width anywhere: a centred column leaves dead margins on a stage panel
+  // and shrinks the text relative to the viewport. The SHAPE changes instead.
+  const shape = width < 640 ? "stacked" : width < 1024 ? "compact" : "full";
+  // Compact drops the clock (a projected time, the least load-bearing column) before
+  // it touches anything an operator reads off the page.
+  const shownColumns = shape === "full" ? columns : columns.filter((c) => c.key !== "clock");
   useEffect(() => {
     if (autoScroll) currentRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [currentItemId, autoScroll]);
 
+  if (shape === "stacked") {
+    return (
+      <div ref={wrapRef} className={`flex flex-col ${textSizeClass}`}>
+        {items.map((it) => {
+          const isCurrent = currentItemId != null && currentItemId === it.id;
+          if (it.itemType === "header") {
+            const kind = rundownHeaderKind(it.title);
+            return (
+              <div
+                key={it.id}
+                className={`px-3 py-1.5 text-caption1 font-semibold uppercase tracking-wider ${kind ? "bg-white/[0.1] text-fg" : "bg-white/[0.06] text-fg-muted"}`}
+              >
+                {it.title}
+              </div>
+            );
+          }
+          const accentActive = !!accentColor && !isCurrent && !!accentDepartment && !!it.notesByCategory[accentDepartment]?.trim();
+          const rowColour = isCurrent
+            ? null
+            : (resolveItemColour(it, itemTypeColors) ?? (accentActive ? accentColor : null));
+          return (
+            <div
+              key={it.id}
+              ref={isCurrent ? (currentRef as unknown as React.Ref<HTMLDivElement>) : undefined}
+              className={`flex flex-col gap-0.5 border-b border-line px-3 py-2 ${isCurrent ? "bg-live-9/10" : ""}`}
+              style={rowColour ? {
+                background: `color-mix(in srgb, ${rowColour} 10%, transparent)`,
+                boxShadow: `inset 3px 0 0 0 ${rowColour}`,
+              } : undefined}
+            >
+              {shownColumns.map((c) => {
+                const body = c.render(it, { isCurrent });
+                if (body == null || body === "") return null;
+                // Every column keeps its header as a label, since the columns are gone.
+                return c.key === "title" ? (
+                  <div key={c.key} className="font-medium">{body}</div>
+                ) : (
+                  <div key={c.key} className="flex gap-1.5 text-caption2">
+                    <span className="shrink-0 text-fg-subtle">{c.header}</span>
+                    <span className="min-w-0 whitespace-pre-line text-fg-muted">{body}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+        {footer && <div className="px-3 py-2 text-caption1 text-fg-muted">{footer}</div>}
+      </div>
+    );
+  }
+
   return (
+    <div ref={wrapRef}>
     <table className={`w-full border-collapse ${textSizeClass}`}>
       <thead className="sticky top-0 z-10 bg-[var(--kiosk-surface-1)] text-fg-subtle">
         <tr className="text-left">
-          {columns.map((c) => (
+          {shownColumns.map((c) => (
             <th
               key={c.key}
               className={`px-3 py-2 font-medium ${c.align === "right" ? "text-right" : ""} ${c.headerClassName ?? ""}`}
@@ -92,7 +163,7 @@ export function RundownTable({
             return (
               <tr key={it.id} className={kind ? "bg-white/[0.1]" : "bg-white/[0.06]"}>
                 <td
-                  colSpan={columns.length}
+                  colSpan={shownColumns.length}
                   className={`px-3 py-1.5 text-caption1 font-semibold uppercase tracking-wider ${kind ? "text-fg" : "text-fg-muted"}`}
                 >
                   {it.title}
@@ -123,7 +194,7 @@ export function RundownTable({
                 boxShadow: `inset 3px 0 0 0 ${rowColour}`,
               } : undefined}
             >
-              {columns.map((c) => (
+              {shownColumns.map((c) => (
                 <td
                   key={c.key}
                   className={`px-3 py-2 ${c.align === "right" ? "text-right tabular-nums" : ""} ${c.cellClassName ?? ""}`}
@@ -145,5 +216,6 @@ export function RundownTable({
         </tfoot>
       )}
     </table>
+    </div>
   );
 }
