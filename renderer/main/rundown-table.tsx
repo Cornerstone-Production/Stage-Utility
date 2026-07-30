@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { PcoItemTypeColor } from "../../main/types/stage.js";
 import { resolveItemColour } from "./item-colour";
-import { categoryColour } from "./category-colour";
+import { headerColoursFor } from "./category-header-colour";
 
 // Shared PCO plan rundown table. Both the "script" View-kind (ScriptView on a
 // display) and the standalone ScriptView pages render through this so column
@@ -23,10 +23,10 @@ export function rundownHeaderKind(title: string): "start" | "end" | null {
 // as one system. Hues are spread amber/green/blue/teal/red for separation at the
 // 12%-alpha tint these are used at; no purple or magenta, per the palette rule.
 // Must stay 6-digit hex — callers concatenate an alpha suffix (`${color}1f`).
-// Category colours moved into category-colour.ts: they are stored app-wide now, so a
-// keyword guess could not be the source of truth. Re-exported here because existing
-// importers reach for it through this module.
-export { categoryColour, suggestedCategoryColour, normaliseCategory } from "./category-colour";
+// Row colour has ONE source: PCO's item row colours. There is deliberately no
+// per-category accent — PCO has no colour for a note category (item_note_categories
+// carries only name/sequence/frequently_used), so any category colour would have been
+// invented here rather than read from the plan.
 
 export interface RundownColumn {
   key: string;
@@ -43,9 +43,7 @@ export function RundownTable({
   items,
   columns,
   currentItemId,
-  accentDepartment,
   itemTypeColors,
-  categoryColors,
   footer,
   autoScroll = true,
   textSizeClass = "text-[clamp(0.8rem,1.6vmin,1.1rem)]",
@@ -54,17 +52,13 @@ export function RundownTable({
   columns: RundownColumn[];
   currentItemId?: string | null;
   /** Tint a row when this note category has content for the item (department focus). */
-  accentDepartment?: string | null;
   /** PCO's item row colours for this service type (see item-colour.ts). */
   itemTypeColors?: PcoItemTypeColor[];
-  /** App-wide note category -> "#rrggbb". */
-  categoryColors?: Record<string, string>;
   /** Optional sticky bottom band (e.g. total time), spanning all columns. */
   footer?: import("react").ReactNode;
   autoScroll?: boolean;
   textSizeClass?: string;
 }) {
-  const accentColor = accentDepartment ? categoryColour(accentDepartment, categoryColors) : null;
   const currentRef = useRef<HTMLTableRowElement | null>(null);
 
   // Measured on the table's own wrapper, not the viewport: this also renders inside
@@ -85,6 +79,12 @@ export function RundownTable({
   // Compact drops the clock (a projected time, the least load-bearing column) before
   // it touches anything an operator reads off the page.
   const shownColumns = shape === "full" ? columns : columns.filter((c) => c.key !== "clock");
+  // Spread across the columns this layout actually shows, so they are always maximally
+  // distinct from each other — see category-header-colour.ts.
+  const headerColours = useMemo(
+    () => headerColoursFor(shownColumns.map((c) => c.key)),
+    [shownColumns],
+  );
   useEffect(() => {
     if (autoScroll) currentRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [currentItemId, autoScroll]);
@@ -105,10 +105,7 @@ export function RundownTable({
               </div>
             );
           }
-          const accentActive = !!accentColor && !isCurrent && !!accentDepartment && !!it.notesByCategory[accentDepartment]?.trim();
-          const rowColour = isCurrent
-            ? null
-            : (resolveItemColour(it, itemTypeColors) ?? (accentActive ? accentColor : null));
+          const rowColour = isCurrent ? null : resolveItemColour(it, itemTypeColors);
           return (
             <div
               key={it.id}
@@ -127,7 +124,12 @@ export function RundownTable({
                   <div key={c.key} className="font-medium">{body}</div>
                 ) : (
                   <div key={c.key} className="flex gap-1.5 text-caption2">
-                    <span className="shrink-0 text-fg-subtle">{c.header}</span>
+                    <span
+                      className="shrink-0 text-fg-subtle"
+                      style={headerColours[c.key] ? { color: headerColours[c.key] } : undefined}
+                    >
+                      {c.header}
+                    </span>
                     <span className="min-w-0 whitespace-pre-line text-fg-muted">{body}</span>
                   </div>
                 );
@@ -145,15 +147,21 @@ export function RundownTable({
     <table className={`w-full border-collapse ${textSizeClass}`}>
       <thead className="sticky top-0 z-10 bg-[var(--kiosk-surface-1)] text-fg-subtle">
         <tr className="text-left">
-          {shownColumns.map((c) => (
-            <th
-              key={c.key}
-              className={`px-3 py-2 font-medium ${c.align === "right" ? "text-right" : ""} ${c.headerClassName ?? ""}`}
-              style={c.width ? { width: c.width } : undefined}
-            >
-              {c.header}
-            </th>
-          ))}
+          {shownColumns.map((c) => {
+            // Each note column's header carries its own colour so a layout's columns
+            // are told apart at a glance. Structural columns (Clock/Time/Item) stay
+            // default — see category-header-colour.ts.
+            const tint = headerColours[c.key];
+            return (
+              <th
+                key={c.key}
+                className={`px-3 py-2 font-medium ${c.align === "right" ? "text-right" : ""} ${c.headerClassName ?? ""}`}
+                style={{ ...(c.width ? { width: c.width } : {}), ...(tint ? { color: tint } : {}) }}
+              >
+                {c.header}
+              </th>
+            );
+          })}
         </tr>
       </thead>
       <tbody>
@@ -174,13 +182,9 @@ export function RundownTable({
           const isCurrent = currentItemId != null && currentItemId === it.id;
           // Row tint when the accent department has content here (not while the
           // live-item highlight already owns the row).
-          const accentActive = !!accentColor && !isCurrent && !!accentDepartment && !!it.notesByCategory[accentDepartment]?.trim();
-          // PCO's own row colour wins where it has one; the category accent fills the
-          // rest. A live item still outranks both — a running item must stay the most
+          // A live item outranks PCO's colour — a running item must stay the most
           // prominent row on the page.
-          const rowColour = isCurrent
-            ? null
-            : (resolveItemColour(it, itemTypeColors) ?? (accentActive ? accentColor : null));
+          const rowColour = isCurrent ? null : resolveItemColour(it, itemTypeColors);
           return (
             <tr
               key={it.id}

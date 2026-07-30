@@ -81,20 +81,6 @@ export async function scriptviewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    // One note category's colour, app-wide. "" clears it and the category falls back
-    // to its suggestion — it does not hide the category, which PCO owns.
-    if (method === "POST" && pathname === "/api/scriptview/category-color") {
-      const body = await readBody(req) as Record<string, unknown>;
-      const category = typeof body.category === "string" ? body.category : "";
-      const color = typeof body.color === "string" ? body.color : "";
-      try {
-        json(res, await stageController.setCategoryColor(category, color));
-      } catch (err) {
-        error(res, err instanceof Error ? err.message : String(err));
-      }
-      return;
-    }
-
     if (method === "GET" && pathname === "/api/scriptview/note-categories") {
       const serviceTypeId = url.searchParams.get("serviceTypeId");
       if (!serviceTypeId) {

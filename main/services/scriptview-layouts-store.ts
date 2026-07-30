@@ -10,11 +10,11 @@ import { DataStore } from "./data-store.js";
  *  reference PCO note-category names, so a category a plan lacks renders empty.
  *  All element toggles default shown (show* omitted = shown). */
 const DEFAULT_LAYOUTS: ScriptViewLayout[] = [
-  { id: "starter-audio", name: "Audio", order: 0, columns: ["Audio", "Band", "MD + Playback Tech", "Vocals"], accentDepartment: "Audio" },
-  { id: "starter-video", name: "Video", order: 1, columns: ["Graphics", "Video", "Vocals"], accentDepartment: "Video" },
-  { id: "starter-lighting", name: "Lighting", order: 2, columns: ["Lighting", "Band", "Stage Manager"], accentDepartment: "Lighting" },
-  { id: "starter-stage", name: "Stage", order: 3, columns: ["Stage Manager"], accentDepartment: "Stage Manager" },
-  { id: "starter-simple", name: "Simple", order: 4, columns: [], accentDepartment: null },
+  { id: "starter-audio", name: "Audio", order: 0, columns: ["Audio", "Band", "MD + Playback Tech", "Vocals"] },
+  { id: "starter-video", name: "Video", order: 1, columns: ["Graphics", "Video", "Vocals"] },
+  { id: "starter-lighting", name: "Lighting", order: 2, columns: ["Lighting", "Band", "Stage Manager"] },
+  { id: "starter-stage", name: "Stage", order: 3, columns: ["Stage Manager"] },
+  { id: "starter-simple", name: "Simple", order: 4, columns: [] },
 ];
 
 const store = new DataStore<ScriptViewLayout[]>("scriptview-layouts.json", DEFAULT_LAYOUTS);

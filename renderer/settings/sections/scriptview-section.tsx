@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
-import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, Collapsible, confirm } from "../../components/ui";
+import { Button, Input, Switch, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, MultiSelect, EmptyState, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
-import { useStageState } from "../../main/use-stage-state";
 import { RundownTable } from "../../main/rundown-table";
-import { categoryColour, normaliseCategory } from "../../main/category-colour";
 import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLengthSec, fmtTotal } from "../../main/scriptview-columns";
 
 // crypto.randomUUID is undefined in an insecure (plain-HTTP) context, which prod
@@ -18,8 +16,6 @@ function uid(): string {
 /** ScriptView layouts editor: per-service-type named column presets, with a live
  *  preview against that type's live/next plan. */
 export function ScriptViewSection() {
-  // Category colours are app-wide, so they come off stage state rather than a layout.
-  const categoryColors = useStageState().state?.scriptViewCategoryColors;
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
   const [typeId, setTypeId] = useState<string | null>(null);
@@ -68,22 +64,6 @@ export function ScriptViewSection() {
     [layouts],
   );
 
-  // Every category that COULD be a row accent — the union of the layouts' columns,
-  // which is exactly what fills each layout's Row accent dropdown. Deliberately not
-  // "categories currently accented": that would mean accenting something before you
-  // could colour it. Deliberately not "every category PCO reports" either — a category
-  // no layout shows can never accent a row, so a colour for it would do nothing.
-  const accentCategories = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const l of layouts) {
-      for (const c of l.columns) {
-        const name = c.trim();
-        if (name) seen.set(normaliseCategory(name), name);
-      }
-    }
-    for (const k of Object.keys(categoryColors ?? {})) if (!seen.has(k)) seen.set(k, k);
-    return [...seen.values()].sort((a, b) => a.localeCompare(b));
-  }, [layouts, categoryColors]);
 
   async function persist(next: ScriptViewLayout[]) {
     setLayouts(next);
@@ -98,7 +78,7 @@ export function ScriptViewSection() {
     const order = sortedLayouts.length ? Math.max(...sortedLayouts.map((l) => l.order)) + 1 : 0;
     const layout: ScriptViewLayout = {
       id: uid(), name: `Layout ${sortedLayouts.length + 1}`, order,
-      columns: [...noteCats], accentDepartment: null, // all element toggles default on
+      columns: [...noteCats], // all element toggles default on
     };
     setExpandedId(layout.id);
     persist([...layouts, layout]);
@@ -122,7 +102,6 @@ export function ScriptViewSection() {
   const addColumn = (l: ScriptViewLayout, cat: string) => update(l.id, { columns: [...l.columns, cat] });
   const removeColumn = (l: ScriptViewLayout, cat: string) => {
     const patch: Partial<ScriptViewLayout> = { columns: l.columns.filter((c) => c !== cat) };
-    if (l.accentDepartment === cat) patch.accentDepartment = null;
     update(l.id, patch);
   };
   const moveColumn = (l: ScriptViewLayout, idx: number, dir: -1 | 1) => {
@@ -236,18 +215,7 @@ export function ScriptViewSection() {
                       <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showBpm !== false} onCheckedChange={(v: boolean) => update(l.id, { showBpm: v })} /> BPM</label>
                       <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showArrangement !== false} onCheckedChange={(v: boolean) => update(l.id, { showArrangement: v })} /> Arrangement</label>
                       <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showItemNotes !== false} onCheckedChange={(v: boolean) => update(l.id, { showItemNotes: v })} /> Item notes</label>
-                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showTotalTime !== false} onCheckedChange={(v: boolean) => update(l.id, { showTotalTime: v })} /> Total time</label>
-                      <div className="flex items-center gap-2 text-caption1 text-gray-11">
-                        Row accent
-                        <Select value={l.accentDepartment ?? "__none__"} onValueChange={(v) => update(l.id, { accentDepartment: v === "__none__" ? null : v })}>
-                          <SelectTrigger className="w-40 h-7"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">None</SelectItem>
-                            {l.columns.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
+                      <label className="flex items-center gap-2 text-caption1 text-gray-11"><Switch checked={l.showTotalTime !== false} onCheckedChange={(v: boolean) => update(l.id, { showTotalTime: v })} /> Total time</label>                    </div>
 
                     {/* Inline live preview for this layout (16:9, scrolls internally). */}
                     <div className="flex items-center gap-2 mb-2">
@@ -264,9 +232,7 @@ export function ScriptViewSection() {
                           <RundownTable
                             items={rundown.items}
                             columns={buildScriptViewColumns(resolveScriptViewSpec(l, noteCats), computeClocks(rundown.items, rundown.serviceTimes?.[0]), rundown.timeZone)}
-                            accentDepartment={l.accentDepartment ?? null}
                             itemTypeColors={rundown.itemTypeColors}
-                            categoryColors={categoryColors}
                             autoScroll={false}
                             footer={l.showTotalTime !== false ? <span>{fmtTotal(totalLengthSec(rundown.items))} <span className="text-white/40">· total time</span></span> : undefined}
                           />
@@ -283,15 +249,6 @@ export function ScriptViewSection() {
         </div>
       )}
 
-      {/* Last on the page and collapsed: these are set once and rarely revisited, so
-          they should not be the first thing you look at. */}
-      <Collapsible
-        label={<span className="text-callout font-semibold text-fg">Row accent colours</span>}
-        summary={accentCategories.length ? `${accentCategories.length} categories` : "no layouts yet"}
-        className="rounded-xl border border-gray-a5 bg-gray-a2 px-3 py-2"
-      >
-        <CategoryColoursPanel categories={accentCategories} colors={categoryColors} />
-      </Collapsible>
     </div>
   );
 }
@@ -306,59 +263,3 @@ export function ScriptViewSection() {
  * "Reset" clears the colour so the category falls back to its suggestion — it does not
  * remove the category, which PCO owns.
  */
-function CategoryColoursPanel({
-  categories,
-  colors,
-}: {
-  categories: string[];
-  colors?: Record<string, string>;
-}) {
-  const set = (category: string, color: string) =>
-    void invoke("scriptview:setCategoryColor", { category, color });
-
-  if (categories.length === 0) {
-    return (
-      <p className="py-1 text-caption1 text-fg-muted">
-        Add a layout above and its note columns appear here.
-      </p>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-2 pt-1">
-      <span className="text-caption2 text-fg-muted">
-        Each layout picks one of these as its Row accent; this is the colour it uses. Set
-        once — the same colour applies to every layout and every service type.
-      </span>
-      <div className="flex flex-col gap-1">
-        {categories.map((cat) => {
-          const key = normaliseCategory(cat);
-          const chosen = colors?.[key];
-          return (
-            <div key={key} className="flex items-center gap-2">
-              <label
-                className="size-5 shrink-0 cursor-pointer rounded border border-line-strong"
-                style={{ backgroundColor: categoryColour(cat, colors) }}
-                title={`Change the ${cat} colour`}
-              >
-                <input
-                  type="color"
-                  className="sr-only"
-                  value={categoryColour(cat, colors)}
-                  aria-label={`${cat} colour`}
-                  onChange={(e) => set(cat, e.target.value)}
-                />
-              </label>
-              <span className="min-w-0 flex-1 truncate text-caption1 text-gray-11">{cat}</span>
-              {chosen && (
-                <Button variant="transparent" size="small" onClick={() => set(cat, "")} title="Back to the default colour">
-                  Reset
-                </Button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}

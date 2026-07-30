@@ -61,40 +61,29 @@ is legible at distance; the wash groups the row without lifting the background i
 text. PCO's palette includes lavender and pink — those render as chosen. The project's
 zero-purple rule governs our own chrome, not a colour an operator picked in PCO.
 
-## Row accent colours
+## Column header colours
 
-Settings → ScriptView → **Row accent colours** (collapsed, at the foot of the page —
-set once and rarely revisited). One colour per category, stored app-wide in
-`settings.json` under `scriptViewCategoryColors`.
+Each note column's header takes its own colour so a layout's columns are told apart at
+a glance — the Audio layout's Band and Vocals, or a fourteen-column layout's whole set.
+Structural columns (Clock, Time, Item) keep the default.
 
-### Where these categories come from
+**Nothing to configure.** PCO has no colour for a note category — `item_note_categories`
+carries only `name` / `sequence` / `frequently_used` — so any configurable colour would
+be invented here rather than read from the plan.
 
-1. **PCO owns the names.** Each service type has item note categories — Audio, Band,
-   Vocals, Lighting — fetched with `listItemNoteCategories(serviceTypeId)`. These become
-   ScriptView's columns.
-2. **A layout picks which columns it shows** (`layout.columns`).
-3. **A layout picks one of those as its Row accent** (`layout.accentDepartment`). This is
-   the Stage Utility concept: tint the row whenever that category has a note on it.
-4. **The colour** is whatever is set here, falling back to the keyword suggestion.
+Colours are spread **evenly across the columns a layout shows**, not hashed from the
+category name. Hashing was tried first and cannot guarantee the one thing that matters:
+with fourteen columns in a ~260-degree hue space, collisions are a birthday problem, and
+two columns sharing a colour inside one layout defeats the point. Even spacing
+guarantees maximum separation in every layout, at the cost of a category not keeping the
+same colour across layouts that show different column sets.
 
-The list is the **union of the layouts' columns** — exactly what fills each layout's Row
-accent dropdown. Not "categories currently accented", which would mean accenting
-something before you could colour it; and not every category PCO reports, since a
-category no layout shows can never accent a row.
+Hues 230-330 are skipped for the zero-purple rule. The gap is generous at both ends
+deliberately: 249 reads indigo and 320 reads violet, so a narrow "purple only" gap still
+produced purple headers.
 
-Note categories are fetched **per service type**, so "Audio" exists separately under
-Weekend, Youth and Salt Company. Keys are normalised (trimmed, lowercased), so setting
-Audio once colours it under every service type — which is the point of storing them here
-rather than on a layout.
-
-- **Edit** — click the swatch; native colour picker.
-- **Reset** — clears the colour so the category falls back to its suggestion. It does not
-  remove the category; PCO owns whether one exists.
-
-Categories with no colour fall back to a keyword suggestion (lighting → amber, audio →
-blue, band/vocals → teal, stage/cam → red, video/graphics → green, anything else neutral).
-That guess used to *be* the colour, with no way to change it — a category named
-"Hospitality" was stuck on grey. It now survives only as the starting suggestion.
+**Rows are never coloured by category.** Row colour has one source — PCO's item row
+colours above — so a plan reads the way PCO shows it. There is no row accent setting.
 
 ## Responsive layout
 
