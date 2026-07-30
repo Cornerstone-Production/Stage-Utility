@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { MinusIcon, PlusIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -43,9 +44,9 @@ export function NumberInput({
   const [text, setText] = React.useState(() => String(value));
   const [editing, setEditing] = React.useState(false);
 
-  React.useEffect(() => {
+  useResyncOn([value, editing], () => {
     if (!editing) setText(String(Number.isFinite(value) ? value : 0));
-  }, [value, editing]);
+  });
 
   const clamp = (n: number) => {
     if (min != null) n = Math.max(min, n);

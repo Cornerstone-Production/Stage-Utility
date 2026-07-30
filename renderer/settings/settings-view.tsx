@@ -1,4 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import { PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
@@ -387,7 +388,7 @@ export function SettingsView() {
       const version = (payload as { version?: string } | null)?.version ?? null;
       if (!version || version === "unknown") return;
       if (serverVersionRef.current === null) serverVersionRef.current = version;
-      let pending: { fromVersion: string | null } | null = null;
+      let pending: { fromVersion: string | null } | null;
       try {
         const raw = sessionStorage.getItem(UPDATE_PENDING_KEY);
         pending = raw ? (JSON.parse(raw) as { fromVersion: string | null }) : null;
@@ -403,7 +404,7 @@ export function SettingsView() {
   // Selected View for the Views tab master-detail (default to the first view).
   const [selectedViewId, setSelectedViewId] = useState<string>("");
 
-  useEffect(() => {
+  useResyncOn([stageState, selectedViewId], () => {
     if (!stageState) return;
     const views = stageState.views ?? [];
     if (views.length === 0) {
@@ -413,7 +414,7 @@ export function SettingsView() {
     if (!selectedViewId || !views.find((v) => v.id === selectedViewId)) {
       setSelectedViewId(views[0].id);
     }
-  }, [stageState, selectedViewId]);
+  });
 
   // Local slot editor state
   const [localSlots, setLocalSlots] = useState<Slot[]>([]);
@@ -422,21 +423,22 @@ export function SettingsView() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Mirror the selected View's resolved slots into the editor (unless dirty).
-  useEffect(() => {
+  useResyncOn([stageState, selectedViewId, slotsDirty], () => {
     if (!stageState || slotsDirty) return;
     const viewSlots = stageState.slotsByView?.[selectedViewId] ?? [];
     setLocalSlots([...viewSlots].sort((a, b) => a.order - b.order));
-  }, [stageState, selectedViewId, slotsDirty]);
+  });
 
   // Live draft preview: while slots are dirty, resolve the in-progress edits
   // server-side (no save) so the preview iframe can show the draft exactly as the
   // kiosk would. Debounced to avoid a request per keystroke; cleared when clean.
   const [resolvedDraftSlots, setResolvedDraftSlots] = useState<Slot[] | null>(null);
+  useResyncOn([slotsDirty], () => {
+    if (!slotsDirty) setResolvedDraftSlots(null);
+  });
+
   useEffect(() => {
-    if (!slotsDirty) {
-      setResolvedDraftSlots(null);
-      return;
-    }
+    if (!slotsDirty) return;
     let cancelled = false;
     const t = setTimeout(() => {
       ipc<Slot[]>("views:resolveSlots", { slots: localSlots.map((s, i) => ({ ...s, order: i })) })

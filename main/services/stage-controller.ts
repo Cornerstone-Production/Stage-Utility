@@ -611,7 +611,7 @@ export class StageController {
 
     const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, serviceTypeId);
     const isActiveType = serviceTypeId === this.state.serviceTypeId;
-    let plan: PlanDTO | null = null;
+    let plan: PlanDTO | null;
     if (planId) plan = plans.find((p) => p.id === planId) ?? null;
     else if (isActiveType && this.state.planId) plan = plans.find((p) => p.id === this.state.planId) ?? plans[0] ?? null;
     else plan = plans[0] ?? null;

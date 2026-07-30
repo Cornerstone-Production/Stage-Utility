@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Loader2Icon, PlusIcon } from "lucide-react";
@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useStageState } from "../../main/use-stage-state";
 import { SortableSlotGroup, AlignmentPanel, PresetsPanel, makeSharesWith, type PresetHandlers } from "./slots-section";
 import type { WirelessChannel } from "../types";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 function freshSlotId(): string {
   return `slot-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -56,11 +57,11 @@ export function InlineSlotsEditor({
 
   // Mirror this object's resolved slots into the editor (unless mid-edit). Re-seeds
   // when the object or active service type changes (state carries both).
-  useEffect(() => {
+  useResyncOn([state, objectId, dirty], () => {
     if (dirty) return;
     const slots = state?.slotsByLayoutObject?.[objectId] ?? [];
     setLocalSlots([...slots].sort((a, b) => a.order - b.order));
-  }, [state, objectId, dirty]);
+  });
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 

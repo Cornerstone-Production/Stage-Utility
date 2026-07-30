@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useLatestRef } from "@renderer/lib/use-latest-ref";
 
 const DESIGN_W = 1280;
 
@@ -34,8 +35,7 @@ export function ViewPreview({
   const designH = Math.round(DESIGN_W / aspect);
 
   // Latest draft in a ref so the ready-handshake handler always posts current data.
-  const draftRef = useRef<Slot[] | null>(draftSlots);
-  draftRef.current = draftSlots;
+  const draftRef = useLatestRef(draftSlots);
 
   function postDraft(target: Window | null | undefined) {
     if (!target) return;

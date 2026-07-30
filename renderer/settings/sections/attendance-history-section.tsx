@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { ChevronLeftIcon, ChevronRightIcon, Trash2Icon, UsersIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
@@ -126,12 +127,17 @@ export function AttendanceHistorySection() {
     });
   }, [selectedKey]);
 
-  useEffect(() => {
+  // Clearing is synchronous, so it happens in the same render the selection
+  // clears — the panel never shows the old service's numbers under no selection.
+  useResyncOn([selectedKey], () => {
     if (!selectedKey) {
       setDetail(null);
       setTimeline(null);
-      return;
     }
+  });
+
+  useEffect(() => {
+    if (!selectedKey) return;
     let cancelled = false;
     invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: selectedKey })
       .then((d) => !cancelled && setDetail(d))
@@ -151,9 +157,9 @@ export function AttendanceHistorySection() {
     return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
   }, [list]);
 
-  useEffect(() => {
+  useResyncOn([days, day], () => {
     if (day == null && days.length > 0) setDay(days[0]);
-  }, [days, day]);
+  });
 
   const dayServices = useMemo(() => (list ?? []).filter((s) => s.serviceDate === day), [list, day]);
 

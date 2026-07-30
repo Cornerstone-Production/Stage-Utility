@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, DownloadIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
@@ -343,13 +344,18 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     return () => clearInterval(t);
   }, [detailLive, listLive]);
 
-  useEffect(() => {
+  // Synchronous, so the panel clears in the same render the selection does —
+  // it never shows the previous service's numbers under an empty selection.
+  useResyncOn([selectedKey], () => {
     if (!selectedKey) {
       setDetail(null);
       setAttendance(null);
       setSpl(null);
-      return;
     }
+  });
+
+  useEffect(() => {
+    if (!selectedKey) return;
     let cancelled = false;
     invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: selectedKey })
       .then((d) => !cancelled && setDetail(d))
@@ -403,9 +409,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   }, [filtered]);
 
   // Auto-select the newest day; also re-select when the filter drops the current day.
-  useEffect(() => {
+  useResyncOn([days, day], () => {
     if (days.length > 0 && (day == null || !days.includes(day))) setDay(days[0]);
-  }, [days, day]);
+  });
 
   const dayServices = useMemo(() => filtered.filter((s) => s.serviceDate === day), [filtered, day]);
   // Per-day service counts for the calendar (respects the type filter).

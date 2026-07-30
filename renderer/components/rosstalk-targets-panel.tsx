@@ -4,6 +4,7 @@ import { CheckCircle2Icon, Loader2Icon, PlusIcon, TrashIcon, XCircleIcon } from 
 
 import { invoke, onNotification } from "../lib/api";
 import { Button, InfoHint, Input, NumberInput, Separator, Status, Switch, toast } from "./ui";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 const DEFAULT_PORT = 7788;
 
@@ -39,12 +40,12 @@ function TargetCard({ target, onChanged }: { target: RossTalkTarget; onChanged: 
   const [family, setFamily] = useState<RossTalkFamily>(target.config.family ?? "carbonite");
   const [testing, setTesting] = useState(false);
 
-  useEffect(() => {
+  useResyncOn([target], () => {
     setName(target.name);
     setHost(String(target.config.host ?? ""));
     setPort(Number(target.config.port ?? DEFAULT_PORT));
     setFamily(target.config.family ?? "carbonite");
-  }, [target]);
+  });
 
   async function patch(patchBody: Record<string, unknown>) {
     await invoke("rosstalk:updateTarget", { id: target.id, patch: patchBody });

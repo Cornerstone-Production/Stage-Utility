@@ -45,6 +45,19 @@ function textOf(node: React.ReactNode): string {
   return "";
 }
 
+// Does the caller already supply an empty-valued item? If so the placeholder
+// option is skipped, or the list opens with two blank rows. Traversed the same
+// way the options themselves are, but as a pure predicate — the option builder is
+// a reusable closure, so counting from inside it would mutate render scope.
+function hasEmptyItem(node: React.ReactNode): boolean {
+  return React.Children.toArray(node).some((child) => {
+    if (!React.isValidElement(child)) return false;
+    if (child.type === SelectItem) return (child.props as ItemProps).value === "";
+    const kids = (child.props as { children?: React.ReactNode })?.children;
+    return kids != null ? hasEmptyItem(kids) : false;
+  });
+}
+
 // Field styling for the closed control; the OS renders the arrow + open list
 // (native picker), matching the patch sheet's native <select>s. Call-site trigger
 // classes (widths etc.) apply directly to the <select> — no wrapper needed.
@@ -94,13 +107,11 @@ export function Select({
     }
   });
 
-  let hasEmpty = false;
   const toOptions = (node: React.ReactNode): React.ReactNode =>
     React.Children.map(node, (child) => {
       if (!React.isValidElement(child)) return null;
       if (child.type === SelectItem) {
         const p = child.props as ItemProps;
-        if (p.value === "") hasEmpty = true;
         return (
           <option value={p.value} disabled={p.disabled}>
             {textOf(p.children)}
@@ -123,6 +134,7 @@ export function Select({
     });
 
   const options = toOptions(contentChildren);
+  const hasEmpty = hasEmptyItem(contentChildren);
 
   return (
     <select

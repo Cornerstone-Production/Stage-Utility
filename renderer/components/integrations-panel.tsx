@@ -401,15 +401,21 @@ function SenSourceScopePicker({
   state: IntegrationState;
   onStateChange: (next: IntegrationState) => void;
 }) {
-  const [locations, setLocations] = useState<{ locationId: string; name: string }[]>([]);
-  const [zones, setZones] = useState<VeaZone[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [zonesLoading, setZonesLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const current = typeof state.config.locationId === "string" ? state.config.locationId : "";
   const selectedZoneIds = Array.isArray(state.config.zoneIds)
     ? (state.config.zoneIds as unknown[]).filter((z): z is string => typeof z === "string")
     : [];
+  // Whether the lists load themselves on mount, so a saved location/zone renders
+  // by name rather than as a bare id. Decided once, and it seeds the spinners —
+  // starting them on is what lets the mount load do all its state updates after
+  // the await, rather than flipping a flag on the way in.
+  const autoLoad = state.configured || !!current || selectedZoneIds.length > 0;
+
+  const [locations, setLocations] = useState<{ locationId: string; name: string }[]>([]);
+  const [zones, setZones] = useState<VeaZone[]>([]);
+  const [loading, setLoading] = useState(autoLoad);
+  const [zonesLoading, setZonesLoading] = useState(autoLoad);
+  const [error, setError] = useState<string | null>(null);
 
   const loadLocations = useCallback(async () => {
     setLoading(true);
@@ -435,14 +441,30 @@ function SenSourceScopePicker({
     }
   }, []);
 
-  // Auto-load lists on mount when the integration is set up, so a previously-saved
-  // location/zone selection renders by name (the dropdowns need the lists loaded
-  // to show the chosen options after a refresh / re-opening the tab).
   useEffect(() => {
-    if (state.configured || current || selectedZoneIds.length) {
-      void loadLocations();
-      void loadZones();
-    }
+    if (!autoLoad) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [locs, zs] = await Promise.all([
+          invoke<{ locationId: string; name: string }[]>("sensource:listLocations"),
+          invoke<VeaZone[]>("sensource:listZones"),
+        ]);
+        if (cancelled) return;
+        setLocations(locs);
+        setZones(zs);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setZonesLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

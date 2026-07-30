@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 /** A month calendar for browsing recorded services: days with recordings get a
  *  filled dot (shaded by count), click to jump; arrows page month-to-month. Suits
@@ -38,11 +39,11 @@ export function HistoryCalendar({
     }
     return today;
   });
-  useEffect(() => {
+  useResyncOn([selected], () => {
     if (!selected) return;
     const p = new Date(`${selected}T00:00:00`);
     if (!Number.isNaN(p.getTime())) setView({ y: p.getFullYear(), m: p.getMonth() });
-  }, [selected]);
+  });
 
   // Bound navigation to [earliest recorded month … current month].
   const earliest = useMemo(() => {

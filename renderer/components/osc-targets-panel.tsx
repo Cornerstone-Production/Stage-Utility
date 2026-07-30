@@ -1,4 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -58,7 +59,7 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
 
-  useEffect(() => setName(target.name), [target.name]);
+  useResyncOn([target.name], () => setName(target.name));
 
   async function patch(p: Record<string, unknown>) {
     try {
@@ -168,9 +169,9 @@ export function OscTargetsPanel({ className }: { className?: string }) {
 
   const targets = targetsQuery.data ?? [];
   const [portInput, setPortInput] = useState(9000);
-  useEffect(() => {
+  useResyncOn([portQuery.data], () => {
     if (portQuery.data) setPortInput(portQuery.data.port);
-  }, [portQuery.data]);
+  });
 
   useEffect(() => {
     return onNotification("osc:targets-changed", (p) => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { OctagonXIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
@@ -204,7 +205,7 @@ function RuleCard({
   const [draft, setDraft] = useState<Rule>(rule);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => setDraft(rule), [rule]);
+  useResyncOn([rule], () => setDraft(rule));
 
   const trigger = registry.triggers.find((t) => t.id === draft.trigger.id) ?? null;
   const action = registry.actions.find((a) => a.id === draft.action.id) ?? null;

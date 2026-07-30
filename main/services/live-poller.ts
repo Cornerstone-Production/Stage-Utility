@@ -61,7 +61,7 @@ class LivePoller {
 
   private async tick(): Promise<void> {
     if (!this.running) return;
-    let live: PcoLiveDTO | null = null;
+    let live: PcoLiveDTO | null;
     try {
       live = await stageController.fetchLive();
     } catch (err) {
