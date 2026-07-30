@@ -33,6 +33,7 @@ Settings → ScriptView → a layout → **Row colour**:
 |---|---|
 | **From PCO** (default) | PCO's item row colours — song, header, media, custom title matches |
 | **By category** | the chosen note category, wherever that category has a note on the item |
+
 | **None** | nothing |
 
 A layout saved before this existed has no `rowColour` and behaves as **From PCO**.
@@ -67,6 +68,16 @@ Add or change a colour in PCO and rows follow within the 15-minute service-type 
 including brand-new custom item types — nothing to configure here.
 
 ### By category — a fixed table
+
+The category can be **any** the service type defines, not only the columns this layout
+shows. Tinting by a category the layout does not display is deliberate: "Lighting has a
+cue on this item" is useful to a stage manager without showing the cue text.
+
+A category with no notes on the current plan simply tints nothing — worth knowing, since
+a plan may define a category no one has written in. On the Weekend service type, for
+instance, `Audio` is defined but currently carries no notes, so accenting by it shows
+nothing while `Band` lights up nine rows.
+
 
 | Category name contains | Colour |
 |---|---|

@@ -241,7 +241,11 @@ export function ScriptViewSection() {
                             <SelectTrigger className="w-40 h-7"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="__none__">Pick a category…</SelectItem>
-                              {l.columns.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                              {/* Every note category the service type defines, not just
+                                  this layout's columns. Tinting by a category the layout
+                                  does not display is legitimate — "Lighting has a cue
+                                  here" is useful without showing the cue text. */}
+                              {noteCats.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         )}
