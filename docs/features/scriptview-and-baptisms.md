@@ -20,3 +20,88 @@ A standalone **`/baptism` operator page** (also a Settings tab) with a **grouped
 workflow** (all testimonies, then all baptisms). Sessions are named by service and
 **cross-linked into Service History** with per-person splits + averages. An on-air
 **"Baptism timer"** layout object shows the live count/timer on a display.
+
+## Row colours
+
+Three sources, first match wins.
+
+**1. PCO item row colours.** `ServiceType.standard_item_types` and `custom_item_types`
+carry `{name, color}` and ride along on the `listServiceTypes` request the app already
+makes, so they cost nothing extra. Standard entries match an item's `itemType`
+(header / song / media). Custom entries match text **contained in the title** — PCO's own
+wording is "Items that include this text in the title will be highlighted."
+
+`#ffffff` means *unset*, not white: PCO ships it as the default on Media, so rendering it
+would stripe every video row for no reason. Only exact white is special — a near-white is
+treated as a real choice.
+
+Because the app renders whatever the arrays contain, **a colour added in PCO needs no
+change here**. It appears within the 15-minute service-type cache, or immediately on a
+manual refresh, including brand-new custom types.
+
+**2. Category accent.** When a layout selects a note category as its row accent and an
+item has a note in it. Colour comes from the app-wide map below.
+
+**3. Nothing.** A plain row.
+
+A live item outranks all three — a running item stays the most prominent row.
+
+### How they render
+
+A 3px full-strength stripe plus a 10% wash:
+
+```css
+box-shadow: inset 3px 0 0 var(--colour);
+background: color-mix(in srgb, var(--colour) 10%, transparent);
+```
+
+PCO's palette is authored against a white table, so used directly as row backgrounds on a
+dark panel two of the three read as near-white blocks. The stripe carries the hue where it
+is legible at distance; the wash groups the row without lifting the background into the
+text. PCO's palette includes lavender and pink — those render as chosen. The project's
+zero-purple rule governs our own chrome, not a colour an operator picked in PCO.
+
+## Category colours
+
+Settings → ScriptView → **Category colours**. One colour per note category, stored
+app-wide in `settings.json` under `scriptViewCategoryColors`.
+
+Note categories are fetched **per service type**, so "Audio" exists separately under
+Weekend, Youth and Salt Company. Keys are normalised (trimmed, lowercased), so setting
+Audio once colours it under every service type — which is the point of storing them here
+rather than on a layout.
+
+- **Edit** — click the swatch; native colour picker.
+- **Add** — for a category PCO has not reported yet.
+- **Reset** — clears the colour so the category falls back to its suggestion. It does not
+  remove the category; PCO owns whether one exists.
+
+Categories with no colour fall back to a keyword suggestion (lighting → amber, audio →
+blue, band/vocals → teal, stage/cam → red, video/graphics → green, anything else neutral).
+That guess used to *be* the colour, with no way to change it — a category named
+"Hospitality" was stuck on grey. It now survives only as the starting suggestion.
+
+## Responsive layout
+
+ScriptView is a kiosk `ViewKind`, so it renders on stage panels as well as laptops and
+phones. There is **no page max-width**: a centred column leaves dead margins on a 37-inch
+panel and shrinks the text relative to the viewport, which is backwards for a surface read
+at distance. The shape changes instead:
+
+| Container width | Shape |
+|---|---|
+| `< 640` | Stacked. Each item is a block; every column keeps its header as a label. |
+| `640-1024` | Table without the Clock column (a projected time, the least load-bearing). |
+| `> 1024` | Every column, filling the width. |
+
+Measured with a `ResizeObserver` on the table's own wrapper, **not** the viewport — the
+table also renders inside the settings live preview, a narrow container on a wide screen,
+which a viewport media query would get exactly backwards.
+
+## Files
+
+- `renderer/main/item-colour.ts` — `resolveItemColour()`, PCO matching
+- `renderer/main/category-colour.ts` — `categoryColour()`, normalisation + fallback
+- `renderer/main/rundown-table.tsx` — precedence, stripe + wash, the three shapes
+- `main/services/pco-service.ts` — `toItemColors()`, colours off `listServiceTypes`
+- `main/services/stage-controller.ts` — `setCategoryColor()`
