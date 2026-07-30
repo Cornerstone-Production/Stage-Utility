@@ -325,7 +325,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
         <div className="flex flex-col gap-1.5 pl-4 sm:pl-9">
           <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
             {/* Mode select + its hint stay one row at every width. `self-center` on
-                the hint alone put it on its own centred line once the parent wraps
+                the hint alone put it on its own centerd line once the parent wraps
                 to a column on mobile. */}
             <div className="flex items-center gap-2 shrink-0">
               <Select
@@ -553,7 +553,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
               </Select>
             )}
             {/* Toggle + its hint stay one row at every width. `self-center` alone
-                would centre the hint on its own line once the parent wraps to a
+                would center the hint on its own line once the parent wraps to a
                 column on mobile. */}
             <div className="flex items-center gap-1.5 shrink-0">
               <label className="flex items-center gap-1.5 text-caption1 text-gray-9">

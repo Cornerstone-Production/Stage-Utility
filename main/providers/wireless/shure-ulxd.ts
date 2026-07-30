@@ -116,7 +116,7 @@ export class ShureUlxd extends ShureBaseProvider {
       }
 
       default:
-        console.debug(`[shure:${this.id}] ch${channel} unrecognised field: ${token}`);
+        console.debug(`[shure:${this.id}] ch${channel} unrecognized field: ${token}`);
         break;
     }
 

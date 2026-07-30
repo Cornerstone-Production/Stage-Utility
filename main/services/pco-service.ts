@@ -418,7 +418,7 @@ class PcoService {
     const result: ServiceTypeDTO[] = items.map((item) => ({
       id: item.id,
       name: String(item.attributes.name ?? "Unknown"),
-      // Free: this resource already carries the colours, we just stopped throwing
+      // Free: this resource already carries the colors, we just stopped throwing
       // them away. `index` is PCO's palette slot and is not useful to us.
       itemTypeColors: [
         ...toItemColors(item.attributes.standard_item_types, false),

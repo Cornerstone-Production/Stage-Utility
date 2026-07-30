@@ -64,3 +64,35 @@ describe("migrateLayouts", () => {
     assert.equal((layouts[0] as { accentDepartment?: unknown }).accentDepartment, undefined);
   });
 });
+
+describe("rowColour -> rowColor", () => {
+  const withLegacy = (rowColour: string, extra: Record<string, unknown> = {}) =>
+    [{ id: "l1", name: "Audio", order: 0, columnRoles: ["r1"], rowColour, ...extra }] as never;
+
+  test("a layout saved under the old key keeps its row coloring", () => {
+    const { layouts } = migrateLayouts(withLegacy("category"), []);
+    assert.equal(layouts[0]!.rowColor, "category");
+  });
+
+  test("the old key is dropped, so nothing reads it by accident", () => {
+    const { layouts } = migrateLayouts(withLegacy("pco"), []);
+    assert.equal((layouts[0] as { rowColour?: unknown }).rowColour, undefined);
+  });
+
+  test("running it twice changes nothing", () => {
+    const once = migrateLayouts(withLegacy("none"), []);
+    const twice = migrateLayouts(once.layouts, once.roles);
+    assert.deepEqual(twice.layouts, once.layouts);
+  });
+
+  test("a value already under the new key wins over the stale one", () => {
+    const { layouts } = migrateLayouts(withLegacy("pco", { rowColor: "none" }), []);
+    assert.equal(layouts[0]!.rowColor, "none");
+  });
+
+  test("a layout that never had the field is untouched", () => {
+    const input = [{ id: "l1", name: "Audio", order: 0, columnRoles: ["r1"] }] as never;
+    const { layouts } = migrateLayouts(input, []);
+    assert.equal(layouts[0]!.rowColor, undefined);
+  });
+});

@@ -312,7 +312,7 @@ export type LayoutObjectConfig =
   | { type: "shape"; shape: "rect" | "ellipse" }
   // A connection-status light for any integration, driven by the
   // "integrations:state-changed" channel. `integrationId` selects which (null =
-  // first). Dot color reflects the live connection (green/amber/red/grey);
+  // first). Dot color reflects the live connection (green/amber/red/gray);
   // `label` overrides the integration's friendly name.
   | {
       type: "integration-status";
@@ -869,14 +869,14 @@ export interface BaptismSession {
   planId: string | null;
 }
 
-/** One of PCO's item row colours, from ServiceType.standard_item_types /
+/** One of PCO's item row colors, from ServiceType.standard_item_types /
  *  custom_item_types. Standard entries match an item's `itemType`; custom entries
  *  match text CONTAINED in the title ("Items that include this text in the title
  *  will be highlighted"). */
 export interface PcoItemTypeColor {
   /** "Header" / "Song" / "Media" for standard; the operator's text for custom. */
   name: string;
-  /** "#rrggbb". PCO stores #ffffff to mean "no colour". */
+  /** "#rrggbb". PCO stores #ffffff to mean "no color". */
   color: string;
   custom: boolean;
 }
@@ -884,7 +884,7 @@ export interface PcoItemTypeColor {
 export interface ServiceTypeDTO {
   id: string;
   name: string;
-  /** Item row colours configured on this service type in PCO. */
+  /** Item row colors configured on this service type in PCO. */
   itemTypeColors?: PcoItemTypeColor[];
 }
 
@@ -949,12 +949,12 @@ export interface ScriptViewLayout {
   showArrangement?: boolean;  // arrangement name in the title meta line
   showItemNotes?: boolean;    // description line (leader / cues) under the title
   showTotalTime?: boolean;    // total-time footer
-  /** What colours this layout's rows. Absent = "pco", so a layout saved before this
-   *  existed keeps the behaviour it had. */
-  rowColour?: "pco" | "category" | "none";
+  /** What colors this layout's rows. Absent = "pco", so a layout saved before this
+   *  existed keeps the behavior it had. */
+  rowColor?: "pco" | "category" | "none";
   /** @deprecated Category NAME that tinted the row. Migrated to `accentRole`. */
   accentDepartment?: string | null;
-  /** Role whose presence tints a row, used only when rowColour === "category". */
+  /** Role whose presence tints a row, used only when rowColor === "category". */
   accentRole?: string | null;
 }
 
@@ -974,7 +974,7 @@ export interface ScriptViewRundownDTO {
   planDates: string | null;
   items: PlanItemDTO[];
   noteCategories: string[];
-  /** Item row colours for this rundown's service type (see PcoItemTypeColor). */
+  /** Item row colors for this rundown's service type (see PcoItemTypeColor). */
   itemTypeColors?: PcoItemTypeColor[];
   /** Scheduled service start time(s), ISO (from PCO plan_times type=service).
    *  serviceTimes[0] anchors the projected per-item clock. */
@@ -1161,7 +1161,7 @@ export interface StageState {
   publicUrl: string | null;
   /** Icon tint per display id or tool path (e.g. "display-1", "/baptism"), as
    *  "#rrggbb". One map covers the Displays cards, the Connect tool cards and the
-   *  picker tiles, so a colour set anywhere shows everywhere that item appears. */
+   *  picker tiles, so a color set anywhere shows everywhere that item appears. */
   iconColors?: Record<string, string>;
   /** User-assigned caption colors, keyed by ProdCom channel label. */
   captionChannelColors: Record<string, string>;
@@ -1207,7 +1207,7 @@ export interface ChargerBayDTO {
  *   manual       — operator checks, applies and restarts by hand
  *   auto-install — apply automatically in the window, but WAIT for an operator
  *                  to restart (the new build sits ready; nothing interrupts)
- *   auto-full    — apply and restart in the window (the original behaviour)
+ *   auto-full    — apply and restart in the window (the original behavior)
  */
 export type UpdateMode = "manual" | "auto-install" | "auto-full";
 

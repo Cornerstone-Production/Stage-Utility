@@ -93,7 +93,7 @@ to take the new build without taking the restart.
 export type UpdateMode =
   | "manual"        // check + apply + restart all operator-driven
   | "auto-install"  // apply automatically, restart when the operator says
-  | "auto-full";    // current behaviour: apply and restart in the window
+  | "auto-full";    // current behavior: apply and restart in the window
 ```
 
 Keep `dayOfWeek`/`hour` for the two auto modes. Split the apply script so the

@@ -68,7 +68,7 @@ export function Collapsible({
               {/* Label and summary align on their BASELINES, not their boxes. They are
                   usually different sizes (a 16px title beside 11px summary text), and
                   centring two boxes of different heights leaves the baselines apart —
-                  which reads as the smaller text sitting low. The chevron stays centred,
+                  which reads as the smaller text sitting low. The chevron stays centerd,
                   which is why this is its own group rather than the row itself. */}
               <span className="flex min-w-0 items-baseline gap-1.5">
                 {/* overflow-hidden here as well as on whatever `label` is: min-w-0

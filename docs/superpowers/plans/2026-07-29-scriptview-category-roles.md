@@ -10,9 +10,9 @@
 
 ## Global Constraints
 
-- Branch from `beta` **after #145 merges**. This is its own PR — do not fold it into the colour work.
+- Branch from `beta` **after #145 merges**. This is its own PR — do not fold it into the color work.
 - `scriptview-roles.json` **must** be added to `CONFIG_FILES` in `main/services/config-snapshot.ts` in the same change. `config-snapshot.test.ts` fails until it is; that guard is deliberate.
-- No emojis anywhere. Numeric inputs use `NumberInput`; colour inputs use native `<input type="color">`.
+- No emojis anywhere. Numeric inputs use `NumberInput`; color inputs use native `<input type="color">`.
 - Zero purple in our own chrome. Dark surfaces strictly R=G=B.
 - Migration must be **lossless and idempotent** — running it twice changes nothing, and every existing layout renders exactly as before.
 - Keyword matching may only ever *suggest*. It must never silently change membership: measured false-positive rate is high (`Stage Manager` matches "band" via "man**ag**er").
@@ -428,7 +428,7 @@ and replace `accentDepartment`:
 ```ts
   /** @deprecated Category NAME that tinted the row. Migrated to `accentRole`. */
   accentDepartment?: string | null;
-  /** Role whose presence tints the row, used when rowColour === "category". */
+  /** Role whose presence tints the row, used when rowColor === "category". */
   accentRole?: string | null;
 ```
 
@@ -596,7 +596,7 @@ In `rundown-table.tsx`, the category branch takes an `accentRole` and its resolv
     if (source === "category") {
       const role = roles?.find((r) => r.id === accentRole);
       if (!role || !resolveRole(role, it.notesByCategory)) return null;
-      return categoryColour(role.name);
+      return categoryColor(role.name);
     }
 ```
 
@@ -734,7 +734,7 @@ Expected: the roles list, a count after seeding, and `body.roles (array) require
 Collapsed, below the layouts (matching the pattern used for the removed accent panel):
 
 - Each role: an `Input` for its name, its members as removable chips in order with
-  left/right reorder buttons, and a `Select` labelled **"+ Add category"** listing every
+  left/right reorder buttons, and a `Select` labeled **"+ Add category"** listing every
   PCO category not already in this role.
 - **Add role** and **Delete role** buttons. Deleting a role also drops it from every
   layout's `columnRoles` in the same save.

@@ -71,16 +71,16 @@ would break.
 These are not on the Displays tab on purpose. That tab answers one question — which View does
 this physical screen show — and these are not outputs.
 
-## Icon colours
+## Icon colors
 
 Every display and tool icon can be retinted by clicking it, on the Displays tab or
-on Connect. Colours live in one map keyed by **display id** ("display-1") or **tool
-path** ("/baptism"), so a colour set on either tab also shows on the picker at `/` —
+on Connect. Colors live in one map keyed by **display id** ("display-1") or **tool
+path** ("/baptism"), so a color set on either tab also shows on the picker at `/` —
 the icon belongs to the thing, not to the screen it is rendered on.
 
 Untinted icons use the theme accent, so the set stays consistent until someone
-chooses otherwise. (Baptisms used to be the only hardcoded coloured icon on the
-picker; that is now the same default as everything else.) An empty colour clears the
+chooses otherwise. (Baptisms used to be the only hardcoded colored icon on the
+picker; that is now the same default as everything else.) An empty color clears the
 entry rather than storing a sentinel. Values must be `#rrggbb`.
 
 ## Files

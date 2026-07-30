@@ -2,7 +2,7 @@
 //
 // The registry replaced seven hand-maintained structures. The values below are
 // copied verbatim from those structures as they were BEFORE the consolidation,
-// so this asserts the refactor was behaviour-preserving: same labels, same
+// so this asserts the refactor was behavior-preserving: same labels, same
 // palette contents and order, same defaults for every type. If a future change
 // to the registry alters an existing type's defaults, this fails loudly rather
 // than quietly changing what a placed object looks like on a stage monitor.

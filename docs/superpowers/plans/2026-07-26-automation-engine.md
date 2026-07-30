@@ -1642,7 +1642,7 @@ Unsaved edits use the shared neutral `UnsavedBanner`, matching the rest of Setti
 
 **The activity log** — a reverse-chronological list from `automation:log`, live via
 the `automation:log` SSE channel. Each row: time, rule name, outcome and detail.
-Colour by outcome — `fired` neutral, `simulated` muted, `suppressed` muted with the
+Color by outcome — `fired` neutral, `simulated` muted, `suppressed` muted with the
 reason, `failed` red. Include a "Clear" button.
 
 - [ ] **Step 2: Add the nav entry**
@@ -1657,7 +1657,7 @@ Start an isolated instance as in Task 7, then:
 - Building a rule with the `log.message` action and pressing **Test fire** adds a
   `simulated` entry to the activity log.
 - Turning simulate off and test-firing again logs it as `fired`.
-- **Disarm all** greys the list and no rule fires.
+- **Disarm all** grays the list and no rule fires.
 
 - [ ] **Step 4: Commit**
 

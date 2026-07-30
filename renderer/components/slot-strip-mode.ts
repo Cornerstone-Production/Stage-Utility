@@ -3,7 +3,7 @@
  *  "strip" — live telemetry (RF bars, charge, battery). A manual label rides
  *            INSIDE this, in place of the frequency; it never suppresses it.
  *  "pill"  — a manually-assigned (offline) device: labels only, no telemetry.
- *  "none"  — nothing bound and nothing labelled.
+ *  "none"  — nothing bound and nothing labeled.
  *
  *  Extracted from slot-panel so the rule is testable without a DOM. Before this
  *  split, a label set on a LIVE device suppressed the whole strip and took the RF

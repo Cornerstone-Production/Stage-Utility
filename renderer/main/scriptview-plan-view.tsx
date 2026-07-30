@@ -168,7 +168,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
             columns={columns}
             currentItemId={currentItemId}
             itemTypeColors={rundown?.itemTypeColors}
-            rowColour={layout?.rowColour}
+            rowColor={layout?.rowColor}
             accentRole={layout?.accentRole ?? null}
             roles={roles}
             footer={spec.showTotalTime ? <span>{fmtTotal(totalLengthSec(items))} <span className="text-fg-subtle">· total time</span></span> : undefined}

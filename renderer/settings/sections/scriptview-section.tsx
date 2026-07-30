@@ -281,14 +281,14 @@ export function ScriptViewSection() {
                         />
                       </div>
 
-                      {/* One source per layout, never both — PCO's colour answers "what
+                      {/* One source per layout, never both — PCO's color answers "what
                           kind of item is this", the category answers "does my department
                           have something to do here". Stacking them is too much per row. */}
                       <div className="flex items-center gap-2 text-caption1 text-gray-11">
-                        Row colour
+                        Row color
                         <Select
-                          value={l.rowColour ?? "pco"}
-                          onValueChange={(v) => update(l.id, { rowColour: v as "pco" | "category" | "none" })}
+                          value={l.rowColor ?? "pco"}
+                          onValueChange={(v) => update(l.id, { rowColor: v as "pco" | "category" | "none" })}
                         >
                           <SelectTrigger className="w-36 h-7"><SelectValue /></SelectTrigger>
                           <SelectContent>
@@ -297,7 +297,7 @@ export function ScriptViewSection() {
                             <SelectItem value="none">None</SelectItem>
                           </SelectContent>
                         </Select>
-                        {(l.rowColour ?? "pco") === "category" && (
+                        {(l.rowColor ?? "pco") === "category" && (
                           <Select
                             value={l.accentRole ?? "__none__"}
                             onValueChange={(v) => update(l.id, { accentRole: v === "__none__" ? null : v })}
@@ -332,7 +332,7 @@ export function ScriptViewSection() {
                             items={rundown.items}
                             columns={buildScriptViewColumns(resolveScriptViewSpec(l, roles, noteCats), computeClocks(rundown.items, rundown.serviceTimes?.[0]), rundown.timeZone)}
                             itemTypeColors={rundown.itemTypeColors}
-                            rowColour={l.rowColour}
+                            rowColor={l.rowColor}
                             accentRole={l.accentRole ?? null}
                             roles={roles}
                             autoScroll={false}
@@ -365,13 +365,13 @@ export function ScriptViewSection() {
 }
 
 /**
- * One colour per note category, app-wide.
+ * One color per note category, app-wide.
  *
  * Note categories are fetched per service type, so "Audio" exists separately under
- * Weekend, Youth and Salt Company. Storing the colour on a layout would mean setting it
+ * Weekend, Youth and Salt Company. Storing the color on a layout would mean setting it
  * once per layout per service type; storing it here means setting Audio once.
  *
- * "Reset" clears the colour so the category falls back to its suggestion — it does not
+ * "Reset" clears the color so the category falls back to its suggestion — it does not
  * remove the category, which PCO owns.
  */
 

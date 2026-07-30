@@ -33,7 +33,7 @@ export function Tooltip({
 }: {
   /** The text to show. Nothing renders when this is empty. */
   label: React.ReactNode;
-  /** The control being labelled. Must forward a ref and its props. */
+  /** The control being labeled. Must forward a ref and its props. */
   children: React.ReactElement;
   side?: "top" | "right" | "bottom" | "left";
   className?: string;

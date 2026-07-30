@@ -1016,7 +1016,7 @@ function RowToggle<T extends string>({
   );
 }
 
-/** A labelled dropdown row (for when there are more options than fit a toggle). */
+/** A labeled dropdown row (for when there are more options than fit a toggle). */
 function RowSelect({ label, hint, value, options, onChange }: { label: string; hint?: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
   return (
     <Row label={label} hint={hint}>

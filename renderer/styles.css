@@ -380,7 +380,7 @@
      :root, so it RESOLVES there and inherits its computed value down — redefining
      --su-fg on a nested element changes nothing. (.dark and .kiosk get away with it
      only because they sit on <html>, the same element as :root.) So the Tailwind
-     colour variables are set directly, with the same values .kiosk uses.
+     color variables are set directly, with the same values .kiosk uses.
 
      Without this, a preview inside the light theme drew near-black text on the
      kiosk's near-black panel — measured at 1.14:1, i.e. invisible. */

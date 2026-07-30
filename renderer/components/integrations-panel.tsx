@@ -1128,7 +1128,7 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
    * An integration is "in use" if it is enabled or has been configured. Everything
    * else is noise on this page — a site running three integrations should not scroll
    * past eleven. Nothing is hidden permanently and there is no preference to store:
-   * the state already says which are in use, so the list reorganises itself as soon
+   * the state already says which are in use, so the list reorganizes itself as soon
    * as one is set up. An ERRORING integration always stays in the main list, since an
    * error is exactly what you want to see.
    */

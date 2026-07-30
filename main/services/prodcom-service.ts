@@ -234,7 +234,7 @@ class ProdComService extends ConnectionLifecycle {
     // a deterministic per-channel color. (Field name unconfirmed — kept defensive;
     // PRODCOM_DEBUG logs raw frames so the real key can be confirmed on site.)
     const color = normalizeColor(
-      firstString(data, ["color", "colour", "channelColor", "channel_color", "hexColor", "hex"]),
+      firstString(data, ["color", "color", "channelColor", "channel_color", "hexColor", "hex"]),
     );
 
     // ProdCom's flag is `inProgress` (true = partial). Fall back to other spellings.

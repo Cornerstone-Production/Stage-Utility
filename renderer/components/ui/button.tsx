@@ -8,7 +8,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   iconOnly?: boolean;
   /**
    * Hover tooltip text. Icon-only buttons fall back to their `aria-label`
-   * automatically, so every labelled icon button gets a tooltip for free. Pass
+   * automatically, so every labeled icon button gets a tooltip for free. Pass
    * an explicit string to override, or `""` to suppress.
    */
   tooltip?: string;
@@ -51,12 +51,12 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     );
 
     // Tooltip text: explicit `tooltip`, else the icon button's aria-label, so a
-    // labelled icon button is described without repeating itself at the call site.
+    // labeled icon button is described without repeating itself at the call site.
     const tipText = tooltip !== undefined ? tooltip : iconOnly ? (props["aria-label"] as string | undefined) : undefined;
     if (!tipText) return btn;
 
     // A disabled button takes `pointer-events: none`, so it never sees the hover
-    // that would open its own tooltip — and "why is this greyed out" is exactly
+    // that would open its own tooltip — and "why is this grayed out" is exactly
     // when the label is wanted. Hang the trigger on a wrapper that still receives
     // events. `inline-flex` so the wrapper measures the same as the button did.
     if (props.disabled) {

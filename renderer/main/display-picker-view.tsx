@@ -34,7 +34,7 @@ export function DisplayPickerView() {
   const centerLogo = state.emptySlotLogo ?? state.appLogo;
   const displays = state.displays ?? [];
   // Icon tints are stored once, keyed by display id or tool path, and set from the
-  // Displays / Connect tabs — so a colour chosen there shows here too. Falling back
+  // Displays / Connect tabs — so a color chosen there shows here too. Falling back
   // to the theme accent keeps every untinted tile consistent.
   const tintOf = (key: string) => ({ color: state.iconColors?.[key] || "var(--su-accent)" });
 
