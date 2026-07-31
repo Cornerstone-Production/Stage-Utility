@@ -51,6 +51,7 @@ class Updater {
     currentSha: null,
     currentDate: null,
     behind: 0,
+    behindUserFacing: 0,
     latestSha: null,
     latestDate: null,
     changelog: [],
@@ -156,13 +157,18 @@ class Updater {
       const behind = Number.parseInt(behindStr, 10) || 0;
       // Curated, not raw: see changelog.ts for why the release workflow's own
       // version bump and the merge commits are not news.
-      const changelog =
-        behind > 0
-          ? summarizeChangelog(
-              (await this.git(["log", "--format=%s", `HEAD..${upstream}`])).split("\n"),
-              CHANGELOG_CAP,
-            )
-          : [];
+      // Two different counts, and the difference matters. `behind` is the literal
+      // git distance. `behindUserFacing` is how much of it an operator would notice.
+      //
+      // The release workflow pushes its own `chore(release): vX.Y.Z` commit AFTER
+      // the merge that triggered it, so every merge leaves exactly one of these
+      // trailing behind a box that has already updated. Reporting that as "1 update
+      // available" trains people to ignore the banner, which is the opposite of what
+      // it is for.
+      const pending =
+        behind > 0 ? summarizeChangelog((await this.git(["log", "--format=%s", `HEAD..${upstream}`])).split("\n")) : [];
+      const behindUserFacing = pending.length;
+      const changelog = pending.slice(0, CHANGELOG_CAP);
 
       this.status = {
         ...this.status,
@@ -172,6 +178,7 @@ class Updater {
         currentSha,
         currentDate,
         behind,
+        behindUserFacing,
         latestSha,
         latestDate,
         changelog,

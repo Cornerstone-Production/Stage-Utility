@@ -1278,6 +1278,10 @@ export interface UpdateStatus {
   currentDate: string | null;
   /** Commits the local branch is behind its upstream. */
   behind: number;
+  /** How many of those an operator would notice — see summarizeChangelog. The
+   *  release workflow's own version bump trails every merge, so this is 0 far more
+   *  often than `behind` is, and it is what the "update available" banner reads. */
+  behindUserFacing?: number;
   latestSha: string | null;
   latestDate: string | null;
   /** Commit subjects between current and latest (newest first), capped. */
