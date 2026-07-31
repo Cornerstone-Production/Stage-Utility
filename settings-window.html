@@ -6,15 +6,16 @@
     <link rel="icon" type="image/png" href="/app-icon.png" />
     <title>Stage Utility — Settings</title>
     <script>
-      // Apply the saved theme before paint (no flash). Falls back to the OS
-      // preference when the user hasn't chosen one. Mirrors the key used by
-      // the in-app toggle (THEME_STORAGE_KEY in settings-view.tsx).
+      // Apply the saved theme before paint (no flash). "system" — and no stored
+      // choice at all — follow the OS. Mirrors THEME_STORAGE_KEY in
+      // settings-view.tsx, which keeps this in step while the app is open.
       (function () {
         var saved = null;
         try { saved = localStorage.getItem("stage-utility-theme"); } catch (e) {}
-        var dark = saved
-          ? saved === "dark"
-          : window.matchMedia("(prefers-color-scheme: dark)").matches;
+        var dark =
+          saved === "dark" || saved === "light"
+            ? saved === "dark"
+            : window.matchMedia("(prefers-color-scheme: dark)").matches;
         if (dark) document.documentElement.classList.add("dark");
       })();
     </script>

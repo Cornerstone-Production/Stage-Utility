@@ -155,6 +155,21 @@ subscribed once. Anything rendered from belongs in state.
 
 `react-hooks/set-state-in-effect` and `react-hooks/refs` enforce both of these.
 
+## Tooltips and theme
+
+`<Tooltip>` waits **3s** before opening, with no skip window — every tooltip waits
+its full turn rather than the next one appearing instantly after the first. These
+label controls that are already legible from their icon and position, so a tooltip
+is for the rare moment someone is unsure, not something to fire at every pointer
+crossing a toolbar. Anything an operator *must* read belongs in visible text or an
+`InfoHint`, which opens on click and so works on touch.
+
+The theme is `system` | `light` | `dark`, stored under `stage-utility-theme`.
+`system` follows `prefers-color-scheme` live via a `matchMedia` listener, and is the
+default when nothing is stored — so an install predating the option keeps the
+behaviour it had. The pre-paint script in `settings-window.html` reads the same key
+and must stay in step with `useTheme`, or the page flashes the wrong theme on load.
+
 ## Dependencies
 
 Two rules, and they are not negotiable.
