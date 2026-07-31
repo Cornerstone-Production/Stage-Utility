@@ -849,6 +849,9 @@ export interface BaptismPerson {
 }
 
 export interface BaptismState {
+  /** Service occurrence captured when the session started; carried onto the record
+   *  so a baptism belongs to one service rather than to whatever it overlapped. */
+  serviceKey?: string | null;
   /** Workflow: per-person vs grouped (all testimonies, then all baptisms). */
   mode: BaptismMode;
   phase: BaptismPhase;
@@ -883,6 +886,10 @@ export interface BaptismSession {
   title: string | null;
   serviceTypeId: string | null;
   planId: string | null;
+  /** The service occurrence this belongs to — same key the recorders use, stamped
+   *  when the session started. Absent on sessions recorded before it was captured,
+   *  which fall back to matching by time overlap. */
+  serviceKey?: string | null;
 }
 
 /** One of PCO's item row colors, from ServiceType.standard_item_types /

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { linkBaptisms, baptismTotals } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
@@ -182,21 +183,6 @@ function overrunStats(tl: ServiceTimeline) {
 }
 
 /** Baptism sessions that overlap a service's recorded window. */
-function linkedBaptisms(all: BaptismSession[], tl: ServiceTimeline): BaptismSession[] {
-  const ds = Date.parse(tl.startedAt);
-  const de = tl.endedAt ? Date.parse(tl.endedAt) : ds + 6 * 3600 * 1000;
-  return all.filter((b) => {
-    const bs = Date.parse(b.startedAt);
-    const be = Date.parse(b.finishedAt);
-    return Number.isFinite(bs) && Number.isFinite(be) && bs <= de && be >= ds;
-  });
-}
-function baptismTotals(sessions: BaptismSession[]) {
-  const people = sessions.reduce((a, b) => a + b.people.length, 0);
-  const ms = sessions.reduce((a, b) => a + b.people.reduce((x, p) => x + p.testimonyMs + p.baptizeMs, 0), 0);
-  return { people, sec: ms / 1000 };
-}
-
 /** A plain-text service report combining timing + attendance + audio + baptisms (shareable). */
 function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null, baptisms: BaptismSession[] = []): string {
   const sum = summarize(tl);
@@ -244,6 +230,7 @@ const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
   { id: "attendance", label: "Attendance polls", hint: "every poll sample" },
   { id: "items", label: "PCO item timings", hint: "planned vs actual per item" },
   { id: "spl", label: "SPL", hint: "max + Leq per item; a second sheet for pivots" },
+  { id: "baptisms", label: "Baptisms", hint: "testimony + baptism splits, per person" },
 ];
 
 export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean } = {}) {
@@ -583,7 +570,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       actualEnd ? `ended ${fmtTime(actualEnd)}` : null,
     ].filter(Boolean).join(" · ") || undefined;
     const det = detail; // narrow for the async handler
-    const linkedBap = linkedBaptisms(baptisms, detail);
+    const linkedBap = linkBaptisms(baptisms, detail);
     const bapTot = baptismTotals(linkedBap);
     async function copyReport() {
       const ok = await copyText(buildReport(det, attendance, spl, linkedBap));

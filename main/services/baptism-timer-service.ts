@@ -12,6 +12,7 @@
 // sessions are logged for review. Running elapsed is derived client-side.
 
 import type { BaptismMode, BaptismPerson, BaptismSession, BaptismState } from "../types/stage.js";
+import { currentServiceKey } from "./service-key.js";
 import { broadcast } from "./broadcaster.js";
 import { baptismStore } from "./baptism-store.js";
 import { stageController } from "./stage-controller.js";
@@ -95,6 +96,12 @@ class BaptismTimerService {
       serviceTitle: st.planTitle ?? null,
       serviceTypeId: st.serviceTypeId ?? null,
       planId: st.planId ?? null,
+      // Which occurrence this is, not just which plan — two services on one day
+      // share a plan, so a plan id cannot tell the 9am from the 11am. Taken from
+      // the service the timeline recorder currently has open, so a baptism agrees
+      // with the timing and attendance recorded alongside it, including when an
+      // overrunning service rolls PCO's current service time forward.
+      serviceKey: currentServiceKey(),
     };
     return this.commit();
   }
@@ -173,6 +180,7 @@ class BaptismTimerService {
         title: this.state.serviceTitle,
         serviceTypeId: this.state.serviceTypeId,
         planId: this.state.planId,
+        serviceKey: this.state.serviceKey ?? null,
       });
     }
     return this.commit();
