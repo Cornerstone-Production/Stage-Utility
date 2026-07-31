@@ -22,7 +22,7 @@ export function BaptismOperatorView() {
           </a>
         </Tooltip>
         <span className="inline-flex items-center gap-1.5 text-headline font-semibold text-gray-12">
-          <DropletIcon className="size-5 text-blue-9" /> Baptisms
+          <DropletIcon className="size-5 text-accent" /> Baptisms
         </span>
       </header>
       <div className="flex-1 overflow-y-auto px-4 py-5">

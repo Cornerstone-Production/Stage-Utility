@@ -554,7 +554,7 @@ function SenSourceScopePicker({
                   className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-gray-3 transition-colors"
                 >
                   {on ? (
-                    <CheckCircle2Icon className="size-4 shrink-0 text-blue-9" />
+                    <CheckCircle2Icon className="size-4 shrink-0 text-accent" />
                   ) : (
                     <span className="size-4 shrink-0 rounded-full border border-gray-6" />
                   )}

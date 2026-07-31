@@ -125,7 +125,7 @@ export function BaptismOperator() {
               key={m}
               disabled={busy || phase !== "idle"}
               onClick={() => void act("baptism:setMode", undefined, { mode: m })}
-              className={cn("px-2.5 py-1 text-caption1 transition-colors", state.mode === m ? "bg-blue-9 text-fg" : "text-gray-11 enabled:hover:bg-gray-3", "disabled:opacity-50")}
+              className={cn("px-2.5 py-1 text-caption1 transition-colors", state.mode === m ? "bg-accent text-white" : "text-gray-11 enabled:hover:bg-gray-3", "disabled:opacity-50")}
             >
               {label}
             </button>
