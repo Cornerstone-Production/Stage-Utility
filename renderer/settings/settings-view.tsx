@@ -207,12 +207,24 @@ const SECTION_DESC: Record<string, string> = {
   advanced: "Updates, network address, capture windows, and full config.",
 };
 
-// Nav clusters — keeps the flat 10-item list within a scannable 7±2 per group.
+// Nav clusters. Each group answers one question, which is what the previous set of
+// labels did not: "Output" had collected anything screen-adjacent (Patch is a
+// document, Integrations are devices), and "Identity" had become the bucket for the
+// two sections that fit nowhere — including Baptisms, which is a live stopwatch.
 const NAV_GROUPS: { label: string; ids: string[] }[] = [
-  { label: "Content", ids: ["plan", "views", "scriptview"] },
-  { label: "Output", ids: ["displays", "connect", "integrations", "patch"] },
-  { label: "Identity", ids: ["branding", "baptisms"] },
-  { label: "System", ids: ["service-history", "automation", "advanced"] },
+  // What is shown. Patch belongs here because volunteers READ it at /patch; the
+  // "output" in its description is XLR, not a display.
+  { label: "Content", ids: ["plan", "views", "scriptview", "patch"] },
+  // Where it shows. Connect is a phone rather than a monitor, but it is the same
+  // job — getting the app onto a screen — not machine configuration.
+  { label: "Screens", ids: ["displays", "connect"] },
+  // What it talks to. Automation rules act ON integrations, so configuring a device
+  // and configuring its behaviour sit together instead of three tabs apart.
+  { label: "Devices", ids: ["integrations", "automation"] },
+  // A service you ran — one live, one recorded.
+  { label: "Services", ids: ["service-history", "baptisms"] },
+  // The install itself.
+  { label: "System", ids: ["branding", "advanced"] },
 ];
 
 // ---- main settings view -----------------------------------------------------
