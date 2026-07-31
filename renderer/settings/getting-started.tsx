@@ -53,7 +53,7 @@ export function GettingStarted({
     <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4">
       <div className="rounded-xl border border-gray-a5 bg-gray-2 p-4">
         <div className="flex items-start gap-2">
-          <RocketIcon className="size-4 text-blue-10 mt-0.5 shrink-0" />
+          <RocketIcon className="size-4 text-accent mt-0.5 shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="text-headline font-semibold text-gray-12">Getting started</div>
             <div className="text-caption1 text-gray-10">A few steps to get this machine ready for a service.</div>

@@ -116,8 +116,8 @@ function WirelessConnectionBadge({
   if (connection === "connecting") {
     return (
       <span className="flex items-center gap-1">
-        <Loader2Icon className="size-3.5 text-blue-10 animate-spin shrink-0" />
-        <span className="text-caption1 text-blue-10">Connecting…</span>
+        <Loader2Icon className="size-3.5 text-accent animate-spin shrink-0" />
+        <span className="text-caption1 text-accent">Connecting…</span>
       </span>
     );
   }

@@ -67,7 +67,7 @@ export function BaptismOperator() {
 
   const grouped = state.mode === "grouped";
   const lastBaptism = grouped && phase === "baptism" && state.baptismIndex >= state.people.length - 1;
-  const phaseColor = phase === "testimony" ? "text-blue-11" : phase === "baptism" ? "text-green-11" : "text-gray-11";
+  const phaseColor = phase === "testimony" ? "text-accent" : phase === "baptism" ? "text-green-11" : "text-gray-11";
 
   // Phase-aware primary action (label + channel), per workflow.
   let primaryLabel: string;
@@ -182,7 +182,7 @@ export function BaptismOperator() {
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat label="Baptized" value={String(sum.count)} />
           <Stat label="Total time" value={fmtClock(sum.totalMs)} />
-          <Stat label="Avg testimony" value={fmtClock(sum.avgTestimonyMs)} accent="text-blue-11" />
+          <Stat label="Avg testimony" value={fmtClock(sum.avgTestimonyMs)} accent="text-accent" />
           <Stat label="Avg baptism" value={fmtClock(sum.avgBaptizeMs)} accent="text-green-11" />
         </div>
       )}
@@ -197,7 +197,7 @@ export function BaptismOperator() {
             <div key={i} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"}`}>
               <span className="text-gray-9">{i + 1}</span>
               <span className="text-gray-12">Person {i + 1}</span>
-              <span className="text-right text-blue-11">{fmtClock(p.testimonyMs)}</span>
+              <span className="text-right text-accent">{fmtClock(p.testimonyMs)}</span>
               <span className="text-right text-green-11">{fmtClock(p.baptizeMs)}</span>
               <span className="text-right text-gray-12">{fmtClock(p.testimonyMs + p.baptizeMs)}</span>
             </div>
@@ -252,7 +252,7 @@ function PastSession({ s, open, onToggle, onDelete }: { s: BaptismSession; open:
       {open && (
         <div className="border-t border-gray-5">
           <div className="flex flex-wrap gap-x-4 gap-y-1 px-3 py-2 text-caption2 text-gray-9 tabular-nums">
-            <span>Avg testimony <span className="text-blue-11">{fmtClock(n ? totT / n : 0)}</span></span>
+            <span>Avg testimony <span className="text-accent">{fmtClock(n ? totT / n : 0)}</span></span>
             <span>Avg baptism <span className="text-green-11">{fmtClock(n ? totB / n : 0)}</span></span>
             <span>Avg / person <span className="text-gray-12">{fmtClock(n ? tot / n : 0)}</span></span>
           </div>
@@ -263,7 +263,7 @@ function PastSession({ s, open, onToggle, onDelete }: { s: BaptismSession; open:
             <div key={i} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"}`}>
               <span className="text-gray-9">{i + 1}</span>
               <span className="text-gray-12">Person {i + 1}</span>
-              <span className="text-right text-blue-11">{fmtClock(p.testimonyMs)}</span>
+              <span className="text-right text-accent">{fmtClock(p.testimonyMs)}</span>
               <span className="text-right text-green-11">{fmtClock(p.baptizeMs)}</span>
               <span className="text-right text-gray-12">{fmtClock(p.testimonyMs + p.baptizeMs)}</span>
             </div>

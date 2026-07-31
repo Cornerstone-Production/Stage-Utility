@@ -186,7 +186,7 @@ export function SplHistorySection() {
     return (
       <div className="flex flex-col gap-4">
         <button
-          className="self-start text-caption1 text-blue-11 hover:underline"
+          className="self-start text-caption1 text-accent hover:underline"
           onClick={() => setSelectedKey(null)}
         >
           ← All services
@@ -425,7 +425,7 @@ function MetricPicker({
               onClick={() => onToggle(k)}
               className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${
                 on
-                  ? "border-blue-7 bg-blue-3 text-blue-11"
+                  ? "border-accent/50 bg-accent/12 text-accent"
                   : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"
               }`}
             >

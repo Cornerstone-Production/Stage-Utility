@@ -120,7 +120,7 @@ export function PositionRangeEditor({ positions, teamPositions, onChange }: Posi
                     anyTicked && "bg-gray-a3",
                   )}
                 >
-                  <CheckIcon className={cn("size-3.5 shrink-0", anyTicked ? "opacity-100 text-blue-10" : "opacity-0")} />
+                  <CheckIcon className={cn("size-3.5 shrink-0", anyTicked ? "opacity-100 text-accent" : "opacity-0")} />
                   <span className="truncate">Any position</span>
                 </button>
               )}
@@ -152,7 +152,7 @@ export function PositionRangeEditor({ positions, teamPositions, onChange }: Posi
                             <CheckIcon
                               className={cn(
                                 "size-3.5 shrink-0",
-                                selected ? "opacity-100 text-blue-10" : "opacity-0",
+                                selected ? "opacity-100 text-accent" : "opacity-0",
                               )}
                             />
                             <span className="truncate">{p.positionName}</span>

@@ -78,7 +78,7 @@ export function MultiSelect({
           <div className="flex items-center justify-between gap-2 border-b border-line px-2.5 py-1.5">
             <span className="text-caption2 text-gray-9">{chosen.length} of {options.length}</span>
             <div className="flex items-center gap-3 text-caption2">
-              <button className="text-blue-11 hover:text-blue-10" onClick={() => onChange(options.map((o) => o.value))}>All</button>
+              <button className="text-accent hover:text-accent-hover" onClick={() => onChange(options.map((o) => o.value))}>All</button>
               <button className="text-gray-10 hover:text-gray-12" onClick={() => onChange([])}>None</button>
             </div>
           </div>
@@ -100,7 +100,7 @@ export function MultiSelect({
                       squares reads much heavier than the list it is describing. The icon
                       always occupies its space so labels stay aligned. */}
                   <CheckIcon
-                    className={cn("size-3.5 shrink-0", on ? "opacity-100 text-blue-10" : "opacity-0")}
+                    className={cn("size-3.5 shrink-0", on ? "opacity-100 text-accent" : "opacity-0")}
                     strokeWidth={3}
                   />
                   <span className="truncate">{o.label}</span>
