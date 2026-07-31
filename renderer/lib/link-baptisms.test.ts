@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { linkBaptisms, baptismTotals } from "./link-baptisms.js";
+import { linkBaptisms, baptismStats } from "./link-baptisms.js";
 
 const svc = (over: Partial<ServiceTimeline> = {}) =>
   ({
@@ -68,17 +68,38 @@ describe("linkBaptisms", () => {
   });
 });
 
-describe("baptismTotals", () => {
-  test("counts people and sums both phases", () => {
-    const out = baptismTotals([
-      bap({ people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }] as never }),
-      bap({ people: [{ testimonyMs: 45_000, baptizeMs: 15_000 }, { testimonyMs: 30_000, baptizeMs: 20_000 }] as never }),
-    ]);
+describe("baptismStats", () => {
+  const people = (...pairs: [number, number][]) =>
+    bap({ people: pairs.map(([t, b]) => ({ testimonyMs: t * 1000, baptizeMs: b * 1000 })) as never });
+
+  test("totals split testimony from baptism, and add up to the total", () => {
+    const out = baptismStats([people([90, 30], [60, 20]), people([45, 15])]);
     assert.equal(out.people, 3);
-    assert.equal(out.sec, 200);
+    assert.equal(out.testimonySec, 195);
+    assert.equal(out.baptismSec, 65);
+    assert.equal(out.totalSec, 260);
+    assert.equal(out.totalSec, out.testimonySec + out.baptismSec);
   });
 
-  test("no sessions is zero, not NaN", () => {
-    assert.deepEqual(baptismTotals([]), { people: 0, sec: 0 });
+  test("averages are per person, not per session", () => {
+    // Two sessions, three people. Per session would give 130s; per person is what
+    // can be compared week to week.
+    const out = baptismStats([people([90, 30], [60, 20]), people([45, 15])]);
+    assert.equal(out.avgTestimonySec, 65);
+    assert.equal(out.avgBaptismSec, 65 / 3);
+  });
+
+  test("no people is zero, never NaN", () => {
+    assert.deepEqual(baptismStats([]), {
+      people: 0, totalSec: 0, testimonySec: 0, baptismSec: 0, avgTestimonySec: 0, avgBaptismSec: 0,
+    });
+    // A session that was started and finished without timing anyone.
+    assert.equal(baptismStats([people()]).avgTestimonySec, 0);
+  });
+
+  test("one long testimony pulls the average up, which is the point of showing it", () => {
+    const out = baptismStats([people([90, 30], [95, 30], [240, 30], [70, 30])]);
+    assert.equal(out.people, 4);
+    assert.ok(out.avgTestimonySec > 120, `got ${out.avgTestimonySec}`);
   });
 });

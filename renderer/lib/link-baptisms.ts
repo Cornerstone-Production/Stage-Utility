@@ -36,9 +36,44 @@ export function linkBaptisms(all: readonly BaptismSession[], tl: ServiceTimeline
   return [...exact, ...overlapping];
 }
 
-/** People and total timed seconds across a set of sessions. */
-export function baptismTotals(sessions: readonly BaptismSession[]): { people: number; sec: number } {
-  const people = sessions.reduce((a, b) => a + b.people.length, 0);
-  const ms = sessions.reduce((a, b) => a + b.people.reduce((x, p) => x + p.testimonyMs + p.baptizeMs, 0), 0);
-  return { people, sec: ms / 1000 };
+/** What a service's baptisms amounted to, in seconds. */
+export interface BaptismStats {
+  people: number;
+  totalSec: number;
+  testimonySec: number;
+  baptismSec: number;
+  /** Per person, not per session — the person is the unit worth comparing. */
+  avgTestimonySec: number;
+  avgBaptismSec: number;
+}
+
+/**
+ * Totals and per-person averages across a set of sessions.
+ *
+ * Averages divide by PEOPLE rather than by sessions: a session is only when the
+ * operator started and stopped, so averaging over sessions would say something
+ * about the operator instead of about the baptisms. Zero people gives zero rather
+ * than NaN, so an empty set renders as dashes instead of blanks.
+ */
+export function baptismStats(sessions: readonly BaptismSession[]): BaptismStats {
+  let people = 0;
+  let testimonyMs = 0;
+  let baptismMs = 0;
+  for (const s of sessions) {
+    for (const p of s.people) {
+      people += 1;
+      testimonyMs += p.testimonyMs;
+      baptismMs += p.baptizeMs;
+    }
+  }
+  const testimonySec = testimonyMs / 1000;
+  const baptismSec = baptismMs / 1000;
+  return {
+    people,
+    totalSec: testimonySec + baptismSec,
+    testimonySec,
+    baptismSec,
+    avgTestimonySec: people ? testimonySec / people : 0,
+    avgBaptismSec: people ? baptismSec / people : 0,
+  };
 }

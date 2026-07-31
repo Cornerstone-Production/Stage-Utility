@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { linkBaptisms, baptismTotals } from "../../lib/link-baptisms";
+import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
@@ -212,9 +212,12 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
     });
   }
   if (baptisms.length) {
-    const t = baptismTotals(baptisms);
+    // The same figures the section shows, so a pasted report and the screen agree.
+    const t = baptismStats(baptisms);
     L.push("", "BAPTISMS");
-    L.push(`${t.people} baptized · total ${fmtDur(t.sec)}`);
+    L.push(`${t.people} baptized · total ${fmtDur(t.totalSec)}`);
+    L.push(`testimony ${fmtDur(t.testimonySec)} (avg ${fmtDur(t.avgTestimonySec)})`);
+    L.push(`baptism ${fmtDur(t.baptismSec)} (avg ${fmtDur(t.avgBaptismSec)})`);
   }
   return L.join("\n");
 }
@@ -571,7 +574,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     ].filter(Boolean).join(" · ") || undefined;
     const det = detail; // narrow for the async handler
     const linkedBap = linkBaptisms(baptisms, detail);
-    const bapTot = baptismTotals(linkedBap);
+    const bapStats = baptismStats(linkedBap);
     async function copyReport() {
       const ok = await copyText(buildReport(det, attendance, spl, linkedBap));
       if (ok) toast.success("Report copied to clipboard");
@@ -764,6 +767,25 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           })}
         </div>
 
+        {/* Baptism timings sit with the rundown above rather than after the audio:
+            they are timing data, and on a baptism weekend they explain the overrun
+            in the table right above them. Only rendered when a session links, so a
+            normal service is unchanged. */}
+        {linkedBap.length > 0 && (
+          <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
+            <span className="text-body font-semibold text-gray-12">Baptisms</span>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+              <Stat label="Baptized" value={String(bapStats.people)} accent="text-gray-12" />
+              <Stat label="Total time" value={fmtDur(bapStats.totalSec)} accent="text-accent" />
+              <Stat label="Testimony total" value={fmtDur(bapStats.testimonySec)} accent="text-gray-12" />
+              <Stat label="Baptism total" value={fmtDur(bapStats.baptismSec)} accent="text-gray-12" />
+              <Stat label="Avg testimony" value={fmtDur(bapStats.avgTestimonySec)} accent="text-gray-12" />
+              <Stat label="Avg baptism" value={fmtDur(bapStats.avgBaptismSec)} accent="text-gray-12" />
+            </div>
+            <span className="text-caption2 text-gray-9">Per-person splits are in the Baptisms tab.</span>
+          </div>
+        )}
+
         {/* Full attendance + audio detail for the same service occurrence — one place
             for everything about this service (rundown above, the rest folded in here). */}
         <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
@@ -782,16 +804,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
           )}
         </div>
-        {linkedBap.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-caption1 font-medium text-gray-11">Baptisms</span>
-            <div className="flex flex-wrap gap-2 text-caption1 tabular-nums">
-              <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Baptized </span><span className="text-gray-12">{bapTot.people}</span></span>
-              <span className="rounded-md border border-gray-5 bg-gray-2 px-2.5 py-1"><span className="text-gray-9">Total time </span><span className="text-gray-12">{fmtDur(bapTot.sec)}</span></span>
-            </div>
-            <span className="text-caption2 text-gray-9">Per-person testimony/baptism splits are in the Baptisms tab.</span>
-          </div>
-        )}
       </div>
     );
   }

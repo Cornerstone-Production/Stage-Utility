@@ -42,6 +42,12 @@ Recording what happened during a service, and reading it back.
   finished falls back to an assumed six-hour window. A keyed session is never
   rescued by overlap, or the 9am's baptism would reappear on the 11am whenever the
   two ran long.
+- **A Baptisms section** sits with the rundown, above Attendance and Audio, and only
+  when a session links: baptism timings are timing data, and on a baptism weekend
+  they explain the overrun in the table right above them. Six figures — people, total,
+  testimony and baptism totals, and per-person averages of each. Averages divide by
+  people rather than sessions, since a session is only when the operator started and
+  stopped. Per-person splits stay in the Baptisms tab.
 - **Baptisms export too**, one row per person with testimony/baptism splits, keyed
   by date and service time like the other sheets.
 - **SPL exports in two shapes.** `SPL` is wide — one row per plan item with every
