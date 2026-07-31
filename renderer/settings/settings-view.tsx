@@ -100,54 +100,93 @@ function useEscapeToClose() {
 
 const THEME_STORAGE_KEY = "stage-utility-theme";
 
-function useTheme() {
-  const [isDark, setIsDark] = useState(() =>
-    document.documentElement.classList.contains("dark"),
-  );
+/** "system" follows the OS and keeps following it as the OS changes. */
+export type ThemeMode = "system" | "light" | "dark";
 
-  function toggle() {
-    setIsDark((prev) => {
-      const next = !prev;
-      document.documentElement.classList.toggle("dark", next);
-      try {
-        localStorage.setItem(THEME_STORAGE_KEY, next ? "dark" : "light");
-      } catch {
-        // localStorage unavailable (private mode etc.) — theme still applies for this session.
-      }
-      return next;
-    });
+const SYSTEM_DARK = "(prefers-color-scheme: dark)";
+
+function storedMode(): ThemeMode {
+  try {
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    if (raw === "light" || raw === "dark" || raw === "system") return raw;
+  } catch {
+    // localStorage unavailable (private mode etc.) — fall through to system.
+  }
+  // No stored choice means the app has always followed the OS, so an install that
+  // predates this option keeps the behaviour it already had.
+  return "system";
+}
+
+function useTheme() {
+  const [mode, setModeState] = useState<ThemeMode>(storedMode);
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains("dark"));
+
+  // One place decides what `.dark` should be, so the class can never disagree with
+  // the mode — whether it changed because the operator picked one or because the OS
+  // flipped underneath us.
+  useEffect(() => {
+    const mq = window.matchMedia(SYSTEM_DARK);
+    const apply = () => {
+      const dark = mode === "system" ? mq.matches : mode === "dark";
+      document.documentElement.classList.toggle("dark", dark);
+      setIsDark(dark);
+    };
+    apply();
+    if (mode !== "system") return;
+    // Only worth listening while following the OS; a fixed choice ignores it.
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [mode]);
+
+  function setMode(next: ThemeMode) {
+    setModeState(next);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Theme still applies for this session; it just will not survive a reload.
+    }
   }
 
-  return { isDark, toggle };
+  return { mode, isDark, setMode };
 }
 
 // ---- sidebar collapse (desktop icon rail) -----------------------------------
 
 const SIDEBAR_COLLAPSED_KEY = "settings-sidebar-collapsed";
 
-/** Segmented light/dark toggle (accent-tint pill, active segment is accent).
- *  `vertical` stacks the two segments so it fits the narrow collapsed rail. */
-function ThemeTogglePill({ isDark, toggle, vertical = false }: { isDark: boolean; toggle: () => void; vertical?: boolean }) {
+/** Segmented theme picker — light, follow the system, dark. `vertical` stacks the
+ *  segments so it fits the narrow collapsed rail. */
+function ThemeTogglePill({
+  mode,
+  setMode,
+  vertical = false,
+}: {
+  mode: ThemeMode;
+  setMode: (m: ThemeMode) => void;
+  vertical?: boolean;
+}) {
+  const options: { m: ThemeMode; label: string; Icon: typeof SunIcon }[] = [
+    { m: "light", label: "Light mode", Icon: SunIcon },
+    { m: "system", label: "Match system", Icon: MonitorIcon },
+    { m: "dark", label: "Dark mode", Icon: MoonIcon },
+  ];
   return (
     <div className={cn("flex items-center gap-px rounded-lg bg-accent/12 p-0.5 shrink-0", vertical && "flex-col")}>
-      <button
-        type="button"
-        onClick={() => isDark && toggle()}
-        aria-label="Light mode"
-        aria-pressed={!isDark}
-        className={cn("flex h-5 w-6 items-center justify-center rounded-md transition-colors", !isDark ? "text-accent" : "text-fg-subtle hover:text-fg")}
-      >
-        <SunIcon className="size-3.5" />
-      </button>
-      <button
-        type="button"
-        onClick={() => !isDark && toggle()}
-        aria-label="Dark mode"
-        aria-pressed={isDark}
-        className={cn("flex h-5 w-6 items-center justify-center rounded-md transition-colors", isDark ? "text-accent" : "text-fg-subtle hover:text-fg")}
-      >
-        <MoonIcon className="size-3.5" />
-      </button>
+      {options.map(({ m, label, Icon }) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => mode !== m && setMode(m)}
+          aria-label={label}
+          aria-pressed={mode === m}
+          className={cn(
+            "flex h-5 w-6 items-center justify-center rounded-md transition-colors",
+            mode === m ? "text-accent" : "text-fg-subtle hover:text-fg",
+          )}
+        >
+          <Icon className="size-3.5" />
+        </button>
+      ))}
     </div>
   );
 }
@@ -1293,7 +1332,7 @@ export function SettingsView() {
               narrow rail. */}
           {railed ? (
             <div className="mt-auto flex flex-col items-center gap-1.5 px-2 py-2.5">
-              <ThemeTogglePill isDark={theme.isDark} toggle={theme.toggle} vertical />
+              <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} vertical />
               <Button variant="transparent" size="small" iconOnly aria-label="Expand sidebar" onClick={toggleCollapsed}>
                 <PanelLeftOpenIcon className="size-4 text-gray-11" />
               </Button>
@@ -1305,7 +1344,7 @@ export function SettingsView() {
                 {updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}
               </span>
               <div className="flex items-center gap-1.5 shrink-0">
-                <ThemeTogglePill isDark={theme.isDark} toggle={theme.toggle} />
+                <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} />
                 <Button
                   variant="transparent"
                   size="small"
