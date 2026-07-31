@@ -6,8 +6,9 @@ import { Tooltip as TooltipPrimitive } from "radix-ui";
  *
  * The delay is deliberately long. These label controls that are already legible
  * from their icon and position, so a tooltip is for the rare moment someone is
- * unsure — not something to fire at every pointer that crosses a toolbar. Three
- * seconds is long enough that it only appears when a hover is a question.
+ * unsure — not something to fire at every pointer that crosses a toolbar. Two
+ * seconds reads as a deliberate hover without being long enough that the tooltip
+ * seems not to exist.
  *
  * `skipDelayDuration` of 0 means every tooltip waits its full turn: there is no
  * window where moving to the next control opens instantly. That grouping makes
@@ -16,7 +17,7 @@ import { Tooltip as TooltipPrimitive } from "radix-ui";
  */
 export function TooltipProvider({ children }: { children: React.ReactNode }) {
   return (
-    <TooltipPrimitive.Provider delayDuration={3000} skipDelayDuration={0}>
+    <TooltipPrimitive.Provider delayDuration={2000} skipDelayDuration={0}>
       {children}
     </TooltipPrimitive.Provider>
   );

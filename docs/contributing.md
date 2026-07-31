@@ -157,7 +157,7 @@ subscribed once. Anything rendered from belongs in state.
 
 ## Tooltips and theme
 
-`<Tooltip>` waits **3s** before opening, with no skip window — every tooltip waits
+`<Tooltip>` waits **2s** before opening, with no skip window — every tooltip waits
 its full turn rather than the next one appearing instantly after the first. These
 label controls that are already legible from their icon and position, so a tooltip
 is for the rare moment someone is unsure, not something to fire at every pointer
