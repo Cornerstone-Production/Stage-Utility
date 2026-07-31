@@ -35,6 +35,18 @@ an unrecognised line is more likely to be a real change than something to hide. 
 nothing survives the filter the panel is hidden entirely, rather than showing a
 heading over an empty list.
 
+### Why the banner can stay quiet while `behind` is not zero
+
+Two counts are tracked. `behind` is the literal git distance to upstream;
+`behindUserFacing` is how much of it an operator would notice, filtered the same way
+the changelog is. The banner reads the second.
+
+They differ constantly, because the release workflow pushes its own
+`chore(release): vX.Y.Z [skip ci]` commit *after* the merge that triggered it — so
+every merge leaves exactly one of those trailing behind a machine that has already
+updated. Announcing that as "1 update available" is how a banner gets ignored. The
+version line says a bump is pending, and **Update now** still applies it.
+
 ### Progress reconciliation across the restart
 
 Because a successful update restarts the server, the settings page's SSE socket
