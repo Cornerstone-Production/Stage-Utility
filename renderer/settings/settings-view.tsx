@@ -1,4 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
+import { buildLabel } from "../lib/build-label";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import { PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
@@ -11,6 +12,7 @@ import {
   SidebarGroupLabel,
   ScrollArea,
   Button,
+  Tooltip,
   toast,
   ErrorBoundary,
 } from "../components/ui";
@@ -1339,10 +1341,16 @@ export function SettingsView() {
             </div>
           ) : (
             <div className="mt-auto flex items-center justify-between gap-2 px-3 py-2.5">
-              <span className="text-[11.5px] leading-none text-fg-subtle tabular-nums truncate">
-                {updateStatus?.version ? `v${updateStatus.version}` : ""}
-                {updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}
-              </span>
+              {/* The label truncates in the sidebar, so the hover carries the whole
+                  build identity — version, track, commit and date. That is what gets
+                  asked for when something needs diagnosing, and it saves opening
+                  Advanced to read it. */}
+              <Tooltip label={buildLabel(updateStatus)} side="top">
+                <span className="min-w-0 text-[11.5px] leading-none text-fg-subtle tabular-nums truncate">
+                  {updateStatus?.version ? `v${updateStatus.version}` : ""}
+                  {updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}
+                </span>
+              </Tooltip>
               <div className="flex items-center gap-1.5 shrink-0">
                 <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} />
                 <Button
