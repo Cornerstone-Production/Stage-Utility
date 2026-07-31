@@ -200,7 +200,7 @@ export function AttendanceHistorySection() {
     const live = detail.endedAt == null;
     return (
       <div className="flex flex-col gap-4">
-        <button className="self-start text-caption1 text-blue-11 hover:underline" onClick={() => setSelectedKey(null)}>
+        <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
           ← All services
         </button>
         <div className="flex flex-col">
@@ -256,7 +256,7 @@ export function AttendanceHistorySection() {
                 </span>
               </div>
               <span className="shrink-0 tabular-nums text-caption1 text-right">
-                <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">peak </span><span className="text-blue-11">{servicePeakAttendance(s).toLocaleString()}</span></span>
+                <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">peak </span><span className="text-accent">{servicePeakAttendance(s).toLocaleString()}</span></span>
                 <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">room </span><span className="text-green-11">{s.peakOccupancy.toLocaleString()}</span></span>
               </span>
             </button>
@@ -307,8 +307,8 @@ export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendan
   const statValues: Record<string, { value: number | null; accent: string }> = {
     peak: { value: detail.peakOccupancy, accent: "text-green-11" }, // peak people in the room = real attendance
     lowest: { value: detail.minOccupancy ?? null, accent: "text-amber-11" },
-    entries: { value: servicePeakAttendance(detail), accent: "text-blue-11" }, // cumulative door count
-    dayTotal: { value: detail.totalAttendance ?? null, accent: "text-blue-11" },
+    entries: { value: servicePeakAttendance(detail), accent: "text-accent" }, // cumulative door count
+    dayTotal: { value: detail.totalAttendance ?? null, accent: "text-accent" },
     samples: { value: detail.samples.length, accent: "text-gray-12" },
   };
   const shownStats = STAT_METRICS.filter((m) => shows(m.key));
@@ -350,7 +350,7 @@ function MetricPicker({ visible, onToggle }: { visible: string[]; onToggle: (key
       <button
         onClick={() => onToggle(k)}
         className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${
-          on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"
+          on ? "border-accent/50 bg-accent/12 text-accent" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"
         }`}
       >
         {label}
@@ -538,7 +538,7 @@ function AttendanceChart({
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-4 text-caption2 flex-wrap text-gray-11">
         {showOccupancy && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-green-9" /> Attendance</span>}
-        {showAttendance && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-blue-9" /> Total entries</span>}
+        {showAttendance && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-accent" /> Total entries</span>}
         {avgOccupancy != null && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-green-9" /> Avg attendance {avgOccupancy.toLocaleString()}</span>}
         {inRange.length > 0 && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t border-dashed border-gray-8" /> Plan items</span>}
         {(hasPre || hasPost) && <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-sm bg-gray-a4" /> Before / after service</span>}
@@ -547,8 +547,8 @@ function AttendanceChart({
         <svg ref={svgRef} onPointerMove={onMove} onPointerLeave={() => setHover(null)} viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 320 }} role="img" aria-label="Attendance and in-room occupancy over the service, with plan-item markers">
           <defs>
             <linearGradient id="attFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--blue-9)" stopOpacity={0.22} />
-              <stop offset="100%" stopColor="var(--blue-9)" stopOpacity={0.02} />
+              <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.22} />
+              <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0.02} />
             </linearGradient>
             <linearGradient id="occFill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="var(--green-9)" stopOpacity={0.20} />
@@ -600,13 +600,13 @@ function AttendanceChart({
             </g>
           ))}
           {showOccupancy && runs.map((r, i) => <polyline key={`ol${i}`} points={pts(r, "occupancy")} fill="none" stroke="var(--green-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />)}
-          {showAttendance && runs.map((r, i) => <polyline key={`al${i}`} points={pts(r, "attendance")} fill="none" stroke="var(--blue-9)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />)}
+          {showAttendance && runs.map((r, i) => <polyline key={`al${i}`} points={pts(r, "attendance")} fill="none" stroke="var(--color-accent)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />)}
           {/* hover crosshair + tooltip */}
           {hs && (
             <g pointerEvents="none">
               <line x1={hx} y1={padT} x2={hx} y2={padT + plotH} stroke="var(--gray-a7)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
               {showOccupancy && <circle cx={hx} cy={y(hs.occupancy)} r={3} fill="var(--green-9)" />}
-              {showAttendance && <circle cx={hx} cy={y(hs.attendance)} r={3} fill="var(--blue-9)" />}
+              {showAttendance && <circle cx={hx} cy={y(hs.attendance)} r={3} fill="var(--color-accent)" />}
               {(() => {
                 const rows: { t: string; kind: "time" | "val" | "item" }[] = [{ t: fmtTime(hs.t), kind: "time" }];
                 if (showOccupancy) rows.push({ t: `Attendance ${hs.occupancy.toLocaleString()}`, kind: "val" });

@@ -2415,7 +2415,7 @@ function Inspector({
                       <button
                         key={k}
                         onClick={() => toggle(k)}
-                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-line-strong bg-fill text-fg-muted hover:bg-fill-hover"}`}
+                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-accent/50 bg-accent/12 text-accent" : "border-line-strong bg-fill text-fg-muted hover:bg-fill-hover"}`}
                       >
                         {k}
                       </button>
@@ -2456,7 +2456,7 @@ function Inspector({
                       <button
                         key={ch}
                         onClick={() => toggle(ch)}
-                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-blue-7 bg-blue-3 text-blue-11" : "border-line-strong bg-fill text-fg-muted hover:bg-fill-hover"}`}
+                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-accent/50 bg-accent/12 text-accent" : "border-line-strong bg-fill text-fg-muted hover:bg-fill-hover"}`}
                       >
                         {ch}
                       </button>

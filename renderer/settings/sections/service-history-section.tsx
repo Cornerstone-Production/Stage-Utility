@@ -657,7 +657,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       : "grid-cols-[1fr_3.5rem_3rem] sm:grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem]";
     return (
       <div className="flex flex-col gap-4">
-        <button className="self-start text-caption1 text-blue-11 hover:underline" onClick={() => setSelectedKey(null)}>
+        <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
           ← All services
         </button>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -730,7 +730,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat label="Started" value={fmtTime(sum.firstStart)} accent={sum.lateStartSec != null && sum.lateStartSec > 60 ? "text-amber-11" : "text-gray-12"} sub={sum.lateStartSec != null ? (sum.lateStartSec >= 0 ? `${fmtDelta(sum.lateStartSec)} late` : `${fmtDelta(sum.lateStartSec)} early`) : undefined} />
           <Stat label="Planned" value={fmtDur(sum.planned)} accent="text-gray-12" sub={projectedEnd ? `ends ${fmtTime(projectedEnd)}` : undefined} />
-          <Stat label="Actual" value={fmtDur(sum.actual)} accent="text-blue-11" sub={actualSub} />
+          <Stat label="Actual" value={fmtDur(sum.actual)} accent="text-accent" sub={actualSub} />
           <Stat label="Avg overrun" value={over.avg != null ? fmtDelta(over.avg) : "—"} accent={over.avg != null && over.avg > 0 ? "text-red-11" : "text-gray-12"} sub={over.total ? `${over.over} of ${over.total} over` : undefined} />
         </div>
 
@@ -918,7 +918,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                   </div>
                   <span className="shrink-0 tabular-nums text-caption1 text-right">
                     {sum.lateStartSec != null && sum.lateStartSec >= 30 && <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">late </span><span className="text-amber-11">{fmtDelta(sum.lateStartSec)}</span></span>}
-                    <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">{live ? "running " : "ran "}</span><span className="text-blue-11">{fmtDur(sum.actual)}</span></span>
+                    <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">{live ? "running " : "ran "}</span><span className="text-accent">{fmtDur(sum.actual)}</span></span>
                     {/* Delta vs plan only once finished — a live "−38:45" (most of
                         the plan not yet run) reads as misleading. */}
                     {!live && totalDelta != null && <span className="ml-3 whitespace-nowrap"><span className={totalDelta > 0 ? "text-red-11" : "text-gray-11"}>{fmtDelta(totalDelta)}</span></span>}

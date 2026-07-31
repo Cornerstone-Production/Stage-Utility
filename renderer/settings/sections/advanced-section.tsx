@@ -57,14 +57,14 @@ function UpdateProgress({ step }: { step: UpdateStatus["step"] }) {
     <div className="mt-2 flex flex-col gap-1.5">
       <div className="flex items-center justify-between text-caption2 text-gray-11">
         <span className="flex items-center gap-1.5">
-          <Loader2Icon className="size-3.5 animate-spin text-blue-9" />
+          <Loader2Icon className="size-3.5 animate-spin text-accent" />
           {meta.label}
         </span>
         <span className="tabular-nums text-gray-10">{meta.pct}%</span>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-a4">
         <div
-          className="h-full rounded-full bg-blue-9 transition-[width] duration-700 ease-out"
+          className="h-full rounded-full bg-accent transition-[width] duration-700 ease-out"
           style={{ width: `${meta.pct}%` }}
         />
       </div>
