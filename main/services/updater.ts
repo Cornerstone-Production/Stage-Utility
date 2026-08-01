@@ -2,10 +2,18 @@
 //
 // The server runs from a git checkout (systemd/launchd/NSSM run `node --import
 // tsx server.ts` from the repo root). This service:
-//   - checks how far behind the upstream branch we are (`git fetch` + rev-list),
+//   - resolves the newest release tag on the track and checks whether we're on it,
 //   - applies an update by spawning a detached script that does
-//     `git pull → npm ci → npm run build` and then kills this process, so the
-//     service manager restarts it with the new build.
+//     `fetch → fast-forward to that tag → npm ci → npm run build` and then kills
+//     this process, so the service manager restarts it with the new build.
+//
+// TAGS, NOT THE BRANCH TIP. The release workflow runs lint, type-check, tests and
+// build before it tags, so a tag is verified code. The branch tip is whatever
+// merged most recently — it may still be in CI, or may have failed it. Following
+// the tip meant a red build could land on a stage display minutes after a merge.
+//
+// A track with no tags at all (a fork, or a branch that has never released) falls
+// back to following the tip, so the updater never becomes a silent no-op.
 //
 // Degrades gracefully when this isn't a git checkout (isGitRepo:false → the UI
 // tells the operator to update from the CLI).
@@ -20,6 +28,7 @@ import { promisify } from "node:util";
 import type { UpdateStatus } from "../types/stage.js";
 import { getUserDataPath } from "./app-paths.js";
 import { broadcast } from "./broadcaster.js";
+import { latestOnTrack, newerThan } from "./release-tags.js";
 import { appendUpdateLog, updateLogPath } from "./update-log.js";
 
 const execFileAsync = promisify(execFile);
@@ -147,15 +156,57 @@ class Updater {
       }
 
       const branch = await this.git(["rev-parse", "--abbrev-ref", "HEAD"]);
-      await this.git(["fetch", "--quiet", "origin", branch], 90_000);
+      // --tags so a box that has never seen them gets the full set; --force so a
+      // retagged release (rare, but it happens) doesn't wedge the fetch.
+      await this.git(["fetch", "--quiet", "--tags", "--force", "origin", branch], 90_000);
 
       const currentSha = await this.git(["rev-parse", "--short", "HEAD"]);
       const currentDate = await this.git(["show", "-s", "--format=%cI", "HEAD"]);
       const upstream = `origin/${branch}`;
-      const latestSha = await this.git(["rev-parse", "--short", upstream]);
-      const latestDate = await this.git(["show", "-s", "--format=%cI", upstream]);
-      const behindStr = await this.git(["rev-list", "--count", `HEAD..${upstream}`]);
+
+      // Only tags actually reachable from this track. A tag cut on main is not a
+      // candidate for a beta box until it lands in beta's history.
+      const tags = (
+        await this.git(["tag", "--list", "v[0-9]*", "--merged", upstream]).catch(() => "")
+      )
+        .split("\n")
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      const target = latestOnTrack(tags, branch);
+      const tagBased = target !== null;
+
+      // The newest tag at or behind HEAD — what this box is actually running.
+      const currentTag = tagBased
+        ? (await this.git(["describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "HEAD"]).catch(
+            () => "",
+          )) || null
+        : null;
+
+      // No tags on this track (a fork, or a branch that has never released) →
+      // follow the tip, exactly as before, rather than reporting "up to date"
+      // forever.
+      const targetRef = target ? target.tag : upstream;
+      const latestSha = await this.git(["rev-parse", "--short", targetRef]);
+      const latestDate = await this.git(["show", "-s", "--format=%cI", targetRef]);
+      const behindStr = await this.git(["rev-list", "--count", `HEAD..${targetRef}`]).catch(() => "0");
       const behind = Number.parseInt(behindStr, 10) || 0;
+
+      const releasesBehind = tagBased ? newerThan(tags, branch, currentTag).length : 0;
+
+      // Merged but not yet released: non-zero while a release build runs, and
+      // stays non-zero when one fails — the signal that a track is stalled rather
+      // than quiet.
+      //
+      // Curated the same way the changelog is, because a `ci:` or `docs:` commit
+      // deliberately produces no release. Counting raw commits would leave a box
+      // permanently reporting work as "waiting to be released" when nothing is
+      // ever coming, which is exactly the false alarm this line exists to avoid.
+      const unreleasedCommits = tagBased
+        ? summarizeChangelog(
+            (await this.git(["log", "--format=%s", `${targetRef}..${upstream}`]).catch(() => "")).split("\n"),
+          ).length
+        : 0;
       // Curated, not raw: see changelog.ts for why the release workflow's own
       // version bump and the merge commits are not news.
       // Two different counts, and the difference matters. `behind` is the literal
@@ -166,8 +217,12 @@ class Updater {
       // trailing behind a box that has already updated. Reporting that as "1 update
       // available" trains people to ignore the banner, which is the opposite of what
       // it is for.
+      // Scoped to the target, not the tip: commits still awaiting release are not
+      // news to an operator, because Update will not bring them.
       const pending =
-        behind > 0 ? summarizeChangelog((await this.git(["log", "--format=%s", `HEAD..${upstream}`])).split("\n")) : [];
+        behind > 0
+          ? summarizeChangelog((await this.git(["log", "--format=%s", `HEAD..${targetRef}`])).split("\n"))
+          : [];
       const behindUserFacing = pending.length;
       const changelog = pending.slice(0, CHANGELOG_CAP);
 
@@ -180,6 +235,11 @@ class Updater {
         currentDate,
         behind,
         behindUserFacing,
+        currentTag,
+        targetTag: target?.tag ?? null,
+        releasesBehind,
+        unreleasedCommits,
+        tagBased,
         latestSha,
         latestDate,
         changelog,
@@ -231,7 +291,30 @@ class Updater {
     const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
     if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before updating.");
 
-    return this.launch(this.status.branch ?? "main", false, opts.deferRestart === true);
+    const branch = this.status.branch ?? "main";
+    return this.launch(branch, false, opts.deferRestart === true, this.status.targetTag ?? null);
+  }
+
+  /**
+   * The newest release tag on a track we may not be standing on.
+   *
+   * Track-switching has to fetch the other branch before it can see its tags.
+   * Resolved here rather than in the update script so that both paths order
+   * versions through the same tested comparator — a shell `sort` would rank a
+   * prerelease above its own release. Null means the track has no tags and the
+   * script should follow its tip.
+   */
+  private async targetTagFor(branch: string): Promise<string | null> {
+    try {
+      await this.git(["fetch", "--quiet", "--tags", "--force", "origin", branch], 90_000);
+      const tags = (await this.git(["tag", "--list", "v[0-9]*", "--merged", `origin/${branch}`]))
+        .split("\n")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      return latestOnTrack(tags, branch)?.tag ?? null;
+    } catch {
+      return null; // offline or no such branch — the script surfaces the failure
+    }
   }
 
   /**
@@ -253,7 +336,7 @@ class Updater {
     const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
     if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before switching tracks.");
 
-    return this.launch(branch, true, false);
+    return this.launch(branch, true, false, await this.targetTagFor(branch));
   }
 
   /**
@@ -279,7 +362,7 @@ class Updater {
   }
 
   /** Spawn the detached update/switch script and enter the "updating" phase. */
-  private launch(branch: string, checkout: boolean, deferRestart: boolean): UpdateStatus {
+  private launch(branch: string, checkout: boolean, deferRestart: boolean, tag: string | null): UpdateStatus {
     const isWin = process.platform === "win32";
     const script = path.join(REPO_ROOT, "scripts", isWin ? "update.ps1" : "update.sh");
 
@@ -300,6 +383,9 @@ class Updater {
       ...process.env,
       STAGE_UPDATE_REPO: REPO_ROOT,
       STAGE_UPDATE_BRANCH: branch,
+      // The verified release to land on. Empty means the track has no tags, and
+      // the script follows the branch tip instead.
+      STAGE_UPDATE_TAG: tag ?? "",
       // When set, the script checks out the branch (force-points it at origin)
       // before building — used for switching tracks, not a same-branch update.
       STAGE_UPDATE_CHECKOUT: checkout ? "1" : "",
@@ -325,7 +411,9 @@ class Updater {
     this.liveLogOffset = 0;
 
     this.logEvent(
-      `${checkout ? "switching to" : "applying update on"} ${branch} — from ${this.status.currentSha ?? "?"} to ${this.status.latestSha ?? "?"} (${this.status.behind} commit${this.status.behind === 1 ? "" : "s"} behind)`,
+      `${checkout ? "switching to" : "applying update on"} ${branch} — ` +
+        `${this.status.currentTag ?? this.status.currentSha ?? "?"} -> ${tag ?? this.status.latestSha ?? "tip"}` +
+        ` (${this.status.behind} commit${this.status.behind === 1 ? "" : "s"})`,
     );
     const child = isWin
       ? spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], {

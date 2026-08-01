@@ -1308,8 +1308,20 @@ export interface UpdateStatus {
   /** Short SHA + ISO commit date of the running checkout. */
   currentSha: string | null;
   currentDate: string | null;
-  /** Commits the local branch is behind its upstream. */
+  /** Commits between here and the release we should be running. */
   behind: number;
+  /** The release tag this checkout is on, or null when it predates every tag. */
+  currentTag?: string | null;
+  /** The newest release tag on this track — what an update would move to. */
+  targetTag?: string | null;
+  /** How many releases newer than `currentTag` exist on this track. */
+  releasesBehind?: number;
+  /** Commits on the branch past `targetTag`: merged but not yet released,
+   *  because CI is still running or has failed. Surfaced so a track stalled on a
+   *  red build reads as "waiting to be released" rather than "updates broken". */
+  unreleasedCommits?: number;
+  /** False when the track has no tags and the updater is following the tip. */
+  tagBased?: boolean;
   /** How many of those an operator would notice — see summarizeChangelog. The
    *  release workflow's own version bump trails every merge, so this is 0 far more
    *  often than `behind` is, and it is what the "update available" banner reads. */
