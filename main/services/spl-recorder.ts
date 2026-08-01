@@ -9,6 +9,7 @@
 // and persisted to disk, so a mid-service restart resumes the same record.
 
 import type { PcoLiveDTO, ServiceSplHistory, SplMetricsDTO } from "../types/stage.js";
+import { rebuildSplRecord } from "./archive/rebuild.js";
 import { sampleArchive } from "./archive/sample-archive.js";
 import { addLeqSample } from "./spl-leq.js";
 import { broadcast } from "./broadcaster.js";
@@ -16,7 +17,14 @@ import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { stageController } from "./stage-controller.js";
 
-const PERSIST_DEBOUNCE_MS = 4000;
+// How long a change may sit in memory before it is written.
+//
+// This was 4s, when the debounced write was the only durability guarantee — a
+// crash lost whatever had not been flushed. Every sample is now appended to the
+// raw archive as it arrives, and `ensureRecord` rebuilds from it on resume, so the
+// window costs nothing and the store is rewritten ~75 times per service instead of
+// ~1125. The UI never waits on this: it reads the in-memory record over SSE.
+const PERSIST_DEBOUNCE_MS = 60_000;
 /** Max cadence for pushing the (O(n)) live record to trend viewers between item changes. */
 const LIVE_BROADCAST_MS = 5_000;
 /** Short gap between live-item ticks = same service (hold the record through a
@@ -170,9 +178,19 @@ class SplRecorder {
     // Resume an existing record for this occurrence (e.g. after a restart), else create.
     const existing = await splHistoryStore.get(key);
     if (existing) {
-      this.current = existing;
+      // A restart loses everything since the last debounced write. The raw layer
+      // has every sample that arrived, so rebuild the aggregates from it rather
+      // than resuming a record that is short by up to PERSIST_DEBOUNCE_MS. Returns
+      // null for a service recorded before the archive existed — then the stored
+      // record is all there is, which is the old behaviour.
+      const rebuilt = await rebuildSplRecord(existing).catch(() => null);
+      if (rebuilt) console.log(`[spl-recorder] rebuilt ${key} from the archive on resume`);
+      this.current = rebuilt ?? existing;
       this.current.endedAt = null; // reopened
-      this.nextSequence = existing.items.reduce((m, it) => Math.max(m, it.sequence), -1) + 1;
+      // From the resumed record, not `existing`: a rebuild can hold items the
+      // stored copy never got, and seeding from the short list would reissue
+      // sequences that are already in use.
+      this.nextSequence = this.current.items.reduce((m, it) => Math.max(m, it.sequence), -1) + 1;
     } else {
       this.current = {
         serviceKey: key,
