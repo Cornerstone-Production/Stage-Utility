@@ -66,6 +66,7 @@ class Updater {
   // While an apply runs, poll the progress/result files the detached script
   // writes so we can broadcast sub-phase progress (the server stays alive through
   // pull/install/build and is only killed at the very end).
+  private liveLogOffset = 0;
   private progressTimer: ReturnType<typeof setInterval> | null = null;
   private applyStartedAt = 0;
 
@@ -312,7 +313,16 @@ class Updater {
       STAGE_UPDATE_RESULT: this.resultFile(),
       STAGE_UPDATE_PROGRESS: this.progressFile(),
       STAGE_UPDATE_LOG: updateLogPath(),
+      // Where the script writes its live output. Tailed below so /log narrates the
+      // update as it happens, instead of only summarising once it is over.
+      STAGE_UPDATE_LIVE_LOG: this.liveLogFile(),
     };
+    try {
+      fs.writeFileSync(this.liveLogFile(), ""); // start each run from empty
+    } catch {
+      /* best effort */
+    }
+    this.liveLogOffset = 0;
 
     this.logEvent(
       `${checkout ? "switching to" : "applying update on"} ${branch} — from ${this.status.currentSha ?? "?"} to ${this.status.latestSha ?? "?"} (${this.status.behind} commit${this.status.behind === 1 ? "" : "s"} behind)`,
@@ -344,6 +354,38 @@ class Updater {
    *     us); flag "restarting" so the UI shows the final step before the socket
    *     drops and the service manager relaunches with the new build.
    */
+  private liveLogFile(): string {
+    return path.join(getUserDataPath(), "update-live.log");
+  }
+
+  /**
+   * Surface new lines from the running script's log.
+   *
+   * The script narrates itself — the commit range and subjects it pulled, how many
+   * files changed, whether the reinstall and rebuild are needed or skipped, and
+   * npm/vite's own output. All of that used to sit in a temp file until the run
+   * finished, so the only thing visible while an update ran was "step: install".
+   *
+   * Only the script's own `[update]` narration is forwarded; npm and vite's raw
+   * output stays in update.log rather than flooding /log with progress bars.
+   */
+  private drainLiveLog(): void {
+    let text: string;
+    try {
+      text = fs.readFileSync(this.liveLogFile(), "utf8");
+    } catch {
+      return; // not created yet
+    }
+    if (text.length <= this.liveLogOffset) return;
+    const fresh = text.slice(this.liveLogOffset);
+    this.liveLogOffset = text.length;
+    for (const raw of fresh.split("\n")) {
+      const line = raw.trimEnd();
+      if (!line.startsWith("[update]")) continue;
+      this.logEvent(line.replace(/^\[update\]\s?/, ""));
+    }
+  }
+
   private startProgressPolling(): void {
     if (this.progressTimer) clearInterval(this.progressTimer);
     this.progressTimer = setInterval(() => {
@@ -353,6 +395,7 @@ class Updater {
       }
       const result = this.readResult();
       if (result && Date.parse(result.finishedAt || "") >= this.applyStartedAt) {
+        this.drainLiveLog();
         if (result.ok) {
           if (this.status.step !== "restarting") {
             this.logEvent("build succeeded — restarting into the new version");
@@ -368,6 +411,7 @@ class Updater {
         }
         return;
       }
+      this.drainLiveLog();
       const step = this.readProgressStep();
       if (step && step !== this.status.step) {
         this.logEvent(`step: ${step}`);

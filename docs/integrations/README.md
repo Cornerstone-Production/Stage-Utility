@@ -1,10 +1,11 @@
 # Integrations
 
-Stage Utility connects to a range of production tools. Each integration is
-optional, configured under **Settings → Integrations**, and (where noted) drives
-a custom-layout object. All follow the same shape: a descriptor + service in
-`main/services/`, a `<name>:status`-style SSE channel, and a live hook +
-render/inspector on the renderer side.
+Every integration is optional and configured under **Settings → Integrations**,
+where each shows its own connection state. Most also drive a custom-layout object
+you can place on a screen.
+
+**Planning Center is the exception** — it supplies the plan, the people and the
+countdown, so the app needs it.
 
 | Integration | What it surfaces |
 |---|---|

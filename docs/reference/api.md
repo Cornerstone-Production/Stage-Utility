@@ -2,8 +2,6 @@
 
 The HTTP surface. Also what Bitfocus Companion and the automation engine call.
 
-## API reference
-
 All endpoints are under `/api`. State-changing routes return the updated
 `StageState`. Live updates arrive on the SSE stream rather than by polling.
 
@@ -46,9 +44,9 @@ All endpoints are under `/api`. State-changing routes return the updated
 | GET / POST | `/api/layout-templates` | List / save a custom-layout template |
 | PATCH / DELETE | `/api/layout-templates/:id` | Update / delete a template |
 
-Legacy aliases (retained for older clients; they map onto views/outputs):
-`POST /api/slots`, `GET/POST /api/presets` + `/api/presets/:id/apply` + `DELETE /api/presets/:id`,
-and `POST /api/displays` + `PATCH/DELETE /api/displays/:id`.
+`GET /api/displays` returns each output joined with its routed view's kind, for
+clients that want a flat list. `POST /api/displays/refresh` reloads connected
+screens.
 
 **Integrations & wireless**
 | Method | Path | Purpose |

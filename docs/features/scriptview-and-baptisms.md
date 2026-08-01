@@ -1,243 +1,130 @@
 # ScriptView and Baptisms
 
-Two operator-facing surfaces built on the PCO plan.
+Two operator surfaces built on the Planning Center plan.
 
-## ScriptView
+# ScriptView
 
-A per-service-type PCO **rundown dashboard** at `/scriptview` — an in-app replacement
-for ScriptViewer. The landing page lists the service types you enable; each opens a
-**deep-linkable** rundown at a readable URL (`/scriptview/weekend/audio`) you can pin in
-its own browser tab. **Layouts are global** column presets (Audio / Video / Lighting / …)
-shared across every service type, each with per-element toggles (**clock, time, song
-key / BPM / arrangement, item notes, total time**) and **department row coloring**. The
-projected clock follows the **plan's timezone**; the current item highlights live only
-while a service is actually running. Configured in **Settings → ScriptView** with a live
-preview.
+A rundown dashboard at `/scriptview` — every plan item with the note columns your
+department cares about, section headers, lengths, a clock and a live countdown.
+The current item highlights while a service is running.
 
-## Baptisms
+Pick a service type from the landing page and it opens at a readable, shareable
+URL (`/scriptview/weekend/audio`) you can pin in its own tab. The clock follows
+the plan's timezone.
 
-A standalone **`/baptism` operator page** (also a Settings tab) with a **grouped
-workflow** (all testimonies, then all baptisms). Sessions are named by service and
-**cross-linked into Service History** with per-person splits + averages. An on-air
-**"Baptism timer"** layout object shows the live count/timer on a display.
+Configure it under **Settings → ScriptView**, with a live preview.
+
+## Layouts
+
+A layout is a set of columns — Audio, Video, Lighting, and so on. Layouts are
+global: define one and it works across every service type.
+
+Each has per-element toggles for the clock, item time, song key, BPM,
+arrangement, item notes and total time.
 
 ## Category roles
 
-A layout's columns reference **roles**, not PCO category names.
+Planning Center note categories are defined per service type, and the names drift
+— one church might have `Audio` on some types and `Audio/Visual` on others, plus
+case and spelling variants of the same department.
 
-Category names are defined **per service type** and vary. Measured on one church: 20
-service types, 130 category rows, **29 distinct names** — `Audio` and `Audio/Visual` for
-the same department (one service type defines both), three spellings of
-`MD + Playback Tech`, and case variants of `EG 1 (Lead)`. `sequence` is null on 59 of 130
-rows, so it cannot order anything, and counts run 0 to 14.
-
-A role is a named, ordered set of those names:
+A **role** is a named, ordered set of those category names:
 
 ```
-Audio    -> ["Audio", "Audio/Visual"]
-Guitars  -> ["AG", "EG", "EG 1 (Lead)", "EG 1 (LEAD)"]
+Audio    →  Audio, Audio/Visual
+Guitars  →  AG, EG, EG 1 (Lead)
 ```
 
-### Resolving a role on an item
+Layout columns reference roles rather than raw category names, so one layout
+works everywhere.
 
-**The non-empty members joined, in the role's member order.** One rule, three behaviors:
-one member has a note and it shows; the first is blank or absent so the next shows;
-several are populated and they merge, first-listed first. Member order is therefore the
-priority chain, and the panel lets you reorder it.
+**Resolution:** the role's non-empty members, joined in order. If the first member
+has no note the next one shows; if several do, they merge. Member order is the
+priority, and you can reorder it.
 
-A role none of whose members this service type defines is **hidden**, not rendered as an
-empty column. That empty column was the bug: a layout with an `Audio` column rendered
-blank on every service type calling it `Audio/Visual`.
+A role whose members a service type doesn't define is hidden rather than shown as
+an empty column.
 
-### Managing roles
+**Managing them:** Settings → ScriptView → Category roles. Rename, add or remove
+members, reorder. Two diagnostics flag problems you would otherwise notice only by
+absence — categories in no role (which can never appear as a column) and
+categories in more than one (ambiguous, since two columns would claim the note).
 
-Settings -> ScriptView -> **Category roles** (collapsed, at the foot). Rename a role, add
-or remove member categories, reorder members. Deleting a role also removes it from every
-layout in the same save.
-
-Two diagnostics you would otherwise notice only by absence:
-
-- **In no role** — categories that can never appear as a column.
-- **In more than one role** — ambiguous, since two columns would claim the same note.
-
-### Seeding and migration
-
-Seeding creates **one role per category, named after it, containing only itself**. It
-never merges: keyword matching guesses badly enough to be dangerous — in measurement a
-"band" rule swallowed nine categories in one service type, and `Stage Manager` matched it
-through "man**ag**er". A wrong automatic merge hides a department's notes with no visible
-cause, so merging is always the operator's action. Seeding also only ever *adds* — never
-removes, since a role may cover a category from another service type.
-
-Existing layouts migrate on load: each distinct category name becomes a single-member
-role and columns are rewritten to role ids, preserving order. Lossless — every layout
-renders exactly as before — and idempotent, since it runs on every load rather than
-behind a version stamp.
-
-There are **no starter layouts**. They used to hardcode names like `Audio` and
-`Stage Manager` that exist in some churches and, in this org, only some service types, so
-a fresh install got layouts whose columns rendered empty.
+Seeding creates one role per category, containing only itself. Merging is always
+your call — automatic keyword matching guesses badly, and a wrong merge hides a
+department's notes with no visible cause.
 
 ## Row colors
 
-Each layout picks **one** source for its row color. Never two: PCO's color answers
-*what kind of item is this*, the category answers *does my department have something to
-do here*, and stacking both puts more on a line than a stage display can carry.
+Each layout picks one source for its row color, under **Row color**:
 
-Settings → ScriptView → a layout → **Row color**:
-
-| Setting | Rows are tinted by |
+| | Rows tinted by |
 |---|---|
-| **From PCO** (default) | PCO's item row colors — song, header, media, custom title matches |
-| **By category** | the chosen note category, wherever that category has a note on the item |
-
+| **From PCO** (default) | Planning Center's own item colors — song, header, media, custom types |
+| **By category** | a note category you choose, wherever it has a note on the item |
 | **None** | nothing |
 
-A layout saved before this existed has no `rowColor` and behaves as **From PCO**.
-A live item outranks all three — a running item stays the most prominent row.
+A running item always outranks the tint.
 
-### From PCO — remapped, not literal
+**From PCO** remaps rather than copying: PCO's swatches are pale pastels made for a
+white table and would read as near-white on a dark panel, so each hue maps to a
+colour chosen for a dark surface. Add a colour in PCO and rows follow within
+fifteen minutes, including new custom item types.
 
-PCO's swatches are pale pastels authored for a white table; used literally on a dark
-panel they read as near-white (`#e0f7ff` is 88% lightness). Each hue **band** maps to a
-color chosen for a dark surface:
+**By category** can use any category the service type defines, not just the columns
+this layout shows — "Lighting has a cue here" is useful to a stage manager without
+showing the cue text. Colours are assigned from the category name and are not
+configurable, since Planning Center has no colour for a note category.
 
-| PCO swatch | Hue band | Renders as |
-|---|---|---|
-| green | 75-160 | `#46a758` |
-| blue | 160-250 | `#4a86c8` |
-| lavender | 250-290 | `#58c1e4` |
-| pink | 290-345 | `#e0729a` |
-| orange / red | 345-75 (wraps) | `#ffb224` |
-| white, gray | no hue | no color |
+## On different screens
 
-Keyed by band rather than exact hex because only four of PCO's seven swatch values have
-ever come back from the API; a band covers the rest without guessing, and holds if PCO
-adjusts a swatch. **Blue and lavender are crossed deliberately** — PCO's blue takes the
-deeper `#4a86c8`, lavender the brighter `#58c1e4`. Lavender never renders purple, which
-the project rule forbids.
+ScriptView renders on stage panels, laptops and phones, and changes shape rather
+than centring a fixed column:
 
-`#ffffff` is how PCO stores *no color* (it is Media's default) and `#eaebeb` (Header) is
-a near-gray with no hue; both leave the row plain rather than drawing a meaningless
-neutral stripe.
-
-Add or change a color in PCO and rows follow within the 15-minute service-type cache,
-including brand-new custom item types — nothing to configure here.
-
-### By category — a fixed table
-
-The category can be **any** the service type defines, not only the columns this layout
-shows. Tinting by a category the layout does not display is deliberate: "Lighting has a
-cue on this item" is useful to a stage manager without showing the cue text.
-
-A category with no notes on the current plan simply tints nothing — worth knowing, since
-a plan may define a category no one has written in. On the Weekend service type, for
-instance, `Audio` is defined but currently carries no notes, so accenting by it shows
-nothing while `Band` lights up nine rows.
-
-
-| Category name contains | Color |
+| Width | Shape |
 |---|---|
-| light | `#ffb224` amber |
-| video, graphic, pro, screen | `#46a758` green |
-| audio, sound, foh | `#0091ff` blue |
-| vocal, band, music, md, key, drum | `#12a594` teal |
-| stage, cam, director | `#e5484d` red |
-| anything else | `#8b8d98` neutral |
+| under 640 | stacked blocks, each column labelled |
+| 640–1024 | table without the clock column |
+| over 1024 | every column, full width |
 
-Not configurable, deliberately. PCO has no color for a note category — `ItemNote`
-carries only `category_name / content / created_at / updated_at`, and `ItemNoteCategory`
-only `name / sequence / frequently_used` — so any category color is invented here
-either way. A default that needs no setup beats a picker that must be filled in per
-category before the feature does anything. The weakness is that an unmatched name
-("Hospitality") is neutral gray; the categories that matter on a rundown all match.
+# Baptisms
 
-### How a tint renders
+An operator page at `/baptism`, also available as a Settings tab. The workflow is
+grouped — all testimonies first, then all baptisms.
 
-```css
-box-shadow: inset 3px 0 0 hsl(<hue> 72% 62%);   /* stripe — bright, reads at distance */
-background:              hsl(<hue> 42% 15%);    /* wash  — sits behind the text */
-```
+Sessions are named by service and cross-linked into Service History with
+per-person splits and averages. A **Baptism timer** layout object puts the live
+count and timer on a display.
 
-One value cannot serve both a 3px rule and a text background, so the stripe and the wash
-take the same hue at different saturation and lightness.
+## Starting from the plan
 
-## Responsive layout
+The timer can start itself, since the two ends of a baptism differ:
 
-ScriptView is a kiosk `ViewKind`, so it renders on stage panels as well as laptops and
-phones. There is **no page max-width**: a centerd column leaves dead margins on a 37-inch
-panel and shrinks the text relative to the viewport, which is backwards for a surface read
-at distance. The shape changes instead:
-
-| Container width | Shape |
-|---|---|
-| `< 640` | Stacked. Each item is a block; every column keeps its header as a label. |
-| `640-1024` | Table without the Clock column (a projected time, the least load-bearing). |
-| `> 1024` | Every column, filling the width. |
-
-Measured with a `ResizeObserver` on the table's own wrapper, **not** the viewport — the
-table also renders inside the settings live preview, a narrow container on a wide screen,
-which a viewport media query would get exactly backwards.
-
-## Files
-
-- `renderer/main/item-color.ts` — `resolveItemColor()`, PCO matching
-- `renderer/main/category-color.ts` — `categoryColor()`, normalisation + fallback
-- `renderer/main/rundown-table.tsx` — precedence, stripe + wash, the three shapes
-- `main/services/pco-service.ts` — `toItemColors()`, colors off `listServiceTypes`
-- `main/services/stage-controller.ts` — `setCategoryColor()`
-
-## Previews render with kiosk colors
-
-A kiosk preview embedded in the settings page (`.kiosk-surface`) sets the Tailwind
-`--color-*` variables directly rather than the `--su-*` ones.
-
-That looks redundant next to `.kiosk`, and is not. `--color-fg: var(--su-fg)` is declared
-on `:root`, so it **resolves there** and inherits its computed value down — redefining
-`--su-fg` on a nested element changes nothing. `.dark` and `.kiosk` get away with it only
-because they sit on `<html>`, the same element as `:root`.
-
-Without this, a preview inside the light theme drew near-black text on the kiosk's
-near-black panel: measured at **1.14:1**, versus 19.80:1 after. Real displays already
-carry `.kiosk` on `<html>` and are unaffected (measured 17.93:1 before and after).
-
-### Starting the baptism timer from the plan
-
-Two triggers, because the two ends of a baptism differ in how stable they are:
-
-- **Testimonies** happen during an item named the same every week ("Baptism
-  Stories"), so a **keyword** finds it — set once under Advanced, off by default.
+- **Testimonies** happen during an item named the same thing every week, so a
+  **keyword** finds it. Set it under Advanced; off by default.
 - **Baptisms** happen during whichever songs are on that week, so no keyword can
-  ever find them. That end is **bound to an item per plan**, on the Baptisms tab.
+  find them. Bind that end **to an item on the plan**, on the Baptisms tab.
 
-Binding both ends also fixes an accuracy problem rather than papering over it.
-Between the testimonies and the baptisms there is usually several minutes of vows,
-prayer and preaching; with only a manual "start baptisms" button that gap lands on
-whichever person is timing. Started from the item the baptisms actually happen
-during, it belongs to neither phase.
+Binding both ends is also more accurate than a manual button. Between testimonies
+and baptisms there are usually several minutes of vows and prayer; started from the
+item the baptisms actually happen during, that gap belongs to neither phase.
 
-Auto-start only ever moves the timer FORWARD — idle → testimonies, testimonies →
-baptisms. It never restarts and never fires while the phase it would start is
-already running, so a re-fired item or a PCO re-sync cannot wipe a session underway.
-The operator page says which item started it, with reset one tap away.
+Auto-start only moves forward — idle → testimonies → baptisms. It never restarts
+and never fires into a phase already running, so a re-fired item or a plan re-sync
+cannot wipe a session underway. The operator page shows which item started it,
+with reset one tap away.
 
-### It gates itself on non-baptism weeks
+**It leaves itself alone on ordinary weeks.** Neither trigger can fire without
+something to fire on: the keyword only matches an item that exists, and per-plan
+bindings only exist on plans you set them on. So the setting can stay on all year.
 
-Neither trigger needs turning off between baptism Sundays, because neither can fire
-without something to fire on. The keyword only matches an item that exists, and an
-ordinary plan has no "Baptism Stories" in it; the per-plan bindings only exist for
-plans somebody set them on. So the setting can be left enabled all year.
+Keep the keyword specific — plain "baptism" would catch a "Baptism class signup"
+announcement where "baptism stories" would not. The Baptisms tab states, for the
+plan currently loaded, which item will start each phase or that nothing will.
 
-The one way to break that is a keyword loose enough to match something else — plain
-"baptism" would catch a "Baptism class signup" announcement, where the default
-"baptism stories" would not. The Baptisms tab therefore says, for the plan actually
-loaded, which item will start the testimonies and which will start the baptisms, or
-that nothing on this plan will — so an armed week can be told from an ordinary one
-without guessing.
+## Pause
 
-### Pause
-
-A segment is "time already banked, plus time since it last resumed"
-(`baptism-elapsed.ts`), so the clock can stop for the talking between people without
-that time landing on anyone. Both the operator page and the display object compute
-from the same two fields, so a paused clock reads the same everywhere.
+The clock can stop for the talking between people without that time landing on
+anyone. A segment is time already banked plus time since it last resumed, and both
+the operator page and the display object read the same fields, so a paused clock
+shows the same everywhere.

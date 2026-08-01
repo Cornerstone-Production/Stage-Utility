@@ -37,13 +37,3 @@ Access Tokens → create a token. Note the **App ID** and **Secret** shown there
 **In Stage:** Settings → Integrations → **Planning Center** → enter the **App ID**
 and **Secret**, pick a **Refresh interval** and **Pre-service countdown**, enable
 it, and **Test connection** (should report the number of service types found).
-
-## Files
-
-- `main/services/pco-service.ts` — REST client, Basic Auth, tiered cache, DTOs
-- `main/services/pco-attachment-cache.ts` — plan-attachment download/proxy cache
-- `main/services/stage-controller.ts` — synced plan/roster state, refresh loop
-- `main/services/integration-manager.ts` — `PCO_DESCRIPTOR`, credentials, test
-- `main/services/remote-server.ts` — `GET /api/pco/live`, `/api/pco/attachments`,
-  `/api/pco/plan-items`, `/api/pco/attachment`
-- `renderer/main/pco-timer.ts` — live countdown timer hook

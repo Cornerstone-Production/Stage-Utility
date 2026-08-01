@@ -36,12 +36,3 @@ stored encrypted on this machine.
 **On a layout:** add object → **Smaart SPL → SPL meter** → pick the meter
 (`deviceName::channelName`) and metric key; optional peak-hold shows the highest
 value seen for that meter/metric.
-
-## Files
-
-- `main/services/smaart-service.ts` — connect/reconnect loop, per-input streams, throttled `spl:metrics` broadcast
-- `main/services/smaart-protocol.ts` — `ModernSmaartAdapter` (JSON-over-WebSocket wire protocol, V3/V4)
-- `main/services/integration-manager.ts` — `SMAART_DESCRIPTOR`, `applySmaart()`, `getSmaartTarget()`, test
-- `main/services/remote-server.ts` — `GET /api/spl/metrics` + `spl:metrics` SSE hydrate
-- `renderer/main/layout-renderer.tsx` — `spl-meter` render case (`SplMeterValue`)
-- `renderer/main/object-integration.ts` — maps `spl-meter` → Smaart integration

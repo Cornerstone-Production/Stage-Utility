@@ -44,6 +44,20 @@ function highResAvatar(url: string): string {
   return url + (url.includes("?") ? "&" : "?") + `g=${AVATAR_PX}x${AVATAR_PX}%23`;
 }
 
+/** One PCO plan row → PlanDTO. Shared by the future and past listings. */
+function toPlanDTO(item: PcoNode): PlanDTO {
+  return {
+    id: item.id,
+    title: String(item.attributes.title ?? item.attributes.series_title ?? item.attributes.dates ?? "Untitled"),
+    seriesTitle:
+      item.attributes.series_title != null && String(item.attributes.series_title) !== ""
+        ? String(item.attributes.series_title)
+        : null,
+    sortDate: item.attributes.sort_date != null ? String(item.attributes.sort_date) : null,
+    dates: item.attributes.dates != null ? String(item.attributes.dates) : null,
+  };
+}
+
 interface CacheEntry<T> {
   value: T;
   expiresAt: number;
@@ -443,15 +457,42 @@ class PcoService {
     const json = await this.request(url, appId, secret);
     const items = Array.isArray(json.data) ? json.data : [json.data];
 
-    const result: PlanDTO[] = items.map((item) => ({
-      id: item.id,
-      title: String(item.attributes.title ?? item.attributes.series_title ?? item.attributes.dates ?? "Untitled"),
-      seriesTitle: item.attributes.series_title != null && String(item.attributes.series_title) !== ""
-        ? String(item.attributes.series_title)
-        : null,
-      sortDate: item.attributes.sort_date != null ? String(item.attributes.sort_date) : null,
-      dates: item.attributes.dates != null ? String(item.attributes.dates) : null,
-    }));
+    const result: PlanDTO[] = items.map(toPlanDTO);
+
+    this.cacheSet(cacheKey, result, TTL_MEDIUM_MS);
+    return result;
+  }
+
+  /**
+   * Recently-past plans, newest first — for the manual picker only.
+   *
+   * Auto plan selection and the reconnect windows deliberately keep using
+   * `listUpcomingPlans`: a past plan must never be auto-selected, and a window
+   * derived from one would already have closed.
+   */
+  async listRecentPlans(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    days = 30,
+  ): Promise<PlanDTO[]> {
+    const cacheKey = `plans:past:${appId}:${serviceTypeId}:${days}`;
+    const cached = this.cacheGet<PlanDTO[]>(cacheKey);
+    if (cached) return cached;
+
+    // PCO orders `past` oldest-first, so ask in reverse to get the most recent
+    // page rather than the oldest plans this service type ever had.
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans?filter=past&order=-sort_date&per_page=25`;
+    const json = await this.request(url, appId, secret);
+    const items = Array.isArray(json.data) ? json.data : [json.data];
+
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const result = items
+      .map(toPlanDTO)
+      .filter((p) => {
+        const t = p.sortDate ? Date.parse(p.sortDate) : NaN;
+        return Number.isFinite(t) && t >= cutoff;
+      });
 
     this.cacheSet(cacheKey, result, TTL_MEDIUM_MS);
     return result;

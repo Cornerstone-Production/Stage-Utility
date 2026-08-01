@@ -37,7 +37,10 @@ export function Collapsible({
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className={cn("flex flex-col", className)}>
-      <div className={cn("flex items-center gap-2", headerClassName)}>
+      {/* A small default inset so the chevron never sits flush against a card's
+          edge or into its corner radius. tailwind-merge lets a caller's own
+          padding win, so the callers that pass px-4 py-2.5 are unaffected. */}
+      <div className={cn("flex items-center gap-2 px-1 py-0.5", headerClassName)}>
         {/* The label group owns all the leftover width and is the only thing that
             shrinks; `right` never does. A long label therefore has to clip inside
             here instead of overflowing and painting over the status/toggle.

@@ -78,10 +78,27 @@ append and at startup (always at a line boundary), and each run only appends a
 bounded ~8 KB tail. It holds roughly the last dozen runs and can never grow
 without bound.
 
-## Files
 
-- `main/services/updater.ts` — the update state machine + lifecycle logging
-- `main/services/update-log.ts` — persistent, capped `update.log` + startup replay
-- `main/services/log-buffer.ts` — in-memory `/log` ring buffer
-- `scripts/update.sh` / `update.ps1` — the detached pull/install/build/restart script
-- `renderer/settings/sections/advanced-section.tsx` — the Updates panel + progress bar
+## Logs across restarts
+
+`/log` holds the last 10,000 lines, mirrored to `server.log` in the data directory
+and replayed on boot with their original timestamps — so the run-up to a restart,
+a crash or an update is still there afterwards. The file is capped at 4 MB.
+
+## What an update reports
+
+The update narrates itself into `/log` as it runs: the commit range, the subject of
+every commit arriving, how many files changed, and whether the reinstall and
+rebuild are needed or being skipped.
+
+```
+57dd812 -> 8904fed (35 commits)
+what changed:
+  perf(sse): split volatile slot telemetry onto its own channel
+  refactor: retire the DisplayInfo shim from state
+86 file(s) changed
+dependencies unchanged — skipping npm ci
+```
+
+npm and vite's own output stays in `update.log` rather than filling `/log` with
+progress bars.

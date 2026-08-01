@@ -107,6 +107,7 @@ export function PlanSection({
             <Field orientation="horizontal">
               <FieldContent>
                 <FieldLabel>Plan</FieldLabel>
+                <FieldDescription>Upcoming services, plus the last 30 days.</FieldDescription>
               </FieldContent>
               <Select
                 value={stageState.planId ?? ""}
@@ -121,6 +122,9 @@ export function PlanSection({
                     <SelectItem key={p.id} value={p.id}>
                       {p.title}
                       {p.dates ? ` — ${p.dates}` : ""}
+                      {/* Flagged by the server, which built the list — last Sunday
+                          and next Sunday would otherwise read identically. */}
+                      {p.past && <span className="text-fg-subtle"> · past</span>}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -132,7 +136,14 @@ export function PlanSection({
           <Field orientation="horizontal">
             <FieldContent>
               <FieldLabel>Active plan</FieldLabel>
-              {stageState.planTitle && <FieldDescription>{stageState.planTitle}</FieldDescription>}
+              {stageState.planTitle && (
+                <FieldDescription>
+                  {stageState.planTitle}
+                  {stageState.planDates && (
+                    <span className="text-fg-subtle"> · {stageState.planDates}</span>
+                  )}
+                </FieldDescription>
+              )}
             </FieldContent>
             <div className="flex items-center gap-2">
               {stageState.planMode === "auto" && (

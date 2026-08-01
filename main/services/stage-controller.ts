@@ -146,6 +146,7 @@ export class StageController {
     planId: null,
     planTitle: null,
     planSeriesTitle: null,
+    planDates: null,
     views: [{ id: PRIMARY_DISPLAY_ID, name: "Slots", kind: "slots", ndiSource: null, createdAt: "" }],
     outputs: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", viewId: PRIMARY_DISPLAY_ID }],
     slotsByView: {},
@@ -237,6 +238,7 @@ export class StageController {
       planId: settings.planId,
       planTitle: settings.planTitle,
       planSeriesTitle: settings.planSeriesTitle ?? null,
+      planDates: settings.planDates ?? null,
       views,
       outputs,
       showQr,
@@ -457,9 +459,28 @@ export class StageController {
 
   // ── Plans ──────────────────────────────────────────────────────────────
 
+  /**
+   * Plans for the manual picker: the last 30 days, then everything upcoming.
+   *
+   * Past plans are here and nowhere else — auto selection and the reconnect
+   * windows use `listUpcomingPlans` directly, so neither can land on a service
+   * that has already happened.
+   */
   async listPlans(serviceTypeId: string): Promise<PlanDTO[]> {
     this.assertPco();
-    return pcoService.listUpcomingPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId);
+    const [past, future] = await Promise.all([
+      pcoService
+        .listRecentPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId)
+        .catch(() => [] as PlanDTO[]),
+      pcoService.listUpcomingPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId),
+    ]);
+    // Oldest → newest, and de-duplicated: a plan happening today can come back
+    // from both filters depending on where PCO draws the line.
+    const seen = new Set(future.map((p) => p.id));
+    return [
+      ...past.filter((p) => !seen.has(p.id)).reverse().map((p) => ({ ...p, past: true })),
+      ...future,
+    ];
   }
 
   async listTeamPositions(): Promise<TeamPositionDTO[]> {
@@ -775,9 +796,9 @@ export class StageController {
 
     if (plans.length === 0) {
       console.log("[stage-controller] selectNextPlan: no upcoming plans");
-      this.state = { ...this.state, planId: null, planTitle: null, planSeriesTitle: null };
+      this.state = { ...this.state, planId: null, planTitle: null, planSeriesTitle: null, planDates: null };
       this.teamMembers = [];
-      await settingsStore.patch({ planId: null, planTitle: null, planSeriesTitle: null });
+      await settingsStore.patch({ planId: null, planTitle: null, planSeriesTitle: null, planDates: null });
       await this.reResolveAll();
       this.broadcast();
       return this.state;
@@ -875,10 +896,11 @@ export class StageController {
         planId: null,
         planTitle: null,
         planSeriesTitle: null,
+        planDates: null,
         lastRefreshedAt: new Date().toISOString(),
       };
       this.teamMembers = [];
-      await settingsStore.patch({ planId: null, planTitle: null, planSeriesTitle: null });
+      await settingsStore.patch({ planId: null, planTitle: null, planSeriesTitle: null, planDates: null });
       await this.reResolveAll();
       this.broadcast();
       return this.state;
@@ -1999,11 +2021,13 @@ export class StageController {
       planId: plan.id,
       planTitle: plan.title,
       planSeriesTitle: plan.seriesTitle,
+      planDates: plan.dates,
     };
     await settingsStore.patch({
       planId: plan.id,
       planTitle: plan.title,
       planSeriesTitle: plan.seriesTitle,
+      planDates: plan.dates,
     });
 
     if (this.state.serviceTypeId) {

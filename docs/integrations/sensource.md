@@ -56,14 +56,3 @@ weekend total is a partial that keeps climbing. Every computed stat (average, pe
 trend direction) is taken over finished services only; folding a partial peak into a
 cross-service mean would understate it all morning and "recover" by noon. The two
 scopes live in `renderer/settings/sections/overview-scope.ts`.
-
-## Files
-
-- `main/services/sensource-service.ts` — poll loop, token exchange, `reduceTraffic()` / `reduceSpaceOccupancy()` / `latestSpaceOccupancy()`, `people:count` broadcast
-- `main/services/attendance-recorder.ts` — per-service sampling, peak folding, `attendance:history` broadcast
-- `renderer/settings/sections/overview-scope.ts` — `inTrendScope()` / `inAverageScope()` (chart shows the recording service, stats don't)
-- `main/services/integration-manager.ts` — `SENSOURCE_DESCRIPTOR`, `applySensource()`, `getSensourceConfig()`, `getSensourceLocations()` / `getSensourceZones()`, test
-- `main/services/remote-server.ts` — `GET /api/people/count`, `/api/sensource/locations`, `/api/sensource/zones` + `people:count` SSE hydrate
-- `renderer/main/layout-renderer.tsx` — `people-counter` / `people-graph` / `people-panel` render cases
-- `renderer/settings/sections/layout-editor.tsx` — object palette + inspector
-- `renderer/components/integrations-panel.tsx` — location/zone pickers

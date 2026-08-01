@@ -1,66 +1,78 @@
-# Reliability, backups and data
+# Reliability and data
 
-How the app behaves under load and over time, and where your data lives.
+How the app behaves over a long run, and where your data lives.
 
-## Reliability & efficiency
+## Under load
 
-The live layer is tuned for many always-on kiosks:
+Built for a room full of always-on screens.
 
-- **SSE:** a single multiplexed stream with **per-connection channel filtering** (a
-  display only receives the channels it uses), **broadcast-on-change** (e.g. `pco:live`
-  and `spl:metrics` emit on change, not every tick), payloads **stringified once** per
-  broadcast, a **heartbeat + backpressure guard** that reaps dead clients, and an
-  **opt-in shared-worker relay** (`stage:sharedSse`) that shares one connection across
-  tabs on the same machine.
-- **PCO:** tiered response caches, consolidated `plan_times` + team-position calls, and
-  **429 backoff** cut request volume; the live timer stays uncached.
-- **Storage:** the DataStore uses **atomic writes** (temp + rename) and is
-  **corruption-safe** on load (bad files are backed up, never overwritten). Photo and
-  plan-attachment disk caches are pruned by age + size.
-- **Polling & assets:** static assets are gzipped; ProPresenter thumbnails are cached
-  and its poll interval is configurable; charger/heartbeat polls are slowed; live-history
-  broadcasts are throttled to ~5 s.
-- **Updater:** skips `npm ci` / `npm run build` when an update doesn't touch deps or the
-  renderer, and can switch between the **beta** and **main** update tracks in-app.
+- **One event stream per client**, filtered to the channels that screen renders,
+  broadcast on change rather than on a timer, serialised once per push, with a
+  heartbeat that reaps dead clients. See [network traffic](network-traffic.md).
+- **Planning Center requests are pooled and cached** in tiers, with backoff on rate
+  limits. The live countdown stays uncached.
+- **Writes are atomic** — temp file then rename — and a file that will not parse is
+  backed up rather than overwritten. Recorded services are one file each, so
+  persisting a live service does not rewrite your whole history.
+- **Disk caches are pruned** by age and size. Photos and plan attachments are
+  cached, and images are served immutable so a screen fetches each one once.
+- **Updates skip what they can** — no reinstall unless dependencies changed, no
+  rebuild unless the interface did.
 
-## Backups & portability
+## Winding down between services
 
-A **full config snapshot** (Settings → Advanced) can be **saved/recalled** in-app and
-**downloaded/uploaded** as a file to move a configuration between machines. Integration
-**secrets are excluded** from snapshots (they stay AES-256-GCM encrypted on the box). A
-server **log viewer** is available at `/log`.
+Integrations do not retry at full speed all week. Rehearsal and service windows are
+derived from Planning Center — the earliest plan time minus a lead (default 2 h)
+through the last plus a tail (default 1 h) — and connections back off toward a
+dormant ceiling outside them. The Planning Center poll stretches from 4 seconds to
+5 minutes.
 
-## Data, secrets & backups
+Windows are recomputed on boot, hourly with the plan refresh, and when the schedule
+settings change. Two safeguards: nothing sleeps past the moment the next window
+opens, and if the schedule cannot be worked out — no credentials, a failed fetch,
+the feature off — everything stays at its active cadence rather than going quiet.
 
-State persists in a **data directory** — `$STAGE_UTILITY_DATA` if set, otherwise
-`~/.stage-utility`:
+Tunable under **Settings → Advanced → Network & behavior**.
 
-- `settings.json` — non-secret config (service type, plan mode, outputs, branding, …)
-- `branding-images/` — the logo and avatar files `settings.json` points at (content-hashed)
-- `views.json` — view definitions (kind + config; custom views carry their layout)
-- `slots.json` — slot sets, keyed by view + service type
-- `layout-templates.json` — saved custom-layout library; `presets.json` — slot presets
-- `layout-groups.json` — reusable object groups; `scriptview-layouts.json` + `scriptview-config.json` — ScriptView presets + landing curation
-- `layout-images/` — images uploaded for custom-layout objects
-- `spl-history/` — per-item SPL recordings, **one file per service**, for History
-- `attendance-history/` — per-service attendance; `service-timeline/` — per-service item timing
-- `archive/` — the raw samples behind those records, one directory per service ([data archive](../data-archive.md))
-- `baptism.json` — baptism sessions; `osc.json` — OSC button/target definitions
-- `secrets.bin` — integration secrets, **AES-256-GCM encrypted**
-- `encryption.key` — 32-byte key, auto-generated on first run (mode `600`)
-- `cache/photos/` — cached PCO photos
-- `cache/attachments/` — cached PCO plan files (stage plots etc.), keyed by attachment id
+## Where your data lives
 
-A `*.json.migrated` file is an older single-document store left in place after it
-was split per service — safe to delete once you are happy the split took.
+`$STAGE_UTILITY_DATA` if set, otherwise `~/.stage-utility` (`/var/lib/stage-utility`
+on a Linux install).
 
-**Back up this directory.** If you lose `encryption.key`, the encrypted secrets are
-unrecoverable and you'll need to re-enter every credential.
+| | |
+|---|---|
+| `settings.json` | non-secret config — service type, plan mode, outputs, branding |
+| `views.json`, `slots.json` | view definitions and slot sets |
+| `presets.json`, `layout-templates.json`, `layout-groups.json` | saved slot presets and layout libraries |
+| `scriptview-*.json`, `patch.json`, `automation-*.json`, `osc.json` | per-feature config |
+| `branding-images/`, `layout-images/` | uploaded images, named by content hash |
+| `spl-history/`, `attendance-history/`, `service-timeline/` | recorded services, one file each |
+| `archive/` | the raw samples behind them — see [data archive](../data-archive.md) |
+| `baptism.json` | baptism sessions |
+| `cache/photos/`, `cache/attachments/` | cached Planning Center photos and plan files |
+| `server.log`, `update.log` | log history, replayed into `/log` on boot |
+| `secrets.bin` | integration credentials, AES-256-GCM encrypted |
+| `encryption.key` | 32-byte key, generated on first run, mode `600` |
 
-**Keeping the key out of a synced/backed-up data dir.** By default the key sits next to
-`secrets.bin` so the service can decrypt unattended at boot. If you back up or sync the data
-dir, the key travels with the ciphertext — to avoid that, store the key elsewhere via
-`STAGE_UTILITY_KEY_FILE=/abs/path/to/key` (key file at a path you control) or
-`STAGE_UTILITY_KEY=<base64-or-hex>` (a raw 32-byte key supplied via the environment; no key
-file is written — generate one with `openssl rand -base64 32`). See
-[SECURITY.md](SECURITY.md) for the threat model.
+A `*.json.migrated` file is an older store kept after its contents were split into
+per-service files. Safe to delete.
+
+## Backups
+
+**Back up this directory.** Lose `encryption.key` and the encrypted credentials
+cannot be recovered — you would re-enter every one.
+
+Two backups exist in the app, and they cover different things:
+
+- **Settings → Advanced → Backup & restore** — a config snapshot, saved in-app or
+  downloaded as a file, for moving a configuration between machines. Credentials
+  are deliberately excluded, so the file is safe to store.
+- **Settings → Advanced → Data archive** — recorded services and their raw samples.
+  See [data archive](../data-archive.md).
+
+**Keeping the key out of a synced backup.** By default the key sits beside
+`secrets.bin` so the service can decrypt unattended at boot, which means it travels
+with any copy of the directory. To separate them, set `STAGE_UTILITY_KEY_FILE` to a
+path you control, or `STAGE_UTILITY_KEY` to a raw 32-byte key in the environment
+(`openssl rand -base64 32`), in which case no key file is written. Threat model is
+in [SECURITY.md](../../SECURITY.md).

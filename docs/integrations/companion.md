@@ -29,9 +29,3 @@ server's IP and Port (no password — LAN only).
 (`CompanionInfoPanel`) shows this server's LAN IP and port split out (Companion
 takes host + port separately and can't resolve DNS), each copyable, plus a live
 connected-client count. There is nothing to enable or test here.
-
-## Files
-
-- `main/services/integration-manager.ts` — `COMPANION_DESCRIPTOR` (no config), `setCompanionClients()`
-- `main/services/remote-server.ts` — SSE stream + REST API the module consumes; `companionClients` set keyed off the `X-Companion-Module` header / `?client=companion` marker
-- `renderer/components/companion-info-panel.tsx` — IP/port copy fields + connected-client count

@@ -14,7 +14,7 @@ integration polls REAPER's built-in **Web Interface** over HTTP:
   reports `0` stopped, `1` playing, `2` paused, `5` recording, `6` record-paused.
 - Recording = `(playstate & 4) === 4`.
 
-The poller (`main/services/reaper-service.ts`) polls ~1 s while a display is
+The poller polls ~1 s while a display is
 watching the `reaper:status` channel, drops to ~5 s when nobody is, and backs off
 exponentially while REAPER is unreachable. It broadcasts on change (and each
 second while recording, to tick the position display). No secret is stored — the
@@ -31,12 +31,3 @@ tick *Run web server on port* (e.g. `8080`) → leave *Username:password* blank 
 
 **On a layout:** add object → **REAPER → REAPER status**. Options: recording/idle/
 offline text overrides, fill-red-when-recording, show-position, hide-when-idle.
-
-## Files
-
-- `main/services/reaper-service.ts` — HTTP poll loop + `parseTransport()`
-- `main/services/integration-manager.ts` — `REAPER_DESCRIPTOR`, `applyReaper()`, test
-- `main/services/remote-server.ts` — `GET /api/reaper/status` + SSE hydrate
-- `renderer/main/use-reaper-state.ts` — live hook (`reaper:status`)
-- `renderer/main/layout-renderer.tsx` — `reaper-status` render case
-- `renderer/settings/sections/layout-editor.tsx` — object palette + inspector
