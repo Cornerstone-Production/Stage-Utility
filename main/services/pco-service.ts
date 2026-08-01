@@ -19,6 +19,9 @@ const TTL_MEDIUM_MS = 3 * 60_000;
 const ATTACH_OPEN_TTL_MS = 10 * 60_000;
 /** Retry budget for transient PCO failures (429 / 5xx / network). */
 const MAX_RETRIES = 3;
+/** Concurrent in-flight PCO requests. PCO allows roughly 100 per 20s per app, so
+ *  the ceiling is well under that even when every slot is retrying. */
+const MAX_CONCURRENT = 4;
 // Per-request PCO logging (~2 lines per uncached /live, ~1 Hz during a service) is
 // off unless STAGE_UTILITY_DEBUG=1 — keeps an unrotated stdout log from ballooning.
 const DEBUG_PCO = process.env.STAGE_UTILITY_DEBUG === "1";
@@ -140,6 +143,9 @@ function toItemColors(raw: unknown, custom: boolean): PcoItemTypeColor[] {
 }
 
 class PcoService {
+  private inFlight = 0;
+  private pending: (() => void)[] = [];
+
   private cache = new Map<string, CacheEntry<unknown>>();
 
   private cacheGet<T>(key: string): T | null {
@@ -191,6 +197,41 @@ class PcoService {
   }
 
   private async request<T extends PcoNode = PcoNode>(
+    url: string,
+    appId: string,
+    secret: string,
+  ): Promise<PcoResponse<T>> {
+    // Every PCO call queues here. Retrying a 429 does not help if the burst that
+    // caused it is still in flight, so the cap is what actually prevents one —
+    // any fan-out over plans or service types is throttled rather than trusted to
+    // be small.
+    const release = await this.acquireSlot();
+    try {
+      return await this.requestInner<T>(url, appId, secret);
+    } finally {
+      release();
+    }
+  }
+
+  /** Wait for a free request slot; resolves with the function that frees it. */
+  private acquireSlot(): Promise<() => void> {
+    return new Promise((resolve) => {
+      const grant = () => {
+        this.inFlight++;
+        let released = false;
+        resolve(() => {
+          if (released) return; // a double release would over-grant the pool
+          released = true;
+          this.inFlight--;
+          this.pending.shift()?.();
+        });
+      };
+      if (this.inFlight < MAX_CONCURRENT) grant();
+      else this.pending.push(grant);
+    });
+  }
+
+  private async requestInner<T extends PcoNode = PcoNode>(
     url: string,
     appId: string,
     secret: string,
