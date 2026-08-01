@@ -14,6 +14,7 @@
 
 import type { BaptismTriggers } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+import { assertSafeKey } from "./safe-key.js";
 
 /** planId → which items start each phase. */
 type File = Record<string, BaptismTriggers>;
@@ -32,6 +33,9 @@ export const baptismTriggersStore = {
   },
 
   async set(planId: string, triggers: BaptismTriggers): Promise<void> {
+    // planId arrives from a request; "__proto__" would write through to the
+    // prototype rather than into the map.
+    assertSafeKey(planId, "planId");
     const all = await this.all();
     // An entry with neither trigger set is the same as none — drop it rather than
     // accumulating an entry for every plan the panel was merely opened on.

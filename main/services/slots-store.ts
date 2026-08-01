@@ -7,6 +7,7 @@
 
 import type { Slot, SlotLink } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+import { assertSafeKey } from "./safe-key.js";
 
 /** v2 -> v3: a single `teamPositionName` + `notesStartsWith` becomes a `positions`
  *  range. Exported for tests. Total by design — DataStore does not deep-merge on
@@ -89,6 +90,10 @@ export const slotsStore = {
   },
 
   async setSlots(displayId: string, serviceTypeId: string, slots: Slot[]): Promise<void> {
+    // Both keys arrive from a request. `map["__proto__"]` is truthy, so the
+    // guard below would pass and the write would land on Object.prototype.
+    assertSafeKey(displayId, "displayId");
+    assertSafeKey(serviceTypeId, "serviceTypeId");
     const map = await loadNormalised();
     if (!map[displayId]) map[displayId] = {};
     map[displayId][serviceTypeId] = slots;
@@ -98,6 +103,8 @@ export const slotsStore = {
   // One-time recovery for display-1: if the active service type has no slots but
   // the legacy "default" bucket has some, adopt them and clear the bucket.
   async adoptDefaultInto(displayId: string, serviceTypeId: string): Promise<Slot[]> {
+    assertSafeKey(displayId, "displayId");
+    assertSafeKey(serviceTypeId, "serviceTypeId");
     const map = await loadNormalised();
     const displayMap = map[displayId] ?? {};
     const existing = displayMap[serviceTypeId] ?? [];
