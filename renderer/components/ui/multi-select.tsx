@@ -82,7 +82,7 @@ export function MultiSelect({
               <button className="text-gray-10 hover:text-gray-12" onClick={() => onChange([])}>None</button>
             </div>
           </div>
-          <div className="p-1 max-h-[min(20rem,var(--radix-popover-content-available-height))] overflow-y-auto">
+          <div className="flex flex-col gap-0.5 p-1 max-h-[min(20rem,var(--radix-popover-content-available-height))] overflow-y-auto">
             {options.map((o) => {
               const on = selectedSet.has(o.value);
               return (
@@ -90,8 +90,11 @@ export function MultiSelect({
                   key={o.value}
                   onClick={() => toggle(o.value)}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-footnote text-fg outline-none",
-                    "hover:bg-fill focus:bg-fill",
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-footnote text-fg outline-none",
+                    // focus-VISIBLE, not focus: a clicked button keeps focus, so
+                    // `focus:` left the row lit after it had been unticked — the
+                    // highlight said "selected" about something that no longer was.
+                    "hover:bg-fill focus-visible:bg-fill",
                     on && "bg-fill",
                   )}
                 >
