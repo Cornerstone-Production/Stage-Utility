@@ -44,13 +44,22 @@ importers, and handing one to the other is refused by name.
 
 Choosing a file inspects it and sorts every service into three buckets: **new**,
 **already here and identical**, and **already here but recorded differently**. Only
-the last needs a decision, and each one gets its own:
+the last needs a decision, and it is **one choice for the whole import** — a control
+per service is unreadable once a year's worth disagrees:
 
 | Choice | What it does |
 |---|---|
-| **Keep** (default) | Leaves this machine's recording exactly as it is. |
+| **Keep mine** (default) | Leaves every one of them exactly as this machine recorded it. |
 | **Merge** | Fills what this machine is missing — plan items, attendance samples and raw CSV rows it never recorded — and changes nothing it already has. |
-| **Replace** | Discards the local copy and takes the archive's. |
+| **Replace mine** | Discards the local copy of each and takes the archive's. |
+
+The choice applies only to services that actually differ. Ones already here and
+identical are left alone, so the result always matches the count the panel showed.
+
+Attendance peaks are recomputed after a merge, since a peak measured over a gap is
+wrong once the gap is filled — but only in-service samples count toward it. The
+recorder deliberately excludes the pre-service ramp and post-service taper from
+peaks, and merging respects that.
 
 Merge exists for one service recorded on two machines, neither with the whole
 thing: a box that restarted at 09:20 is missing twenty minutes another box has.

@@ -43,24 +43,36 @@ interface ImportPlan {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 const CHOICES: { id: Choice; label: string; hint: string }[] = [
-  { id: "skip", label: "Keep", hint: "Leave this machine's recording exactly as it is." },
+  {
+    id: "skip",
+    label: "Keep mine",
+    hint: "Leave every one of them exactly as this machine recorded it. Nothing changes.",
+  },
   {
     id: "merge",
     label: "Merge",
-    hint: "Fill in what this machine is missing. Nothing it already recorded is changed.",
+    hint: "Fill in what this machine is missing — items and samples it never recorded. Nothing it already has is changed.",
   },
-  { id: "replace", label: "Replace", hint: "Discard this machine's recording and take the archive's." },
+  {
+    id: "replace",
+    label: "Replace mine",
+    hint: "Discard this machine's version of each and take the archive's instead.",
+  },
 ];
+
+/** A glance at which services disagree, without a row each. At fifty the list is
+ *  the noise, not the information — the dates that matter are the first few. */
+function summarise(services: ServiceMeta[]): string {
+  const shown = services.slice(0, 3).map((s) => (s.label ? `${s.serviceDate} (${s.label})` : s.serviceDate));
+  const rest = services.length - shown.length;
+  return rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(", ");
+}
 
 export function DataArchivePanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<{ file: File; plan: ImportPlan } | null>(null);
-  const [choices, setChoices] = useState<Record<string, Choice>>({});
+  const [choice, setChoice] = useState<Choice>("skip");
   const [busy, setBusy] = useState(false);
-
-  function choose(key: string, choice: Choice) {
-    setChoices((prev) => ({ ...prev, [key]: choice }));
-  }
 
   function download() {
     window.location.assign("/api/archive/export");
@@ -77,7 +89,7 @@ export function DataArchivePanel() {
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error ?? "Could not read that archive.");
       setPending({ file, plan: body as ImportPlan });
-      setChoices({}); // keeping what is here is always the default
+      setChoice("skip"); // keeping what is here is always the default
 
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -92,10 +104,7 @@ export function DataArchivePanel() {
     try {
       const res = await fetch("/api/archive/import", {
         method: "POST",
-        headers: {
-          ...(merging.length ? { "X-Archive-Merge": merging.join(",") } : {}),
-          ...(replacing.length ? { "X-Archive-Replace": replacing.join(",") } : {}),
-        },
+        headers: { "X-Archive-Mode": choice },
         body: await pending.file.arrayBuffer(),
       });
       const body = await res.json();
@@ -111,7 +120,7 @@ export function DataArchivePanel() {
           : `Import done: ${parts.join(", ")}.`,
       );
       setPending(null);
-      setChoices({});
+      setChoice("skip");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -122,9 +131,8 @@ export function DataArchivePanel() {
   const fresh = pending?.plan.newServices.length ?? 0;
   const identical = pending?.plan.identicalServices.length ?? 0;
   const differing = pending?.plan.differingServices ?? [];
-  const merging = Object.keys(choices).filter((k) => choices[k] === "merge");
-  const replacing = Object.keys(choices).filter((k) => choices[k] === "replace");
-  const willChange = fresh + merging.length + replacing.length;
+  const affected = choice === "skip" ? 0 : differing.length;
+  const willChange = fresh + affected;
 
   return (
     <FieldSet flat>
@@ -172,40 +180,32 @@ export function DataArchivePanel() {
               </span>
 
               {/* The only case worth a decision: here already, but the two copies
-                  disagree. Keep is the default and is never destructive. */}
+                  disagree. One choice covers all of them — a control per service is
+                  unreadable the moment a year's worth disagrees, and picking
+                  individually across fifty is not a thing anyone wants to do. */}
               {differing.length > 0 && (
                 <div className="flex flex-col gap-2">
                   <span className="text-caption2 text-amber-11">
                     {plural(differing.length, "service")} here already but recorded differently in
-                    that file. Keeping this machine&rsquo;s version unless you say otherwise.
+                    that file.
                   </span>
-                  <ul className="flex flex-col gap-2">
-                    {differing.map((s) => (
-                      <li key={s.serviceKey} className="flex flex-wrap items-center gap-2">
-                        <span className="min-w-40 text-caption2 text-gray-11">
-                          <span className="text-gray-12">{s.serviceDate}</span>
-                          {s.label && <span className="text-gray-11"> — {s.label}</span>}
-                        </span>
-                        <ButtonGroup>
-                          {CHOICES.map(({ id, label, hint }) => (
-                            <Button
-                              key={id}
-                              variant={(choices[s.serviceKey] ?? "skip") === id ? "accent" : "filled"}
-                              size="small"
-                              disabled={busy}
-                              title={hint}
-                              onClick={() => choose(s.serviceKey, id)}
-                            >
-                              {label}
-                            </Button>
-                          ))}
-                        </ButtonGroup>
-                      </li>
+                  <span className="text-caption2 text-gray-11">{summarise(differing)}</span>
+                  <ButtonGroup className="self-start">
+                    {CHOICES.map(({ id, label, hint }) => (
+                      <Button
+                        key={id}
+                        variant={choice === id ? "accent" : "filled"}
+                        size="small"
+                        disabled={busy}
+                        title={hint}
+                        onClick={() => setChoice(id)}
+                      >
+                        {label}
+                      </Button>
                     ))}
-                  </ul>
+                  </ButtonGroup>
                   <span className="text-caption2 text-gray-9">
-                    Merge fills what this machine is missing — items and samples it never
-                    recorded — and never changes a figure it already has.
+                    {CHOICES.find((c) => c.id === choice)?.hint}
                   </span>
                 </div>
               )}
@@ -215,8 +215,7 @@ export function DataArchivePanel() {
                   <Button variant="accent" size="small" onClick={runImport} disabled={busy}>
                     {[
                       fresh > 0 && `Add ${fresh}`,
-                      merging.length > 0 && `merge ${merging.length}`,
-                      replacing.length > 0 && `replace ${replacing.length}`,
+                      affected > 0 && `${choice === "merge" ? "merge" : "replace"} ${affected}`,
                     ]
                       .filter(Boolean)
                       .join(", ")

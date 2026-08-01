@@ -70,18 +70,25 @@ interface AttendanceRecord {
  *
  * The peaks are recomputed rather than filled, because a peak taken over a gap is
  * wrong the moment the gap is filled — that is the whole point of merging.
+ *
+ * Only IN-SERVICE samples feed a peak. The recorder tags ramp and taper samples
+ * with a `phase` and leaves the service proper untagged, precisely so an emptying
+ * or filling room does not set the peak (see attendance-recorder.ts). Recomputing
+ * over every sample quietly overrode that and inflated the figure — a service whose
+ * stored peak was 1810 came back as 1915 off a taper sample.
  */
 export function mergeAttendanceRecord(mine: AttendanceRecord, theirs: AttendanceRecord): AttendanceRecord {
   const samples = mergeByKey(mine.samples ?? [], theirs.samples ?? [], (s) => s.t).sort((a, b) =>
     a.t.localeCompare(b.t),
   );
   const out = { ...fillMissingFields(mine, theirs, ["samples"]), samples };
+  const inService = samples.filter((s) => (s as unknown as Record<string, unknown>).phase == null);
   const peakOf = (field: string) =>
-    samples.reduce((m, s) => {
+    inService.reduce((m, s) => {
       const v = (s as unknown as Record<string, unknown>)[field];
       return typeof v === "number" ? Math.max(m, v) : m;
     }, 0);
-  if (samples.length) {
+  if (inService.length) {
     out.peakAttendance = Math.max(mine.peakAttendance ?? 0, peakOf("attendance"));
     out.peakOccupancy = Math.max(mine.peakOccupancy ?? 0, peakOf("occupancy"));
   }

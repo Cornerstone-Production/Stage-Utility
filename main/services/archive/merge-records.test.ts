@@ -125,3 +125,32 @@ test("merging is idempotent — running it twice changes nothing", () => {
   const twice = mergeSplRecord(once, theirs);
   assert.deepEqual(twice, once);
 });
+
+test("a ramp or taper sample never sets the peak", () => {
+  // The recorder tags ramp/taper and leaves the service proper untagged, so that an
+  // emptying or filling room cannot set the peak. Merging must respect that: a real
+  // record came back as 1915 instead of its stored 1810 off a taper sample.
+  const mine = {
+    samples: [{ t: "t2", attendance: 1810, occupancy: 1700 }],
+    peakAttendance: 1810,
+    peakOccupancy: 1700,
+  };
+  const theirs = {
+    samples: [
+      { t: "t1", attendance: 1915, occupancy: 1800, phase: "post" },
+      { t: "t3", attendance: 1400, occupancy: 1300, phase: "pre" },
+    ],
+  };
+  const out = mergeAttendanceRecord(mine, theirs);
+  assert.equal(out.samples!.length, 3, "the tagged samples are still kept");
+  assert.equal(out.peakAttendance, 1810, "the taper sample did not raise the peak");
+  assert.equal(out.peakOccupancy, 1700);
+});
+
+test("an in-service sample from the other machine does raise the peak", () => {
+  const mine = { samples: [{ t: "t2", attendance: 100, occupancy: 90 }], peakAttendance: 100, peakOccupancy: 90 };
+  const theirs = { samples: [{ t: "t1", attendance: 500, occupancy: 480 }] }; // untagged = in service
+  const out = mergeAttendanceRecord(mine, theirs);
+  assert.equal(out.peakAttendance, 500);
+  assert.equal(out.peakOccupancy, 480);
+});

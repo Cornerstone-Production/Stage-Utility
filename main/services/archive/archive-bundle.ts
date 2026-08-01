@@ -302,12 +302,33 @@ export async function inspectArchive(zip: Uint8Array): Promise<ImportPlan> {
  */
 export async function importArchive(
   zip: Uint8Array,
-  opts: { replace?: string[]; merge?: string[] } = {},
+  opts: { mode?: ServiceDisposition; replace?: string[]; merge?: string[] } = {},
 ): Promise<ImportResult> {
   const { files, manifest } = open(zip);
-  const replace = new Set(opts.replace ?? []);
-  const merge = new Set((opts.merge ?? []).filter((k) => !replace.has(k))); // replace wins
   const local = await localServices();
+
+  // `mode` is the choice for the whole import; the key lists are a per-service
+  // override. The UI sends only the mode — one choice covers everything, and a list
+  // of every key would grow past the HTTP header limit on a big archive.
+  //
+  // Mode applies only to services whose content actually DIFFERS. A service already
+  // here and identical has nothing to merge or replace, so it stays skipped — which
+  // is also what keeps the result matching the readout the operator agreed to
+  // ("50 differ" must not come back as "merged 56").
+  const mode = opts.mode ?? "skip";
+  const explicitReplace = new Set(opts.replace ?? []);
+  const explicitMerge = new Set(opts.merge ?? []);
+  const mineByKey = await localRecordsByKey();
+  const theirsByKey = archiveRecordsByKey(files);
+  const contentDiffers = (key: string) =>
+    canonical(mineByKey.get(key) ?? {}) !== canonical(theirsByKey.get(key) ?? {});
+  const dispositionOf = (key: string): ServiceDisposition => {
+    if (explicitReplace.has(key)) return "replace"; // replace wins over merge
+    if (explicitMerge.has(key)) return "merge";
+    return contentDiffers(key) ? mode : "skip";
+  };
+  const replace = { has: (k: string) => dispositionOf(k) === "replace" };
+  const merge = { has: (k: string) => dispositionOf(k) === "merge" };
 
   // ── Read phase: parse every member. Throws before anything is written. ──
   // The three keyed stores share one shape: { services: { [serviceKey]: record } }.

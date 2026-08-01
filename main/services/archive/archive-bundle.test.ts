@@ -280,3 +280,58 @@ test("replace wins over merge when a key is somehow in both lists", async () => 
   assert.deepEqual(res.replaced, ["st1:pMerge:t1"]);
   assert.equal(res.merged.length, 0);
 });
+
+test("mode applies to every service already here, with no per-key list", async () => {
+  await splHistoryStore.upsert(record("st1:pBulkA:t1", "2026-11-01"));
+  await splHistoryStore.upsert(record("st1:pBulkB:t1", "2026-11-08"));
+  const zip = await buildArchive();
+  await splHistoryStore.upsert(record("st1:pBulkA:t1", "2026-11-01", "edited A"));
+  await splHistoryStore.upsert(record("st1:pBulkB:t1", "2026-11-08", "edited B"));
+
+  const res = await importArchive(zip, { mode: "replace" });
+  assert.ok(res.replaced.includes("st1:pBulkA:t1"), JSON.stringify(res.replaced));
+  assert.ok(res.replaced.includes("st1:pBulkB:t1"));
+  assert.ok(!res.skipped.includes("st1:pBulkA:t1"), "a differing service is not skipped under mode replace");
+  assert.ok(!res.skipped.includes("st1:pBulkB:t1"));
+  assert.equal((await splHistoryStore.get("st1:pBulkA:t1"))!.planTitle, "Plan");
+  assert.equal((await splHistoryStore.get("st1:pBulkB:t1"))!.planTitle, "Plan");
+});
+
+test("the default mode is skip — an import with no choice changes nothing", async () => {
+  await splHistoryStore.upsert(record("st1:pBulkA:t1", "2026-11-01", "mine again"));
+  const res = await importArchive(await buildArchive());
+  assert.equal(res.replaced.length, 0);
+  assert.equal(res.merged.length, 0);
+  assert.equal((await splHistoryStore.get("st1:pBulkA:t1"))!.planTitle, "mine again");
+});
+
+test("an explicit key still overrides the mode for that one service", async () => {
+  await splHistoryStore.upsert(record("st1:pBulkA:t1", "2026-11-01"));
+  await splHistoryStore.upsert(record("st1:pBulkB:t1", "2026-11-08"));
+  const zip = await buildArchive();
+  await splHistoryStore.upsert(record("st1:pBulkA:t1", "2026-11-01", "keep me"));
+  await splHistoryStore.upsert(record("st1:pBulkB:t1", "2026-11-08", "swap me"));
+
+  const res = await importArchive(zip, { mode: "merge", replace: ["st1:pBulkB:t1"] });
+  assert.ok(res.replaced.includes("st1:pBulkB:t1"), JSON.stringify(res));
+  assert.ok(res.merged.includes("st1:pBulkA:t1"));
+  assert.equal((await splHistoryStore.get("st1:pBulkA:t1"))!.planTitle, "keep me", "merge kept the local title");
+  assert.equal((await splHistoryStore.get("st1:pBulkB:t1"))!.planTitle, "Plan", "replace took the archive's");
+});
+
+test("mode does not touch services that are already identical", async () => {
+  // The readout promises a count of DIFFERING services; the result has to match it,
+  // or "50 differ" comes back as "merged 56" and the operator was told the wrong thing.
+  await splHistoryStore.upsert(record("st1:pSameAsArchive:t1", "2026-12-06"));
+  const zip = await buildArchive();
+  const plan = await inspectArchive(zip);
+  const res = await importArchive(zip, { mode: "merge" });
+
+  assert.ok(res.skipped.includes("st1:pSameAsArchive:t1"), "identical service left alone");
+  assert.ok(!res.merged.includes("st1:pSameAsArchive:t1"));
+  assert.equal(
+    res.merged.length + res.replaced.length,
+    plan.differingServices.length,
+    "exactly the services the readout said would change",
+  );
+});

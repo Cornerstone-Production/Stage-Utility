@@ -35,12 +35,12 @@ export async function archiveRoutes({ req, res, pathname, method }: RouteCtx): P
   if (method === "POST" && pathname === "/api/archive/import") {
     try {
       const raw = await readRawBody(req);
-      // The per-service choices ride in headers because the body is the zip itself.
-      const keys = (name: string): string[] => {
-        const v = req.headers[name];
-        return typeof v === "string" && v ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
-      };
-      json(res, await importArchive(raw, { replace: keys("x-archive-replace"), merge: keys("x-archive-merge") }));
+      // The choice rides in a header because the body is the zip itself. It is one
+      // mode for the whole import rather than a list of keys, which would grow past
+      // the header limit once an archive holds a couple of hundred services.
+      const m = req.headers["x-archive-mode"];
+      const mode = m === "merge" || m === "replace" ? m : "skip";
+      json(res, await importArchive(raw, { mode }));
     } catch (err) {
       error(res, err instanceof Error ? err.message : String(err));
     }
