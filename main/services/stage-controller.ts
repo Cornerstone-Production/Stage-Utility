@@ -2187,7 +2187,7 @@ export class StageController {
     if (sig === this.lastBroadcastSig) return;
     this.lastBroadcastSig = sig;
     // Reuse the dedupe serialization as the SSE frame body so the fan-out doesn't
-    // re-stringify the full state (which carries base64 branding blobs).
+    // re-stringify the full state once per client.
     broadcast("stage:state-changed", this.state, sig);
   }
 }

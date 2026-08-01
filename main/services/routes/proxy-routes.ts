@@ -112,7 +112,15 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
         const mime =
           ext === "png" ? "image/png" : ext === "gif" ? "image/gif" : "image/jpeg";
         const data = await fs.readFile(localPath);
-        res.writeHead(200, { "Content-Type": mime });
+        // Cache hard. The upstream URL is content-addressed by PCO — the path holds
+        // the upload timestamp (`/person/<id>-<uploaded>/avatar.png`), so a new
+        // photo is a new URL and therefore a new cache key. Without this header a
+        // display re-downloaded every face on every load: nine photos at ~500 KB is
+        // ~4.5 MB per reload, per screen, for images that had not changed.
+        res.writeHead(200, {
+          "Content-Type": mime,
+          "Cache-Control": "public, max-age=31536000, immutable",
+        });
         res.end(data);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
