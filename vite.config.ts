@@ -37,6 +37,14 @@ export default defineConfig({
     tailwindcss(),
   ],
 
+  // `@renderer/*` is declared in tsconfig.json, which is enough for tsc and for the
+  // production build, but the dev server does not read tsconfig paths — so an import
+  // through the alias type-checked, built, and then 500'd the moment anyone opened
+  // the page in dev. Declared here too, pointing at the same place.
+  resolve: {
+    alias: { "@renderer": resolve(__dirname, "renderer") },
+  },
+
   // Multi-page: kiosk display + settings panel
   build: {
     rollupOptions: {
