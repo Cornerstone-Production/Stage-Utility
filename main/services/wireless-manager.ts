@@ -12,6 +12,10 @@ import { deviceManager } from "./device-manager.js";
 import { settingsStore } from "./settings-store.js";
 import { wirelessStore } from "./wireless-store.js";
 
+/** The fastest metering interval worth allowing. Below this the polling costs
+ *  more than the freshness is worth, and 0 is a busy loop. */
+const MIN_METER_RATE_MS = 100;
+
 class WirelessManager {
   // In-memory list of connections including runtime fields.
   private connections: WirelessConnection[] = [];
@@ -54,7 +58,10 @@ class WirelessManager {
   }
 
   async setMeterRate(ms: number): Promise<{ ms: number }> {
-    const next = Math.max(0, Math.floor(ms));
+    // Floored, not just made non-negative. The route accepts any number >= 0,
+    // and 0 has no meaning here — it becomes setInterval(poll, 0), a busy loop
+    // that pegs a core on a Pi and floods the LAN with device polls.
+    const next = Math.max(MIN_METER_RATE_MS, Math.floor(ms));
     console.log(`[wireless] setMeterRate → ${next}ms`);
     this.meterRateMs = next;
     await settingsStore.patch({ wirelessMeterRateMs: next });
