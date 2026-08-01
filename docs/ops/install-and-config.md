@@ -5,25 +5,60 @@ auto-starts.
 
 ## Install
 
-| Platform | Auto-start | Install |
-|---|---|---|
-| **Linux** (Pi or server) | systemd | `sudo ./scripts/install.sh` |
-| **macOS** | launchd | manual build + a plist |
-| **Windows** | NSSM service | manual build + service |
+One line, on any supported machine. Nothing to clone, no Node to install, no
+build step — the download carries its own runtime.
 
-Step-by-step for each is in [INSTALL.md](../../INSTALL.md).
+**Linux and macOS**
 
-On Linux the installer checks Node, builds the UI, creates the data directory and
-installs an auto-starting `stage-utility` service. Re-run it after `git pull` to
-update, or use the in-app updater. `sudo ./scripts/uninstall.sh` removes it.
+```bash
+curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.sh | sudo bash
+```
 
-To run it by hand on any OS, without auto-start:
+**Windows** — in an Administrator PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.ps1 | iex
+```
+
+It works out which build this machine needs, verifies the download against the
+published checksums, registers an auto-starting service, waits for the server to
+answer, and prints the address to open. If any of that fails it stops before
+writing anything.
+
+| Platform | Architectures | Auto-start | Installs to |
+|---|---|---|---|
+| Linux (Pi or server) | x64, arm64 | systemd | `/opt/stage-utility` |
+| macOS | Apple silicon, Intel | launchd | `/usr/local/stage-utility` |
+| Windows | x64 | Scheduled task | `C:\Program Files\Stage Utility` |
+
+A 32-bit Raspberry Pi OS is not published; the arm64 build runs on a 64-bit one.
+
+Options, set as environment variables before the command:
+
+| | |
+|---|---|
+| `STAGE_TRACK=beta` | follow prereleases instead of stable |
+| `STAGE_VERSION=v1.9.2` | pin an exact release |
+| `STAGE_PORT=8080` | serve on a different port |
+| `STAGE_DATA=/srv/stage` | put config and history somewhere else |
+| `STAGE_NO_SERVICE=1` | install the files, register nothing |
+
+After that, update from **Settings → Advanced → Updates** — see
+[Releases and distribution](distribution.md).
+
+### From a checkout instead
+
+For development, or to run a modified copy:
 
 ```bash
 npm ci
 npm run build
 npm start          # → http://localhost:8788/
 ```
+
+`sudo ./scripts/install.sh` registers a systemd service from a checkout, building
+from source and requiring Node ≥ 24 on the machine. `sudo ./scripts/uninstall.sh`
+removes it. Step-by-step per platform is in [INSTALL.md](../../INSTALL.md).
 
 ## Updates
 
