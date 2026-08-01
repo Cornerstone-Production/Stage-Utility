@@ -5,7 +5,8 @@
 // RossTalk targets and ScriptView layouts among them.
 //
 // So rather than trusting the list to be maintained by hand, this scans the source
-// for every DataStore and requires each one to be classified: backed up, or
+// for every DataStore and KeyedRecordStore and requires each one to be classified:
+// backed up, or
 // deliberately runtime. Adding a store without deciding which is a CI failure.
 
 import assert from "node:assert/strict";
@@ -24,6 +25,12 @@ function declaredStores(): { file: string; store: string }[] {
   for (const f of readdirSync(SERVICES_DIR)) {
     if (!f.endsWith(".ts") || f.endsWith(".test.ts")) continue;
     const src = readFileSync(path.join(SERVICES_DIR, f), "utf8");
+    // KeyedRecordStore is the other persistence primitive: it takes the legacy
+    // single-document filename as its second argument, which is the name that has
+    // to be classified. A store added through it must not slip past this scan.
+    for (const m of src.matchAll(/new KeyedRecordStore<[^>]*>\(\s*"[^"]+",\s*"([^"]+\.json)"/g)) {
+      out.push({ file: f, store: m[1] });
+    }
     for (const m of src.matchAll(/new DataStore<[^>]*>\(\s*"([^"]+\.json)"/g)) {
       out.push({ file: f, store: m[1] });
     }

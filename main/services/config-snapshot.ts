@@ -57,6 +57,10 @@ export const CONFIG_FILES = [
  *  would fabricate services that machine never ran. Listed explicitly so the drift
  *  test can tell "considered and excluded" from "forgotten". */
 export const RUNTIME_FILES = [
+  // These three are now directories of per-service files (spl-history/, …); the
+  // legacy single-document names are kept here because that is what the drift scan
+  // matches on, and because an install that has not booted since the split still
+  // has them on disk.
   "spl-history.json",
   "attendance-history.json",
   "service-timeline.json",
