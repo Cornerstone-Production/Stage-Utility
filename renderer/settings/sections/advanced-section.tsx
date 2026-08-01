@@ -884,18 +884,19 @@ export function AdvancedSection({
       </FieldSet>
 
       <FieldSet>
-        <Collapsible label="Automatic backups" summary="Save a copy on a schedule" headerClassName="px-4 py-2.5">
-          <AutoBackupPanel />
-        </Collapsible>
-      </FieldSet>
-
-      <FieldSet>
         <Collapsible
           label="Data archive"
           summary="Download & restore what the app recorded"
           headerClassName="px-4 py-2.5"
         >
           <DataArchivePanel />
+        </Collapsible>
+      </FieldSet>
+
+      {/* Last, because it schedules the two above rather than being a third thing to back up. */}
+      <FieldSet>
+        <Collapsible label="Automatic backups" summary="Save a copy on a schedule" headerClassName="px-4 py-2.5">
+          <AutoBackupPanel />
         </Collapsible>
       </FieldSet>
     </div>
