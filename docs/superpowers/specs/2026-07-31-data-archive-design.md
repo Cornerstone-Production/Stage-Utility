@@ -35,8 +35,8 @@ happens whenever the only thing kept is the answer.
 | Baptism timer | operator-driven | ✓ per-person durations are the raw data |
 
 Two of these destroy genuinely analysable data: **SPL** and **wireless telemetry**.
-Wireless has never been stored at all, so "which pack was dying" or "how does this
-transmitter's battery behave over a year" cannot be asked at all today.
+**Only SPL is in v1** — wireless is deferred (see Out of scope), because nothing
+depends on it yet and it is two thirds of the bytes.
 
 The rest are **state changes**, not measurements. They belong in an event log rather
 than a sample series.
@@ -65,7 +65,6 @@ fidelity on nested shapes (per-metric maps, sample arrays), and buy no durabilit
   2026-07-26_st1-p123-t9/          one service occurrence (sanitised serviceKey)
     manifest.json                  schema version, serviceKey, counts, first/last sample
     spl.csv                        1 row per tick, 1 column per metric
-    wireless.csv                   1 row per tick, RF + battery per channel
     attendance.csv                 1 row per poll
     events.csv                     item changes, OBS/REAPER state, OSC feedback, automation fires
     baptisms.csv                   1 row per person
@@ -95,29 +94,35 @@ ragged one; the manifest lists both.
 | | per service | per year (2×52) |
 |---|---|---|
 | SPL (1 Hz, ~10 metrics) | 0.41 MB | 43 MB |
-| Wireless (1 Hz, 16 channels) | 0.95 MB | 99 MB |
 | Attendance + events + baptisms | 0.04 MB | 4 MB |
-| **Total** | **~1.4 MB** | **~150 MB** (~15 MB gzipped) |
+| **Total** | **~0.45 MB** | **~47 MB** (~5 MB gzipped) |
 
 Small enough that no retention policy is needed for years. A prune is out of scope;
 if it is ever wanted it should be an explicit operator action, never automatic.
 
+Adding wireless later roughly triples this, to ~1.4 MB/service and ~150 MB/year,
+which is still small. Size is not the reason it is deferred.
+
 ### When recording happens
 
-**While a service record is open** — the same gate the existing recorders use,
-including the pre-service ramp and post-service taper.
+**Only while a service record is open** — the same gate the existing recorders use,
+including the pre-service ramp and post-service taper. Nothing is written outside a
+service.
 
-This is a deliberate narrowing of "every sample that comes into the app". Recording
-around the clock would be roughly 25 MB/day (~9 GB/year), and samples taken on a
-Tuesday afternoon have no service to belong to and nothing to be analysed against.
-If continuous capture is wanted later it is the same writer with a different gate,
-so nothing here forecloses it.
+Continuous capture is not wanted: samples taken on a Tuesday afternoon have no
+service to belong to and nothing to be analysed against, and SPL alone would be
+~7.8 MB/day (~2.8 GB/year) of it. Should that ever change it is the same writer with
+a different gate, so nothing here forecloses it.
 
 ## Export
 
 A **data archive**, distinct from the config snapshot: a zip of `archive/` plus the
 derived history stores, with a top-level manifest listing schema version, app
 version and the services inside.
+
+It gets its own control, worded so the two are not mistaken for each other — the
+config snapshot restores how the app is set up, the data archive restores what it
+recorded, and importing the wrong one is not a mistake that announces itself.
 
 It is separate on purpose. History is currently excluded from the config snapshot
 with good reason — *"restoring them onto another install would fabricate services
@@ -168,16 +173,13 @@ Pure and file-level, no network:
 
 ## Out of scope
 
+- **Wireless RF and battery.** Nothing depends on it today and it is two thirds of
+  the bytes, so it waits. The writer is per-source and the layout already allows a
+  `wireless.csv` alongside the others, so adding it later is a new caller rather than
+  a change to anything here — but it does mean battery and RF history only starts
+  whenever that happens, not now.
 - Converting the existing stores to CSV. They stay JSON; see Design.
 - Retention/pruning.
 - Continuous (non-service) capture.
 - Transcript archiving — large, and a different problem with its own privacy questions.
 - Recomputing past services. There is nothing to recompute them from.
-
-## To decide before building
-
-1. **Wireless telemetry: in or out of v1?** It is the larger half of the bytes and
-   has never been recorded, so nothing depends on it yet — but it is also the only
-   way battery and RF history ever becomes answerable.
-2. **Should the archive export be offered in the same place as the config export**,
-   or somewhere separate enough that the two are never confused?
