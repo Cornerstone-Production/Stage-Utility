@@ -226,7 +226,10 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           already pointed at it — a Pi, a bookmark, a printed QR — keeps working
           whatever is typed here. */}
       <div className="flex items-center gap-2 border-t border-line px-3 py-2">
-        <span className="shrink-0 text-caption2 text-fg-subtle">Also at</span>
+        {/* Mono throughout: the label butting against a mono URL in the UI face
+            read as two different things stuck together, and the row above this one
+            is all mono. */}
+        <span className="shrink-0 font-mono text-caption2 text-fg-faint">Also at</span>
         <span className="shrink-0 font-mono text-caption2 text-fg-subtle">{baseUrl}/</span>
         <Input
           value={editSlug}

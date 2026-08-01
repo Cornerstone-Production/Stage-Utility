@@ -663,6 +663,45 @@ interface SseListener {
 let eventSource: EventSource | null = null;
 const sseListeners: SseListener[] = [];
 
+/**
+ * Channels the server pushes a snapshot of the moment a stream connects.
+ *
+ * That hydrate fires once, at connect — so a component that mounts later (any
+ * settings tab, for instance) misses it and then only hears about *changes*. In a
+ * steady state there are none, which is how the Displays tab could sit on
+ * "Offline" while the server knew the screen was connected.
+ *
+ * The last payload for each of these is kept and replayed to a late subscriber.
+ * Every one is a state snapshot, so replaying it is what the subscriber would have
+ * received had it been listening. Command channels (display:refresh) are
+ * deliberately absent — replaying one of those would re-fire the command.
+ *
+ * `hydrated-channels.test.ts` reads remote-server.ts and fails if the two lists
+ * drift, so a new hydrated channel cannot silently reintroduce the bug.
+ */
+export const HYDRATED_CHANNELS = [
+  "server:hello",
+  "stage:state-changed",
+  "pco:live",
+  "propresenter:status",
+  "propresenter:instances",
+  "spl:metrics",
+  "spl:history",
+  "attendance:history",
+  "service-timeline:history",
+  "baptism:state",
+  "obs:status",
+  "reaper:status",
+  "update:status",
+  "osc:feedback",
+  "people:count",
+  "displays:presence",
+] as const;
+
+const hydratedSet = new Set<string>(HYDRATED_CHANNELS);
+/** Last payload seen per hydrated channel, for replay to late subscribers. */
+const lastPayload = new Map<string, unknown>();
+
 // Stable per-context client id, sent on the SSE URL so the server can scope this
 // stream's channel filter to us. crypto.randomUUID is unavailable in an insecure
 // context (prod is plain HTTP), so guard it and fall back.
@@ -741,6 +780,21 @@ function ensureEventSource(): EventSource {
   console.log("[api] (re)connecting SSE at /api/events");
   eventSource = new EventSource(`/api/events?cid=${encodeURIComponent(CLIENT_ID)}`);
 
+  // Capture every hydrated channel's snapshot whether or not anything is listening
+  // yet — that is the whole point, since the hydrate lands before the tab that
+  // wants it has mounted. These are attached directly to the EventSource and are
+  // deliberately NOT in `sseListeners`, so they do not widen the channel filter
+  // reported to the server.
+  for (const channel of HYDRATED_CHANNELS) {
+    eventSource.addEventListener(channel, (e: MessageEvent) => {
+      try {
+        lastPayload.set(channel, JSON.parse(e.data));
+      } catch {
+        /* a malformed frame is the dispatcher's problem, not the cache's */
+      }
+    });
+  }
+
   // Re-attach all registered listeners on reconnect.
   for (const entry of sseListeners) {
     eventSource.addEventListener(entry.channel, entry.handler);
@@ -784,7 +838,9 @@ export function onNotification(
 
   const handler = (e: MessageEvent) => {
     try {
-      cb(JSON.parse(e.data));
+      const payload = JSON.parse(e.data);
+      if (hydratedSet.has(channel)) lastPayload.set(channel, payload);
+      cb(payload);
     } catch (err) {
       console.error(`[api] SSE parse error for "${channel}":`, err);
     }
@@ -792,6 +848,13 @@ export function onNotification(
 
   const entry: SseListener = { channel, handler };
   sseListeners.push(entry);
+
+  // Replay the connect-time snapshot this subscriber was too late for. Deferred
+  // so a caller cannot receive it synchronously during its own render.
+  if (hydratedSet.has(channel) && lastPayload.has(channel)) {
+    const cached = lastPayload.get(channel);
+    queueMicrotask(() => cb(cached));
+  }
 
   const es = ensureEventSource();
   es.addEventListener(channel, handler);
