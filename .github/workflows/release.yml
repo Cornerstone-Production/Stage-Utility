@@ -24,6 +24,11 @@ name: Release
 on:
   push:
     branches: [beta, main]
+  # Re-run a release by hand — after fixing a credential, say, or a step that
+  # failed downstream of the tag. Safe to press: with nothing new since the last
+  # tag the run stands down rather than minting a version, and a tag that
+  # already exists is never rewritten.
+  workflow_dispatch:
 
 # Two pushes in quick succession must not both try to tag.
 concurrency:
