@@ -41,7 +41,7 @@
     "qrcode": "^1.5.4",
     "radix-ui": "^1.6.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1",
+    "react-dom": "^19.2.8",
     "read-excel-file": "^9.3.5",
     "tailwind-merge": "^3.3.1",
     "tsx": "^4.20.5",
