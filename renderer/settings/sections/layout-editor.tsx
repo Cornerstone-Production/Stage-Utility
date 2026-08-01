@@ -70,6 +70,19 @@ import {
   isLockedInTree,
   type FracRect,
 } from "../../main/layout-tree";
+import {
+  GRID,
+  HANDLES,
+  MIN,
+  applyResize,
+  clamp,
+  gridUnits,
+  handleCursor,
+  hexForInput,
+  snapRectToGrid,
+  snapTo,
+  type Handle,
+} from "./layout-geometry.js";
 import { useSplState } from "../../main/use-spl-state";
 import { useWirelessChannels } from "../../main/use-wireless-channels";
 import { usePeopleCountState } from "../../main/use-people-count-state";
@@ -307,8 +320,6 @@ export function confidenceMonitorTemplate(): LayoutObject[] {
   return [bar, hero, next, ...tiles];
 }
 
-const GRID = 96; // snap steps across the canvas (finer grid = ~half-size cells)
-const MIN = 0.03;
 
 // Canvas aspect presets. Resolution is irrelevant (the renderer scales the design
 // canvas to fit any screen, incl. 4K) — only the aspect/orientation matters.
@@ -323,87 +334,12 @@ const CANVAS_PRESETS: { id: string; label: string; w: number; h: number }[] = [
   { id: "3:2", label: "3:2", w: 1620, h: 1080 },
   { id: "5:4", label: "5:4", w: 1350, h: 1080 },
 ];
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-// A native <input type="color"> only accepts solid "#rrggbb". Style colors can be
-// translucent rgba() (the glass presets), #rgb, #rrggbbaa, var(), or named — so
-// coerce to a solid hex for the swatch's value (dropping alpha) to avoid the
-// browser's "does not conform to #rrggbb" warning. The stored style keeps its
-// original value until the user picks a new one.
-function hexForInput(v: string | null | undefined, fallback: string): string {
-  if (!v) return fallback;
-  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v;
-  const m3 = v.match(/^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/);
-  if (m3) return `#${m3[1]}${m3[1]}${m3[2]}${m3[2]}${m3[3]}${m3[3]}`;
-  const m8 = v.match(/^#([0-9a-fA-F]{6})[0-9a-fA-F]{2}$/);
-  if (m8) return `#${m8[1]}`;
-  const rgb = v.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
-  if (rgb) {
-    const h = (n: number) => clamp(n, 0, 255).toString(16).padStart(2, "0");
-    return `#${h(+rgb[1])}${h(+rgb[2])}${h(+rgb[3])}`;
-  }
-  return fallback;
-}
 
-// Grid step per axis. x is a plain fraction of width (1/GRID); y is scaled by the
-// canvas aspect so the cell is the SAME number of px on both axes (a SQUARE grid),
-// regardless of canvas shape. Snapping uses these so objects land on the lines you
-// see — including objects nested in a container (snapping is done in absolute
-// canvas space, then converted back to the parent's local coords).
-// Derive grid units from the actual rendered box aspect (boxW/boxH) so the snap
-// grid matches the SQUARE grid drawn on that box — correct whether the canvas is
-// letterboxed (box aspect == design aspect) or fills the window (box aspect ==
-// window aspect).
-function gridUnits(boxW: number, boxH: number): { xUnit: number; yUnit: number } {
-  return { xUnit: 1 / GRID, yUnit: boxH > 0 ? (boxW / boxH) / GRID : 1 / GRID };
-}
-const snapTo = (v: number, unit: number) => Math.round(v / unit) * unit;
 
-// Snap a parent-LOCAL rect to the grid. Composes to absolute, snaps x/y (and w/h
-// when `size`), then localizes back so nested objects align to the same visible
-// grid as top-level ones. `boxW`/`boxH` are the rendered canvas box dimensions.
-function snapRectToGrid(
-  local: FracRect,
-  parentAbs: FracRect,
-  boxW: number,
-  boxH: number,
-  size: boolean,
-): FracRect {
-  const { xUnit, yUnit } = gridUnits(boxW, boxH);
-  const abs = composeRect(parentAbs, local);
-  const snapped = {
-    x: snapTo(abs.x, xUnit),
-    y: snapTo(abs.y, yUnit),
-    w: size ? Math.max(xUnit, snapTo(abs.w, xUnit)) : abs.w,
-    h: size ? Math.max(yUnit, snapTo(abs.h, yUnit)) : abs.h,
-  };
-  return localizeRect(parentAbs, snapped);
-}
 
-type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
-const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
-function handleCursor(h: Handle): string {
-  if (h === "n" || h === "s") return "ns-resize";
-  if (h === "e" || h === "w") return "ew-resize";
-  if (h === "nw" || h === "se") return "nwse-resize";
-  return "nesw-resize";
-}
 
-function applyResize(start: LayoutObject, h: Handle, dx: number, dy: number): Pick<LayoutObject, "x" | "y" | "w" | "h"> {
-  let { x, y, w, h: hh } = start;
-  if (h.includes("e")) w = start.w + dx;
-  if (h.includes("s")) hh = start.h + dy;
-  if (h.includes("w")) { x = start.x + dx; w = start.w - dx; }
-  if (h.includes("n")) { y = start.y + dy; hh = start.h - dy; }
-  if (w < MIN) { if (h.includes("w")) x = start.x + start.w - MIN; w = MIN; }
-  if (hh < MIN) { if (h.includes("n")) y = start.y + start.h - MIN; hh = MIN; }
-  x = clamp(x, 0, 1 - w);
-  y = clamp(y, 0, 1 - hh);
-  w = Math.min(w, 1 - x);
-  hh = Math.min(hh, 1 - y);
-  return { x, y, w, h: hh };
-}
 
 // Recursive visual render for the editor canvas. Mirrors the renderer's
 // RenderObject but DIMS hidden objects (by their own flag only) instead of
