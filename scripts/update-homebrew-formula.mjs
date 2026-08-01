@@ -9,9 +9,14 @@
 // Reads the checksums the release already publishes rather than re-hashing
 // anything, so the formula can only ever agree with what was actually shipped.
 //
-//   node scripts/update-homebrew-formula.mjs <version> [--sums path/to/SHA256SUMS]
+//   node scripts/update-homebrew-formula.mjs <version> --sums path/to/SHA256SUMS
 //
-// With no --sums it downloads SHA256SUMS from the release.
+// The checksum file is always a local path, never fetched here. The release
+// workflow already has it — it built it — and a script that writes a file people
+// install from should not also be the thing deciding what to trust off the
+// network. To run this by hand, download it first:
+//
+//   gh release download v<version> --pattern SHA256SUMS
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -19,27 +24,19 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FORMULA = path.join(ROOT, "packaging", "homebrew", "stage-utility.rb");
-const REPO = process.env.STAGE_REPO ?? "Cornerstone-Production/Stage-Utility";
 
 const version = process.argv[2];
-if (!version) {
-  console.error("usage: update-homebrew-formula.mjs <version> [--sums <file>]");
+const sumsArg = process.argv.indexOf("--sums");
+if (!version || sumsArg === -1 || !process.argv[sumsArg + 1]) {
+  console.error("usage: update-homebrew-formula.mjs <version> --sums <SHA256SUMS>");
+  console.error("  get the file with: gh release download v<version> --pattern SHA256SUMS");
   process.exit(1);
 }
-const sumsArg = process.argv.indexOf("--sums");
 
 /** The platforms Homebrew can install. Windows is not one of them. */
 const PLATFORMS = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"];
 
-async function readSums() {
-  if (sumsArg > -1) return fs.readFileSync(process.argv[sumsArg + 1], "utf8");
-  const url = `https://github.com/${REPO}/releases/download/v${version}/SHA256SUMS`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`could not fetch ${url}: ${res.status}`);
-  return res.text();
-}
-
-const sums = await readSums();
+const sums = fs.readFileSync(process.argv[sumsArg + 1], "utf8");
 
 /** platform -> sha256, from the release's own checksum file. */
 const bySha = new Map();
