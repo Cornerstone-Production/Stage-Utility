@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "../lib/api";
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue, toast } from "../components/ui";
 import { usePlanItems } from "./use-plan-items";
+import { useStageState } from "./use-stage-state";
 
 /**
  * Which items in THIS plan start each phase of the timer.
@@ -17,6 +18,7 @@ import { usePlanItems } from "./use-plan-items";
  */
 export function BaptismTriggersPanel() {
   const plan = usePlanItems();
+  const auto = useStageState().state?.baptismAutoStart ?? null;
   const [testimonyItemId, setTestimony] = useState<string>("");
   const [baptismItemId, setBaptism] = useState<string>("");
   const [loaded, setLoaded] = useState(false);
@@ -57,6 +59,17 @@ export function BaptismTriggersPanel() {
   // Headers are section markers, not things that go live on their own.
   const options = plan.items.filter((i) => i.itemType !== "header");
 
+  // What will actually happen this week. Both triggers gate themselves — the keyword
+  // only matches an item that exists, and a plan nobody bound has no bindings — so
+  // the setting can be left on all year and simply does nothing on an ordinary
+  // weekend. This says which of those is the case, rather than leaving it to be
+  // inferred from an empty panel.
+  const keyword = auto?.enabled ? auto.testimonyKeyword.trim().toLowerCase() : "";
+  const keywordMatch = keyword ? options.find((i) => (i.title ?? "").toLowerCase().includes(keyword)) : undefined;
+  const testimonyItem = options.find((i) => i.id === testimonyItemId) ?? keywordMatch;
+  const baptismItem = options.find((i) => i.id === baptismItemId);
+  const armed = !!testimonyItem;
+
   const picker = (value: string, onPick: (v: string) => void, label: string) => (
     <Select
       value={value}
@@ -87,8 +100,26 @@ export function BaptismTriggersPanel() {
     <div className="flex flex-col gap-2 rounded-xl border border-gray-5 bg-gray-2 p-4">
       <span className="text-caption1 font-medium text-gray-11">Start from this plan</span>
       <span className="text-caption2 text-gray-9">
-        When one of these items goes live in Planning Center, the timer moves itself on — so the
-        producer isn&rsquo;t starting two things at once. Leave unset to run it by hand.
+        {armed ? (
+          <>
+            This plan will start the testimonies at{" "}
+            <span className="text-gray-12">&ldquo;{testimonyItem?.title}&rdquo;</span>
+            {testimonyItemId ? "" : " (found by the keyword in Advanced)"}, and{" "}
+            {baptismItem ? (
+              <>
+                switch to the baptisms at{" "}
+                <span className="text-gray-12">&ldquo;{baptismItem.title}&rdquo;</span>.
+              </>
+            ) : (
+              <>the switch to the baptisms is still by hand.</>
+            )}
+          </>
+        ) : (
+          <>
+            Nothing on this plan starts the timer, so it runs by hand — which is what an ordinary
+            weekend wants. Pick the items below on a baptism week.
+          </>
+        )}
       </span>
       <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
         <span className="w-32 shrink-0 text-caption1 text-gray-11">Testimonies</span>

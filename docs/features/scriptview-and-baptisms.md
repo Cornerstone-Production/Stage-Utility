@@ -221,6 +221,20 @@ baptisms. It never restarts and never fires while the phase it would start is
 already running, so a re-fired item or a PCO re-sync cannot wipe a session underway.
 The operator page says which item started it, with reset one tap away.
 
+### It gates itself on non-baptism weeks
+
+Neither trigger needs turning off between baptism Sundays, because neither can fire
+without something to fire on. The keyword only matches an item that exists, and an
+ordinary plan has no "Baptism Stories" in it; the per-plan bindings only exist for
+plans somebody set them on. So the setting can be left enabled all year.
+
+The one way to break that is a keyword loose enough to match something else — plain
+"baptism" would catch a "Baptism class signup" announcement, where the default
+"baptism stories" would not. The Baptisms tab therefore says, for the plan actually
+loaded, which item will start the testimonies and which will start the baptisms, or
+that nothing on this plan will — so an armed week can be told from an ordinary one
+without guessing.
+
 ### Pause
 
 A segment is "time already banked, plus time since it last resumed"
