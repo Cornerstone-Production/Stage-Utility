@@ -110,3 +110,50 @@ describe("serviceWindow.capDelayMs", () => {
     assert.equal(serviceWindow.msUntilNextOpen(now), Infinity);
   });
 });
+
+// ── pollDelayMs — steady cadence, stretched when nothing is happening ───────
+
+test("a poller keeps its normal cadence inside a service window", () => {
+  const now = Date.now();
+  serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
+  serviceWindow.setWindows([{ open: now - 60_000, close: now + 600_000 }]);
+  assert.equal(serviceWindow.pollDelayMs(4000, 300_000, now), 4000);
+});
+
+test("a poller backs off to the dormant ceiling outside every window", () => {
+  const now = Date.now();
+  serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
+  serviceWindow.setWindows([{ open: now + 24 * 3600_000, close: now + 25 * 3600_000 }]);
+  assert.equal(serviceWindow.pollDelayMs(4000, 300_000, now), 300_000);
+});
+
+test("a dormant poller never sleeps past the next window opening", () => {
+  const now = Date.now();
+  serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
+  // Window opens in 90s — a 5-minute ceiling would overshoot the ramp-up.
+  serviceWindow.setWindows([{ open: now + 90_000, close: now + 3600_000 }]);
+  assert.equal(serviceWindow.pollDelayMs(4000, 300_000, now), 90_000);
+});
+
+test("with no windows known the poller stays awake, rather than going quiet", () => {
+  // No PCO credentials, or the schedule fetch failed. Going dormant because we
+  // could not work out the schedule is how a service gets missed.
+  serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
+  serviceWindow.setWindows([]);
+  assert.equal(serviceWindow.pollDelayMs(4000, 300_000, Date.now()), 4000);
+});
+
+test("with the feature switched off the poller is untouched", () => {
+  const now = Date.now();
+  serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE, enabled: false });
+  serviceWindow.setWindows([{ open: now + 24 * 3600_000, close: now + 25 * 3600_000 }]);
+  assert.equal(serviceWindow.pollDelayMs(4000, 300_000, now), 4000);
+  serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
+});
+
+test("the dormant delay is never shorter than the active cadence", () => {
+  const now = Date.now();
+  serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
+  serviceWindow.setWindows([{ open: now + 500, close: now + 3600_000 }]);
+  assert.ok(serviceWindow.pollDelayMs(4000, 300_000, now) >= 4000);
+});

@@ -684,8 +684,6 @@ export interface SplItemHistory {
   metrics: Record<string, SplMetricStat>;
   /** Legacy single-metric peak (dB) — kept populated for back-compat reads. */
   maxSpl: number | null;
-  /** Legacy single-metric arithmetic mean (dB). @deprecated see SplMetricStat.avg. */
-  avgSpl: number | null;
   /** Legacy single-metric energy average (dB). Absent on older records. */
   leqSpl?: number | null;
   /** PCO item_type ("song" | "header" | "media" | "item") when it was known at

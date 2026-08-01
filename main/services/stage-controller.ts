@@ -1808,57 +1808,10 @@ export class StageController {
   // The old model conflated a screen and its content. Each alias maps onto the
   // new View/Output verbs so older clients keep working unchanged.
 
-  /** @deprecated Use createView + addOutput. Creates a View of `kind` and an
-   *  Output routed to it, mirroring the old "add a display" behavior. */
-  async addDisplay(name?: string, kind: DisplayInfo["kind"] = "slots"): Promise<StageState> {
-    const viewId = this.nextViewId();
-    const outputId = this.nextOutputId();
-    const num = parseInt(outputId.replace("display-", ""), 10);
-    const displayName = name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`;
-    const k = (kind ?? "slots") as ViewKind;
-    const view: View = { id: viewId, name: displayName, kind: k, ndiSource: null, createdAt: new Date().toISOString() };
-    const output: Output = { id: outputId, name: displayName, viewId };
-    console.log(`[stage-controller] addDisplay (alias) output=${outputId} view=${viewId} kind=${k}`);
-    const views = [...this.state.views, view];
-    const outputs = [...this.state.outputs, output];
-    this.state = { ...this.state, views, outputs };
-    await viewsStore.save(views);
-    await settingsStore.patch({ outputs });
-    if (k === "slots") this.rawSlotsByView.set(viewId, []);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
-  }
 
-  /** @deprecated Renames the output (the screen). */
-  async renameDisplay(id: string, name: string): Promise<StageState> {
-    return this.renameOutput(id, name);
-  }
 
-  /** @deprecated Sets the kind of the View routed to this output. */
-  async setDisplayKind(id: string, kind: DisplayInfo["kind"]): Promise<StageState> {
-    const viewId = this.outputRoutedViewId(id);
-    if (!viewId) throw new Error(`displays:setKind — output ${id} has no routed view`);
-    return this.setViewKind(viewId, (kind ?? "slots") as ViewKind);
-  }
 
-  /** @deprecated Sets the NDI source of the View routed to this output. */
-  async setDisplayNdiSource(id: string, source: string | null): Promise<StageState> {
-    const viewId = this.outputRoutedViewId(id);
-    if (!viewId) throw new Error(`displays:setNdiSource — output ${id} has no routed view`);
-    return this.setViewNdiSource(viewId, source);
-  }
 
-  /** @deprecated Removes the output, and its 1:1 routed View if nothing else uses it. */
-  async removeDisplay(id: string): Promise<StageState> {
-    const viewId = this.outputRoutedViewId(id);
-    await this.removeOutput(id);
-    // Clean up the routed View if it's now orphaned (migrated 1:1 case).
-    if (viewId && !this.state.outputs.some((o) => o.viewId === viewId) && this.state.views.length > 1) {
-      await this.deleteView(viewId);
-    }
-    return this.state;
-  }
 
   // ── Refresh ───────────────────────────────────────────────────────────
 
@@ -1989,10 +1942,6 @@ export class StageController {
     const output = this.state.outputs.find((o) => o.id === target);
     if (output) return output.viewId ?? this.primaryViewId();
     return target; // already a view id
-  }
-
-  private outputRoutedViewId(outputId: string): string | null {
-    return this.state.outputs.find((o) => o.id === outputId)?.viewId ?? null;
   }
 
   private nextViewId(): string {

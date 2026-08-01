@@ -230,7 +230,6 @@ class SplRecorder {
         sequence: this.nextSequence++,
         metrics: {},
         maxSpl: null,
-        avgSpl: null,
         sampleCount: 0,
         startedAt: new Date().toISOString(),
         endedAt: null,

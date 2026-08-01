@@ -82,7 +82,6 @@ export async function rebuildSplItems(
         sequence: sequence++,
         metrics: {},
         maxSpl: null,
-        avgSpl: null,
         sampleCount: 0,
         startedAt: row.at || new Date(0).toISOString(),
         endedAt: null,
