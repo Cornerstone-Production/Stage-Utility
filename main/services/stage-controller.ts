@@ -3,7 +3,8 @@
 
 import { randomUUID } from "crypto";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart,
+  TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -169,6 +170,7 @@ export class StageController {
     autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
     reconnectSchedule: { ...DEFAULT_RECONNECT_SCHEDULE },
     taperWindow: { ...DEFAULT_TAPER_WINDOW },
+    baptismAutoStart: { enabled: false, testimonyKeyword: "baptism stories" },
     onboardingDismissed: false,
   };
 
@@ -251,6 +253,7 @@ export class StageController {
       autoUpdate: migrateAutoUpdate(settings.autoUpdate),
       reconnectSchedule: settings.reconnectSchedule ?? { ...DEFAULT_RECONNECT_SCHEDULE },
       taperWindow: settings.taperWindow ?? { ...DEFAULT_TAPER_WINDOW },
+      baptismAutoStart: settings.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" },
       onboardingDismissed: settings.onboardingDismissed ?? false,
     };
     this.publicUrl = settings.publicUrl ?? null;
@@ -1049,6 +1052,16 @@ export class StageController {
     await settingsStore.patch({ reconnectSchedule: next });
     serviceWindow.setSchedule(next);
     void this.refreshServiceWindows(); // lead/tail shift the window bounds
+    this.broadcast();
+    return this.state;
+  }
+
+  /** The keyword that lets a plan item start the testimonies by itself. */
+  async setBaptismAutoStart(partial: Partial<BaptismAutoStart>): Promise<StageState> {
+    const cur = this.state.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" };
+    const next: BaptismAutoStart = { ...cur, ...partial, testimonyKeyword: (partial.testimonyKeyword ?? cur.testimonyKeyword).slice(0, 80) };
+    this.state = { ...this.state, baptismAutoStart: next };
+    await settingsStore.patch({ baptismAutoStart: next });
     this.broadcast();
     return this.state;
   }

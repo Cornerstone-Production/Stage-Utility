@@ -735,7 +735,7 @@ export class RemoteServer {
     // Multi-sheet .xlsx export of service history — date range + which sheets via
     // query params (?from=&to=&include=services,attendance,items,spl).
     if (method === "GET" && pathname === "/api/history/export") {
-      const VALID: HistorySheet[] = ["services", "attendance", "items", "spl"];
+      const VALID: HistorySheet[] = ["services", "attendance", "items", "spl", "baptisms"];
       const include = (_url.searchParams.get("include") ?? "")
         .split(",")
         .map((s) => s.trim())

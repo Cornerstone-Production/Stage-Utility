@@ -16,8 +16,9 @@ import { tableFeature, type TableSpec } from "./xlsx-table.js";
 import { attendanceStore } from "./attendance-store.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { splHistoryStore } from "./spl-history-store.js";
+import { baptismStore } from "./baptism-store.js";
 
-export type HistorySheet = "services" | "attendance" | "items" | "spl";
+export type HistorySheet = "services" | "attendance" | "items" | "spl" | "baptisms";
 
 export interface HistoryExportOptions {
   from?: string | null; // YYYY-MM-DD inclusive
@@ -92,10 +93,11 @@ export function historyFileName(from?: string | null, to?: string | null): strin
 /** Assemble the workbook and return its bytes. */
 export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<Buffer> {
   const { from, to, include } = opts;
-  const [attendance, timelines, spls] = await Promise.all([
+  const [attendance, timelines, spls, baptismSessions] = await Promise.all([
     attendanceStore.list(),
     serviceTimelineStore.list(),
     splHistoryStore.list(),
+    baptismStore.listSessions(),
   ]);
 
   const att = attendance.filter((a) => inRange(a.serviceDate, from, to));
@@ -310,5 +312,38 @@ export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<
       : [],
     rowCount: tabular[i] ? Math.max(0, s.data.length - 1) : 0,
   }));
+  if (include.includes("baptisms")) {
+    // One row per person, not per session: the timings are per person, and a
+    // session is just when the operator started and stopped. Sessions carry the
+    // service they were recorded in, so these line up with the other sheets by
+    // date and time rather than needing to be matched by hand.
+    const sessions = baptismSessions.filter((b) => inRange((b.startedAt ?? "").slice(0, 10), from, to));
+    const byKey = new Map(tl.map((t) => [t.serviceKey, t]));
+    const rows = sessions
+      .flatMap((b) => b.people.map((p, i) => ({ b, p, n: i + 1 })))
+      .sort((a, z) => a.b.startedAt.localeCompare(z.b.startedAt) || a.n - z.n);
+    tabular.push(true);
+    sheets.push(
+      sheet<(typeof rows)[number]>(
+        "Baptisms",
+        [
+          { header: "Date", width: 12, value: ({ b }) => (b.startedAt ?? "").slice(0, 10) },
+          {
+            header: "Service time",
+            width: 13,
+            value: ({ b }) => serviceTimeLabel(byKey.get(b.serviceKey ?? "")?.serviceTimeStartsAt),
+          },
+          { header: "Service type", width: 20, value: ({ b }) => byKey.get(b.serviceKey ?? "")?.serviceTypeName ?? "" },
+          { header: "Session", width: 22, value: ({ b }) => b.title ?? "" },
+          { header: "#", width: 6, value: (r) => r.n },
+          { header: "Testimony (s)", width: 14, value: ({ p }) => Math.round(p.testimonyMs / 1000) },
+          { header: "Baptism (s)", width: 13, value: ({ p }) => Math.round(p.baptizeMs / 1000) },
+          { header: "Total (s)", width: 11, value: ({ p }) => Math.round((p.testimonyMs + p.baptizeMs) / 1000) },
+        ],
+        rows,
+      ),
+    );
+  }
+
   return writeXlsxFile(sheets, { features: [tableFeature(specs)] }).toBuffer();
 }

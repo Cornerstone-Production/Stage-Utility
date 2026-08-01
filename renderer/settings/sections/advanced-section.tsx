@@ -606,6 +606,7 @@ export function AdvancedSection({
   // local mirror needed; it selects-all on focus and clamps to min/max itself.
   const rc = stageState.reconnectSchedule ?? { enabled: true, leadMin: 120, tailMin: 60, dormantMin: 30 };
   const tw = stageState.taperWindow ?? { preMin: 60, postMin: 60 };
+  const bas = stageState.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" };
 
   return (
     <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
@@ -696,6 +697,33 @@ export function AdvancedSection({
 
           <FieldSet flat>
         <FieldGroup>
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Start baptism testimonies from the plan</FieldLabel>
+              <FieldDescription>
+                When a plan item whose title contains this goes live, the baptism timer starts
+                timing testimonies — so the producer isn&rsquo;t advancing Planning Center and
+                starting a timer at the same moment. The switch to the baptisms themselves is
+                picked per plan on the Baptisms tab, since that usually happens during a song.
+              </FieldDescription>
+            </FieldContent>
+            <div className="flex items-center gap-2">
+              <Input
+                value={bas.testimonyKeyword}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  handlers.handleSetBaptismAutoStart({ testimonyKeyword: e.target.value })
+                }
+                placeholder="baptism stories"
+                className="w-48"
+                aria-label="Testimony item keyword"
+              />
+              <Switch
+                checked={bas.enabled}
+                onCheckedChange={(v: boolean) => handlers.handleSetBaptismAutoStart({ enabled: v })}
+                aria-label="Start baptism testimonies from the plan"
+              />
+            </div>
+          </Field>
           <Field orientation="horizontal">
             <FieldContent>
               <FieldLabel>Pre-service ramp</FieldLabel>

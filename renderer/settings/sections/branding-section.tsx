@@ -33,6 +33,25 @@ const ACCEPTED = "image/png,image/jpeg,image/svg+xml,image/webp";
 type Crop = { scale: number; x: number; y: number };
 type Target = "app" | "empty" | "avatar";
 
+/**
+ * One preview tile for an uploaded image, so the three of them cannot drift apart
+ * again — they had different backgrounds, different padding and different
+ * placeholder colours.
+ *
+ * The surface follows the theme. Two of these used a hard-coded dark kiosk colour
+ * because that is where the image ends up, which meant a black square sitting in an
+ * otherwise light page. A monochrome image is recoloured from `currentColor`, so on
+ * the theme surface it still shows the shape and coverage that is actually being
+ * checked here.
+ */
+function LogoPreview({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-gray-a4 bg-gray-a2 p-1 text-fg">
+      {children}
+    </div>
+  );
+}
+
 export function BrandingSection({
   stageState,
   handlers,
@@ -191,8 +210,15 @@ export function BrandingSection({
                 />
               ))}
               <Tooltip label="Custom color">
+                {/* The gradient is the label's own background, not an inner element.
+                    Nested, it painted to the padding box while the preset swatches
+                    paint to the border box — same 24px element, 22px of colour, and
+                    it read as a smaller chip in the row. */}
                 <label
-                  className="relative size-6 rounded-md border border-gray-a5 overflow-hidden cursor-pointer"
+                  className={cn(
+                    "relative size-6 cursor-pointer rounded-md border border-gray-a5 transition-transform hover:scale-110",
+                    "bg-[conic-gradient(from_180deg,#c2410c,#0d9488,#5b9bd8,#6e56cf,#c2410c)]",
+                  )}
                   aria-label="Custom accent color"
                 >
                   <input
@@ -206,7 +232,6 @@ export function BrandingSection({
                     }}
                     className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                   />
-                  <span className="block h-full w-full bg-[conic-gradient(from_180deg,#c2410c,#0d9488,#5b9bd8,#6e56cf,#c2410c)]" />
                 </label>
               </Tooltip>
               <Button
@@ -228,7 +253,7 @@ export function BrandingSection({
               </FieldDescription>
             </FieldContent>
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center justify-center size-12 rounded-md border border-gray-a4 bg-gray-a2 overflow-hidden shrink-0 text-gray-12">
+              <LogoPreview>
                 {stageState.appLogo ? (
                   <BrandLogo
                     logo={stageState.appLogo}
@@ -236,9 +261,9 @@ export function BrandingSection({
                     className="size-full"
                   />
                 ) : (
-                  <span className="text-caption2 text-gray-9">None</span>
+                  <span className="text-caption2 text-fg-subtle">None</span>
                 )}
-              </div>
+              </LogoPreview>
               <Button variant="filled" size="small" onClick={() => openPicker("app")}>
                 <UploadIcon className="size-3.5 text-gray-9" />
                 {stageState.appLogo ? "Replace" : "Upload"}
@@ -289,13 +314,13 @@ export function BrandingSection({
               </FieldDescription>
             </FieldContent>
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center size-12 rounded-md border border-gray-a4 overflow-hidden shrink-0 bg-[var(--kiosk-surface-1)] text-white/45">
+              <LogoPreview>
                 {stageState.emptySlotLogo ? (
-                  <BrandLogo logo={stageState.emptySlotLogo} monochrome className="size-full p-1" />
+                  <BrandLogo logo={stageState.emptySlotLogo} monochrome className="size-full" />
                 ) : (
-                  <span className="text-caption2 text-white/30">None</span>
+                  <span className="text-caption2 text-fg-subtle">None</span>
                 )}
-              </div>
+              </LogoPreview>
               <Button variant="filled" size="small" onClick={() => openPicker("empty")}>
                 <UploadIcon className="size-3.5 text-gray-9" />
                 {stageState.emptySlotLogo ? "Replace" : "Upload"}
@@ -330,13 +355,13 @@ export function BrandingSection({
               </FieldDescription>
             </FieldContent>
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center size-12 rounded-md border border-gray-a4 overflow-hidden shrink-0 bg-[var(--kiosk-surface-1)] text-white/45">
+              <LogoPreview>
                 {stageState.defaultAvatar ? (
-                  <BrandLogo logo={stageState.defaultAvatar} monochrome className="size-full p-1" />
+                  <BrandLogo logo={stageState.defaultAvatar} monochrome className="size-full" />
                 ) : (
-                  <UserRoundIcon className="size-6 text-white/30" />
+                  <UserRoundIcon className="size-6 text-fg-subtle" />
                 )}
-              </div>
+              </LogoPreview>
               <Button variant="filled" size="small" onClick={() => openPicker("avatar")}>
                 <UploadIcon className="size-3.5 text-gray-9" />
                 {stageState.defaultAvatar ? "Replace" : "Upload"}
