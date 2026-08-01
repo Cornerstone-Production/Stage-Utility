@@ -1,0 +1,16 @@
+# What CodeQL should look at.
+#
+# Only this repository's own source. Findings in a dependency are dependabot's
+# job, and findings in build output are duplicates of the source they came from.
+name: "Stage Utility"
+
+paths:
+  - main
+  - renderer
+  - scripts
+  - server.ts
+
+paths-ignore:
+  - "**/*.test.ts"
+  - build
+  - node_modules

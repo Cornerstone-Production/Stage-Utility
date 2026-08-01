@@ -1,0 +1,45 @@
+# Static analysis for the server and the interface.
+#
+# Free on public repositories. Catches the classes a test suite does not: path
+# traversal in a file route, injection through a device response, unsafe
+# deserialisation of an imported bundle.
+#
+# Scoped to this repo's own code — build output and dependencies are excluded in
+# codeql-config.yml, since findings there are not ours to fix.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main, beta]
+  pull_request:
+  schedule:
+    # Weekly, so a newly published query runs against code that already merged.
+    - cron: "23 5 * * 2"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # to file findings in the Security tab
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Initialise
+        uses: github/codeql-action/init@18420e3271f74589575af831a523c833acda327f # codeql-bundle-v2.26.2
+        with:
+          languages: javascript-typescript
+          # security-and-quality is noisier than the default and includes
+          # maintainability rules; security-extended keeps it to real findings.
+          queries: security-extended
+          config-file: ./.github/codeql-config.yml
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@18420e3271f74589575af831a523c833acda327f # codeql-bundle-v2.26.2
+        with:
+          category: "/language:javascript-typescript"
