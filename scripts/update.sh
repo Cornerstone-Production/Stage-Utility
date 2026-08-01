@@ -109,10 +109,15 @@ write_result() {
     CHANGED="$(git diff --name-only "$OLD_REV" "$NEW_REV" 2>/dev/null || echo "")"
     echo "[update] $(printf '%s\n' "$CHANGED" | grep -c .) file(s) changed"
     NEED_INSTALL=0; NEED_BUILD=0
-    # Lockfile change → reinstall (and rebuild, since deps may feed the bundle).
-    if echo "$CHANGED" | grep -q '^package-lock\.json$'; then NEED_INSTALL=1; NEED_BUILD=1; fi
+    # The manifests are judged by CONTENT, not filename. Every release carries a
+    # version bump that rewrites package.json and package-lock.json without
+    # changing a single dependency — matching on the path made this skip fire on
+    # every update, so it never once saved the work it exists to save.
+    MANIFEST="$(node "$REPO/scripts/manifest-changed.mjs" "$OLD_REV" "$NEW_REV" 2>/dev/null || echo '{"deps":true,"manifest":true}')"
+    case "$MANIFEST" in *'"deps":true'*) NEED_INSTALL=1; NEED_BUILD=1 ;; esac
+    case "$MANIFEST" in *'"manifest":true'*) NEED_BUILD=1 ;; esac
     # Any renderer/build input change → rebuild the bundle.
-    if echo "$CHANGED" | grep -qE '^(renderer/|index\.html|vite\.config|tailwind\.config|postcss\.config|package\.json|tsconfig)'; then NEED_BUILD=1; fi
+    if echo "$CHANGED" | grep -qE '^(renderer/|index\.html|vite\.config|tailwind\.config|postcss\.config|tsconfig)'; then NEED_BUILD=1; fi
   fi
 
   if [ "$NEED_INSTALL" = "1" ]; then

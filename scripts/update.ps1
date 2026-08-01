@@ -99,8 +99,15 @@ try {
     ($changed | ForEach-Object { "[update]   $_" }) | Out-File -Append $log
     $needInstall = $false
     $needBuild = $false
-    if ($changed -match '^package-lock\.json$') { $needInstall = $true; $needBuild = $true }
-    if ($changed -match '^(renderer/|index\.html|vite\.config|tailwind\.config|postcss\.config|package\.json|tsconfig)') { $needBuild = $true }
+    # The manifests are judged by CONTENT, not filename. Every release carries a
+    # version bump that rewrites package.json and package-lock.json without
+    # changing a single dependency — matching on the path made this skip fire on
+    # every update, so it never once saved the work it exists to save.
+    $manifest = '{"deps":true,"manifest":true}'
+    try { $manifest = (node (Join-Path $repo "scripts/manifest-changed.mjs") $oldRev $newRev) } catch {}
+    if ($manifest -match '"deps":true') { $needInstall = $true; $needBuild = $true }
+    if ($manifest -match '"manifest":true') { $needBuild = $true }
+    if ($changed -match '^(renderer/|index\.html|vite\.config|tailwind\.config|postcss\.config|tsconfig)') { $needBuild = $true }
   }
 
   if ($needInstall) {
