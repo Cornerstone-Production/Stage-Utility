@@ -1,31 +1,80 @@
-# Bitfocus Companion integration
+# Bitfocus Companion
 
-Lets a Bitfocus Companion module drive and read Stage over its LAN HTTP/SSE API,
-for stream-deck-style buttons and feedback.
+Drives and reads Stage Utility from [Bitfocus Companion](https://bitfocus.io/companion)
+— Stream Deck buttons for plan control, view routing and blackout, with feedback
+from the live service.
 
-## How it works
+The module is a separate repository:
+[companion-module-cornerstone-stageutility](https://github.com/Cornerstone-Production/companion-module-cornerstone-stageutility).
 
-There is nothing for Stage to dial out to — the direction is reversed. The
-Companion module (a separate, sideloaded Bitfocus module in its own private repo)
-connects **to** this app's existing HTTP/SSE server, so the descriptor carries no
-config fields.
+## How it connects
 
-The module talks to the same REST endpoints and SSE stream the app's own
-displays use (served on port 8788, which always stays up). It marks its event
-stream with an `X-Companion-Module` header (or `?client=companion`); the server
-tracks those streams in a `companionClients` set and pushes the live count into
-the integration manager, so the settings panel can show "N connected".
+The direction is reversed from every other integration: Stage Utility dials out
+to nothing. The Companion module connects **to** this app's existing HTTP/SSE
+server on port 8788, so the in-app integration carries no config fields and
+stores no secret.
 
-The in-app "companion" integration is therefore just presence + guidance: it
-exposes no dial-out connection and stores no secret. Its master state reflects how
-many Companion clients are currently streaming.
+The module marks its event stream with an `X-Companion-Module` header (or
+`?client=companion`). The server counts those streams and reports the total to
+the integration manager, which is what the settings panel's "N connected" shows.
+The in-app integration is therefore presence and guidance only — there is nothing
+to enable or test.
 
 ## Setup
 
-**In Companion:** add a **Cornerstone Stage Utility** connection and enter this
-server's IP and Port (no password — LAN only).
+**In Companion** — add a **Cornerstone Stage Utility** connection and enter this
+server's IP and port. No password; the API is LAN-only.
 
-**In Stage:** Settings → Integrations → **Bitfocus Companion**. The panel
-(`CompanionInfoPanel`) shows this server's LAN IP and port split out (Companion
-takes host + port separately and can't resolve DNS), each copyable, plus a live
-connected-client count. There is nothing to enable or test here.
+The module requires **Companion 4.3.0 or newer**, which is where Companion added
+the v2 connection API the module is built against. On anything older it installs
+and shows up in the module list, but the connection never starts — Companion
+reports "Connection not found or not running" and loads no config, which looks
+like a broken download rather than a version mismatch.
+
+**In Stage Utility** — Settings → Integrations → **Bitfocus Companion** shows the
+LAN IP and port split into separate copyable fields, because Companion takes host
+and port separately and cannot resolve a DNS name. A live connected-client count
+sits alongside them.
+
+## What the module exposes
+
+**Actions** — PCO Live next/previous, refresh lineup, jump to next plan, set plan,
+set service type, set plan mode, route a view to an output, blackout an output,
+refresh displays, apply a preset, show/hide the QR code.
+
+**Feedbacks** — countdown overtime, mic battery low, mic offline, ProPresenter
+disconnected, plan in manual mode, output showing a given view, output blacked
+out, occupancy over a threshold, captions idle, and a people-count text feedback
+that writes the count onto a button.
+
+**Variables** — plan and series title, service type, plan mode, ProPresenter
+current/next item and slide position, PCO countdown label and seconds, mics
+online and total, lowest battery and its channel, last caption text and speaker,
+people attendance and occupancy (with per-zone variables), last sync time.
+
+## Network cost
+
+**The module is event-driven, not polling.** It holds one SSE connection to
+`/api/events` and reacts to pushes. A local one-second timer ticks the countdown
+and re-evaluates the two time-relative feedbacks — that runs in the module's own
+memory and puts nothing on the network.
+
+It listens to seven channels: `server:hello`, `stage:state-changed`, `pco:live`,
+`propresenter:status`, `prodcom:transcript`, `wireless:connections-changed`,
+`people:count`.
+
+REST is used for two things: writes (every action is a POST), and a hydrate on
+connect that fetches nine endpoints in one burst — state, views, outputs, service
+types, presets, wireless channels, PCO live, ProPresenter status and people
+count.
+
+**Poll fallback is off by default** (`0` seconds) and should stay that way unless
+an SSE connection cannot be kept open. When enabled it re-runs that nine-endpoint
+hydrate on every tick, so a five-second fallback is 108 requests a minute, most
+of them for configuration that rarely changes.
+
+The module reports those channels to the server. It sends a `cid` on the event
+stream and posts its channel list to `POST /api/events/subscribe` when the stream
+opens, so the fan-out skips everything else — notably the 4 Hz `spl:metrics`
+stream, which the module has no use for. See
+[network traffic](../ops/network-traffic.md) for how the filter works.

@@ -20,6 +20,7 @@ import * as path from "node:path";
 
 import { getUserDataPath } from "./app-paths.js";
 import { addLogLine, setLogSink, type LogLine } from "./log-buffer.js";
+import { trimFileToLastBytes } from "./trim-file.js";
 
 /** Roughly 10k lines at typical length, hard-capped by bytes rather than count so
  *  a burst of long lines cannot blow past it. */
@@ -58,17 +59,7 @@ export function flushLogQueue(): void {
 
 /** Keep only the last MAX_BYTES, cut at a line boundary so no partial line survives. */
 function trim(): void {
-  try {
-    const p = serverLogPath();
-    const size = fs.statSync(p).size;
-    if (size <= MAX_BYTES) return;
-    const buf = fs.readFileSync(p);
-    const slice = buf.subarray(buf.length - MAX_BYTES);
-    const nl = slice.indexOf(0x0a);
-    fs.writeFileSync(p, nl >= 0 ? slice.subarray(nl + 1) : slice);
-  } catch {
-    /* ignore */
-  }
+  trimFileToLastBytes(serverLogPath(), MAX_BYTES);
 }
 
 /** Last `maxLines` persisted lines, oldest → newest. */
