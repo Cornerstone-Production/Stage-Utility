@@ -665,8 +665,8 @@ export function AdvancedSection({
             <>
               <Field orientation="horizontal">
                 <FieldContent>
-                  <FieldLabel>Lead time before rehearsal</FieldLabel>
-                  <FieldDescription>Start reconnecting this many minutes before a scheduled rehearsal/service.</FieldDescription>
+                  <FieldLabel>Lead time before rehearsal (minutes)</FieldLabel>
+                  <FieldDescription>Start reconnecting this long before a scheduled rehearsal or service.</FieldDescription>
                 </FieldContent>
                 <NumberInput value={rc.leadMin} min={0} max={1440} className="w-28"
                   onChange={(v) => { if (v !== rc.leadMin) handlers.handleSetReconnectSchedule({ leadMin: Math.round(v) }); }}
@@ -674,8 +674,8 @@ export function AdvancedSection({
               </Field>
               <Field orientation="horizontal">
                 <FieldContent>
-                  <FieldLabel>Keep active after service ends</FieldLabel>
-                  <FieldDescription>Stay in fast-reconnect mode this many minutes after the service end time.</FieldDescription>
+                  <FieldLabel>Keep active after service ends (minutes)</FieldLabel>
+                  <FieldDescription>Stay in fast-reconnect mode this long after the service end time.</FieldDescription>
                 </FieldContent>
                 <NumberInput value={rc.tailMin} min={0} max={1440} className="w-28"
                   onChange={(v) => { if (v !== rc.tailMin) handlers.handleSetReconnectSchedule({ tailMin: Math.round(v) }); }}
@@ -683,7 +683,7 @@ export function AdvancedSection({
               </Field>
               <Field orientation="horizontal">
                 <FieldContent>
-                  <FieldLabel>Idle retry interval</FieldLabel>
+                  <FieldLabel>Idle retry interval (minutes)</FieldLabel>
                   <FieldDescription>Longest gap between reconnect attempts when far from any service (the dead-week cadence).</FieldDescription>
                 </FieldContent>
                 <NumberInput value={rc.dormantMin} min={1} max={1440} className="w-28"
@@ -726,8 +726,8 @@ export function AdvancedSection({
           </Field>
           <Field orientation="horizontal">
             <FieldContent>
-              <FieldLabel>Pre-service ramp</FieldLabel>
-              <FieldDescription>Start sampling attendance this many minutes before the service start, so the graph shows the room filling up. 0 = off.</FieldDescription>
+              <FieldLabel>Pre-service ramp (minutes)</FieldLabel>
+              <FieldDescription>Start sampling attendance this long before the service start, so the graph shows the room filling up. 0 = off.</FieldDescription>
             </FieldContent>
             <NumberInput value={tw.preMin} min={0} max={240} className="w-28"
               onChange={(v) => { if (v !== tw.preMin) handlers.handleSetTaperWindow({ preMin: Math.round(v) }); }}
@@ -735,8 +735,8 @@ export function AdvancedSection({
           </Field>
           <Field orientation="horizontal">
             <FieldContent>
-              <FieldLabel>Post-service taper</FieldLabel>
-              <FieldDescription>Keep sampling this many minutes after the service ends (even once PCO Live is cleared) to capture how fast the room empties. Excluded from Peak/Lowest stats. 0 = off.</FieldDescription>
+              <FieldLabel>Post-service taper (minutes)</FieldLabel>
+              <FieldDescription>Keep sampling this long after the service ends (even once PCO Live is cleared) to capture how fast the room empties. Excluded from Peak/Lowest stats. 0 = off.</FieldDescription>
             </FieldContent>
             <NumberInput value={tw.postMin} min={0} max={240} className="w-28"
               onChange={(v) => { if (v !== tw.postMin) handlers.handleSetTaperWindow({ postMin: Math.round(v) }); }}
