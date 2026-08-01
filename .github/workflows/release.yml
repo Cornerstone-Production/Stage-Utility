@@ -291,7 +291,12 @@ jobs:
           cd tap
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet; then echo "tap already at $V"; exit 0; fi
-          git commit -am "stage-utility $V"
+          # add -A, not commit -a: on the first run Formula/stage-utility.rb is a
+          # NEW file, and both `git diff` and `commit -a` ignore untracked files.
+          # The original check saw a clean tree, said "already at", and would have
+          # published the formula exactly never — a green step and no formula.
+          git add -A
+          if git diff --cached --quiet; then echo "tap already at $V"; exit 0; fi
+          git commit -m "stage-utility $V"
           git push
 
