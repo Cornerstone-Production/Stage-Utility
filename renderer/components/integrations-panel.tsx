@@ -807,7 +807,6 @@ function ProPresenterInstancesPanel({
                   <FieldContent>
                     <FieldLabel className="flex items-center gap-1.5">
                       Name
-                      <InfoHint>Display name for this ProPresenter, shown when a layout object picks which instance to read.</InfoHint>
                     </FieldLabel>
                     <FieldDescription>SA (e.g. Auditorium 2)</FieldDescription>
                   </FieldContent>
@@ -838,7 +837,6 @@ function ProPresenterInstancesPanel({
                   <FieldContent>
                     <FieldLabel className="flex items-center gap-1.5">
                       API Port
-                      <InfoHint>ProPresenter's network API port. Turn the API on and find the port under ProPresenter → Preferences → Network (default 1025).</InfoHint>
                     </FieldLabel>
                     <FieldDescription>1025</FieldDescription>
                   </FieldContent>
@@ -856,7 +854,6 @@ function ProPresenterInstancesPanel({
                   <FieldContent>
                     <FieldLabel className="flex items-center gap-1.5">
                       Poll interval (ms)
-                      <InfoHint>How often to query this ProPresenter over the LAN. 500ms feels instant; raise it to ease network load. Leave blank to use the default.</InfoHint>
                     </FieldLabel>
                     <FieldDescription>500 (lower = snappier, more requests)</FieldDescription>
                   </FieldContent>

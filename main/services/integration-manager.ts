@@ -107,7 +107,6 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
       label: "Name",
       type: "text",
       placeholder: "Main (e.g. Auditorium 1)",
-      help: "Display name for this ProPresenter, shown when a layout object picks which instance to read. Add more auditoriums below.",
     },
     {
       key: "host",
@@ -120,14 +119,12 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
       label: "API Port",
       type: "number",
       placeholder: "1025",
-      help: "ProPresenter's network API port. Turn the API on and find the port under ProPresenter → Preferences → Network (default 1025).",
     },
     {
       key: "pollMs",
       label: "Poll interval (ms)",
       type: "number",
       placeholder: "500 (lower = snappier, more requests)",
-      help: "How often to query ProPresenter over the LAN. 500ms feels instant; raise it to ease network load. The API is under ProPresenter → Preferences → Network.",
     },
   ],
 };
@@ -177,14 +174,12 @@ const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
       label: "API Port",
       type: "number",
       placeholder: "24480",
-      help: "ProdCom's HTTP Application API port. Enable the Application API in ProdCom's settings (default 24480).",
     },
     {
       key: "apiKey",
       label: "API Key",
       type: "password",
       placeholder: "(only if Require Authentication is on)",
-      help: "Only needed if ProdCom's API has 'Require Authentication' turned on — paste the key from ProdCom's API settings. Leave blank otherwise. Stored encrypted on this machine.",
     },
   ],
 };
@@ -209,14 +204,12 @@ const SMAART_DESCRIPTOR: IntegrationDescriptor = {
       label: "API Port",
       type: "number",
       placeholder: "26000",
-      help: "Smaart's API port. Enable the API in Smaart's API/IO settings (default 26000).",
     },
     {
       key: "password",
       label: "API Password",
       type: "password",
       placeholder: "(only if the Smaart API requires authentication)",
-      help: "Only needed if Smaart's API is set to require authentication; otherwise leave blank. Stored encrypted on this machine.",
     },
   ],
 };
@@ -242,14 +235,12 @@ const OBS_DESCRIPTOR: IntegrationDescriptor = {
       label: "WebSocket Port",
       type: "number",
       placeholder: "4455",
-      help: "The obs-websocket server port. Enable the server under OBS → Tools → WebSocket Server Settings (default 4455).",
     },
     {
       key: "password",
       label: "Server Password",
       type: "password",
       placeholder: "(from OBS → Tools → WebSocket Server Settings)",
-      help: "In OBS, open Tools → WebSocket Server Settings, enable the server, and copy the password here. Leave blank if you turned authentication off.",
     },
   ],
 };
@@ -263,7 +254,7 @@ const REAPER_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "REAPER",
   description:
-    "Shows whether REAPER is recording, on a stage display. Polls REAPER's built-in Web Interface over your LAN. Turn it on under REAPER → Preferences → Control/OSC/web (Web browser interface), then enter the host and port below.",
+    "Shows whether REAPER is recording, on a stage display. Polls REAPER's built-in Web Interface over your LAN. Turn it on under REAPER → Preferences → Control/OSC/web (Web browser interface), leaving that page's Username:password field blank, then enter the host and port below.",
   configSchema: [
     {
       key: "host",
@@ -276,7 +267,6 @@ const REAPER_DESCRIPTOR: IntegrationDescriptor = {
       label: "Web Interface Port",
       type: "number",
       placeholder: "8080",
-      help: "The port from REAPER → Preferences → Control/OSC/web → Web browser interface (\"Run web server on port\"). Leave the Username:password field blank there.",
     },
   ],
 };
@@ -314,7 +304,7 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "SenSource Vea",
   description:
-    "Brings live people counts — attendance and room occupancy — from SenSource Vea onto displays and graphs. Connects to the Vea cloud API with an API client ID + secret (created in Vea → API clients). Pick which zones to count below.",
+    "Brings live people counts — attendance and room occupancy — from SenSource Vea onto displays and graphs. Connects to the Vea cloud API with an API client ID + secret (created in Vea → API clients). Vea's counts lag a few minutes server-side, so polling faster than the default adds requests without fresher numbers. Pick which zones to count below.",
   configSchema: [
     {
       key: "clientId",
@@ -343,7 +333,6 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       type: "number",
       placeholder: "45",
       default: 45,
-      help: "How often to query SenSource. Their counts lag a few minutes server-side, so ~45s is plenty — lower values just add API calls without fresher data.",
     },
   ],
 };
@@ -370,7 +359,6 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
       label: "TSL Port",
       type: "number",
       placeholder: "(TSL UMD input port on the Ross)",
-      help: "The TSL UMD input port configured on the Ross device (its UMD/TSL setup). The people count is sent here as on-tile text; map a count to a tile's TSL address in the feeds panel below.",
     },
   ],
 };
