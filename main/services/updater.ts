@@ -19,10 +19,11 @@
 // tells the operator to update from the CLI).
 
 import { execFile, spawn } from "node:child_process";
+
+import { APP_ROOT } from "./app-root.js";
 import { summarizeChangelog } from "./changelog.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import type { UpdateStatus } from "../types/stage.js";
@@ -34,8 +35,7 @@ import { appendUpdateLog, updateLogPath } from "./update-log.js";
 const execFileAsync = promisify(execFile);
 
 // main/services/updater.ts → repo root is two levels up.
-const __filename = fileURLToPath(import.meta.url);
-const REPO_ROOT = path.resolve(path.dirname(__filename), "..", "..");
+const REPO_ROOT = APP_ROOT;
 
 const CHANGELOG_CAP = 20;
 

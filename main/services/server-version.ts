@@ -7,10 +7,11 @@ import { execFileSync } from "node:child_process";
 import * as crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+
+import { APP_ROOT } from "./app-root.js";
 
 const RENDERER_BUILD_DIR = path.join(process.cwd(), "build", "renderer");
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const REPO_ROOT = APP_ROOT;
 
 /**
  * A stable id for the currently-running code, advertised to kiosks on every SSE
