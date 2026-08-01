@@ -27,7 +27,11 @@ PROGRESS="${STAGE_UPDATE_PROGRESS:-$REPO/update-progress.json}"
 ULOG="${STAGE_UPDATE_LOG:-}"
 
 cd "$REPO" || exit 1
-LOG="$(mktemp)"
+# The live log goes somewhere the (still-running) server can tail, so /log shows
+# what is happening DURING the update rather than only a summary afterwards. Falls
+# back to a temp file when run by hand with no data dir wired in.
+LOG="${STAGE_UPDATE_LIVE_LOG:-$(mktemp)}"
+: >"$LOG" 2>/dev/null || LOG="$(mktemp)"
 # Commit before the pull — lets us diff what changed and skip the (slow) reinstall
 # / rebuild when an update doesn't touch them.
 OLD_REV="$(git rev-parse HEAD 2>/dev/null || echo none)"
@@ -75,11 +79,17 @@ write_result() {
   # changed; rebuild only when renderer/build inputs changed. Default to doing the
   # work whenever we can't tell (no OLD rev, or build/ missing).
   NEW_REV="$(git rev-parse HEAD 2>/dev/null || echo none)"
+  if [ "$OLD_REV" != "none" ] && [ "$NEW_REV" != "none" ] && [ "$OLD_REV" != "$NEW_REV" ]; then
+    echo "[update] $(git rev-parse --short "$OLD_REV") -> $(git rev-parse --short "$NEW_REV") ($(git rev-list --count "$OLD_REV..$NEW_REV" 2>/dev/null || echo '?') commits)"
+    echo "[update] what changed:"
+    git log --no-merges --pretty=format:'[update]   %s' "$OLD_REV..$NEW_REV" 2>/dev/null | head -40
+    echo ""
+  fi
   NEED_INSTALL=1
   NEED_BUILD=1
   if [ "$OLD_REV" != "none" ] && [ "$NEW_REV" != "none" ] && [ -d build ]; then
     CHANGED="$(git diff --name-only "$OLD_REV" "$NEW_REV" 2>/dev/null || echo "")"
-    echo "[update] changed files:"; echo "$CHANGED" | sed 's/^/[update]   /'
+    echo "[update] $(printf '%s\n' "$CHANGED" | grep -c .) file(s) changed"
     NEED_INSTALL=0; NEED_BUILD=0
     # Lockfile change → reinstall (and rebuild, since deps may feed the bundle).
     if echo "$CHANGED" | grep -q '^package-lock\.json$'; then NEED_INSTALL=1; NEED_BUILD=1; fi

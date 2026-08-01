@@ -85,3 +85,22 @@ without bound.
 - `main/services/log-buffer.ts` — in-memory `/log` ring buffer
 - `scripts/update.sh` / `update.ps1` — the detached pull/install/build/restart script
 - `renderer/settings/sections/advanced-section.tsx` — the Updates panel + progress bar
+
+## Logs survive restarts
+
+`/log` is a ring buffer of the last 10,000 lines, mirrored to `server.log` in the
+data directory and replayed on boot — so the run-up to a restart, a crash or an
+update is still there afterwards, tagged with its original timestamps. Writes are
+batched on a 2s timer (console.* sits on the hot path, including the 1 Hz recorder
+loops) and the file is hard-capped at 4 MB, trimmed at a line boundary.
+
+## What an update reports
+
+The update script narrates itself into `/log` as it runs: the commit range and the
+subject line of every commit arriving, how many files changed, and whether the
+reinstall and rebuild are needed or being skipped. Previously that detail sat in a
+temp file until the run finished, so the only thing visible mid-update was
+`step: install`.
+
+npm and vite's raw output is deliberately not forwarded — it lands in `update.log`
+rather than flooding `/log` with progress bars.

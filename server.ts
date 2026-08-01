@@ -18,6 +18,11 @@ import { initLogCapture } from "./main/services/log-buffer.js";
 // Capture logs into the ring buffer (exposed at /log) as early as possible.
 initLogCapture();
 
+import { initLogPersistence } from "./main/services/log-persist.js";
+// Replay the previous run's log tail, then start mirroring new lines to disk, so
+// /log spans restarts instead of starting blank after every one.
+initLogPersistence();
+
 import { initUpdateLog } from "./main/services/update-log.js";
 // Replay the last update's persisted activity into the /log buffer (and trim the
 // on-disk log) so an update that just restarted us is still visible at /log.

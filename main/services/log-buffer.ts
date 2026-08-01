@@ -4,7 +4,17 @@
 //
 // initLogCapture() must run BEFORE other modules log, so call it first in server.ts.
 
-const MAX = 500;
+// Held in memory and mirrored to disk by log-persist.ts, which replays this many
+// lines back on boot — so /log shows the run-up to a restart, not just what has
+// happened since. ~10k lines is a couple of MB at typical length.
+const MAX = 10_000;
+
+/** Set by log-persist to mirror each line to disk. Kept as a hook rather than a
+ *  direct import so log-buffer stays dependency-free and safe to load first. */
+let sink: ((line: LogLine) => void) | null = null;
+export function setLogSink(fn: (line: LogLine) => void): void {
+  sink = fn;
+}
 
 export interface LogLine {
   /** ISO timestamp. */
@@ -30,8 +40,10 @@ function record(level: LogLine["level"], args: unknown[]): void {
       typeof a === "string" ? a : a instanceof Error ? (a.stack ?? a.message) : safeStringify(a),
     )
     .join(" ");
-  lines.push({ t: new Date().toISOString(), level, msg });
+  const line: LogLine = { t: new Date().toISOString(), level, msg };
+  lines.push(line);
   if (lines.length > MAX) lines.splice(0, lines.length - MAX);
+  sink?.(line);
 }
 
 /** Patch console.{log,info,warn,error} to also capture into the ring buffer. The
