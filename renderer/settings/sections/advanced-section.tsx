@@ -259,7 +259,13 @@ function UpdatesPanel({
                 <CheckCircle2Icon className="size-4 shrink-0 mt-0.5 text-green-10" />
                 <div className="flex-1">
                   <p className="font-medium">Update installed successfully.</p>
-                  <p className="text-caption2 text-green-11/80">Now running {justUpdated.version}.</p>
+                  {/* The handshake value is a git SHA — it has to change on every
+                      update, not just released ones, or kiosks would not reload.
+                      Right for that job, meaningless to read, so the banner names
+                      the release from live status and keeps the SHA as a fallback. */}
+                  <p className="text-caption2 text-green-11/80">
+                    Now running {s?.currentTag ?? (s ? `v${s.version}` : justUpdated.version)}.
+                  </p>
                 </div>
                 {onDismissJustUpdated ? (
                   <button

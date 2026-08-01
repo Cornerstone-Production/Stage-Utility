@@ -21,7 +21,7 @@
     "server": "tsx server.ts",
     "start": "node --import tsx server.ts",
     "lint": "eslint .",
-    "test": "node --import tsx --test \"main/**/*.test.ts\" \"renderer/**/*.test.ts\"",
+    "test": "node --import tsx --test \"main/**/*.test.ts\" \"renderer/**/*.test.ts\" \"scripts/**/*.test.ts\"",
     "type-check": "tsc --noEmit",
     "format": "oxfmt ."
   },
