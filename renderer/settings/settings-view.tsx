@@ -253,6 +253,14 @@ const SECTION_DESC: Record<string, string> = {
 // labels did not: "Output" had collected anything screen-adjacent (Patch is a
 // document, Integrations are devices), and "Identity" had become the bucket for the
 // two sections that fit nowhere — including Baptisms, which is a live stopwatch.
+/** Tabs whose content also lives at a standalone URL, and what to call the link. */
+const SECTION_PAGE: Record<string, { path: string; label: string } | undefined> = {
+  scriptview: { path: "/scriptview", label: "Open ScriptView" },
+  patch: { path: "/patch", label: "Open patch sheet" },
+  "service-history": { path: "/history", label: "Open history" },
+  baptisms: { path: "/baptism", label: "Open operator page" },
+};
+
 const NAV_GROUPS: { label: string; ids: string[] }[] = [
   // What is shown. Patch belongs here because volunteers READ it at /patch; the
   // "output" in its description is XLR, not a display.
@@ -1283,7 +1291,7 @@ export function SettingsView() {
       case "baptisms":
         return (
           <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
-            <BaptismsSection stageState={stageState} />
+            <BaptismsSection />
           </div>
         );
       case "patch":
@@ -1399,24 +1407,17 @@ export function SettingsView() {
               <p className="text-footnote text-fg-muted mt-1 max-w-[68ch]">{SECTION_DESC[activeSection.id]}</p>
             )}
           </div>
-          {activeSection.id === "scriptview" && (
+          {/* Every tab that has a standalone page gets the same header link, so a
+              section is never the odd one out — declared once rather than copied
+              per tab. */}
+          {SECTION_PAGE[activeSection.id] && (
             <a
-              href="/scriptview"
+              href={SECTION_PAGE[activeSection.id]!.path}
               target="_blank"
               rel="noopener noreferrer"
               className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-caption1 text-fg-muted transition-colors hover:bg-fill hover:text-fg"
             >
-              Open ScriptView <ExternalLinkIcon className="size-3.5" />
-            </a>
-          )}
-          {activeSection.id === "patch" && (
-            <a
-              href="/patch"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-caption1 text-fg-muted transition-colors hover:bg-fill hover:text-fg"
-            >
-              Open patch sheet <ExternalLinkIcon className="size-3.5" />
+              {SECTION_PAGE[activeSection.id]!.label} <ExternalLinkIcon className="size-3.5" />
             </a>
           )}
         </header>

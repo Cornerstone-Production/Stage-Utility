@@ -823,7 +823,6 @@ function ProPresenterInstancesPanel({
                   <FieldContent>
                     <FieldLabel className="flex items-center gap-1.5">
                       ProPresenter Host
-                      <InfoHint>IP or hostname of the machine running ProPresenter, on the same network as this server.</InfoHint>
                     </FieldLabel>
                     <FieldDescription>192.168.1.101</FieldDescription>
                   </FieldContent>

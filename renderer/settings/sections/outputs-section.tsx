@@ -4,7 +4,7 @@ import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, GripVerticalIcon, RefreshCwIcon, LockIcon, MoreVerticalIcon, CopyIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, GripVerticalIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon } from "lucide-react";
 import {
   Button,
   Input,
@@ -13,9 +13,9 @@ import {
   SelectContent,
   SelectItem,
   SelectValue,
-  Switch,
   toast,
 } from "../../components/ui";
+import { cn } from "../../lib/cn";
 import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
 import { invoke, onNotification } from "../../lib/api";
@@ -150,7 +150,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
             <DropdownMenu.Content
               align="end"
               sideOffset={4}
-              className="z-50 min-w-44 rounded-md border border-line-strong bg-popover p-1 shadow-md backdrop-blur-xl"
+              className="z-50 min-w-max rounded-md border border-line-strong bg-popover p-1 shadow-md backdrop-blur-xl"
             >
               <DropdownMenu.Item
                 onSelect={onRefresh}
@@ -201,13 +201,24 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           <ExternalLinkIcon className="size-3.5 text-gray-9" />
           Open window
         </Button>
+        {/* The padlock is the state, so a separate switch beside it said the same
+            thing twice. Closed and accented = locked, open and muted = not. */}
         <Tooltip label="Hide the settings/QR link and home logo on this display so a handed-out link can't navigate away">
-          <label
-            className="ml-auto flex shrink-0 cursor-pointer items-center gap-1.5 text-caption1 text-fg-muted" aria-label="Hide the settings/QR link and home logo on this display so a handed-out link can't navigate away">
-            <LockIcon className="size-3.5" />
-            <span>Locked</span>
-            <Switch checked={output.locked ?? false} onCheckedChange={onSetLocked} aria-label={`Lock display ${output.name}`} />
-          </label>
+          <button
+            type="button"
+            onClick={() => onSetLocked(!(output.locked ?? false))}
+            aria-pressed={output.locked ?? false}
+            aria-label={`${output.locked ? "Unlock" : "Lock"} display ${output.name}`}
+            className={cn(
+              "ml-auto flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-caption1 transition-colors",
+              output.locked
+                ? "border-accent/40 bg-accent/15 text-accent"
+                : "border-line text-fg-muted hover:bg-fill hover:text-fg",
+            )}
+          >
+            {output.locked ? <LockIcon className="size-3.5" /> : <LockOpenIcon className="size-3.5" />}
+            <span>{output.locked ? "Locked" : "Unlocked"}</span>
+          </button>
         </Tooltip>
       </div>
 
