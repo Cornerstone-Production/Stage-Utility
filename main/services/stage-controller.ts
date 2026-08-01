@@ -1070,7 +1070,7 @@ export class StageController {
     next.leadMin = Math.min(1440, Math.max(0, Math.round(next.leadMin)));
     next.tailMin = Math.min(1440, Math.max(0, Math.round(next.tailMin)));
     next.dormantMin = Math.min(1440, Math.max(1, Math.round(next.dormantMin)));
-    console.log(`[stage-controller] setReconnectSchedule →`, next);
+    console.log(`[stage-controller] setReconnectSchedule → ${scrub(next)}`);
     this.state = { ...this.state, reconnectSchedule: next };
     await settingsStore.patch({ reconnectSchedule: next });
     serviceWindow.setSchedule(next);
@@ -1093,7 +1093,7 @@ export class StageController {
     const next: TaperWindow = { ...this.state.taperWindow, ...partial };
     next.preMin = Math.min(240, Math.max(0, Math.round(next.preMin)));
     next.postMin = Math.min(240, Math.max(0, Math.round(next.postMin)));
-    console.log(`[stage-controller] setTaperWindow →`, next);
+    console.log(`[stage-controller] setTaperWindow → ${scrub(next)}`);
     this.state = { ...this.state, taperWindow: next };
     await settingsStore.patch({ taperWindow: next });
     this.broadcast();
