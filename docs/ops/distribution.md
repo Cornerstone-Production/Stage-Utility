@@ -46,7 +46,7 @@ Two update tracks, selectable in **Settings → Advanced → Update track**:
 ## What a release contains
 
 Every tag is built by CI into one archive per platform, attached to the GitHub
-release alongside `SHA256SUMS`:
+release:
 
 ```
 stage-utility-<version>-<os>-<arch>.tar.gz
@@ -71,8 +71,14 @@ compilation step per platform.
 ## Installing
 
 See [install-and-config.md](install-and-config.md). Installers download the archive
-for the platform they are running on, verify it against `SHA256SUMS`, and register a
-service (systemd, launchd, or a Windows service).
+for the platform they are running on, verify it, and register a service (systemd,
+launchd, or a Windows service).
+
+The expected hash comes from the **releases API**, which publishes a SHA-256 digest
+per asset. It has to come from outside the archive: a checksum shipped inside the
+file it describes proves nothing, because whoever alters the file alters the
+checksum with it. An installer that cannot obtain a digest refuses to install
+rather than proceeding unverified.
 
 Installers are distributed as a script rather than a `.pkg` or `.msi` because an
 unsigned installer bundle is worse than none: macOS Gatekeeper refuses to open an

@@ -54,8 +54,8 @@ done
 # One of these must exist to verify the download. Refusing to continue without
 # one is deliberate: an unverified archive is the thing this script must not
 # install.
-if command -v sha256sum >/dev/null; then SHACHECK="sha256sum -c -"
-elif command -v shasum   >/dev/null; then SHACHECK="shasum -a 256 -c -"
+if command -v sha256sum >/dev/null; then SHASUM="sha256sum"
+elif command -v shasum   >/dev/null; then SHASUM="shasum -a 256"
 else die "Neither sha256sum nor shasum is available; cannot verify the download."
 fi
 
@@ -68,10 +68,11 @@ else
   say "Finding the newest ${TRACK} release"
   # `beta` takes prereleases and releases both; `main` takes only full releases.
   if [ "$TRACK" = beta ]; then
-    TAG=$(api "releases?per_page=20" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    RELEASE_JSON=$(api "releases?per_page=20")
   else
-    TAG=$(api "releases/latest" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    RELEASE_JSON=$(api "releases/latest")
   fi
+  TAG=$(printf '%s' "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
 fi
 [ -n "${TAG:-}" ] || die "Could not determine a release to install. Is the repository reachable?"
 VERSION="${TAG#v}"
@@ -86,11 +87,35 @@ trap 'rm -rf "$WORK"' EXIT
 
 curl -fsSL --retry 3 -o "$WORK/$ARCHIVE" "$BASE/$ARCHIVE" \
   || die "No build for ${PLATFORM} in ${TAG}."
-curl -fsSL --retry 3 -o "$WORK/SHA256SUMS" "$BASE/SHA256SUMS" \
-  || die "Release ${TAG} publishes no checksums; refusing to install unverified."
+
+# The expected hash comes from the releases API, not from anything inside the
+# archive — a checksum shipped inside the file it describes proves nothing,
+# because whoever alters the file alters the checksum with it.
+#
+# Pinned to a specific release when STAGE_VERSION was given, since the payload
+# fetched above is then the wrong one (or absent).
+if [ -z "${RELEASE_JSON:-}" ]; then
+  RELEASE_JSON=$(api "releases/tags/${TAG}") \
+    || die "Could not read release ${TAG} to verify the download."
+fi
 
 say "Verifying"
-( cd "$WORK" && grep " ${ARCHIVE}\$" SHA256SUMS | $SHACHECK >/dev/null ) \
+# Within an asset object the API emits "name" before "digest", so the digest we
+# want is the first one after this archive's name. Anchoring on the exact name
+# is what stops another platform's hash being read as this one's — and the
+# response is pretty-printed, so the two fields are never on the same line.
+WANT=$(printf '%s' "$RELEASE_JSON" | awk -v want="\"name\": \"${ARCHIVE}\"" '
+  index($0, want) { found = 1; next }
+  found && /"digest": "sha256:/ {
+    if (match($0, /[0-9a-f]{64}/)) { print substr($0, RSTART, RLENGTH); exit }
+  }
+')
+
+[ -n "${WANT:-}" ] \
+  || die "Release ${TAG} publishes no checksum for ${ARCHIVE}; refusing to install unverified."
+
+GOT=$(cd "$WORK" && $SHASUM "$ARCHIVE" | cut -d" " -f1)
+[ "$WANT" = "$GOT" ] \
   || die "Checksum mismatch — the download does not match the published release. Nothing installed."
 
 # ── Unpack beside the current release, then switch ────────────────────────────
