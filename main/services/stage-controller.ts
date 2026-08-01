@@ -151,8 +151,6 @@ export class StageController {
     slotsByLayoutObject: {},
     resolvedByOutput: {},
     chargerBays: [],
-    slots: [],
-    slotsByDisplay: {},
     displays: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots", ndiSource: null }],
     pcoConfigured: false,
     lastRefreshedAt: null,
@@ -1975,10 +1973,6 @@ export class StageController {
 
   // ── Internals ─────────────────────────────────────────────────────────
 
-  private primaryOutputId(): string {
-    return this.state.outputs[0]?.id ?? PRIMARY_DISPLAY_ID;
-  }
-
   /** The View id routed to the primary output, falling back to the first slots
    *  View (or the primary id) so legacy slot writes always land somewhere. */
   private primaryViewId(): string {
@@ -2119,7 +2113,6 @@ export class StageController {
     for (const oid of this.rawSlotsByObject.keys()) if (!(oid in slotsByLayoutObject)) resolveObjectSlots(oid);
 
     const resolvedByOutput: Record<string, ResolvedOutput> = {};
-    const slotsByDisplay: Record<string, Slot[]> = {};
     const displays: DisplayInfo[] = [];
     for (const output of this.state.outputs) {
       const view = output.viewId ? this.state.views.find((v) => v.id === output.viewId) ?? null : null;
@@ -2133,20 +2126,15 @@ export class StageController {
         blackout: output.blackout ?? false,
         locked: output.locked ?? false,
       };
-      slotsByDisplay[output.id] = view && view.kind === "slots" ? (slotsByView[view.id] ?? []) : [];
       displays.push({ id: output.id, name: output.name, kind, ndiSource });
     }
-    const slots = slotsByDisplay[this.primaryOutputId()] ?? [];
-
     this.state = {
       ...this.state,
       slotsByView,
       slotsByLayoutObject,
       resolvedByOutput,
-      slotsByDisplay,
       chargerBays: this.computeChargerBays(),
       displays,
-      slots,
     };
   }
 

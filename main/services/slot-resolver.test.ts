@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { resolveSlots } from "./slot-resolver.js";
+import { resolveSlots, fitAvatarToColumn } from "./slot-resolver.js";
 import type { Slot, SlotLink, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 
@@ -185,4 +185,57 @@ describe("which positions the cell names", () => {
     assert.equal(out[0]!.displayName, "Pat");
     assert.deepEqual(out[0]!.shownPositions, ["Keys"]);
   });
+});
+
+// ── Avatar geometry ────────────────────────────────────────────────────────
+// Slots are tall and drawn with object-fit: cover, so a square source is scaled to
+// fill the height and cropped hard horizontally. Matching the request to the column
+// keeps only the pixels that get drawn.
+
+test("a narrow column asks for a narrow crop, at full height", () => {
+  const out = fitAvatarToColumn("https://x/avatar.png?g=1000x1000%23", 13);
+  assert.match(out!, /[?&]g=\d+x1000%23$/, out!);
+  const w = Number(/g=(\d+)x/.exec(out!)![1]);
+  assert.ok(w < 250, `13 columns should be narrow, got ${w}`);
+});
+
+test("fewer columns means a wider crop", () => {
+  const wide = Number(/g=(\d+)x/.exec(fitAvatarToColumn("https://x/a.png", 4)!)![1]);
+  const narrow = Number(/g=(\d+)x/.exec(fitAvatarToColumn("https://x/a.png", 13)!)![1]);
+  assert.ok(wide > narrow, `${wide} should exceed ${narrow}`);
+});
+
+test("a single-slot view never asks for more than the source has", () => {
+  for (const columns of [1, 2]) {
+    const w = Number(/g=(\d+)x/.exec(fitAvatarToColumn("https://x/a.png", columns)!)![1]);
+    assert.equal(w, 1000, `${columns} column(s) should cap at the source ceiling`);
+  }
+});
+
+test("vertical resolution never drops below what was requested before", () => {
+  // The whole point is to cut wasted width, not to make anything softer.
+  for (const columns of [1, 2, 4, 8, 13, 30]) {
+    const h = Number(/g=\d+x(\d+)/.exec(fitAvatarToColumn("https://x/a.png", columns)!)![1]);
+    assert.equal(h, 1000, `columns=${columns}`);
+  }
+});
+
+test("an existing geometry is rewritten, not appended to", () => {
+  const out = fitAvatarToColumn("https://x/a.png?g=1000x1000%23&z=1", 8);
+  assert.equal((out!.match(/g=/g) ?? []).length, 1, out!);
+  assert.match(out!, /z=1/, "other params survive");
+});
+
+test("a url with no geometry gets one, with the right separator", () => {
+  assert.match(fitAvatarToColumn("https://x/a.png", 8)!, /\?g=\d+x1000%23$/);
+  assert.match(fitAvatarToColumn("https://x/a.png?v=2", 8)!, /&g=\d+x1000%23$/);
+});
+
+test("no photo stays no photo", () => {
+  assert.equal(fitAvatarToColumn(null, 8), null);
+});
+
+test("an absurd column count still yields a usable width", () => {
+  const w = Number(/g=(\d+)x/.exec(fitAvatarToColumn("https://x/a.png", 500)!)![1]);
+  assert.ok(w >= 120, `floor keeps it legible, got ${w}`);
 });

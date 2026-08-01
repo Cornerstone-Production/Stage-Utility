@@ -538,7 +538,10 @@ export function StageView() {
   // precedence so edits show live; null draft falls back to saved state.
   const displaySlots = previewViewId
     ? (previewDraftSlots ?? state.slotsByView?.[previewViewId] ?? [])
-    : (state.slotsByDisplay?.[displayId] ?? []);
+    // Derived rather than read from a second copy: slotsByDisplay held exactly
+    // slotsByView[thisOutput'sView], and shipping both put ~6 KB of duplicate slot
+    // data in every state broadcast to every display.
+    : (state.slotsByView?.[state.resolvedByOutput?.[displayId]?.viewId ?? ""] ?? []);
   const sortedSlots = [...displaySlots].sort((a, b) => a.order - b.order);
 
   // Physical alignment: when the View has a slotsLayout, columns are sized in

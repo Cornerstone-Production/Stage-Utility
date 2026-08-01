@@ -1148,10 +1148,6 @@ export interface StageState {
   resolvedByOutput: Record<string, ResolvedOutput>;
 
   // ── Compat shim (computed from outputs + views) ──────────────────────
-  /** @deprecated Primary output's resolved slots (legacy phone control page). */
-  slots: Slot[];
-  /** @deprecated Resolved slots keyed by OUTPUT id (== slotsByView of its routed view). */
-  slotsByDisplay: Record<string, Slot[]>;
   /** @deprecated Each output joined with its routed view's kind/ndiSource. */
   displays: DisplayInfo[];
 

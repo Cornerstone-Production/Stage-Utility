@@ -102,7 +102,12 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
       }
       try {
         const { getPhotoPath } = await import("../photo-cache.js");
-        const localPath = await getPhotoPath(decodeURIComponent(photoUrl));
+        // `searchParams.get` has already decoded once. Decoding again turned the
+        // avatar geometry's %23 into a literal '#', which a URL treats as the start
+        // of a fragment — so PCO never saw the crop flag and returned a fit-inside
+        // image instead of a crop. Invisible while the request was square (both give
+        // the same result); it silently capped every non-square crop.
+        const localPath = await getPhotoPath(photoUrl);
         if (!localPath) {
           res.writeHead(404);
           res.end("Photo not found");
