@@ -12,12 +12,20 @@ import { broadcast } from "./broadcaster.js";
 import { splRecorder } from "./spl-recorder.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
+import { serviceWindow } from "./service-window.js";
 import { stageController } from "./stage-controller.js";
 
 const LIVE_INTERVAL_MS = 1000;
 // Preservice/idle: still poll often enough to notice a service going live quickly
 // (the countdown itself ticks client-side, so this is just change detection).
 const IDLE_INTERVAL_MS = 4000;
+// Outside a service window there is nothing to notice, so stop asking so often.
+// At 4s around the clock this poll was ~151,000 PCO requests a week, of which only
+// about 5% fell anywhere near a service — and unlike the LAN integrations, which
+// have honoured the window for a while, it spends a rate-limited cloud quota.
+// serviceWindow never sleeps past the next window opening, and fails open when the
+// schedule is unknown, so the ramp-up before rehearsal is unaffected.
+const DORMANT_INTERVAL_MS = 5 * 60_000;
 
 // Everything on the live DTO that a client actually reacts to. serverNow is
 // deliberately excluded: it changes every tick but the client ticks the countdown
@@ -68,7 +76,7 @@ class LivePoller {
     } catch (err) {
       // Transient (e.g. 429 / network) — keep last client state, slow down.
       console.error("[live-poller] fetch error:", err instanceof Error ? err.message : err);
-      this.schedule(IDLE_INTERVAL_MS);
+      this.schedule(serviceWindow.pollDelayMs(IDLE_INTERVAL_MS, DORMANT_INTERVAL_MS));
       return;
     }
 
@@ -98,7 +106,12 @@ class LivePoller {
 
     // Fast cadence while a live item is running (so item switches reflect quickly);
     // a calmer cadence for the preservice countdown (it ticks client-side anyway).
-    this.schedule(live?.mode === "item" ? LIVE_INTERVAL_MS : IDLE_INTERVAL_MS);
+    const active = live?.mode === "item" ? LIVE_INTERVAL_MS : IDLE_INTERVAL_MS;
+    // A live item means a service is happening whatever the schedule says — only
+    // the idle cadence is allowed to go dormant.
+    this.schedule(
+      live?.mode === "item" ? active : serviceWindow.pollDelayMs(active, DORMANT_INTERVAL_MS),
+    );
   }
 }
 

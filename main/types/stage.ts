@@ -16,9 +16,6 @@ export type ViewKind =
   | "script"
   | "spl-rundown";
 
-/** @deprecated Back-compat alias retained for the legacy display model. Use ViewKind. */
-export type DisplayKind = ViewKind;
-
 /** A live transcript line from ProdCom (pushed on "prodcom:transcript"). */
 export interface TranscriptLineDTO {
   /** Stable id for keying/dedupe (falls back to a synthesized one). */
@@ -63,7 +60,7 @@ export interface DisplayInfo {
   id: string;
   name: string;
   /** Defaults to "slots" when absent (back-compat with older settings). */
-  kind?: DisplayKind;
+  kind?: ViewKind;
   /** NDI source name (mirrors the routed View's ndiSource). */
   ndiSource?: string | null;
 }
@@ -684,8 +681,6 @@ export interface SplItemHistory {
   metrics: Record<string, SplMetricStat>;
   /** Legacy single-metric peak (dB) — kept populated for back-compat reads. */
   maxSpl: number | null;
-  /** Legacy single-metric arithmetic mean (dB). @deprecated see SplMetricStat.avg. */
-  avgSpl: number | null;
   /** Legacy single-metric energy average (dB). Absent on older records. */
   leqSpl?: number | null;
   /** PCO item_type ("song" | "header" | "media" | "item") when it was known at
@@ -1095,6 +1090,9 @@ export interface SlotDevice {
   rf: number | null;
   battery: number | null;
   freq: string | null;
+  /** Live audio level, **normalised 0–1**. Receivers report this on different
+   *  scales (Shure against its own dB range, Sennheiser raw), so it is coerced to
+   *  one unit in slot-resolver.ts — never assume it is dB. */
   audioLevel: number | null;
   /** Resolved level for the charge bar, from the slot's chargeSource: the bound
    *  mic's battery, a chosen SBC charger bay, or null (off / no source). */
@@ -1180,12 +1178,6 @@ export interface StageState {
   resolvedByOutput: Record<string, ResolvedOutput>;
 
   // ── Compat shim (computed from outputs + views) ──────────────────────
-  /** @deprecated Primary output's resolved slots (legacy phone control page). */
-  slots: Slot[];
-  /** @deprecated Resolved slots keyed by OUTPUT id (== slotsByView of its routed view). */
-  slotsByDisplay: Record<string, Slot[]>;
-  /** @deprecated Each output joined with its routed view's kind/ndiSource. */
-  displays: DisplayInfo[];
 
   pcoConfigured: boolean;
   lastRefreshedAt: string | null;

@@ -16,6 +16,27 @@ const EMPTY_DEVICE: SlotDevice = {
   iemLabel: null,
 };
 
+
+/**
+ * Coerce a provider's audio level to the documented 0–1 contract.
+ *
+ * Providers disagree: Shure normalises against its own dB range (Axient −60..0,
+ * ULXD −50..0), while the Sennheiser paths pass the device's raw value straight
+ * through. So the field arrived as 0–1 from some receivers and as dBFS from
+ * others, and the one place that renders it printed `Math.round(v)` followed by
+ * "dB" — which could only ever say "0 dB" or "1 dB" for a Shure rig.
+ *
+ * Normalising here rather than in each provider keeps one definition of the unit,
+ * and means a receiver added later cannot quietly reintroduce the mismatch.
+ */
+export function normaliseAudioLevel(v: number | null | undefined): number | null {
+  if (v == null || !Number.isFinite(v)) return null;
+  if (v >= 0 && v <= 1) return v; // already normalised
+  if (v < 0) return Math.max(0, Math.min(1, (v + 60) / 60)); // dBFS-ish, −60..0
+  if (v <= 100) return v / 100; // percentage
+  return null; // nothing sensible to make of it
+}
+
 function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
   if (!ds.online) {
     return { status: "error", rf: null, battery: null, freq: ds.frequencyLabel, audioLevel: null, charge: null, iemCharge: null, label: null, iemLabel: null };
@@ -29,7 +50,7 @@ function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
     rf: ds.rfBars,
     battery: ds.battery,
     freq: ds.frequencyLabel,
-    audioLevel: ds.audioLevel,
+    audioLevel: normaliseAudioLevel(ds.audioLevel),
     charge: ds.battery,
     iemCharge: null,
     label: null,
@@ -161,11 +182,63 @@ function matchByPositions(
   return null;
 }
 
+
+/**
+ * Vertical resolution to ask PCO for — unchanged from what this always requested,
+ * so nothing gets softer than it is today.
+ *
+ * There is no single ceiling to raise it to: originals are whatever each person
+ * uploaded, measured here from 364×364 up to 1000×1000, with a couple that are not
+ * even square (716×1000, 1000×750). PCO will happily serve any geometry asked of
+ * it, upscaling past the original — so a bigger number costs bytes for everyone and
+ * only buys detail for whoever uploaded something larger. 1000 is where real
+ * originals top out in practice; if that changes, this is the one knob.
+ */
+const AVATAR_MAX_PX = 1000;
+
+/** Widest a single column's photo can usefully be, as a fraction of its height.
+ *  A 16:9 display split into C columns gives each roughly (16/C)/(9 × 0.87) — the
+ *  0.87 being the share of the card the photo occupies above the name plate. The
+ *  2.2 rounds that up so a column is never under-served. */
+const COLUMN_ASPECT_BUDGET = 2.2;
+
+/** Columns a view renders: stacked slots share one, so they do not each get a
+ *  column's width. Mirrors the grouping the kiosk does with `stackWithPrevious`. */
+function columnCount(slots: Slot[]): number {
+  const n = slots.filter((s) => !s.stackWithPrevious).length;
+  return Math.max(1, n);
+}
+
+/**
+ * Ask PCO for the crop this slot will actually display, rather than a square.
+ *
+ * Slots are tall and narrow, and the kiosk draws them with `object-fit: cover` —
+ * so a square source is scaled to fill the height and then cropped hard
+ * horizontally. In a 13-slot view roughly 85% of every downloaded image was thrown
+ * away, and the fixed 1000px request was itself an upscale of a 960px original.
+ * Matching the geometry to the column keeps exactly the pixels that get drawn:
+ * ~183 KB per photo instead of ~1093 KB, with nothing visibly different.
+ */
+export function fitAvatarToColumn(url: string | null, columns: number): string | null {
+  if (!url) return null;
+  const width = Math.min(
+    AVATAR_MAX_PX,
+    Math.max(120, Math.ceil((AVATAR_MAX_PX * COLUMN_ASPECT_BUDGET) / columns)),
+  );
+  const geometry = `${width}x${AVATAR_MAX_PX}%23`;
+  return /[?&]g=\d+x\d+(%23|#)?/.test(url)
+    ? url.replace(/([?&]g=)\d+x\d+(%23|#)?/, `$1${geometry}`)
+    : url + (url.includes("?") ? "&" : "?") + `g=${geometry}`;
+}
+
 export function resolveSlots(
   slots: Slot[],
   members: TeamMemberDTO[],
   deviceStatuses: Map<string, DeviceStatus>,
 ): Slot[] {
+  // How wide each column will be drawn, which sets the avatar crop below.
+  const columns = columnCount(slots);
+
   // Claimed people, keyed by positions-signature. Slots with the same signature
   // compete for distinct people; slots with different signatures are independent,
   // so a player with two devices still appears in both of their slots. Board order
@@ -235,7 +308,7 @@ export function resolveSlots(
     return {
       ...slot,
       displayName: member?.name ?? null,
-      photoUrl: member?.photoUrl ?? null,
+      photoUrl: fitAvatarToColumn(member?.photoUrl ?? null, columns),
       shownPositions,
       device,
     };

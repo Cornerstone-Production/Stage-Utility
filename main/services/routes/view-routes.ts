@@ -7,7 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { type RouteCtx, json, error, readBody, isDisplayKind } from "./context.js";
-import type { DisplayKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
+import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
 import { stageController } from "../stage-controller.js";
 
 export async function viewRoutes(c: RouteCtx): Promise<void> {
@@ -17,45 +17,10 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    if (method === "POST" && pathname === "/api/displays") {
-      const body = await readBody(req) as Record<string, unknown>;
-      const name = typeof body.name === "string" ? body.name : undefined;
-      const kind = isDisplayKind(body.kind) ? body.kind : "slots";
-      const state = await stageController.addDisplay(name, kind);
-      json(res, state, 201);
-      return;
-    }
-
-    // PATCH /api/displays/:id — accepts { name? } and/or { kind? } and/or { ndiSource? }
-    const displayPatchMatch = pathname.match(/^\/api\/displays\/([^/]+)$/);
-    if (method === "PATCH" && displayPatchMatch) {
-      const id = displayPatchMatch[1];
-      const body = await readBody(req) as Record<string, unknown>;
-      const hasName = typeof body.name === "string";
-      const hasKind = isDisplayKind(body.kind);
-      // ndiSource accepts a string (assign) or null (clear); absent = no change.
-      const hasNdiSource = "ndiSource" in body
-        && (typeof body.ndiSource === "string" || body.ndiSource === null);
-      if (!hasName && !hasKind && !hasNdiSource) {
-        error(res, "body.name (string), body.kind ('slots'|'dashboard'|'stage'|'transcription'), or body.ndiSource (string|null) required");
-        return;
-      }
-      let state = stageController.getState();
-      if (hasName) state = await stageController.renameDisplay(id, body.name as string);
-      if (hasKind) state = await stageController.setDisplayKind(id, body.kind as DisplayKind);
-      if (hasNdiSource) state = await stageController.setDisplayNdiSource(id, body.ndiSource as string | null);
-      json(res, state);
-      return;
-    }
-
-    // DELETE /api/displays/:id
-    const displayDeleteMatch = pathname.match(/^\/api\/displays\/([^/]+)$/);
-    if (method === "DELETE" && displayDeleteMatch) {
-      const id = displayDeleteMatch[1];
-      const state = await stageController.removeDisplay(id);
-      json(res, state);
-      return;
-    }
+    // The legacy write API (POST /api/displays, PATCH|DELETE /api/displays/:id)
+    // is gone — Views and Outputs replaced it and nothing called it. GET
+    // /api/displays and /api/displays/refresh stay: the first is the DisplayInfo
+    // compat shim, the second is what the Companion module uses to reload kiosks.
 
     // ── Views (content definitions) ───────────────────────────────────────
     if (method === "GET" && pathname === "/api/views") {
@@ -166,7 +131,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameView(id, body.name as string);
-      if (hasKind) state = await stageController.setViewKind(id, body.kind as DisplayKind);
+      if (hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
       if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
       if (hasLayout) state = await stageController.setViewLayout(id, body.layout as LayoutDTO);
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);

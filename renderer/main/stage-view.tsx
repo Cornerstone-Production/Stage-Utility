@@ -422,8 +422,10 @@ export function StageView() {
     : null;
 
   const multiDisplay = (state.outputs?.length ?? 0) > 1;
-  const currentDisplay = previewViewId ? null : (state.displays?.find((d) => d.id === displayId) ?? null);
-  const kind: ViewKind = previewView?.kind ?? currentDisplay?.kind ?? "slots";
+  // Name comes from the Output, kind from the View it is routed to — the same two
+  // places the `displays` shim was assembled from before it was dropped.
+  const currentDisplay = previewViewId ? null : (state.outputs?.find((o) => o.id === displayId) ?? null);
+  const kind: ViewKind = previewView?.kind ?? state.resolvedByOutput?.[displayId]?.kind ?? "slots";
   const displayName = previewView ? null : (multiDisplay ? (currentDisplay?.name ?? displayId) : null);
 
   // A real output (not a preview) with no View routed to it is unconfigured —
@@ -538,7 +540,10 @@ export function StageView() {
   // precedence so edits show live; null draft falls back to saved state.
   const displaySlots = previewViewId
     ? (previewDraftSlots ?? state.slotsByView?.[previewViewId] ?? [])
-    : (state.slotsByDisplay?.[displayId] ?? []);
+    // Derived rather than read from a second copy: slotsByDisplay held exactly
+    // slotsByView[thisOutput'sView], and shipping both put ~6 KB of duplicate slot
+    // data in every state broadcast to every display.
+    : (state.slotsByView?.[state.resolvedByOutput?.[displayId]?.viewId ?? ""] ?? []);
   const sortedSlots = [...displaySlots].sort((a, b) => a.order - b.order);
 
   // Physical alignment: when the View has a slotsLayout, columns are sized in

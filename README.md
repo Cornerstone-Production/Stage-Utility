@@ -50,6 +50,7 @@ displays, the settings UI, the phone remote, and a REST + SSE API — all on one
 | [Data model and concepts](docs/reference/data-model.md) | Views, Outputs, Slots — the nouns |
 | [API reference](docs/reference/api.md) | the HTTP surface |
 | [Reliability, backups and data](docs/ops/reliability.md) | behaviour under load, and where your data lives |
+| [Network traffic](docs/ops/network-traffic.md) | what this actually puts on your LAN during a service |
 | [Updates and logs](docs/ops/updates-and-logs.md) | the in-app updater |
 | [Contributing](docs/contributing.md) | commit convention, branching, releases |
 | [Project structure](docs/contributing-appendix.md) | orientation in the codebase |
@@ -163,7 +164,9 @@ Moved to [scriptview and baptisms](docs/features/scriptview-and-baptisms.md).
 
 ## Reliability & efficiency
 
-Moved to [reliability](docs/ops/reliability.md).
+Moved to [reliability](docs/ops/reliability.md). For what the app puts on the
+network — about 1.4 Mbit/s across six screens during a service, and close to
+nothing between them — see [network traffic](docs/ops/network-traffic.md).
 
 ## Backups & portability
 

@@ -1,4 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
+import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { buildLabel } from "../lib/build-label";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
@@ -512,7 +513,17 @@ export function SettingsView() {
       const s = payload as StageState;
       queryClient.setQueryData(["stage:getState"], s);
     });
-    return unsub;
+    // Telemetry rides its own channel so a meter twitch does not re-send the whole
+    // state document; merge it back so the slots editor's RF bars stay live.
+    const unsubDevices = onNotification("slots:devices", (payload: unknown) => {
+      queryClient.setQueryData(["stage:getState"], (prev: StageState | undefined) =>
+        prev ? applyDeviceTelemetry(prev, payload as Record<string, SlotDevice>) : prev,
+      );
+    });
+    return () => {
+      unsub();
+      unsubDevices();
+    };
   }, [queryClient]);
 
   // Live update-status pushes (availability check, apply progress). This channel

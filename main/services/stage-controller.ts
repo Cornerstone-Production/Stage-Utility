@@ -10,6 +10,7 @@ import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
+import { migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
@@ -151,9 +152,6 @@ export class StageController {
     slotsByLayoutObject: {},
     resolvedByOutput: {},
     chargerBays: [],
-    slots: [],
-    slotsByDisplay: {},
-    displays: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots", ndiSource: null }],
     pcoConfigured: false,
     lastRefreshedAt: null,
     remoteUrl: null,
@@ -183,6 +181,7 @@ export class StageController {
   private connectionNames = new Map<string, string>();
   // Coalesce timer for device-status updates (see applyDeviceStatus).
   private deviceStatusFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastDeviceSig: string | null = null;
   private deviceStatusDirty = false; // device status changed while no client watched
   // Cached team members for the active plan.
   private teamMembers: TeamMemberDTO[] = [];
@@ -210,7 +209,16 @@ export class StageController {
 
   async init(): Promise<void> {
     console.log("[stage-controller] init");
-    const settings = await settingsStore.load();
+    let settings = await settingsStore.load();
+
+    // Installs made before branding images moved to files still hold base64 in
+    // settings. Convert once, then carry on with the rewritten values — otherwise
+    // this boot would broadcast the old inline data and rewrite it on the next patch.
+    const { patch, converted } = await migrateInlineBrandingImages(settings);
+    if (converted.length > 0) {
+      settings = await settingsStore.patch(patch);
+      console.log(`[stage-controller] moved ${converted.length} branding image(s) out of settings:`, converted.join(", "));
+    }
 
     const showQr = settings.showQr ?? true;
 
@@ -386,8 +394,19 @@ export class StageController {
     return { ...this.state };
   }
 
+  /**
+   * The DisplayInfo compatibility shim, built on demand for `GET /api/displays`.
+   *
+   * It used to be stored on StageState and broadcast to every client, but nothing
+   * in the app read it — each view wanted a name (on the Output) or a kind (on the
+   * routed View). Only external callers still ask for this shape, and they ask over
+   * HTTP, so it is assembled here instead of riding in every push.
+   */
   getDisplays(): DisplayInfo[] {
-    return [...this.state.displays];
+    return this.state.outputs.map((o) => {
+      const view = o.viewId ? this.state.views.find((v) => v.id === o.viewId) ?? null : null;
+      return { id: o.id, name: o.name, kind: view?.kind ?? "slots", ndiSource: view?.ndiSource ?? null };
+    });
   }
 
   // ── Service type ──────────────────────────────────────────────────────
@@ -1813,57 +1832,10 @@ export class StageController {
   // The old model conflated a screen and its content. Each alias maps onto the
   // new View/Output verbs so older clients keep working unchanged.
 
-  /** @deprecated Use createView + addOutput. Creates a View of `kind` and an
-   *  Output routed to it, mirroring the old "add a display" behavior. */
-  async addDisplay(name?: string, kind: DisplayInfo["kind"] = "slots"): Promise<StageState> {
-    const viewId = this.nextViewId();
-    const outputId = this.nextOutputId();
-    const num = parseInt(outputId.replace("display-", ""), 10);
-    const displayName = name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`;
-    const k = (kind ?? "slots") as ViewKind;
-    const view: View = { id: viewId, name: displayName, kind: k, ndiSource: null, createdAt: new Date().toISOString() };
-    const output: Output = { id: outputId, name: displayName, viewId };
-    console.log(`[stage-controller] addDisplay (alias) output=${outputId} view=${viewId} kind=${k}`);
-    const views = [...this.state.views, view];
-    const outputs = [...this.state.outputs, output];
-    this.state = { ...this.state, views, outputs };
-    await viewsStore.save(views);
-    await settingsStore.patch({ outputs });
-    if (k === "slots") this.rawSlotsByView.set(viewId, []);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
-  }
 
-  /** @deprecated Renames the output (the screen). */
-  async renameDisplay(id: string, name: string): Promise<StageState> {
-    return this.renameOutput(id, name);
-  }
 
-  /** @deprecated Sets the kind of the View routed to this output. */
-  async setDisplayKind(id: string, kind: DisplayInfo["kind"]): Promise<StageState> {
-    const viewId = this.outputRoutedViewId(id);
-    if (!viewId) throw new Error(`displays:setKind — output ${id} has no routed view`);
-    return this.setViewKind(viewId, (kind ?? "slots") as ViewKind);
-  }
 
-  /** @deprecated Sets the NDI source of the View routed to this output. */
-  async setDisplayNdiSource(id: string, source: string | null): Promise<StageState> {
-    const viewId = this.outputRoutedViewId(id);
-    if (!viewId) throw new Error(`displays:setNdiSource — output ${id} has no routed view`);
-    return this.setViewNdiSource(viewId, source);
-  }
 
-  /** @deprecated Removes the output, and its 1:1 routed View if nothing else uses it. */
-  async removeDisplay(id: string): Promise<StageState> {
-    const viewId = this.outputRoutedViewId(id);
-    await this.removeOutput(id);
-    // Clean up the routed View if it's now orphaned (migrated 1:1 case).
-    if (viewId && !this.state.outputs.some((o) => o.viewId === viewId) && this.state.views.length > 1) {
-      await this.deleteView(viewId);
-    }
-    return this.state;
-  }
 
   // ── Refresh ───────────────────────────────────────────────────────────
 
@@ -1951,9 +1923,9 @@ export class StageController {
       // Skip the expensive re-resolve + full-state broadcast when no display is
       // watching (idle). Mark dirty so the next connecting client gets fresh state
       // via ensureResolvedFresh() before hydration.
-      if (channelHasSubscribers("stage:state-changed")) {
+      if (channelHasSubscribers("stage:state-changed") || channelHasSubscribers("slots:devices")) {
         this.recomputeResolved();
-        this.broadcast();
+        this.broadcastDevices();
       } else {
         this.deviceStatusDirty = true;
       }
@@ -1978,10 +1950,6 @@ export class StageController {
 
   // ── Internals ─────────────────────────────────────────────────────────
 
-  private primaryOutputId(): string {
-    return this.state.outputs[0]?.id ?? PRIMARY_DISPLAY_ID;
-  }
-
   /** The View id routed to the primary output, falling back to the first slots
    *  View (or the primary id) so legacy slot writes always land somewhere. */
   private primaryViewId(): string {
@@ -1998,10 +1966,6 @@ export class StageController {
     const output = this.state.outputs.find((o) => o.id === target);
     if (output) return output.viewId ?? this.primaryViewId();
     return target; // already a view id
-  }
-
-  private outputRoutedViewId(outputId: string): string | null {
-    return this.state.outputs.find((o) => o.id === outputId)?.viewId ?? null;
   }
 
   private nextViewId(): string {
@@ -2122,8 +2086,6 @@ export class StageController {
     for (const oid of this.rawSlotsByObject.keys()) if (!(oid in slotsByLayoutObject)) resolveObjectSlots(oid);
 
     const resolvedByOutput: Record<string, ResolvedOutput> = {};
-    const slotsByDisplay: Record<string, Slot[]> = {};
-    const displays: DisplayInfo[] = [];
     for (const output of this.state.outputs) {
       const view = output.viewId ? this.state.views.find((v) => v.id === output.viewId) ?? null : null;
       const kind = view?.kind ?? "slots";
@@ -2136,20 +2098,13 @@ export class StageController {
         blackout: output.blackout ?? false,
         locked: output.locked ?? false,
       };
-      slotsByDisplay[output.id] = view && view.kind === "slots" ? (slotsByView[view.id] ?? []) : [];
-      displays.push({ id: output.id, name: output.name, kind, ndiSource });
     }
-    const slots = slotsByDisplay[this.primaryOutputId()] ?? [];
-
     this.state = {
       ...this.state,
       slotsByView,
       slotsByLayoutObject,
       resolvedByOutput,
-      slotsByDisplay,
       chargerBays: this.computeChargerBays(),
-      displays,
-      slots,
     };
   }
 
@@ -2181,6 +2136,32 @@ export class StageController {
   }
 
   private lastBroadcastSig: string | null = null;
+  /**
+   * Push only the volatile per-slot telemetry.
+   *
+   * RF and audio level move constantly while mics are live, and they live on the
+   * slots inside stage:state — so a meter twitch used to re-send the whole 36.6 KB
+   * document up to ~6.7 times a second, of which 88% (views, slot config, layouts,
+   * outputs) had not changed. This sends the ~4.5 KB that did.
+   *
+   * `recomputeResolved()` has already refreshed `this.state`, so a client
+   * connecting mid-service still hydrates complete — the two are consistent, this
+   * is purely about not repeating the static half down the wire.
+   */
+  private broadcastDevices(): void {
+    const devices: Record<string, SlotDevice> = {};
+    for (const slots of Object.values(this.state.slotsByView)) {
+      for (const s of slots) devices[s.id] = s.device;
+    }
+    for (const slots of Object.values(this.state.slotsByLayoutObject)) {
+      for (const s of slots) devices[s.id] = s.device;
+    }
+    const sig = JSON.stringify(devices);
+    if (sig === this.lastDeviceSig) return; // nothing actually moved
+    this.lastDeviceSig = sig;
+    broadcast("slots:devices", devices, sig);
+  }
+
   private broadcast(): void {
     // Skip when nothing actually changed — a setter called with its current value
     // (same mode, unchanged settings save) still runs the mutating method. State is
@@ -2190,7 +2171,7 @@ export class StageController {
     if (sig === this.lastBroadcastSig) return;
     this.lastBroadcastSig = sig;
     // Reuse the dedupe serialization as the SSE frame body so the fan-out doesn't
-    // re-stringify the full state (which carries base64 branding blobs).
+    // re-stringify the full state once per client.
     broadcast("stage:state-changed", this.state, sig);
   }
 }

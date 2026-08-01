@@ -35,18 +35,24 @@ server **log viewer** is available at `/log`.
 State persists in a **data directory** — `$STAGE_UTILITY_DATA` if set, otherwise
 `~/.stage-utility`:
 
-- `settings.json` — non-secret config (service type, plan mode, outputs/displays, branding, …)
+- `settings.json` — non-secret config (service type, plan mode, outputs, branding, …)
+- `branding-images/` — the logo and avatar files `settings.json` points at (content-hashed)
 - `views.json` — view definitions (kind + config; custom views carry their layout)
 - `slots.json` — slot sets, keyed by view + service type
 - `layout-templates.json` — saved custom-layout library; `presets.json` — slot presets
 - `layout-groups.json` — reusable object groups; `scriptview-layouts.json` + `scriptview-config.json` — ScriptView presets + landing curation
-- `spl-history.json` — per-item SPL recordings (one record per service), for History
-- `attendance-history.json` — per-service attendance recordings; `service-timeline.json` — per-service item timing
+- `layout-images/` — images uploaded for custom-layout objects
+- `spl-history/` — per-item SPL recordings, **one file per service**, for History
+- `attendance-history/` — per-service attendance; `service-timeline/` — per-service item timing
+- `archive/` — the raw samples behind those records, one directory per service ([data archive](../data-archive.md))
 - `baptism.json` — baptism sessions; `osc.json` — OSC button/target definitions
 - `secrets.bin` — integration secrets, **AES-256-GCM encrypted**
 - `encryption.key` — 32-byte key, auto-generated on first run (mode `600`)
-- `photo-cache/` — cached PCO photos
+- `cache/photos/` — cached PCO photos
 - `cache/attachments/` — cached PCO plan files (stage plots etc.), keyed by attachment id
+
+A `*.json.migrated` file is an older single-document store left in place after it
+was split per service — safe to delete once you are happy the split took.
 
 **Back up this directory.** If you lose `encryption.key`, the encrypted secrets are
 unrecoverable and you'll need to re-enter every credential.

@@ -39,15 +39,11 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 export const ARCHIVE_KIND = "stage-utility-archive";
 export const ARCHIVE_VERSION = 1;
 
-/** The derived history stores this bundle carries beside the raw layer. These are
- *  RUNTIME_FILES in config-snapshot.ts — deliberately absent from a config backup
- *  and deliberately present here. */
-const STORE_FILES = [
-  "spl-history.json",
-  "attendance-history.json",
-  "service-timeline.json",
-  "baptism.json",
-] as const;
+/** Records keyed by serviceKey — the shape the bundle has always used, kept stable
+ *  across the move to per-service files so old archives still import. */
+function byKey<T extends { serviceKey: string }>(records: T[]): Record<string, T> {
+  return Object.fromEntries(records.map((r) => [r.serviceKey, r]));
+}
 
 export interface ArchiveServiceMeta {
   serviceKey: string;
@@ -131,12 +127,17 @@ export async function buildArchive(): Promise<Uint8Array> {
   const files: Record<string, Uint8Array> = {};
   await readDirInto(archiveRoot(), "archive/", files);
 
-  for (const name of STORE_FILES) {
-    try {
-      files[`stores/${name}`] = new Uint8Array(await fs.readFile(path.join(getUserDataPath(), name)));
-    } catch {
-      /* store absent — nothing of that kind recorded yet */
-    }
+  // Built from the stores rather than read off disk, so the bundle format stays
+  // the same shape regardless of how the stores lay themselves out. (They are one
+  // file per service now; they used to be one document for all of them.)
+  const encode = (v: unknown) => strToU8(JSON.stringify(v, null, 2));
+  files["stores/spl-history.json"] = encode({ services: byKey(await splHistoryStore.list()) });
+  files["stores/attendance-history.json"] = encode({ services: byKey(await attendanceStore.list()) });
+  files["stores/service-timeline.json"] = encode({ services: byKey(await serviceTimelineStore.list()) });
+  try {
+    files["stores/baptism.json"] = new Uint8Array(await fs.readFile(path.join(getUserDataPath(), "baptism.json")));
+  } catch {
+    /* nothing recorded yet */
   }
 
   const local = await localServices();

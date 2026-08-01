@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke, onNotification } from "../lib/api";
+import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { applyAccentVar } from "../lib/apply-accent";
 
 interface UseStageStateResult {
@@ -45,6 +46,17 @@ export function useStageState(): UseStageStateResult {
   useEffect(() => {
     return onNotification("stage:state-changed", (payload: unknown) => {
       setState(payload as StageState);
+    });
+  }, []);
+
+  // Volatile per-slot telemetry (RF, battery, audio level) arrives on its own
+  // channel so a meter twitch does not re-send the whole state document. Merged
+  // back onto the slots here, where every component already looks for it.
+  useEffect(() => {
+    return onNotification("slots:devices", (payload: unknown) => {
+      setState((prev) =>
+        prev ? applyDeviceTelemetry(prev, payload as Record<string, SlotDevice>) : prev,
+      );
     });
   }, []);
 

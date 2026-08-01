@@ -25,7 +25,7 @@ declare global {
   type BaptismState = Stage.BaptismState;
   type ChargerBayDTO = Stage.ChargerBayDTO;
   type DisplayInfo = Stage.DisplayInfo;
-  type DisplayKind = Stage.DisplayKind;
+  type ViewKind = Stage.ViewKind;
   type LayoutCanvas = Stage.LayoutCanvas;
   type LayoutDTO = Stage.LayoutDTO;
   type LayoutGroup = Stage.LayoutGroup;

@@ -69,6 +69,18 @@ export default defineConfig({
         target: "http://localhost:8788",
         changeOrigin: true,
       },
+      // Uploaded images live in the data dir and are served by the Node server.
+      // Without these the dev server answers with the SPA fallback — an HTML 200,
+      // not a 404 — so every logo and layout image silently renders blank in dev
+      // while working perfectly in production.
+      "/branding-images": {
+        target: "http://localhost:8788",
+        changeOrigin: true,
+      },
+      "/layout-images": {
+        target: "http://localhost:8788",
+        changeOrigin: true,
+      },
     },
   },
 });

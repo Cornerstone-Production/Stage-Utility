@@ -102,7 +102,12 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
       }
       try {
         const { getPhotoPath } = await import("../photo-cache.js");
-        const localPath = await getPhotoPath(decodeURIComponent(photoUrl));
+        // `searchParams.get` has already decoded once. Decoding again turned the
+        // avatar geometry's %23 into a literal '#', which a URL treats as the start
+        // of a fragment — so PCO never saw the crop flag and returned a fit-inside
+        // image instead of a crop. Invisible while the request was square (both give
+        // the same result); it silently capped every non-square crop.
+        const localPath = await getPhotoPath(photoUrl);
         if (!localPath) {
           res.writeHead(404);
           res.end("Photo not found");
@@ -112,7 +117,15 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
         const mime =
           ext === "png" ? "image/png" : ext === "gif" ? "image/gif" : "image/jpeg";
         const data = await fs.readFile(localPath);
-        res.writeHead(200, { "Content-Type": mime });
+        // Cache hard. The upstream URL is content-addressed by PCO — the path holds
+        // the upload timestamp (`/person/<id>-<uploaded>/avatar.png`), so a new
+        // photo is a new URL and therefore a new cache key. Without this header a
+        // display re-downloaded every face on every load: nine photos at ~500 KB is
+        // ~4.5 MB per reload, per screen, for images that had not changed.
+        res.writeHead(200, {
+          "Content-Type": mime,
+          "Cache-Control": "public, max-age=31536000, immutable",
+        });
         res.end(data);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
