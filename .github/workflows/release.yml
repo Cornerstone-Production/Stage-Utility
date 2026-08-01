@@ -262,8 +262,8 @@ jobs:
             --title "v$V" \
             --notes "${NOTES:-No notable changes.}" \
             $([ "$PRE" = true ] && echo --prerelease || echo --latest) \
-            dist/*
-          echo "published v$V with $(ls dist | wc -l) files"
+            dist/*.tar.gz
+          echo "published v$V with $(ls dist/*.tar.gz | wc -l) archives"
 
       - name: Update the Homebrew tap
         # Skipped until STAGE_TAP_TOKEN exists, so this cannot fail a release

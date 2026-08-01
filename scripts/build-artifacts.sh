@@ -80,5 +80,9 @@ for entry in "${PLATFORMS[@]}"; do
   echo "    $(basename "$out")  $(du -h "$out" | cut -f1)"
 done
 
-echo "==> checksums"
+# Not published as a release asset — GitHub already serves a per-asset digest
+# through the releases API, and that is what the installers verify against. This
+# file exists so the Homebrew formula generator can read the hashes without a
+# network call of its own.
+echo "==> checksums (local, for the Homebrew formula)"
 ( cd "$OUT" && sha256sum stage-utility-*.tar.gz > SHA256SUMS && cat SHA256SUMS )
