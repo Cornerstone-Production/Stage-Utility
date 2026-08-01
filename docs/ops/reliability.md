@@ -70,6 +70,21 @@ Two backups exist in the app, and they cover different things:
 - **Settings → Advanced → Data archive** — recorded services and their raw samples.
   See [data archive](../data-archive.md).
 
+## Automatic backups
+
+**Settings → Advanced → Automatic backups.** Writes a config snapshot, and
+optionally the data archive, on an interval you choose — keeping the most recent
+few and deleting the rest.
+
+Leaving the destination blank keeps them in the data directory, which does not
+survive a disk failure. Point it at a mounted network share and the copies land
+off the machine; the app only writes to a path, so anything the OS can mount
+works — SMB, NFS, an external disk — with no credentials stored here.
+
+A failed run leaves the existing backups untouched and is retried on the next
+check rather than skipping an interval, and a machine that was switched off runs
+one backup when it returns rather than one per interval it missed.
+
 **Keeping the key out of a synced backup.** By default the key sits beside
 `secrets.bin` so the service can decrypt unattended at boot, which means it travels
 with any copy of the directory. To separate them, set `STAGE_UTILITY_KEY_FILE` to a

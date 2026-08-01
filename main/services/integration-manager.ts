@@ -114,7 +114,6 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
       label: "ProPresenter Host",
       type: "text",
       placeholder: "192.168.1.100",
-      help: "IP or hostname of the machine running ProPresenter, on the same network as this server.",
     },
     {
       key: "port",
@@ -172,7 +171,6 @@ const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
       label: "ProdCom Host",
       type: "text",
       placeholder: "192.168.1.201",
-      help: "IP or hostname of the machine running ProdCom, on the same network as this server.",
     },
     {
       key: "port",
@@ -205,7 +203,6 @@ const SMAART_DESCRIPTOR: IntegrationDescriptor = {
       label: "Smaart Host",
       type: "text",
       placeholder: "192.168.1.50",
-      help: "IP or hostname of the machine running Smaart, on the same network. Requires Smaart 8.3+ (the modern JSON API).",
     },
     {
       key: "port",
@@ -239,7 +236,6 @@ const OBS_DESCRIPTOR: IntegrationDescriptor = {
       label: "OBS Host",
       type: "text",
       placeholder: "192.168.1.50",
-      help: "IP or hostname of the machine running OBS, on the same network as this server.",
     },
     {
       key: "port",
@@ -274,7 +270,6 @@ const REAPER_DESCRIPTOR: IntegrationDescriptor = {
       label: "REAPER Host",
       type: "text",
       placeholder: "192.168.1.50",
-      help: "IP or hostname of the machine running REAPER, on the same network as this server (the Access URL shown in REAPER's web interface settings).",
     },
     {
       key: "port",
@@ -369,7 +364,6 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
       label: "Switcher Host",
       type: "text",
       placeholder: "192.168.1.60",
-      help: "IP or hostname of the Ross multiviewer/switcher receiving the TSL UMD data, on the same network as this server.",
     },
     {
       key: "port",

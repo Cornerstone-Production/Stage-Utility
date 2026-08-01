@@ -288,24 +288,6 @@ export function BrandingSection({
             </div>
           </Field>
 
-          {stageState.appLogo && (
-            <Field orientation="horizontal">
-              <FieldContent>
-                <FieldLabel>Recolor to match theme</FieldLabel>
-                <FieldDescription>
-                  Best for single-color logos — recolors to match light/dark (and the kiosk's
-                  gray). Turn off to show a full-color logo exactly as uploaded.
-                </FieldDescription>
-              </FieldContent>
-              <Switch
-                checked={stageState.appLogoMonochrome}
-                onCheckedChange={(v: boolean) => handlers.handleSetBranding({ monochrome: v })}
-                aria-label="Recolor logo to match theme"
-              />
-            </Field>
-          )}
-
-          {/* ── Empty-slot image ── */}
           <Field orientation="horizontal">
             <FieldContent>
               <FieldLabel>Empty slot image</FieldLabel>
@@ -385,6 +367,26 @@ export function BrandingSection({
               )}
             </div>
           </Field>
+
+          {stageState.appLogo && (
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel>Recolor to match theme</FieldLabel>
+                <FieldDescription>
+                  Best for single-color logos — recolors to match light/dark (and the kiosk's
+                  gray). Turn off to show a full-color logo exactly as uploaded.
+                </FieldDescription>
+              </FieldContent>
+              <Switch
+                checked={stageState.appLogoMonochrome}
+                onCheckedChange={(v: boolean) => handlers.handleSetBranding({ monochrome: v })}
+                aria-label="Recolor logo to match theme"
+              />
+            </Field>
+          )}
+
+          {/* ── Empty-slot image ── */}
+
 
           {/* Crop / zoom editor — shared by both images. */}
           {cropSrc && (

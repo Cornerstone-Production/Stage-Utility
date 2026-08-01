@@ -74,17 +74,8 @@ export function QrHint({ url, compact = false, sizeCss }: QrHintProps) {
     );
   }
 
-  // No backdrop box: modules and URL are tinted with the theme foreground
-  // (near-black on light, near-white on dark) so the QR reads on either theme.
-  return (
-    <div className="inline-flex flex-col items-center gap-1.5">
-      <canvas ref={canvasRef} width={backing} height={backing} className="rounded" />
-      <span
-        className="text-caption1 text-fg tabular-nums text-center leading-tight"
-        style={{ maxWidth: 140, wordBreak: "break-all" }}
-      >
-        {url}
-      </span>
-    </div>
-  );
+  // No backdrop box: the modules are tinted with the theme foreground (near-black
+  // on light, near-white on dark) so the QR reads on either theme. No caption —
+  // the one place this variant is used already shows the address beside it.
+  return <canvas ref={canvasRef} width={backing} height={backing} className="rounded" />;
 }
