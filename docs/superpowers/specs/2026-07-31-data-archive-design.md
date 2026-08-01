@@ -120,11 +120,27 @@ A **data archive**, distinct from the config snapshot: a zip of `archive/` plus 
 derived history stores, with a top-level manifest listing schema version, app
 version and the services inside.
 
-It gets its own control, worded so the two are not mistaken for each other — the
-config snapshot restores how the app is set up, the data archive restores what it
-recorded, and importing the wrong one is not a mistake that announces itself.
+### Where it lives
 
-It is separate on purpose. History is currently excluded from the config snapshot
+**Advanced, as its own "Data archive" panel beside "Backup & restore"** — restoring
+config and restoring history are both restore operations, and both belong behind the
+same deliberate trip into Advanced. Not the History tab, where an archive import
+would sit one click from ordinary browsing.
+
+That puts the two exports on one screen, so the copy has to do the work the layout
+isn't: **"Backup & restore — how the app is set up"** against **"Data archive — what
+the app recorded."** Neither says "export" unqualified, and the file names differ
+(`stage-config-*.zip` against `stage-archive-*.zip`) so a downloads folder six months
+from now is still legible.
+
+**Import states what it will do before it does it** — how many services are in the
+file, how many are already here and will be skipped, how many are new — and only
+then offers the button. That readout is the real protection: it makes an archive
+imported into the wrong app obvious while it is still a click away, which no amount
+of labelling does on its own. Not a confirmation dialog, which is dismissed
+unread.
+
+The two are separate files on purpose. History is currently excluded from the config snapshot
 with good reason — *"restoring them onto another install would fabricate services
 that machine never ran."* That holds for cloning onto a different church's box. It
 does **not** hold for rebuilding your own, which is the case this exists for.
@@ -168,6 +184,9 @@ Pure and file-level, no network:
   is asked for that service.
 - A newer schema version is refused, and nothing is written.
 - A corrupt member in the zip aborts the whole import with nothing written.
+- The pre-import readout counts new and already-present services correctly, and a
+  config snapshot handed to the archive importer is rejected by name rather than
+  read as an empty archive.
 - Sizes: a synthetic 75-minute service lands within the estimates above, so a
   regression in row width is visible.
 
