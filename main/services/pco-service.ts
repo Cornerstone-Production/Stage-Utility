@@ -2,6 +2,7 @@
 // Flattens JSON:API responses to slim DTOs. ~30s in-memory cache.
 
 import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
+import { scrub } from "./scrub.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
@@ -236,7 +237,7 @@ class PcoService {
     appId: string,
     secret: string,
   ): Promise<PcoResponse<T>> {
-    if (DEBUG_PCO) console.log(`[pco] GET ${url}`);
+    if (DEBUG_PCO) console.log(`[pco] GET ${scrub(url)}`);
     // Retry transient failures (429 rate-limit, 5xx, network) with backoff. PCO
     // allows ~100 req / 20s per app; a burst (many displays + a refresh) can 429,
     // which previously threw and dropped data. 401/other-4xx fail fast.
@@ -260,7 +261,7 @@ class PcoService {
       }
       if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
         const wait = this.backoffMs(attempt, response.headers.get("Retry-After"));
-        console.warn(`[pco] ${response.status} on ${url} — retrying in ${wait}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        console.warn(`[pco] ${scrub(response.status)} on ${scrub(url)} — retrying in ${scrub(wait)}ms (attempt ${scrub(attempt + 1)}/${scrub(MAX_RETRIES)})`);
         await this.sleep(wait);
         continue;
       }
@@ -270,7 +271,7 @@ class PcoService {
       }
 
       const json = await response.json() as PcoResponse<T>;
-      if (DEBUG_PCO) console.log(`[pco] OK ${url} (${Array.isArray(json.data) ? (json.data as T[]).length : 1} items)`);
+      if (DEBUG_PCO) console.log(`[pco] OK ${scrub(url)} (${scrub(Array.isArray(json.data) ? (json.data as T[]).length : 1)} items)`);
       return json;
     }
   }
@@ -278,7 +279,7 @@ class PcoService {
   // POST a Services Live controller action (no JSON body; PCO returns the updated
   // live object or 204). Surfaces PCO's error text so the UI can toast it.
   private async postAction(url: string, appId: string, secret: string): Promise<void> {
-    console.log(`[pco] POST ${url}`);
+    console.log(`[pco] POST ${scrub(url)}`);
     const response = await fetch(url, {
       method: "POST",
       headers: {

@@ -37,7 +37,7 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
 
     if (method === "POST" && pathname === "/api/wireless/meter-rate") {
       const body = await readBody(req) as Record<string, unknown>;
-      if (typeof body.ms !== "number" || body.ms < 0) {
+      if (typeof body.ms !== "number" || !Number.isFinite(body.ms) || body.ms < 0) {
         error(res, "body.ms (non-negative number) required");
         return;
       }

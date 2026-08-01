@@ -3,6 +3,7 @@
 // secrets via secretsStore; broadcasts "integrations:state-changed".
 
 import type { IntegrationDescriptor, IntegrationState } from "../types/integrations.js";
+import { scrub } from "./scrub.js";
 import type { PeopleCountDTO } from "../types/stage.js";
 import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
@@ -608,7 +609,7 @@ class IntegrationManager {
   }
 
   async setEnabled(id: string, enabled: boolean): Promise<IntegrationState> {
-    console.log(`[integration-manager] setEnabled ${id} → ${enabled}`);
+    console.log(`[integration-manager] setEnabled ${scrub(id)} → ${scrub(enabled)}`);
     const state = this.states.get(id);
     if (!state) throw new Error(`Unknown integration: ${id}`);
 
