@@ -25,6 +25,21 @@ npm run build
 npm start          # → http://localhost:8788/
 ```
 
+## Updates
+
+**Advanced → Updates** installs in place: fetch, fast-forward, reinstall if the
+lockfile changed, rebuild if the UI changed, restart. A live service or an active
+recording blocks it until you override.
+
+A server follows **release tags, not the tip of its branch**. Tags are cut only
+after lint, type-check, tests and the build all pass, so a failed build cannot
+reach a display; work that has merged but not yet released is reported as such
+rather than counted as an available update. A branch with no tags falls back to
+following its tip.
+
+Two tracks: **main** takes stable releases only, **beta** takes prereleases too.
+Switching tracks reinstalls and rebuilds.
+
 ## Development
 
 Two terminals, from the repo root:

@@ -1,6 +1,6 @@
 # update.ps1 — Windows in-app updater. Mirrors scripts/update.sh.
 #
-#   git pull --ff-only -> npm ci -> npm run build
+#   fast-forward to a release tag -> npm ci -> npm run build
 #   on success: write the result file + stop the running server (NSSM /
 #               Task Scheduler relaunches it with the new build).
 #   on failure: write the result file and leave the running server untouched.
@@ -58,15 +58,34 @@ function Write-Progress-Step($step) {
 
 try {
   Write-Progress-Step "pull"
-  if ($env:STAGE_UPDATE_CHECKOUT) {
-    # Switching tracks: fetch the target branch and force the local branch to it.
-    "[update] git fetch origin $branch; git checkout -B $branch origin/$branch" | Out-File -Append $log
-    git fetch origin $branch *>> $log; if ($LASTEXITCODE -ne 0) { throw "git fetch failed" }
-    git checkout -B $branch "origin/$branch" *>> $log; if ($LASTEXITCODE -ne 0) { throw "git checkout failed" }
-  } else {
-    "[update] git pull --ff-only origin $branch" | Out-File -Append $log
-    git pull --ff-only origin $branch *>> $log; if ($LASTEXITCODE -ne 0) { throw "git pull failed" }
+  # A tag is verified code (the release workflow tests and builds before tagging);
+  # the branch tip may still be in CI or have failed it. The tag is resolved by the
+  # server, which orders versions properly. Empty = the track has never released,
+  # so follow the tip rather than refusing to update at all.
+  $tag = $env:STAGE_UPDATE_TAG
+  "[update] git fetch --tags --force origin $branch" | Out-File -Append $log
+  git fetch --tags --force origin $branch *>> $log; if ($LASTEXITCODE -ne 0) { throw "git fetch failed" }
+
+  if ($tag) {
+    git rev-parse -q --verify "refs/tags/$tag^{commit}" *>> $log
+    if ($LASTEXITCODE -ne 0) {
+      "[update] tag $tag not found after fetch - falling back to the branch tip" | Out-File -Append $log
+      $tag = ""
+    }
   }
+  $target = if ($tag) { $tag } else { "origin/$branch" }
+
+  if ($env:STAGE_UPDATE_CHECKOUT) {
+    # Switching tracks: point the local branch at the target, wherever it was.
+    "[update] git checkout -B $branch $target" | Out-File -Append $log
+    git checkout -B $branch $target *>> $log; if ($LASTEXITCODE -ne 0) { throw "git checkout failed" }
+  } else {
+    # --ff-only so a box that has somehow diverged fails loudly instead of having
+    # its history rewritten underneath it.
+    "[update] git merge --ff-only $target" | Out-File -Append $log
+    git merge --ff-only $target *>> $log; if ($LASTEXITCODE -ne 0) { throw "git merge failed" }
+  }
+  if ($tag) { "[update] now on release $tag" | Out-File -Append $log }
   # Decide what's actually needed. The backend runs via tsx (no build), so a
   # backend-only update just needs a restart. Reinstall only when the lockfile
   # changed; rebuild only when renderer/build inputs changed. Default to doing the

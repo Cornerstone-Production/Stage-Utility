@@ -99,6 +99,13 @@ function UpdatesPanel({
   // ignore the banner. Falls back to `behind` for a server too old to send the
   // narrower count.
   const behindNews = s?.behindUserFacing ?? behind;
+  // Releases, not commits, once the server follows tags. A release is the unit an
+  // operator acts on; the commit count behind it is detail.
+  const releasesBehind = s?.tagBased ? (s.releasesBehind ?? 0) : 0;
+  const available = s?.tagBased ? releasesBehind : behindNews;
+  // Merged but not yet released — CI still running, or red. Only worth saying when
+  // there is nothing to install, otherwise it competes with the update itself.
+  const unreleased = s?.tagBased ? (s.unreleasedCommits ?? 0) : 0;
   const [trackSel, setTrackSel] = useState<string | null>(null);
   // Update lock — a live service / active recording blocks self-updates (which
   // restart the process) unless overridden. Re-checked whenever a service goes
@@ -217,20 +224,27 @@ function UpdatesPanel({
         <Field orientation="vertical">
           <FieldContent>
             <FieldLabel>
-              {!s ? "Checking for updates…" : behindNews > 0 ? `${behindNews} update${behindNews === 1 ? "" : "s"} available` : "Up to date"}
+              {!s
+                ? "Checking for updates…"
+                : available > 0
+                  ? s.tagBased && s.targetTag
+                    ? `${s.targetTag} available`
+                    : `${available} update${available === 1 ? "" : "s"} available`
+                  : "Up to date"}
             </FieldLabel>
             <FieldDescription>
               {s ? (
                 <>
-                  Running v{s.version}
+                  Running {s.currentTag ?? `v${s.version}`}
                   {s.currentSha ? ` · ${s.currentSha}` : ""}
                   {s.currentDate ? ` · ${new Date(s.currentDate).toLocaleDateString()}` : ""}
                   {s.branch ? ` (${s.branch})` : ""}.
+                  {available > 1 ? ` ${available} releases behind.` : ""}
                   {s.lastCheckedAt ? ` Last checked ${new Date(s.lastCheckedAt).toLocaleString()}.` : ""}
                   {/* Said plainly rather than hidden. The banner stays quiet because
                       nothing pending changes what the app does, but Update still
                       works if you want the version number to line up. */}
-                  {behindNews === 0 && behind > 0
+                  {!s.tagBased && behindNews === 0 && behind > 0
                     ? ` A version bump is pending (${behind} commit${behind === 1 ? "" : "s"}) — nothing user-facing.`
                     : ""}
                 </>
@@ -264,7 +278,7 @@ function UpdatesPanel({
             {updating ? <UpdateProgress step={s?.step ?? null} /> : null}
 
             {/* Changelog of pending commits */}
-            {!updating && behindNews > 0 && s?.changelog?.length ? (
+            {!updating && available > 0 && s?.changelog?.length ? (
               <div className="mt-2 rounded-md border border-gray-a4 bg-gray-a2">
                 <p className="border-b border-gray-a4 px-2.5 py-1.5 text-caption2 font-medium text-gray-11">
                   What's new
@@ -288,9 +302,18 @@ function UpdatesPanel({
                 {s.lastResult.log ? ` ${s.lastResult.log.split("\n").filter(Boolean).slice(-1)[0]}` : ""}
               </p>
             ) : null}
-            {!justUpdated && s && behindNews === 0 && !updating && (!s.lastResult || s.lastResult.ok) ? (
+            {!justUpdated && s && available === 0 && !updating && (!s.lastResult || s.lastResult.ok) ? (
               <p className="mt-1 flex items-center gap-1.5 text-caption2 text-green-10">
-                <CheckCircle2Icon className="size-3.5" /> You're on the latest version.
+                <CheckCircle2Icon className="size-3.5" /> You're on the latest release.
+              </p>
+            ) : null}
+            {/* Work is merged but not released. Normal for a few minutes while the
+                release build runs; if it persists, that build failed and the track
+                is stalled — which should read as "waiting", not "up to date". */}
+            {!updating && available === 0 && unreleased > 0 ? (
+              <p className="mt-1 text-caption2 text-gray-9">
+                {unreleased} commit{unreleased === 1 ? "" : "s"} merged since {s?.targetTag} and not yet
+                released. Updates arrive once the release build passes.
               </p>
             ) : null}
             {lock?.active && !updating ? (
@@ -305,7 +328,12 @@ function UpdatesPanel({
               <RefreshCwIcon className="size-3.5 text-gray-9" />
               Check now
             </Button>
-            <Button variant="accent" size="small" onClick={onUpdateNow} disabled={updating || behind === 0}>
+            <Button
+              variant="accent"
+              size="small"
+              onClick={onUpdateNow}
+              disabled={updating || (s?.tagBased ? available === 0 : behind === 0)}
+            >
               {updating ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
               {updating ? "Updating…" : "Update now"}
             </Button>
