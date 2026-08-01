@@ -25,6 +25,12 @@ to enable or test.
 **In Companion** — add a **Cornerstone Stage Utility** connection and enter this
 server's IP and port. No password; the API is LAN-only.
 
+The module requires **Companion 4.3.0 or newer**, which is where Companion added
+the v2 connection API the module is built against. On anything older it installs
+and shows up in the module list, but the connection never starts — Companion
+reports "Connection not found or not running" and loads no config, which looks
+like a broken download rather than a version mismatch.
+
 **In Stage Utility** — Settings → Integrations → **Bitfocus Companion** shows the
 LAN IP and port split into separate copyable fields, because Companion takes host
 and port separately and cannot resolve a DNS name. A live connected-client count
@@ -67,10 +73,8 @@ an SSE connection cannot be kept open. When enabled it re-runs that nine-endpoin
 hydrate on every tick, so a five-second fallback is 108 requests a minute, most
 of them for configuration that rarely changes.
 
-### Known inefficiency
-
-The module does not call `POST /api/events/subscribe`, so the server has no
-channel filter for it and sends **every** channel — including the 4 Hz
-`spl:metrics` stream, which the module discards client-side. Reporting its seven
-channels would let the fan-out skip the rest. See
+The module reports those channels to the server. It sends a `cid` on the event
+stream and posts its channel list to `POST /api/events/subscribe` when the stream
+opens, so the fan-out skips everything else — notably the 4 Hz `spl:metrics`
+stream, which the module has no use for. See
 [network traffic](../ops/network-traffic.md) for how the filter works.
