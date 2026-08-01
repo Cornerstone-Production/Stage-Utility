@@ -7,6 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
+import { baptismTriggersStore } from "../baptism-triggers-store.js";
 import { stageController } from "../stage-controller.js";
 import { attendanceStore } from "../attendance-store.js";
 import { attendanceRecorder } from "../attendance-recorder.js";
@@ -117,6 +118,29 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       json(res, await baptismTimerService.listSessions());
       return;
     }
+    // Which plan items start each phase, for one plan. Kept per plan because the
+    // baptisms usually happen during a song, and the songs change every week.
+    if (pathname === "/api/baptism/triggers") {
+      const planId = new URL(req.url ?? "", "http://x").searchParams.get("planId");
+      if (method === "GET") {
+        json(res, (await baptismTriggersStore.get(planId)) ?? {});
+        return;
+      }
+      if (method === "POST") {
+        const body = (await readBody(req)) as Record<string, unknown>;
+        const id = typeof body.planId === "string" ? body.planId : planId;
+        if (!id) {
+          json(res, { error: "planId required" }, 400);
+          return;
+        }
+        await baptismTriggersStore.set(id, {
+          testimonyItemId: typeof body.testimonyItemId === "string" ? body.testimonyItemId : null,
+          baptismItemId: typeof body.baptismItemId === "string" ? body.baptismItemId : null,
+        });
+        json(res, await baptismTriggersStore.get(id));
+        return;
+      }
+    }
     if (method === "POST" && pathname.startsWith("/api/baptism/")) {
       const action = pathname.slice("/api/baptism/".length);
       switch (action) {
@@ -126,6 +150,8 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         case "next": json(res, baptismTimerService.next()); return;
         case "undo": json(res, baptismTimerService.undo()); return;
         case "finish": json(res, baptismTimerService.finish()); return;
+        case "pause": json(res, baptismTimerService.pause()); return;
+        case "resume": json(res, baptismTimerService.resume()); return;
         case "reset": json(res, baptismTimerService.reset()); return;
         case "mode": {
           const body = (await readBody(req)) as Record<string, unknown>;

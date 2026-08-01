@@ -28,6 +28,28 @@ Recording what happened during a service, and reading it back.
   not that the room emptied. The chart used to join straight across such a gap,
   drawing a confident hour-long decline nobody measured. Gaps over three minutes now
   render as a break.
+- **Baptisms belong to a service occurrence, not a plan.** The timer stamps the
+  service the timeline recorder currently has open (`service-key.ts`) when a session
+  starts, so a baptism lands on the 9am or the 11am rather than on whichever service
+  it happened to overlap. Taking the key from the recorder rather than from PCO's
+  live snapshot matters: an overrunning service rolls PCO's "current service time"
+  on to the next occurrence, and a key derived from that would put the end of a long
+  9am onto the 11am.
+
+  Sessions recorded before this shipped carry no key and still match by overlapping
+  the service's window — with the two failure modes that motivated the change: one
+  session left running across two services counts in both, and a service that never
+  finished falls back to an assumed six-hour window. A keyed session is never
+  rescued by overlap, or the 9am's baptism would reappear on the 11am whenever the
+  two ran long.
+- **A Baptisms section** sits with the rundown, above Attendance and Audio, and only
+  when a session links: baptism timings are timing data, and on a baptism weekend
+  they explain the overrun in the table right above them. Six figures — people, total,
+  testimony and baptism totals, and per-person averages of each. Averages divide by
+  people rather than sessions, since a session is only when the operator started and
+  stopped. Per-person splits stay in the Baptisms tab.
+- **Baptisms export too**, one row per person with testimony/baptism splits, keyed
+  by date and service time like the other sheets.
 - **SPL exports in two shapes.** `SPL` is wide — one row per plan item with every
   metric side by side — for reading and for comparing metrics on a line. `SPL data`
   is long — one row per item per metric — which is the shape a PivotTable wants, so

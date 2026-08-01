@@ -200,3 +200,44 @@ because they sit on `<html>`, the same element as `:root`.
 Without this, a preview inside the light theme drew near-black text on the kiosk's
 near-black panel: measured at **1.14:1**, versus 19.80:1 after. Real displays already
 carry `.kiosk` on `<html>` and are unaffected (measured 17.93:1 before and after).
+
+### Starting the baptism timer from the plan
+
+Two triggers, because the two ends of a baptism differ in how stable they are:
+
+- **Testimonies** happen during an item named the same every week ("Baptism
+  Stories"), so a **keyword** finds it — set once under Advanced, off by default.
+- **Baptisms** happen during whichever songs are on that week, so no keyword can
+  ever find them. That end is **bound to an item per plan**, on the Baptisms tab.
+
+Binding both ends also fixes an accuracy problem rather than papering over it.
+Between the testimonies and the baptisms there is usually several minutes of vows,
+prayer and preaching; with only a manual "start baptisms" button that gap lands on
+whichever person is timing. Started from the item the baptisms actually happen
+during, it belongs to neither phase.
+
+Auto-start only ever moves the timer FORWARD — idle → testimonies, testimonies →
+baptisms. It never restarts and never fires while the phase it would start is
+already running, so a re-fired item or a PCO re-sync cannot wipe a session underway.
+The operator page says which item started it, with reset one tap away.
+
+### It gates itself on non-baptism weeks
+
+Neither trigger needs turning off between baptism Sundays, because neither can fire
+without something to fire on. The keyword only matches an item that exists, and an
+ordinary plan has no "Baptism Stories" in it; the per-plan bindings only exist for
+plans somebody set them on. So the setting can be left enabled all year.
+
+The one way to break that is a keyword loose enough to match something else — plain
+"baptism" would catch a "Baptism class signup" announcement, where the default
+"baptism stories" would not. The Baptisms tab therefore says, for the plan actually
+loaded, which item will start the testimonies and which will start the baptisms, or
+that nothing on this plan will — so an armed week can be told from an ordinary one
+without guessing.
+
+### Pause
+
+A segment is "time already banked, plus time since it last resumed"
+(`baptism-elapsed.ts`), so the clock can stop for the talking between people without
+that time landing on anyone. Both the operator page and the display object compute
+from the same two fields, so a paused clock reads the same everywhere.

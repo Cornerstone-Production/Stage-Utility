@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
 import { advancePeakHold, type PeakHold } from "./peak-hold.js";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
@@ -1201,8 +1202,10 @@ function BaptismTimer({
   let value = "—";
   let fallback = "";
   if (field === "live") {
-    if (state && state.phase !== "idle" && state.segmentStartedAt) {
-      value = fmtClock(Math.max(0, now - Date.parse(state.segmentStartedAt)));
+    if (state && state.phase !== "idle") {
+      // Same calculation as the operator page, so a paused timer on a display shows
+      // the held value rather than freezing at whatever it last happened to render.
+      value = fmtClock(segmentElapsedMs(state, now));
       if (state.phase === "testimony") fallback = state.mode === "grouped" ? `Testimony ${state.personNumber}` : `Person ${state.personNumber} · testimony`;
       else fallback = state.mode === "grouped" ? `Baptism ${state.baptismIndex + 1}` : `Person ${state.personNumber} · baptism`;
     } else {
