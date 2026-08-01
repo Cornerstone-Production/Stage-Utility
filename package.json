@@ -36,7 +36,7 @@
     "@tanstack/react-router": "^1.170.17",
     "clsx": "^2.1.1",
     "fflate": "^0.8.3",
-    "lucide-react": "^1.23.0",
+    "lucide-react": "^1.27.0",
     "pdfjs-dist": "^6.0.227",
     "qrcode": "^1.5.4",
     "radix-ui": "^1.6.0",
