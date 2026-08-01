@@ -16,6 +16,7 @@ import * as path from "node:path";
 
 import { getUserDataPath } from "./app-paths.js";
 import { addLogLine } from "./log-buffer.js";
+import { trimFileToLastBytes } from "./trim-file.js";
 
 const MAX_BYTES = 128 * 1024; // hard cap on the on-disk update log (~128 KB)
 const REPLAY_LINES = 150; // how much of the tail to surface in /log at startup
@@ -36,17 +37,7 @@ export function appendUpdateLog(line: string): void {
 
 /** Keep only the last MAX_BYTES of the file, cut at a line boundary. */
 function trimUpdateLog(): void {
-  try {
-    const p = updateLogPath();
-    const size = fs.statSync(p).size;
-    if (size <= MAX_BYTES) return;
-    const buf = fs.readFileSync(p);
-    const slice = buf.subarray(buf.length - MAX_BYTES);
-    const nl = slice.indexOf(0x0a); // start at the next line so we never keep a partial line
-    fs.writeFileSync(p, nl >= 0 ? slice.subarray(nl + 1) : slice);
-  } catch {
-    /* ignore */
-  }
+  trimFileToLastBytes(updateLogPath(), MAX_BYTES);
 }
 
 /** Last `maxLines` lines of the persisted log, oldest → newest. */
