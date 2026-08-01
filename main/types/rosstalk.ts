@@ -1,7 +1,6 @@
 // Types for RossTalk control of Ross Video gear (Carbonite switcher, Ultrix router).
 //
 // Protocol: TCP 7788, plain ASCII, CR/LF terminated, case sensitive, SEND-ONLY.
-// See docs/superpowers/specs/2026-07-26-rosstalk-design.md.
 
 import type { ConnectionState } from "./integrations.js";
 

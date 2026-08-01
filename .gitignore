@@ -35,3 +35,11 @@ sensource-probe*.json
 # Local tooling scratch (Playwright MCP screenshots/logs, impeccable design plugin)
 .playwright-mcp/
 .impeccable/
+
+# Internal working documents. These are notes to ourselves — agent execution
+# plans with task checkboxes, proposals with a "decisions for you" section, and
+# references to local tooling paths that exist on no other machine. Published
+# design docs belong in docs/ proper, written for a stranger.
+docs/superpowers/
+docs/design-overhaul/
+DESIGN_TOKENS_PROPOSAL.md

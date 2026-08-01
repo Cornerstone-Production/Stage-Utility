@@ -171,7 +171,7 @@
   --color-amber-a11: var(--amber-a11);
   --color-amber-a12: var(--amber-a12);
 
-  /* ── Semantic design tokens (see DESIGN_TOKENS_PROPOSAL.md) ──
+  /* ── Semantic design tokens ──
      These resolve per context: settings (Radix, light/dark) vs .kiosk (stage).
      Generates utilities: bg-surface, text-fg, text-fg-muted, border-line,
      bg-live-9, text-live-11, bg-danger-9, text-warn-11, … */
@@ -208,7 +208,7 @@
 }
 
 /* ── Design-token layer (Tier 1 primitives + Tier 2 semantic vars) ──
-   See DESIGN_TOKENS_PROPOSAL.md. One source of truth for color across both the
+   One source of truth for color across both the
    settings UI (Radix, light/dark) and the kiosk stage (near-black, white-opacity).
    Seeded with the pre-existing values so adopting this layer is non-breaking. */
 :root {

@@ -1,5 +1,4 @@
 // Types for the automation engine — "when X happens in Stage, do Y to a device".
-// See docs/superpowers/specs/2026-07-26-automation-engine-design.md.
 
 /** A typed parameter on a trigger, condition or action — renders a form field. */
 export interface ParamDef {
