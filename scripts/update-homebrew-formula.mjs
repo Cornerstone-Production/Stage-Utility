@@ -67,6 +67,17 @@ src = src.replace(/^(\s*version\s+)"[^"]+"/m, `$1"${version}"`);
 // publishes win-x64, which Homebrew does not install.
 for (const platform of PLATFORMS) {
   const sha = bySha.get(platform);
+
+  // Re-assert the shape here, at the point of use. The parse regex above already
+  // constrains this to 64 hex characters, but that is thirty lines away, and
+  // this value comes off the network and ends up in a file people install from.
+  // A later edit that loosens the parser must not be able to widen what gets
+  // written, and the guarantee should be readable where it matters.
+  if (!/^[0-9a-f]{64}$/.test(sha ?? "")) {
+    console.error(`[homebrew] checksum for ${platform} is not a sha256 digest — not updating`);
+    process.exit(1);
+  }
+
   const re = new RegExp(
     `(url "[^"]*stage-utility-#\\{version\\}-${platform}\\.tar\\.gz"\\s*\\n\\s*sha256 ")[0-9a-f]{64}(")`,
   );
@@ -74,7 +85,10 @@ for (const platform of PLATFORMS) {
     console.error(`[homebrew] could not find the ${platform} block in the formula`);
     process.exit(1);
   }
-  src = src.replace(re, `$1${sha}$2`);
+  // A replacer function, not a template string: in a replacement string `$&`,
+  // `$1` and friends are substitution patterns. A digest cannot contain them,
+  // but relying on that is relying on the check above never being relaxed.
+  src = src.replace(re, (_full, before, after) => `${before}${sha}${after}`);
 }
 
 if (src === before) {
