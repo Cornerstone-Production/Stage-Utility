@@ -92,6 +92,14 @@ test("something that is not a zip at all is refused", async () => {
   await assert.rejects(() => inspectArchive(strToU8("just some text")), /not a readable zip/i);
 });
 
+test("the config snapshot json — the realistic mistake — is named, not called an unreadable zip", async () => {
+  // The real file: plain JSON, so it never reaches the manifest kind check.
+  const snapshot = strToU8(
+    JSON.stringify({ kind: "stage-utility-config", version: 1, appVersion: "1.6.0", files: { "views.json": {} } }),
+  );
+  await assert.rejects(() => inspectArchive(snapshot), /config snapshot.*Backup & restore/is);
+});
+
 test("importing a service this box does not have adds it, raw files and all", async () => {
   await splHistoryStore.upsert(record("st1:pX:t1", "2026-08-02"));
   const dir = await writeRaw("2026-08-02_st1-pX-t1", "at,db\n2026-08-02T09:00:00.000Z,88\n");

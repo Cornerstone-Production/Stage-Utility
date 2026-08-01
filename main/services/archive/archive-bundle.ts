@@ -136,13 +136,27 @@ export async function buildArchive(): Promise<Uint8Array> {
   return zipSync(files, { level: 6 });
 }
 
+/** Is this the config snapshot — plain JSON with the snapshot's kind? Read only the
+ *  head: a year of config is megabytes and the marker is in the first object. */
+function looksLikeConfigSnapshot(bytes: Uint8Array): boolean {
+  const head = new TextDecoder().decode(bytes.subarray(0, 512));
+  return head.includes('"stage-utility-config"');
+}
+
 /** Unpack + validate. Throws a readable reason rather than half-reading. */
 function open(zip: Uint8Array): { files: Record<string, Uint8Array>; manifest: ArchiveManifest } {
   let files: Record<string, Uint8Array>;
   try {
     files = unzipSync(zip);
   } catch {
-    throw new Error("That file is not a readable zip.");
+    // The realistic mistake is the config snapshot, which is a .json rather than a
+    // zip and so never gets as far as the kind check below. Name it here instead of
+    // leaving the operator with "not a readable zip" and nowhere to go.
+    throw new Error(
+      looksLikeConfigSnapshot(zip)
+        ? "That is a config snapshot, not a Stage Utility data archive. Restore it under Backup & restore."
+        : "That file is not a readable zip.",
+    );
   }
   const raw = files["manifest.json"];
   if (!raw) throw new Error("That archive has no manifest — it was not produced by Stage Utility.");

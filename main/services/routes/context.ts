@@ -50,6 +50,14 @@ export function error(res: http.ServerResponse, message: string, status = 400): 
   json(res, { error: message }, status);
 }
 
+/** The request body as bytes. `readBody` parses JSON and would mangle a binary
+ *  upload, so anything carrying a file uses this instead. */
+export async function readRawBody(req: http.IncomingMessage): Promise<Uint8Array> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  return new Uint8Array(Buffer.concat(chunks));
+}
+
 export async function readBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let body = "";
