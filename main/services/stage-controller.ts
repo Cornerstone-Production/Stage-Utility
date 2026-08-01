@@ -9,6 +9,7 @@ import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
+import { migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
@@ -208,7 +209,16 @@ export class StageController {
 
   async init(): Promise<void> {
     console.log("[stage-controller] init");
-    const settings = await settingsStore.load();
+    let settings = await settingsStore.load();
+
+    // Installs made before branding images moved to files still hold base64 in
+    // settings. Convert once, then carry on with the rewritten values — otherwise
+    // this boot would broadcast the old inline data and rewrite it on the next patch.
+    const { patch, converted } = await migrateInlineBrandingImages(settings);
+    if (converted.length > 0) {
+      settings = await settingsStore.patch(patch);
+      console.log(`[stage-controller] moved ${converted.length} branding image(s) out of settings:`, converted.join(", "));
+    }
 
     const showQr = settings.showQr ?? true;
 

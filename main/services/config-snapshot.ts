@@ -18,6 +18,8 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { getUserDataPath } from "./app-paths.js";
+import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
+import { listImages, readImage, restoreImage } from "./image-files.js";
 
 // main/services/config-snapshot.ts → repo root is two levels up.
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -64,6 +66,10 @@ export const RUNTIME_FILES = [
   "baptism.json",
 ] as const;
 
+/** Image directories carried in a snapshot. Allowlisted for the same reason
+ *  CONFIG_FILES is: it bounds what an applied bundle can write. */
+const IMAGE_DIRS = [BRANDING_IMAGE_DIR, "layout-images"] as const;
+
 const SNAPSHOT_KIND = "stage-utility-config";
 const SNAPSHOT_VERSION = 1;
 
@@ -77,6 +83,14 @@ export interface ConfigSnapshot {
   name?: string;
   /** filename → parsed JSON contents, for each present config store. */
   files: Record<string, unknown>;
+  /** `<dir>/<file>` → base64 bytes, for uploaded images.
+   *
+   *  Branding logos and custom-layout images are files, not JSON, so listing the
+   *  stores was no longer enough to describe the config. Logos in particular used
+   *  to be base64 inside settings.json and so rode along for free; moving them to
+   *  files would have quietly dropped them from every backup. Layout images were
+   *  never captured at all — this fixes that too. Absent on older snapshots. */
+  images?: Record<string, string>;
 }
 
 /** Lightweight metadata for listing saved snapshots (no file contents). */
@@ -111,6 +125,18 @@ class ConfigSnapshotService {
     }
   }
 
+  /** Every uploaded image, as `<dir>/<file>` → base64. */
+  private async readImages(): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    for (const dir of IMAGE_DIRS) {
+      for (const file of await listImages(dir)) {
+        const img = await readImage(dir, file);
+        if (img) out[`${dir}/${file}`] = img.data.toString("base64");
+      }
+    }
+    return out;
+  }
+
   /** Build a snapshot of the live config (secrets excluded). */
   async build(name?: string): Promise<ConfigSnapshot> {
     const files: Record<string, unknown> = {};
@@ -118,7 +144,9 @@ class ConfigSnapshotService {
       const v = await this.readFile(f);
       if (v !== undefined) files[f] = v;
     }
+    const images = await this.readImages();
     return {
+      ...(Object.keys(images).length ? { images } : {}),
       kind: SNAPSHOT_KIND,
       version: SNAPSHOT_VERSION,
       appVersion: pkgVersion(),
@@ -150,6 +178,16 @@ class ConfigSnapshotService {
       const dest = path.join(getUserDataPath(), name);
       await fs.writeFile(dest, JSON.stringify(contents, null, 2), "utf8");
       applied.push(name);
+    }
+    // Uploaded images, restored under their content-hashed names. The directory is
+    // allowlisted the same way the store filenames are, so a crafted bundle cannot
+    // write outside the image dirs.
+    for (const [ref, b64] of Object.entries(bundle.images ?? {})) {
+      const slash = ref.indexOf("/");
+      const dir = slash > 0 ? ref.slice(0, slash) : "";
+      const file = slash > 0 ? ref.slice(slash + 1) : "";
+      if (!(IMAGE_DIRS as readonly string[]).includes(dir)) continue;
+      if (await restoreImage(dir, file, Buffer.from(b64, "base64"))) applied.push(ref);
     }
     return applied;
   }

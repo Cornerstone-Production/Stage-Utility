@@ -19,6 +19,8 @@ import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./hist
 import { getLogLines } from "./log-buffer.js";
 
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
+import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
+import { readImage } from "./image-files.js";
 import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { reaperService } from "./reaper-service.js";
@@ -558,6 +560,23 @@ export class RemoteServer {
           return;
         }
         // Content-hashed name → immutable, cache forever.
+        res.writeHead(200, { "Content-Type": img.mime, "Cache-Control": "public, max-age=31536000, immutable" });
+        res.end(img.data);
+        return;
+      }
+    }
+    // ── Branding images (app logo, empty-slot logo, avatar) ───────────────
+    // Same content-hashed, cache-forever treatment. These used to ride in
+    // stage:state as base64 and were 77% of every broadcast.
+    {
+      const brandMatch = pathname.match(/^\/branding-images\/([^/]+)$/);
+      if (method === "GET" && brandMatch) {
+        const img = await readImage(BRANDING_IMAGE_DIR, decodeURIComponent(brandMatch[1]));
+        if (!img) {
+          res.writeHead(404, { "Content-Type": "text/plain" });
+          res.end("Not found");
+          return;
+        }
         res.writeHead(200, { "Content-Type": img.mime, "Cache-Control": "public, max-age=31536000, immutable" });
         res.end(img.data);
         return;

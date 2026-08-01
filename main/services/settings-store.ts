@@ -2,6 +2,7 @@
 // integration configs (non-secret fields), display options.
 
 import type { DisplayInfo, Output } from "../types/stage.js";
+import { externalizeBrandingImages } from "./branding-image-store.js";
 import { DataStore } from "./data-store.js";
 
 export interface SettingsData {
@@ -124,9 +125,14 @@ export const settingsStore = {
   },
 
   async patch(partial: Partial<SettingsData>): Promise<SettingsData> {
+    // Images arrive as base64 data URLs from the branding editor. Store the bytes as
+    // files and keep only the reference: inline they made settings.json 435 KB of
+    // which 431 KB never changed, so patching one boolean re-serialised the lot —
+    // and two of them ride in stage:state, where they were 77% of every broadcast.
+    const clean = (await externalizeBrandingImages(partial as Record<string, unknown>)) as Partial<SettingsData>;
     // Serialized atomic read-modify-write — prevents a concurrent patch (e.g. the
     // live poller advancing the plan while the operator changes display routing)
     // from clobbering this one's fields.
-    return store.update((current) => ({ ...current, ...partial }));
+    return store.update((current) => ({ ...current, ...clean }));
   },
 };
