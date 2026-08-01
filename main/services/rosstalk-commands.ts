@@ -6,7 +6,7 @@
 // Every command belongs to exactly ONE family. Carbonite and Ultrix both have XPT
 // and GPI, but XPT has different syntax on each and GPI means different things
 // (a GPI output vs a salvo), so they are separate entries rather than one
-// branching formatter. See docs/superpowers/specs/2026-07-26-rosstalk-design.md.
+// branching formatter.
 //
 // Verified against Ross's published docs:
 //   https://help.rossvideo.com/carbonite-device/Topics/Protocol/RossTalk/CNT/RT-CNT-Comm.html

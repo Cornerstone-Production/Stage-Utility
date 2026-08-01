@@ -1,9 +1,7 @@
 # Stage Utility — Design & Style Guide
 
-> Reflects the design overhaul on `feat/design-overhaul`. The plan and principles
-> behind it live in
-> [`docs/design-overhaul/DESIGN_OVERHAUL.md`](docs/design-overhaul/DESIGN_OVERHAUL.md);
-> this guide documents **what the code does now**, grounded in file references.
+> What the interface does now, grounded in file references. Read this before adding
+> a screen, so a new surface matches the ones beside it.
 
 The overhaul unified two previously disconnected visual systems (the kiosk's
 hardcoded hex/opacity vs. the settings' Radix scales) onto **one semantic token
