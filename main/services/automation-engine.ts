@@ -14,9 +14,11 @@ import type { AutomationSettings, ConditionCtx, Rule } from "../types/automation
 import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { AUTOMATION_ACTIONS } from "./automation-actions.js";
 import { allConditionsHold } from "./automation-conditions.js";
+import { sampleArchive } from "./archive/sample-archive.js";
 import { automationLog } from "./automation-log.js";
 import { automationStore } from "./automation-store.js";
 import { AUTOMATION_TRIGGERS, triggersForChannel } from "./automation-triggers.js";
+import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
 
 class AutomationEngine {
@@ -205,6 +207,18 @@ class AutomationEngine {
       outcome,
       detail,
     });
+    // Mirror into the raw layer, but only while a service is being recorded — the
+    // archive is per-service, and a rule firing on a Tuesday belongs to no service.
+    // The open SPL record is the authority on which occurrence that is.
+    const rec = splRecorder.getCurrent();
+    if (rec && !rec.endedAt) {
+      sampleArchive.recordEvent(
+        { serviceKey: rec.serviceKey, serviceDate: rec.serviceDate },
+        "automation",
+        outcome,
+        `${rule.name}: ${detail}`,
+      );
+    }
   }
 
   private conditionCtx(): ConditionCtx {
