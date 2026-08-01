@@ -46,6 +46,9 @@ Options, set as environment variables before the command:
 After that, update from **Settings → Advanced → Updates** — see
 [Releases and distribution](distribution.md).
 
+On a laptop or workstation, [Homebrew](homebrew.md) is an alternative:
+`brew tap Cornerstone-Production/stage-utility && brew install stage-utility`.
+
 ### From a checkout instead
 
 For development, or to run a modified copy:
