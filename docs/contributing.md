@@ -89,19 +89,30 @@ Automated from the commit types above, by `.github/workflows/release.yml`.
 | `beta` | a prerelease `X.Y.Z-beta.N`, tagged, published as a GitHub prerelease |
 | `main` | the release `X.Y.Z`, tagged, published as the latest GitHub release |
 
-The level is the **highest** severity among the commits since the last tag — one
-`feat` among twenty `docs` still makes it a minor. A push containing only
-`docs`/`chore`/`refactor`/`test`/`ci`/`build` produces **no release at all**, so
-documentation churn does not mint versions.
+A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build` produces **no
+release at all**, so documentation churn does not mint versions.
+
+Otherwise the level is the **highest** severity among every commit since the last
+**stable** release — one `feat` among twenty `docs` makes it a minor. Reaching back
+to the last stable, rather than to the last tag, is what keeps a beta line coherent:
+
+```
+v1.9.2            last stable release
+  fix             -> v1.9.3-beta.1     a patch line opens
+  fix             -> v1.9.3-beta.2     refinements ride the same base
+  feat            -> v1.10.0-beta.1    a feature raises the line to minor
+  fix             -> v1.10.0-beta.2    and later fixes ride that
+  (merge to main) -> v1.10.0
+```
+
+The base moves only when the pending release changes class. Refinements and UI
+tweaks advance `-beta.N`, never the third decimal. The version never decreases: if
+the beta line already sits above what the level implies, it stays where it is.
 
 `package.json` is bumped and committed forward, then tagged. **Nothing is ever
 force-pushed** — deployments track `beta` and a rewrite breaks their in-app updater.
 The workflow re-runs lint, type-check, tests and build before it tags, so a red build
 cannot become a release.
-
-The first run will produce **v1.1.0**: there are 333 commits since the `v1.0.0` tag,
-including features but no breaking changes, and the level is the maximum severity
-rather than a count.
 
 To force a major, mark the commit breaking — `feat(types)!: …` plus an explanation in
 the body.
