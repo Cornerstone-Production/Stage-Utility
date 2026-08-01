@@ -9,6 +9,7 @@
 // and persisted to disk, so a mid-service restart resumes the same record.
 
 import type { PcoLiveDTO, ServiceSplHistory, SplMetricsDTO } from "../types/stage.js";
+import { sampleArchive } from "./archive/sample-archive.js";
 import { addLeqSample } from "./spl-leq.js";
 import { broadcast } from "./broadcaster.js";
 import { smaartService } from "./smaart-service.js";
@@ -98,6 +99,14 @@ class SplRecorder {
           this.finalizePrevItem();
           this.lastItemId = live.currentItemId;
           itemChanged = true;
+          if (this.currentKey) {
+            sampleArchive.recordEvent(
+              { serviceKey: this.currentKey, serviceDate: this.current.serviceDate },
+              "pco",
+              "item",
+              live.label ?? live.currentItemId,
+            );
+          }
         }
         this.recordSample(
         live.currentItemId,
@@ -235,6 +244,17 @@ class SplRecorder {
         st.leq = addLeqSample(st.leq ?? null, st.count, v);
         st.count += 1;
       }
+      // Keep the raw readings too. The fold above is lossy by design — max/leq/count
+      // cannot be un-averaged — which is why the corrected Leq could not be applied
+      // to anything already recorded. See docs/data-archive.md.
+      if (this.currentKey) {
+        sampleArchive.recordSpl(
+          { serviceKey: this.currentKey, serviceDate: this.current.serviceDate },
+          itemId,
+          item.title,
+          sample.metrics,
+        );
+      }
       // Keep the legacy single-metric fields populated (primary metric) for back-compat.
       const pk = this.current.metricKey;
       if (pk && pk in sample.metrics) {
@@ -257,6 +277,10 @@ class SplRecorder {
     const now = new Date().toISOString();
     for (const it of this.current.items) if (!it.endedAt) it.endedAt = now;
     this.current.endedAt = now;
+    // The record is closed: name what the raw layer captured, then release the
+    // appenders. A later item going live reopens the record and the files resume.
+    const ctx = { serviceKey: this.current.serviceKey, serviceDate: this.current.serviceDate };
+    void sampleArchive.writeManifest(ctx).then(() => sampleArchive.closeService(ctx.serviceKey));
   }
 
   private schedulePersist(): void {

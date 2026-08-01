@@ -37,6 +37,7 @@ import { SERVER_VERSION } from "./server-version.js";
 import { type RouteCtx, json, error, readBody } from "./routes/context.js";
 import { statusRoutes } from "./routes/status-routes.js";
 import { historyRoutes } from "./routes/history-routes.js";
+import { archiveRoutes } from "./routes/archive-routes.js";
 import { proxyRoutes } from "./routes/proxy-routes.js";
 import { stateRoutes } from "./routes/state-routes.js";
 import { scriptviewRoutes } from "./routes/scriptview-routes.js";
@@ -743,6 +744,8 @@ export class RemoteServer {
     await statusRoutes(c);
     if (res.headersSent) return;
     await historyRoutes(c);
+    if (res.headersSent) return;
+    await archiveRoutes(c);
     if (res.headersSent) return;
     await proxyRoutes(c);
     if (res.headersSent) return;

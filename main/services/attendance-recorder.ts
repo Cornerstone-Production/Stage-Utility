@@ -10,6 +10,7 @@
 
 import type { AttendanceSample, PcoLiveDTO, ServiceAttendance } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
+import { sampleArchive } from "./archive/sample-archive.js";
 import { attendanceStore } from "./attendance-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { sensourceService } from "./sensource-service.js";
@@ -133,6 +134,15 @@ class AttendanceRecorder {
       if (this.current.attendanceBaseline == null) this.current.attendanceBaseline = rawA;
       const a = Math.max(0, rawA - this.current.attendanceBaseline);
       this.current.totalAttendance = rawA;
+
+      // Archive EVERY reading, not just the 30s-gated ones the trend keeps: the
+      // record below stores what the chart needs, and the point of the raw layer is
+      // to outlive today's idea of what that is. The un-baselined daily total goes
+      // along too, since the baseline is a decision this recorder made.
+      sampleArchive.recordAttendance(
+        { serviceKey: this.current.serviceKey, serviceDate: this.current.serviceDate },
+        { attendance: a, occupancy: o, rawAttendance: rawA },
+      );
 
       // Only the service proper feeds Peak/Lowest/Last — the pre-service ramp and the
       // post-service taper would otherwise drag the "floor"/"last" toward an empty room.
