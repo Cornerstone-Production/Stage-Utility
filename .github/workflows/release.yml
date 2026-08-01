@@ -88,10 +88,20 @@ jobs:
             fi
           }
 
-          # Has anything releasable landed since the last tag? Without this, the
-          # level range below (which reaches back past old feats) would cut a new
-          # prerelease for a docs- or chore-only push.
-          NEWS=$(level_of "${LAST:+$LAST..HEAD}")
+          # Has anything releasable landed that this branch has not published?
+          #
+          # The anchor differs by branch, and getting it wrong costs a release.
+          # On beta, "released" means any tag, so a push with nothing new does
+          # not mint another prerelease. On main, prerelease tags do NOT count:
+          # a beta -> main merge brings across commits that are already tagged
+          # as betas, so measuring from the last tag sees nothing new and skips
+          # the very release the merge exists to produce. That is exactly what
+          # happened to v1.9.3 — "Nothing user-visible since v1.9.3-beta.1".
+          if [ "$BRANCH" = main ]; then
+            NEWS=$(level_of "${STABLE:+$STABLE..HEAD}")
+          else
+            NEWS=$(level_of "${LAST:+$LAST..HEAD}")
+          fi
           if [ "$NEWS" = none ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "Nothing user-visible since ${LAST:-the beginning} — no release."
@@ -252,8 +262,8 @@ jobs:
             --title "v$V" \
             --notes "${NOTES:-No notable changes.}" \
             $([ "$PRE" = true ] && echo --prerelease || echo --latest) \
-            dist/*
-          echo "published v$V with $(ls dist | wc -l) files"
+            dist/*.tar.gz
+          echo "published v$V with $(ls dist/*.tar.gz | wc -l) archives"
 
       - name: Update the Homebrew tap
         # Skipped until STAGE_TAP_TOKEN exists, so this cannot fail a release

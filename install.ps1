@@ -52,10 +52,11 @@ if ($env:STAGE_VERSION) {
   $headers = @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "stage-utility-installer" }
   if ($track -eq "beta") {
     # beta takes prereleases and releases both; main takes only full releases.
-    $tag = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=20" -Headers $headers)[0].tag_name
+    $release = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=20" -Headers $headers)[0]
   } else {
-    $tag = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -Headers $headers).tag_name
+    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -Headers $headers
   }
+  $tag = $release.tag_name
 }
 if (-not $tag) { Fail "Could not determine a release to install." }
 
@@ -69,13 +70,22 @@ Say "Installing $tag for $platform"
 $work = Join-Path $env:TEMP ("stage-utility-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 try {
-  Invoke-WebRequest "$base/$archive"    -OutFile "$work\$archive"    -UseBasicParsing
-  Invoke-WebRequest "$base/SHA256SUMS"  -OutFile "$work\SHA256SUMS"  -UseBasicParsing
+  Invoke-WebRequest "$base/$archive" -OutFile "$work\$archive" -UseBasicParsing
+
+  # The expected hash comes from the releases API, not from anything inside the
+  # archive - a checksum shipped inside the file it describes proves nothing,
+  # because whoever alters the file alters the checksum with it.
+  if (-not $release) {
+    $headers = @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "stage-utility-installer" }
+    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/$tag" -Headers $headers
+  }
 
   Say "Verifying"
-  $line = Select-String -Path "$work\SHA256SUMS" -Pattern ([regex]::Escape($archive)) | Select-Object -First 1
-  if (-not $line) { Fail "Release $tag publishes no checksum for $archive; refusing to install unverified." }
-  $want = ($line.Line -split '\s+')[0].ToLower()
+  $asset = $release.assets | Where-Object { $_.name -eq $archive } | Select-Object -First 1
+  if (-not $asset -or -not $asset.digest) {
+    Fail "Release $tag publishes no checksum for $archive; refusing to install unverified."
+  }
+  $want = ($asset.digest -replace '^sha256:', '').ToLower()
   $got  = (Get-FileHash "$work\$archive" -Algorithm SHA256).Hash.ToLower()
   if ($want -ne $got) {
     Fail "Checksum mismatch - the download does not match the published release. Nothing installed."
