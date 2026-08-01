@@ -43,12 +43,28 @@ const CHANGELOG_CAP = 20;
 // "main" = stable/production, "beta" = pre-release test track.
 const TRACKS = ["main", "beta"];
 
+/**
+ * The running version.
+ *
+ * A checkout carries package.json; a packaged install ships a VERSION file
+ * instead, because the artifact contains no manifest. Without the second source a
+ * packaged server reports 0.0.0 — which the UI shows, and which makes every
+ * release look older than the one before it.
+ */
 function pkgVersion(): string {
   try {
-    return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version ?? "0.0.0";
+    const v = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version;
+    if (v) return v;
   } catch {
-    return "0.0.0";
+    // no manifest — packaged install
   }
+  try {
+    const v = fs.readFileSync(path.join(REPO_ROOT, "VERSION"), "utf8").trim();
+    if (v) return v;
+  } catch {
+    // neither — fall through
+  }
+  return "0.0.0";
 }
 
 class Updater {
