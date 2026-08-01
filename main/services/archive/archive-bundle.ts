@@ -15,7 +15,8 @@ import { readFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+
+import { APP_ROOT } from "../app-root.js";
 
 import { strToU8, unzipSync, zipSync } from "fflate";
 
@@ -34,7 +35,7 @@ import {
 } from "./merge-records.js";
 
 // main/services/archive/archive-bundle.ts → repo root is three levels up.
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const REPO_ROOT = APP_ROOT;
 
 export const ARCHIVE_KIND = "stage-utility-archive";
 export const ARCHIVE_VERSION = 1;

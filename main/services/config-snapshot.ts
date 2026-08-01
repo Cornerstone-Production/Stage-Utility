@@ -15,14 +15,15 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+
+import { APP_ROOT } from "./app-root.js";
 
 import { getUserDataPath } from "./app-paths.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { listImages, readImage, restoreImage } from "./image-files.js";
 
 // main/services/config-snapshot.ts → repo root is two levels up.
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const REPO_ROOT = APP_ROOT;
 
 /** Config stores included in a snapshot (allowlist — anything else is ignored on
  *  apply, which also blocks path traversal). NB: secrets.bin / encryption.key are
