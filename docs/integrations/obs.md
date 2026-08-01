@@ -17,7 +17,7 @@ WebSocket (JSON message protocol, default port `4455`, optional password):
 - While recording, a 1 Hz poll (`GetRecordStatus`) refreshes the record
   timecode, trimmed from `HH:MM:SS.mmm` to whole seconds.
 
-The service (`main/services/obs-service.ts`) broadcasts the snapshot on the
+The service broadcasts the snapshot on the
 `obs:status` channel on change (and each second while recording, to tick the
 timecode). It uses a configure/connect/reconnect loop with exponential backoff
 and goes quiet when unreachable. The password is stored as an encrypted secret.
@@ -36,13 +36,3 @@ Password**, enable it, and **Test connection**.
 (recording / streaming / virtualcam), recording/idle/offline text overrides,
 show-timecode (recording mode only), fill-red-when-recording, hide-when-idle
 (pure tally-light — nothing on screen unless the chosen output is active).
-
-## Files
-
-- `main/services/obs-service.ts` — connect/reconnect loop, `reduceObsEvent()`, timecode poll
-- `main/services/obs-protocol.ts` — obs-websocket v5 adapter (handshake, events, requests)
-- `main/services/integration-manager.ts` — `OBS_DESCRIPTOR` (host/port/password)
-- `main/services/remote-server.ts` — `GET /api/obs/status` + SSE hydrate (`obs:status`)
-- `renderer/main/use-obs-state.ts` — live hook (`obs:status`)
-- `renderer/main/layout-renderer.tsx` — `obs-status` render case
-- `renderer/settings/sections/layout-editor.tsx` — object palette + inspector

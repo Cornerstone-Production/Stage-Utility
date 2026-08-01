@@ -101,16 +101,6 @@ Do this off-air.
    unused bank, never `FTB` or `MECUT`.
 4. Only then wire up buttons that do real work.
 
-## Files
-
-- `main/services/rosstalk-commands.ts` — the command catalogue (pure formatters)
-- `main/services/rosstalk-manager.ts` — targets, TCP connections, `send()`
-- `main/services/rosstalk-store.ts` — persisted targets + the simulate flag
-- `main/services/routes/rosstalk-routes.ts` — `/api/rosstalk/*`
-- `main/services/integration-manager.ts` — `ROSSTALK_DESCRIPTOR`, master row summary
-- `renderer/components/rosstalk-targets-panel.tsx` — targets + simulate UI
-- `renderer/main/rosstalk-button.tsx` + `layout-objects.ts` — the layout object
-- Design: `docs/superpowers/specs/2026-07-26-rosstalk-design.md`
 
 ## API
 

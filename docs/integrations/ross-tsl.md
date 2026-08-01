@@ -39,9 +39,3 @@ and **Test connection** (opens a TCP socket and sends a probe packet). Then, in
 the feeds panel, add one or more **feeds** mapping a count → tile TSL address. The
 host/port and feed mappings are all saved as non-secret config (no secret is
 stored).
-
-## Files
-
-- `main/services/tsl-service.ts` — TCP sender, `buildTsl31Packet()`, `onPeopleCount()`, reconnect + refresh loop, test
-- `main/services/integration-manager.ts` — `ROSS_TSL_DESCRIPTOR`, `applyRossTsl()`, `getRossTslConfig()`, `people:count` → `onPeopleCount` forward, test
-- `renderer/components/integrations-panel.tsx` — host/port fields + feeds mapping panel

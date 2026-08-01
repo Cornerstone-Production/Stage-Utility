@@ -35,13 +35,3 @@ connection**.
 
 **On a layout:** add object → **transcription strip**. Options: latest-line vs.
 multi-speaker scrolling feed, max lines, and hide specific channels by name.
-
-## Files
-
-- `main/services/prodcom-service.ts` — SSE stream client, `normalizeLine()`, buffer
-- `main/services/integration-manager.ts` — `PRODCOM_DESCRIPTOR`,
-  `applyProdcom()`, `getProdcomTarget()`, test
-- `main/services/remote-server.ts` — `GET /api/prodcom/transcript` (SSE hydrate)
-- `renderer/main/use-transcript.ts` — live hook (`prodcom:transcript`)
-- `renderer/main/transcript-feed.tsx` — multi-speaker feed renderer
-- `renderer/main/layout-renderer.tsx` — `transcript-strip` render case

@@ -38,13 +38,3 @@ enable it, and **Test connection**. Add more auditoriums via extra instances.
 **On a layout:** add slide objects — current/next slide text, current/next slide
 notes, current/next section, slide progress, slide thumbnail. Each can target a
 specific ProPresenter instance.
-
-## Files
-
-- `main/services/propresenter-service.ts` — poll loop, status DTO, multi-instance
-- `main/services/integration-manager.ts` — `PROPRESENTER_DESCRIPTOR`,
-  `applyPropresenter()`, `parsePropInstances()`, test
-- `main/services/remote-server.ts` — `GET /api/propresenter/status`,
-  `/api/propresenter/instances`, `/api/propresenter/thumbnail`
-- `renderer/main/use-dashboard-state.ts` — `usePropInstances`, live status
-- `renderer/main/layout-renderer.tsx` — slide-* / section / thumbnail render cases

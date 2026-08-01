@@ -37,14 +37,3 @@ feedback listen port if your gear replies on a non-default port.
 **On a layout:** add object → **Control → OSC button**. Set the **target**,
 **label**, **address** and **args**, and optionally bind a **feedback** address
 so the button reflects live device state.
-
-## Files
-
-- `main/services/osc-manager.ts` — target list, UDP send/receive sockets, feedback store
-- `main/services/osc-codec.ts` — OSC encode/decode (`encodeMessage`, `decodePacket`)
-- `main/services/osc-store.ts` — persisted target configs
-- `main/services/integration-manager.ts` — `OSC_DESCRIPTOR` (empty schema)
-- `main/services/remote-server.ts` — `/api/osc/*` (targets, send, feedback, feedback-port) + SSE hydrate
-- `renderer/main/use-osc-state.ts` — live hooks (`osc:feedback`, `osc:targets-changed`)
-- `renderer/main/osc-button.tsx` + `layout-renderer.tsx` — `osc-button` render case
-- `renderer/settings/sections/layout-editor.tsx` — object palette + inspector

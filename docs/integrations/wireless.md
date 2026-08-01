@@ -37,15 +37,3 @@ meter rate is set once and applies to all wireless gear.
 - **Wireless channel** — one channel's RF bars, battery %, frequency, audio level
   (each toggleable).
 - **Charger battery** — a charger bay's battery state.
-
-## Files
-
-- `main/services/wireless-manager.ts` — connection list, config persistence, meter rate
-- `main/services/device-manager.ts` — one provider per connection, channel namespacing
-- `main/services/wireless-store.ts` — persisted connection config
-- `main/providers/registry.ts` — provider descriptors + `hasDriver` / `createProvider`
-- `main/providers/wireless/` — Shure (`shure-*.ts`) and Sennheiser drivers
-- `main/services/integration-manager.ts` — `WIRELESS_DESCRIPTOR`, `refreshWirelessSummary()`
-- `main/services/remote-server.ts` — `/api/wireless/connections`, `/api/wireless/meter-rate`, `/api/wireless/providers`, `/api/integrations/wireless/channels`
-- `renderer/main/layout-renderer.tsx` — `wireless-summary`, `wireless-channel`, `charger-battery` render cases
-- `renderer/main/use-wireless-channels.ts` — live channel hook
