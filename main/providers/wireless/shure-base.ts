@@ -336,7 +336,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
       // Format: SAMPLE {ch} ...
       const ch = parseInt(tokens[1] ?? "", 10);
       if (Number.isNaN(ch) || ch < 1) {
-        console.debug(`[shure:${this.id}] SAMPLE â unrecognised channel token: ${tokens[1]}`);
+        console.debug(`[shure:${this.id}] SAMPLE â unrecognized channel token: ${tokens[1]}`);
         return;
       }
       if (!this.ensureChannel(ch)) {
@@ -373,7 +373,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
       return;
     }
 
-    console.debug(`[shure:${this.id}] unrecognised message type: ${type}`);
+    console.debug(`[shure:${this.id}] unrecognized message type: ${type}`);
   }
 
   private scheduleReconnect(): void {

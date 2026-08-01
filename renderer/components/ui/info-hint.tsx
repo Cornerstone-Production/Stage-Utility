@@ -17,7 +17,7 @@ export function InfoHint({ children, className }: { children: React.ReactNode; c
           aria-label="More info"
           className={cn(
             "inline-flex size-4 items-center justify-center rounded-full text-gray-9",
-            "hover:text-gray-11 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-8",
+            "hover:text-fg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
             className,
           )}
         >
@@ -31,7 +31,7 @@ export function InfoHint({ children, className }: { children: React.ReactNode; c
           sideOffset={6}
           collisionPadding={8}
           className={cn(
-            "z-50 max-w-[16rem] rounded-lg border border-gray-a6 bg-gray-2 px-3 py-2 text-[12px] leading-snug text-gray-11 shadow-md",
+            "z-50 max-w-[16rem] rounded-lg border border-line-strong bg-popover backdrop-blur-xl px-3 py-2 text-caption1 leading-snug text-fg-muted shadow-md",
             "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           )}
         >

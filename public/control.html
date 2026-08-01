@@ -360,7 +360,12 @@ async function loadSlotsTab() {
   try {
     wirelessChannels = await api('GET', '/api/integrations/wireless/channels');
     if (state) {
-      editSlots = JSON.parse(JSON.stringify(state.slots));
+      // state.slots used to be shipped as its own copy of the primary output's
+      // slots; derive it instead so the broadcast carries one copy, not three.
+      const primary = (state.outputs || [])[0];
+      const viewId = primary && state.resolvedByOutput ? state.resolvedByOutput[primary.id]?.viewId : null;
+      const primarySlots = (viewId && state.slotsByView ? state.slotsByView[viewId] : null) || [];
+      editSlots = JSON.parse(JSON.stringify(primarySlots));
     }
     renderSlots();
   } catch (err) {

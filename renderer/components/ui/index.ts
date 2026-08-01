@@ -14,6 +14,7 @@ export {
   SelectItem,
 } from "./select";
 export { Switch } from "./switch";
+export { MultiSelect, type MultiSelectOption } from "./multi-select";
 export { Separator } from "./separator";
 export { Collapsible } from "./collapsible";
 export {
@@ -36,7 +37,7 @@ export { InfoHint } from "./info-hint";
 export { UnsavedBanner } from "./unsaved-banner";
 export { ScrollArea, ScrollBar } from "./scroll-area";
 export { SplitView } from "./split-view";
-export { Sidebar, SidebarList, SidebarListItem } from "./sidebar";
+export { Sidebar, SidebarList, SidebarListItem, SidebarGroupLabel } from "./sidebar";
 export {
   Field,
   FieldSet,
@@ -47,4 +48,6 @@ export {
 } from "./field";
 export { Status } from "./status";
 export { TooltipProvider } from "./tooltip-provider";
+export { Tooltip } from "./tooltip";
+export { Checkbox } from "./checkbox";
 export { ErrorBoundaryView, ErrorBoundary } from "./error-boundary-view";

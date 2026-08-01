@@ -49,20 +49,17 @@ export class SennheiserSpectera implements DeviceProvider {
       label: "Base Station IP / Hostname",
       type: "text",
       placeholder: "192.168.1.130",
-      help: "IP or hostname of the Spectera Base Station. SSCv2 over HTTPS (port 443) on your LAN — give it a static IP so it stays reachable.",
     },
     {
       key: "port",
       label: "HTTPS Port",
       type: "number",
       placeholder: "443",
-      help: "The base station's HTTPS API port. 443 unless you've changed it.",
     },
     {
       key: "password",
       label: "API Password",
       type: "password",
-      help: "The API password set on the base station (WebUI / LinkDesk). The username is fixed (controlSennheiser). API access is disabled until a password is set on the device.",
     },
   ];
 

@@ -1,0 +1,78 @@
+# Checks that every non-merge commit in a PR follows Conventional Commits.
+#
+# This repo MERGES rather than squashes, so the commits you write are the ones that
+# land — and the ones the release flow will read to pick a version. Validating the
+# PR title instead would check a string that never becomes a commit.
+#
+# See docs/contributing.md.
+
+name: Commit convention
+
+on:
+  pull_request:
+
+# Least privilege, stated rather than inherited: the repository default is
+# read today, but a settings change should not silently widen every workflow.
+permissions:
+  contents: read
+
+jobs:
+  conventional-commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Need the full range between base and head to inspect every commit.
+          fetch-depth: 0
+
+      - name: Check commit subjects
+        run: |
+          set -uo pipefail
+          PATTERN='^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([a-z0-9.+/-]+\))?!?: .+'
+          BASE="origin/${{ github.base_ref }}"
+          git fetch -q origin "${{ github.base_ref }}"
+
+          # --no-merges: GitHub authors merge commits and they carry no release meaning.
+          mapfile -t SUBJECTS < <(git log --no-merges --format='%s' "$BASE..HEAD")
+
+          if [ ${#SUBJECTS[@]} -eq 0 ]; then
+            echo "No non-merge commits to check."
+            exit 0
+          fi
+
+          BAD=0
+          for s in "${SUBJECTS[@]}"; do
+            if [[ "$s" =~ $PATTERN ]]; then
+              echo "  ok   $s"
+            else
+              echo "  BAD  $s"
+              BAD=1
+            fi
+          done
+
+          if [ "$BAD" -ne 0 ]; then
+            cat <<'EOF'
+
+          One or more commit subjects do not follow the convention.
+
+            type(scope): subject
+
+          type must be one of:
+            feat fix perf refactor docs test build ci chore revert
+
+          scope is optional and lower-case. Add "!" after the type/scope for a
+          breaking change. Subject is imperative mood, no trailing period.
+
+          Examples:
+            feat(patch): rack colour on its header card
+            fix(server): reject cross-origin state-changing requests
+            feat(types)!: rename Slot.channel to Slot.channelId
+
+          See docs/contributing.md. Reword with:
+            git rebase -i origin/${{ github.base_ref }}
+
+          EOF
+            exit 1
+          fi
+
+          echo "All ${#SUBJECTS[@]} commit(s) follow the convention."

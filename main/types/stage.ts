@@ -16,9 +16,6 @@ export type ViewKind =
   | "script"
   | "spl-rundown";
 
-/** @deprecated Back-compat alias retained for the legacy display model. Use ViewKind. */
-export type DisplayKind = ViewKind;
-
 /** A live transcript line from ProdCom (pushed on "prodcom:transcript"). */
 export interface TranscriptLineDTO {
   /** Stable id for keying/dedupe (falls back to a synthesized one). */
@@ -63,7 +60,7 @@ export interface DisplayInfo {
   id: string;
   name: string;
   /** Defaults to "slots" when absent (back-compat with older settings). */
-  kind?: DisplayKind;
+  kind?: ViewKind;
   /** NDI source name (mirrors the routed View's ndiSource). */
   ndiSource?: string | null;
 }
@@ -174,7 +171,7 @@ export type LayoutObjectConfig =
   // compares the current live item's elapsed time to its planned length (from
   // pco:live); `scope: "service"` sums actual-vs-planned across the recorded service
   // timeline for a running whole-service total. Over plan reads red, under reads green.
-  | { type: "service-pacing"; scope?: "item" | "service"; hideWhenIdle?: boolean; showLabel?: boolean }
+  | { type: "service-pacing"; scope?: "item" | "service"; hideWhenIdle?: boolean; showLabel?: boolean; aheadColor?: string | null; behindColor?: string | null }
   // ProPresenter-fed objects. `propresenterInstanceId` picks which configured
   // instance to read (omitted / "default" = the primary) — lets separate custom
   // views per auditorium point at different ProPresenter machines.
@@ -258,6 +255,46 @@ export type LayoutObjectConfig =
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
     }
+  // "Is anything recording?" — one indicator across every recorder, so a layout does
+  // not need to know whether the campus records on OBS or REAPER. `source: "any"`
+  // is red when EITHER is recording. The device-specific obs-status/reaper-status
+  // objects remain for when you want exactly one machine.
+  | {
+      type: "record-status";
+      source?: "any" | "obs" | "reaper";
+      recordingText?: string;
+      idleText?: string;
+      offlineText?: string;
+      hideWhenIdle?: boolean;
+      fillWhenRecording?: boolean;
+    }
+  // Live REAPER recording indicator (from the REAPER integration, `reaper:status`
+  // channel). Turns red while REAPER is recording. Label texts override the
+  // defaults ("REAPER: Recording" / "REAPER: Standby" / "REAPER: Offline");
+  // `hideWhenIdle` makes it a pure tally light (render nothing unless recording);
+  // `fillWhenRecording` fills the whole box red instead of just coloring the text;
+  // `showPosition` appends REAPER's transport position while recording.
+  | {
+      type: "reaper-status";
+      recordingText?: string;
+      idleText?: string;
+      offlineText?: string;
+      showPosition?: boolean;
+      hideWhenIdle?: boolean;
+      fillWhenRecording?: boolean;
+    }
+  // A RossTalk control button. Tapping it (on a real display / operator surface,
+  // never in the editor) fires `commandId` with `params` at `targetId`, or `raw`
+  // when no catalogue command is chosen. No feedback bind: RossTalk is send-only,
+  // so a button is a trigger and never an indicator.
+  | {
+      type: "rosstalk-button";
+      targetId: string | null;
+      commandId: string | null;
+      params: Record<string, string | number>;
+      label: string;
+      raw?: string;
+    }
   // An OSC control button. Tapping it (on a real display / operator surface, never
   // in the editor) sends `address` + `args` to the chosen OSC target. `feedback`
   // optionally lights the button from incoming OSC. Send-only if no feedback bind.
@@ -272,7 +309,7 @@ export type LayoutObjectConfig =
   | { type: "shape"; shape: "rect" | "ellipse" }
   // A connection-status light for any integration, driven by the
   // "integrations:state-changed" channel. `integrationId` selects which (null =
-  // first). Dot color reflects the live connection (green/amber/red/grey);
+  // first). Dot color reflects the live connection (green/amber/red/gray);
   // `label` overrides the integration's friendly name.
   | {
       type: "integration-status";
@@ -412,8 +449,14 @@ export interface LayoutGroup {
 
 /** A physical screen at a URL slug, routed to exactly one View (or none). */
 export interface Output {
+  /** Permanent. Never rewritten after creation — slots.json and every other store
+   *  is keyed by this, and Pis/bookmarks/QR codes point at `/<id>`. */
   id: string;
   name: string;
+  /** Optional friendly URL. `/<id>` always resolves; when this is set, `/<slug>`
+   *  resolves to the same display. Never used as a storage key, so clearing it
+   *  cannot orphan anything. Validated against RESERVED_SLUGS on save. */
+  slug?: string;
   /** The View this screen currently shows, or null when unrouted (renders a placeholder). */
   viewId: string | null;
   /** When true, this screen renders a full black "blackout" regardless of its
@@ -445,6 +488,9 @@ export interface PcoLiveDTO {
   currentItemId: string | null;
   /** Item title ("item") or service label ("preservice"). */
   label: string | null;
+  /** PCO item_type of the live item ("song" | "header" | "media" | "item"), so
+   *  recorders can tag what was playing without re-fetching the plan. */
+  itemType?: string | null;
   /** Item's planned length in seconds ("item" mode). */
   lengthSec: number | null;
   /** ISO timestamp the current item went live — countdown anchor ("item" mode). */
@@ -555,6 +601,20 @@ export interface ObsStatusDTO {
   recordTimecode: string | null;
 }
 
+/** Live REAPER transport state (pushed on "reaper:status"). `connected` is the
+ *  web-interface HTTP link; the rest reflect REAPER's transport. v1 surfaces
+ *  recording for the layout object. */
+export interface ReaperStatusDTO {
+  connected: boolean;
+  recording: boolean;
+  recordPaused: boolean;
+  playing: boolean;
+  /** Transport position in seconds, or null when unknown. */
+  positionSeconds: number | null;
+  /** REAPER's position string (e.g. "0:02.123"), or null. */
+  positionString: string | null;
+}
+
 /** Live people counts from the SenSource Vea integration (pushed on
  *  "people:count"). Counts are polled (SenSource has no real-time endpoint) and
  *  computed from today's traffic: attendance = Σins, occupancy = Σins − Σouts
@@ -597,7 +657,14 @@ export interface PeopleCountDTO {
 /** Running max/mean of one Smaart metric over an item (e.g. "LAeq 10"). */
 export interface SplMetricStat {
   max: number | null;
+  /** Arithmetic mean of the dB readings. WRONG for sound levels — decibels are
+   *  logarithmic, so this understates a dynamic passage by 8-15 dB. Kept only so
+   *  records made before `leq` existed still load; never displayed or exported.
+   *  @deprecated use `leq`. */
   avg: number | null;
+  /** Equivalent continuous level (energy average) across the samples — the
+   *  correct way to combine dB. Absent on records made before this existed. */
+  leq?: number | null;
   count: number;
 }
 
@@ -614,8 +681,12 @@ export interface SplItemHistory {
   metrics: Record<string, SplMetricStat>;
   /** Legacy single-metric peak (dB) — kept populated for back-compat reads. */
   maxSpl: number | null;
-  /** Legacy single-metric running mean (dB) — kept populated for back-compat reads. */
-  avgSpl: number | null;
+  /** Legacy single-metric energy average (dB). Absent on older records. */
+  leqSpl?: number | null;
+  /** PCO item_type ("song" | "header" | "media" | "item") when it was known at
+   *  record time. Absent on records made before this was captured, so a song
+   *  cannot be identified in older history. */
+  itemType?: string | null;
   sampleCount: number;
   startedAt: string;
   endedAt: string | null;
@@ -653,6 +724,10 @@ export interface AttendanceSample {
   t: string;
   attendance: number;
   occupancy: number;
+  /** "pre" = arrivals sampled before the service began, "post" = the room emptying
+   *  after it ended. Omitted = in-service — only these feed Peak/Lowest/Avg so the
+   *  ramp-up and taper tails don't skew the stats (they still draw on the curve). */
+  phase?: "pre" | "post";
 }
 
 /** Recorded attendance/occupancy trend for one service occurrence, keyed by
@@ -671,7 +746,13 @@ export interface ServiceAttendance {
   serviceDate: string;
   serviceTimeId: string | null;
   serviceTimeStartsAt: string | null;
+  /** When recording began — may be BEFORE the service (pre-service arrival ramp). */
   startedAt: string;
+  /** First in-service sample (the service proper began). Null while only pre-service
+   *  samples exist; may differ from `startedAt`. Absent on pre-taper legacy records. */
+  serviceStartedAt?: string | null;
+  /** When the service ended (the taper boundary). Post-service samples continue past
+   *  this during the cooldown window. */
   endedAt: string | null;
   /** Down-sampled samples across the service (oldest→newest). `attendance` is
    *  PER-SERVICE (baselined — see attendanceBaseline), so a second service in the
@@ -763,6 +844,9 @@ export interface BaptismPerson {
 }
 
 export interface BaptismState {
+  /** Service occurrence captured when the session started; carried onto the record
+   *  so a baptism belongs to one service rather than to whatever it overlapped. */
+  serviceKey?: string | null;
   /** Workflow: per-person vs grouped (all testimonies, then all baptisms). */
   mode: BaptismMode;
   phase: BaptismPhase;
@@ -772,6 +856,13 @@ export interface BaptismState {
   baptismIndex: number;
   /** ISO when the current segment (testimony/baptism) started; null when idle. */
   segmentStartedAt: string | null;
+  /** Milliseconds this segment banked before the last pause. Elapsed is this plus
+   *  the time since `segmentStartedAt`; a null start with a non-zero accumulator is
+   *  a paused clock. Absent on records made before pausing existed. */
+  segmentAccumMs?: number;
+  /** The plan item that started this session automatically, if one did — shown so
+   *  the operator can see the timer did not start itself out of nowhere. */
+  autoStartedFrom?: string | null;
   /** ISO when the session began; null before the first start. */
   sessionStartedAt: string | null;
   /** ISO when the session was finished (totals frozen); null while active. */
@@ -788,6 +879,24 @@ export interface BaptismState {
 }
 
 /** A finished baptism session, kept for later review. */
+/** Which plan items start each phase of the baptism timer, for one plan. */
+/** How the baptism timer may start itself from the running plan. */
+export interface BaptismAutoStart {
+  enabled: boolean;
+  /** Case-insensitive substring of a plan item's title that starts the
+   *  testimonies. Only the testimony end can work this way — the baptisms happen
+   *  during whichever songs are on that week, so that end is bound per plan. */
+  testimonyKeyword: string;
+}
+
+export interface BaptismTriggers {
+  /** Item whose going live starts the testimonies. */
+  testimonyItemId?: string | null;
+  /** Item whose going live switches to the baptisms. Picked per plan because it is
+   *  usually a song, and the songs change every week. */
+  baptismItemId?: string | null;
+}
+
 export interface BaptismSession {
   id: string;
   startedAt: string;
@@ -797,11 +906,29 @@ export interface BaptismSession {
   title: string | null;
   serviceTypeId: string | null;
   planId: string | null;
+  /** The service occurrence this belongs to — same key the recorders use, stamped
+   *  when the session started. Absent on sessions recorded before it was captured,
+   *  which fall back to matching by time overlap. */
+  serviceKey?: string | null;
+}
+
+/** One of PCO's item row colors, from ServiceType.standard_item_types /
+ *  custom_item_types. Standard entries match an item's `itemType`; custom entries
+ *  match text CONTAINED in the title ("Items that include this text in the title
+ *  will be highlighted"). */
+export interface PcoItemTypeColor {
+  /** "Header" / "Song" / "Media" for standard; the operator's text for custom. */
+  name: string;
+  /** "#rrggbb". PCO stores #ffffff to mean "no color". */
+  color: string;
+  custom: boolean;
 }
 
 export interface ServiceTypeDTO {
   id: string;
   name: string;
+  /** Item row colors configured on this service type in PCO. */
+  itemTypeColors?: PcoItemTypeColor[];
 }
 
 export interface PlanDTO {
@@ -810,6 +937,9 @@ export interface PlanDTO {
   seriesTitle: string | null;
   sortDate: string | null;
   dates: string | null;
+  /** True for a plan that has already happened. Set when the manual picker's list
+   *  is built, so the UI does not have to re-derive it against the clock. */
+  past?: boolean;
 }
 
 /** One line-item of a PCO plan (song / header / media / item). */
@@ -843,14 +973,20 @@ export interface PlanItemsDTO {
 
 /** A saved ScriptView layout — a named column preset (our in-app ScriptViewer
  *  replacement). GLOBAL: one set of layouts applies across every service type.
- *  Columns reference PCO note categories by name, so a layout works under any
- *  type (a category a type lacks just renders as an empty column). */
+ *  Columns reference category ROLES, not names. Names are defined per service type and
+ *  vary between them, so a name-based column rendered empty wherever that service type
+ *  used a different word for the same thing. A role whose members are all absent is
+ *  hidden instead. */
 export interface ScriptViewLayout {
   id: string;
   name: string;
   order: number;
-  /** Ordered note-category names shown as columns. */
-  columns: string[];
+  /** @deprecated Ordered note-category NAMES. Migrated to `columnRoles` on load and
+   *  kept only so an unmigrated file still parses. Category names vary per service
+   *  type, which is why columns reference roles now. */
+  columns?: string[];
+  /** Ordered role ids shown as columns. See CategoryRole. */
+  columnRoles?: string[];
   // Per-element visibility toggles (undefined = shown; opt-out by setting false).
   showClock?: boolean;        // projected wall-clock column
   showLength?: boolean;       // length / "Time" column
@@ -859,8 +995,13 @@ export interface ScriptViewLayout {
   showArrangement?: boolean;  // arrangement name in the title meta line
   showItemNotes?: boolean;    // description line (leader / cues) under the title
   showTotalTime?: boolean;    // total-time footer
-  /** Note category whose presence tints the row (department focus), or null. */
+  /** What colors this layout's rows. Absent = "pco", so a layout saved before this
+   *  existed keeps the behavior it had. */
+  rowColor?: "pco" | "category" | "none";
+  /** @deprecated Category NAME that tinted the row. Migrated to `accentRole`. */
   accentDepartment?: string | null;
+  /** Role whose presence tints a row, used only when rowColor === "category". */
+  accentRole?: string | null;
 }
 
 /** ScriptView-wide config: which PCO service types appear on the landing page
@@ -879,6 +1020,8 @@ export interface ScriptViewRundownDTO {
   planDates: string | null;
   items: PlanItemDTO[];
   noteCategories: string[];
+  /** Item row colors for this rundown's service type (see PcoItemTypeColor). */
+  itemTypeColors?: PcoItemTypeColor[];
   /** Scheduled service start time(s), ISO (from PCO plan_times type=service).
    *  serviceTimes[0] anchors the projected per-item clock. */
   serviceTimes: string[];
@@ -923,14 +1066,26 @@ export interface TeamPositionDTO {
   positionName: string;
 }
 
+/** One position a slot will accept, with an optional note filter scoped to it.
+ *  `name` omitted = any position (the note is then the only constraint). An entry
+ *  with neither is a misconfiguration and never matches — see slot-resolver. */
+export interface SlotPositionMatch {
+  name?: string;
+  notesStartsWith?: string;
+}
+
 export type SlotLink =
   | { kind: "pco"; matchBy: "person"; personId: string }
-  | { kind: "pco"; matchBy: "position"; teamPositionName: string; notesStartsWith?: string }
+  // A range: the first listed position with someone available fills the slot. A
+  // per-position note pins that entry to one person (e.g. Vocals note "4").
+  | { kind: "pco"; matchBy: "position"; positions: SlotPositionMatch[] }
   | { kind: "static"; label: string; color: string }
   | { kind: "empty" }
   // A horizontal gap used to align slot columns with physical chargers. Occupies
   // width (see Slot.widthIn). Renders nothing unless `showEmptyImage` is set, in
   // which case the empty-slot logo is centered in the gap.
+  /** `showEmptyImage` is no longer read — a spacer is a gap and nothing else. Kept
+   *  on the type so slots saved with it still load. */
   | { kind: "spacer"; showEmptyImage?: boolean };
 
 export interface SlotDevice {
@@ -938,6 +1093,9 @@ export interface SlotDevice {
   rf: number | null;
   battery: number | null;
   freq: string | null;
+  /** Live audio level, **normalised 0–1**. Receivers report this on different
+   *  scales (Shure against its own dB range, Sennheiser raw), so it is coerced to
+   *  one unit in slot-resolver.ts — never assume it is dB. */
   audioLevel: number | null;
   /** Resolved level for the charge bar, from the slot's chargeSource: the bound
    *  mic's battery, a chosen SBC charger bay, or null (off / no source). */
@@ -977,6 +1135,10 @@ export interface Slot {
    *  to the device's name. */
   iemLabel?: string | null;
   displayName?: string | null;
+  /** Which of a position range's names the resolved person is actually scheduled
+   *  for. A slot may accept "EG Ghost or EG Shadow"; the cell should name only what
+   *  this person is really doing. Absent on non-position slots. */
+  shownPositions?: string[];
   photoUrl?: string | null;
   device: SlotDevice;
   /** When true, this slot stacks into the SAME on-screen column as the previous
@@ -1003,6 +1165,9 @@ export interface StageState {
   planId: string | null;
   planTitle: string | null;
   planSeriesTitle: string | null;
+  /** The plan's own date label from Planning Center ("August 3, 2026"), so the
+   *  active plan can be told apart from next week's. */
+  planDates: string | null;
 
   // ── Views/Outputs model (canonical) ──────────────────────────────────
   /** All content definitions. */
@@ -1019,12 +1184,6 @@ export interface StageState {
   resolvedByOutput: Record<string, ResolvedOutput>;
 
   // ── Compat shim (computed from outputs + views) ──────────────────────
-  /** @deprecated Primary output's resolved slots (legacy phone control page). */
-  slots: Slot[];
-  /** @deprecated Resolved slots keyed by OUTPUT id (== slotsByView of its routed view). */
-  slotsByDisplay: Record<string, Slot[]>;
-  /** @deprecated Each output joined with its routed view's kind/ndiSource. */
-  displays: DisplayInfo[];
 
   pcoConfigured: boolean;
   lastRefreshedAt: string | null;
@@ -1037,6 +1196,8 @@ export interface StageState {
   allowedServiceTypeIds: string[];
   /** Customizable brand name shown in the sidebar header and on the kiosk. */
   appName: string;
+  /** Themeable brand accent (#rrggbb), or null to use the built-in default. */
+  accentColor: string | null;
   /** Customizable brand logo as a data URL (PNG/JPG/SVG/WebP), or null. */
   appLogo: string | null;
   /** Recolor a single-color logo to match the theme. */
@@ -1050,6 +1211,10 @@ export interface StageState {
   ndiEnabled: boolean;
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */
   publicUrl: string | null;
+  /** Icon tint per display id or tool path (e.g. "display-1", "/baptism"), as
+   *  "#rrggbb". One map covers the Displays cards, the Connect tool cards and the
+   *  picker tiles, so a color set anywhere shows everywhere that item appears. */
+  iconColors?: Record<string, string>;
   /** User-assigned caption colors, keyed by ProdCom channel label. */
   captionChannelColors: Record<string, string>;
   /** Live battery bays from any Shure SBC charger connections. */
@@ -1057,6 +1222,10 @@ export interface StageState {
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
   reconnectSchedule: ReconnectSchedule;
+  /** Attendance ramp/taper capture windows (Advanced tab). */
+  taperWindow: TaperWindow;
+  /** Keyword auto-start for the baptism timer (see BaptismAutoStart). */
+  baptismAutoStart?: BaptismAutoStart;
   /** Operator dismissed the first-run "Getting started" checklist (machine-wide). */
   onboardingDismissed: boolean;
 }
@@ -1087,12 +1256,32 @@ export interface ChargerBayDTO {
 
 /** Scheduled auto-update config. When enabled, the server applies an available
  *  update during the weekly window (skipping while a PCO service is live). */
+/**
+ * How updates are applied.
+ *   manual       — operator checks, applies and restarts by hand
+ *   auto-install — apply automatically in the window, but WAIT for an operator
+ *                  to restart (the new build sits ready; nothing interrupts)
+ *   auto-full    — apply and restart in the window (the original behavior)
+ */
+export type UpdateMode = "manual" | "auto-install" | "auto-full";
+
 export interface AutoUpdateSettings {
-  enabled: boolean;
+  mode: UpdateMode;
+  /** @deprecated Pre-mode boolean, read once to migrate. true -> auto-full. */
+  enabled?: boolean;
   /** Day of week 0–6 (Sun–Sat), or null for any day. */
   dayOfWeek: number | null;
   /** Hour of day 0–23 (local time) the update window opens. */
   hour: number;
+}
+
+/** Minutes to keep sampling attendance/occupancy around a service so the graphs
+ *  show the room filling before and emptying after (Advanced tab). 0 = off. */
+export interface TaperWindow {
+  /** Sample the arrival ramp this many minutes before the service start. */
+  preMin: number;
+  /** Keep sampling the emptying room this many minutes after the service ends. */
+  postMin: number;
 }
 
 /** Tunables for time-aware integration reconnects (Advanced tab). */
@@ -1119,8 +1308,24 @@ export interface UpdateStatus {
   /** Short SHA + ISO commit date of the running checkout. */
   currentSha: string | null;
   currentDate: string | null;
-  /** Commits the local branch is behind its upstream. */
+  /** Commits between here and the release we should be running. */
   behind: number;
+  /** The release tag this checkout is on, or null when it predates every tag. */
+  currentTag?: string | null;
+  /** The newest release tag on this track — what an update would move to. */
+  targetTag?: string | null;
+  /** How many releases newer than `currentTag` exist on this track. */
+  releasesBehind?: number;
+  /** Commits on the branch past `targetTag`: merged but not yet released,
+   *  because CI is still running or has failed. Surfaced so a track stalled on a
+   *  red build reads as "waiting to be released" rather than "updates broken". */
+  unreleasedCommits?: number;
+  /** False when the track has no tags and the updater is following the tip. */
+  tagBased?: boolean;
+  /** How many of those an operator would notice — see summarizeChangelog. The
+   *  release workflow's own version bump trails every merge, so this is 0 far more
+   *  often than `behind` is, and it is what the "update available" banner reads. */
+  behindUserFacing?: number;
   latestSha: string | null;
   latestDate: string | null;
   /** Commit subjects between current and latest (newest first), capped. */
@@ -1130,8 +1335,98 @@ export interface UpdateStatus {
   phase: "idle" | "checking" | "updating";
   /** Sub-phase while `phase==="updating"`, for the progress bar. Null otherwise. */
   step: "pull" | "install" | "build" | "restarting" | null;
+  /** A build has been installed but the process is still running the old code —
+   *  set by an auto-install update that deferred its restart. */
+  restartPending: boolean;
   /** Outcome of the most recent apply (read from the updater's result file). */
   lastResult: { ok: boolean; finishedAt: string; log: string | null } | null;
   /** Non-null when the last check failed (e.g. no network). */
   error: string | null;
+}
+
+// ── Stage patch sheet (see docs/patch-sheet/DESIGN.md) ───────────────────────
+export type PatchDeviceKind = "rack" | "snake" | "drop-snake" | "pocket" | "wireless" | "array" | "other";
+
+/** A physical device that carries channels (SD rack, snake, pocket, RF bank, …). */
+export interface PatchDevice {
+  id: string;
+  name: string;
+  kind: PatchDeviceKind;
+  inputs: number;
+  outputs: number;
+  /** Optional custom connector labels; default = "1".."N" (supports "B-1", "S11", …). */
+  inLabels?: string[];
+  outLabels?: string[];
+  /** Optional color ("#rrggbb") to tint every channel sourced from this device. */
+  color?: string;
+}
+
+/** One hop in a signal path: a specific connector on a device. */
+export interface PatchHop {
+  deviceId: string;
+  connector: string;
+}
+
+/** One console endpoint on a rack — the spine of the patch. */
+export interface PatchEndpoint {
+  rackId: string;
+  dir: "in" | "out";
+  index: number;
+  consoleChannel?: string;
+  /** Source (in) / destination (out) name. */
+  label?: string;
+  /** Input metadata. */
+  mic?: string;
+  phantom?: boolean;
+  /** Output metadata: "IEM" | "wedge" | "amp" | "stream" | "record" | … */
+  feedType?: string;
+  /** Ordered upstream (in) / downstream (out) hops; empty/absent = direct. */
+  path?: PatchHop[];
+  unused?: boolean;
+  notes?: string;
+  /** Optional ownership/section tag (e.g. "338 @ FOH") — groups channels under a
+   *  subheading, mirroring the ownership bands on a Dante patch sheet. */
+  owner?: string;
+  /** HOOK: link a vocal/RF endpoint to a mic-board channel (feature later). */
+  micSlotRef?: string | null;
+  /** HOOK: PCO team position tag for scheduling suggestions (feature later). */
+  pcoPosition?: string | null;
+}
+
+/** A named overlay of endpoint overrides on the default patch (template == event). */
+export interface PatchVariant {
+  id: string;
+  name: string;
+  /** key = `${rackId}:${dir}:${index}`; value = only the changed fields. */
+  overrides: Record<string, Partial<PatchEndpoint>>;
+}
+
+export interface PatchAssignments {
+  /** Standing variant per PCO service type. */
+  byServiceType: Record<string, string>;
+  /** Per specific PCO plan: override variant + one-off week tweaks. */
+  byPlan: Record<string, { variantId?: string; tweaks?: Record<string, Partial<PatchEndpoint>> }>;
+}
+
+/** What kind of patch a sheet documents — drives labels/cosmetics only. */
+export type PatchSheetKind = "analog" | "dante" | "network" | "monitor" | "custom";
+
+/** One patch surface (a tab): its own devices, default endpoints, variants, and
+ *  weekly assignments. Analog stage patch, Dante, Waves SoundGrid, monitors, etc.
+ *  each are a sheet of this same shape. */
+export interface PatchSheet {
+  id: string;
+  name: string;
+  kind: PatchSheetKind;
+  devices: PatchDevice[];
+  /** The DEFAULT patch for this sheet (source of truth). */
+  endpoints: PatchEndpoint[];
+  variants: PatchVariant[];
+  assignments: PatchAssignments;
+}
+
+export interface PatchFile {
+  /** All patch sheets (tabs). At least one; the first is the default view. */
+  sheets: PatchSheet[];
+  updatedAt: string;
 }

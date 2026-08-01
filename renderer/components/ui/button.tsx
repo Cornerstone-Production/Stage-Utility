@@ -1,6 +1,6 @@
 import * as React from "react";
-import { Tooltip as TooltipPrimitive } from "radix-ui";
 import { cn } from "../../lib/cn";
+import { Tooltip } from "./tooltip";
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "accent" | "filled" | "transparent";
@@ -8,7 +8,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   iconOnly?: boolean;
   /**
    * Hover tooltip text. Icon-only buttons fall back to their `aria-label`
-   * automatically, so every labelled icon button gets a tooltip for free. Pass
+   * automatically, so every labeled icon button gets a tooltip for free. Pass
    * an explicit string to override, or `""` to suppress.
    */
   tooltip?: string;
@@ -22,25 +22,25 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         className={cn(
           // Base
           "inline-flex items-center justify-center gap-1.5 rounded-md font-medium",
-          "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-8",
+          "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
           "disabled:pointer-events-none disabled:opacity-40 select-none",
           // Size
-          size === "small" && !iconOnly && "h-6 px-2 text-[12px]",
-          size === "small" && iconOnly && "h-6 w-6 p-0 text-[12px]",
-          size === "medium" && !iconOnly && "h-8 px-3 text-[13px]",
-          size === "medium" && iconOnly && "h-8 w-8 p-0 text-[13px]",
+          size === "small" && !iconOnly && "h-6 px-2 text-caption1",
+          size === "small" && iconOnly && "h-6 w-6 p-0 text-caption1",
+          size === "medium" && !iconOnly && "h-8 px-3 text-footnote",
+          size === "medium" && iconOnly && "h-8 w-8 p-0 text-footnote",
           // Variant
           variant === "accent" && [
-            "bg-blue-9 text-white",
-            "hover:bg-blue-10 active:bg-blue-11",
+            "bg-accent text-white",
+            "hover:bg-accent-hover active:bg-accent-active",
           ],
           variant === "filled" && [
-            "bg-gray-a3 text-gray-12",
-            "hover:bg-gray-a4 active:bg-gray-a5",
+            "bg-fill text-fg",
+            "hover:bg-fill-hover active:bg-fill-active",
           ],
           variant === "transparent" && [
-            "bg-transparent text-gray-11",
-            "hover:bg-gray-a3 active:bg-gray-a4",
+            "bg-transparent text-fg-muted",
+            "hover:bg-fill active:bg-fill-hover",
           ],
           className,
         )}
@@ -50,30 +50,23 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       </button>
     );
 
-    // Tooltip text: explicit `tooltip`, else the icon button's aria-label. A
-    // global Tooltip.Provider is mounted in both app entrypoints. No icon-only
-    // Button is used as another Radix trigger, so wrapping here is safe.
+    // Tooltip text: explicit `tooltip`, else the icon button's aria-label, so a
+    // labeled icon button is described without repeating itself at the call site.
     const tipText = tooltip !== undefined ? tooltip : iconOnly ? (props["aria-label"] as string | undefined) : undefined;
-    if (!tipText || props.disabled) return btn;
+    if (!tipText) return btn;
 
-    return (
-      <TooltipPrimitive.Root>
-        <TooltipPrimitive.Trigger asChild>{btn}</TooltipPrimitive.Trigger>
-        <TooltipPrimitive.Portal>
-          <TooltipPrimitive.Content
-            side="top"
-            sideOffset={6}
-            className={cn(
-              "z-50 rounded-md bg-gray-12 px-2 py-1 text-[11px] font-medium text-gray-1 shadow-md",
-              "select-none data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95",
-            )}
-          >
-            {tipText}
-            <TooltipPrimitive.Arrow className="fill-gray-12" />
-          </TooltipPrimitive.Content>
-        </TooltipPrimitive.Portal>
-      </TooltipPrimitive.Root>
-    );
+    // A disabled button takes `pointer-events: none`, so it never sees the hover
+    // that would open its own tooltip — and "why is this grayed out" is exactly
+    // when the label is wanted. Hang the trigger on a wrapper that still receives
+    // events. `inline-flex` so the wrapper measures the same as the button did.
+    if (props.disabled) {
+      return (
+        <Tooltip label={tipText}>
+          <span className="inline-flex">{btn}</span>
+        </Tooltip>
+      );
+    }
+    return <Tooltip label={tipText}>{btn}</Tooltip>;
   },
 );
 Button.displayName = "Button";

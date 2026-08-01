@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -24,7 +24,8 @@
   "include": [
     "renderer",
     "server.ts",
-    "vite.config.ts"
+    "vite.config.ts",
+    "main/**/*.test.ts"
   ],
   "exclude": [
     "node_modules"

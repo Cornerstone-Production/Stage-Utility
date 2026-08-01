@@ -19,6 +19,9 @@ export interface IntegrationDescriptor {
   id: string;
   kind: "lineup" | "wireless" | "control";
   label: string;
+  /** Short paragraph shown in the settings panel's per-integration info "i":
+   *  what it surfaces, how it connects, and where to set it up. */
+  description?: string;
   configSchema: ConfigField[];
 }
 

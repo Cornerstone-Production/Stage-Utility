@@ -5,14 +5,33 @@ on:
     branches: [main, beta]
   pull_request:
 
+# Least privilege, stated rather than inherited: the repository default is
+# read today, but a settings change should not silently widen every workflow.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Pinning is only worth anything if it holds. It already slipped once: the
+      # references pinned in one PR were complete, and a second PR merged
+      # afterwards carrying a new job with a fresh mutable tag. Nothing noticed.
+      - name: Every action is pinned to a commit SHA
+        run: |
+          set -euo pipefail
+          bad=$(grep -rnE "uses: [^ ]+@(v[0-9]+|main|master)([^0-9a-f]|$)" .github/workflows/ || true)
+          if [ -n "$bad" ]; then
+            echo "::error::a mutable action reference can be repointed at new code — pin it to a commit SHA"
+            echo "$bad"
+            exit 1
+          fi
+          echo "all actions pinned"
 
       - name: Set up Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
@@ -26,5 +45,15 @@ jobs:
       - name: Type-check
         run: npm run type-check
 
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
+
+      # Fails the PR that introduces a known-vulnerable dependency, rather than
+      # waiting for a dependabot alert once it has already merged. High and
+      # critical only: moderate findings in build tooling are noise that would
+      # train people to ignore this.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high

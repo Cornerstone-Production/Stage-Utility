@@ -26,7 +26,6 @@ export class SennheiserEwDx extends SennheiserSscBase {
       label: "Device IP / Hostname",
       type: "text",
       placeholder: "192.168.1.120",
-      help: "IP or hostname of the EW-DX receiver (EM2/EM4) or CHG 70N charger. Sennheiser SSC over UDP port 45 — give the device a static IP so it stays reachable.",
     },
     {
       key: "model",
@@ -37,7 +36,6 @@ export class SennheiserEwDx extends SennheiserSscBase {
         { value: "EM2", label: "EW-DX EM2 (2 channels)" },
         { value: "CHG70N", label: "CHG 70N charger (2 bays)" },
       ],
-      help: "Sets how many channels/bays appear and how telemetry is read. EM4 = 4 RX, EM2 = 2 RX, CHG 70N = 2 charging bays.",
     },
   ];
   protected readonly defaultChannels = 4;

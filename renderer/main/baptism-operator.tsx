@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, Trash2Icon, ChevronRightIcon } from "lucide-react";
+import { BaptismTriggersPanel } from "./baptism-triggers-panel";
+import { segmentElapsedMs } from "@main/services/baptism-elapsed";
+import { Tooltip } from "../components/ui/tooltip";
+import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, Trash2Icon, ChevronRightIcon, PauseIcon, PlayIcon } from "lucide-react";
 
 import { invoke } from "../lib/api";
 import { Button, confirm, toast } from "../components/ui";
@@ -37,6 +40,9 @@ export function BaptismOperator() {
 
   // Tick the live segment clock while a segment is running.
   const segStart = state?.segmentStartedAt ?? null;
+  // Paused = a phase is running but its clock is not. The readout keeps showing what
+  // was banked, so a paused timer looks stopped rather than looking broken.
+  const paused = !!state && state.phase !== "idle" && !state.segmentStartedAt;
   useEffect(() => {
     if (!segStart) return;
     const id = setInterval(() => setNow(Date.now()), 250);
@@ -60,13 +66,16 @@ export function BaptismOperator() {
   }
 
   const phase = state.phase;
-  const liveMs = segStart ? Math.max(0, now - Date.parse(segStart)) : 0;
+  // Includes what the segment banked before a pause, or a paused clock reads 0:00
+  // and looks broken. `now` is only ticking while it runs, which is why the paused
+  // value holds steady.
+  const liveMs = segmentElapsedMs(state, now);
   const sum = summarizeBaptism(state);
   const justFinished = phase === "idle" && state.finishedAt != null && state.people.length > 0;
 
   const grouped = state.mode === "grouped";
   const lastBaptism = grouped && phase === "baptism" && state.baptismIndex >= state.people.length - 1;
-  const phaseColor = phase === "testimony" ? "text-blue-11" : phase === "baptism" ? "text-green-11" : "text-gray-11";
+  const phaseColor = phase === "testimony" ? "text-accent" : phase === "baptism" ? "text-green-11" : "text-gray-11";
 
   // Phase-aware primary action (label + channel), per workflow.
   let primaryLabel: string;
@@ -124,7 +133,7 @@ export function BaptismOperator() {
               key={m}
               disabled={busy || phase !== "idle"}
               onClick={() => void act("baptism:setMode", undefined, { mode: m })}
-              className={cn("px-2.5 py-1 text-caption1 transition-colors", state.mode === m ? "bg-blue-9 text-white" : "text-gray-11 enabled:hover:bg-gray-3", "disabled:opacity-50")}
+              className={cn("px-2.5 py-1 text-caption1 transition-colors", state.mode === m ? "bg-accent text-white" : "text-gray-11 enabled:hover:bg-gray-3", "disabled:opacity-50")}
             >
               {label}
             </button>
@@ -135,6 +144,8 @@ export function BaptismOperator() {
           {phase !== "idle" && " · finish or reset to switch"}
         </span>
       </div>
+
+      <BaptismTriggersPanel />
 
       {/* Live readout */}
       <div className="flex flex-col items-center gap-1 rounded-xl border border-gray-5 bg-gray-2 py-6">
@@ -149,11 +160,32 @@ export function BaptismOperator() {
         </span>
       </div>
 
+      {state?.autoStartedFrom && phase !== "idle" && (
+        <span className="text-caption2 text-gray-9">
+          Started automatically from &ldquo;{state.autoStartedFrom}&rdquo; — reset if that was wrong.
+        </span>
+      )}
+
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="accent" disabled={busy} onClick={() => void act(primaryChannel, primaryChannel === "baptism:finish" ? reloadSessions : undefined)} className="px-6 py-2 text-body">
           {primaryLabel}
         </Button>
+        {phase !== "idle" && (
+          <Button
+            variant="filled"
+            disabled={busy}
+            onClick={() => void act(paused ? "baptism:resume" : "baptism:pause")}
+            tooltip={
+              paused
+                ? "Start the clock again from where it stopped"
+                : "Stop the clock — vows, prayer and talking between people should not land on someone's time"
+            }
+          >
+            {paused ? <PlayIcon className="size-4 text-gray-9" /> : <PauseIcon className="size-4 text-gray-9" />}
+            {paused ? "Resume" : "Pause"}
+          </Button>
+        )}
         {grouped && phase === "testimony" && (
           <Button variant="filled" disabled={busy} onClick={() => void act("baptism:startBaptisms")} tooltip="Done with testimonies — start timing baptisms">
             Start baptisms →
@@ -181,7 +213,7 @@ export function BaptismOperator() {
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat label="Baptized" value={String(sum.count)} />
           <Stat label="Total time" value={fmtClock(sum.totalMs)} />
-          <Stat label="Avg testimony" value={fmtClock(sum.avgTestimonyMs)} accent="text-blue-11" />
+          <Stat label="Avg testimony" value={fmtClock(sum.avgTestimonyMs)} accent="text-accent" />
           <Stat label="Avg baptism" value={fmtClock(sum.avgBaptizeMs)} accent="text-green-11" />
         </div>
       )}
@@ -196,7 +228,7 @@ export function BaptismOperator() {
             <div key={i} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"}`}>
               <span className="text-gray-9">{i + 1}</span>
               <span className="text-gray-12">Person {i + 1}</span>
-              <span className="text-right text-blue-11">{fmtClock(p.testimonyMs)}</span>
+              <span className="text-right text-accent">{fmtClock(p.testimonyMs)}</span>
               <span className="text-right text-green-11">{fmtClock(p.baptizeMs)}</span>
               <span className="text-right text-gray-12">{fmtClock(p.testimonyMs + p.baptizeMs)}</span>
             </div>
@@ -242,14 +274,16 @@ function PastSession({ s, open, onToggle, onDelete }: { s: BaptismSession; open:
           </span>
           <span className="shrink-0 tabular-nums text-caption1 text-gray-9">{n} baptized · {fmtClock(tot)}</span>
         </button>
-        <button className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors" onClick={onDelete} aria-label="Delete session" title="Delete session">
-          <Trash2Icon className="size-4" />
-        </button>
+        <Tooltip label="Delete session">
+          <button className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors" onClick={onDelete} aria-label="Delete session">
+            <Trash2Icon className="size-4" />
+          </button>
+        </Tooltip>
       </div>
       {open && (
         <div className="border-t border-gray-5">
           <div className="flex flex-wrap gap-x-4 gap-y-1 px-3 py-2 text-caption2 text-gray-9 tabular-nums">
-            <span>Avg testimony <span className="text-blue-11">{fmtClock(n ? totT / n : 0)}</span></span>
+            <span>Avg testimony <span className="text-accent">{fmtClock(n ? totT / n : 0)}</span></span>
             <span>Avg baptism <span className="text-green-11">{fmtClock(n ? totB / n : 0)}</span></span>
             <span>Avg / person <span className="text-gray-12">{fmtClock(n ? tot / n : 0)}</span></span>
           </div>
@@ -260,7 +294,7 @@ function PastSession({ s, open, onToggle, onDelete }: { s: BaptismSession; open:
             <div key={i} className={`grid grid-cols-[1.6rem_1fr_4rem_4rem_4rem] gap-2 px-3 py-1.5 text-caption1 tabular-nums ${i % 2 ? "bg-gray-2" : "bg-gray-1"}`}>
               <span className="text-gray-9">{i + 1}</span>
               <span className="text-gray-12">Person {i + 1}</span>
-              <span className="text-right text-blue-11">{fmtClock(p.testimonyMs)}</span>
+              <span className="text-right text-accent">{fmtClock(p.testimonyMs)}</span>
               <span className="text-right text-green-11">{fmtClock(p.baptizeMs)}</span>
               <span className="text-right text-gray-12">{fmtClock(p.testimonyMs + p.baptizeMs)}</span>
             </div>

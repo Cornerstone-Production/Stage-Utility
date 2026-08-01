@@ -1,7 +1,7 @@
 // Planning Center Online client (Basic Auth: App ID + Secret).
 // Flattens JSON:API responses to slim DTOs. ~30s in-memory cache.
 
-import type { PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
+import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
@@ -19,6 +19,9 @@ const TTL_MEDIUM_MS = 3 * 60_000;
 const ATTACH_OPEN_TTL_MS = 10 * 60_000;
 /** Retry budget for transient PCO failures (429 / 5xx / network). */
 const MAX_RETRIES = 3;
+/** Concurrent in-flight PCO requests. PCO allows roughly 100 per 20s per app, so
+ *  the ceiling is well under that even when every slot is retrying. */
+const MAX_CONCURRENT = 4;
 // Per-request PCO logging (~2 lines per uncached /live, ~1 Hz during a service) is
 // off unless STAGE_UTILITY_DEBUG=1 — keeps an unrotated stdout log from ballooning.
 const DEBUG_PCO = process.env.STAGE_UTILITY_DEBUG === "1";
@@ -42,6 +45,20 @@ function highResAvatar(url: string): string {
     return url.replace(/([?&]g=)\d+x\d+(%23|#)?/, `$1${AVATAR_PX}x${AVATAR_PX}%23`);
   }
   return url + (url.includes("?") ? "&" : "?") + `g=${AVATAR_PX}x${AVATAR_PX}%23`;
+}
+
+/** One PCO plan row → PlanDTO. Shared by the future and past listings. */
+function toPlanDTO(item: PcoNode): PlanDTO {
+  return {
+    id: item.id,
+    title: String(item.attributes.title ?? item.attributes.series_title ?? item.attributes.dates ?? "Untitled"),
+    seriesTitle:
+      item.attributes.series_title != null && String(item.attributes.series_title) !== ""
+        ? String(item.attributes.series_title)
+        : null,
+    sortDate: item.attributes.sort_date != null ? String(item.attributes.sort_date) : null,
+    dates: item.attributes.dates != null ? String(item.attributes.dates) : null,
+  };
 }
 
 interface CacheEntry<T> {
@@ -111,7 +128,24 @@ interface PcoResponse<T extends PcoNode = PcoNode> {
   included?: PcoNode[];
 }
 
+/** Normalise PCO's item-type arrays. Anything without a usable name + #rrggbb is
+ *  dropped rather than guessed at. */
+function toItemColors(raw: unknown, custom: boolean): PcoItemTypeColor[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PcoItemTypeColor[] = [];
+  for (const e of raw) {
+    const name = typeof e?.name === "string" ? e.name.trim() : "";
+    const color = typeof e?.color === "string" ? e.color.trim().toLowerCase() : "";
+    if (!name || !/^#[0-9a-f]{6}$/.test(color)) continue;
+    out.push({ name, color, custom });
+  }
+  return out;
+}
+
 class PcoService {
+  private inFlight = 0;
+  private pending: (() => void)[] = [];
+
   private cache = new Map<string, CacheEntry<unknown>>();
 
   private cacheGet<T>(key: string): T | null {
@@ -163,6 +197,41 @@ class PcoService {
   }
 
   private async request<T extends PcoNode = PcoNode>(
+    url: string,
+    appId: string,
+    secret: string,
+  ): Promise<PcoResponse<T>> {
+    // Every PCO call queues here. Retrying a 429 does not help if the burst that
+    // caused it is still in flight, so the cap is what actually prevents one —
+    // any fan-out over plans or service types is throttled rather than trusted to
+    // be small.
+    const release = await this.acquireSlot();
+    try {
+      return await this.requestInner<T>(url, appId, secret);
+    } finally {
+      release();
+    }
+  }
+
+  /** Wait for a free request slot; resolves with the function that frees it. */
+  private acquireSlot(): Promise<() => void> {
+    return new Promise((resolve) => {
+      const grant = () => {
+        this.inFlight++;
+        let released = false;
+        resolve(() => {
+          if (released) return; // a double release would over-grant the pool
+          released = true;
+          this.inFlight--;
+          this.pending.shift()?.();
+        });
+      };
+      if (this.inFlight < MAX_CONCURRENT) grant();
+      else this.pending.push(grant);
+    });
+  }
+
+  private async requestInner<T extends PcoNode = PcoNode>(
     url: string,
     appId: string,
     secret: string,
@@ -404,6 +473,12 @@ class PcoService {
     const result: ServiceTypeDTO[] = items.map((item) => ({
       id: item.id,
       name: String(item.attributes.name ?? "Unknown"),
+      // Free: this resource already carries the colors, we just stopped throwing
+      // them away. `index` is PCO's palette slot and is not useful to us.
+      itemTypeColors: [
+        ...toItemColors(item.attributes.standard_item_types, false),
+        ...toItemColors(item.attributes.custom_item_types, true),
+      ],
     }));
 
     this.cacheSet(cacheKey, result, TTL_LONG_MS);
@@ -423,15 +498,42 @@ class PcoService {
     const json = await this.request(url, appId, secret);
     const items = Array.isArray(json.data) ? json.data : [json.data];
 
-    const result: PlanDTO[] = items.map((item) => ({
-      id: item.id,
-      title: String(item.attributes.title ?? item.attributes.series_title ?? item.attributes.dates ?? "Untitled"),
-      seriesTitle: item.attributes.series_title != null && String(item.attributes.series_title) !== ""
-        ? String(item.attributes.series_title)
-        : null,
-      sortDate: item.attributes.sort_date != null ? String(item.attributes.sort_date) : null,
-      dates: item.attributes.dates != null ? String(item.attributes.dates) : null,
-    }));
+    const result: PlanDTO[] = items.map(toPlanDTO);
+
+    this.cacheSet(cacheKey, result, TTL_MEDIUM_MS);
+    return result;
+  }
+
+  /**
+   * Recently-past plans, newest first — for the manual picker only.
+   *
+   * Auto plan selection and the reconnect windows deliberately keep using
+   * `listUpcomingPlans`: a past plan must never be auto-selected, and a window
+   * derived from one would already have closed.
+   */
+  async listRecentPlans(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    days = 30,
+  ): Promise<PlanDTO[]> {
+    const cacheKey = `plans:past:${appId}:${serviceTypeId}:${days}`;
+    const cached = this.cacheGet<PlanDTO[]>(cacheKey);
+    if (cached) return cached;
+
+    // PCO orders `past` oldest-first, so ask in reverse to get the most recent
+    // page rather than the oldest plans this service type ever had.
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans?filter=past&order=-sort_date&per_page=25`;
+    const json = await this.request(url, appId, secret);
+    const items = Array.isArray(json.data) ? json.data : [json.data];
+
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const result = items
+      .map(toPlanDTO)
+      .filter((p) => {
+        const t = p.sortDate ? Date.parse(p.sortDate) : NaN;
+        return Number.isFinite(t) && t >= cutoff;
+      });
 
     this.cacheSet(cacheKey, result, TTL_MEDIUM_MS);
     return result;
@@ -837,6 +939,7 @@ class PcoService {
         serverNow,
         currentItemTitle,
         nextItemTitle,
+        itemType: curIdx >= 0 ? (planItems[curIdx]?.itemType ?? null) : null,
         serviceTimeId,
         serviceTimeStartsAt,
         serviceEnded,

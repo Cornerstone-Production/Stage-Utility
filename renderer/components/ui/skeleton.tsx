@@ -7,7 +7,7 @@ import { cn } from "../../lib/cn";
  * prefers-reduced-motion (Tailwind's animate-pulse is disabled there).
  */
 export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("animate-pulse rounded-md bg-gray-a3 motion-reduce:animate-none", className)} {...props} />;
+  return <div className={cn("animate-pulse rounded-md bg-fill motion-reduce:animate-none", className)} {...props} />;
 }
 
 /** A few stacked skeleton lines — a common "list/section is loading" placeholder. */

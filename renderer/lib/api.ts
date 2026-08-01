@@ -24,7 +24,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === "TimeoutError") {
-      throw new Error(`Request to ${path} timed out`);
+      throw new Error(`Request to ${path} timed out`, { cause: err });
     }
     throw err;
   }
@@ -94,10 +94,31 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "scriptview:setConfig":
       return post<T>("/api/scriptview/config", { serviceTypeIds: p.serviceTypeIds });
 
+    case "scriptview:listRoles":
+      return apiFetch<T>("/api/scriptview/roles");
+
+    case "scriptview:saveRoles":
+      return post<T>("/api/scriptview/roles", { roles: p.roles });
+
+    // Adds a role for any category this service type defines that no role covers.
+    // Only ever adds — never merges, never removes.
+    case "scriptview:seedRoles":
+      return post<T>("/api/scriptview/roles/seed", { serviceTypeId: p.serviceTypeId });
+
     case "scriptview:noteCategories": {
       const id = p.serviceTypeId as string;
       return apiFetch<T>(`/api/scriptview/note-categories?serviceTypeId=${encodeURIComponent(id)}`);
     }
+
+    // ── Stage patch sheet ───────────────────────────────────────────────
+    case "patch:get":
+      return apiFetch<T>("/api/patch");
+
+    case "patch:save":
+      return post<T>("/api/patch", { file: p.file });
+
+    case "patch:parseXlsx":
+      return post<T>("/api/patch/parse-xlsx", { xlsx: p.xlsx });
 
     case "scriptview:rundown": {
       const id = p.serviceTypeId as string;
@@ -145,6 +166,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "obs:getStatus":
       return apiFetch<T>("/api/obs/status");
+    case "reaper:getStatus":
+      return apiFetch<T>("/api/reaper/status");
 
     case "spl:getHistoryCurrent":
       return apiFetch<T>("/api/spl/history/current");
@@ -271,6 +294,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "settings:setReconnectSchedule":
       return post<T>("/api/reconnect-schedule", p);
 
+    case "settings:setBaptismAutoStart":
+      return post<T>("/api/settings/baptism-auto-start", {
+        enabled: p.enabled,
+        testimonyKeyword: p.testimonyKeyword,
+      });
+    case "settings:setTaperWindow":
+      return post<T>("/api/taper-window", p);
+
     case "update:setTrack":
       return post<T>("/api/update/track", p);
 
@@ -278,6 +309,15 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/update/restart");
 
     // ── Config snapshot (backup / restore) ───────────────────────────────
+    case "backup:getSchedule":
+      return apiFetch<T>("/api/backup/schedule");
+
+    case "backup:setSchedule":
+      return post<T>("/api/backup/schedule", p);
+
+    case "backup:runNow":
+      return post<T>("/api/backup/run", {});
+
     case "config:listSnapshots":
       return apiFetch<T>("/api/config/snapshots");
 
@@ -455,6 +495,17 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { name: p.name });
     }
 
+    // "" clears the friendly URL. Rejections come back as a 400 with the reason
+    // (reserved page, already taken, bad characters) — the caller surfaces it.
+    // Icon tint for a display id or tool path; "" clears it.
+    case "icons:setColor":
+      return post<T>("/api/icon-color", { key: p.key, color: p.color });
+
+    case "outputs:setSlug": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { slug: p.slug });
+    }
+
     case "outputs:setView": {
       const id = p.id as string;
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { viewId: p.viewId });
@@ -474,6 +525,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "history:setItemCounted":
       return post<T>("/api/history/item-counted", p);
 
+    case "history:merge":
+      return post<T>("/api/history/merge", p);
+
     case "layout:uploadImage":
       return post<T>("/api/layout-images", { dataUrl: p.dataUrl });
 
@@ -486,34 +540,6 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/outputs/reorder", { ids: p.ids });
 
     case "outputs:openWindow":
-      // No native windows in standalone mode — no-op.
-      return { ok: true } as unknown as T;
-
-    // ── Displays (legacy aliases — retained during transition) ────────────
-    case "displays:add":
-      return post<T>("/api/displays", p);
-
-    case "displays:rename": {
-      const id = p.id as string;
-      return patch<T>(`/api/displays/${encodeURIComponent(id)}`, { name: p.name });
-    }
-
-    case "displays:setKind": {
-      const id = p.id as string;
-      return patch<T>(`/api/displays/${encodeURIComponent(id)}`, { kind: p.kind });
-    }
-
-    case "displays:setNdiSource": {
-      const id = p.id as string;
-      return patch<T>(`/api/displays/${encodeURIComponent(id)}`, { ndiSource: p.ndiSource });
-    }
-
-    case "displays:remove": {
-      const id = p.id as string;
-      return del<T>(`/api/displays/${encodeURIComponent(id)}`);
-    }
-
-    case "displays:openWindow":
       // No native windows in standalone mode — no-op.
       return { ok: true } as unknown as T;
 
@@ -592,6 +618,25 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>(`/api/osc/targets/${encodeURIComponent(id)}/test`);
     }
 
+    case "automation:registry": return apiFetch("/api/automation/registry");
+    case "automation:rules": return apiFetch("/api/automation/rules");
+    case "automation:addRule": return post("/api/automation/rules", params);
+    case "automation:updateRule": return patch(`/api/automation/rules/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);
+    case "automation:removeRule": return del(`/api/automation/rules/${(params as { id: string }).id}`);
+    case "automation:testRule": return post(`/api/automation/rules/${(params as { id: string }).id}/test`);
+    case "automation:settings": return apiFetch("/api/automation/settings");
+    case "automation:setSettings": return post("/api/automation/settings", params);
+    case "automation:log": return apiFetch("/api/automation/log");
+    case "automation:clearLog": return del("/api/automation/log");
+    case "rosstalk:targets": return apiFetch("/api/rosstalk/targets");
+    case "rosstalk:addTarget": return post("/api/rosstalk/targets", params);
+    case "rosstalk:updateTarget": return patch(`/api/rosstalk/targets/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);
+    case "rosstalk:removeTarget": return del(`/api/rosstalk/targets/${(params as { id: string }).id}`);
+    case "rosstalk:test": return post(`/api/rosstalk/targets/${(params as { id: string }).id}/test`);
+    case "rosstalk:commands": return apiFetch("/api/rosstalk/commands");
+    case "rosstalk:send": return post("/api/rosstalk/send", params);
+    case "rosstalk:simulate": return apiFetch("/api/rosstalk/simulate");
+    case "rosstalk:setSimulate": return post("/api/rosstalk/simulate", params);
     case "osc:send":
       return post<T>("/api/osc/send", p);
 
@@ -626,6 +671,45 @@ interface SseListener {
 
 let eventSource: EventSource | null = null;
 const sseListeners: SseListener[] = [];
+
+/**
+ * Channels the server pushes a snapshot of the moment a stream connects.
+ *
+ * That hydrate fires once, at connect — so a component that mounts later (any
+ * settings tab, for instance) misses it and then only hears about *changes*. In a
+ * steady state there are none, which is how the Displays tab could sit on
+ * "Offline" while the server knew the screen was connected.
+ *
+ * The last payload for each of these is kept and replayed to a late subscriber.
+ * Every one is a state snapshot, so replaying it is what the subscriber would have
+ * received had it been listening. Command channels (display:refresh) are
+ * deliberately absent — replaying one of those would re-fire the command.
+ *
+ * `hydrated-channels.test.ts` reads remote-server.ts and fails if the two lists
+ * drift, so a new hydrated channel cannot silently reintroduce the bug.
+ */
+export const HYDRATED_CHANNELS = [
+  "server:hello",
+  "stage:state-changed",
+  "pco:live",
+  "propresenter:status",
+  "propresenter:instances",
+  "spl:metrics",
+  "spl:history",
+  "attendance:history",
+  "service-timeline:history",
+  "baptism:state",
+  "obs:status",
+  "reaper:status",
+  "update:status",
+  "osc:feedback",
+  "people:count",
+  "displays:presence",
+] as const;
+
+const hydratedSet = new Set<string>(HYDRATED_CHANNELS);
+/** Last payload seen per hydrated channel, for replay to late subscribers. */
+const lastPayload = new Map<string, unknown>();
 
 // Stable per-context client id, sent on the SSE URL so the server can scope this
 // stream's channel filter to us. crypto.randomUUID is unavailable in an insecure
@@ -705,6 +789,21 @@ function ensureEventSource(): EventSource {
   console.log("[api] (re)connecting SSE at /api/events");
   eventSource = new EventSource(`/api/events?cid=${encodeURIComponent(CLIENT_ID)}`);
 
+  // Capture every hydrated channel's snapshot whether or not anything is listening
+  // yet — that is the whole point, since the hydrate lands before the tab that
+  // wants it has mounted. These are attached directly to the EventSource and are
+  // deliberately NOT in `sseListeners`, so they do not widen the channel filter
+  // reported to the server.
+  for (const channel of HYDRATED_CHANNELS) {
+    eventSource.addEventListener(channel, (e: MessageEvent) => {
+      try {
+        lastPayload.set(channel, JSON.parse(e.data));
+      } catch {
+        /* a malformed frame is the dispatcher's problem, not the cache's */
+      }
+    });
+  }
+
   // Re-attach all registered listeners on reconnect.
   for (const entry of sseListeners) {
     eventSource.addEventListener(entry.channel, entry.handler);
@@ -748,7 +847,9 @@ export function onNotification(
 
   const handler = (e: MessageEvent) => {
     try {
-      cb(JSON.parse(e.data));
+      const payload = JSON.parse(e.data);
+      if (hydratedSet.has(channel)) lastPayload.set(channel, payload);
+      cb(payload);
     } catch (err) {
       console.error(`[api] SSE parse error for "${channel}":`, err);
     }
@@ -756,6 +857,13 @@ export function onNotification(
 
   const entry: SseListener = { channel, handler };
   sseListeners.push(entry);
+
+  // Replay the connect-time snapshot this subscriber was too late for. Deferred
+  // so a caller cannot receive it synchronously during its own render.
+  if (hydratedSet.has(channel) && lastPayload.has(channel)) {
+    const cached = lastPayload.get(channel);
+    queueMicrotask(() => cb(cached));
+  }
 
   const es = ensureEventSource();
   es.addEventListener(channel, handler);

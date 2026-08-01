@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon } from "lucide-react";
 import { invoke, onNotification } from "../../lib/api";
-import { CompanionInfoPanel } from "../../components/companion-info-panel";
 import {
   FieldSet,
   FieldGroup,
@@ -10,8 +9,11 @@ import {
   FieldContent,
   FieldLabel,
   FieldDescription,
+  InfoHint,
+  Collapsible,
   Switch,
   Input,
+  NumberInput,
   Button,
   Select,
   SelectTrigger,
@@ -22,6 +24,8 @@ import {
   confirm,
 } from "../../components/ui";
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
+import { DataArchivePanel } from "./data-archive-panel";
+import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -31,7 +35,7 @@ const ANY_DAY = "any";
 // — e.g. a server that hasn't been restarted after a frontend deploy, or the brief
 // window during an in-app self-update. Mirrors the backend default so a newer bundle
 // never crashes against an older API. Keep in sync with settings-store DEFAULT_SETTINGS.
-const DEFAULT_AUTO_UPDATE: StageState["autoUpdate"] = { enabled: false, dayOfWeek: null, hour: 3 };
+const DEFAULT_AUTO_UPDATE: StageState["autoUpdate"] = { mode: "manual", dayOfWeek: null, hour: 3 };
 
 function formatHour(h: number): string {
   const am = h < 12;
@@ -56,14 +60,14 @@ function UpdateProgress({ step }: { step: UpdateStatus["step"] }) {
     <div className="mt-2 flex flex-col gap-1.5">
       <div className="flex items-center justify-between text-caption2 text-gray-11">
         <span className="flex items-center gap-1.5">
-          <Loader2Icon className="size-3.5 animate-spin text-blue-9" />
+          <Loader2Icon className="size-3.5 animate-spin text-accent" />
           {meta.label}
         </span>
         <span className="tabular-nums text-gray-10">{meta.pct}%</span>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-a4">
         <div
-          className="h-full rounded-full bg-blue-9 transition-[width] duration-700 ease-out"
+          className="h-full rounded-full bg-accent transition-[width] duration-700 ease-out"
           style={{ width: `${meta.pct}%` }}
         />
       </div>
@@ -90,6 +94,18 @@ function UpdatesPanel({
   const s = updateStatus;
   const updating = s?.phase === "updating";
   const behind = s?.behind ?? 0;
+  // What the banner counts. `behind` includes the release workflow's own version
+  // bump, which trails every merge — announcing that as an update trains people to
+  // ignore the banner. Falls back to `behind` for a server too old to send the
+  // narrower count.
+  const behindNews = s?.behindUserFacing ?? behind;
+  // Releases, not commits, once the server follows tags. A release is the unit an
+  // operator acts on; the commit count behind it is detail.
+  const releasesBehind = s?.tagBased ? (s.releasesBehind ?? 0) : 0;
+  const available = s?.tagBased ? releasesBehind : behindNews;
+  // Merged but not yet released — CI still running, or red. Only worth saying when
+  // there is nothing to install, otherwise it competes with the update itself.
+  const unreleased = s?.tagBased ? (s.unreleasedCommits ?? 0) : 0;
   const [trackSel, setTrackSel] = useState<string | null>(null);
   // Update lock — a live service / active recording blocks self-updates (which
   // restart the process) unless overridden. Re-checked whenever a service goes
@@ -131,10 +147,27 @@ function UpdatesPanel({
   }
 
   async function onRestart() {
-    if (await confirm({ title: "Restart the server?", message: "The displays will go blank and reload for a few seconds while the server restarts. No update is installed.", confirmLabel: "Restart" })) {
+    const doRestart = () =>
       void invoke("update:restart").catch((e) =>
         window.alert(`Restart failed: ${e instanceof Error ? e.message : String(e)}`),
       );
+    // Locked during a live service / recording, same as self-update — a manual
+    // restart interrupts displays too. Overridable for a genuine emergency.
+    if (lock?.active) {
+      if (
+        await confirm({
+          title: "Service in progress",
+          message: `Restarting the server would interrupt: ${lock.reasons.join(", ")}. It's safest to wait until the service is over.`,
+          confirmLabel: "Override & restart anyway",
+          destructive: true,
+        })
+      ) {
+        doRestart();
+      }
+      return;
+    }
+    if (await confirm({ title: "Restart the server?", message: "The displays will go blank and reload for a few seconds while the server restarts. No update is installed.", confirmLabel: "Restart" })) {
+      doRestart();
     }
   }
 
@@ -169,7 +202,7 @@ function UpdatesPanel({
   // before the first check runs.
   if (s && !s.isGitRepo && s.lastCheckedAt) {
     return (
-      <FieldSet title="Updates">
+      <FieldSet>
         <FieldGroup>
           <Field orientation="vertical">
             <FieldContent>
@@ -186,21 +219,34 @@ function UpdatesPanel({
   }
 
   return (
-    <FieldSet title="Updates">
+    <FieldSet>
       <FieldGroup>
         <Field orientation="vertical">
           <FieldContent>
             <FieldLabel>
-              {!s ? "Checking for updates…" : behind > 0 ? `${behind} update${behind === 1 ? "" : "s"} available` : "Up to date"}
+              {!s
+                ? "Checking for updates…"
+                : available > 0
+                  ? s.tagBased && s.targetTag
+                    ? `${s.targetTag} available`
+                    : `${available} update${available === 1 ? "" : "s"} available`
+                  : "Up to date"}
             </FieldLabel>
             <FieldDescription>
               {s ? (
                 <>
-                  Running v{s.version}
+                  Running {s.currentTag ?? `v${s.version}`}
                   {s.currentSha ? ` · ${s.currentSha}` : ""}
                   {s.currentDate ? ` · ${new Date(s.currentDate).toLocaleDateString()}` : ""}
                   {s.branch ? ` (${s.branch})` : ""}.
+                  {available > 1 ? ` ${available} releases behind.` : ""}
                   {s.lastCheckedAt ? ` Last checked ${new Date(s.lastCheckedAt).toLocaleString()}.` : ""}
+                  {/* Said plainly rather than hidden. The banner stays quiet because
+                      nothing pending changes what the app does, but Update still
+                      works if you want the version number to line up. */}
+                  {!s.tagBased && behindNews === 0 && behind > 0
+                    ? ` A version bump is pending (${behind} commit${behind === 1 ? "" : "s"}) — nothing user-facing.`
+                    : ""}
                 </>
               ) : (
                 "Comparing this install against the latest release…"
@@ -213,7 +259,13 @@ function UpdatesPanel({
                 <CheckCircle2Icon className="size-4 shrink-0 mt-0.5 text-green-10" />
                 <div className="flex-1">
                   <p className="font-medium">Update installed successfully.</p>
-                  <p className="text-caption2 text-green-11/80">Now running {justUpdated.version}.</p>
+                  {/* The handshake value is a git SHA — it has to change on every
+                      update, not just released ones, or kiosks would not reload.
+                      Right for that job, meaningless to read, so the banner names
+                      the release from live status and keeps the SHA as a fallback. */}
+                  <p className="text-caption2 text-green-11/80">
+                    Now running {s?.currentTag ?? (s ? `v${s.version}` : justUpdated.version)}.
+                  </p>
                 </div>
                 {onDismissJustUpdated ? (
                   <button
@@ -232,7 +284,7 @@ function UpdatesPanel({
             {updating ? <UpdateProgress step={s?.step ?? null} /> : null}
 
             {/* Changelog of pending commits */}
-            {!updating && behind > 0 && s?.changelog?.length ? (
+            {!updating && available > 0 && s?.changelog?.length ? (
               <div className="mt-2 rounded-md border border-gray-a4 bg-gray-a2">
                 <p className="border-b border-gray-a4 px-2.5 py-1.5 text-caption2 font-medium text-gray-11">
                   What's new
@@ -256,14 +308,23 @@ function UpdatesPanel({
                 {s.lastResult.log ? ` ${s.lastResult.log.split("\n").filter(Boolean).slice(-1)[0]}` : ""}
               </p>
             ) : null}
-            {!justUpdated && s && behind === 0 && !updating && (!s.lastResult || s.lastResult.ok) ? (
+            {!justUpdated && s && available === 0 && !updating && (!s.lastResult || s.lastResult.ok) ? (
               <p className="mt-1 flex items-center gap-1.5 text-caption2 text-green-10">
-                <CheckCircle2Icon className="size-3.5" /> You're on the latest version.
+                <CheckCircle2Icon className="size-3.5" /> You're on the latest release.
+              </p>
+            ) : null}
+            {/* Work is merged but not released. Normal for a few minutes while the
+                release build runs; if it persists, that build failed and the track
+                is stalled — which should read as "waiting", not "up to date". */}
+            {!updating && available === 0 && unreleased > 0 ? (
+              <p className="mt-1 text-caption2 text-gray-9">
+                {unreleased} commit{unreleased === 1 ? "" : "s"} merged since {s?.targetTag} and not yet
+                released. Updates arrive once the release build passes.
               </p>
             ) : null}
             {lock?.active && !updating ? (
               <p className="mt-1 flex items-center gap-1.5 text-caption2 text-amber-11">
-                <LockIcon className="size-3.5" /> Update locked — {lock.reasons.join(" · ")}. Finish the service, or override in the dialog.
+                <LockIcon className="size-3.5" /> Update &amp; restart locked — {lock.reasons.join(" · ")}. Finish the service, or override in the dialog.
               </p>
             ) : null}
           </FieldContent>
@@ -273,7 +334,12 @@ function UpdatesPanel({
               <RefreshCwIcon className="size-3.5 text-gray-9" />
               Check now
             </Button>
-            <Button variant="accent" size="small" onClick={onUpdateNow} disabled={updating || behind === 0}>
+            <Button
+              variant="accent"
+              size="small"
+              onClick={onUpdateNow}
+              disabled={updating || (s?.tagBased ? available === 0 : behind === 0)}
+            >
               {updating ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
               {updating ? "Updating…" : "Update now"}
             </Button>
@@ -313,22 +379,58 @@ function UpdatesPanel({
           </Field>
         ) : null}
 
-        {/* Automatic updates */}
+        {/* A build is installed but not running yet — auto-install deferred the
+            restart, so the operator decides when the displays blink. */}
+        {updateStatus?.restartPending ? (
+          <div className="flex items-start gap-3 rounded-lg border border-line-strong bg-popover p-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-footnote font-medium text-fg">Update installed — restart to use it</div>
+              <p className="mt-0.5 text-caption1 text-fg-muted">
+                The new build is ready. Displays are still running the previous one and will reload
+                when you restart.
+              </p>
+            </div>
+            {/* Reuses onRestart, which already refuses (with an override) during a
+                live service or an active recording — a deferred update must not be
+                the thing that finally interrupts one. */}
+            <Button variant="accent" size="small" onClick={() => void onRestart()}>
+              Restart now
+            </Button>
+          </div>
+        ) : null}
+
+        {/* Update mode */}
         <Field orientation="horizontal">
           <FieldContent>
-            <FieldLabel>Automatic updates</FieldLabel>
+            <FieldLabel>Updates</FieldLabel>
             <FieldDescription>
-              Install available updates automatically during the chosen weekly window. Updates are
-              skipped while a Planning Center service is live, so a display never restarts mid-service.
+              How updates are applied. Nothing is applied or restarted while a Planning Center
+              service is live, whichever mode you pick.
             </FieldDescription>
           </FieldContent>
-          <Switch
-            checked={autoUpdate.enabled}
-            onCheckedChange={(v: boolean) => handlers.handleSetAutoUpdate({ enabled: v })}
-          />
+          <Select
+            value={autoUpdate.mode}
+            onValueChange={(v: string) =>
+              handlers.handleSetAutoUpdate({ mode: v as StageState["autoUpdate"]["mode"] })
+            }
+          >
+            <SelectTrigger className="w-56" aria-label="Update mode"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="manual">Manual — I check and apply</SelectItem>
+              <SelectItem value="auto-install">Install automatically, restart when I say</SelectItem>
+              <SelectItem value="auto-full">Install and restart automatically</SelectItem>
+            </SelectContent>
+          </Select>
         </Field>
 
-        {autoUpdate.enabled ? (
+        {autoUpdate.mode === "auto-install" ? (
+          <p className="text-caption1 text-fg-muted">
+            The new build is applied in the window and then waits. Displays keep running the old one
+            until you press Restart, so an update can land on Saturday and be taken on Monday.
+          </p>
+        ) : null}
+
+        {autoUpdate.mode !== "manual" ? (
           <Field orientation="horizontal">
             <FieldContent>
               <FieldLabel>Update window</FieldLabel>
@@ -368,35 +470,6 @@ function UpdatesPanel({
   );
 }
 
-// Bitfocus Companion lives here (not on Integrations) — there's nothing to dial;
-// Companion connects TO this app, so this just shows the URL + live client count.
-function CompanionPanel() {
-  const queryClient = useQueryClient();
-  const { data } = useQuery({
-    queryKey: ["integrations:list"],
-    queryFn: () =>
-      invoke<{ descriptors: IntegrationDescriptor[]; states: IntegrationState[] }>("integrations:list"),
-  });
-  useEffect(() => {
-    return onNotification("integrations:state-changed", (payload: unknown) => {
-      const states = payload as IntegrationState[];
-      queryClient.setQueryData(
-        ["integrations:list"],
-        (prev: { descriptors: IntegrationDescriptor[]; states: IntegrationState[] } | undefined) =>
-          prev ? { ...prev, states } : prev,
-      );
-    });
-  }, [queryClient]);
-
-  const state = data?.states.find((s) => s.id === "companion");
-  if (!state) return null;
-  return (
-    <FieldSet>
-      <CompanionInfoPanel state={state} />
-    </FieldSet>
-  );
-}
-
 interface SnapshotMeta {
   id: string;
   name: string;
@@ -407,6 +480,144 @@ interface SnapshotMeta {
 
 // Backup / restore the whole config (secrets excluded). Download/upload a file,
 // or save/recall named snapshots. Restoring overwrites config + restarts.
+
+// Unattended backups. One control covers both the config snapshot and the data
+// archive, since "did my backups run" should have one answer, not two.
+function AutoBackupPanel() {
+  const queryClient = useQueryClient();
+  const { data: sched } = useQuery({
+    queryKey: ["backup:schedule"],
+    queryFn: () => invoke<BackupSchedule>("backup:getSchedule"),
+    staleTime: 10_000,
+  });
+  const [busy, setBusy] = useState(false);
+  const [dest, setDest] = useState("");
+  const stored = sched?.destination ?? "";
+  const [lastDest, setLastDest] = useState(stored);
+  if (stored !== lastDest) {
+    setLastDest(stored);
+    setDest(stored);
+  }
+
+  async function patch(partial: Partial<BackupSchedule>) {
+    try {
+      const next = await invoke<BackupSchedule>("backup:setSchedule", partial);
+      queryClient.setQueryData(["backup:schedule"], next);
+    } catch (e) {
+      toast.error(`Couldn't save: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function runNow() {
+    setBusy(true);
+    try {
+      const next = await invoke<BackupSchedule>("backup:runNow");
+      queryClient.setQueryData(["backup:schedule"], next);
+      if (next.lastError) toast.error(`Backup failed: ${next.lastError}`);
+      else toast.success("Backup written.");
+    } catch (e) {
+      toast.error(`Backup failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!sched) return null;
+
+  return (
+    <FieldSet flat>
+      <FieldGroup>
+        <Field orientation="horizontal">
+          <FieldContent>
+            <FieldLabel>
+              Automatic backups
+              <InfoHint className="ml-1.5 align-middle">
+                Writes a config snapshot, and optionally the data archive, on the interval
+                below — keeping the most recent few and deleting the rest. A run that fails
+                leaves the existing backups alone and is retried, rather than being skipped
+                until the next interval. A machine that was switched off runs one backup when
+                it comes back, not one per interval it missed.
+              </InfoHint>
+            </FieldLabel>
+            <FieldDescription>
+              Save a copy on a schedule, so a backup exists without anyone remembering to make one.
+            </FieldDescription>
+          </FieldContent>
+          <Switch checked={sched.enabled} onCheckedChange={(v: boolean) => void patch({ enabled: v })} />
+        </Field>
+
+        {sched.enabled && (
+          <>
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel>Every (days)</FieldLabel>
+                <FieldDescription>1 = daily, 7 = weekly, 30 = monthly.</FieldDescription>
+              </FieldContent>
+              <NumberInput value={sched.intervalDays} min={1} max={365} className="w-28"
+                onChange={(v) => { if (v !== sched.intervalDays) void patch({ intervalDays: Math.round(v) }); }}
+                aria-label="Backup interval (days)" />
+            </Field>
+
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel>Keep</FieldLabel>
+                <FieldDescription>How many of each to keep. Older ones are deleted.</FieldDescription>
+              </FieldContent>
+              <NumberInput value={sched.keep} min={1} max={100} className="w-28"
+                onChange={(v) => { if (v !== sched.keep) void patch({ keep: Math.round(v) }); }}
+                aria-label="How many backups to keep" />
+            </Field>
+
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel>Include recorded services</FieldLabel>
+                <FieldDescription>
+                  Adds the data archive — every recorded service and its raw samples. Much
+                  larger than the config alone.
+                </FieldDescription>
+              </FieldContent>
+              <Switch checked={sched.includeArchive}
+                onCheckedChange={(v: boolean) => void patch({ includeArchive: v })} />
+            </Field>
+
+            <Field orientation="vertical">
+              <FieldContent>
+                <FieldLabel>Where to write</FieldLabel>
+                <FieldDescription>
+                  Blank keeps them in the data directory. Point this at a mounted network
+                  share to keep the copies off this machine — a disk failure takes the data
+                  directory with it.
+                </FieldDescription>
+              </FieldContent>
+              <Input
+                value={dest}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setDest(e.target.value)}
+                onBlur={() => { if (dest !== stored) void patch({ destination: dest }); }}
+                placeholder="/mnt/nas/stage-backups"
+                className="w-full font-mono text-gray-12"
+                aria-label="Backup destination directory"
+              />
+            </Field>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="filled" size="small" onClick={runNow} disabled={busy}>
+                <SaveIcon className="size-3.5 text-gray-9" /> Back up now
+              </Button>
+              <span className="text-caption2 text-gray-9">
+                {sched.lastError
+                  ? `Last run failed: ${sched.lastError}`
+                  : sched.lastRunAt
+                    ? `Last backup ${new Date(sched.lastRunAt).toLocaleString()}`
+                    : "No backup yet."}
+              </span>
+            </div>
+          </>
+        )}
+      </FieldGroup>
+    </FieldSet>
+  );
+}
+
 function ConfigSnapshotPanel() {
   const queryClient = useQueryClient();
   const { data: snapshots } = useQuery({
@@ -477,7 +688,7 @@ function ConfigSnapshotPanel() {
   }
 
   return (
-    <FieldSet title="Backup & restore">
+    <FieldSet flat>
       <FieldGroup>
         <Field orientation="vertical">
           <FieldContent>
@@ -565,14 +776,10 @@ export function AdvancedSection({
     handlers.handleSetPublicUrl(trimmed || null);
   }
 
+  // NumberInput persists on change (server round-trips back into stageState) — no
+  // local mirror needed; it selects-all on focus and clamps to min/max itself.
   const rc = stageState.reconnectSchedule ?? { enabled: true, leadMin: 120, tailMin: 60, dormantMin: 30 };
-  const [lead, setLead] = useState(String(rc.leadMin));
-  const [tail, setTail] = useState(String(rc.tailMin));
-  const [dormant, setDormant] = useState(String(rc.dormantMin));
-  const commitNum = (key: "leadMin" | "tailMin" | "dormantMin", valStr: string, cur: number) => {
-    const n = Math.round(Number(valStr));
-    if (Number.isFinite(n) && n >= 0 && n !== cur) handlers.handleSetReconnectSchedule({ [key]: n });
-  };
+  const tw = stageState.taperWindow ?? { preMin: 60, postMin: 60 };
 
   return (
     <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
@@ -584,7 +791,9 @@ export function AdvancedSection({
         onDismissJustUpdated={onDismissJustUpdated}
       />
 
-      <FieldSet title="Advanced">
+      <FieldSet>
+        <Collapsible label="Network & behavior" summary="Public address, reconnects, attendance" headerClassName="px-4 py-2.5">
+          <FieldSet flat>
         <FieldGroup>
           <Field orientation="vertical">
             <FieldContent>
@@ -610,14 +819,25 @@ export function AdvancedSection({
         </FieldGroup>
       </FieldSet>
 
-      <FieldSet title="Integration reconnects">
+          <FieldSet flat>
         <FieldGroup>
           <Field orientation="horizontal">
             <FieldContent>
-              <FieldLabel>Wake around service times</FieldLabel>
+              <FieldLabel>
+                Wake around service times
+                <InfoHint className="ml-1.5 align-middle">
+                  Church gear is off most of the week, so retrying at full speed is wasted
+                  traffic and log noise. Rehearsal and service windows come from Planning
+                  Center; outside them connections back off toward the idle interval below,
+                  and the Planning Center poll slows too. Nothing ever sleeps past the moment
+                  the next window opens, and if the schedule cannot be worked out — no
+                  credentials, a failed fetch — everything stays at full speed rather than
+                  going quiet.
+                </InfoHint>
+              </FieldLabel>
               <FieldDescription>
-                Quiet ProPresenter / OBS / Smaart / wireless reconnects when gear is off for the week,
-                then ramp back up before a Planning Center rehearsal or service. Off = a fixed 2-minute retry.
+                Back off reconnects when gear is off for the week, and ramp up before a
+                rehearsal or service. Off = a fixed 2-minute retry.
               </FieldDescription>
             </FieldContent>
             <Switch
@@ -629,35 +849,29 @@ export function AdvancedSection({
             <>
               <Field orientation="horizontal">
                 <FieldContent>
-                  <FieldLabel>Lead time before rehearsal</FieldLabel>
-                  <FieldDescription>Start reconnecting this many minutes before a scheduled rehearsal/service.</FieldDescription>
+                  <FieldLabel>Lead time before rehearsal (minutes)</FieldLabel>
+                  <FieldDescription>Start reconnecting this long before a scheduled rehearsal or service.</FieldDescription>
                 </FieldContent>
-                <Input type="number" min={0} max={1440} value={lead} className="w-24 text-gray-12"
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setLead(e.target.value)}
-                  onBlur={() => commitNum("leadMin", lead, rc.leadMin)}
-                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                <NumberInput value={rc.leadMin} min={0} max={1440} className="w-28"
+                  onChange={(v) => { if (v !== rc.leadMin) handlers.handleSetReconnectSchedule({ leadMin: Math.round(v) }); }}
                   aria-label="Lead time before rehearsal (minutes)" />
               </Field>
               <Field orientation="horizontal">
                 <FieldContent>
-                  <FieldLabel>Keep active after service ends</FieldLabel>
-                  <FieldDescription>Stay in fast-reconnect mode this many minutes after the service end time.</FieldDescription>
+                  <FieldLabel>Keep active after service ends (minutes)</FieldLabel>
+                  <FieldDescription>Stay in fast-reconnect mode this long after the service end time.</FieldDescription>
                 </FieldContent>
-                <Input type="number" min={0} max={1440} value={tail} className="w-24 text-gray-12"
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setTail(e.target.value)}
-                  onBlur={() => commitNum("tailMin", tail, rc.tailMin)}
-                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                <NumberInput value={rc.tailMin} min={0} max={1440} className="w-28"
+                  onChange={(v) => { if (v !== rc.tailMin) handlers.handleSetReconnectSchedule({ tailMin: Math.round(v) }); }}
                   aria-label="Keep active after service ends (minutes)" />
               </Field>
               <Field orientation="horizontal">
                 <FieldContent>
-                  <FieldLabel>Idle retry interval</FieldLabel>
+                  <FieldLabel>Idle retry interval (minutes)</FieldLabel>
                   <FieldDescription>Longest gap between reconnect attempts when far from any service (the dead-week cadence).</FieldDescription>
                 </FieldContent>
-                <Input type="number" min={1} max={1440} value={dormant} className="w-24 text-gray-12"
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setDormant(e.target.value)}
-                  onBlur={() => commitNum("dormantMin", dormant, rc.dormantMin)}
-                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                <NumberInput value={rc.dormantMin} min={1} max={1440} className="w-28"
+                  onChange={(v) => { if (v !== rc.dormantMin) handlers.handleSetReconnectSchedule({ dormantMin: Math.round(v) }); }}
                   aria-label="Idle retry interval (minutes)" />
               </Field>
             </>
@@ -665,9 +879,60 @@ export function AdvancedSection({
         </FieldGroup>
       </FieldSet>
 
-      <ConfigSnapshotPanel />
+          <FieldSet flat>
+        <FieldGroup>
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Pre-service ramp (minutes)</FieldLabel>
+              <FieldDescription>Start sampling attendance this long before the service start, so the graph shows the room filling up. 0 = off.</FieldDescription>
+            </FieldContent>
+            <NumberInput value={tw.preMin} min={0} max={240} className="w-28"
+              onChange={(v) => { if (v !== tw.preMin) handlers.handleSetTaperWindow({ preMin: Math.round(v) }); }}
+              aria-label="Pre-service ramp (minutes)" />
+          </Field>
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>
+                Post-service taper (minutes)
+                <InfoHint className="ml-1.5 align-middle">
+                  Sampling continues even once the live plan is cleared, so an emptying room
+                  is still recorded. These samples are excluded from the Peak and Lowest
+                  figures — otherwise the taper would drag the low toward an empty room.
+                </InfoHint>
+              </FieldLabel>
+              <FieldDescription>Keep sampling this long after the service ends, to capture how fast the room empties. 0 = off.</FieldDescription>
+            </FieldContent>
+            <NumberInput value={tw.postMin} min={0} max={240} className="w-28"
+              onChange={(v) => { if (v !== tw.postMin) handlers.handleSetTaperWindow({ postMin: Math.round(v) }); }}
+              aria-label="Post-service taper (minutes)" />
+          </Field>
+        </FieldGroup>
+          </FieldSet>
+        </Collapsible>
+      </FieldSet>
 
-      <CompanionPanel />
+      <FieldSet>
+        <Collapsible label="Backup & restore" summary="Save, download & recall how the app is set up" headerClassName="px-4 py-2.5">
+          <ConfigSnapshotPanel />
+        </Collapsible>
+      </FieldSet>
+
+      <FieldSet>
+        <Collapsible
+          label="Data archive"
+          summary="Download & restore what the app recorded"
+          headerClassName="px-4 py-2.5"
+        >
+          <DataArchivePanel />
+        </Collapsible>
+      </FieldSet>
+
+      {/* Last, because it schedules the two above rather than being a third thing to back up. */}
+      <FieldSet>
+        <Collapsible label="Automatic backups" summary="Save a copy on a schedule" headerClassName="px-4 py-2.5">
+          <AutoBackupPanel />
+        </Collapsible>
+      </FieldSet>
     </div>
   );
 }

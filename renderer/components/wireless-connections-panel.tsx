@@ -1,4 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useState, useEffect, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -115,8 +116,8 @@ function WirelessConnectionBadge({
   if (connection === "connecting") {
     return (
       <span className="flex items-center gap-1">
-        <Loader2Icon className="size-3.5 text-blue-10 animate-spin shrink-0" />
-        <span className="text-caption1 text-blue-10">Connecting…</span>
+        <Loader2Icon className="size-3.5 text-accent animate-spin shrink-0" />
+        <span className="text-caption1 text-accent">Connecting…</span>
       </span>
     );
   }
@@ -182,12 +183,12 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
     .find((v) => typeof v === "string" && v.trim()) as string | undefined;
 
   // Sync local name if the connection updates from outside (e.g. broadcast)
-  useEffect(() => {
+  useResyncOn([conn.name], () => {
     setLocalName(conn.name);
-  }, [conn.name]);
+  });
 
   // Sync localConfig when provider changes (new schema) or connection data updates
-  useEffect(() => {
+  useResyncOn([conn.providerId, conn.config, provider], () => {
     if (!provider) {
       setLocalConfig({ ...conn.config });
       return;
@@ -202,7 +203,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       }
     }
     setLocalConfig(out);
-  }, [conn.providerId, conn.config, provider]);
+  });
 
   async function handleNameBlur() {
     const trimmed = localName.trim();
@@ -539,9 +540,9 @@ export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanel
     queryFn: () => ipc<{ ms: number }>("wireless:getMeterRate"),
   });
   const [meterInput, setMeterInput] = useState<string>("1000");
-  useEffect(() => {
+  useResyncOn([meterData], () => {
     if (meterData) setMeterInput(String(meterData.ms));
-  }, [meterData]);
+  });
 
   async function commitMeterRate() {
     const ms = parseInt(meterInput, 10);
@@ -604,7 +605,7 @@ export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanel
         step={100}
         min={0}
         suffix="ms"
-        className="w-28"
+        className="w-44"
         aria-label="Polling interval in milliseconds"
       />
     </div>

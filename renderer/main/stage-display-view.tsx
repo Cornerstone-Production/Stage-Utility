@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Tooltip } from "../components/ui/tooltip";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
@@ -8,6 +9,7 @@ import { channelColor, channelLabel } from "./channel-color";
 import { LiveControls } from "./live-controls";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 interface StageDisplayViewProps {
   displayId: string;
@@ -20,7 +22,7 @@ function chipText(hex: string): string {
   const n = parseInt(m[1], 16);
   const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
   const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return lum > 0.6 ? "#11131a" : "#fff";
+  return lum > 0.6 ? "#111111" : "#fff";
 }
 
 function SectionChip({ section, size = "md" }: { section: ProSection | null; size?: "sm" | "md" }) {
@@ -54,28 +56,28 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   }, []);
 
   const [skewMs, setSkewMs] = useState(0);
-  useEffect(() => {
+  useResyncOn([pcoLive?.serverNow], () => {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  }, [pcoLive?.serverNow]);
+  });
 
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3">
-        <Loader2Icon className="size-8 text-gray-7 animate-spin" />
-        <p className="text-headline text-gray-7">Loading…</p>
+        <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
+        <p className="text-headline text-fg-subtle">Loading…</p>
       </div>
     );
   }
   if (error || !state) {
     return (
       <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3 px-12 text-center">
-        <p className="text-title3 text-gray-9 font-semibold">Could not load stage display</p>
-        {error && <p className="text-caption1 text-gray-7">{error}</p>}
+        <p className="text-title3 text-fg-muted font-semibold">Could not load stage display</p>
+        {error && <p className="text-caption1 text-fg-subtle">{error}</p>}
       </div>
     );
   }
 
-  const display = state.displays?.find((d) => d.id === displayId) ?? null;
+  const display = state.outputs?.find((o) => o.id === displayId) ?? null;
   const displayName = display?.name ?? null;
 
   const clock = new Date(now);
@@ -98,45 +100,48 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   const runningTimers = pro?.timers ?? [];
 
   return (
-    <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface text-white pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface text-fg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Brand top bar */}
       <div
         className="relative flex items-center h-10 shrink-0"
         style={
           {
             background: "rgba(0,0,0,0.50)",
-            backdropFilter: "blur(20px) saturate(1.6)",
+            backdropFilter: "blur(20px)",
             borderBottom: "1px solid rgba(255,255,255,0.09)",
           } as React.CSSProperties
         }
       >
         <div className="shrink-0 ml-3 flex items-center gap-2.5 relative z-10">
-          <a
-            href="/"
-            className="flex items-center gap-2 text-white/70 rounded hover:opacity-80 transition-opacity"
-            title="Back to home"
-            aria-label="Back to home"
-          >
-            {state.appLogo && (
-              <BrandLogo logo={state.appLogo} monochrome={state.appLogoMonochrome} className="size-5 rounded select-none" />
-            )}
-            <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
-              {state.appName}
-            </span>
-          </a>
+          <Tooltip label="Back to home">
+            <a
+              href="/"
+              className="flex items-center gap-2 text-fg-muted rounded hover:opacity-80 transition-opacity"
+              aria-label="Back to home"
+            >
+              {state.appLogo && (
+                <BrandLogo logo={state.appLogo} monochrome={state.appLogoMonochrome} className="size-5 rounded select-none" />
+              )}
+              <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
+                {state.appName}
+              </span>
+            </a>
+          </Tooltip>
           {displayName && (
             <>
               <span className="w-px h-4 bg-white/15 shrink-0" aria-hidden="true" />
-              <span className="text-caption1 font-medium text-white/40 select-none truncate" style={{ letterSpacing: "0.02em" }}>
+              <span className="text-caption1 font-medium text-fg-subtle select-none truncate" style={{ letterSpacing: "0.02em" }}>
                 {displayName}
               </span>
             </>
           )}
         </div>
         {state.showQr && state.remoteUrl && (
-          <a href="/settings" target="_blank" rel="noopener noreferrer" className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70" title="Open settings" aria-label="Open settings">
-            <QrHint url={state.remoteUrl} compact />
-          </a>
+          <Tooltip label="Open settings in a new tab">
+            <a href="/settings" target="_blank" rel="noopener noreferrer" className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70" aria-label="Open settings in a new tab">
+              <QrHint url={state.remoteUrl} compact />
+            </a>
+          </Tooltip>
         )}
       </div>
 
@@ -144,13 +149,13 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
         {/* Top strip: remaining slides · clock · PCO live · (SPL when present) */}
         <div className={`grid gap-2.5 h-[16%] min-h-0 ${splVal ? "grid-cols-4" : "grid-cols-3"}`}>
           <Cell label="Remaining slides">
-            <span className="text-[clamp(1.5rem,7vmin,3.5rem)] font-medium leading-none tabular-nums">
+            <span className="text-[clamp(1.5rem,7vmin,3.5rem)] font-mono font-medium leading-none tabular-nums">
               {pro?.slidesRemaining ?? "—"}
             </span>
           </Cell>
           <Cell label="Clock">
-            <span className="text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums">
-              {h12}:{cmm}<span className="text-white/45 text-[0.6em]">:{css} {ampm}</span>
+            <span className="text-[clamp(1.4rem,6vmin,3rem)] font-mono font-medium leading-none tabular-nums">
+              {h12}:{cmm}<span className="text-fg-subtle text-[0.6em]">:{css} {ampm}</span>
             </span>
           </Cell>
           <Cell
@@ -169,21 +174,21 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
           >
             {timer ? (
               <div className="flex flex-col items-center gap-1">
-                <span className={`text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums ${over ? "text-red-10" : "text-[#7fe3c4]"}`}>
+                <span className={`text-[clamp(1.4rem,6vmin,3rem)] font-mono font-medium leading-none tabular-nums ${over ? "text-red-10" : "text-live-11"}`}>
                   {fmtDuration(timer.seconds)}
                 </span>
                 {timer.label && (
-                  <span className="text-caption2 text-white/40 truncate max-w-full">{timer.label}</span>
+                  <span className="text-caption2 text-fg-subtle truncate max-w-full">{timer.label}</span>
                 )}
               </div>
             ) : (
-              <span className="text-white/35 text-[clamp(0.8rem,2.4vmin,1.1rem)]">No live service</span>
+              <span className="text-fg-faint text-[clamp(0.8rem,2.4vmin,1.1rem)]">No live service</span>
             )}
           </Cell>
           {splVal && (
             <Cell label={`SPL · ${splVal.metricKey}`}>
-              <span className="text-[clamp(1.4rem,6vmin,3rem)] font-medium leading-none tabular-nums">
-                {Math.round(splVal.value)}<span className="text-white/45 text-[0.6em]"> dB</span>
+              <span className="text-[clamp(1.4rem,6vmin,3rem)] font-mono font-medium leading-none tabular-nums">
+                {Math.round(splVal.value)}<span className="text-fg-subtle text-[0.6em]"> dB</span>
               </span>
             </Cell>
           )}
@@ -193,9 +198,9 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
             phones (max-sm) — the slide text is already shown here, so it's just
             clutter on a small screen; it stays on the wall/desktop display. */}
         <div className="flex flex-1 min-h-0 gap-2.5">
-          <div className="flex flex-col flex-1 min-w-0 rounded-2xl border border-white/10 bg-white/4 p-3 gap-2">
+          <div className="flex flex-col flex-1 min-w-0 su-card p-3 gap-2">
             <div className="flex items-center gap-2 shrink-0">
-              <span className="text-caption2 uppercase tracking-wider text-white/40" style={{ letterSpacing: "0.1em" }}>Now</span>
+              <span className="text-caption2 uppercase tracking-wider text-fg-subtle" style={{ letterSpacing: "0.1em" }}>Now</span>
               <SectionChip section={pro?.currentSection ?? null} />
               {pro?.currentNotes && <span className="ml-auto text-[clamp(0.8rem,2vmin,1.1rem)] text-amber-9 font-medium tabular-nums">{pro.currentNotes}</span>}
             </div>
@@ -206,7 +211,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
             </div>
           </div>
           {previewSrc && (
-            <div className="w-[34%] max-sm:hidden shrink-0 rounded-2xl border border-white/10 overflow-hidden bg-black flex items-center justify-center">
+            <div className="w-[34%] max-sm:hidden shrink-0 rounded-2xl border border-line overflow-hidden bg-black flex items-center justify-center">
               <img src={previewSrc} alt="" className="w-full h-full object-contain" />
             </div>
           )}
@@ -214,14 +219,14 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
 
         {/* Next slide */}
         <div className="flex items-center gap-3 rounded-2xl border border-amber-a5 bg-amber-a2 p-2.5 px-3 shrink-0 h-[18%] min-h-0">
-          <span className="text-caption2 uppercase tracking-wider text-white/40 shrink-0" style={{ letterSpacing: "0.1em" }}>Next</span>
+          <span className="text-caption2 uppercase tracking-wider text-fg-subtle shrink-0" style={{ letterSpacing: "0.1em" }}>Next</span>
           <SectionChip section={pro?.nextSection ?? null} size="sm" />
           <span className="text-[clamp(1rem,3.4vmin,1.9rem)] font-medium text-amber-10 leading-tight truncate">
             {pro?.nextSlideText ?? "—"}
           </span>
           {pro?.nextArrangementSection && (
             <span className="ml-auto flex items-center gap-2 shrink-0">
-              <span className="text-caption2 uppercase tracking-wider text-white/30" style={{ letterSpacing: "0.1em" }}>Then</span>
+              <span className="text-caption2 uppercase tracking-wider text-fg-faint" style={{ letterSpacing: "0.1em" }}>Then</span>
               <SectionChip section={pro.nextArrangementSection} size="sm" />
             </span>
           )}
@@ -242,8 +247,8 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
               {runningTimers.length > 0 && (
                 <span className="flex items-center gap-2 shrink-0">
                   {runningTimers.slice(0, 2).map((t) => (
-                    <span key={t.name} className="text-caption1 text-white/55 tabular-nums">
-                      {t.name}: <span className="text-white/80">{t.time}</span>
+                    <span key={t.name} className="text-caption1 text-fg-subtle tabular-nums">
+                      {t.name}: <span className="text-fg">{t.time}</span>
                     </span>
                   ))}
                 </span>
@@ -256,14 +261,14 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
           const last = transcript[transcript.length - 1];
           const speaker = channelLabel(last);
           return (
-            <div className="shrink-0 rounded-2xl border border-white/8 bg-white/4 px-3 py-2 flex items-center gap-3 min-h-0">
+            <div className="shrink-0 su-card px-3 py-2 flex items-center gap-3 min-h-0">
               <span
                 className="text-caption2 font-semibold uppercase tracking-wider shrink-0 max-w-[28%] truncate"
                 style={{ letterSpacing: "0.1em", color: speaker ? channelColor(last.channel) : "rgba(255,255,255,0.4)" }}
               >
                 {speaker ?? "Transcript"}
               </span>
-              <span className={`text-[clamp(0.9rem,2.6vmin,1.5rem)] truncate ${last.isFinal ? "text-white/85" : "text-white/50"}`}>
+              <span className={`text-[clamp(0.9rem,2.6vmin,1.5rem)] truncate ${last.isFinal ? "text-fg" : "text-fg-subtle"}`}>
                 {last.text}
               </span>
             </div>
@@ -288,12 +293,12 @@ function Cell({
   children: React.ReactNode;
 }) {
   const border =
-    accent === "green" ? "border-[#2dd49622] bg-[#2dd49614]"
+    accent === "green" ? "border-live-9/15 bg-live-9/8"
     : accent === "red" ? "border-red-a6 bg-red-a3"
     : accent === "amber" ? "border-amber-a5 bg-amber-a2"
-    : "border-white/8 bg-white/4";
+    : "border-line bg-surface";
   const labelColor =
-    accent === "green" ? "text-[#5dcaa5]" : accent === "red" ? "text-red-10" : accent === "amber" ? "text-amber-9" : "text-white/40";
+    accent === "green" ? "text-live-11" : accent === "red" ? "text-red-10" : accent === "amber" ? "text-amber-9" : "text-fg-subtle";
   return (
     <div className={`flex flex-col justify-center rounded-2xl border p-3 min-h-0 overflow-hidden ${border} ${align === "center" ? "items-center" : "items-start"}`}>
       <span className={`text-caption2 font-medium uppercase tracking-wider mb-1 ${labelColor}`} style={{ letterSpacing: "0.1em" }}>

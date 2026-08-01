@@ -1,4 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
+import { Tooltip } from "./ui/tooltip";
 import { useStageState } from "../main/use-stage-state";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { usePropInstances } from "../main/use-dashboard-state";
@@ -6,6 +7,7 @@ import { useState, useEffect, useCallback, type ChangeEvent, type ReactNode } fr
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { OscTargetsPanel } from "./osc-targets-panel";
+import { RossTalkTargetsPanel } from "./rosstalk-targets-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
 import {
   Button,
@@ -28,6 +30,7 @@ import {
   toast,
   SkeletonRows,
   InfoHint,
+  UnsavedBanner,
 } from "../components/ui";
 import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -108,8 +111,8 @@ function ConnectionBadge({ connection, message }: { connection: ConnectionState;
   if (connection === "connecting") {
     return (
       <span className="flex items-center gap-1">
-        <Loader2Icon className="size-3.5 text-blue-10 animate-spin shrink-0" />
-        <span className="text-caption1 text-blue-10">Connecting…</span>
+        <Loader2Icon className="size-3.5 text-accent animate-spin shrink-0" />
+        <span className="text-caption1 text-accent">Connecting…</span>
       </span>
     );
   }
@@ -117,10 +120,12 @@ function ConnectionBadge({ connection, message }: { connection: ConnectionState;
     // Truncate a long error (e.g. "Can't reach 192.168.x.x — ECONNREFUSED…") so it
     // never overflows its row; the full text shows on hover via the native title.
     return (
-      <span className="flex items-center gap-1 min-w-0" title={message ?? "Error"}>
-        <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
-        <span className="text-caption1 text-red-10 truncate">{message ?? "Error"}</span>
-      </span>
+      <Tooltip label={message ?? "Error"}>
+        <span className="flex items-center gap-1 min-w-0 max-w-[9rem] sm:max-w-md" aria-label={message ?? "Error"}>
+          <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
+          <span className="text-caption1 text-red-10 truncate min-w-0">{message ?? "Error"}</span>
+        </span>
+      </Tooltip>
     );
   }
   // disconnected
@@ -150,25 +155,48 @@ function fmtSynced(iso: string | null | undefined): string {
   return `Synced ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
+/** The form's starting values for an integration — the saved config, with password
+ *  fields masked and unset numbers prefilled from their default/placeholder.
+ *  Hoisted out of the component so Discard can rebuild exactly the same thing. */
+function initialConfig(
+  descriptor: IntegrationDescriptor,
+  state: IntegrationState,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const field of descriptor.configSchema) {
+    const raw = state.config[field.key];
+    if (field.type === "password" && typeof raw === "string" && raw !== "") {
+      out[field.key] = MASKED_PASSWORD;
+    } else if (field.type === "number") {
+      // Unset numeric fields (e.g. an API port) prefill the integration's
+      // default — field.default if declared, else the numeric placeholder
+      // (the shown default) — so the field displays and saves the real port
+      // instead of a bare 0.
+      const fallback =
+        field.default ?? (field.placeholder != null && field.placeholder !== "" ? Number(field.placeholder) : undefined);
+      const rawNum = raw == null || raw === "" ? NaN : Number(raw);
+      out[field.key] = Number.isFinite(rawNum) && rawNum > 0 ? rawNum : (fallback ?? "");
+    } else {
+      out[field.key] = raw ?? field.default ?? "";
+    }
+  }
+  return out;
+}
+
 function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: IntegrationCardProps) {
   // Local config mirrors state.config but tracks in-progress edits
-  const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(() => {
-    // Mask password fields coming from backend
-    const out: Record<string, unknown> = {};
-    for (const field of descriptor.configSchema) {
-      const raw = state.config[field.key];
-      if (field.type === "password" && typeof raw === "string" && raw !== "") {
-        out[field.key] = MASKED_PASSWORD;
-      } else {
-        out[field.key] = raw ?? field.default ?? "";
-      }
-    }
-    return out;
-  });
+  const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(() =>
+    initialConfig(descriptor, state),
+  );
 
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Compare against the saved config rather than tracking a flag, so Save/Discard
+  // appear only for genuine edits — and disappear again on their own after a save.
+  const pristine = initialConfig(descriptor, state);
+  const dirty = JSON.stringify(localConfig) !== JSON.stringify(pristine);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   function setField(key: string, value: unknown) {
@@ -230,7 +258,7 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
   return (
     <div className="flex flex-col gap-3">
       {/* Schema-driven form */}
-      <FieldSet>
+      <FieldSet flat>
         <FieldGroup>
           {descriptor.configSchema.map((field) => {
             const value = localConfig[field.key];
@@ -304,12 +332,20 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
         <ProPresenterInstancesPanel state={state} onStateChange={onStateChange} />
       )}
 
+      {/* Unsaved changes — same bar as the patch sheet and the layout editor, so
+          "you have edits" reads identically everywhere in the app. */}
+      {dirty && (
+        <UnsavedBanner
+          compact
+          className="self-start"
+          saving={isSaving}
+          onSave={handleSave}
+          onDiscard={() => setLocalConfig(initialConfig(descriptor, state))}
+        />
+      )}
+
       {/* Actions row */}
       <div className="flex items-center gap-2">
-        <Button variant="filled" size="small" onClick={handleSave} disabled={isSaving}>
-          {isSaving ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
-          Save
-        </Button>
         <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting}>
           {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
           Test connection
@@ -368,15 +404,21 @@ function SenSourceScopePicker({
   state: IntegrationState;
   onStateChange: (next: IntegrationState) => void;
 }) {
-  const [locations, setLocations] = useState<{ locationId: string; name: string }[]>([]);
-  const [zones, setZones] = useState<VeaZone[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [zonesLoading, setZonesLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const current = typeof state.config.locationId === "string" ? state.config.locationId : "";
   const selectedZoneIds = Array.isArray(state.config.zoneIds)
     ? (state.config.zoneIds as unknown[]).filter((z): z is string => typeof z === "string")
     : [];
+  // Whether the lists load themselves on mount, so a saved location/zone renders
+  // by name rather than as a bare id. Decided once, and it seeds the spinners —
+  // starting them on is what lets the mount load do all its state updates after
+  // the await, rather than flipping a flag on the way in.
+  const autoLoad = state.configured || !!current || selectedZoneIds.length > 0;
+
+  const [locations, setLocations] = useState<{ locationId: string; name: string }[]>([]);
+  const [zones, setZones] = useState<VeaZone[]>([]);
+  const [loading, setLoading] = useState(autoLoad);
+  const [zonesLoading, setZonesLoading] = useState(autoLoad);
+  const [error, setError] = useState<string | null>(null);
 
   const loadLocations = useCallback(async () => {
     setLoading(true);
@@ -402,14 +444,30 @@ function SenSourceScopePicker({
     }
   }, []);
 
-  // Auto-load lists on mount when the integration is set up, so a previously-saved
-  // location/zone selection renders by name (the dropdowns need the lists loaded
-  // to show the chosen options after a refresh / re-opening the tab).
   useEffect(() => {
-    if (state.configured || current || selectedZoneIds.length) {
-      void loadLocations();
-      void loadZones();
-    }
+    if (!autoLoad) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [locs, zs] = await Promise.all([
+          invoke<{ locationId: string; name: string }[]>("sensource:listLocations"),
+          invoke<VeaZone[]>("sensource:listZones"),
+        ]);
+        if (cancelled) return;
+        setLocations(locs);
+        setZones(zs);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setZonesLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -496,7 +554,7 @@ function SenSourceScopePicker({
                   className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-gray-3 transition-colors"
                 >
                   {on ? (
-                    <CheckCircle2Icon className="size-4 shrink-0 text-blue-9" />
+                    <CheckCircle2Icon className="size-4 shrink-0 text-accent" />
                   ) : (
                     <span className="size-4 shrink-0 rounded-full border border-gray-6" />
                   )}
@@ -622,7 +680,7 @@ function RossTslFeedsPanel({
           </Select>
           <div className="flex items-center gap-1">
             <span className="text-caption2 text-gray-9">TSL #</span>
-            <NumberInput value={f.displayIndex} step={1} min={0} max={126} onChange={(v) => update(i, { displayIndex: Math.round(v) })} className="w-16" />
+            <NumberInput value={f.displayIndex} step={1} min={0} max={126} onChange={(v) => update(i, { displayIndex: Math.round(v) })} className="w-24" />
           </div>
           <Input value={f.prefix ?? ""} onChange={(e: ChangeEvent<HTMLInputElement>) => update(i, { prefix: e.target.value })} placeholder="prefix" className="w-20" />
           <Input value={f.suffix ?? ""} onChange={(e: ChangeEvent<HTMLInputElement>) => update(i, { suffix: e.target.value })} placeholder="suffix" className="w-20" />
@@ -743,13 +801,12 @@ function ProPresenterInstancesPanel({
                 <TrashIcon className="size-3.5 text-gray-9" />
               </Button>
             </div>
-            <FieldSet>
+            <FieldSet flat>
               <FieldGroup>
                 <Field orientation="horizontal">
                   <FieldContent>
                     <FieldLabel className="flex items-center gap-1.5">
                       Name
-                      <InfoHint>Display name for this ProPresenter, shown when a layout object picks which instance to read.</InfoHint>
                     </FieldLabel>
                     <FieldDescription>SA (e.g. Auditorium 2)</FieldDescription>
                   </FieldContent>
@@ -765,7 +822,6 @@ function ProPresenterInstancesPanel({
                   <FieldContent>
                     <FieldLabel className="flex items-center gap-1.5">
                       ProPresenter Host
-                      <InfoHint>IP or hostname of the machine running ProPresenter, on the same network as this server.</InfoHint>
                     </FieldLabel>
                     <FieldDescription>192.168.1.101</FieldDescription>
                   </FieldContent>
@@ -781,7 +837,6 @@ function ProPresenterInstancesPanel({
                   <FieldContent>
                     <FieldLabel className="flex items-center gap-1.5">
                       API Port
-                      <InfoHint>ProPresenter's network API port. Turn the API on and find the port under ProPresenter → Preferences → Network (default 1025).</InfoHint>
                     </FieldLabel>
                     <FieldDescription>1025</FieldDescription>
                   </FieldContent>
@@ -799,7 +854,6 @@ function ProPresenterInstancesPanel({
                   <FieldContent>
                     <FieldLabel className="flex items-center gap-1.5">
                       Poll interval (ms)
-                      <InfoHint>How often to query this ProPresenter over the LAN. 500ms feels instant; raise it to ease network load. Leave blank to use the default.</InfoHint>
                     </FieldLabel>
                     <FieldDescription>500 (lower = snappier, more requests)</FieldDescription>
                   </FieldContent>
@@ -839,7 +893,16 @@ const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
   { title: "Audio", ids: ["smaart"] },
   { title: "People", ids: ["sensource"] },
   { title: "Wireless", ids: ["wireless"] },
-  { title: "Control & output", ids: ["obs", "osc", "ross-tsl"] },
+  { title: "Control & output", ids: ["obs", "reaper", "osc", "rosstalk", "ross-tsl"] },
+];
+
+/** Two integrations that present as one card. RossTalk (commands, TCP 7788) and
+ *  Ross MultiViewer (TSL UMD) are different protocols that usually address the
+ *  same Carbonite, so two separate cards read as clutter. This is presentation
+ *  only — each keeps its own id, enable flag, config and connection state, so
+ *  layout buttons and automation actions referencing "rosstalk" are untouched. */
+const PAIRS: { title: string; ids: [string, string] }[] = [
+  { title: "Ross", ids: ["rosstalk", "ross-tsl"] },
 ];
 
 /** One integration as a collapsible card: header (name · status · enable) that
@@ -869,24 +932,95 @@ function IntegrationRow({
     }
   }
   return (
-    <div className="rounded-lg border border-gray-a4 bg-gray-1 px-3 py-2">
-      <Collapsible
-        defaultOpen={!state.configured}
-        label={<span className="text-callout font-semibold text-gray-12 truncate">{descriptor.label}</span>}
-        right={
-          <div className="flex items-center gap-3 shrink-0">
-            <ConnectionBadge connection={state.connection} message={state.message} />
-            <Switch
-              checked={state.enabled}
-              onCheckedChange={toggleEnabled}
-              disabled={toggling}
-              aria-label={`Enable ${descriptor.label}`}
-            />
-          </div>
-        }
-      >
-        <div className="pt-1">{body}</div>
-      </Collapsible>
+    <div className="su-card px-3 py-2">
+      <IntegrationEntry
+        descriptor={descriptor}
+        state={state}
+        body={body}
+        toggling={toggling}
+        onToggle={toggleEnabled}
+      />
+    </div>
+  );
+}
+
+/** The collapsible header + body for one integration, without a card wrapper —
+ *  so it can sit alone in its own card or beside a sibling inside a pair card. */
+function IntegrationEntry({
+  descriptor,
+  state,
+  body,
+  toggling,
+  onToggle,
+}: {
+  descriptor: IntegrationDescriptor;
+  state: IntegrationState;
+  body: ReactNode;
+  toggling: boolean;
+  onToggle: (enabled: boolean) => void;
+}) {
+  return (
+    <Collapsible
+      defaultOpen={!state.configured}
+      label={<span className="text-callout font-semibold text-fg truncate">{descriptor.label}</span>}
+      afterLabel={descriptor.description ? <InfoHint>{descriptor.description}</InfoHint> : undefined}
+      right={
+        <div className="flex items-center gap-3 shrink-0">
+          <ConnectionBadge connection={state.connection} message={state.message} />
+          <Switch
+            checked={state.enabled}
+            onCheckedChange={onToggle}
+            disabled={toggling}
+            aria-label={`Enable ${descriptor.label}`}
+          />
+        </div>
+      }
+    >
+      <div className="pt-1">{body}</div>
+    </Collapsible>
+  );
+}
+
+/** One card holding two related integrations as sections. Each section keeps its
+ *  own status badge and enable switch — this groups them visually, it does not
+ *  merge them. */
+function IntegrationPairRow({
+  title,
+  entries,
+  onStateChange,
+}: {
+  title: string;
+  entries: { descriptor: IntegrationDescriptor; state: IntegrationState; body: ReactNode }[];
+  onStateChange: (id: string, s: IntegrationState) => void;
+}) {
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  async function toggle(id: string, label: string, enabled: boolean) {
+    setTogglingId(id);
+    try {
+      const next = await ipc<IntegrationState>("integrations:setEnabled", { id, enabled });
+      onStateChange(id, next);
+    } catch (err) {
+      toast.error(`Failed to ${enabled ? "enable" : "disable"} ${label}: ${String(err)}`);
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  return (
+    <div className="su-card flex flex-col gap-1 px-3 py-2">
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">{title}</span>
+      {entries.map(({ descriptor, state, body }, i) => (
+        <div key={descriptor.id} className={i > 0 ? "border-t border-line pt-1" : undefined}>
+          <IntegrationEntry
+            descriptor={descriptor}
+            state={state}
+            body={body}
+            toggling={togglingId === descriptor.id}
+            onToggle={(enabled) => toggle(descriptor.id, descriptor.label, enabled)}
+          />
+        </div>
+      ))}
     </div>
   );
 }
@@ -968,6 +1102,7 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   const bodyFor = (descriptor: IntegrationDescriptor, state: IntegrationState): ReactNode => {
     if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
     if (descriptor.id === "osc") return <OscTargetsPanel />;
+    if (descriptor.id === "rosstalk") return <RossTalkTargetsPanel />;
     return (
       <>
         <IntegrationCard
@@ -985,25 +1120,75 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   const connectedCount = descriptors.filter((d) => stateMap.get(d.id)?.connection === "connected").length;
   const needsSetup = descriptors.filter((d) => stateMap.get(d.id)?.configured === false).length;
   const categorized = new Set(CATEGORY_ORDER.flatMap((c) => c.ids));
+  /**
+   * An integration is "in use" if it is enabled or has been configured. Everything
+   * else is noise on this page — a site running three integrations should not scroll
+   * past eleven. Nothing is hidden permanently and there is no preference to store:
+   * the state already says which are in use, so the list reorganizes itself as soon
+   * as one is set up. An ERRORING integration always stays in the main list, since an
+   * error is exactly what you want to see.
+   */
+  const inUse = (d: IntegrationDescriptor) => {
+    const st = stateMap.get(d.id);
+    return !!st && (st.enabled || st.configured !== false || st.connection === "error");
+  };
+  const dormant = descriptors.filter((d) => !inUse(d));
+  const dormantIds = new Set(dormant.map((d) => d.id));
+
   const groups = [
     ...CATEGORY_ORDER.map((c) => ({
       title: c.title,
-      items: c.ids.map((id) => byId.get(id)).filter((d): d is IntegrationDescriptor => !!d),
+      items: c.ids
+        .map((id) => byId.get(id))
+        .filter((d): d is IntegrationDescriptor => !!d && !dormantIds.has(d.id)),
     })),
-    { title: "Other", items: descriptors.filter((d) => !categorized.has(d.id)) },
+    { title: "Other", items: descriptors.filter((d) => !categorized.has(d.id) && !dormantIds.has(d.id)) },
   ].filter((g) => g.items.length > 0);
 
   return (
     <div className={cn("flex flex-col gap-5", className)}>
-      <p className="text-caption1 text-gray-9">
-        {connectedCount} connected{needsSetup > 0 ? ` · ${needsSetup} to set up` : ""}
+      <p className="text-caption1 text-fg-subtle">
+        <span className="font-medium text-accent">{connectedCount} connected</span>
+        {needsSetup > 0 ? ` · ${needsSetup} to set up` : ""}
       </p>
+      {groups.length === 0 && dormant.length > 0 && (
+        <p className="text-caption1 text-fg-muted">
+          Nothing set up yet — pick one below to get started.
+        </p>
+      )}
       {groups.map((g) => (
         <div key={g.title} className="flex flex-col gap-2">
           <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">{g.title}</span>
           {g.items.map((descriptor) => {
             const state = stateMap.get(descriptor.id);
             if (!state) return null;
+
+            // Paired integrations render once, as a single card, in the position of
+            // whichever id comes first; the sibling is skipped where it would have
+            // rendered on its own.
+            const pair = PAIRS.find((p) => p.ids.includes(descriptor.id));
+            if (pair) {
+              // Anchor to the first id actually in this group, not ids[0] — when one
+              // half is dormant the card must still render for the half that isn't.
+              const anchor = pair.ids.find((id) => g.items.some((d) => d.id === id));
+              if (descriptor.id !== anchor) return null;
+              const entries = pair.ids
+                .map((id) => {
+                  const d = byId.get(id);
+                  const s = stateMap.get(id);
+                  return d && s ? { descriptor: d, state: s, body: bodyFor(d, s) } : null;
+                })
+                .filter((e): e is { descriptor: IntegrationDescriptor; state: IntegrationState; body: ReactNode } => e !== null);
+              return (
+                <IntegrationPairRow
+                  key={pair.title}
+                  title={pair.title}
+                  entries={entries}
+                  onStateChange={(_id, s) => handleStateChange(s)}
+                />
+              );
+            }
+
             return (
               <IntegrationRow
                 key={descriptor.id}
@@ -1016,6 +1201,26 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
           })}
         </div>
       ))}
+
+      {dormant.length > 0 && (
+        <Collapsible label={`Not set up (${dormant.length})`} summary="integrations you are not using">
+          <div className="flex flex-col gap-2 pt-2">
+            {dormant.map((descriptor) => {
+              const state = stateMap.get(descriptor.id);
+              if (!state) return null;
+              return (
+                <IntegrationRow
+                  key={descriptor.id}
+                  descriptor={descriptor}
+                  state={state}
+                  onStateChange={handleStateChange}
+                  body={bodyFor(descriptor, state)}
+                />
+              );
+            })}
+          </div>
+        </Collapsible>
+      )}
     </div>
   );
 }

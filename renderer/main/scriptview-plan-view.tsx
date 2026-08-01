@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { Tooltip } from "../components/ui/tooltip";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { Loader2Icon, ArrowLeftIcon } from "lucide-react";
 
 import { BrandLogo } from "../components/brand-logo";
@@ -8,6 +10,7 @@ import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLeng
 import { useDashboardState } from "./use-dashboard-state";
 import { invoke } from "../lib/api";
 import { ALL_COLUMNS_LAYOUT_ID, ALL_COLUMNS_SLUG, slugify, scriptViewUrl } from "./scriptview-index-view";
+import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 
 function fmtSvcTime(iso: string, timeZone?: string | null): string {
   const d = new Date(iso);
@@ -23,11 +26,13 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
   const [rundown, setRundown] = useState<ScriptViewRundownDTO | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
+  const [roles, setRoles] = useState<CategoryRole[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<ServiceTypeDTO[]>("stage:listServiceTypes").then(setTypes).catch(() => setTypes([]));
     invoke<ScriptViewLayout[]>("scriptview:listLayouts").then(setLayouts).catch(() => setLayouts([]));
+    invoke<CategoryRole[]>("scriptview:listRoles").then(setRoles).catch(() => setRoles([]));
   }, []);
 
   // Resolve the service-type slug (or raw id) to an id.
@@ -59,9 +64,9 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     return () => clearInterval(t);
   }, []);
   const [skewMs, setSkewMs] = useState(0);
-  useEffect(() => {
+  useResyncOn([pcoLive?.serverNow], () => {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  }, [pcoLive?.serverNow]);
+  });
 
   const allLayouts = useMemo(() => [...layouts].sort((a, b) => a.order - b.order), [layouts]);
   // Resolve the layout slug (or raw id) to a layout; the All-columns slug/id → null.
@@ -78,7 +83,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   }, [rundown?.planTitle, rundown?.planSeriesTitle, layoutName]);
 
   const items = useMemo(() => rundown?.items ?? [], [rundown?.items]);
-  const spec = useMemo(() => resolveScriptViewSpec(layout, rundown?.noteCategories ?? []), [layout, rundown?.noteCategories]);
+  const spec = useMemo(() => resolveScriptViewSpec(layout, roles, rundown?.noteCategories ?? []), [layout, roles, rundown?.noteCategories]);
   const clocks = useMemo(() => computeClocks(items, rundown?.serviceTimes?.[0]), [items, rundown?.serviceTimes]);
   const columns = useMemo(() => buildScriptViewColumns(spec, clocks, rundown?.timeZone), [spec, clocks, rundown?.timeZone]);
 
@@ -101,48 +106,50 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Header: back + brand + plan · layout switcher · countdown · clock */}
-      <div className="flex items-center gap-4 px-4 h-14 shrink-0 border-b border-white/10 bg-black/40">
-        <a href="/scriptview" className="flex items-center justify-center rounded-lg size-8 shrink-0 transition-colors hover:bg-white/10" title="All services" aria-label="All services">
-          <ArrowLeftIcon className="size-4 text-white/60" />
-        </a>
+      <div className="flex items-center gap-4 px-4 h-14 shrink-0 border-b border-line bg-black/40">
+        <Tooltip label="All services">
+          <a href="/scriptview" className="flex items-center justify-center rounded-lg size-8 shrink-0 transition-colors hover:bg-white/10" aria-label="All services">
+            <ArrowLeftIcon className="size-4 text-fg-muted" />
+          </a>
+        </Tooltip>
         <div className="flex items-center gap-2 min-w-0">
-          {state?.appLogo && <BrandLogo logo={state.appLogo} monochrome className="size-6 rounded text-white/90" />}
+          {state?.appLogo && <BrandLogo logo={state.appLogo} monochrome className="size-6 rounded text-fg" />}
           <div className="flex flex-col min-w-0 leading-tight">
-            <span className="text-caption1 font-title text-white/85 truncate">{rundown?.planSeriesTitle ?? rundown?.planTitle ?? "ScriptView"}</span>
-            <span className="text-caption2 text-white/45 truncate">
+            <span className="text-caption1 font-title text-fg truncate">{rundown?.planSeriesTitle ?? rundown?.planTitle ?? "ScriptView"}</span>
+            <span className="text-caption2 text-fg-subtle truncate">
               {[rundown?.planSeriesTitle ? rundown?.planTitle : null, rundown?.planDates, svcTimes || null].filter(Boolean).join("  ·  ")}
             </span>
           </div>
         </div>
         <div className="ml-auto flex items-center gap-4 tabular-nums">
           {liveNow && (
-            <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-[#7fe3c4]">
-              <span className="size-2 rounded-full bg-[#22c55e]" /> Live
+            <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-live-11">
+              <span className="size-2 rounded-full bg-live-9" /> Live
             </span>
           )}
           {timer && (
             <div className="flex flex-col items-end leading-none">
-              <span className="text-caption2 uppercase tracking-wider text-white/40">{over ? "Over" : timer.mode === "preservice" ? "Starts in" : "Remaining"}</span>
-              <span className={`text-title3 font-medium ${over ? "text-red-10" : "text-[#7fe3c4]"}`}>{fmtDuration(timer.seconds)}</span>
+              <span className="text-caption2 uppercase tracking-wider text-fg-subtle">{over ? "Over" : timer.mode === "preservice" ? "Starts in" : "Remaining"}</span>
+              <span className={`text-title3 font-medium ${over ? "text-red-10" : "text-live-11"}`}>{fmtDuration(timer.seconds)}</span>
             </div>
           )}
           <div className="flex flex-col items-end leading-none">
-            <span className="text-caption2 uppercase tracking-wider text-white/40">Clock</span>
-            <span className="text-title3 font-medium text-white/90">{h12}:{mm}<span className="text-white/45 text-[0.7em]">:{ss} {ampm}</span></span>
+            <span className="text-caption2 uppercase tracking-wider text-fg-subtle">Clock</span>
+            <span className="text-title3 font-medium text-fg">{h12}:{mm}<span className="text-fg-subtle text-[0.7em]">:{ss} {ampm}</span></span>
           </div>
           {/* Layout switcher */}
-          <select
-            value={currentLayoutKey}
-            onChange={(e) => {
-              const id = e.target.value;
-              window.location.href = scriptViewUrl(typeNameForUrl, id, allLayouts.find((l) => l.id === id)?.name);
-            }}
-            className="rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-caption1 text-white/85 outline-none focus:border-white/25"
-            title="Layout"
-          >
-            {allLayouts.map((l) => <option key={l.id} value={l.id} className="bg-[#14161c]">{l.name}</option>)}
-            <option value={ALL_COLUMNS_LAYOUT_ID} className="bg-[#14161c]">All columns</option>
-          </select>
+          <Tooltip label="Layout">
+            <select
+              value={currentLayoutKey}
+              onChange={(e) => {
+                const id = e.target.value;
+                window.location.href = scriptViewUrl(typeNameForUrl, id, allLayouts.find((l) => l.id === id)?.name);
+              }}
+              className="rounded-lg border border-line bg-black/30 px-3 py-1.5 text-caption1 text-fg outline-none focus:border-line-strong" aria-label="Layout">
+              {allLayouts.map((l) => <option key={l.id} value={l.id} className="bg-[var(--kiosk-surface-1)]">{l.name}</option>)}
+              <option value={ALL_COLUMNS_LAYOUT_ID} className="bg-[var(--kiosk-surface-1)]">All columns</option>
+            </select>
+          </Tooltip>
         </div>
       </div>
 
@@ -152,7 +159,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         ) : !rundown ? (
           <div className="flex items-center justify-center h-full"><Loader2Icon className="size-8 text-gray-7 animate-spin" /></div>
         ) : items.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-white/35 text-body">
+          <div className="flex items-center justify-center h-full text-fg-faint text-body">
             {rundown.planId ? "No items in this plan" : "No upcoming plan for this service type"}
           </div>
         ) : (
@@ -160,8 +167,11 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
             items={items}
             columns={columns}
             currentItemId={currentItemId}
-            accentDepartment={layout?.accentDepartment ?? null}
-            footer={spec.showTotalTime ? <span>{fmtTotal(totalLengthSec(items))} <span className="text-white/40">· total time</span></span> : undefined}
+            itemTypeColors={rundown?.itemTypeColors}
+            rowColor={layout?.rowColor}
+            accentRole={layout?.accentRole ?? null}
+            roles={roles}
+            footer={spec.showTotalTime ? <span>{fmtTotal(totalLengthSec(items))} <span className="text-fg-subtle">· total time</span></span> : undefined}
           />
         )}
       </div>

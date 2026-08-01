@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { UserRoundIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { StatusStrip, OfflinePill } from "./status-strip";
+import { slotStripMode } from "./slot-strip-mode";
 import { BrandLogo } from "./brand-logo";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 interface SlotPanelProps {
   slot: Slot;
@@ -35,10 +37,10 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
   const [imgAttempt, setImgAttempt] = useState(0);
   const [imgFailed, setImgFailed] = useState(false);
   // Reset retry/fail state whenever the underlying photo URL changes.
-  useEffect(() => {
+  useResyncOn([slot.photoUrl], () => {
     setImgAttempt(0);
     setImgFailed(false);
-  }, [slot.photoUrl]);
+  });
 
   const photoSrc =
     hasPhoto && !imgFailed
@@ -68,9 +70,9 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           className,
         )}
       >
-        {/* Empty slot: a barely-there panel. We deliberately skip the .glass-card
-            ring (its crisp 1px border bands visibly on the Pi panels against the
-            dark fill); just a soft fill so it reads without an outlined rectangle. */}
+        {/* Empty slot: a barely-there panel. We deliberately skip the .su-card
+            border ring (its crisp 1px border bands visibly on the Pi panels against
+            the dark fill); just a soft fill so it reads without an outlined rectangle. */}
         <div
           className="relative flex flex-col items-center justify-center flex-1 overflow-hidden [container-type:inline-size]"
           // Radius is purely relative to the slot's own width (cqi) so it renders at
@@ -82,13 +84,13 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             <BrandLogo
               logo={emptySlotLogo}
               monochrome
-              className="text-white/25"
+              className="text-fg-faint"
               // Size to the slot itself (the card is the container), capped so it
               // never exceeds the column width and gets clipped on narrow displays.
               style={{ width: "clamp(2.5rem,55cqw,11rem)", height: "clamp(2.5rem,55cqw,11rem)", maxWidth: "80%" }}
             />
           ) : (
-            <span className="text-callout font-medium text-white/20 select-none">empty</span>
+            <span className="text-callout font-medium text-fg-faint select-none">empty</span>
           )}
         </div>
       </div>
@@ -108,7 +110,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           makes every cqi/cqw unit inside resolve against THIS card's width, so
           names/avatar/RF bar stay proportional from preview sliver to 4K column. */}
       <div
-        className="relative flex flex-col flex-1 overflow-hidden glass-card [container-type:inline-size]"
+        className="relative flex flex-col flex-1 overflow-hidden su-card [container-type:inline-size]"
         style={{ borderRadius: "7cqi" }}
       >
         {/* ── Photo (top) — fills all the space above the info card and stops at
@@ -126,7 +128,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           ) : (
             <div
               className="absolute inset-0"
-              style={{ backgroundColor: solidColor ?? "#1a1a2e" }}
+              style={{ backgroundColor: solidColor ?? "var(--kiosk-surface-1)" }}
             />
           )}
 
@@ -149,12 +151,12 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
                   <BrandLogo
                     logo={defaultAvatar}
                     monochrome
-                    className="text-white/80"
+                    className="text-fg"
                     style={{ width: "70%", height: "70%" }}
                   />
                 ) : (
                   <UserRoundIcon
-                    className="text-white/70"
+                    className="text-fg-muted"
                     style={{ width: "55%", height: "55%" }}
                     strokeWidth={1.75}
                   />
@@ -187,7 +189,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
         >
           <div>
             <span
-              className="font-semibold text-white leading-tight line-clamp-2 block"
+              className="font-semibold text-fg leading-tight line-clamp-2 block"
               // Stacked mode reserves two lines (2 × 1.25 leading-tight) so one- and
               // two-line names yield the SAME card height, keeping photo bottoms /
               // position / RF aligned across the row. Overlay mode sits at the bottom
@@ -196,31 +198,30 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             >
               {displayName ?? "—"}
             </span>
-            {!isStatic && slot.link.kind === "pco" && slot.link.matchBy === "position" && (
+            {!isStatic && slot.link.kind === "pco" && slot.link.matchBy === "position" && slot.link.positions.length > 0 && (
               <span
-                className="text-white/65 block leading-tight truncate mt-0.5"
+                className="text-fg-muted block leading-tight truncate mt-0.5"
                 style={{ fontSize: "clamp(0.72rem, 8.5cqi, 1.75rem)" }}
               >
-                {slot.link.teamPositionName}
+                {(slot.shownPositions ?? slot.link.positions.map((p) => p.name ?? "Any")).join(" / ")}
               </span>
             )}
           </div>
 
-          {/* Offline pill — a manually-assigned (offline) mic and/or IEM shows as
-              its own pill in place of the RF pill; only surfaces when an offline
-              device is set (Device channel → Offline). */}
-          {(slot.device.label !== null || slot.device.iemLabel !== null) && (
-            <OfflinePill micLabel={slot.device.label} iemLabel={slot.device.iemLabel} />
-          )}
-
-          {/* Status strip — live telemetry (RF / charge / IEM battery). Suppressed
-              when the mic itself is offline (the offline pill takes its place). */}
-          {slot.device.label === null &&
-            ((slot.device.status !== "none" && !slot.hideRf) ||
-              slot.device.charge !== null ||
-              slot.device.iemCharge !== null) && (
-              <StatusStrip device={slot.device} hideRf={slot.hideRf} />
-            )}
+          {/* One of two pills, never both. A live device shows the telemetry strip
+              — with any manual label standing in for the frequency inside it — and
+              a manually-assigned (offline) device shows the label-only pill in the
+              same spot. See slot-strip-mode.ts. */}
+          {(() => {
+            const mode = slotStripMode(slot.device, slot.hideRf);
+            if (mode === "pill") {
+              return <OfflinePill micLabel={slot.device.label} iemLabel={slot.device.iemLabel} />;
+            }
+            if (mode === "strip") {
+              return <StatusStrip device={slot.device} hideRf={slot.hideRf} />;
+            }
+            return null;
+          })()}
         </div>
       </div>
     </div>

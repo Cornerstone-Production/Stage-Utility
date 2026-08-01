@@ -5,7 +5,8 @@
 // + OSC targets, branding, display options). Secrets are DELIBERATELY excluded —
 // `secrets.bin`/`encryption.key` never leave the box, so a downloaded/saved
 // snapshot is safe to store; on recall the operator re-enters API keys/passwords.
-// History (`spl-history.json`) and caches are runtime data, not config, so excluded.
+// Recorded history (SPL/attendance/timeline, the automation log, baptism sessions) is
+// runtime data rather than config, so it is excluded — see RUNTIME_FILES.
 //
 // Applying a snapshot writes the files then the server restarts (handled by the
 // route) so every integration cleanly re-initializes from the restored config.
@@ -14,25 +15,66 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+
+import { APP_ROOT } from "./app-root.js";
 
 import { getUserDataPath } from "./app-paths.js";
+import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
+import { listImages, readImage, restoreImage } from "./image-files.js";
 
 // main/services/config-snapshot.ts → repo root is two levels up.
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const REPO_ROOT = APP_ROOT;
 
 /** Config stores included in a snapshot (allowlist — anything else is ignored on
- *  apply, which also blocks path traversal). NB: secrets.bin / encryption.key /
- *  spl-history.json / caches are intentionally NOT here. */
-const CONFIG_FILES = [
+ *  apply, which also blocks path traversal). NB: secrets.bin / encryption.key are
+ *  intentionally NOT here.
+ *
+ *  A store missing from this list is silently excluded from export AND import, so
+ *  the omission stays invisible until someone restores a backup and finds their
+ *  work gone. `config-snapshot.test.ts` scans main/services for every DataStore and
+ *  fails unless it appears here or in RUNTIME_FILES — adding a store without
+ *  classifying it breaks CI. */
+export const CONFIG_FILES = [
   "settings.json",
   "views.json",
   "slots.json",
   "layout-templates.json",
+  "layout-groups.json",
   "presets.json",
   "wireless-connections.json",
   "osc-targets.json",
+  "rosstalk-targets.json",
+  "rosstalk-settings.json",
+  "automation-rules.json",
+  "automation-settings.json",
+  "scriptview-layouts.json",
+  "scriptview-config.json",
+  "scriptview-roles.json",
+  "baptism-triggers.json",
+  "patch.json",
 ] as const;
+
+/** Stores deliberately excluded: recorded history and logs, which are observations
+ *  of what happened rather than configuration. Restoring them onto another install
+ *  would fabricate services that machine never ran. Listed explicitly so the drift
+ *  test can tell "considered and excluded" from "forgotten". */
+export const RUNTIME_FILES = [
+  // These three are now directories of per-service files (spl-history/, …); the
+  // legacy single-document names are kept here because that is what the drift scan
+  // matches on, and because an install that has not booted since the split still
+  // has them on disk.
+  "spl-history.json",
+  "attendance-history.json",
+  "service-timeline.json",
+  "automation-log.json",
+  // { current, sessions } — an in-progress session plus finished records.
+  // Restoring it onto another install would fabricate baptisms that never happened.
+  "baptism.json",
+] as const;
+
+/** Image directories carried in a snapshot. Allowlisted for the same reason
+ *  CONFIG_FILES is: it bounds what an applied bundle can write. */
+const IMAGE_DIRS = [BRANDING_IMAGE_DIR, "layout-images"] as const;
 
 const SNAPSHOT_KIND = "stage-utility-config";
 const SNAPSHOT_VERSION = 1;
@@ -47,6 +89,14 @@ export interface ConfigSnapshot {
   name?: string;
   /** filename → parsed JSON contents, for each present config store. */
   files: Record<string, unknown>;
+  /** `<dir>/<file>` → base64 bytes, for uploaded images.
+   *
+   *  Branding logos and custom-layout images are files, not JSON, so listing the
+   *  stores was no longer enough to describe the config. Logos in particular used
+   *  to be base64 inside settings.json and so rode along for free; moving them to
+   *  files would have quietly dropped them from every backup. Layout images were
+   *  never captured at all — this fixes that too. Absent on older snapshots. */
+  images?: Record<string, string>;
 }
 
 /** Lightweight metadata for listing saved snapshots (no file contents). */
@@ -81,6 +131,18 @@ class ConfigSnapshotService {
     }
   }
 
+  /** Every uploaded image, as `<dir>/<file>` → base64. */
+  private async readImages(): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    for (const dir of IMAGE_DIRS) {
+      for (const file of await listImages(dir)) {
+        const img = await readImage(dir, file);
+        if (img) out[`${dir}/${file}`] = img.data.toString("base64");
+      }
+    }
+    return out;
+  }
+
   /** Build a snapshot of the live config (secrets excluded). */
   async build(name?: string): Promise<ConfigSnapshot> {
     const files: Record<string, unknown> = {};
@@ -88,7 +150,9 @@ class ConfigSnapshotService {
       const v = await this.readFile(f);
       if (v !== undefined) files[f] = v;
     }
+    const images = await this.readImages();
     return {
+      ...(Object.keys(images).length ? { images } : {}),
       kind: SNAPSHOT_KIND,
       version: SNAPSHOT_VERSION,
       appVersion: pkgVersion(),
@@ -121,6 +185,16 @@ class ConfigSnapshotService {
       await fs.writeFile(dest, JSON.stringify(contents, null, 2), "utf8");
       applied.push(name);
     }
+    // Uploaded images, restored under their content-hashed names. The directory is
+    // allowlisted the same way the store filenames are, so a crafted bundle cannot
+    // write outside the image dirs.
+    for (const [ref, b64] of Object.entries(bundle.images ?? {})) {
+      const slash = ref.indexOf("/");
+      const dir = slash > 0 ? ref.slice(0, slash) : "";
+      const file = slash > 0 ? ref.slice(slash + 1) : "";
+      if (!(IMAGE_DIRS as readonly string[]).includes(dir)) continue;
+      if (await restoreImage(dir, file, Buffer.from(b64, "base64"))) applied.push(ref);
+    }
     return applied;
   }
 
@@ -137,7 +211,7 @@ class ConfigSnapshotService {
   }
 
   async list(): Promise<SnapshotMeta[]> {
-    let entries: string[] = [];
+    let entries: string[];
     try {
       entries = (await fs.readdir(this.snapshotsDir())).filter((f) => f.endsWith(".json"));
     } catch {

@@ -82,7 +82,7 @@ export function CaptionColorsPanel() {
                       iconOnly
                       onClick={() => save(label, null)}
                       aria-label={`Reset ${label} to automatic color`}
-                      title="Reset to automatic"
+                      tooltip="Reset to automatic"
                     >
                       <RotateCcwIcon className="size-3.5 text-gray-9" />
                     </Button>

@@ -50,6 +50,21 @@ When reporting, please include:
   (default `8788`). Run it on a trusted network and restrict the port with your firewall;
   do not expose it directly to the public internet.
 
+- **Cross-origin writes are blocked.** A firewall does not help against the browser case: any
+  web page an operator visits can issue requests to the appliance *from inside the LAN*, and
+  DNS rebinding makes that reachable from the public internet. State-changing requests
+  (`POST`/`PUT`/`PATCH`/`DELETE`) are therefore rejected with `403` unless they are
+  same-origin, which closes off a drive-by page triggering an update, a track switch, or a
+  restart mid-service.
+
+  Requests carrying **no** `Origin` header are allowed — that is every non-browser client
+  (the Companion module, `curl`, scripts), none of which a hostile web page can impersonate.
+  Origins are matched on hostname only, so the friendly port `80`, port `8788`, and the Vite
+  dev proxy on `3000` all interoperate. `GET` is unchanged and remains open to the LAN.
+
+  This is defence against the *browser*, not against a peer on the network: anyone who can
+  reach the port directly can still call the API. Firewall the port regardless.
+
 ## Supported versions
 
 Security fixes target the latest release on the `main` branch. Please update to the latest

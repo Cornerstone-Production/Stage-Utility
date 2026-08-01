@@ -1,0 +1,270 @@
+# Versioning and releases, driven by Conventional Commits.
+#
+# beta  -> a prerelease  X.Y.Z-beta.N   (tag + GitHub prerelease)
+# main  -> the release   X.Y.Z          (tag + GitHub release)
+#
+# The level comes from every commit since the last STABLE release, per
+# docs/contributing.md:
+#   feat            -> minor
+#   fix | perf      -> patch
+#   `!` or BREAKING -> major
+#   everything else -> no release
+#
+# Since the last stable, not since the last tag — so the base version moves only
+# when the pending release changes class. A feature opens X.Y+1.0-beta.1, and the
+# refinements that follow it ride the same base as -beta.2, -beta.3, … until main
+# ships X.Y+1.0. Only a breaking change raises the base again mid-line.
+#
+# TAG-DRIVEN ON PURPOSE. This never rewrites branch history — it commits the
+# version bump forward and tags it. Deployments track `beta` and a force-push
+# would break their in-app updater.
+
+name: Release
+
+on:
+  push:
+    branches: [beta, main]
+
+# Two pushes in quick succession must not both try to tag.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      # Consumed by the artifacts job below. `published` is only true when the tag
+      # actually reached the remote, so a run that stood down builds nothing.
+      version: ${{ steps.version.outputs.version }}
+      published: ${{ steps.push.outputs.pushed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Decide the version
+        id: version
+        run: |
+          set -euo pipefail
+          BRANCH="${GITHUB_REF_NAME}"
+          CURRENT=$(node -p "require('./package.json').version")
+
+          # Two anchors, because "should we release?" and "at what level?" are
+          # different questions over different ranges.
+          #
+          # LAST is the previous tag of any kind — what testers last saw. It
+          # answers whether anything new has landed, and scopes the notes.
+          #
+          # STABLE is the last non-prerelease. It answers the level, because a
+          # beta line accumulates: everything since the last stable release is
+          # still unreleased, so a fix landing after a feat must not drag the
+          # base forward a second time. Measuring the level from LAST instead is
+          # why -beta.N never once reached 2 across twenty prereleases.
+          LAST=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "")
+          STABLE=$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -v -- '-' | head -1 || true)
+          echo "last tag: ${LAST:-<none>}  last stable: ${STABLE:-<none>}"
+
+          level_of() { # highest level among commits in the given range
+            local range="$1" subjects bodies
+            subjects=$(git log --no-merges --format='%s' $range)
+            bodies=$(git log --no-merges --format='%b' $range)
+            if grep -qE '^(feat|fix|perf|refactor|docs|test|build|ci|chore)(\([^)]+\))?!:' <<<"$subjects" \
+               || grep -q 'BREAKING CHANGE' <<<"$bodies"; then echo major
+            elif grep -qE '^feat(\([^)]+\))?:' <<<"$subjects"; then echo minor
+            elif grep -qE '^(fix|perf)(\([^)]+\))?:' <<<"$subjects"; then echo patch
+            else echo none
+            fi
+          }
+
+          # Has anything releasable landed since the last tag? Without this, the
+          # level range below (which reaches back past old feats) would cut a new
+          # prerelease for a docs- or chore-only push.
+          NEWS=$(level_of "${LAST:+$LAST..HEAD}")
+          if [ "$NEWS" = none ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Nothing user-visible since ${LAST:-the beginning} — no release."
+            exit 0
+          fi
+
+          LEVEL=$(level_of "${STABLE:+$STABLE..HEAD}")
+          echo "new since $LAST: $NEWS   accumulated since ${STABLE:-<none>}: $LEVEL"
+
+          # Where the accumulated work since the last stable release lands.
+          FROM=${STABLE#v}; FROM=${FROM:-0.0.0}
+          IFS=. read -r MA MI PA <<<"$FROM"
+          case "$LEVEL" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch) PA=$((PA+1)) ;;
+          esac
+          TARGET="$MA.$MI.$PA"
+
+          # Never go backwards. The beta line can already sit above what this
+          # level implies — a long-running beta accumulates many features but
+          # is still only one minor ahead of the last stable release. Taking the
+          # higher of the two keeps the published version monotonic, which the
+          # in-app updater and anyone reading the tag list both depend on.
+          BASE=${CURRENT%%-*}
+          NEXT=$(printf '%s\n%s\n' "$TARGET" "$BASE" | sort -V | tail -1)
+          echo "target from ${STABLE:-<none>}: $TARGET   current base: $BASE   -> $NEXT"
+
+          if [ "$BRANCH" = beta ]; then
+            # Highest existing N for this base, not a count — a deleted tag must
+            # not hand the same number out twice.
+            N=$(git tag -l "v$NEXT-beta.*" | sed 's/.*-beta\.//' | sort -n | tail -1)
+            NEXT="$NEXT-beta.$(( ${N:-0} + 1 ))"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "next: $NEXT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "level=$LEVEL" >> "$GITHUB_OUTPUT"
+          echo "last=$LAST" >> "$GITHUB_OUTPUT"
+
+      - name: Verify before tagging
+        if: steps.version.outputs.skip == 'false'
+        run: npm ci --include=dev && npm run lint && npm run type-check && npm test && npm run build
+
+      - name: Bump, tag and push
+        id: push
+        if: steps.version.outputs.skip == 'false'
+        env:
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm version "$V" --no-git-tag-version
+          git add package.json package-lock.json
+          git commit -m "chore(release): v$V [skip ci]"
+          git tag "v$V"
+
+          # Push the branch fast-forward only, then the tag. Never a force.
+          #
+          # A rejection here means the branch moved while we were verifying —
+          # someone merged another PR during the several minutes of ci + build.
+          # That is not a failure: this run's version was computed against a HEAD
+          # that is now stale, and the queued run for the newer commit will
+          # release everything since the last tag, at the correct level for the
+          # combined set. So stand down rather than erroring (or force-pushing:
+          # deployments track beta and a rewrite breaks their in-app updater).
+          if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+            git push origin "v$V"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${GITHUB_REF_NAME} advanced during this run — skipping v$V. The run for the newer commit will release it."
+          fi
+
+      # Only when the tag actually reached the remote — a skipped push means this
+      # run stood down and there is no tag to publish against.
+      - name: Publish the release
+        if: steps.version.outputs.skip == 'false' && steps.push.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.version.outputs.version }}
+          LAST: ${{ steps.version.outputs.last }}
+          PRE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          NOTES=$(git log --no-merges --format='- %s' ${LAST:+$LAST..}HEAD~1 || true)
+          gh release create "v$V" \
+            --title "v$V" \
+            --notes "${NOTES:-No notable changes.}" \
+            $([ "$PRE" = true ] && echo --prerelease || echo --latest)
+
+  # Downloadable installs, attached to the release the job above just published.
+  #
+  # Every platform is built on this one runner because there is nothing to
+  # cross-compile: the server's only third-party dependencies are pure JavaScript
+  # and there are no native modules, so the per-platform part is which Node binary
+  # gets copied in. Five archives take about twenty seconds.
+  artifacts:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.release.outputs.version }} # the tagged tree, not the branch
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Build
+        run: |
+          npm ci --include=dev
+          npm run build
+
+      - name: Assemble the archives
+        run: scripts/build-artifacts.sh "${{ needs.release.outputs.version }}" dist
+
+      - name: Smoke-test the Linux archive
+        # An archive that unpacks is not the same as one that runs. This starts the
+        # real thing, using its own bundled runtime and nothing from the host, and
+        # fails the release if it does not serve.
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/smoke && tar -xzf dist/*-linux-x64.tar.gz -C /tmp/smoke
+          cd /tmp/smoke
+          test "$(./node -v)" != "" || { echo "bundled node will not run"; exit 1; }
+          STAGE_UTILITY_DATA=/tmp/smoke-data STAGE_UTILITY_PORT=8912 \
+            STAGE_UTILITY_FRIENDLY_PORT=0 ./node server.mjs > /tmp/smoke.log 2>&1 &
+          for i in $(seq 1 30); do
+            sleep 1
+            curl -fsS --max-time 3 http://localhost:8912/api/state >/dev/null 2>&1 && break
+          done
+          for p in / /api/state /api/integrations; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:8912$p")
+            echo "  $p -> $code"
+            [ "$code" = "200" ] || { echo "::error::$p returned $code"; tail -40 /tmp/smoke.log; exit 1; }
+          done
+          got=$(curl -s --max-time 5 http://localhost:8912/api/update/status | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          echo "  reported version: $got"
+          [ "$got" = "${{ needs.release.outputs.version }}" ] \
+            || { echo "::error::version reported as $got"; exit 1; }
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ needs.release.outputs.version }}" dist/* --clobber
+
+      - name: Update the Homebrew tap
+        # Skipped until STAGE_TAP_TOKEN exists, so this cannot fail a release
+        # before the tap is set up. GITHUB_TOKEN cannot push to another
+        # repository, so a PAT with contents:write on the tap is required.
+        if: env.TAP_TOKEN != ''
+        env:
+          TAP_TOKEN: ${{ secrets.STAGE_TAP_TOKEN }}
+          V: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/update-homebrew-formula.mjs "$V" --sums dist/SHA256SUMS
+          git clone --depth 1 \
+            "https://x-access-token:${TAP_TOKEN}@github.com/Cornerstone-Production/homebrew-stage-utility.git" tap
+          mkdir -p tap/Formula
+          cp packaging/homebrew/stage-utility.rb tap/Formula/stage-utility.rb
+          cd tap
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then echo "tap already at $V"; exit 0; fi
+          git commit -am "stage-utility $V"
+          git push
+

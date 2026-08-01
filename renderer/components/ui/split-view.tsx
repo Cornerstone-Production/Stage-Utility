@@ -6,6 +6,7 @@ import { useIsMobile } from "../../lib/use-media-query";
 import { DialogOverlay } from "./dialog";
 import { Button } from "./button";
 import { SidebarChromeProvider } from "./sidebar";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 interface SplitViewProps {
   sidebar: React.ReactNode;
@@ -45,9 +46,9 @@ export function SplitView({
   const railed = collapsed && !isMobile;
 
   // Never leave a drawer open when we transition back to desktop.
-  React.useEffect(() => {
+  useResyncOn([isMobile], () => {
     if (!isMobile) setDrawerOpen(false);
-  }, [isMobile]);
+  });
 
   const closeDrawer = React.useCallback(() => setDrawerOpen(false), []);
   const chrome = { collapsed: railed, isMobile, closeDrawer };
@@ -73,12 +74,12 @@ export function SplitView({
       <div className={cn("flex flex-col h-full w-full overflow-hidden", className)}>
         {/* Top bar — pads past the status bar so the hamburger stays reachable in
             standalone (added-to-homescreen) mode where the page extends to the top. */}
-        <div className="shrink-0 border-b border-gray-a4 bg-gray-2 pt-[env(safe-area-inset-top)]">
+        <div className="shrink-0 border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
           <div className="flex items-center gap-2 h-11 px-2">
             <Button variant="transparent" size="small" iconOnly aria-label="Open navigation" onClick={() => setDrawerOpen(true)}>
-              <MenuIcon className="size-5 text-gray-11" />
+              <MenuIcon className="size-5 text-fg-muted" />
             </Button>
-            {mobileTitle && <span className="text-[14px] font-semibold text-gray-12 truncate">{mobileTitle}</span>}
+            {mobileTitle && <span className="text-[14px] font-semibold text-fg truncate">{mobileTitle}</span>}
           </div>
         </div>
 
@@ -100,7 +101,7 @@ export function SplitView({
               aria-describedby={undefined}
               onTouchStart={onTouchStart}
               onTouchEnd={onSwipeEnd((dx) => { if (dx < 0) closeDrawer(); })}
-              className="fixed left-0 top-0 z-50 flex h-full w-64 max-w-[82vw] flex-col overflow-hidden bg-gray-2 pt-[env(safe-area-inset-top)] shadow-xl focus:outline-none"
+              className="fixed left-0 top-0 z-50 flex h-full w-64 max-w-[82vw] flex-col overflow-hidden bg-surface pt-[env(safe-area-inset-top)] shadow-xl focus:outline-none"
             >
               <DialogPrimitive.Title className="sr-only">Settings navigation</DialogPrimitive.Title>
               <SidebarChromeProvider value={chrome}>

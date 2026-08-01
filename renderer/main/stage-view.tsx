@@ -1,4 +1,5 @@
 import { Component, useEffect, useState } from "react";
+import { Tooltip } from "../components/ui/tooltip";
 import type { ReactNode, ErrorInfo } from "react";
 import { onNotification } from "../lib/api";
 import { SlotPanel } from "../components/slot-panel";
@@ -13,6 +14,7 @@ import { ScriptView } from "./script-view";
 import { SplRundownView } from "./spl-rundown-view";
 import { LayoutRenderer } from "./layout-renderer";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
+import { resolveDisplayId } from "./resolve-display";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
 // form (/display-1), falling back to the legacy ?display= query, then default.
@@ -135,7 +137,7 @@ function KioskTopBar({
         fontSize: "clamp(0.78rem, 1.16vh, 1.5rem)",
         height: "3.3em",
         background: "rgba(0,0,0,0.50)",
-        backdropFilter: "blur(20px) saturate(1.6)",
+        backdropFilter: "blur(20px)",
         borderBottom: "1px solid rgba(255,255,255,0.09)",
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 8px rgba(0,0,0,0.40)",
       } as React.CSSProperties}
@@ -144,25 +146,26 @@ function KioskTopBar({
           display name all share the same vertical center. */}
       <div className="shrink-0 flex items-center relative z-10" style={{ marginLeft: "1em", gap: "0.7em" }}>
         {locked ? (
-          <div className="flex items-center text-white/70" style={{ gap: "0.55em" }}>
+          <div className="flex items-center text-fg-muted" style={{ gap: "0.55em" }}>
             {brandInner}
           </div>
         ) : (
-          <a
-            href="/"
-            className="flex items-center text-white/70 rounded hover:opacity-80 transition-opacity"
-            style={{ gap: "0.55em" }}
-            title="Back to home"
-            aria-label="Back to home"
-          >
-            {brandInner}
-          </a>
+          <Tooltip label="Back to home">
+            <a
+              href="/"
+              className="flex items-center text-fg-muted rounded hover:opacity-80 transition-opacity"
+              style={{ gap: "0.55em" }}
+              aria-label="Back to home"
+            >
+              {brandInner}
+            </a>
+          </Tooltip>
         )}
         {displayName && (
           <>
             <span className="w-px bg-white/15 shrink-0" style={{ height: "1.3em" }} aria-hidden="true" />
             <span
-              className="font-medium text-white/40 select-none truncate"
+              className="font-medium text-fg-subtle select-none truncate"
               style={{ fontSize: "0.92em", letterSpacing: "0.02em" }}
             >
               {displayName}
@@ -173,7 +176,7 @@ function KioskTopBar({
 
       <div className="absolute inset-0 flex items-center justify-center px-32 pointer-events-none max-sm:hidden">
         <span
-          className="font-medium text-white/55 truncate select-none tracking-wide"
+          className="font-medium text-fg-subtle truncate select-none tracking-wide"
           style={{ fontSize: "1em", letterSpacing: "0.02em" }}
         >
           {contextLabel}
@@ -181,17 +184,18 @@ function KioskTopBar({
       </div>
 
       {showQr && remoteUrl && !locked && (
-        <a
-          href="/settings"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="shrink-0 ml-auto relative z-10 rounded transition-opacity hover:opacity-70"
-          style={{ marginRight: "1em" }}
-          title="Open settings"
-          aria-label="Open settings"
-        >
-          <QrHint url={remoteUrl} compact sizeCss="clamp(1.75rem, 2.6vh, 3.5rem)" />
-        </a>
+        <Tooltip label="Open settings in a new tab">
+          <a
+            href="/settings"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 ml-auto relative z-10 rounded transition-opacity hover:opacity-70"
+            style={{ marginRight: "1em" }}
+            aria-label="Open settings in a new tab"
+          >
+            <QrHint url={remoteUrl} compact sizeCss="clamp(1.75rem, 2.6vh, 3.5rem)" />
+          </a>
+        </Tooltip>
       )}
     </div>
   );
@@ -328,7 +332,13 @@ function usePreviewDraftSlots(previewViewId: string | null): Slot[] | null {
 
 export function StageView() {
   const { state, isLoading, error } = useStageState();
-  const displayId = getDisplayId();
+  const pathSlug = getDisplayId();
+  // A display may carry an optional friendly slug (/left-mic) alongside its
+  // permanent id (/display-1). Resolve to the canonical id ONCE, here — everything
+  // downstream (slotsByDisplay, resolvedByOutput, reload targeting) keys off the id,
+  // so a slug must never reach them. Falling back to the raw path keeps every
+  // pre-slug behavior intact, including the preview- prefix.
+  const displayId = resolveDisplayId(pathSlug, state?.outputs) ?? pathSlug;
   // Preview slug → view id (null on a real display). Computed before any early
   // return so the draft-bridge hook is called unconditionally.
   const previewViewId = displayId.startsWith("preview-") ? displayId.slice("preview-".length) : null;
@@ -355,6 +365,51 @@ export function StageView() {
     });
   }, [displayId]);
 
+  // Presence heartbeat: tell the server this screen is alive so Settings → Displays
+  // can show a Connected/Offline dot. Fast cadence near/during a PCO service, slow
+  // otherwise (no point pinging every 20s during a dead week); a sendBeacon on unload
+  // flips the dot offline at once, and the server TTL catches ungraceful deaths.
+  useEffect(() => {
+    if (displayId.startsWith("preview-")) return;
+    const url = "/api/displays/presence";
+    let near = false;
+    let timer: ReturnType<typeof setInterval>;
+    const ping = () => {
+      void fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outputId: displayId }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+    const schedule = () => {
+      clearInterval(timer);
+      timer = setInterval(ping, near ? 20_000 : 60_000);
+    };
+    ping();
+    schedule();
+    const offLive = onNotification("pco:live", (p: unknown) => {
+      const mode = (p as { mode?: string } | null)?.mode;
+      const n = mode === "item" || mode === "preservice";
+      if (n !== near) { near = n; schedule(); }
+    });
+    const leave = () => {
+      try {
+        navigator.sendBeacon?.(
+          url,
+          new Blob([JSON.stringify({ outputId: displayId, leaving: true })], { type: "application/json" }),
+        );
+      } catch { /* ignore */ }
+    };
+    window.addEventListener("pagehide", leave);
+    return () => {
+      clearInterval(timer);
+      offLive();
+      window.removeEventListener("pagehide", leave);
+      leave();
+    };
+  }, [displayId]);
+
   if (isLoading) return <KioskLoading />;
   if (error) return <KioskError message={error} />;
   if (!state) return <KioskError message="State is unavailable." />;
@@ -367,8 +422,10 @@ export function StageView() {
     : null;
 
   const multiDisplay = (state.outputs?.length ?? 0) > 1;
-  const currentDisplay = previewViewId ? null : (state.displays?.find((d) => d.id === displayId) ?? null);
-  const kind: ViewKind = previewView?.kind ?? currentDisplay?.kind ?? "slots";
+  // Name comes from the Output, kind from the View it is routed to — the same two
+  // places the `displays` shim was assembled from before it was dropped.
+  const currentDisplay = previewViewId ? null : (state.outputs?.find((o) => o.id === displayId) ?? null);
+  const kind: ViewKind = previewView?.kind ?? state.resolvedByOutput?.[displayId]?.kind ?? "slots";
   const displayName = previewView ? null : (multiDisplay ? (currentDisplay?.name ?? displayId) : null);
 
   // A real output (not a preview) with no View routed to it is unconfigured —
@@ -483,7 +540,10 @@ export function StageView() {
   // precedence so edits show live; null draft falls back to saved state.
   const displaySlots = previewViewId
     ? (previewDraftSlots ?? state.slotsByView?.[previewViewId] ?? [])
-    : (state.slotsByDisplay?.[displayId] ?? []);
+    // Derived rather than read from a second copy: slotsByDisplay held exactly
+    // slotsByView[thisOutput'sView], and shipping both put ~6 KB of duplicate slot
+    // data in every state broadcast to every display.
+    : (state.slotsByView?.[state.resolvedByOutput?.[displayId]?.viewId ?? ""] ?? []);
   const sortedSlots = [...displaySlots].sort((a, b) => a.order - b.order);
 
   // Physical alignment: when the View has a slotsLayout, columns are sized in

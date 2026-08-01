@@ -73,7 +73,7 @@ export function TranscriptFeed({
     >
       {visible.length === 0 && emptyText ? (
         <div className="m-auto">
-          <span className="text-title3 text-white/30">{emptyText}</span>
+          <span className="text-title3 text-fg-faint">{emptyText}</span>
         </div>
       ) : (
         // `mt-auto` bottom-anchors the lines when they don't fill the box, but
@@ -87,7 +87,7 @@ export function TranscriptFeed({
               style={{ color: lineColor(l, colorOverrides), opacity: l.isFinal ? 1 : 0.55 }}
             >
               {labels && (l.channelName || l.channel) && (
-                <span className="text-[0.5em] font-medium uppercase tracking-wider text-white/40 mr-[0.6em] align-middle">
+                <span className="text-[0.5em] font-medium uppercase tracking-wider text-fg-subtle mr-[0.6em] align-middle">
                   {l.channelName ?? l.channel}
                 </span>
               )}

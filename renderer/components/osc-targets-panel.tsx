@@ -1,4 +1,5 @@
 import { invoke, onNotification } from "../lib/api";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -58,7 +59,7 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
 
-  useEffect(() => setName(target.name), [target.name]);
+  useResyncOn([target.name], () => setName(target.name));
 
   async function patch(p: Record<string, unknown>) {
     try {
@@ -118,7 +119,7 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
           className="flex-1 min-w-0"
           aria-label="Host"
         />
-        <NumberInput value={port} onChange={setPort} onCommit={() => patchConfig({ port })} min={1} max={65535} className="w-24" aria-label="Port" />
+        <NumberInput value={port} onChange={setPort} onCommit={() => patchConfig({ port })} min={1} max={65535} className="w-44" aria-label="Port" />
       </div>
 
       <div className="flex items-center gap-2 pl-1">
@@ -130,7 +131,7 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
           className="flex-1 min-w-0"
           aria-label="Subscribe address"
         />
-        <NumberInput value={subSec} onChange={setSubSec} onCommit={() => patchConfig({ subscribeIntervalSec: subSec })} min={1} max={60} suffix="s" className="w-20" aria-label="Subscribe interval seconds" />
+        <NumberInput value={subSec} onChange={setSubSec} onCommit={() => patchConfig({ subscribeIntervalSec: subSec })} min={1} max={60} suffix="s" className="w-28" aria-label="Subscribe interval seconds" />
         <InfoHint>
           Optional. Some gear (e.g. Behringer/Midas) only sends feedback while it keeps hearing from a
           subscriber — enter the address it expects (like /xremote) and how often to send it. Leave blank
@@ -168,9 +169,9 @@ export function OscTargetsPanel({ className }: { className?: string }) {
 
   const targets = targetsQuery.data ?? [];
   const [portInput, setPortInput] = useState(9000);
-  useEffect(() => {
+  useResyncOn([portQuery.data], () => {
     if (portQuery.data) setPortInput(portQuery.data.port);
-  }, [portQuery.data]);
+  });
 
   useEffect(() => {
     return onNotification("osc:targets-changed", (p) => {

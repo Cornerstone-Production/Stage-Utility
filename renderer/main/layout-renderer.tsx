@@ -1,16 +1,23 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import { segmentElapsedMs } from "@main/services/baptism-elapsed";
+import { Tooltip } from "../components/ui/tooltip";
+import { advancePeakHold, type PeakHold } from "./peak-hold.js";
+import { useLatestRef } from "@renderer/lib/use-latest-ref";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { invoke } from "../lib/api";
 import { BrandLogo } from "../components/brand-logo";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
+import { useReaperState } from "./use-reaper-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance } from "./use-people-count-state";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessChannels } from "./use-wireless-channels";
 import { OscButton } from "./osc-button";
+import { RossTalkButton } from "./rosstalk-button";
 import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
@@ -33,7 +40,11 @@ export interface LayoutRenderCtx {
   transcript: TranscriptLineDTO[];
   spl: SplMetricsDTO | null;
   obs: ObsStatusDTO | null;
+  reaper: ReaperStatusDTO | null;
   osc: OscFeedbackDTO | null;
+  /** Global RossTalk simulate mode, so a button can show it is not really sending.
+   *  Defaults to TRUE when unknown — the direction that cannot cause a stray send. */
+  rosstalkSimulate?: boolean;
   /** Live SenSource Vea people counts — for the people-counter object. */
   peopleCount: PeopleCountDTO | null;
   /** Lowest in-room occupancy during the current/most-recent live service — the
@@ -184,8 +195,9 @@ function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const elRef = useRef<HTMLSpanElement | null>(null);
   const [scale, setScale] = useState(1);
-  const scaleRef = useRef(1);
-  scaleRef.current = scale;
+  // The ResizeObserver below is subscribed once per text/size change, so its
+  // callback would otherwise close over a stale `scale`.
+  const scaleRef = useLatestRef(scale);
   const basePx = parseFloat(String(ts.fontSize)) || 16;
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
@@ -206,7 +218,7 @@ function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign
     const ro = new ResizeObserver(measure);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [text, basePx, ts.fontWeight]);
+  }, [text, basePx, ts.fontWeight, scaleRef]);
   const justify = vAlign === "top" ? "flex-start" : vAlign === "bottom" ? "flex-end" : "center";
   const align = ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center";
   return (
@@ -241,38 +253,45 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       );
     }
     case "service-pacing": {
-      const scope = c.scope ?? "item";
-      const tol = 3; // within ±3s of plan reads "On time"
+      // Live cumulative drift: how far ahead/behind the whole schedule we are
+      // right NOW. actualElapsed (wall-clock since the service began) minus the
+      // planned position (sum of planned lengths of finished items + the live
+      // item's elapsed, capped at its planned length). Result carries slippage
+      // from earlier items and only grows "behind" once the current item runs
+      // past its plan. Negative = ahead (green), positive = behind (red).
+      const tol = 3; // within ±3s of plan reads "0:00"
+      const serverNow = ctx.now + ctx.skewMs;
       let deltaSec: number | null = null;
-      if (scope === "service") {
-        // Sum actual-vs-planned across completed items, plus the live item's delta.
-        let sum = 0;
-        let any = false;
-        for (const it of ctx.serviceTimeline?.items ?? []) {
-          if (it.actualDurationSec != null && it.plannedLengthSec != null) {
-            sum += it.actualDurationSec - it.plannedLengthSec;
-            any = true;
-          }
+      const tl = ctx.serviceTimeline;
+      if (tl) {
+        // Counted items only — exclude pre-service/buffer padding (a per-item
+        // override wins, else default to not-pre-service), mirroring History.
+        const items = tl.items.filter((it) => (typeof it.counted === "boolean" ? it.counted : !(it.preService ?? false)));
+        const startMs = items[0]?.startedAt ? Date.parse(items[0].startedAt) : NaN;
+        let plannedElapsed = 0;
+        let live: { startedAt: string; plannedLengthSec: number | null } | null = null;
+        for (const it of items) {
+          // Finished items add their planned length; an item PCO gave no planned
+          // time falls back to its actual so it reads neutral (not "behind").
+          if (it.endedAt != null) plannedElapsed += it.plannedLengthSec ?? it.actualDurationSec ?? 0;
+          else if (it.startedAt) live = it;
         }
-        const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
-        if (t && t.mode === "item" && !t.countUp) {
-          sum += -t.seconds; // remaining<0 ⇒ over ⇒ positive delta
-          any = true;
+        if (live && Number.isFinite(startMs)) {
+          const liveElapsed = Math.max(0, (serverNow - Date.parse(live.startedAt)) / 1000);
+          const livePlanned = live.plannedLengthSec ?? liveElapsed;
+          plannedElapsed += Math.min(liveElapsed, livePlanned);
+          deltaSec = (serverNow - startMs) / 1000 - plannedElapsed;
         }
-        deltaSec = any ? sum : null;
-      } else {
-        const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
-        if (t && t.mode === "item" && !t.countUp) deltaSec = -t.seconds;
       }
       if (deltaSec == null) return (c.hideWhenIdle ?? false) ? null : <span style={{ ...ts, opacity: 0.4 }}>—</span>;
-      const over = deltaSec > tol;
-      const under = deltaSec < -tol;
-      const color = over ? "var(--red-10)" : under ? "var(--green-10)" : null;
-      const text = !over && !under ? "On time" : fmtSignedDuration(deltaSec);
+      const behind = deltaSec > tol;
+      const ahead = deltaSec < -tol;
+      const color = behind ? c.behindColor ?? "var(--red-10)" : ahead ? c.aheadColor ?? "var(--green-10)" : null;
+      const text = !behind && !ahead ? "0:00" : fmtSignedDuration(deltaSec);
       return (
         <span style={color ? { ...ts, color } : ts}>
           {text}
-          {(c.showLabel ?? false) && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{scope === "service" ? " service" : " item"}</span>}
+          {(c.showLabel ?? false) && (behind || ahead) && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{behind ? " behind" : " ahead"}</span>}
         </span>
       );
     }
@@ -531,6 +550,38 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} ts={ts} H={ctx.H} />;
     case "baptism-timer":
       return <BaptismTimer state={ctx.baptism} config={c} ts={ts} now={ctx.now} />;
+    case "record-status": {
+      // "Is anything recording?" — one indicator regardless of which recorder the
+      // campus uses, so a layout survives a switch from OBS to REAPER unchanged.
+      const src = c.source ?? "any";
+      const obsRec = ctx.obs?.recording ?? false;
+      const reaRec = ctx.reaper?.recording ?? false;
+      const obsUp = ctx.obs?.connected ?? false;
+      const reaUp = ctx.reaper?.connected ?? false;
+      const active = src === "obs" ? obsRec : src === "reaper" ? reaRec : obsRec || reaRec;
+      // "Connected" for `any` means at least one recorder is reachable — otherwise a
+      // dim badge would claim "not recording" when nothing can actually report.
+      const connected = src === "obs" ? obsUp : src === "reaper" ? reaUp : obsUp || reaUp;
+
+      if (!active && (c.hideWhenIdle ?? false)) return null;
+
+      if (active) {
+        const label = c.recordingText ?? "RECORDING";
+        if (c.fillWhenRecording ?? true) {
+          return (
+            <div style={{ ...ts, color: "#ffffff", background: "var(--red-9)", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "inherit" }}>
+              {label}
+            </div>
+          );
+        }
+        return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
+      }
+      return (
+        <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
+          {connected ? (c.idleText ?? "STANDBY") : (c.offlineText ?? "NO RECORDER")}
+        </span>
+      );
+    }
     case "obs-status": {
       const obs = ctx.obs;
       const connected = obs?.connected ?? false;
@@ -566,6 +617,45 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         </span>
       );
     }
+    case "reaper-status": {
+      const reaper = ctx.reaper;
+      const connected = reaper?.connected ?? false;
+      const recording = reaper?.recording ?? false;
+      // Pure tally-light mode: nothing on screen unless REAPER is recording.
+      if (!recording && (c.hideWhenIdle ?? false)) return null;
+      if (recording) {
+        // Position ticks while recording — trim REAPER's ".mmm" to whole seconds.
+        const posRaw = reaper?.positionString ?? "";
+        const dot = posRaw.indexOf(".");
+        const pos = c.showPosition && posRaw ? ` ${dot === -1 ? posRaw : posRaw.slice(0, dot)}` : "";
+        const label = `${c.recordingText ?? "REAPER: Recording"}${pos}`;
+        // Fill the whole box red (a strong room cue) or just color the text.
+        if (c.fillWhenRecording ?? true) {
+          return (
+            <div style={{ ...ts, color: "#ffffff", background: "var(--red-9)", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "inherit" }}>
+              {label}
+            </div>
+          );
+        }
+        return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
+      }
+      // Idle: dim when offline so a neutral badge is never mistaken for "not
+      // recording" when REAPER is merely unreachable.
+      return (
+        <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
+          {connected ? (c.idleText ?? "REAPER: Standby") : (c.offlineText ?? "REAPER: Offline")}
+        </span>
+      );
+    }
+    case "rosstalk-button":
+      return (
+        <RossTalkButton
+          config={c}
+          interactive={ctx.interactive ?? false}
+          simulate={ctx.rosstalkSimulate ?? true}
+          ts={ts}
+        />
+      );
     case "osc-button":
       return (
         <OscButton
@@ -621,13 +711,21 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
             {show.rf && d.rfBars != null && <span>{rfBarsGlyph(d.rfBars)}</span>}
             {show.battery && d.battery != null && <span style={{ color: batteryColor(d.battery) }}>{d.battery}%</span>}
             {show.frequency && d.frequencyLabel && <span style={{ opacity: 0.7 }}>{d.frequencyLabel}</span>}
-            {show.audio && d.audioLevel != null && <span style={{ opacity: 0.7 }}>{Math.round(d.audioLevel)} dB</span>}
+            {show.audio && d.audioLevel != null && <span style={{ opacity: 0.7 }}>{Math.round(d.audioLevel * 100)}%</span>}
           </span>
         </div>
       );
     }
-    default:
+    default: {
+      // Exhaustiveness guard: every LayoutObjectType must have a case above. Add
+      // a type to the registry without a renderer here and this assignment stops
+      // compiling, instead of the object silently rendering as an empty box on a
+      // stage monitor. (Runtime still returns null — an older layout may hold a
+      // type this build has since dropped.)
+      const _never: never = c;
+      void _never;
       return null;
+    }
   }
 }
 
@@ -644,14 +742,16 @@ function SplMeterValue({
   ts: CSSProperties;
 }) {
   const r = resolveSplValue(spl, config.meterId, config.metricKey);
-  const peak = useRef<number | null>(null);
-  useEffect(() => {
-    peak.current = null; // reset the hold when the source or mode changes
-  }, [config.meterId, config.metricKey, config.peakHold]);
-  if (config.peakHold && r) {
-    peak.current = peak.current == null ? r.value : Math.max(peak.current, r.value);
-  }
-  const shown = config.peakHold ? peak.current : (r?.value ?? null);
+  // Peak hold is a running max over samples, so it has to survive renders — but it
+  // must also rise on the very render a louder sample lands, or the meter reads a
+  // frame behind the room. Advanced during render for that reason; see peak-hold.ts
+  // for why the step is written to be idempotent.
+  const holdKey = `${config.meterId ?? ""}|${config.metricKey ?? ""}|${config.peakHold ? "1" : "0"}`;
+  const [hold, setHold] = useState<PeakHold>({ key: holdKey, peak: null });
+  const nextHold = advancePeakHold(hold, holdKey, r?.value ?? null, !!config.peakHold);
+  if (nextHold !== hold) setHold(nextHold);
+
+  const shown = config.peakHold ? nextHold.peak : (r?.value ?? null);
   if (shown == null) return <span style={{ ...ts, opacity: 0.4 }}>— dB</span>;
   const color = splThresholdColor(shown, config.thresholds);
   return (
@@ -687,9 +787,12 @@ function niceStepInt(target: number): number {
 /** Fetch a recorded service's per-service curve + PCO markers for the people-graph
  *  "recorded" mode. serviceKey null → most recent finished service. */
 function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefined) {
-  const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[] } | null>(null);
+  const [data, setData] = useState<{ points: PeopleHistoryPoint[]; markers: { t: string; label: string }[]; serviceStartedAt: string | null; serviceEndedAt: string | null } | null>(null);
+  useResyncOn([enabled], () => {
+    if (!enabled) setData(null);
+  });
   useEffect(() => {
-    if (!enabled) { setData(null); return; }
+    if (!enabled) return;
     let cancelled = false;
     void (async () => {
       let key = serviceKey ?? null;
@@ -697,7 +800,7 @@ function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefine
         const list = await invoke<ServiceAttendance[]>("attendance:listHistory").catch(() => [] as ServiceAttendance[]);
         key = (list ?? []).filter((s) => s.endedAt).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0]?.serviceKey ?? null;
       }
-      if (!key) { if (!cancelled) setData({ points: [], markers: [] }); return; }
+      if (!key) { if (!cancelled) setData({ points: [], markers: [], serviceStartedAt: null, serviceEndedAt: null }); return; }
       const [att, tl] = await Promise.all([
         invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: key }).catch(() => null),
         invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: key }).catch(() => null),
@@ -706,7 +809,7 @@ function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefine
       const base = att?.samples?.[0]?.attendance ?? 0; // per-service anchor
       const points: PeopleHistoryPoint[] = (att?.samples ?? []).map((s) => ({ t: s.t, attendance: Math.max(0, s.attendance - base), occupancy: s.occupancy }));
       const markers = (tl?.items ?? []).filter((it) => it.title && it.startedAt).map((it) => ({ t: it.startedAt, label: it.title }));
-      setData({ points, markers });
+      setData({ points, markers, serviceStartedAt: att?.serviceStartedAt ?? null, serviceEndedAt: att?.endedAt ?? null });
     })();
     return () => { cancelled = true; };
   }, [enabled, serviceKey]);
@@ -718,7 +821,7 @@ function useRecordedGraph(enabled: boolean, serviceKey: string | null | undefine
 function PeopleGraphObject({ ctx, config, ts }: { ctx: LayoutRenderCtx; config: Extract<LayoutObjectConfig, { type: "people-graph" }>; ts: CSSProperties }) {
   const cfgSource = config.source ?? "live";
   const [mode, setMode] = useState<"live" | "recorded">(cfgSource);
-  useEffect(() => setMode(cfgSource), [cfgSource]);
+  useResyncOn([cfgSource], () => setMode(cfgSource));
   const recorded = useRecordedGraph(mode === "recorded", config.recordedServiceKey);
   const liveMarkers = (ctx.serviceTimeline?.items ?? []).filter((it) => it.title && it.startedAt).map((it) => ({ t: it.startedAt, label: it.title }));
   const points = mode === "recorded" ? (recorded?.points ?? []) : (ctx.peopleCount?.history ?? []);
@@ -732,6 +835,8 @@ function PeopleGraphObject({ ctx, config, ts }: { ctx: LayoutRenderCtx; config: 
       showTooltip={config.showTooltip !== false}
       ts={ts}
       H={ctx.H}
+      serviceStartedAt={mode === "recorded" ? (recorded?.serviceStartedAt ?? null) : null}
+      serviceEndedAt={mode === "recorded" ? (recorded?.serviceEndedAt ?? null) : null}
       toggle={config.kioskToggle && ctx.interactive ? { mode, onToggle: () => setMode((m) => (m === "live" ? "recorded" : "live")) } : null}
     />
   );
@@ -746,6 +851,8 @@ function PeopleGraph({
   toggle = null,
   ts,
   H,
+  serviceStartedAt = null,
+  serviceEndedAt = null,
 }: {
   history: PeopleHistoryPoint[];
   metric: "attendance" | "occupancy";
@@ -755,6 +862,9 @@ function PeopleGraph({
   toggle?: { mode: "live" | "recorded"; onToggle: () => void } | null;
   ts: CSSProperties;
   H: number;
+  /** Service-proper window (recorded mode) — dims the arrival ramp / emptying-room taper. */
+  serviceStartedAt?: string | null;
+  serviceEndedAt?: string | null;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -816,8 +926,25 @@ function PeopleGraph({
     .filter((m) => Number.isFinite(m.ms) && m.ms >= t0 - 1000 && m.ms <= tN + 1000)
     .map((m) => { const idx = nearestIdx(m.ms); return { ...m, idx, x: px(idx) }; });
   // Autosize marker labels: full size up to ~6 markers, then scale down (floored)
-  // so a busy plan's rotated times stay legible without overlapping.
+  // so a busy plan's rotated names stay legible without overlapping.
   const markerFont = Math.max(6, fontPx * 0.85 * (markerPts.length > 6 ? 6 / markerPts.length : 1));
+
+  // Service-proper band (recorded mode): dim the arrival ramp / emptying-room taper
+  // outside it so the service itself reads as the main event.
+  const bandX0 = serviceStartedAt && Number.isFinite(Date.parse(serviceStartedAt)) ? px(nearestIdx(Date.parse(serviceStartedAt))) : null;
+  const bandX1 = serviceEndedAt && Number.isFinite(Date.parse(serviceEndedAt)) ? px(nearestIdx(Date.parse(serviceEndedAt))) : null;
+  const hasPre = bandX0 != null && bandX0 > PADL + 0.5;
+  const hasPost = bandX1 != null && bandX1 < 100 - PADR - 0.5;
+  // PCO item times for the x-axis — thinned left→right so close items don't crowd
+  // (the item NAME stays on the vertical marker line; only the time drops to the axis).
+  const axisMarkers: { x: number; t: string }[] = [];
+  let lastAxisX = -Infinity;
+  for (const m of [...markerPts].sort((a, b) => a.x - b.x)) {
+    if (m.x - lastAxisX >= 8 && m.x > PADL + 4 && m.x < 100 - PADR - 4) {
+      axisMarkers.push({ x: m.x, t: m.t });
+      lastAxisX = m.x;
+    }
+  }
 
   // Hover: map pointer X (over the full-width box) back to the nearest sample index.
   function onMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -848,6 +975,11 @@ function PeopleGraph({
         ))}
         <polygon points={`${PADL},${100 - PADB} ${line} ${100 - PADR},${100 - PADB}`} fill={stroke} fillOpacity={0.13} />
         <polyline points={line} fill="none" stroke={stroke} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+        {/* dim the pre-service ramp / post-service taper outside the service band */}
+        {hasPre && <rect x={PADL} y={PADT} width={(bandX0 as number) - PADL} height={100 - PADT - PADB} fill="rgba(0,0,0,0.32)" />}
+        {hasPost && <rect x={bandX1 as number} y={PADT} width={100 - PADR - (bandX1 as number)} height={100 - PADT - PADB} fill="rgba(0,0,0,0.32)" />}
+        {hasPre && <line x1={bandX0 as number} y1={PADT} x2={bandX0 as number} y2={100 - PADB} stroke={stroke} strokeOpacity={0.5} strokeWidth={0.6} strokeDasharray="1.5 1.5" vectorEffect="non-scaling-stroke" />}
+        {hasPost && <line x1={bandX1 as number} y1={PADT} x2={bandX1 as number} y2={100 - PADB} stroke={stroke} strokeOpacity={0.5} strokeWidth={0.6} strokeDasharray="1.5 1.5" vectorEffect="non-scaling-stroke" />}
         {/* PCO plan-item markers */}
         {markerPts.map((m, i) => (
           <line key={i} x1={m.x} y1={PADT} x2={m.x} y2={100 - PADB} stroke={stroke} strokeOpacity={0.4} strokeWidth={0.75} strokeDasharray="2 2" vectorEffect="non-scaling-stroke" />
@@ -864,9 +996,21 @@ function PeopleGraph({
       <span style={labelStyle(yMidPct)}>{yLabel(mid)}</span>
       <span style={labelStyle(yBot)}>{yLabel(lo)}</span>
 
-      {/* x-axis time labels */}
+      {/* x-axis time labels — endpoints + thinned PCO item times */}
       <span style={{ position: "absolute", left: `${PADL}%`, bottom: 0, color: stroke, opacity: 0.7, fontSize: `${fontPx}px`, lineHeight: 1 }}>{hhmm(history[0].t)}</span>
       <span style={{ position: "absolute", right: `${PADR}%`, bottom: 0, color: stroke, opacity: 0.7, fontSize: `${fontPx}px`, lineHeight: 1 }}>{hhmm(history[n - 1].t)}</span>
+      {axisMarkers.map((m, i) => (
+        <span
+          key={`axt-${i}`}
+          style={{
+            position: "absolute", left: `${m.x}%`, bottom: 0, transform: "translateX(-50%)",
+            color: stroke, opacity: 0.55, fontSize: `${markerFont}px`, lineHeight: 1,
+            whiteSpace: "nowrap", pointerEvents: "none",
+          }}
+        >
+          {hhmm(m.t)}
+        </span>
+      ))}
 
       {/* current value readout (top-right; drops below the toggle when both show) */}
       {config.showLabel && (
@@ -875,7 +1019,7 @@ function PeopleGraph({
         </span>
       )}
 
-      {/* PCO marker time labels — rotated vertical so they don't crowd, and
+      {/* PCO marker labels — the item NAME rotated on its line (time is on the x-axis),
           shrunk as markers get dense (denser plan → smaller type, floored). */}
       {markerPts.map((m, i) => (
         <span
@@ -885,9 +1029,10 @@ function PeopleGraph({
             transform: "translate(-50%, -50%) rotate(-90deg)", transformOrigin: "center",
             color: stroke, opacity: 0.7, fontSize: `${markerFont}px`, lineHeight: 1,
             fontWeight: 600, whiteSpace: "nowrap", pointerEvents: "none",
+            maxWidth: `${0.32 * H}px`, overflow: "hidden", textOverflow: "ellipsis",
           }}
         >
-          {hhmm(m.t)}
+          {m.label}
         </span>
       ))}
 
@@ -927,28 +1072,28 @@ function GraphToggle({ mode, onToggle, stroke, H }: { mode: "live" | "recorded";
   const dot = `${Math.max(4, 0.016 * H)}px`;
   const pad = `${0.006 * H}px`;
   return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onToggle(); }}
-      onPointerEnter={() => setHot(true)}
-      onPointerLeave={() => { setHot(false); setDown(false); }}
-      onPointerDown={() => setDown(true)}
-      onPointerUp={() => setDown(false)}
-      title={mode === "live" ? "Showing live — tap for the last recorded service" : "Showing recorded service — tap for live"}
-      style={{
-        position: "absolute", top: `${0.008 * H}px`, right: `${0.008 * H}px`,
-        display: "inline-flex", alignItems: "center", gap: `${0.006 * H}px`,
-        // Faint surface only on hover/press — a touch affordance that stays invisible at rest.
-        background: down ? "rgba(255,255,255,0.16)" : hot ? "rgba(255,255,255,0.08)" : "transparent",
-        color: stroke, border: "none", borderRadius: `${0.02 * H}px`,
-        padding: `${pad} ${0.01 * H}px`, margin: `-${pad} -${0.004 * H}px`,
-        fontSize: `${Math.max(7, 0.03 * H)}px`, fontWeight: 700, letterSpacing: "0.06em",
-        lineHeight: 1, cursor: "pointer", opacity: hot ? 1 : 0.8, zIndex: 3,
-        transition: "background 120ms ease, opacity 120ms ease",
-      }}
-    >
-      <span style={{ width: dot, height: dot, borderRadius: "50%", background: mode === "live" ? "#22c55e" : "#f59e0b", flex: "0 0 auto" }} />
-      {mode === "live" ? "LIVE" : "REC"}
-    </button>
+    <Tooltip label={mode === "live" ? "Showing live — tap for the last recorded service" : "Showing recorded service — tap for live"}>
+      <button
+        onClick={(e) => { e.stopPropagation(); onToggle(); }}
+        onPointerEnter={() => setHot(true)}
+        onPointerLeave={() => { setHot(false); setDown(false); }}
+        onPointerDown={() => setDown(true)}
+        onPointerUp={() => setDown(false)}
+        style={{
+          position: "absolute", top: `${0.008 * H}px`, right: `${0.008 * H}px`,
+          display: "inline-flex", alignItems: "center", gap: `${0.006 * H}px`,
+          // Faint surface only on hover/press — a touch affordance that stays invisible at rest.
+          background: down ? "rgba(255,255,255,0.16)" : hot ? "rgba(255,255,255,0.08)" : "transparent",
+          color: stroke, border: "none", borderRadius: `${0.02 * H}px`,
+          padding: `${pad} ${0.01 * H}px`, margin: `-${pad} -${0.004 * H}px`,
+          fontSize: `${Math.max(7, 0.03 * H)}px`, fontWeight: 700, letterSpacing: "0.06em",
+          lineHeight: 1, cursor: "pointer", opacity: hot ? 1 : 0.8, zIndex: 3,
+          transition: "background 120ms ease, opacity 120ms ease",
+        }} aria-label={mode === "live" ? "Showing live — tap for the last recorded service" : "Showing recorded service — tap for live"}>
+        <span style={{ width: dot, height: dot, borderRadius: "50%", background: mode === "live" ? "var(--su-live-9)" : "var(--su-warn-9)", flex: "0 0 auto" }} />
+        {mode === "live" ? "LIVE" : "REC"}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -1057,8 +1202,10 @@ function BaptismTimer({
   let value = "—";
   let fallback = "";
   if (field === "live") {
-    if (state && state.phase !== "idle" && state.segmentStartedAt) {
-      value = fmtClock(Math.max(0, now - Date.parse(state.segmentStartedAt)));
+    if (state && state.phase !== "idle") {
+      // Same calculation as the operator page, so a paused timer on a display shows
+      // the held value rather than freezing at whatever it last happened to render.
+      value = fmtClock(segmentElapsedMs(state, now));
       if (state.phase === "testimony") fallback = state.mode === "grouped" ? `Testimony ${state.personNumber}` : `Person ${state.personNumber} · testimony`;
       else fallback = state.mode === "grouped" ? `Baptism ${state.baptismIndex + 1}` : `Person ${state.personNumber} · baptism`;
     } else {
@@ -1341,10 +1488,15 @@ function PlanAttachment({
   // Stable dep for the options object (crop is nested).
   const optsKey = JSON.stringify(opts);
 
-  useEffect(() => {
-    let cancelled = false;
+  // Reset to the loading placeholder in the same render the target changes, so a
+  // stale image never lingers over the new one.
+  useResyncOn([match, optsKey, planId], () => {
     setSrc(null);
     setStatus("loading");
+  });
+
+  useEffect(() => {
+    let cancelled = false;
     void (async () => {
       try {
         const result = await loadProcessedAttachment(match, JSON.parse(optsKey) as AttachmentProcessOpts, planId);
@@ -1420,8 +1572,7 @@ function ServiceOrderObject({
   // back-derived from the live scrollHeight so it converges in a pass or two.
   const MIN_FIT = 0.5;
   const [fitScale, setFitScale] = useState(1);
-  const fitRef = useRef(1);
-  fitRef.current = fitScale;
+  const fitRef = useLatestRef(fitScale);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -1442,7 +1593,7 @@ function ServiceOrderObject({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [autoFit, contentKey, H, fitScale]);
+  }, [autoFit, contentKey, H, fitScale, fitRef]);
 
   // Auto-hide scrollbar: only show the thin bar while actively scrolling.
   const [scrolling, setScrolling] = useState(false);
@@ -1514,7 +1665,7 @@ function ServiceOrderObject({
               borderRadius: `${0.008 * H}px`,
               padding: `${base * 0.1}px ${base * 0.3}px`,
               background: isLive ? "rgba(45,212,150,0.16)" : undefined,
-              borderLeft: isLive ? `${0.004 * H}px solid var(--green-9, #2dd496)` : `${0.004 * H}px solid transparent`,
+              borderLeft: isLive ? `${0.004 * H}px solid var(--su-live-9)` : `${0.004 * H}px solid transparent`,
               borderTop: divider ? "1px solid rgba(255,255,255,0.07)" : undefined,
             }}
           >
@@ -1574,6 +1725,7 @@ export function useLayoutData(layout?: LayoutDTO) {
   const transcript = useTranscript(want(["transcript-strip"]));
   const spl = useSplState(want(["spl-meter"]));
   const obs = useObsState(want(["obs-status"]));
+  const reaper = useReaperState(want(["reaper-status"]));
   const osc = useOscState(want(["osc-button"]));
   const peopleCount = usePeopleCountState(peopleWanted);
   const serviceLow = useLiveServiceLow(peopleWanted);
@@ -1591,11 +1743,11 @@ export function useLayoutData(layout?: LayoutDTO) {
     return () => clearInterval(t);
   }, []);
   const [skewMs, setSkewMs] = useState(0);
-  useEffect(() => {
+  useResyncOn([pcoLive?.serverNow], () => {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  }, [pcoLive?.serverNow]);
+  });
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -1603,7 +1755,7 @@ export function useLayoutData(layout?: LayoutDTO) {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -1647,7 +1799,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // with the window instead of the design canvas.
   const fill = canvas.fit === "fill";
   const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

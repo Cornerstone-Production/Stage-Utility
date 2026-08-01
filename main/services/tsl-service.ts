@@ -15,9 +15,9 @@
 import * as net from "node:net";
 
 import type { PeopleCountDTO } from "../types/stage.js";
+import { ConnectionLifecycle } from "./integration-base.js";
 import { sensourceService } from "./sensource-service.js";
 
-type ConnState = "connected" | "error" | "disconnected";
 
 const RECONNECT_BASE_MS = 3000;
 const RECONNECT_MAX_MS = 30000;
@@ -72,36 +72,31 @@ function labelFor(feed: TslFeed, value: number | null): string {
   return `${feed.prefix ?? ""}${n}${feed.suffix ?? ""}`;
 }
 
-class TslService {
+class TslService extends ConnectionLifecycle {
   private host: string | null = null;
   private port: number | null = null;
   private feeds: TslFeed[] = [];
 
-  private running = false;
   private socket: net.Socket | null = null;
   private connected = false;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectAttempt = 0;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  private backoffAttempt = 0;
 
-  private onConn: ((state: ConnState, message: string | null) => void) | null = null;
-  private reported: ConnState | null = null;
-
-  setConnectionListener(cb: (state: ConnState, message: string | null) => void): void {
-    this.onConn = cb;
+  constructor() {
+    // No SSE channel: TSL is an OUTPUT (tally to a Ross switcher), so nothing
+    // subscribes to it. That is also why scheduleReconnect is overridden below.
+    super("tsl", "tsl:status");
   }
 
-  private report(state: ConnState, message: string | null): void {
-    if (this.reported === state) return;
-    this.reported = state;
-    this.onConn?.(state, message);
+  protected get configured(): boolean {
+    return !!this.host && !!this.port;
   }
 
   configure(host: string, port: number, feeds: TslFeed[]): void {
     this.host = host?.trim() || null;
     this.port = port > 0 ? Math.floor(port) : null;
     this.feeds = feeds;
-    this.reported = null;
+    this.resetReport();
     this.restart();
   }
 
@@ -111,12 +106,11 @@ class TslService {
     if (this.connected) this.sendAll(sensourceService.getLatest());
   }
 
-  start(): void {
-    if (this.running || !this.host || !this.port) return;
-    this.running = true;
-    this.reconnectAttempt = 0;
+  override start(): void {
+    if (this.running || !this.configured) return;
+    this.backoffAttempt = 0;
     console.log(`[tsl] connecting ${this.host}:${this.port}`);
-    this.connect();
+    super.start();
     if (!this.refreshTimer) {
       this.refreshTimer = setInterval(() => {
         if (this.connected) this.sendAll(sensourceService.getLatest());
@@ -124,9 +118,7 @@ class TslService {
     }
   }
 
-  stop(): void {
-    this.running = false;
-    this.clearReconnect();
+  protected override teardown(): void {
     if (this.refreshTimer) {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
@@ -136,10 +128,6 @@ class TslService {
     this.connected = false;
   }
 
-  private restart(): void {
-    this.stop();
-    if (this.host && this.port) this.start();
-  }
 
   /** Called by the broadcaster on every people:count update. */
   onPeopleCount(people: PeopleCountDTO): void {
@@ -167,13 +155,13 @@ class TslService {
     });
   }
 
-  private connect(): void {
+  protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
     const sock = net.connect({ host: this.host, port: this.port });
     this.socket = sock;
     sock.on("connect", () => {
       this.connected = true;
-      this.reconnectAttempt = 0;
+      this.backoffAttempt = 0;
       this.report("connected", `Sending to ${this.host}:${this.port}`);
       this.sendAll(sensourceService.getLatest());
     });
@@ -200,19 +188,17 @@ class TslService {
     }
   }
 
-  private scheduleReconnect(): void {
+  /**
+   * Keeps TSL's own fixed 30s ceiling instead of the base's window-aware cap.
+   * Nothing subscribes to a tally output, so the shared cap would read it as
+   * "dormant" and stretch retries to 30 minutes — meaning a switcher powered on
+   * mid-week could sit dark for half an hour. Deliberate divergence.
+   */
+  protected override scheduleReconnect(): void {
     if (!this.running) return;
-    this.clearReconnect();
-    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** this.reconnectAttempt);
-    this.reconnectAttempt++;
-    this.reconnectTimer = setTimeout(() => this.connect(), delay);
-  }
-
-  private clearReconnect(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** this.backoffAttempt);
+    this.backoffAttempt++;
+    this.scheduleIn(delay);
   }
 }
 

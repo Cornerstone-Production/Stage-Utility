@@ -27,7 +27,7 @@ export function EmptyState({
       )}
     >
       {icon && <div className="text-gray-8 [&_svg]:size-6">{icon}</div>}
-      <div className="text-callout font-medium text-gray-11">{title}</div>
+      <div className="text-callout font-medium text-fg-muted">{title}</div>
       {hint && <div className="text-caption2 text-gray-9 max-w-xs leading-snug">{hint}</div>}
       {action && <div className="mt-1">{action}</div>}
     </div>

@@ -1,4 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { Tooltip } from "../../components/ui/tooltip";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { ChevronLeftIcon, ChevronRightIcon, Trash2Icon, Volume2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
@@ -28,8 +30,12 @@ function fmtDay(day: string): string {
 function metricStat(item: SplItemHistory, key: string, record: ServiceSplHistory): SplMetricStat | null {
   const m = item.metrics?.[key];
   if (m) return m;
-  // Legacy records stored a single metric in maxSpl/avgSpl under record.metricKey.
-  if (record.metricKey === key) return { max: item.maxSpl, avg: item.avgSpl, count: item.sampleCount };
+  // Legacy records stored a single metric under record.metricKey. Their stored mean
+  // was an arithmetic average of decibels, which understates a dynamic item by up to
+  // 15 dB, so it is deliberately not carried over as a level — those rows show no Leq.
+  if (record.metricKey === key) {
+    return { max: item.maxSpl, avg: null, leq: item.leqSpl ?? null, count: item.sampleCount };
+  }
   return null;
 }
 
@@ -79,11 +85,12 @@ export function SplHistorySection() {
       .catch(() => setVisible([]));
   }, []);
 
+  useResyncOn([selectedKey], () => {
+    if (!selectedKey) setDetail(null);
+  });
+
   useEffect(() => {
-    if (!selectedKey) {
-      setDetail(null);
-      return;
-    }
+    if (!selectedKey) return;
     let cancelled = false;
     invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: selectedKey })
       .then((d) => !cancelled && setDetail(d))
@@ -115,9 +122,9 @@ export function SplHistorySection() {
     return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
   }, [list]);
 
-  useEffect(() => {
+  useResyncOn([days, day], () => {
     if (day == null && days.length > 0) setDay(days[0]);
-  }, [days, day]);
+  });
 
   const dayServices = useMemo(
     () => (list ?? []).filter((s) => s.serviceDate === day),
@@ -179,7 +186,7 @@ export function SplHistorySection() {
     return (
       <div className="flex flex-col gap-4">
         <button
-          className="self-start text-caption1 text-blue-11 hover:underline"
+          className="self-start text-caption1 text-accent hover:underline"
           onClick={() => setSelectedKey(null)}
         >
           ← All services
@@ -211,7 +218,7 @@ export function SplHistorySection() {
                 {shownMetrics.map((k) => (
                   <Fragment key={k}>
                     <th className="py-1 px-3 font-normal text-right w-20">Max</th>
-                    <th className="py-1 px-3 font-normal text-right w-20">Avg</th>
+                    <th className="py-1 px-3 font-normal text-right w-20">Leq</th>
                   </Fragment>
                 ))}
               </tr>
@@ -223,7 +230,7 @@ export function SplHistorySection() {
                   {shownMetrics.map((k) => {
                     const st = metricStat(it, k, detail);
                     return (
-                      <FragmentCells key={k} max={st?.max ?? null} avg={st?.avg ?? null} />
+                      <FragmentCells key={k} max={st?.max ?? null} leq={st?.leq ?? null} />
                     );
                   })}
                 </tr>
@@ -291,14 +298,15 @@ export function SplHistorySection() {
                 })}
               </span>
             </button>
-            <button
-              className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
-              onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
-              aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
-              title="Delete recording"
-            >
-              <Trash2Icon className="size-4" />
-            </button>
+            <Tooltip label="Delete recording">
+              <button
+                className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
+                aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
+              >
+                <Trash2Icon className="size-4" />
+              </button>
+            </Tooltip>
           </div>
         ))}
         {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
@@ -307,7 +315,7 @@ export function SplHistorySection() {
   );
 }
 
-/** The full per-item SPL detail (metric picker + Max/Avg-per-metric table) for one
+/** The full per-item SPL detail (metric picker + Max/Leq-per-metric table) for one
  *  service record. Self-contained (owns the surfaced-metric selection, persisted to
  *  the server) so the unified History tab can embed it. Metric keys come from THIS
  *  record's items. */
@@ -361,7 +369,7 @@ export function SplDetail({ detail }: { detail: ServiceSplHistory }) {
               {shownMetrics.map((k) => (
                 <Fragment key={k}>
                   <th className="py-1 px-3 font-normal text-right w-20">Max</th>
-                  <th className="py-1 px-3 font-normal text-right w-20">Avg</th>
+                  <th className="py-1 px-3 font-normal text-right w-20">Leq</th>
                 </Fragment>
               ))}
             </tr>
@@ -372,7 +380,7 @@ export function SplDetail({ detail }: { detail: ServiceSplHistory }) {
                 <td className="py-1.5 pr-3 text-gray-12 whitespace-nowrap">{it.title || "Untitled"}</td>
                 {shownMetrics.map((k) => {
                   const st = metricStat(it, k, detail);
-                  return <FragmentCells key={k} max={st?.max ?? null} avg={st?.avg ?? null} />;
+                  return <FragmentCells key={k} max={st?.max ?? null} leq={st?.leq ?? null} />;
                 })}
               </tr>
             ))}
@@ -383,12 +391,13 @@ export function SplDetail({ detail }: { detail: ServiceSplHistory }) {
   );
 }
 
-/** Two right-aligned dB cells (Max, Avg) for one metric. */
-function FragmentCells({ max, avg }: { max: number | null; avg: number | null }) {
+/** Two right-aligned dB cells (Max, Leq) for one metric. Leq is blank on records
+ *  made before energy averaging, rather than showing the old linear mean. */
+function FragmentCells({ max, leq }: { max: number | null; leq: number | null }) {
   return (
     <>
       <td className="py-1.5 px-3 text-right tabular-nums text-gray-12">{dB(max)}</td>
-      <td className="py-1.5 px-3 text-right tabular-nums text-gray-10">{dB(avg)}</td>
+      <td className="py-1.5 px-3 text-right tabular-nums text-gray-10">{dB(leq)}</td>
     </>
   );
 }
@@ -416,7 +425,7 @@ function MetricPicker({
               onClick={() => onToggle(k)}
               className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${
                 on
-                  ? "border-blue-7 bg-blue-3 text-blue-11"
+                  ? "border-accent/50 bg-accent/12 text-accent"
                   : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"
               }`}
             >

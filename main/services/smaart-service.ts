@@ -9,13 +9,9 @@
 // meter never re-renders every display 8×/sec.
 
 import type { SplMetricsDTO } from "../types/stage.js";
-import { broadcast, channelHasSubscribers } from "./broadcaster.js";
-import { serviceWindow } from "./service-window.js";
+import { broadcast } from "./broadcaster.js";
+import { StatusIntegration } from "./integration-base.js";
 import { ModernSmaartAdapter, type SmaartInput, type SplReading } from "./smaart-protocol.js";
-
-type SmaartConnState = "connected" | "error" | "disconnected";
-
-const RECONNECT_BASE_MS = 3000;
 /** Trailing throttle for broadcasts — 4 Hz is smooth for a numeric readout. */
 const BROADCAST_THROTTLE_MS = 250;
 /** Per-stream frame rate requested from Smaart (≤ 8). */
@@ -27,67 +23,43 @@ function meterId(deviceName: string, channelName: string): string {
   return `${deviceName}::${channelName}`;
 }
 
-class SmaartService {
+class SmaartService extends StatusIntegration<SplMetricsDTO> {
   private host: string | null = null;
   private port: number | null = null;
   private password: string | null = null;
 
-  private running = false;
   private adapter: ModernSmaartAdapter | null = null;
   private streamClosers: (() => void)[] = [];
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectAttempt = 0;
 
-  private last: SplMetricsDTO = OFFLINE;
   private dirty = false;
   private throttleTimer: ReturnType<typeof setTimeout> | null = null;
 
-  private onConn: ((state: SmaartConnState, message: string | null) => void) | null = null;
-  private reported: SmaartConnState | null = null;
-
-  setConnectionListener(cb: (state: SmaartConnState, message: string | null) => void): void {
-    this.onConn = cb;
+  constructor() {
+    super("smaart", "spl:metrics", OFFLINE);
   }
 
-  /** Latest snapshot — lets a freshly-loaded display hydrate immediately. */
-  getLatest(): SplMetricsDTO {
-    return this.last;
-  }
-
-  private report(state: SmaartConnState, message: string | null): void {
-    if (this.reported === state) return;
-    this.reported = state;
-    this.onConn?.(state, message);
+  protected get configured(): boolean {
+    return !!this.host && !!this.port;
   }
 
   configure(host: string, port: number, password: string | null): void {
     this.host = host?.trim() || null;
     this.port = port > 0 ? Math.floor(port) : null;
     this.password = password?.trim() || null;
-    this.reported = null;
+    this.resetReport();
     this.restart();
   }
 
-  start(): void {
-    if (this.running || !this.host || !this.port) return;
-    this.running = true;
-    this.reconnectAttempt = 0;
+  override start(): void {
+    if (this.running || !this.configured) return;
     console.log(`[smaart] connecting ${this.host}:${this.port}`);
-    void this.connect();
+    super.start();
   }
 
-  stop(): void {
-    this.running = false;
-    this.clearReconnect();
+  protected override teardown(): void {
     this.teardownStreams();
     this.adapter?.close();
     this.adapter = null;
-    if (this.last.connected) this.emit(OFFLINE, true);
-  }
-
-  private restart(): void {
-    this.stop();
-    if (this.host && this.port) this.start();
   }
 
   /** One-shot reachability check for the Integrations "Test connection" button. */
@@ -113,7 +85,7 @@ class SmaartService {
     }
   }
 
-  private async connect(): Promise<void> {
+  protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
     const adapter = new ModernSmaartAdapter(this.host, this.port);
     this.adapter = adapter;
@@ -136,19 +108,19 @@ class SmaartService {
       }
       this.last = { connected: true, apiVersion: adapter.apiVersion, meters };
       this.openStreams(adapter, inputs);
-      this.reconnectAttempt = 0;
+      this.resetBackoff();
       this.report(
         "connected",
         `Connected to ${adapter.serverInfo?.applicationName ?? "Smaart"} — ${inputs.length} input(s)`,
       );
-      this.emit(this.last, true);
+      this.publish(this.last, true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (this.reconnectAttempt === 0) console.warn(`[smaart] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
+      if (this.attempt === 0) console.warn(`[smaart] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
       adapter.close();
       if (this.adapter === adapter) this.adapter = null;
-      if (this.last.connected) this.emit(OFFLINE, true);
+      this.goOffline();
       this.scheduleReconnect();
     }
   }
@@ -186,28 +158,13 @@ class SmaartService {
   /** A stream dropped — if we're still meant to be running, reconnect the lot. */
   private onStreamClose(adapter: ModernSmaartAdapter): void {
     if (!this.running || this.adapter !== adapter) return;
-    if (this.reconnectAttempt === 0) console.warn("[smaart] stream closed — reconnecting");
+    if (this.attempt === 0) console.warn("[smaart] stream closed — reconnecting");
     this.teardownStreams();
     adapter.close();
     if (this.adapter === adapter) this.adapter = null;
     this.report("error", "Smaart stream dropped — reconnecting");
-    if (this.last.connected) this.emit(OFFLINE, true);
+    this.goOffline();
     this.scheduleReconnect();
-  }
-
-  private scheduleReconnect(): void {
-    if (!this.running) return;
-    this.clearReconnect();
-    const delay = serviceWindow.capDelayMs(RECONNECT_BASE_MS * 2 ** this.reconnectAttempt, channelHasSubscribers("spl:metrics"));
-    this.reconnectAttempt++;
-    this.reconnectTimer = setTimeout(() => void this.connect(), delay);
-  }
-
-  private clearReconnect(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
   }
 
   private teardownStreams(): void {
@@ -226,11 +183,16 @@ class SmaartService {
     if (this.throttleTimer) return;
     this.throttleTimer = setTimeout(() => {
       this.throttleTimer = null;
-      if (this.dirty) this.emit(this.last, false);
+      if (this.dirty) this.publish(this.last, false);
     }, BROADCAST_THROTTLE_MS);
   }
 
-  private emit(snapshot: SplMetricsDTO, immediate: boolean): void {
+  /** The base's emit() means "publish now" — which is what goOffline() wants. */
+  protected override emit(snapshot: SplMetricsDTO): void {
+    this.publish(snapshot, true);
+  }
+
+  private publish(snapshot: SplMetricsDTO, immediate: boolean): void {
     this.last = snapshot; // always kept fresh — the SPL recorder pulls getLatest()
     this.dirty = false;
     if (immediate && this.throttleTimer) {
@@ -239,7 +201,7 @@ class SmaartService {
     }
     // 4 Hz to nobody is wasted work — skip the push when no display renders SPL
     // meters. Recording is unaffected (it reads this.last, not the broadcast).
-    if (channelHasSubscribers("spl:metrics")) broadcast("spl:metrics", snapshot);
+    if (this.hasSubscribers) broadcast(this.channel, snapshot);
   }
 }
 

@@ -6,7 +6,9 @@ import type { IntegrationDescriptor, IntegrationState } from "../types/integrati
 import type { PeopleCountDTO } from "../types/stage.js";
 import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
+import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
+import { rosstalkManager } from "./rosstalk-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, propresenterManager, type PropInstanceConfig } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
@@ -22,6 +24,8 @@ const PCO_DESCRIPTOR: IntegrationDescriptor = {
   id: "planning-center",
   kind: "lineup",
   label: "Planning Center",
+  description:
+    "Pulls your Planning Center service plans into Stage — the live rundown, item order, and pre-service countdown. Connects to Planning Center Online over the internet with a Personal Access Token (App ID + Secret). Create the token at api.planningcenteronline.com and paste both halves below.",
   configSchema: [
     {
       key: "appId",
@@ -71,6 +75,8 @@ const WIRELESS_DESCRIPTOR: IntegrationDescriptor = {
   id: "wireless",
   kind: "wireless",
   label: "Wireless Gear",
+  description:
+    "Monitors your wireless mics — RF, audio, and battery/charger status — on stage displays. Connects to receivers over your LAN (Shure and Sennheiser supported). Add one connection per receiver below; each channel can then be placed on a layout.",
   configSchema: [],
 };
 
@@ -82,6 +88,8 @@ const COMPANION_DESCRIPTOR: IntegrationDescriptor = {
   id: "companion",
   kind: "control",
   label: "Bitfocus Companion",
+  description:
+    "Lets a Bitfocus Companion (Stream Deck) surface control and read Stage. The Companion module connects to this app, so there's nothing to configure here — just point the module at this server's IP and port, shown below. This row reflects how many Companion clients are connected.",
   configSchema: [],
 };
 
@@ -91,34 +99,32 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
   id: "propresenter",
   kind: "control",
   label: "ProPresenter",
+  description:
+    "Shows the current and next slide, section, and slide thumbnails from ProPresenter. Connects to ProPresenter's local network API over your LAN (7.9+). Enable the API under ProPresenter → Preferences → Network, then add each instance below.",
   configSchema: [
     {
       key: "name",
       label: "Name",
       type: "text",
       placeholder: "Main (e.g. Auditorium 1)",
-      help: "Display name for this ProPresenter, shown when a layout object picks which instance to read. Add more auditoriums below.",
     },
     {
       key: "host",
       label: "ProPresenter Host",
       type: "text",
       placeholder: "192.168.1.100",
-      help: "IP or hostname of the machine running ProPresenter, on the same network as this server.",
     },
     {
       key: "port",
       label: "API Port",
       type: "number",
       placeholder: "1025",
-      help: "ProPresenter's network API port. Turn the API on and find the port under ProPresenter → Preferences → Network (default 1025).",
     },
     {
       key: "pollMs",
       label: "Poll interval (ms)",
       type: "number",
       placeholder: "500 (lower = snappier, more requests)",
-      help: "How often to query ProPresenter over the LAN. 500ms feels instant; raise it to ease network load. The API is under ProPresenter → Preferences → Network.",
     },
   ],
 };
@@ -154,27 +160,26 @@ const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
   id: "prodcom",
   kind: "lineup",
   label: "ProdCom",
+  description:
+    "Streams live production transcription (captions) onto a stage display. Connects to ProdCom's Application API over your LAN. Enter the host and port below; an API key is optional depending on your ProdCom setup.",
   configSchema: [
     {
       key: "host",
       label: "ProdCom Host",
       type: "text",
       placeholder: "192.168.1.201",
-      help: "IP or hostname of the machine running ProdCom, on the same network as this server.",
     },
     {
       key: "port",
       label: "API Port",
       type: "number",
       placeholder: "24480",
-      help: "ProdCom's HTTP Application API port. Enable the Application API in ProdCom's settings (default 24480).",
     },
     {
       key: "apiKey",
       label: "API Key",
       type: "password",
       placeholder: "(only if Require Authentication is on)",
-      help: "Only needed if ProdCom's API has 'Require Authentication' turned on — paste the key from ProdCom's API settings. Leave blank otherwise. Stored encrypted on this machine.",
     },
   ],
 };
@@ -185,27 +190,26 @@ const SMAART_DESCRIPTOR: IntegrationDescriptor = {
   id: "smaart",
   kind: "control",
   label: "Smaart (SPL)",
+  description:
+    "Brings FOH sound-level (SPL) readings from Rational Acoustics Smaart onto stage displays. Connects to Smaart v8's API over your LAN (8.3+, JSON over WebSocket). Turn the API on in Smaart, then enter its host, port, and password below.",
   configSchema: [
     {
       key: "host",
       label: "Smaart Host",
       type: "text",
       placeholder: "192.168.1.50",
-      help: "IP or hostname of the machine running Smaart, on the same network. Requires Smaart 8.3+ (the modern JSON API).",
     },
     {
       key: "port",
       label: "API Port",
       type: "number",
       placeholder: "26000",
-      help: "Smaart's API port. Enable the API in Smaart's API/IO settings (default 26000).",
     },
     {
       key: "password",
       label: "API Password",
       type: "password",
       placeholder: "(only if the Smaart API requires authentication)",
-      help: "Only needed if Smaart's API is set to require authentication; otherwise leave blank. Stored encrypted on this machine.",
     },
   ],
 };
@@ -217,27 +221,52 @@ const OBS_DESCRIPTOR: IntegrationDescriptor = {
   id: "obs",
   kind: "control",
   label: "OBS Studio",
+  description:
+    "Shows whether OBS is recording, streaming, or running its virtual camera, on a stage display. Connects to OBS's built-in obs-websocket server over your LAN. Enable it under OBS → Tools → WebSocket Server Settings, then enter the host, port, and password below.",
   configSchema: [
     {
       key: "host",
       label: "OBS Host",
       type: "text",
       placeholder: "192.168.1.50",
-      help: "IP or hostname of the machine running OBS, on the same network as this server.",
     },
     {
       key: "port",
       label: "WebSocket Port",
       type: "number",
       placeholder: "4455",
-      help: "The obs-websocket server port. Enable the server under OBS → Tools → WebSocket Server Settings (default 4455).",
     },
     {
       key: "password",
       label: "Server Password",
       type: "password",
       placeholder: "(from OBS → Tools → WebSocket Server Settings)",
-      help: "In OBS, open Tools → WebSocket Server Settings, enable the server, and copy the password here. Leave blank if you turned authentication off.",
+    },
+  ],
+};
+
+// REAPER integration — polls REAPER's built-in Web Interface (Preferences →
+// Control/OSC/web → "Web browser interface") for live transport state (e.g.
+// recording), shown by the custom-layout "REAPER status" object. No secret: the
+// LAN web interface runs without auth in the common setup.
+const REAPER_DESCRIPTOR: IntegrationDescriptor = {
+  id: "reaper",
+  kind: "control",
+  label: "REAPER",
+  description:
+    "Shows whether REAPER is recording, on a stage display. Polls REAPER's built-in Web Interface over your LAN. Turn it on under REAPER → Preferences → Control/OSC/web (Web browser interface), leaving that page's Username:password field blank, then enter the host and port below.",
+  configSchema: [
+    {
+      key: "host",
+      label: "REAPER Host",
+      type: "text",
+      placeholder: "192.168.1.50",
+    },
+    {
+      key: "port",
+      label: "Web Interface Port",
+      type: "number",
+      placeholder: "8080",
     },
   ],
 };
@@ -249,6 +278,19 @@ const OSC_DESCRIPTOR: IntegrationDescriptor = {
   id: "osc",
   kind: "control",
   label: "OSC",
+  description:
+    "Adds layout buttons that send OSC commands to LAN gear (consoles, media servers) and reflect device state back. There's nothing to enter here — manage OSC targets in the list below, then add an OSC button object to a layout.",
+  configSchema: [],
+};
+
+// RossTalk — outbound command control of Ross gear. Like OSC, targets are a
+// separately managed list, so the descriptor carries no config fields.
+const ROSSTALK_DESCRIPTOR: IntegrationDescriptor = {
+  id: "rosstalk",
+  kind: "control",
+  label: "RossTalk (Carbonite / Ultrix)",
+  description:
+    "Sends RossTalk commands to Ross gear — custom controls and switching on a Carbonite, routing and salvos on an Ultrix. Connects over your LAN on TCP 7788. Add one target per device below, then place a RossTalk button on a layout or drive it from an automation rule. Simulate mode logs commands without sending them.",
   configSchema: [],
 };
 
@@ -261,6 +303,8 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
   id: "sensource",
   kind: "control",
   label: "SenSource Vea",
+  description:
+    "Brings live people counts — attendance and room occupancy — from SenSource Vea onto displays and graphs. Connects to the Vea cloud API with an API client ID + secret (created in Vea → API clients). Vea's counts lag a few minutes server-side, so polling faster than the default adds requests without fresher numbers. Pick which zones to count below.",
   configSchema: [
     {
       key: "clientId",
@@ -289,7 +333,6 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       type: "number",
       placeholder: "45",
       default: 45,
-      help: "How often to query SenSource. Their counts lag a few minutes server-side, so ~45s is plenty — lower values just add API calls without fresher data.",
     },
   ],
 };
@@ -302,20 +345,20 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
   id: "ross-tsl",
   kind: "control",
   label: "Ross MultiViewer (TSL UMD)",
+  description:
+    "Pushes a people count onto a Ross multiviewer tile as on-tile text, over your LAN using TSL UMD. Enter the switcher host and TSL port below, then map a count to a tile's TSL address in the feeds panel.",
   configSchema: [
     {
       key: "host",
       label: "Switcher Host",
       type: "text",
       placeholder: "192.168.1.60",
-      help: "IP or hostname of the Ross multiviewer/switcher receiving the TSL UMD data, on the same network as this server.",
     },
     {
       key: "port",
       label: "TSL Port",
       type: "number",
       placeholder: "(TSL UMD input port on the Ross)",
-      help: "The TSL UMD input port configured on the Ross device (its UMD/TSL setup). The people count is sent here as on-tile text; map a count to a tile's TSL address in the feeds panel below.",
     },
   ],
 };
@@ -328,7 +371,9 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   PRODCOM_DESCRIPTOR,
   SMAART_DESCRIPTOR,
   OBS_DESCRIPTOR,
+  REAPER_DESCRIPTOR,
   OSC_DESCRIPTOR,
+  ROSSTALK_DESCRIPTOR,
   SENSOURCE_DESCRIPTOR,
   ROSS_TSL_DESCRIPTOR,
 ];
@@ -342,6 +387,7 @@ const SECRET_KEYS: Record<string, string[]> = {
   prodcom: ["apiKey"],
   smaart: ["password"],
   obs: ["password"],
+  reaper: [],
   sensource: ["clientSecret", "apiToken"],
   "ross-tsl": [],
 };
@@ -357,8 +403,12 @@ class IntegrationManager {
     const settings = await settingsStore.load();
 
     for (const descriptor of DESCRIPTORS) {
-      const savedConfig = settings.integrationConfigs[descriptor.id] ?? {};
-      const enabled = settings.integrationEnabled[descriptor.id] ?? false;
+      // Tolerate a settings.json missing this key entirely. DataStore does not
+      // deep-merge on load (deliberately — it keeps migrations honest), so an older
+      // config snapshot restored over a newer build can arrive without keys added
+      // since. Crashing init over it takes every display down.
+      const savedConfig = settings.integrationConfigs?.[descriptor.id] ?? {};
+      const enabled = settings.integrationEnabled?.[descriptor.id] ?? false;
       const secrets = await secretsStore.getSecrets(descriptor.id);
 
       // Merge saved non-secret config with any secret keys (masked).
@@ -376,8 +426,12 @@ class IntegrationManager {
       });
     }
 
-    // Apply PCO credentials to stage controller if already configured.
+    // Apply PCO credentials to stage controller if already configured. This
+    // leaves the badge on "connecting" and kicks the real check off in the
+    // background — startup must not block on a round-trip to PCO over the
+    // internet (a slow or down link would delay every display coming up).
     await this.applyPcoCredentials();
+    void this.verifyPcoCredentials();
 
     // Start auto-refresh with the persisted interval (defaults to 60 min).
     stageController.startAutoRefresh(this.getPcoRefreshIntervalMs());
@@ -396,17 +450,29 @@ class IntegrationManager {
     await this.applySmaart();
     // Start the OBS connection if enabled + configured.
     await this.applyObs();
+    // Start the REAPER web-interface poller if enabled + configured.
+    await this.applyReaper();
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
     await oscManager.init();
     this.refreshOscSummary();
+
+    await rosstalkManager.init();
+    this.refreshRossTalkSummary();
     // Start the SenSource Vea poller if it's enabled + has credentials.
     await this.applySensource();
     // Forward live people counts to the Ross TSL sender (it ignores them when
     // disconnected), then start it if enabled + configured.
     addBroadcastListener((channel, payload) => {
       if (channel === "people:count") tslService.onPeopleCount(payload as PeopleCountDTO);
+      // Keep the master RossTalk row in step with its targets (and simulate mode).
+      if (channel === "rosstalk:targets-changed") this.refreshRossTalkSummary();
     });
     await this.applyRossTsl();
+
+    // Last, so the engine's seeding sees a settled system. Its own seeding guard
+    // means these first snapshots cannot fire anything regardless.
+    const { automationEngine } = await import("./automation-engine.js");
+    await automationEngine.init();
 
     console.log("[integration-manager] init complete", {
       integrations: Array.from(this.states.keys()),
@@ -472,8 +538,9 @@ class IntegrationManager {
 
     // Persist non-secret config.
     const settings = await settingsStore.load();
+    settings.integrationConfigs ??= {};
     settings.integrationConfigs[id] = {
-      ...(settings.integrationConfigs[id] ?? {}),
+      ...(settings.integrationConfigs?.[id] ?? {}),
       ...nonSecretConfig,
     };
     await settingsStore.save(settings);
@@ -487,7 +554,7 @@ class IntegrationManager {
     // Rebuild masked config for state.
     const allSecrets = await secretsStore.getSecrets(id);
     const maskedConfig: Record<string, unknown> = {
-      ...(settings.integrationConfigs[id] ?? {}),
+      ...(settings.integrationConfigs?.[id] ?? {}),
     };
     for (const key of secretKeys) {
       maskedConfig[key] = allSecrets[key] ? "••••" : "";
@@ -500,24 +567,11 @@ class IntegrationManager {
       await this.applyPcoCredentials();
       // Restart auto-refresh with the (possibly updated) interval.
       stageController.startAutoRefresh(this.getPcoRefreshIntervalMs());
-      // Validate the credentials against PCO and load the lineup so the kiosk
-      // updates immediately. A failure here reports an error status but never
-      // fails the save (the credentials are already persisted).
-      const appId = await this.getPcoAppId();
-      const secret = await this.getPcoSecret();
-      if (appId && secret) {
-        try {
-          const types = await stageController.listServiceTypes();
-          this.setConnectionState(
-            "planning-center",
-            "connected",
-            `Connected — ${types.length} service type(s)`,
-          );
-          await stageController.refresh();
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.setConnectionState("planning-center", "error", msg);
-        }
+      // Validate against PCO and, if it accepts, load the lineup so the kiosk
+      // updates immediately. A failure reports an error status but never fails
+      // the save — the credentials are already persisted either way.
+      if (await this.verifyPcoCredentials()) {
+        await stageController.refresh();
       }
     }
 
@@ -535,6 +589,10 @@ class IntegrationManager {
 
     if (id === "obs") {
       await this.applyObs();
+    }
+
+    if (id === "reaper") {
+      await this.applyReaper();
     }
 
     if (id === "sensource") {
@@ -557,6 +615,7 @@ class IntegrationManager {
     this.states.set(id, { ...state, enabled });
 
     const settings = await settingsStore.load();
+    settings.integrationEnabled ??= {};
     settings.integrationEnabled[id] = enabled;
     await settingsStore.save(settings);
 
@@ -585,6 +644,10 @@ class IntegrationManager {
 
     if (id === "obs") {
       await this.applyObs();
+    }
+
+    if (id === "reaper") {
+      await this.applyReaper();
     }
 
     if (id === "sensource") {
@@ -689,6 +752,17 @@ class IntegrationManager {
         const secrets = await secretsStore.getSecrets("obs");
         const result = await obsService.test(host, port, secrets.password ?? null);
         this.setConnectionState("obs", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "reaper") {
+        const { host, port } = this.getReaperTarget();
+        if (!host || !port) {
+          return { ok: false, message: "Host and Port are required" };
+        }
+        const result = await reaperService.test(host, port);
+        this.setConnectionState("reaper", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
         return result;
       }
@@ -874,6 +948,38 @@ class IntegrationManager {
     return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 4455 : null };
   }
 
+  private getReaperTarget(): { host: string | null; port: number | null } {
+    const cfg = this.states.get("reaper")?.config ?? {};
+    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
+    const rawPort = cfg.port;
+    const port =
+      typeof rawPort === "number"
+        ? rawPort
+        : typeof rawPort === "string" && rawPort.trim()
+          ? parseInt(rawPort, 10)
+          : NaN;
+    // Default to REAPER's suggested web-interface port when only a host is given.
+    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 8080 : null };
+  }
+
+  /** Start/stop the REAPER web-interface poll to match enabled + configured state. */
+  private async applyReaper(): Promise<void> {
+    reaperService.setConnectionListener((state, message) => {
+      this.setConnectionState("reaper", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("reaper")?.enabled ?? false;
+    const { host, port } = this.getReaperTarget();
+    if (enabled && host && port) {
+      this.setConnectionState("reaper", "connecting", `Connecting ${host}:${port}`);
+      reaperService.configure(host, port);
+    } else {
+      reaperService.stop();
+      this.setConnectionState("reaper", "disconnected", null);
+    }
+  }
+
   /** Start/stop the OBS connection to match enabled + configured state. */
   private async applyObs(): Promise<void> {
     obsService.setConnectionListener((state, message) => {
@@ -988,7 +1094,7 @@ class IntegrationManager {
 
   private async getPcoAppId(): Promise<string | null> {
     const settings = await settingsStore.load();
-    return String(settings.integrationConfigs["planning-center"]?.appId ?? "") || null;
+    return String(settings.integrationConfigs?.["planning-center"]?.appId ?? "") || null;
   }
 
   private async getPcoSecret(): Promise<string | null> {
@@ -1000,13 +1106,49 @@ class IntegrationManager {
     const appId = await this.getPcoAppId();
     const secret = await this.getPcoSecret();
     const settings = await settingsStore.load();
-    const target = settings.integrationConfigs["planning-center"]?.countdownTarget === "service-time" ? "service-time" : "plan-start";
+    const target = settings.integrationConfigs?.["planning-center"]?.countdownTarget === "service-time" ? "service-time" : "plan-start";
     stageController.setPcoCredentials(appId, secret, target);
 
-    if (appId && secret) {
-      this.setConnectionState("planning-center", "connected", "Credentials configured");
-    } else {
+    if (!appId || !secret) {
       this.setConnectionState("planning-center", "disconnected", null);
+      return;
+    }
+    // Credentials being PRESENT is not the same as them being VALID. This used to
+    // report "connected" on any non-empty pair, so a revoked or mistyped token
+    // showed a green badge while every refresh failed with "PCO auth failed" —
+    // the panel and the app disagreed and the panel was the convincing one.
+    // Ask PCO instead. Unlike the other integrations there is no socket whose
+    // success speaks for itself: PCO is stateless HTTPS, so a request IS the check.
+    this.setConnectionState("planning-center", "connecting", "Checking credentials…");
+  }
+
+  /**
+   * Ask PCO whether the stored credentials actually work and report the truth.
+   * Never throws — a failure is a reported state, not an exception, so it can be
+   * called at startup without risking init.
+   *
+   * @returns true when PCO accepted the credentials.
+   */
+  private async verifyPcoCredentials(): Promise<boolean> {
+    const appId = await this.getPcoAppId();
+    const secret = await this.getPcoSecret();
+    if (!appId || !secret) {
+      this.setConnectionState("planning-center", "disconnected", null);
+      this.broadcastStates();
+      return false;
+    }
+    try {
+      const { pcoService } = await import("./pco-service.js");
+      const types = await pcoService.listServiceTypes(appId, secret);
+      this.setConnectionState("planning-center", "connected", `Connected — ${types.length} service type(s)`);
+      this.broadcastStates();
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[integration-manager] PCO credential check failed: ${msg}`);
+      this.setConnectionState("planning-center", "error", msg);
+      this.broadcastStates();
+      return false;
     }
   }
 
@@ -1025,6 +1167,26 @@ class IntegrationManager {
       );
     } else {
       this.setConnectionState("wireless", "disconnected", null);
+    }
+  }
+
+  /**
+   * Reflect the RossTalk targets on the master "rosstalk" row. Unlike OSC this is
+   * TCP, so "connected" here means a socket is genuinely open — and the message
+   * carries simulate mode, because a connected badge would otherwise imply commands
+   * are reaching the device when they are being swallowed.
+   */
+  refreshRossTalkSummary(): void {
+    const targets = rosstalkManager.listTargets();
+    const enabled = targets.filter((t) => t.enabled);
+    const connected = enabled.filter((t) => t.connection === "connected").length;
+    const sim = rosstalkManager.getSimulate() ? " — simulate mode" : "";
+    if (enabled.length === 0) {
+      this.setConnectionState("rosstalk", "disconnected", targets.length ? `${targets.length} target(s)` : null);
+    } else if (connected > 0) {
+      this.setConnectionState("rosstalk", "connected", `${connected} of ${enabled.length} target(s)${sim}`);
+    } else {
+      this.setConnectionState("rosstalk", "error", `0 of ${enabled.length} target(s) reachable${sim}`);
     }
   }
 

@@ -31,7 +31,7 @@ function chargeColor(pct: number): string {
 }
 
 function readoutColor(level: number | null): string {
-  if (level === null) return "text-white/30";
+  if (level === null) return "text-fg-faint";
   if (level >= 60) return "text-green-10";
   if (level >= 25) return "text-yellow-10";
   return "text-red-10";
@@ -114,7 +114,7 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
   // matches the bar.
   const chargeReadoutColor =
     charge === null
-      ? "text-white/30"
+      ? "text-fg-faint"
       : charge >= 60
         ? "text-green-10"
         : charge >= 25
@@ -132,7 +132,7 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
       className={cn(
         // Solid pill inset from the card edge. It lives inside the opaque info
         // band now, so no heavy backdrop blur is needed (cheaper to render).
-        "relative mx-2 mb-2 flex items-center rounded-2xl overflow-hidden glass-dark",
+        "relative mx-2 mb-2 flex items-center overflow-hidden su-card",
         chargeOnly && "justify-center",
         className,
       )}
@@ -151,17 +151,32 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
         {hasIem && <ChargeBar level={iemCharge} />}
       </div>
 
-      {/* ── Frequency segment — only with the RF bars (it's RF info). ── */}
+      {/* ── Label / frequency segment — only with the RF bars (it's RF info).
+          A manual label takes the frequency's place; the label's presence IS the
+          toggle, so leaving it blank keeps the frequency showing. An IEM label
+          sits on a second line, present only when set. ── */}
       {showFreq && (
         <>
           <Divider />
-          <div className="flex items-center flex-1 min-w-0">
-            {device.freq !== null ? (
-              <span className={cn("font-bold tabular-nums truncate leading-none", statusColor)} style={valueTextStyle}>
+          <div className="flex flex-col justify-center flex-1 min-w-0" style={{ gap: "calc(var(--rf) * 0.12)" }}>
+            {device.label ? (
+              <span className={cn("font-bold truncate leading-none", statusColor)} style={valueTextStyle}>
+                {device.label}
+              </span>
+            ) : device.freq !== null ? (
+              <span className={cn("font-mono font-bold tabular-nums truncate leading-none", statusColor)} style={valueTextStyle}>
                 {device.freq}
               </span>
             ) : (
-              <span className="font-bold text-white/25 leading-none" style={valueTextStyle}>—</span>
+              <span className="font-bold text-fg-faint leading-none" style={valueTextStyle}>—</span>
+            )}
+            {device.iemLabel && (
+              <span
+                className="text-fg-muted truncate leading-none"
+                style={{ fontSize: "calc(var(--rf) * 0.78)" }}
+              >
+                {device.iemLabel}
+              </span>
             )}
           </div>
         </>
@@ -177,12 +192,12 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
               {charge !== null && (
                 <div className="flex items-center" style={{ gap: "calc(var(--rf) * 0.25)" }}>
                   <MicIcon className={cn("shrink-0", readoutColor(charge))} style={{ width: "calc(var(--rf) * 0.95)", height: "calc(var(--rf) * 0.95)" }} />
-                  <span className={cn("font-bold tabular-nums leading-none", readoutColor(charge))} style={valueTextStyle}>{charge}%</span>
+                  <span className={cn("font-mono font-bold tabular-nums leading-none", readoutColor(charge))} style={valueTextStyle}>{charge}%</span>
                 </div>
               )}
               <div className="flex items-center" style={{ gap: "calc(var(--rf) * 0.25)" }}>
                 <HeadphonesIcon className={cn("shrink-0", readoutColor(iemCharge))} style={{ width: "calc(var(--rf) * 0.95)", height: "calc(var(--rf) * 0.95)" }} />
-                <span className={cn("font-bold tabular-nums leading-none", readoutColor(iemCharge))} style={valueTextStyle}>{iemCharge}%</span>
+                <span className={cn("font-mono font-bold tabular-nums leading-none", readoutColor(iemCharge))} style={valueTextStyle}>{iemCharge}%</span>
               </div>
             </div>
           </>
@@ -193,7 +208,7 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
             <Divider />
             <div className="flex items-center shrink-0" style={{ gap: "calc(var(--rf) * 0.3)" }}>
               <BatteryIcon level={charge} />
-              <span className={cn("font-bold tabular-nums leading-none", chargeReadoutColor)} style={valueTextStyle}>
+              <span className={cn("font-mono font-bold tabular-nums leading-none", chargeReadoutColor)} style={valueTextStyle}>
                 {charge}%
               </span>
             </div>
@@ -214,13 +229,13 @@ export function OfflinePill({ micLabel, iemLabel, className }: { micLabel: strin
   const labels = [micLabel, iemLabel].filter((l): l is string => l !== null);
   return (
     <div
-      className={cn("relative mx-2 mb-2 flex flex-col items-center justify-center rounded-2xl overflow-hidden glass-dark", className)}
+      className={cn("relative mx-2 mb-2 flex flex-col items-center justify-center overflow-hidden su-card", className)}
       style={{ ["--rf" as string]: RF_UNIT, padding: "calc(var(--rf) * 0.55) calc(var(--rf) * 0.7)", gap: "calc(var(--rf) * 0.2)" }}
     >
       {labels.map((label, i) => (
         <span
           key={i}
-          className="max-w-full truncate text-center font-semibold leading-none text-white/85"
+          className="max-w-full truncate text-center font-semibold leading-none text-fg"
           style={valueTextStyle}
         >
           {label || "Offline"}

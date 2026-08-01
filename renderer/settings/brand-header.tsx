@@ -1,11 +1,12 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { BrandLogo } from "../components/brand-logo";
 
-// The logo is the anchor; the name is fit to its height so the two feel
-// balanced — large for short names, shrinking as the name gets longer.
-const LOGO_PX = 44;
-const MAX_FONT = 20;
-const MIN_FONT = 10;
+// The name sits on a SINGLE line next to a compact logo (matches the mockup).
+// It shrinks by width only (never wraps), down to a floor, so long church names
+// stay on one line and truncate rather than stacking.
+const LOGO_PX = 28;
+const MAX_FONT = 16;
+const MIN_FONT = 11;
 
 export function BrandHeader({
   name,
@@ -29,10 +30,8 @@ export function BrandHeader({
     const fit = () => {
       let size = MAX_FONT;
       el.style.fontSize = `${size}px`;
-      // Shrink until the name fits the box BOTH ways: height (so it doesn't clip)
-      // and width (so the longest word — e.g. "Cornerstone" — fits on its own line
-      // and wraps at the space instead of breaking mid-word).
-      while (size > MIN_FONT && (el.scrollHeight > box.clientHeight || el.scrollWidth > box.clientWidth)) {
+      // Single line: shrink by WIDTH only until it fits, then truncate at the floor.
+      while (size > MIN_FONT && el.scrollWidth > box.clientWidth) {
         size -= 1;
         el.style.fontSize = `${size}px`;
       }
@@ -46,26 +45,22 @@ export function BrandHeader({
   }, [name]);
 
   return (
-    <div className="flex items-center gap-2.5 px-3.5 py-3">
+    <div className="flex items-center gap-2.5 px-3 py-3">
       {logo ? (
         <BrandLogo
           logo={logo}
           monochrome={monochrome}
-          className="rounded-md shrink-0 text-gray-12"
+          className="rounded-md shrink-0 text-fg"
           style={{ width: LOGO_PX, height: LOGO_PX }}
         />
       ) : (
-        <div className="rounded-md bg-blue-9 shrink-0" style={{ width: LOGO_PX, height: LOGO_PX }} />
+        <div className="rounded-md bg-accent shrink-0" style={{ width: LOGO_PX, height: LOGO_PX }} />
       )}
-      <div
-        ref={boxRef}
-        className="flex flex-col justify-center overflow-hidden min-w-0 flex-1"
-        style={{ height: LOGO_PX }}
-      >
+      <div ref={boxRef} className="min-w-0 flex-1 overflow-hidden">
         <span
           ref={textRef}
-          className="block font-title text-gray-12 [overflow-wrap:normal] [word-break:normal] hyphens-none"
-          style={{ fontSize, lineHeight: 1.1 }}
+          className="block font-title font-semibold text-fg whitespace-nowrap truncate"
+          style={{ fontSize, lineHeight: 1.15, letterSpacing: "-0.01em" }}
         >
           {name}
         </span>

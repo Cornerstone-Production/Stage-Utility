@@ -37,7 +37,7 @@ export const DialogContent = React.forwardRef<
       ref={ref}
       className={cn(
         "fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
-        "w-full max-w-lg rounded-xl border border-gray-a6 bg-gray-1 p-6 shadow-xl",
+        "w-full max-w-lg rounded-xl border border-line-strong bg-bg p-6 shadow-xl",
         "data-[state=open]:animate-in data-[state=closed]:animate-out",
         "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
@@ -48,7 +48,7 @@ export const DialogContent = React.forwardRef<
       {children}
       <DialogPrimitive.Close
         aria-label="Close"
-        className="absolute right-4 top-4 rounded-sm opacity-70 hover:opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-8"
+        className="absolute right-4 top-4 rounded-sm opacity-70 hover:opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         <XIcon className="size-4" />
         <span className="sr-only">Close</span>
@@ -68,7 +68,7 @@ export const DialogTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Title
     ref={ref}
-    className={cn("text-[15px] font-semibold text-gray-12", className)}
+    className={cn("text-subheadline font-semibold text-fg", className)}
     {...props}
   />
 ));
@@ -80,7 +80,7 @@ export const DialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Description
     ref={ref}
-    className={cn("text-[13px] text-gray-11", className)}
+    className={cn("text-footnote text-fg-muted", className)}
     {...props}
   />
 ));
@@ -153,17 +153,17 @@ export function Dialog({
         <DialogPrimitive.Content
           className={cn(
             "fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
-            "w-full max-w-sm rounded-xl border border-gray-a6 bg-gray-1 p-6 shadow-xl",
+            "w-full max-w-sm rounded-xl border border-line-strong bg-bg p-6 shadow-xl",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
             "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           )}
         >
-          <DialogPrimitive.Title className="text-[15px] font-semibold text-gray-12 mb-1">
+          <DialogPrimitive.Title className="text-subheadline font-semibold text-fg mb-1">
             {title}
           </DialogPrimitive.Title>
           {description && (
-            <DialogPrimitive.Description className="text-[12px] text-gray-10 mb-4">
+            <DialogPrimitive.Description className="text-caption1 text-fg-subtle mb-4">
               {description}
             </DialogPrimitive.Description>
           )}

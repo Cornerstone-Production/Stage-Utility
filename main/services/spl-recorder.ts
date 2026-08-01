@@ -9,14 +9,27 @@
 // and persisted to disk, so a mid-service restart resumes the same record.
 
 import type { PcoLiveDTO, ServiceSplHistory, SplMetricsDTO } from "../types/stage.js";
+import { rebuildSplRecord } from "./archive/rebuild.js";
+import { sampleArchive } from "./archive/sample-archive.js";
+import { addLeqSample } from "./spl-leq.js";
 import { broadcast } from "./broadcaster.js";
 import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { stageController } from "./stage-controller.js";
 
-const PERSIST_DEBOUNCE_MS = 4000;
+// How long a change may sit in memory before it is written.
+//
+// This was 4s, when the debounced write was the only durability guarantee — a
+// crash lost whatever had not been flushed. Every sample is now appended to the
+// raw archive as it arrives, and `ensureRecord` rebuilds from it on resume, so the
+// window costs nothing and the store is rewritten ~75 times per service instead of
+// ~1125. The UI never waits on this: it reads the in-memory record over SSE.
+const PERSIST_DEBOUNCE_MS = 60_000;
 /** Max cadence for pushing the (O(n)) live record to trend viewers between item changes. */
 const LIVE_BROADCAST_MS = 5_000;
+/** Short gap between live-item ticks = same service (hold the record through a
+ *  serviceTimeId roll on overrun); a long gap = a new service occurrence. */
+const SERVICE_GAP_MS = 10 * 60_000;
 /** Metric preference for the recorded level (A-weighted, slow → broadband). */
 const PREFERRED_METRICS = ["SPL A Slow", "SPL A Fast", "LAeq 10", "SPL Slow", "SPL Fast"];
 
@@ -65,6 +78,7 @@ function pickMeter(spl: SplMetricsDTO | null): MeterSample | null {
 class SplRecorder {
   private current: ServiceSplHistory | null = null;
   private currentKey: string | null = null;
+  private lastLiveAt = 0; // last live-item tick (to detect the gap between services)
   private lastItemId: string | null = null;
   private lastBroadcastAt = 0;
   private nextSequence = 0;
@@ -83,7 +97,9 @@ class SplRecorder {
     this.busy = true;
     try {
       if (live.mode === "item" && live.currentItemId && !live.serviceEnded && isLiveServiceToday(live)) {
-        await this.ensureRecord(live);
+        const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
+        this.lastLiveAt = Date.now();
+        await this.ensureRecord(live, gapSinceLive);
         if (!this.current) return;
         if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
         let itemChanged = false;
@@ -91,8 +107,21 @@ class SplRecorder {
           this.finalizePrevItem();
           this.lastItemId = live.currentItemId;
           itemChanged = true;
+          if (this.currentKey) {
+            sampleArchive.recordEvent(
+              { serviceKey: this.currentKey, serviceDate: this.current.serviceDate },
+              "pco",
+              "item",
+              live.label ?? live.currentItemId,
+            );
+          }
         }
-        this.recordSample(live.currentItemId, live.label, pickMeter(smaartService.getLatest()));
+        this.recordSample(
+        live.currentItemId,
+        live.label,
+        live.itemType ?? null,
+        pickMeter(smaartService.getLatest()),
+      );
         // The record is O(n) and item max/avg move slowly — push on an item change,
         // else at most every LIVE_BROADCAST_MS instead of every tick.
         const now = Date.now();
@@ -115,27 +144,27 @@ class SplRecorder {
     }
   }
 
-  private async ensureRecord(live: PcoLiveDTO): Promise<void> {
+  private async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<void> {
     const st = stageController.getState();
     if (!st.serviceTypeId || !st.planId) return; // can't key a record yet
     const date = todayLocal();
     // Separate back-to-back services that share one plan by the PCO service-time
-    // occurrence (9am vs 11am). pickServiceTime flips to the next occurrence as one
-    // ends, which is exactly the boundary we want. Fall back to the date when no
-    // service time is known (keeps legacy keys stable).
+    // occurrence (9am vs 11am). Fall back to the date when no service time is known.
     const serviceTimeId = live.serviceTimeId;
     const key = `${st.serviceTypeId}:${st.planId}:${serviceTimeId ?? date}`;
     if (this.currentKey === key && this.current) return;
 
-    // Guard a transient null serviceTimeId (cache miss / network blip) from
-    // splitting the open record mid-service: keep the current record when it's the
-    // same plan + date and we just lost the occasion id.
+    // Hold the open record through a serviceTimeId change within the same live
+    // service: pickServiceTime rolls to the NEXT occurrence when a service runs past
+    // its planned end (and a null is a transient cache miss). A short gap since the
+    // last live tick = same service → keep appending, don't split; only a long gap
+    // means a genuinely new occurrence.
     if (
-      serviceTimeId == null &&
       this.current &&
       this.current.serviceTypeId === st.serviceTypeId &&
       this.current.planId === st.planId &&
-      this.current.serviceDate === date
+      this.current.serviceDate === date &&
+      (serviceTimeId == null || gapSinceLive < SERVICE_GAP_MS)
     ) {
       return;
     }
@@ -149,9 +178,19 @@ class SplRecorder {
     // Resume an existing record for this occurrence (e.g. after a restart), else create.
     const existing = await splHistoryStore.get(key);
     if (existing) {
-      this.current = existing;
+      // A restart loses everything since the last debounced write. The raw layer
+      // has every sample that arrived, so rebuild the aggregates from it rather
+      // than resuming a record that is short by up to PERSIST_DEBOUNCE_MS. Returns
+      // null for a service recorded before the archive existed — then the stored
+      // record is all there is, which is the old behaviour.
+      const rebuilt = await rebuildSplRecord(existing).catch(() => null);
+      if (rebuilt) console.log(`[spl-recorder] rebuilt ${key} from the archive on resume`);
+      this.current = rebuilt ?? existing;
       this.current.endedAt = null; // reopened
-      this.nextSequence = existing.items.reduce((m, it) => Math.max(m, it.sequence), -1) + 1;
+      // From the resumed record, not `existing`: a rebuild can hold items the
+      // stored copy never got, and seeding from the short list would reissue
+      // sequences that are already in use.
+      this.nextSequence = this.current.items.reduce((m, it) => Math.max(m, it.sequence), -1) + 1;
     } else {
       this.current = {
         serviceKey: key,
@@ -175,24 +214,31 @@ class SplRecorder {
     this.lastItemId = null; // re-detect the live item on the next sample
   }
 
-  private recordSample(itemId: string, title: string | null, sample: MeterSample | null): void {
+  private recordSample(
+    itemId: string,
+    title: string | null,
+    itemType: string | null,
+    sample: MeterSample | null,
+  ): void {
     if (!this.current) return;
     let item = this.current.items.find((i) => i.itemId === itemId);
     if (!item) {
       item = {
         itemId,
         title: title ?? "",
+        itemType,
         sequence: this.nextSequence++,
         metrics: {},
         maxSpl: null,
-        avgSpl: null,
         sampleCount: 0,
         startedAt: new Date().toISOString(),
         endedAt: null,
       };
       this.current.items.push(item);
-    } else if (title && item.title !== title) {
-      item.title = title;
+    } else {
+      if (title && item.title !== title) item.title = title;
+      // The plan may not have been loaded when the item first went live.
+      if (itemType && item.itemType !== itemType) item.itemType = itemType;
     }
     if (!item.metrics) item.metrics = {}; // resumed legacy record
 
@@ -202,24 +248,36 @@ class SplRecorder {
         this.current.metricKey =
           PREFERRED_METRICS.find((k) => k in sample.metrics) ?? Object.keys(sample.metrics)[0] ?? null;
       }
-      // Fold EVERY reported metric into its own running max/mean.
+      // Fold EVERY reported metric into its own running max + Leq. The mean is
+      // energy-weighted (see spl-leq.ts): a plain average of decibels understates
+      // a dynamic item badly, and for LAeq/LCeq it would be an average of averages.
       for (const [key, v] of Object.entries(sample.metrics)) {
         let st = item.metrics[key];
         if (!st) {
-          st = { max: null, avg: null, count: 0 };
+          st = { max: null, avg: null, leq: null, count: 0 };
           item.metrics[key] = st;
         }
         st.max = st.max == null ? v : Math.max(st.max, v);
-        st.avg = st.avg == null ? v : (st.avg * st.count + v) / (st.count + 1);
+        st.leq = addLeqSample(st.leq ?? null, st.count, v);
         st.count += 1;
+      }
+      // Keep the raw readings too. The fold above is lossy by design — max/leq/count
+      // cannot be un-averaged — which is why the corrected Leq could not be applied
+      // to anything already recorded. See docs/data-archive.md.
+      if (this.currentKey) {
+        sampleArchive.recordSpl(
+          { serviceKey: this.currentKey, serviceDate: this.current.serviceDate },
+          itemId,
+          item.title,
+          sample.metrics,
+        );
       }
       // Keep the legacy single-metric fields populated (primary metric) for back-compat.
       const pk = this.current.metricKey;
       if (pk && pk in sample.metrics) {
         const v = sample.metrics[pk];
         item.maxSpl = item.maxSpl == null ? v : Math.max(item.maxSpl, v);
-        item.avgSpl =
-          item.avgSpl == null ? v : (item.avgSpl * item.sampleCount + v) / (item.sampleCount + 1);
+        item.leqSpl = addLeqSample(item.leqSpl ?? null, item.sampleCount, v);
         item.sampleCount += 1;
       }
     }
@@ -236,6 +294,10 @@ class SplRecorder {
     const now = new Date().toISOString();
     for (const it of this.current.items) if (!it.endedAt) it.endedAt = now;
     this.current.endedAt = now;
+    // The record is closed: name what the raw layer captured, then release the
+    // appenders. A later item going live reopens the record and the files resume.
+    const ctx = { serviceKey: this.current.serviceKey, serviceDate: this.current.serviceDate };
+    void sampleArchive.writeManifest(ctx).then(() => sampleArchive.closeService(ctx.serviceKey));
   }
 
   private schedulePersist(): void {

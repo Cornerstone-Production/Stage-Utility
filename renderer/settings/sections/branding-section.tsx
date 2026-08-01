@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, type ChangeEvent } from "react";
+import { useState, useRef, type ChangeEvent } from "react";
+import { Tooltip } from "../../components/ui/tooltip";
 import { UploadIcon, TrashIcon, CropIcon, UserRoundIcon } from "lucide-react";
 import {
   FieldSet,
@@ -16,6 +17,13 @@ import { invoke } from "../../lib/api";
 import { BrandLogo } from "../../components/brand-logo";
 import type { SectionProps } from "../types";
 import { LogoCropper } from "./logo-cropper";
+import { cn } from "../../lib/cn";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
+
+// Convenience presets for the brand accent (any org can also pick a custom hex).
+// Kept non-generic: a considered blue plus a few distinct hues. Semantic status
+// colors (green/red/amber) are separate and never themed.
+const ACCENT_PRESETS = ["#2e6691", "#3b82a6", "#5b9bd8", "#6e56cf", "#0d9488", "#c2410c"];
 
 // Keep in sync with the server-side cap in remote-server.ts (~1.5 MB decoded
 // leaves headroom under the 2 MB data-URL limit).
@@ -24,6 +32,25 @@ const ACCEPTED = "image/png,image/jpeg,image/svg+xml,image/webp";
 
 type Crop = { scale: number; x: number; y: number };
 type Target = "app" | "empty" | "avatar";
+
+/**
+ * One preview tile for an uploaded image, so the three of them cannot drift apart
+ * again — they had different backgrounds, different padding and different
+ * placeholder colours.
+ *
+ * The surface follows the theme. Two of these used a hard-coded dark kiosk colour
+ * because that is where the image ends up, which meant a black square sitting in an
+ * otherwise light page. A monochrome image is recoloured from `currentColor`, so on
+ * the theme surface it still shows the shape and coverage that is actually being
+ * checked here.
+ */
+function LogoPreview({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-gray-a4 bg-gray-a2 p-1 text-fg">
+      {children}
+    </div>
+  );
+}
 
 export function BrandingSection({
   stageState,
@@ -35,10 +62,15 @@ export function BrandingSection({
   const [cropTarget, setCropTarget] = useState<Target>("app");
   const fileRef = useRef<HTMLInputElement>(null);
   const pickTarget = useRef<Target>("app");
+  const [accentDraft, setAccentDraft] = useState(stageState.accentColor ?? "#2e6691");
 
-  useEffect(() => {
+  useResyncOn([stageState.accentColor], () => {
+    setAccentDraft(stageState.accentColor ?? "#2e6691");
+  });
+
+  useResyncOn([stageState.appName], () => {
     setName(stageState.appName);
-  }, [stageState.appName]);
+  });
 
   function commitName() {
     const trimmed = name.trim();
@@ -130,7 +162,7 @@ export function BrandingSection({
         aria-hidden="true"
       />
 
-      <FieldSet title="Branding">
+      <FieldSet>
         <FieldGroup>
           <Field orientation="horizontal">
             <FieldContent>
@@ -153,6 +185,65 @@ export function BrandingSection({
             />
           </Field>
 
+          {/* ── Accent color (themeable brand accent) ── */}
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Accent color</FieldLabel>
+              <FieldDescription>
+                Brand accent for buttons, selection, links, and focus. Status colors
+                (live / over / caution) are unaffected. Clear to use the built-in default.
+              </FieldDescription>
+            </FieldContent>
+            <div className="flex items-center gap-2 flex-wrap">
+              {ACCENT_PRESETS.map((hex) => (
+                <button
+                  key={hex}
+                  type="button"
+                  onClick={() => handlers.handleSetBranding({ accentColor: hex })}
+                  className={cn(
+                    "size-6 rounded-md border border-gray-a5 transition-transform hover:scale-110",
+                    stageState.accentColor?.toLowerCase() === hex &&
+                      "ring-2 ring-offset-2 ring-offset-gray-1 ring-focus",
+                  )}
+                  style={{ backgroundColor: hex }}
+                  aria-label={`Set accent ${hex}`}
+                />
+              ))}
+              <Tooltip label="Custom color">
+                {/* The gradient is the label's own background, not an inner element.
+                    Nested, it painted to the padding box while the preset swatches
+                    paint to the border box — same 24px element, 22px of colour, and
+                    it read as a smaller chip in the row. */}
+                <label
+                  className={cn(
+                    "relative size-6 cursor-pointer rounded-md border border-gray-a5 transition-transform hover:scale-110",
+                    "bg-[conic-gradient(from_180deg,#c2410c,#0d9488,#5b9bd8,#6e56cf,#c2410c)]",
+                  )}
+                  aria-label="Custom accent color"
+                >
+                  <input
+                    type="color"
+                    value={accentDraft}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setAccentDraft(e.target.value)}
+                    onBlur={() => {
+                      if (accentDraft.toLowerCase() !== (stageState.accentColor ?? "").toLowerCase()) {
+                        handlers.handleSetBranding({ accentColor: accentDraft });
+                      }
+                    }}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  />
+                </label>
+              </Tooltip>
+              <Button
+                variant="transparent"
+                size="small"
+                onClick={() => handlers.handleSetBranding({ accentColor: null })}
+              >
+                Default
+              </Button>
+            </div>
+          </Field>
+
           {/* ── App logo ── */}
           <Field orientation="horizontal">
             <FieldContent>
@@ -162,7 +253,7 @@ export function BrandingSection({
               </FieldDescription>
             </FieldContent>
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center justify-center size-12 rounded-md border border-gray-a4 bg-gray-a2 overflow-hidden shrink-0 text-gray-12">
+              <LogoPreview>
                 {stageState.appLogo ? (
                   <BrandLogo
                     logo={stageState.appLogo}
@@ -170,9 +261,9 @@ export function BrandingSection({
                     className="size-full"
                   />
                 ) : (
-                  <span className="text-caption2 text-gray-9">None</span>
+                  <span className="text-caption2 text-fg-subtle">None</span>
                 )}
-              </div>
+              </LogoPreview>
               <Button variant="filled" size="small" onClick={() => openPicker("app")}>
                 <UploadIcon className="size-3.5 text-gray-9" />
                 {stageState.appLogo ? "Replace" : "Upload"}
@@ -197,24 +288,6 @@ export function BrandingSection({
             </div>
           </Field>
 
-          {stageState.appLogo && (
-            <Field orientation="horizontal">
-              <FieldContent>
-                <FieldLabel>Recolor to match theme</FieldLabel>
-                <FieldDescription>
-                  Best for single-color logos — recolors to match light/dark (and the kiosk's
-                  gray). Turn off to show a full-color logo exactly as uploaded.
-                </FieldDescription>
-              </FieldContent>
-              <Switch
-                checked={stageState.appLogoMonochrome}
-                onCheckedChange={(v: boolean) => handlers.handleSetBranding({ monochrome: v })}
-                aria-label="Recolor logo to match theme"
-              />
-            </Field>
-          )}
-
-          {/* ── Empty-slot image ── */}
           <Field orientation="horizontal">
             <FieldContent>
               <FieldLabel>Empty slot image</FieldLabel>
@@ -223,13 +296,13 @@ export function BrandingSection({
               </FieldDescription>
             </FieldContent>
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center size-12 rounded-md border border-gray-a4 overflow-hidden shrink-0 bg-[#13131a] text-white/45">
+              <LogoPreview>
                 {stageState.emptySlotLogo ? (
-                  <BrandLogo logo={stageState.emptySlotLogo} monochrome className="size-full p-1" />
+                  <BrandLogo logo={stageState.emptySlotLogo} monochrome className="size-full" />
                 ) : (
-                  <span className="text-caption2 text-white/30">None</span>
+                  <span className="text-caption2 text-fg-subtle">None</span>
                 )}
-              </div>
+              </LogoPreview>
               <Button variant="filled" size="small" onClick={() => openPicker("empty")}>
                 <UploadIcon className="size-3.5 text-gray-9" />
                 {stageState.emptySlotLogo ? "Replace" : "Upload"}
@@ -264,13 +337,13 @@ export function BrandingSection({
               </FieldDescription>
             </FieldContent>
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center size-12 rounded-md border border-gray-a4 overflow-hidden shrink-0 bg-[#13131a] text-white/45">
+              <LogoPreview>
                 {stageState.defaultAvatar ? (
-                  <BrandLogo logo={stageState.defaultAvatar} monochrome className="size-full p-1" />
+                  <BrandLogo logo={stageState.defaultAvatar} monochrome className="size-full" />
                 ) : (
-                  <UserRoundIcon className="size-6 text-white/30" />
+                  <UserRoundIcon className="size-6 text-fg-subtle" />
                 )}
-              </div>
+              </LogoPreview>
               <Button variant="filled" size="small" onClick={() => openPicker("avatar")}>
                 <UploadIcon className="size-3.5 text-gray-9" />
                 {stageState.defaultAvatar ? "Replace" : "Upload"}
@@ -294,6 +367,26 @@ export function BrandingSection({
               )}
             </div>
           </Field>
+
+          {stageState.appLogo && (
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel>Recolor to match theme</FieldLabel>
+                <FieldDescription>
+                  Best for single-color logos — recolors to match light/dark (and the kiosk's
+                  gray). Turn off to show a full-color logo exactly as uploaded.
+                </FieldDescription>
+              </FieldContent>
+              <Switch
+                checked={stageState.appLogoMonochrome}
+                onCheckedChange={(v: boolean) => handlers.handleSetBranding({ monochrome: v })}
+                aria-label="Recolor logo to match theme"
+              />
+            </Field>
+          )}
+
+          {/* ── Empty-slot image ── */}
+
 
           {/* Crop / zoom editor — shared by both images. */}
           {cropSrc && (

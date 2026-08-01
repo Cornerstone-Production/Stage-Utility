@@ -18,9 +18,20 @@ import { initLogCapture } from "./main/services/log-buffer.js";
 // Capture logs into the ring buffer (exposed at /log) as early as possible.
 initLogCapture();
 
+import { initLogPersistence } from "./main/services/log-persist.js";
+// Replay the previous run's log tail, then start mirroring new lines to disk, so
+// /log spans restarts instead of starting blank after every one.
+initLogPersistence();
+
+import { initUpdateLog } from "./main/services/update-log.js";
+// Replay the last update's persisted activity into the /log buffer (and trim the
+// on-disk log) so an update that just restarted us is still visible at /log.
+initUpdateLog();
+
 import { getUserDataPath } from "./main/services/app-paths.js";
 import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";
+import { backupScheduler } from "./main/services/backup-scheduler.js";
 import { integrationManager } from "./main/services/integration-manager.js";
 import { livePoller } from "./main/services/live-poller.js";
 import { prodcomService } from "./main/services/prodcom-service.js";
@@ -47,6 +58,8 @@ console.log("[server] initialising services...");
 await stageController.init();
 await integrationManager.init();
 await baptismTimerService.init();
+// Unattended backups, if the operator has turned them on.
+backupScheduler.start();
 
 // Close any history record left open by a prior run (crash / restart mid/after a
 // service) before the poller starts — a genuinely-live service reopens on the next tick.

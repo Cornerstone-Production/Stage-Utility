@@ -8,6 +8,15 @@ export default [
   { ignores: ["build/**", "node_modules/**", "public/**"] },
   js.configs.recommended,
   {
+    // Plain ESM helpers run by the update scripts — Node globals, no TS parser.
+    files: ["**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: { ...globals.node },
+    },
+  },
+  {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {
       parser: tsparser,

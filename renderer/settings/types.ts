@@ -15,6 +15,8 @@ export type SectionId =
   | "attendance"
   | "service-history"
   | "baptisms"
+  | "patch"
+  | "automation"
   | "advanced";
 
 export interface SectionItem {
@@ -40,11 +42,14 @@ export interface SectionHandlers {
   // In-app self-update
   handleCheckUpdates: () => Promise<void>;
   handleApplyUpdate: (override?: boolean) => Promise<void>;
-  handleSetAutoUpdate: (partial: { enabled?: boolean; dayOfWeek?: number | null; hour?: number }) => Promise<void>;
+  handleSetAutoUpdate: (partial: { mode?: "manual" | "auto-install" | "auto-full"; enabled?: boolean; dayOfWeek?: number | null; hour?: number }) => Promise<void>;
   handleSetReconnectSchedule: (partial: { enabled?: boolean; leadMin?: number; tailMin?: number; dormantMin?: number }) => Promise<void>;
+  handleSetTaperWindow: (partial: { preMin?: number; postMin?: number }) => Promise<void>;
+  handleSetBaptismAutoStart: (partial: { enabled?: boolean; testimonyKeyword?: string }) => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {
     name?: string;
+    accentColor?: string | null;
     logo?: string | null;
     monochrome?: boolean;
     logoOriginal?: string | null;
@@ -66,7 +71,7 @@ export interface SectionHandlers {
   discardSlots: () => void;
   handleSetViewSlotsLayout: (id: string, slotsLayout: SlotsLayout | null) => Promise<void>;
   // Views (content)
-  handleAddView: (name: string, kind: ViewKind) => Promise<void>;
+  handleAddView: (name: string, kind: ViewKind) => Promise<string | null>;
   handleRenameView: (id: string, name: string) => Promise<void>;
   handleDuplicateView: (id: string) => Promise<void>;
   handleRemoveView: (id: string) => Promise<void>;

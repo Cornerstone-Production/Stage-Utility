@@ -9,7 +9,7 @@ const variantColors: Record<NonNullable<StatusProps["variant"]>, string> = {
   success: "bg-green-9",
   warning: "bg-yellow-9",
   error: "bg-red-9",
-  info: "bg-blue-9",
+  info: "bg-accent",
   neutral: "bg-gray-9",
 };
 
@@ -23,7 +23,7 @@ export function Status({ variant = "neutral", className, children, ...props }: S
         )}
       />
       {children && (
-        <span className="text-[12px] text-gray-11">{children}</span>
+        <span className="text-caption1 text-fg-muted">{children}</span>
       )}
     </span>
   );

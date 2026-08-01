@@ -11,6 +11,23 @@ It runs anywhere Node runs.
 > fails to start. The Linux installer grants the needed privilege automatically
 > (see below). Disable the port-80 listener with `STAGE_UTILITY_FRIENDLY_PORT=0`.
 
+## Most people want the one-liner
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.sh | sudo bash
+```
+
+```powershell
+irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.ps1 | iex
+```
+
+No Node, no git, no build. Options and what it does are in
+[install and config](docs/ops/install-and-config.md#install). **The rest of this
+file is the manual route** — building from a checkout, which you want if you are
+developing, running a modified copy, or on a platform with no published build.
+
+---
+
 **It installs on Linux, macOS, and Windows.** The app itself is identical on each;
 only the way you make it **auto-start on boot and restart if it crashes** differs.
 Pick your platform and follow it top to bottom:

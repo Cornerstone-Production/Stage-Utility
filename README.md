@@ -1,592 +1,129 @@
 # Stage Utility
 
-A kiosk dashboard for a live-production / service tech station. It pulls together
-several live sources and shows them on monitors around the stage:
+Monitors around a stage, showing your production team what they need during a
+service — who is on which mic, what slide is up, how loud it is, how far behind
+the plan you are.
 
-- **Planning Center Online** — the band lineup (people, roles, photos), the active
-  plan, and a live service countdown.
-- **Shure** and **Sennheiser** wireless systems — RF, battery, frequency, and audio
-  level for each mic or in-ear pack.
-- **ProPresenter** (one or more instances) — the live slide: current/next text, the song
-  **section** (Verse/Chorus/Bridge/Intro/Outro…), chords, running timers, and a thumbnail.
-- **ProdCom** — live audio **transcription** (captions), shown full-screen or as a
-  strip on the dashboards.
-- **Smaart** (Rational Acoustics) — live **SPL** from a FOH rig, recorded max/avg
-  **per service item**, with a history browser.
-- **SenSource Vea** — live **people counting** / attendance, with per-service recording
-  and trend graphs (and optional push to a **Ross** multiviewer via TSL UMD).
-- **OBS Studio** (streaming/recording state) and **OSC** control + feedback to LAN gear.
-
-It also includes **ScriptView** (per-service-type PCO rundown dashboards), a unified
-**History** browser (SPL + attendance + item timing, by calendar), and a **baptism**
-timer/operator workflow.
-
-Each monitor is a **display** (a screen at its own URL) pointed at a **view** —
-reusable content you build once and can route to any number of displays. A view is one
-of several types: a slot grid, a tech dashboard, a stage/confidence view, full-screen
-captions, or a **custom** layout you design visually (drag clocks, timers, slide text,
-mic-slot grids, logos, etc. onto a canvas). A phone-friendly remote runs on the same
-LAN so a tech can re-assign slots and switch plans from the floor.
-
-It's a self-contained **web/server app**: a small Node backend serves the kiosk
-displays, the settings UI, the phone remote, and a REST + SSE API — all on one port.
+It reads your service plan from **Planning Center** and pulls live data from the
+gear you already run: wireless receivers, ProPresenter, OBS, SPL meters, people
+counters. Everything is on your own network; a small Node server drives the
+screens, the settings UI and a phone remote from one port.
 
 ---
 
 ## Contents
 
-- [How it works](#how-it-works)
-- [Tech stack](#tech-stack)
-- [Get the code](#get-the-code)
-- [Quick start (development)](#quick-start-development)
-- [Deployment](#deployment)
-- [Configuration](#configuration)
-- [URLs & ports](#urls--ports)
-- [Integrations](#integrations)
-- [Data model & concepts](#data-model--concepts)
-- [API reference](#api-reference)
-- [Project structure](#project-structure)
-- [npm scripts](#npm-scripts)
-- [Data, secrets & backups](#data-secrets--backups)
-- [Development notes](#development-notes)
+**In this file** — [How it works](#how-it-works) · [Get the code](#get-the-code) ·
+[What it connects to](#what-it-connects-to) · [Branches and releases](#branches-and-releases)
+
+**Documentation**
+
+| | |
+|---|---|
+| [Install, deploy and configure](docs/ops/install-and-config.md) | putting it on a machine, running it in development |
+| [Integrations](docs/integrations/README.md) | every device and service it talks to |
+| [Data model](docs/reference/data-model.md) | Views, Outputs and Slots — the nouns |
+| [Display URLs](docs/display-urls.md) | addressing screens |
+| [Slots](docs/slots.md) | matching people and devices to positions |
+| [Attendance and service history](docs/features/attendance-and-history.md) | what a service records, and reading it back |
+| [ScriptView and Baptisms](docs/features/scriptview-and-baptisms.md) | two operator surfaces on the plan |
+| [Patch sheet](docs/patch-sheet/README.md) | the stage patch sheet |
+| [Automation](docs/automation.md) | rules that fire on live events |
+| [Data archive](docs/data-archive.md) | raw sample retention, export and import |
+| [Reliability and data](docs/ops/reliability.md) | behaviour under load, where your data lives |
+| [Network traffic](docs/ops/network-traffic.md) | what it puts on your LAN |
+| [Updates and logs](docs/ops/updates-and-logs.md) | the in-app updater |
+| [Releases and distribution](docs/ops/distribution.md) | how versions are cut, and how a server gets one |
+| [Homebrew](docs/ops/homebrew.md) | installing and running it with brew |
+| [API reference](docs/reference/api.md) | the HTTP surface |
+| [Contributing](docs/contributing.md) | commit convention, branching, releases |
+| [Project structure](docs/contributing-appendix.md) | orientation in the codebase |
 
 ---
 
 ## How it works
 
+Each screen is a **display** — a browser at its own URL, typically a Pi or a
+smart TV. A display shows a **view**: the content you built, which can be a mic
+slot grid, a tech dashboard, a stage/confidence screen, full-screen captions, or
+a layout you design yourself by dragging clocks, timers, slide text and mic grids
+onto a canvas.
+
+Views and displays are separate on purpose. Build a view once and point as many
+screens at it as you like; change the view and every screen follows. A
+phone-friendly remote runs on the same network, so someone on the floor can
+reassign a mic or switch plans without going back to the booth.
+
 ```
- Planning Center ─┐                          ┌─ Displays        (build/renderer, React)
-  (lineup, REST)  │                          │    /            picker
- Shure wireless  ─┤    ┌──────────────┐      │    /display-N   slots │ dashboard │
-  (TCP, RF/batt)  ├───▶│  Node server │─────▶│                 stage │ captions
- ProPresenter    ─┤    │  (server.ts) │      ├─ Settings UI     (/settings)
-  (HTTP, slides)  │    │  :8788       │      ├─ Phone remote    (public/control.html)
- ProdCom         ─┘    └──────┬───────┘      │
-  (HTTP/SSE, text)            └──────────────┴─ REST  /api/*
-                                               SSE   /api/events  (live push)
+Planning Center ─┐                        ┌─ Displays      /display-1, /display-2 …
+   plan, people  │    ┌──────────────┐    │
+Wireless, audio ─┼───▶│  Node server │───▶├─ Settings      /settings
+   and video gear│    │    :8788     │    │
+                 │    └──────────────┘    ├─ Phone remote
+                 │                        │
+                 └── on your network ─────┴─ REST /api/*  ·  SSE /api/events
 ```
 
-The backend (`server.ts` + `main/`) polls Planning Center on a schedule, Shure gear
-and ProPresenter continuously, and holds a long-lived SSE connection to ProdCom. It
-resolves the current plan into the configured **slots** and broadcasts state to every
-connected client over Server-Sent Events. High-frequency data rides its own SSE
-channels — `pco:live` (countdown), `propresenter:status` (slide), and
-`prodcom:transcript` (captions) — so each can update and fail independently. The
-frontend is a React app served as static files; the phone remote is a standalone
-HTML page.
+The server holds the connections to your gear, resolves the current plan into
+slots, and pushes changes to every screen over one event stream. Nothing routes
+through the internet except Planning Center, and video never passes through the
+app at all.
 
-## Tech stack
+**Does it fit your setup?** You need Planning Center Services, a machine to run it
+on (a Pi is enough), and screens that can open a URL. Everything else is optional
+— the app works with whatever subset of gear you have, and each integration is
+enabled independently.
 
-| Layer    | Tech |
-|----------|------|
-| Backend  | Node **≥24**, TypeScript run via `tsx` (no compile step), built-in `http`/`net`/`crypto` only — **zero third-party runtime deps** |
-| Frontend | React 19, TanStack Router + Query, Tailwind CSS v4, Radix UI, dnd-kit, Vite 8 (Rolldown) with the React Compiler enabled |
-| Transport| REST over HTTP + Server-Sent Events for live updates |
-| Storage  | JSON files + an AES-256-GCM encrypted secrets blob, in a local data directory |
+## Install it
 
-## Get the code
+**Linux and macOS**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.sh | sudo bash
+```
+
+**Windows** — in an Administrator PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.ps1 | iex
+```
+
+Nothing to clone and no Node to install: the download carries its own runtime.
+It verifies the download, registers an auto-starting service, and prints the
+address to open. After that it updates itself from Settings.
+
+To work on the code instead:
 
 ```bash
 git clone https://github.com/Cornerstone-Production/Stage-Utility.git
-cd Stage-Utility
+cd Stage-Utility && npm ci && npm run dev
 ```
 
-For installing on the actual display devices (Pi / Mac / Windows), the per-device
-clone + setup steps are in **[INSTALL.md](INSTALL.md)**.
+Both routes, and every option, are in
+[install and config](docs/ops/install-and-config.md).
 
-## Quick start (development)
+## What it connects to
 
-Requires Node ≥ 24. From the repo root (see [Get the code](#get-the-code) above),
-run **two terminals**:
+**Planning Center Services** is the one requirement — it supplies the plan, the
+people, their photos and the live service countdown.
 
-```bash
-# Terminal 1 — backend (API + SSE) on :8788
-npm install
-npm run server
+Everything else is optional and independently enabled: Shure and Sennheiser
+wireless, ProPresenter, Smaart (SPL), SenSource (people counting), OBS, REAPER,
+OSC, RossTalk, Ross TSL, ProdCom transcription, and Bitfocus Companion.
 
-# Terminal 2 — Vite dev server (hot reload) on :3000
-npm run dev
-```
+Setup and behaviour for each is in [integrations](docs/integrations/README.md).
 
-Then open:
+## Branches and releases
 
-- **Display picker** → http://localhost:3000/ (then pick a display, e.g. `/display-1`)
-- **Settings UI** → http://localhost:3000/settings
-
-The Vite dev server proxies `/api` and `/photos` to the backend on `:8788`. If
-`localhost:3000` won't connect, see [Development notes](#development-notes).
-
-## Deployment
-
-It's pure Node + a static build, so it **runs on Linux, macOS, and Windows** (Node
-≥ 24). The only platform-specific piece is how you make it auto-start on boot and
-restart on crash. See **[INSTALL.md](INSTALL.md)** for step-by-step guides:
-
-| Platform | Auto-start mechanism | Install |
-|----------|----------------------|---------|
-| **Linux** (Pi/server) | **systemd** (`Restart=on-failure`, enabled on boot) | one command: `sudo ./scripts/install.sh` |
-| **macOS** | **launchd** LaunchDaemon (`RunAtLoad` + `KeepAlive`) | manual build + a plist |
-| **Windows** | **NSSM** service (auto-start + crash-restart), or Task Scheduler | manual build + service |
-
-On Linux the installer checks Node, builds the UI, sets up the data directory, and
-installs the auto-starting `stage-utility` service. Re-run after `git pull` to
-update; `sudo ./scripts/uninstall.sh` removes it.
-
-For a manual/production run on any OS (no auto-start):
-
-```bash
-npm ci
-npm run build
-npm start          # node --import tsx server.ts  → http://localhost:8788/
-```
-
-The listen port (`8788`) can be overridden with the `STAGE_UTILITY_PORT`
-environment variable.
-
-## Configuration
-
-All configuration is done at runtime through the **Settings UI** — nothing lives
-in the repo. Open `…/settings-window.html` and work through the sidebar:
-
-1. **Integrations → Planning Center** — enter your **App ID** + **Secret** (from a
-   [PCO Personal Access Token](https://api.planningcenteronline.com) → Developers →
-   Personal Access Tokens). Set the **refresh interval** (5 min – 2 h) or hit
-   **Refresh now**; the card shows when it last synced.
-2. **Integrations → Wireless Gear** *(optional)* — add Shure devices by IP, TCP
-   port (usually `2202`), and channel count.
-3. **Integrations → ProPresenter** *(optional)* — host + API port (default `1025`,
-   the Network port in ProPresenter → Settings → Network). Drives the stage view's
-   slide text, section, chords, timers, and thumbnail.
-4. **Integrations → ProdCom** *(optional)* — host + API port (default `24480`), plus
-   an API key only if ProdCom's "Require Authentication" is on. Drives the captions.
-5. **Integrations → Smaart (SPL)** *(optional)* — host + port (default `26000`), plus a
-   password only if Smaart's API requires it. Enable the API in Smaart (Options →
-   Preferences → API; modern JSON-over-WebSocket API, Smaart 8.3+). Drives the SPL meter
-   object/cards, the per-item max/avg recording, and the **SPL History** browser.
-6. **Plan** — **Auto** (follow the next upcoming event; rolls to the next one ~1 h
-   after the current service ends) or **Manual** (pick a plan). **Active Service Types**
-   here toggles which PCO service types auto-plan selection considers.
-7. **Views** — build reusable content (drag to reorder, duplicate, live preview).
-   Pick a **type** when you create one:
-   - **Slots** — the channel grid: link each slot to a PCO person/position, a static
-     label, or leave it empty; optionally bind it to a wireless channel; drag to
-     reorder; stack slots that share a charger into one column.
-   - **Dashboard** — clock + PCO countdown + ProPresenter now/next summary.
-   - **Stage** — confidence view: slide text, section, chords, preview, timers.
-   - **Captions** — full-screen transcription.
-   - **Custom** — a visual editor: drag/resize objects (clocks, countdowns, slide
-     text, mic-slot grids, captions, SPL meters, charger battery, logos, images, shapes,
-     **containers**, …) onto a canvas and style them. Group objects inside a **container**
-     that moves/resizes as a unit, apply one-click **card presets** (the dashboards'
-     rounded "glass tile" look — or **Flat** to clear it), use **Start from Dashboard**
-     to drop in the dashboard design as editable tiles, and **save designs to a reusable
-     layout library** to reuse on other views.
-   - **Script** — a full service rundown (every plan item with PCO note columns,
-     section headers, length, clock + live countdown; current item highlighted), with an
-     optional per-display PCO Prev/Next control.
-   - **SPL Rundown** — a compact item-plus-max-SPL list for the live service.
-8. **ScriptView** — a per-service-type PCO rundown dashboard (an in-app replacement
-   for ScriptViewer) at `/scriptview`. Pick a service type → open a shareable,
-   deep-linkable rundown (`/scriptview/weekend/audio`) to pin in its own tab. Define
-   **global layouts** (Audio/Video/Lighting/…) as column presets shared across every
-   service type, each with per-element toggles (clock, time, song key/BPM/arrangement,
-   item notes, total time) and department row coloring; the projected clock follows the
-   plan's timezone, and the live item highlights when the service is running.
-9. **Displays** — your physical screens. Each has its own URL and is **routed to a
-   view** (one view can drive many screens). Rename, drag to reorder, or open in its
-   own window.
-10. **Connect** — toggle the on-screen QR code for the phone remote.
-
-## URLs & ports
-
-| Surface | Dev (`npm run dev`) | Production (`npm start`) |
-|---------|----------------------|--------------------------|
-| Display picker | `http://localhost:3000/` | `http://<host>/` (or `:8788`) |
-| A specific display | `http://localhost:3000/display-1` | `http://<host>/display-1` |
-| ScriptView | — | `http://<host>/scriptview` (per-service-type PCO rundowns) |
-| Settings UI | `http://localhost:3000/settings` | `http://<host>/settings` |
-| Phone remote | — (use `:8788`) | `http://<host>/` when no built UI is present¹ |
-| API / SSE | proxied to `:8788` | `http://<host>/api/*` |
-
-The server binds `0.0.0.0:8788` (LAN-accessible) and, where the process is
-permitted, **also `:80`** so URLs need no port — 8788 always stays up. Override
-the main port with `STAGE_UTILITY_PORT`; change/disable the port-free listener
-with `STAGE_UTILITY_FRIENDLY_PORT` (`0` = off).
-Clean URLs (`/settings`, `/display-N`) are served directly in production and mapped
-by a small Vite middleware in dev. The display picker at `/` lists every configured
-display; clicking the brand/logo in any display returns there.
-
-¹ The standalone phone control page (`public/control.html`) is served at `/` only
-when there is no `build/renderer/` directory; once the UI is built, `/` serves the
-React app instead.
-
-## Integrations
-
-| Integration | Kind | Config | Notes |
-|-------------|------|--------|-------|
-| **Planning Center** | lineup | App ID, Secret, refresh interval, countdown target | Fetches service types, plans, and team members; auto-refreshes on the chosen interval (default 1 h) plus on demand. Also drives the live service countdown (`pco:live`). Request volume is minimized (tiered caches, consolidated `plan_times` + team-positions calls, 429 backoff). |
-| **Wireless Gear** | wireless | per-device host / port / channels | Shure **ULX-D**, **Axient Digital**, **PSM (in-ear)**, and Sennheiser **EW-DX**, **EW-G4 (SSC)**, **Spectera** drivers; reports RF, battery, charging, frequency, audio level. Offline/manually-entered devices supported. |
-| **ProPresenter** | control | host, API port (`1025`), **per-instance name** | Talks directly to ProPresenter 7.9+'s local HTTP API (LAN, no auth). **Multiple instances** can be configured and selected per layout object. Polls the active presentation, slide status, arrangement, timers, and a thumbnail; broadcasts `propresenter:status`. Section is resolved from the arrangement **play order**. |
-| **ProdCom** | lineup | host, API port (`24480`), API key | Holds an SSE connection to ProdCom's transcript stream and re-broadcasts `prodcom:transcript`; backfills recent lines on connect. Powers the Captions display + dashboard transcript strips. |
-| **Smaart (SPL)** | control | host, port (`26000`), password | Connects to Smaart's modern JSON-over-WebSocket API (8.3+, auto-negotiates SDK V3/V4) for live SPL. Streams per-meter readings (`spl:metrics`); a recorder tracks max/avg SPL **per plan item** per service (`spl:history`), browsable under **History**. |
-| **OBS Studio** | control | host, WebSocket port (`4455`), password | Connects to OBS's obs-websocket v5 (direct, not via Companion). Reports streaming/recording/scene state; drives an **"OBS status"** layout object that turns red while recording. |
-| **OSC** | control | per-button targets (host / port / address / args) | Custom-layout **OSC button** objects send OSC over UDP to LAN gear and reflect device state via OSC **feedback**; multiple targets per button. Zero external deps (`node:dgram` + a hand-rolled codec). |
-| **SenSource Vea** | people | client ID + secret (or static token), poll interval | People-counting: pulls authoritative building occupancy (zone→location scoping, nets ins/outs across doors). Feeds the **attendance** metrics, trend graph, and per-service recording. |
-| **Ross MultiViewer (TSL UMD)** | output | switcher host, TSL port | Pushes live people counts to a Ross multiviewer/switcher as TSL UMD tally text. |
-| **Bitfocus Companion** | control | host, port | Backed by a separate Companion module; in-app control endpoints exist. |
-
-## Attendance & service history
-
-- **People counting (SenSource Vea).** Live building occupancy shown on dashboards
-  and custom layouts. Metrics include **in-room now**, **peak attendance** (highest
-  in-room), **day attendance** (sum of the day's services' peaks), **per-service
-  attendance**, **% of capacity**, **vs average**, and **Low** (lowest in-room during
-  the live service). "Attendance" = people in the room; "entries" = cumulative door
-  count (double-counts re-entries), kept separately.
-- **History tab** (Settings → History) unifies **SPL**, **attendance**, and
-  **service-timeline** records into one browser with a **calendar** (dots on days with
-  data). Per-service detail shows charts — an attendance trend with **PCO plan-item
-  markers** + a service-average line, and per-item SPL — plus a **grouped, drag-orderable
-  KPI overview** (timers, attendance, highest/lowest attended, day totals), with
-  toggleable sparklines. Service windows are **editable** (fix a bad capture), individual
-  items can be **counted/excluded** from the timers, and a service **report** is exportable.
-- **Recorders** capture attendance / SPL / service-timeline per service, keyed to the
-  plan + occurrence, and **auto-finalize at the plan's SERVICE END marker** (robust to
-  a parked live controller). Records are written atomically and reconciled on startup.
-- **Layout objects:** **people counter**, **people summary** (several metrics side by
-  side, each toggleable), and **people graph** (live rolling window **or** a recorded
-  service, with PCO-item markers, a hover tooltip, and an optional kiosk live/recorded
-  toggle).
-
-## ScriptView
-
-A per-service-type PCO **rundown dashboard** at `/scriptview` — an in-app replacement
-for ScriptViewer. The landing page lists the service types you enable; each opens a
-**deep-linkable** rundown at a readable URL (`/scriptview/weekend/audio`) you can pin in
-its own browser tab. **Layouts are global** column presets (Audio / Video / Lighting / …)
-shared across every service type, each with per-element toggles (**clock, time, song
-key / BPM / arrangement, item notes, total time**) and **department row coloring**. The
-projected clock follows the **plan's timezone**; the current item highlights live only
-while a service is actually running. Configured in **Settings → ScriptView** with a live
-preview.
-
-## Baptisms
-
-A standalone **`/baptism` operator page** (also a Settings tab) with a **grouped
-workflow** (all testimonies, then all baptisms). Sessions are named by service and
-**cross-linked into Service History** with per-person splits + averages. An on-air
-**"Baptism timer"** layout object shows the live count/timer on a display.
-
-## Reliability & efficiency
-
-The live layer is tuned for many always-on kiosks:
-
-- **SSE:** a single multiplexed stream with **per-connection channel filtering** (a
-  display only receives the channels it uses), **broadcast-on-change** (e.g. `pco:live`
-  and `spl:metrics` emit on change, not every tick), payloads **stringified once** per
-  broadcast, a **heartbeat + backpressure guard** that reaps dead clients, and an
-  **opt-in shared-worker relay** (`stage:sharedSse`) that shares one connection across
-  tabs on the same machine.
-- **PCO:** tiered response caches, consolidated `plan_times` + team-position calls, and
-  **429 backoff** cut request volume; the live timer stays uncached.
-- **Storage:** the DataStore uses **atomic writes** (temp + rename) and is
-  **corruption-safe** on load (bad files are backed up, never overwritten). Photo and
-  plan-attachment disk caches are pruned by age + size.
-- **Polling & assets:** static assets are gzipped; ProPresenter thumbnails are cached
-  and its poll interval is configurable; charger/heartbeat polls are slowed; live-history
-  broadcasts are throttled to ~5 s.
-- **Updater:** skips `npm ci` / `npm run build` when an update doesn't touch deps or the
-  renderer, and can switch between the **beta** and **main** update tracks in-app.
-
-## Backups & portability
-
-A **full config snapshot** (Settings → Advanced) can be **saved/recalled** in-app and
-**downloaded/uploaded** as a file to move a configuration between machines. Integration
-**secrets are excluded** from snapshots (they stay AES-256-GCM encrypted on the box). A
-server **log viewer** is available at `/log`.
-
-## Data model & concepts
-
-A **slot** is one channel strip on the display. Each slot has a `channel` label and
-a **link** that decides who/what it shows (`renderer/types.d.ts`):
-
-- `pco` **by position** — matches whoever fills a team position (e.g. "Electric Guitar").
-- `pco` **by person** — pinned to a specific PCO person id.
-- `static` — a fixed label + color (e.g. "Backup").
-- `empty` — a placeholder.
-
-A slot can optionally carry a **device binding** to a wireless channel, so the
-display shows that pack's RF/battery next to the person. Slots can **stack** into a
-shared on-screen column (mirrors two people sharing a dual-bay charger).
-
-**Views & displays.** A **view** is a reusable content definition; a **display**
-(output) is a physical screen at its own URL, routed to exactly one view. One view can
-drive many displays, so you change content in one place. Both can be reordered. View
-**kinds**:
-
-- **Slots** — the channel grid (its own slot set, per service type). Only this kind uses the slot editor.
-- **Dashboard** — clock, the PCO live countdown, and a ProPresenter now/next summary.
-- **Stage** — a confidence view: current/next slide text, song section + chords, a
-  live slide thumbnail, running timers, and the countdown.
-- **Captions** — full-screen, auto-scrolling transcription from ProdCom.
-- **Script** — a full service rundown: every plan item with PCO note-category columns,
-  section headers, length, a clock and the live countdown, with the current item
-  highlighted; an optional per-display PCO Prev/Next control.
-- **SPL Rundown** — a compact item-plus-max-SPL list for the live service.
-- **Custom** — a free-form layout authored in the **visual editor**: a fixed design
-  canvas (default 1920×1080) of positioned **objects** — clock, countdown, current/next
-  slide text + notes, slide thumbnail, section chip, mic-slots grid, transcript, SPL
-  meter, charger battery, PCO live controls, brand logo, image, **plan file**, shape,
-  text, **container**, plus the newer **people counter / summary / graph**, **OBS
-  status**, **OSC button**, **integration status**, **wireless summary**, **caption
-  filter**, **baptism timer**, and **service order** — each bound to the same live data.
-  Positions and sizes are stored as fractions of the canvas, so a layout renders
-  identically at any resolution.
-
-  **Containers** are styled boxes that hold other objects: a child's position/size is a
-  fraction of its container, so moving or resizing the container moves and scales its
-  contents as a unit (nesting up to two levels). Drop a top-level object onto a container
-  to nest it; pop it back out from the inspector or the layers panel. **Card presets**
-  (Glass / Green / Red / Amber, or **Flat** to clear) apply the built-in dashboards'
-  rounded "glass tile" look — fill, border, radius, padding — to any object in one click,
-  fully opt-in and reversible. **Start from Dashboard** builds the dashboard layout
-  (clock, PCO timer, current/next item, SPL, captions) as editable nested tiles. Style
-  sizes (font, radius, padding, border) edit in px and opacity as a 0–100% slider.
-
-  The **plan-file** object shows a file attached to the *current Planning Center plan* —
-  e.g. the stage plot. It matches by filename (case-insensitive substring, default
-  `"stage plot"`) across everything on the plan (plan Files, service-type files, item/song
-  charts — via PCO's `all_attachments`), so it auto-tracks the live plan week to week
-  without re-pointing. PDFs render client-side (pdf.js, lazy-loaded); images render
-  directly. The server resolves + proxies the file (PCO only issues short-lived links) and
-  caches it on disk by attachment id. The *rendered image* (not the source file) can be
-  framed in the inspector: **crop** (edge insets), **trim** (auto-remove the white page
-  margin), **background** (keep / fill black / knock white out to transparent), and a
-  **fit box to file** button that matches the object box to the content's aspect ratio.
-
-**Layout templates** are named custom layouts saved to a reusable library (save / load /
-overwrite / delete from the editor). **Slot presets** similarly snapshot a slot
-arrangement by name.
-
-The full base state is the `StageState` object pushed over SSE; high-frequency data (the
-PCO countdown, ProPresenter slide, and transcript) rides separate SSE channels so a
-display can render and recover from each independently. The countdown matches PCO's own
-behavior — it always counts **down** (to the service start, then per item), going
-red/negative when an item runs over.
-
-**Backward compatibility.** The older "a display *is* its content" model is preserved as
-a computed compat shim in `StageState` (`displays` / `slots` / `slotsByDisplay`) so
-existing clients keep working; on first run, existing displays auto-migrate to
-views + outputs with their URLs and slot data intact.
-
-## API reference
-
-All endpoints are under `/api`. State-changing routes return the updated
-`StageState`. Live updates arrive on the SSE stream rather than by polling.
-
-**Stage & plan**
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET  | `/api/health` | Liveness check |
-| GET  | `/api/state` | Current `StageState` |
-| GET  | `/api/service-types` | PCO service types |
-| GET  | `/api/team-positions` | Team positions for the active plan |
-| GET  | `/api/plans?serviceTypeId=…` | Plans for a service type |
-| GET  | `/api/pco/attachments` | Files on the active plan (plan + item level) |
-| GET  | `/api/pco/attachment?match=…` | Stream the active plan's file matching a filename substring (proxied + cached) |
-| POST | `/api/service-type` | Set active service type |
-| POST | `/api/plan` | Set active plan |
-| POST | `/api/plan/next` | Jump to the next plan (auto mode) |
-| POST | `/api/plan/mode` | Set `auto` / `manual` |
-| POST | `/api/refresh` | Re-fetch from Planning Center |
-| POST | `/api/live/next` | PCO Services Live: go to the next item (like PCO's timer) |
-| POST | `/api/live/previous` | PCO Services Live: go to the previous item |
-| POST | `/api/allowed-service-types` | Set the allowlist |
-| POST | `/api/show-qr` | Toggle the connect QR on the display |
-
-**Views, displays & layouts**
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/views` | List views |
-| POST | `/api/views` | Create a view (`{name, kind}`) |
-| PATCH | `/api/views/:id` | Update name / kind / `ndiSource` / `layout` |
-| POST | `/api/views/:id/slots` | Save a slots-view's slots |
-| POST | `/api/views/:id/duplicate` | Duplicate a view |
-| POST | `/api/views/:id/copy-slots` | Copy slots from another view |
-| POST | `/api/views/reorder` | Reorder views |
-| DELETE | `/api/views/:id` | Delete a view |
-| GET | `/api/outputs` | List physical displays |
-| POST | `/api/outputs` | Add a display |
-| PATCH | `/api/outputs/:id` | Rename / route to a view (`{viewId}`) |
-| POST | `/api/outputs/reorder` | Reorder displays |
-| DELETE | `/api/outputs/:id` | Remove a display |
-| GET / POST | `/api/layout-templates` | List / save a custom-layout template |
-| PATCH / DELETE | `/api/layout-templates/:id` | Update / delete a template |
-
-Legacy aliases (retained for older clients; they map onto views/outputs):
-`POST /api/slots`, `GET/POST /api/presets` + `/api/presets/:id/apply` + `DELETE /api/presets/:id`,
-and `POST /api/displays` + `PATCH/DELETE /api/displays/:id`.
-
-**Integrations & wireless**
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/integrations` | Integration states |
-| POST | `/api/integrations/:id/config` | Update config (secrets encrypted) |
-| POST | `/api/integrations/:id/enabled` | Enable / disable |
-| POST | `/api/integrations/:id/test` | Test a connection |
-| GET | `/api/wireless/providers` | Available device drivers |
-| GET / POST | `/api/wireless/connections` | List / add a device connection |
-| PATCH / DELETE | `/api/wireless/connections/:id` | Update / remove a connection |
-| POST | `/api/wireless/connections/:id/test` | Test a device connection |
-| GET | `/api/integrations/wireless/channels` | Bindable channels |
-| GET / POST | `/api/wireless/meter-rate` | Get / set the polling interval |
-
-**ProPresenter & ProdCom**
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/propresenter/thumbnail?k=…` | Live slide thumbnail (JPEG proxy; `k` cache-busts per slide) |
-| GET | `/api/prodcom/transcript` | Recent transcript buffer (backfill for a freshly-loaded Captions display) |
-
-**SPL (Smaart) & rundown**
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/spl/metrics` | Latest live SPL reading per meter (device/channel) |
-| GET | `/api/spl/history/current` | The active service's per-item SPL record (live) |
-| GET | `/api/spl/history` | List saved past-service SPL records |
-| GET | `/api/spl/history/:key` | One past-service record |
-| GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
-
-**People, attendance, timeline & baptism**
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/people/count` | Live building occupancy (SenSource) |
-| GET | `/api/sensource/locations` \| `/api/sensource/zones` | Pickers for the SenSource config |
-| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record |
-| GET | `/api/service-timeline` \| `/:key` \| `/current` | List / one / live per-item timing record |
-| GET | `/api/obs/status` | OBS streaming / recording / scene state |
-| GET | `/api/baptism` \| `/api/baptism/sessions` | Live baptism state / saved sessions (+ start/next/baptized actions) |
-
-**ScriptView**
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/scriptview/rundown?serviceTypeId=…[&planId=]` | Resolved rundown (items, columns, service times, timezone) |
-| GET / POST | `/api/scriptview/layouts` | List / save global layouts |
-| GET / POST | `/api/scriptview/config` | Get / set which service types show on the landing |
-| GET | `/api/scriptview/note-categories?serviceTypeId=…` | Note categories for the column picker |
-
-**Branding & other**
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/branding/source?target=app\|empty` | Original (un-cropped) brand/empty logo source |
-| POST | `/api/branding` | Update app name + logos |
-| GET | `/api/events` | Multiplexed Server-Sent Events stream with per-connection channel filtering. Channels: `stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `spl:metrics`, `spl:history`, `people:count`, `attendance:history`, `service-timeline:history`, `obs:status`, `osc:feedback`, `baptism`, `integrations:state-changed`, `wireless:connections-changed` |
-| POST | `/api/events/subscribe` | Set the channels a connection wants (channel filtering) |
-| GET | `/photos?u=…` | Cached Planning Center photo proxy |
-
-## Project structure
-
-```
-.
-├── server.ts                  # Backend entry point
-├── index.html                 # Kiosk display (Vite entry)
-├── settings-window.html       # Settings UI (Vite entry)
-├── vite.config.ts             # Multi-page build + dev proxy + React Compiler
-├── main/                      # Backend
-│   ├── services/              # stage-controller, remote-server, pco-service,
-│   │                          #   live-poller, propresenter-service, prodcom-service,
-│   │                          #   wireless/device managers, integration-manager,
-│   │                          #   stores (settings/slots/views/presets/layout-templates),
-│   │                          #   slot-resolver, encryption, broadcaster, app-paths, …
-│   ├── providers/wireless/    # Shure (ULX-D/Axient/PSM) + Sennheiser (EW-DX/EW-G4/Spectera) drivers + registry
-│   └── types/                 # Backend type contracts (stage.ts: View/Output/LayoutDTO…)
-├── renderer/                  # Frontend (React)
-│   ├── main/                  # Displays: stage-view (router/picker) → slot grid,
-│   │                          #   dashboard-view, stage-display-view, transcription-view,
-│   │                          #   layout-renderer (custom layouts); hooks + pco-timer
-│   ├── settings/              # Settings app (settings-view + sections/: views-section,
-│   │                          #   outputs-section, slots-section, layout-editor, …)
-│   ├── components/            # Shared components + ui/ primitives
-│   ├── fonts/                 # Self-hosted Outfit (brand title)
-│   └── lib/api.ts             # REST + SSE client
-├── public/control.html        # Standalone phone remote
-├── scripts/                   # install.sh / uninstall.sh
-└── INSTALL.md                 # Server deployment guide
-```
-
-## npm scripts
-
-| Script | What it does |
-|--------|--------------|
-| `npm run dev` | Vite dev server (frontend) on `:3000` |
-| `npm run server` | Backend via `tsx server.ts` on `:8788` (dev) |
-| `npm start` | Backend via `node --import tsx server.ts` (production) |
-| `npm run build` | Build the renderer into `build/renderer/` |
-| `npm run type-check` | `tsc --noEmit` |
-| `npm run lint` | ESLint (flat config + react-hooks) |
-| `npm run format` | Format with `oxfmt` |
-
-## Data, secrets & backups
-
-State persists in a **data directory** — `$STAGE_UTILITY_DATA` if set, otherwise
-`~/.stage-utility`:
-
-- `settings.json` — non-secret config (service type, plan mode, outputs/displays, branding, …)
-- `views.json` — view definitions (kind + config; custom views carry their layout)
-- `slots.json` — slot sets, keyed by view + service type
-- `layout-templates.json` — saved custom-layout library; `presets.json` — slot presets
-- `layout-groups.json` — reusable object groups; `scriptview-layouts.json` + `scriptview-config.json` — ScriptView presets + landing curation
-- `spl-history.json` — per-item SPL recordings (one record per service), for History
-- `attendance-history.json` — per-service attendance recordings; `service-timeline.json` — per-service item timing
-- `baptism.json` — baptism sessions; `osc.json` — OSC button/target definitions
-- `secrets.bin` — integration secrets, **AES-256-GCM encrypted**
-- `encryption.key` — 32-byte key, auto-generated on first run (mode `600`)
-- `photo-cache/` — cached PCO photos
-- `cache/attachments/` — cached PCO plan files (stage plots etc.), keyed by attachment id
-
-**Back up this directory.** If you lose `encryption.key`, the encrypted secrets are
-unrecoverable and you'll need to re-enter every credential.
-
-**Keeping the key out of a synced/backed-up data dir.** By default the key sits next to
-`secrets.bin` so the service can decrypt unattended at boot. If you back up or sync the data
-dir, the key travels with the ciphertext — to avoid that, store the key elsewhere via
-`STAGE_UTILITY_KEY_FILE=/abs/path/to/key` (key file at a path you control) or
-`STAGE_UTILITY_KEY=<base64-or-hex>` (a raw 32-byte key supplied via the environment; no key
-file is written — generate one with `openssl rand -base64 32`). See
-[SECURITY.md](SECURITY.md) for the threat model.
-
-## Development notes
-
-- **React Compiler** is enabled in `vite.config.ts` via `@rolldown/plugin-babel` +
-  `reactCompilerPreset()` — components are auto-memoized at build time. (Vite 8 /
-  Rolldown is oxc-based, so `@vitejs/plugin-react`'s `babel` option doesn't apply;
-  the Rolldown Babel plugin is used instead.)
-- The backend is run directly as TypeScript via `tsx`; there is no separate compile
-  step. `tsx` is a runtime dependency for this reason.
-- **Multiple displays in dev:** the Vite proxy mishandles several concurrent SSE
-  streams, so only the most-recently-loaded display updates. Test multi-display
-  against the built app on `:8788`, not the `:3000` dev server.
-- **`localhost:3000` won't load?** Plain `vite` binds IPv6-only; if your browser
-  resolves `localhost` to IPv4 it can't connect. Use `http://127.0.0.1:3000`
-  (or run `npm run dev -- --host`), or just use the built app on `:8788`.
-- **`PP_DEBUG=1`** before `npm run server` logs the ProPresenter slide→section
-  resolution each poll (`rawIdx → section / next / text`) — handy when verifying the
-  stage view against a live service.
-- `npm run type-check`, `npm run lint`, and `npm run build` are all expected to pass
-  cleanly before merging.
-
-## Branches & releases
-
-- **`main`** — stable, web-only release line. This is what you install and what the
-  in-app updater follows. Tagged releases (`vX.Y.Z`) are published under
+- **`main`** — the stable line. This is what you install, and what the in-app
+  updater follows. Tagged releases are under
   [Releases](https://github.com/Cornerstone-Production/Stage-Utility/releases).
-- **`beta`** — pre-release track for testing changes before they land on `main`. A device
-  checked out on `beta` auto-updates from `beta`. Promote to `main` by merging + tagging.
-- Day-to-day work happens on short-lived `feat/*` / `fix/*` branches opened as PRs.
+- **`beta`** — pre-release track. A device on `beta` auto-updates from `beta`.
 
 ## License
 
-Licensed under the **GNU General Public License v3.0 (or later)** — see [LICENSE](LICENSE).
+**GNU General Public License v3.0 or later** — see [LICENSE](LICENSE).
 
 ## Security
 
-Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md).
+Found a vulnerability? Report it privately — see [SECURITY.md](SECURITY.md).

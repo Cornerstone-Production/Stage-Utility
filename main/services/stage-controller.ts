@@ -3,13 +3,15 @@
 
 import { randomUUID } from "crypto";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart,
+  TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
-import { settingsStore } from "./settings-store.js";
+import { migrateInlineBrandingImages } from "./branding-image-store.js";
+import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
 import { layoutGroupsStore } from "./layout-groups-store.js";
@@ -18,8 +20,31 @@ import { scriptViewConfigStore } from "./scriptview-config-store.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { updater } from "./updater.js";
+import { validateSlug } from "./reserved-slugs.js";
+import { scriptViewRolesStore, seedRoles } from "./scriptview-roles-store.js";
+import type { CategoryRole } from "../types/scriptview-roles.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
+
+/**
+ * Read the persisted auto-update settings, migrating the pre-mode boolean.
+ * `enabled: true` meant "apply and restart in the window", which is auto-full;
+ * `false`/absent meant nothing automatic at all, which is manual.
+ */
+function migrateAutoUpdate(saved: unknown): AutoUpdateSettings {
+  const o = (saved ?? {}) as Partial<AutoUpdateSettings> & { enabled?: boolean };
+  const mode: AutoUpdateSettings["mode"] =
+    o.mode === "auto-install" || o.mode === "auto-full" || o.mode === "manual"
+      ? o.mode
+      : o.enabled === true
+        ? "auto-full"
+        : "manual";
+  return {
+    mode,
+    dayOfWeek: typeof o.dayOfWeek === "number" ? o.dayOfWeek : null,
+    hour: typeof o.hour === "number" ? o.hour : 3,
+  };
+}
 
 // Coalescing window (ms) for live device-status updates. Wireless metering arrives
 // ~1/sec per channel; we collapse bursts into one re-resolve+broadcast per window
@@ -102,27 +127,14 @@ function defaultViewName(kind: ViewKind): string {
 
 /** A sensible starting layout for a new custom View — proves the schema and
  *  gives the editor something to manipulate (clock, countdown, slide text). */
+// A new custom view starts BLANK — the operator builds from scratch, or picks a
+// starter template in the create dialog / editor. (It used to seed 5 objects,
+// which meant every new custom layout had to be cleared by hand first.)
 function defaultCustomLayout(): LayoutDTO {
-  const obj = (
-    config: LayoutDTO["objects"][number]["config"],
-    x: number, y: number, w: number, h: number,
-    style: LayoutDTO["objects"][number]["style"],
-  ): LayoutDTO["objects"][number] => ({ id: randomUUID(), x, y, w, h, z: 1, config, style });
   return {
     version: 1,
-    canvas: { width: 1920, height: 1080, background: "#080810" },
-    objects: [
-      obj({ type: "clock", showSeconds: true, format: "12h" }, 0.04, 0.05, 0.34, 0.13,
-        { fontSize: 0.11, fontWeight: 600, color: "#ffffff", textAlign: "left", vAlign: "middle" }),
-      obj({ type: "countdown-timer" }, 0.62, 0.05, 0.34, 0.13,
-        { fontSize: 0.11, fontWeight: 600, color: "#7fe3c4", textAlign: "right", vAlign: "middle" }),
-      obj({ type: "current-slide-text" }, 0.08, 0.34, 0.84, 0.34,
-        { fontSize: 0.11, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", textShadow: 0.6, lineClamp: 4 }),
-      obj({ type: "next-slide-text" }, 0.08, 0.72, 0.84, 0.10,
-        { fontSize: 0.05, color: "rgba(255,255,255,0.6)", textAlign: "center", vAlign: "middle", lineClamp: 2 }),
-      obj({ type: "transcript-strip", mode: "latest" }, 0.08, 0.86, 0.84, 0.09,
-        { fontSize: 0.038, color: "rgba(255,255,255,0.85)", textAlign: "center", vAlign: "middle" }),
-    ],
+    canvas: { width: 1920, height: 1080, background: null },
+    objects: [],
   };
 }
 
@@ -134,15 +146,13 @@ export class StageController {
     planId: null,
     planTitle: null,
     planSeriesTitle: null,
+    planDates: null,
     views: [{ id: PRIMARY_DISPLAY_ID, name: "Slots", kind: "slots", ndiSource: null, createdAt: "" }],
     outputs: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", viewId: PRIMARY_DISPLAY_ID }],
     slotsByView: {},
     slotsByLayoutObject: {},
     resolvedByOutput: {},
     chargerBays: [],
-    slots: [],
-    slotsByDisplay: {},
-    displays: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots", ndiSource: null }],
     pcoConfigured: false,
     lastRefreshedAt: null,
     remoteUrl: null,
@@ -150,6 +160,7 @@ export class StageController {
     showQr: true,
     allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
     appName: "Stage Utility",
+    accentColor: null,
     appLogo: null,
     appLogoMonochrome: true,
     emptySlotLogo: null,
@@ -157,8 +168,10 @@ export class StageController {
     ndiEnabled: false,
     publicUrl: null,
     captionChannelColors: {},
-    autoUpdate: { enabled: false, dayOfWeek: null, hour: 3 },
+    autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
     reconnectSchedule: { ...DEFAULT_RECONNECT_SCHEDULE },
+    taperWindow: { ...DEFAULT_TAPER_WINDOW },
+    baptismAutoStart: { enabled: false, testimonyKeyword: "baptism stories" },
     onboardingDismissed: false,
   };
 
@@ -169,6 +182,7 @@ export class StageController {
   private connectionNames = new Map<string, string>();
   // Coalesce timer for device-status updates (see applyDeviceStatus).
   private deviceStatusFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastDeviceSig: string | null = null;
   private deviceStatusDirty = false; // device status changed while no client watched
   // Cached team members for the active plan.
   private teamMembers: TeamMemberDTO[] = [];
@@ -196,7 +210,16 @@ export class StageController {
 
   async init(): Promise<void> {
     console.log("[stage-controller] init");
-    const settings = await settingsStore.load();
+    let settings = await settingsStore.load();
+
+    // Installs made before branding images moved to files still hold base64 in
+    // settings. Convert once, then carry on with the rewritten values — otherwise
+    // this boot would broadcast the old inline data and rewrite it on the next patch.
+    const { patch, converted } = await migrateInlineBrandingImages(settings);
+    if (converted.length > 0) {
+      settings = await settingsStore.patch(patch);
+      console.log(`[stage-controller] moved ${converted.length} branding image(s) out of settings:`, converted.join(", "));
+    }
 
     const showQr = settings.showQr ?? true;
 
@@ -215,11 +238,13 @@ export class StageController {
       planId: settings.planId,
       planTitle: settings.planTitle,
       planSeriesTitle: settings.planSeriesTitle ?? null,
+      planDates: settings.planDates ?? null,
       views,
       outputs,
       showQr,
       allowedServiceTypeIds,
       appName: settings.appName ?? "Stage Utility",
+      accentColor: settings.accentColor ?? null,
       appLogo: settings.appLogo ?? null,
       appLogoMonochrome: settings.appLogoMonochrome ?? true,
       emptySlotLogo: settings.emptySlotLogo ?? null,
@@ -227,8 +252,10 @@ export class StageController {
       ndiEnabled: settings.ndiEnabled ?? false,
       publicUrl: settings.publicUrl ?? null,
       captionChannelColors: settings.captionChannelColors ?? {},
-      autoUpdate: settings.autoUpdate ?? { enabled: false, dayOfWeek: null, hour: 3 },
+      autoUpdate: migrateAutoUpdate(settings.autoUpdate),
       reconnectSchedule: settings.reconnectSchedule ?? { ...DEFAULT_RECONNECT_SCHEDULE },
+      taperWindow: settings.taperWindow ?? { ...DEFAULT_TAPER_WINDOW },
+      baptismAutoStart: settings.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" },
       onboardingDismissed: settings.onboardingDismissed ?? false,
     };
     this.publicUrl = settings.publicUrl ?? null;
@@ -322,6 +349,29 @@ export class StageController {
   }
 
   /** Set (or clear with null) the public base URL — persisted + broadcast. */
+  /**
+   * Tint one item's icon. `key` is a display id ("display-1") or a tool path
+   * ("/baptism"); one map so a color set on the Displays tab or Connect also
+   * shows on the picker at /. An empty color clears the entry back to the theme
+   * default rather than storing a sentinel.
+   */
+  async setIconColor(key: string, color: string): Promise<StageState> {
+    const k = key.trim();
+    if (!k) throw new Error("icon-color — key required");
+    const c = color.trim().toLowerCase();
+    if (c !== "" && !/^#[0-9a-f]{6}$/.test(c)) {
+      throw new Error('icon-color — color must be "#rrggbb" or "" to clear');
+    }
+    const next = { ...(this.state.iconColors ?? {}) };
+    if (c === "") delete next[k];
+    else next[k] = c;
+    console.log(`[stage-controller] setIconColor ${k} → ${c || "(cleared)"}`);
+    this.state = { ...this.state, iconColors: next };
+    await settingsStore.patch({ iconColors: next });
+    this.broadcast();
+    return this.state;
+  }
+
   async setPublicUrl(url: string | null): Promise<StageState> {
     const normalized = normalizeBaseUrl(url);
     console.log(`[stage-controller] setPublicUrl → ${normalized ?? "(cleared)"}`);
@@ -346,8 +396,19 @@ export class StageController {
     return { ...this.state };
   }
 
+  /**
+   * The DisplayInfo compatibility shim, built on demand for `GET /api/displays`.
+   *
+   * It used to be stored on StageState and broadcast to every client, but nothing
+   * in the app read it — each view wanted a name (on the Output) or a kind (on the
+   * routed View). Only external callers still ask for this shape, and they ask over
+   * HTTP, so it is assembled here instead of riding in every push.
+   */
   getDisplays(): DisplayInfo[] {
-    return [...this.state.displays];
+    return this.state.outputs.map((o) => {
+      const view = o.viewId ? this.state.views.find((v) => v.id === o.viewId) ?? null : null;
+      return { id: o.id, name: o.name, kind: view?.kind ?? "slots", ndiSource: view?.ndiSource ?? null };
+    });
   }
 
   // ── Service type ──────────────────────────────────────────────────────
@@ -398,9 +459,28 @@ export class StageController {
 
   // ── Plans ──────────────────────────────────────────────────────────────
 
+  /**
+   * Plans for the manual picker: the last 30 days, then everything upcoming.
+   *
+   * Past plans are here and nowhere else — auto selection and the reconnect
+   * windows use `listUpcomingPlans` directly, so neither can land on a service
+   * that has already happened.
+   */
   async listPlans(serviceTypeId: string): Promise<PlanDTO[]> {
     this.assertPco();
-    return pcoService.listUpcomingPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId);
+    const [past, future] = await Promise.all([
+      pcoService
+        .listRecentPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId)
+        .catch(() => [] as PlanDTO[]),
+      pcoService.listUpcomingPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId),
+    ]);
+    // Oldest → newest, and de-duplicated: a plan happening today can come back
+    // from both filters depending on where PCO draws the line.
+    const seen = new Set(future.map((p) => p.id));
+    return [
+      ...past.filter((p) => !seen.has(p.id)).reverse().map((p) => ({ ...p, past: true })),
+      ...future,
+    ];
   }
 
   async listTeamPositions(): Promise<TeamPositionDTO[]> {
@@ -522,6 +602,41 @@ export class StageController {
   /** All note-category names PCO knows for a service type (drives the column
    *  picker). Unlike the rundown's `noteCategories`, this is NOT pruned to
    *  categories currently in use, so authors can pre-add a column. */
+  async listScriptViewRoles(): Promise<CategoryRole[]> {
+    return scriptViewRolesStore.load();
+  }
+
+  async saveScriptViewRoles(roles: CategoryRole[]): Promise<CategoryRole[]> {
+    const clean = (roles ?? [])
+      .filter((r) => r && typeof r.id === "string" && typeof r.name === "string" && r.name.trim())
+      .map((r) => ({
+        id: r.id,
+        name: r.name.trim(),
+        members: [...new Set((r.members ?? []).map((m) => String(m).trim()).filter(Boolean))],
+      }));
+    await scriptViewRolesStore.save(clean);
+    this.broadcast();
+    return clean;
+  }
+
+  /**
+   * Add a role for any category this service type defines that no role covers yet.
+   *
+   * Only ever ADDS. Never merges (that guess is the operator's to make) and never
+   * removes (a role may cover a category from a different service type).
+   */
+  async seedScriptViewRoles(serviceTypeId: string): Promise<CategoryRole[]> {
+    const cats = await this.listScriptViewNoteCategories(serviceTypeId);
+    const roles = await scriptViewRolesStore.load();
+    const covered = new Set(roles.flatMap((r) => r.members.map((m) => m.trim().toLowerCase())));
+    const missing = cats.filter((c) => !covered.has(c.trim().toLowerCase()));
+    if (missing.length === 0) return roles;
+    const next = [...roles, ...seedRoles(missing)];
+    await scriptViewRolesStore.save(next);
+    this.broadcast();
+    return next;
+  }
+
   async listScriptViewNoteCategories(serviceTypeId: string): Promise<string[]> {
     if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return [];
     return pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId);
@@ -539,17 +654,20 @@ export class StageController {
 
     const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, serviceTypeId);
     const isActiveType = serviceTypeId === this.state.serviceTypeId;
-    let plan: PlanDTO | null = null;
+    let plan: PlanDTO | null;
     if (planId) plan = plans.find((p) => p.id === planId) ?? null;
     else if (isActiveType && this.state.planId) plan = plans.find((p) => p.id === this.state.planId) ?? plans[0] ?? null;
     else plan = plans[0] ?? null;
     if (!plan) return empty;
 
-    const [items, categories, serviceTimes, timeZone] = await Promise.all([
+    // serviceTypes is cached for 15 minutes, so pulling the item row colors here
+    // costs nothing — the colors ride along on a request already being made.
+    const [items, categories, serviceTimes, timeZone, serviceTypes] = await Promise.all([
       pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
       pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId),
       pcoService.listPlanServiceTimes(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
       pcoService.listOrgTimeZone(this.pcoAppId, this.pcoSecret),
+      pcoService.listServiceTypes(this.pcoAppId, this.pcoSecret),
     ]);
     const used = new Set<string>();
     for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
@@ -564,6 +682,7 @@ export class StageController {
       planDates: plan.dates,
       items,
       noteCategories: ordered,
+      itemTypeColors: serviceTypes.find((t) => t.id === serviceTypeId)?.itemTypeColors ?? [],
       serviceTimes,
       timeZone,
       isActivePlan: isActiveType && plan.id === this.state.planId,
@@ -677,9 +796,9 @@ export class StageController {
 
     if (plans.length === 0) {
       console.log("[stage-controller] selectNextPlan: no upcoming plans");
-      this.state = { ...this.state, planId: null, planTitle: null, planSeriesTitle: null };
+      this.state = { ...this.state, planId: null, planTitle: null, planSeriesTitle: null, planDates: null };
       this.teamMembers = [];
-      await settingsStore.patch({ planId: null, planTitle: null, planSeriesTitle: null });
+      await settingsStore.patch({ planId: null, planTitle: null, planSeriesTitle: null, planDates: null });
       await this.reResolveAll();
       this.broadcast();
       return this.state;
@@ -736,23 +855,23 @@ export class StageController {
         // ended more than the grace window ago and take the first still-upcoming one.
         // Without this, auto-mode "advances" right back onto the finished plan (its
         // sort_date is the earliest in `future`) and never reaches the real next one.
-        // Resolve every candidate plan's service end concurrently (each is a
-        // cached /plan_times lookup) instead of awaiting them one-by-one.
-        const ends = await Promise.all(
-          plans.map((p) =>
-            pcoService.getServiceEnd(this.pcoAppId!, this.pcoSecret!, type.id, p.id).catch(() => null),
-          ),
-        );
+        // Resolve service ends LAZILY, stopping at the first plan still upcoming.
+        // Only the plans that finished today get skipped, so this is normally one
+        // lookup and at worst a handful. Resolving all ~25 up front turned every
+        // cold cache — which is exactly what a restart after an update leaves —
+        // into a burst of concurrent /plan_times calls that PCO answered with 429s.
         let nearest: PlanDTO | null = null;
-        for (let i = 0; i < plans.length; i++) {
-          const endIso = ends[i];
+        for (const p of plans) {
+          const endIso = await pcoService
+            .getServiceEnd(this.pcoAppId!, this.pcoSecret!, type.id, p.id)
+            .catch(() => null);
           if (endIso) {
             const end = Date.parse(endIso);
             if (Number.isFinite(end) && Date.now() > end + StageController.ROLLOVER_GRACE_MS) {
               continue; // finished plan still lingering in filter=future — skip it
             }
           }
-          nearest = plans[i]; // service still upcoming / within grace, or end unknown
+          nearest = p; // service still upcoming / within grace, or end unknown
           break;
         }
         if (!nearest) continue; // every future plan for this type has already ended
@@ -777,10 +896,11 @@ export class StageController {
         planId: null,
         planTitle: null,
         planSeriesTitle: null,
+        planDates: null,
         lastRefreshedAt: new Date().toISOString(),
       };
       this.teamMembers = [];
-      await settingsStore.patch({ planId: null, planTitle: null, planSeriesTitle: null });
+      await settingsStore.patch({ planId: null, planTitle: null, planSeriesTitle: null, planDates: null });
       await this.reResolveAll();
       this.broadcast();
       return this.state;
@@ -958,6 +1078,27 @@ export class StageController {
     return this.state;
   }
 
+  /** The keyword that lets a plan item start the testimonies by itself. */
+  async setBaptismAutoStart(partial: Partial<BaptismAutoStart>): Promise<StageState> {
+    const cur = this.state.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" };
+    const next: BaptismAutoStart = { ...cur, ...partial, testimonyKeyword: (partial.testimonyKeyword ?? cur.testimonyKeyword).slice(0, 80) };
+    this.state = { ...this.state, baptismAutoStart: next };
+    await settingsStore.patch({ baptismAutoStart: next });
+    this.broadcast();
+    return this.state;
+  }
+
+  async setTaperWindow(partial: Partial<TaperWindow>): Promise<StageState> {
+    const next: TaperWindow = { ...this.state.taperWindow, ...partial };
+    next.preMin = Math.min(240, Math.max(0, Math.round(next.preMin)));
+    next.postMin = Math.min(240, Math.max(0, Math.round(next.postMin)));
+    console.log(`[stage-controller] setTaperWindow →`, next);
+    this.state = { ...this.state, taperWindow: next };
+    await settingsStore.patch({ taperWindow: next });
+    this.broadcast();
+    return this.state;
+  }
+
   /** Recompute the upcoming rehearsal/service windows (from PCO) that gate the
    *  integration reconnect cadence. Cheap (cached PCO calls); runs on refresh +
    *  when creds/allowed/schedule change. Never throws. */
@@ -1007,7 +1148,9 @@ export class StageController {
       const status = await updater.checkForUpdate();
       if (this.shouldAutoApply(status.behind, new Date())) {
         console.log("[stage-controller] auto-update window — applying update");
-        await updater.applyUpdate();
+        // auto-install applies the build but leaves the restart to the operator,
+        // so an update can land on Saturday and be taken on Monday.
+        await updater.applyUpdate({ deferRestart: this.state.autoUpdate.mode === "auto-install" });
       }
     } catch (err) {
       console.error("[stage-controller] update check failed:", err);
@@ -1018,7 +1161,7 @@ export class StageController {
    *  day/hour window + not mid-service. Exposed for unit testing. */
   shouldAutoApply(behind: number, now: Date): boolean {
     const cfg = this.state.autoUpdate;
-    if (!cfg.enabled || behind <= 0) return false;
+    if (cfg.mode === "manual" || behind <= 0) return false;
     if (updater.phase === "updating") return false;
     if (this.isServiceLive()) return false;
     if (cfg.dayOfWeek != null && now.getDay() !== cfg.dayOfWeek) return false;
@@ -1032,6 +1175,7 @@ export class StageController {
    *  persisted to settings only (not broadcast) so the editor can retain zoom. */
   async setBranding(partial: {
     name?: string;
+    accentColor?: string | null;
     logo?: string | null;
     monochrome?: boolean;
     logoOriginal?: string | null;
@@ -1044,8 +1188,9 @@ export class StageController {
     avatarCrop?: { scale: number; x: number; y: number } | null;
   }): Promise<StageState> {
     // Fields that live in both the broadcast state and settings.
-    const stateNext: Partial<Pick<StageState, "appName" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar">> = {};
+    const stateNext: Partial<Pick<StageState, "appName" | "accentColor" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar">> = {};
     if (typeof partial.name === "string") stateNext.appName = partial.name.trim() || "Stage Utility";
+    if (partial.accentColor !== undefined) stateNext.accentColor = partial.accentColor;
     if (partial.logo !== undefined) stateNext.appLogo = partial.logo;
     if (typeof partial.monochrome === "boolean") stateNext.appLogoMonochrome = partial.monochrome;
     if (partial.emptyLogo !== undefined) stateNext.emptySlotLogo = partial.emptyLogo;
@@ -1587,6 +1732,42 @@ export class StageController {
     return this.state;
   }
 
+  /**
+   * Set (or clear, with "") an output's optional friendly URL slug.
+   *
+   * The id is never touched — `/{id}` keeps resolving forever, so a Pi or printed
+   * QR pointed at it cannot break, and nothing is rekeyed so slots stay intact.
+   * Validation is authoritative here rather than in the UI: a slug that collides
+   * with a built-in page would not error at request time, it would silently render
+   * that page instead of the display.
+   */
+  async setOutputSlug(id: string, slug: string): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:slug — output ${id} not found`);
+    }
+    const trimmed = slug.trim().toLowerCase();
+
+    // Every id and slug in use EXCEPT this output's own, or re-saving would reject
+    // its existing slug.
+    const taken: string[] = [];
+    for (const o of this.state.outputs) {
+      if (o.id !== id) taken.push(o.id);
+      if (o.slug && o.id !== id) taken.push(o.slug);
+    }
+    const verdict = validateSlug(trimmed, taken);
+    if (!verdict.ok) throw new Error(verdict.reason);
+
+    const outputs = this.state.outputs.map((o) =>
+      o.id === id ? { ...o, slug: trimmed === "" ? undefined : trimmed } : o,
+    );
+    console.log(`[stage-controller] setOutputSlug id=${id} slug="${trimmed}"`);
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
   /** Route an output to a View (or null to unroute). The recall operation. */
   async setOutputView(id: string, viewId: string | null): Promise<StageState> {
     if (!this.state.outputs.find((o) => o.id === id)) {
@@ -1673,57 +1854,10 @@ export class StageController {
   // The old model conflated a screen and its content. Each alias maps onto the
   // new View/Output verbs so older clients keep working unchanged.
 
-  /** @deprecated Use createView + addOutput. Creates a View of `kind` and an
-   *  Output routed to it, mirroring the old "add a display" behavior. */
-  async addDisplay(name?: string, kind: DisplayInfo["kind"] = "slots"): Promise<StageState> {
-    const viewId = this.nextViewId();
-    const outputId = this.nextOutputId();
-    const num = parseInt(outputId.replace("display-", ""), 10);
-    const displayName = name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`;
-    const k = (kind ?? "slots") as ViewKind;
-    const view: View = { id: viewId, name: displayName, kind: k, ndiSource: null, createdAt: new Date().toISOString() };
-    const output: Output = { id: outputId, name: displayName, viewId };
-    console.log(`[stage-controller] addDisplay (alias) output=${outputId} view=${viewId} kind=${k}`);
-    const views = [...this.state.views, view];
-    const outputs = [...this.state.outputs, output];
-    this.state = { ...this.state, views, outputs };
-    await viewsStore.save(views);
-    await settingsStore.patch({ outputs });
-    if (k === "slots") this.rawSlotsByView.set(viewId, []);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
-  }
 
-  /** @deprecated Renames the output (the screen). */
-  async renameDisplay(id: string, name: string): Promise<StageState> {
-    return this.renameOutput(id, name);
-  }
 
-  /** @deprecated Sets the kind of the View routed to this output. */
-  async setDisplayKind(id: string, kind: DisplayInfo["kind"]): Promise<StageState> {
-    const viewId = this.outputRoutedViewId(id);
-    if (!viewId) throw new Error(`displays:setKind — output ${id} has no routed view`);
-    return this.setViewKind(viewId, (kind ?? "slots") as ViewKind);
-  }
 
-  /** @deprecated Sets the NDI source of the View routed to this output. */
-  async setDisplayNdiSource(id: string, source: string | null): Promise<StageState> {
-    const viewId = this.outputRoutedViewId(id);
-    if (!viewId) throw new Error(`displays:setNdiSource — output ${id} has no routed view`);
-    return this.setViewNdiSource(viewId, source);
-  }
 
-  /** @deprecated Removes the output, and its 1:1 routed View if nothing else uses it. */
-  async removeDisplay(id: string): Promise<StageState> {
-    const viewId = this.outputRoutedViewId(id);
-    await this.removeOutput(id);
-    // Clean up the routed View if it's now orphaned (migrated 1:1 case).
-    if (viewId && !this.state.outputs.some((o) => o.viewId === viewId) && this.state.views.length > 1) {
-      await this.deleteView(viewId);
-    }
-    return this.state;
-  }
 
   // ── Refresh ───────────────────────────────────────────────────────────
 
@@ -1811,9 +1945,9 @@ export class StageController {
       // Skip the expensive re-resolve + full-state broadcast when no display is
       // watching (idle). Mark dirty so the next connecting client gets fresh state
       // via ensureResolvedFresh() before hydration.
-      if (channelHasSubscribers("stage:state-changed")) {
+      if (channelHasSubscribers("stage:state-changed") || channelHasSubscribers("slots:devices")) {
         this.recomputeResolved();
-        this.broadcast();
+        this.broadcastDevices();
       } else {
         this.deviceStatusDirty = true;
       }
@@ -1838,10 +1972,6 @@ export class StageController {
 
   // ── Internals ─────────────────────────────────────────────────────────
 
-  private primaryOutputId(): string {
-    return this.state.outputs[0]?.id ?? PRIMARY_DISPLAY_ID;
-  }
-
   /** The View id routed to the primary output, falling back to the first slots
    *  View (or the primary id) so legacy slot writes always land somewhere. */
   private primaryViewId(): string {
@@ -1858,10 +1988,6 @@ export class StageController {
     const output = this.state.outputs.find((o) => o.id === target);
     if (output) return output.viewId ?? this.primaryViewId();
     return target; // already a view id
-  }
-
-  private outputRoutedViewId(outputId: string): string | null {
-    return this.state.outputs.find((o) => o.id === outputId)?.viewId ?? null;
   }
 
   private nextViewId(): string {
@@ -1895,11 +2021,13 @@ export class StageController {
       planId: plan.id,
       planTitle: plan.title,
       planSeriesTitle: plan.seriesTitle,
+      planDates: plan.dates,
     };
     await settingsStore.patch({
       planId: plan.id,
       planTitle: plan.title,
       planSeriesTitle: plan.seriesTitle,
+      planDates: plan.dates,
     });
 
     if (this.state.serviceTypeId) {
@@ -1982,8 +2110,6 @@ export class StageController {
     for (const oid of this.rawSlotsByObject.keys()) if (!(oid in slotsByLayoutObject)) resolveObjectSlots(oid);
 
     const resolvedByOutput: Record<string, ResolvedOutput> = {};
-    const slotsByDisplay: Record<string, Slot[]> = {};
-    const displays: DisplayInfo[] = [];
     for (const output of this.state.outputs) {
       const view = output.viewId ? this.state.views.find((v) => v.id === output.viewId) ?? null : null;
       const kind = view?.kind ?? "slots";
@@ -1996,20 +2122,13 @@ export class StageController {
         blackout: output.blackout ?? false,
         locked: output.locked ?? false,
       };
-      slotsByDisplay[output.id] = view && view.kind === "slots" ? (slotsByView[view.id] ?? []) : [];
-      displays.push({ id: output.id, name: output.name, kind, ndiSource });
     }
-    const slots = slotsByDisplay[this.primaryOutputId()] ?? [];
-
     this.state = {
       ...this.state,
       slotsByView,
       slotsByLayoutObject,
       resolvedByOutput,
-      slotsByDisplay,
       chargerBays: this.computeChargerBays(),
-      displays,
-      slots,
     };
   }
 
@@ -2041,6 +2160,32 @@ export class StageController {
   }
 
   private lastBroadcastSig: string | null = null;
+  /**
+   * Push only the volatile per-slot telemetry.
+   *
+   * RF and audio level move constantly while mics are live, and they live on the
+   * slots inside stage:state — so a meter twitch used to re-send the whole 36.6 KB
+   * document up to ~6.7 times a second, of which 88% (views, slot config, layouts,
+   * outputs) had not changed. This sends the ~4.5 KB that did.
+   *
+   * `recomputeResolved()` has already refreshed `this.state`, so a client
+   * connecting mid-service still hydrates complete — the two are consistent, this
+   * is purely about not repeating the static half down the wire.
+   */
+  private broadcastDevices(): void {
+    const devices: Record<string, SlotDevice> = {};
+    for (const slots of Object.values(this.state.slotsByView)) {
+      for (const s of slots) devices[s.id] = s.device;
+    }
+    for (const slots of Object.values(this.state.slotsByLayoutObject)) {
+      for (const s of slots) devices[s.id] = s.device;
+    }
+    const sig = JSON.stringify(devices);
+    if (sig === this.lastDeviceSig) return; // nothing actually moved
+    this.lastDeviceSig = sig;
+    broadcast("slots:devices", devices, sig);
+  }
+
   private broadcast(): void {
     // Skip when nothing actually changed — a setter called with its current value
     // (same mode, unchanged settings save) still runs the mutating method. State is
@@ -2050,7 +2195,7 @@ export class StageController {
     if (sig === this.lastBroadcastSig) return;
     this.lastBroadcastSig = sig;
     // Reuse the dedupe serialization as the SSE frame body so the fan-out doesn't
-    // re-stringify the full state (which carries base64 branding blobs).
+    // re-stringify the full state once per client.
     broadcast("stage:state-changed", this.state, sig);
   }
 }

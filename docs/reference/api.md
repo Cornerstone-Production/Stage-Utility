@@ -1,0 +1,105 @@
+# API reference
+
+The HTTP surface. Also what Bitfocus Companion and the automation engine call.
+
+All endpoints are under `/api`. State-changing routes return the updated
+`StageState`. Live updates arrive on the SSE stream rather than by polling.
+
+**Stage & plan**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET  | `/api/health` | Liveness check |
+| GET  | `/api/state` | Current `StageState` |
+| GET  | `/api/service-types` | PCO service types |
+| GET  | `/api/team-positions` | Team positions for the active plan |
+| GET  | `/api/plans?serviceTypeId=…` | Plans for a service type |
+| GET  | `/api/pco/attachments` | Files on the active plan (plan + item level) |
+| GET  | `/api/pco/attachment?match=…` | Stream the active plan's file matching a filename substring (proxied + cached) |
+| POST | `/api/service-type` | Set active service type |
+| POST | `/api/plan` | Set active plan |
+| POST | `/api/plan/next` | Jump to the next plan (auto mode) |
+| POST | `/api/plan/mode` | Set `auto` / `manual` |
+| POST | `/api/refresh` | Re-fetch from Planning Center |
+| POST | `/api/live/next` | PCO Services Live: go to the next item (like PCO's timer) |
+| POST | `/api/live/previous` | PCO Services Live: go to the previous item |
+| POST | `/api/allowed-service-types` | Set the allowlist |
+| POST | `/api/show-qr` | Toggle the connect QR on the display |
+
+**Views, displays & layouts**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/views` | List views |
+| POST | `/api/views` | Create a view (`{name, kind}`) |
+| PATCH | `/api/views/:id` | Update name / kind / `ndiSource` / `layout` |
+| POST | `/api/views/:id/slots` | Save a slots-view's slots |
+| POST | `/api/views/:id/duplicate` | Duplicate a view |
+| POST | `/api/views/:id/copy-slots` | Copy slots from another view |
+| POST | `/api/views/reorder` | Reorder views |
+| DELETE | `/api/views/:id` | Delete a view |
+| GET | `/api/outputs` | List physical displays |
+| POST | `/api/outputs` | Add a display |
+| PATCH | `/api/outputs/:id` | Rename / route to a view (`{viewId}`) |
+| POST | `/api/outputs/reorder` | Reorder displays |
+| DELETE | `/api/outputs/:id` | Remove a display |
+| GET / POST | `/api/layout-templates` | List / save a custom-layout template |
+| PATCH / DELETE | `/api/layout-templates/:id` | Update / delete a template |
+
+`GET /api/displays` returns each output joined with its routed view's kind, for
+clients that want a flat list. `POST /api/displays/refresh` reloads connected
+screens.
+
+**Integrations & wireless**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/integrations` | Integration states |
+| POST | `/api/integrations/:id/config` | Update config (secrets encrypted) |
+| POST | `/api/integrations/:id/enabled` | Enable / disable |
+| POST | `/api/integrations/:id/test` | Test a connection |
+| GET | `/api/wireless/providers` | Available device drivers |
+| GET / POST | `/api/wireless/connections` | List / add a device connection |
+| PATCH / DELETE | `/api/wireless/connections/:id` | Update / remove a connection |
+| POST | `/api/wireless/connections/:id/test` | Test a device connection |
+| GET | `/api/integrations/wireless/channels` | Bindable channels |
+| GET / POST | `/api/wireless/meter-rate` | Get / set the polling interval |
+
+**ProPresenter & ProdCom**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/propresenter/thumbnail?k=…` | Live slide thumbnail (JPEG proxy; `k` cache-busts per slide) |
+| GET | `/api/prodcom/transcript` | Recent transcript buffer (backfill for a freshly-loaded Captions display) |
+
+**SPL (Smaart) & rundown**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/spl/metrics` | Latest live SPL reading per meter (device/channel) |
+| GET | `/api/spl/history/current` | The active service's per-item SPL record (live) |
+| GET | `/api/spl/history` | List saved past-service SPL records |
+| GET | `/api/spl/history/:key` | One past-service record |
+| GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
+
+**People, attendance, timeline & baptism**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/people/count` | Live building occupancy (SenSource) |
+| GET | `/api/sensource/locations` \| `/api/sensource/zones` | Pickers for the SenSource config |
+| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record |
+| GET | `/api/service-timeline` \| `/:key` \| `/current` | List / one / live per-item timing record |
+| GET | `/api/obs/status` | OBS streaming / recording / scene state |
+| GET | `/api/baptism` \| `/api/baptism/sessions` | Live baptism state / saved sessions (+ start/next/baptized actions) |
+
+**ScriptView**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/scriptview/rundown?serviceTypeId=…[&planId=]` | Resolved rundown (items, columns, service times, timezone) |
+| GET / POST | `/api/scriptview/layouts` | List / save global layouts |
+| GET / POST | `/api/scriptview/config` | Get / set which service types show on the landing |
+| GET | `/api/scriptview/note-categories?serviceTypeId=…` | Note categories for the column picker |
+
+**Branding & other**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/branding/source?target=app\|empty` | Original (un-cropped) brand/empty logo source |
+| POST | `/api/branding` | Update app name + logos |
+| GET | `/api/events` | Multiplexed Server-Sent Events stream with per-connection channel filtering. Channels: `stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `spl:metrics`, `spl:history`, `people:count`, `attendance:history`, `service-timeline:history`, `obs:status`, `osc:feedback`, `baptism`, `integrations:state-changed`, `wireless:connections-changed` |
+| POST | `/api/events/subscribe` | Set the channels a connection wants (channel filtering) |
+| GET | `/photos?u=…` | Cached Planning Center photo proxy |

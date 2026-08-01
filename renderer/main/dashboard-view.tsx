@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Tooltip } from "../components/ui/tooltip";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
@@ -8,6 +9,7 @@ import { channelColor, channelLabel } from "./channel-color";
 import { LiveControls } from "./live-controls";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 interface DashboardViewProps {
   displayId: string;
@@ -28,30 +30,30 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   // Skew between this client and the server, recomputed whenever a pco:live
   // arrives, so the countdown matches the server clock even if this kiosk drifts.
   const [skewMs, setSkewMs] = useState(0);
-  useEffect(() => {
+  useResyncOn([pcoLive?.serverNow], () => {
     if (pcoLive?.serverNow) {
       setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
     }
-  }, [pcoLive?.serverNow]);
+  });
 
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3">
-        <Loader2Icon className="size-8 text-gray-7 animate-spin" />
-        <p className="text-headline text-gray-7">Loading…</p>
+        <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
+        <p className="text-headline text-fg-subtle">Loading…</p>
       </div>
     );
   }
   if (error || !state) {
     return (
       <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3 px-12 text-center">
-        <p className="text-title3 text-gray-9 font-semibold">Could not load dashboard</p>
-        {error && <p className="text-caption1 text-gray-7">{error}</p>}
+        <p className="text-title3 text-fg-muted font-semibold">Could not load dashboard</p>
+        {error && <p className="text-caption1 text-fg-subtle">{error}</p>}
       </div>
     );
   }
 
-  const display = state.displays?.find((d) => d.id === displayId) ?? null;
+  const display = state.outputs?.find((o) => o.id === displayId) ?? null;
   const displayName = display?.name ?? null;
 
   // Wall clock.
@@ -77,34 +79,35 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         style={
           {
             background: "rgba(0,0,0,0.50)",
-            backdropFilter: "blur(20px) saturate(1.6)",
+            backdropFilter: "blur(20px)",
             borderBottom: "1px solid rgba(255,255,255,0.09)",
             boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 8px rgba(0,0,0,0.40)",
           } as React.CSSProperties
         }
       >
         <div className="shrink-0 ml-3 flex items-center gap-2.5 relative z-10">
-          <a
-            href="/"
-            className="flex items-center gap-2 text-white/70 rounded hover:opacity-80 transition-opacity"
-            title="Back to home"
-            aria-label="Back to home"
-          >
-            {state.appLogo && (
-              <BrandLogo
-                logo={state.appLogo}
-                monochrome={state.appLogoMonochrome}
-                className="size-5 rounded select-none"
-              />
-            )}
-            <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
-              {state.appName}
-            </span>
-          </a>
+          <Tooltip label="Back to home">
+            <a
+              href="/"
+              className="flex items-center gap-2 text-fg-muted rounded hover:opacity-80 transition-opacity"
+              aria-label="Back to home"
+            >
+              {state.appLogo && (
+                <BrandLogo
+                  logo={state.appLogo}
+                  monochrome={state.appLogoMonochrome}
+                  className="size-5 rounded select-none"
+                />
+              )}
+              <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
+                {state.appName}
+              </span>
+            </a>
+          </Tooltip>
           {displayName && (
             <>
               <span className="w-px h-4 bg-white/15 shrink-0" aria-hidden="true" />
-              <span className="text-caption1 font-medium text-white/40 select-none truncate" style={{ letterSpacing: "0.02em" }}>
+              <span className="text-caption1 font-medium text-fg-subtle select-none truncate" style={{ letterSpacing: "0.02em" }}>
                 {displayName}
               </span>
             </>
@@ -112,16 +115,17 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         </div>
 
         {state.showQr && state.remoteUrl && (
-          <a
-            href="/settings"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70"
-            title="Open settings"
-            aria-label="Open settings"
-          >
-            <QrHint url={state.remoteUrl} compact />
-          </a>
+          <Tooltip label="Open settings in a new tab">
+            <a
+              href="/settings"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70"
+              aria-label="Open settings in a new tab"
+            >
+              <QrHint url={state.remoteUrl} compact />
+            </a>
+          </Tooltip>
         )}
       </div>
 
@@ -131,12 +135,12 @@ export function DashboardView({ displayId }: DashboardViewProps) {
       <div className="grid flex-1 min-h-0 grid-cols-2 grid-rows-2 gap-3 max-sm:grid-cols-1 max-sm:grid-rows-4 max-sm:gap-2">
         {/* Clock */}
         <Tile label="Current time">
-          <div className="flex items-baseline gap-2 tabular-nums">
-            <span className="text-[clamp(2rem,9vmin,5rem)] font-medium text-white/90 leading-none">
+          <div className="flex items-baseline gap-2 font-mono tabular-nums">
+            <span className="text-[clamp(2rem,9vmin,5rem)] font-medium text-fg leading-none">
               {h12}:{mm}
             </span>
-            <span className="text-[clamp(1rem,4vmin,2rem)] text-white/45 leading-none">{ss}</span>
-            <span className="text-[clamp(0.8rem,2.5vmin,1.25rem)] text-white/40 leading-none">{ampm}</span>
+            <span className="text-[clamp(1rem,4vmin,2rem)] text-fg-subtle leading-none">{ss}</span>
+            <span className="text-[clamp(0.8rem,2.5vmin,1.25rem)] text-fg-subtle leading-none">{ampm}</span>
           </div>
         </Tile>
 
@@ -158,18 +162,18 @@ export function DashboardView({ displayId }: DashboardViewProps) {
           {timer ? (
             <div className="flex flex-col items-center gap-1.5">
               <span
-                className={`text-[clamp(2rem,9vmin,5rem)] font-medium leading-none tabular-nums ${
-                  over ? "text-red-10" : "text-[#7fe3c4]"
+                className={`text-[clamp(2rem,9vmin,5rem)] font-mono font-medium leading-none tabular-nums ${
+                  over ? "text-red-10" : "text-live-11"
                 }`}
               >
                 {fmtDuration(timer.seconds)}
               </span>
-              <span className="text-caption1 text-white/45 truncate max-w-full">
+              <span className="text-caption1 text-fg-subtle truncate max-w-full">
                 {timer.label ?? (timer.mode === "preservice" ? "Service start" : "Current item")}
               </span>
             </div>
           ) : (
-            <span className="text-body text-white/35">No live service</span>
+            <span className="text-body text-fg-faint">No live service</span>
           )}
         </Tile>
 
@@ -177,39 +181,39 @@ export function DashboardView({ displayId }: DashboardViewProps) {
         <Tile label="ProPresenter · now">
           {proConnected ? (
             <div className="flex flex-col gap-2 w-full px-1">
-              <span className="text-[clamp(1.1rem,4vmin,2rem)] font-medium text-white/90 leading-tight truncate">
+              <span className="text-[clamp(1.1rem,4vmin,2rem)] font-medium text-fg leading-tight truncate">
                 {pro?.currentItem ?? "—"}
               </span>
               {pro?.slideCount != null && pro?.slideIndex != null ? (
                 <div className="flex items-center gap-2.5">
-                  <span className="text-caption1 text-white/45 shrink-0 tabular-nums">
+                  <span className="text-caption1 text-fg-subtle shrink-0 tabular-nums">
                     Slide {pro.slideIndex} of {pro.slideCount}
                   </span>
                   <span className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
                     <span
-                      className="block h-full bg-white/50"
+                      className="block h-full bg-fg"
                       style={{ width: `${Math.min(100, Math.round((pro.slideIndex / pro.slideCount) * 100))}%` }}
                     />
                   </span>
-                  <span className="text-caption1 text-white/60 shrink-0 tabular-nums">
+                  <span className="text-caption1 text-fg-muted shrink-0 tabular-nums">
                     {pro.slidesRemaining ?? 0} left
                   </span>
                 </div>
               ) : null}
             </div>
           ) : (
-            <span className="text-body text-white/35">ProPresenter offline</span>
+            <span className="text-body text-fg-faint">ProPresenter offline</span>
           )}
         </Tile>
 
         {/* ProPresenter — next */}
         <Tile label="Up next">
           {proConnected ? (
-            <span className="text-[clamp(1.1rem,4vmin,2rem)] font-medium text-white/70 leading-tight truncate px-1">
+            <span className="text-[clamp(1.1rem,4vmin,2rem)] font-medium text-fg-muted leading-tight truncate px-1">
               {pro?.nextItem ?? "—"}
             </span>
           ) : (
-            <span className="text-body text-white/35">—</span>
+            <span className="text-body text-fg-faint">—</span>
           )}
         </Tile>
       </div>
@@ -230,14 +234,14 @@ function TranscriptStrip({ lines }: { lines: TranscriptLineDTO[] }) {
   const last = lines[lines.length - 1];
   const speaker = channelLabel(last);
   return (
-    <div className="shrink-0 rounded-2xl border border-white/8 bg-white/4 px-4 py-3 flex items-center gap-3 min-h-0">
+    <div className="shrink-0 su-card px-4 py-3 flex items-center gap-3 min-h-0">
       <span
         className="text-caption2 font-semibold uppercase tracking-wider shrink-0 max-w-[28%] truncate"
         style={{ letterSpacing: "0.1em", color: speaker ? channelColor(last.channel) : "rgba(255,255,255,0.4)" }}
       >
         {speaker ?? "Transcript"}
       </span>
-      <span className={`text-[clamp(0.9rem,2.4vmin,1.4rem)] truncate ${last.isFinal ? "text-white/85" : "text-white/50"}`}>
+      <span className={`text-[clamp(0.9rem,2.4vmin,1.4rem)] truncate ${last.isFinal ? "text-fg" : "text-fg-subtle"}`}>
         {last.text}
       </span>
     </div>
@@ -249,18 +253,18 @@ function SplStrip({ spl }: { spl: SplMetricsDTO | null }) {
   const r = resolveSplValue(spl);
   if (!r) return null;
   return (
-    <div className="shrink-0 rounded-2xl border border-white/8 bg-white/4 px-4 py-3 flex items-center gap-3 min-h-0">
+    <div className="shrink-0 su-card px-4 py-3 flex items-center gap-3 min-h-0">
       <span
-        className="text-caption2 font-semibold uppercase tracking-wider shrink-0 text-white/40"
+        className="text-caption2 font-semibold uppercase tracking-wider shrink-0 text-fg-subtle"
         style={{ letterSpacing: "0.1em" }}
       >
         SPL
       </span>
-      <span className="text-[clamp(1.4rem,5vmin,2.4rem)] font-medium text-white/90 leading-none tabular-nums">
+      <span className="text-[clamp(1.4rem,5vmin,2.4rem)] font-mono font-medium text-fg leading-none tabular-nums">
         {Math.round(r.value)}
-        <span className="text-[0.5em] text-white/45 ml-1">dB</span>
+        <span className="text-[0.5em] text-fg-subtle ml-1">dB</span>
       </span>
-      <span className="text-caption1 text-white/40 ml-auto truncate">
+      <span className="text-caption1 text-fg-subtle ml-auto truncate">
         {r.metricKey} · {r.meterLabel}
       </span>
     </div>
@@ -278,11 +282,11 @@ function Tile({
 }) {
   const border =
     accent === "green"
-      ? "border-[#2dd49622] bg-[#2dd49614]"
+      ? "border-live-9/15 bg-live-9/8"
       : accent === "red"
         ? "border-red-a6 bg-red-a3"
-        : "border-white/8 bg-white/4";
-  const labelColor = accent === "green" ? "text-[#5dcaa5]" : accent === "red" ? "text-red-10" : "text-white/40";
+        : "border-line bg-surface";
+  const labelColor = accent === "green" ? "text-live-11" : accent === "red" ? "text-red-10" : "text-fg-subtle";
   return (
     <div className={`flex flex-col items-center justify-center rounded-2xl border p-4 max-sm:p-3 min-h-0 ${border}`}>
       <span

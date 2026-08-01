@@ -8,7 +8,6 @@ import {
   Loader2Icon,
   GripVerticalIcon,
   Rows2Icon,
-  ImageIcon,
   BookmarkIcon,
   RotateCcwIcon,
   DownloadIcon,
@@ -33,10 +32,41 @@ import {
   confirm,
 } from "../../components/ui";
 import type { SectionHandlers, WirelessChannel } from "../types";
-import { PositionPicker } from "./position-picker";
+import { PositionRangeEditor } from "./position-picker";
 import { useStageState } from "../../main/use-stage-state";
 
 // ---- slot row (sortable) ----------------------------------------------------
+
+/** Canonical identity of a slot's positions set — mirrors positionSignature in
+ *  main/services/slot-resolver.ts. Slots sharing one of these compete for distinct
+ *  people, so the editor surfaces it; ticking one more position silently changes
+ *  the grouping otherwise. null for slots that don't participate. */
+function positionsSignature(slot: Slot): string | null {
+  if (slot.link.kind !== "pco" || slot.link.matchBy !== "position") return null;
+  if (slot.link.positions.length === 0) return null;
+  return JSON.stringify(
+    slot.link.positions
+      .map((p) => [
+        (p.name ?? "").replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase(),
+        (p.notesStartsWith ?? "").trim().toLowerCase(),
+      ] as const)
+      .sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0]))),
+  );
+}
+
+/** Build a "how many other slots share my set" lookup over the whole board. */
+export function makeSharesWith(slots: Slot[]): (slot: Slot) => number {
+  const counts = new Map<string, number>();
+  for (const s of slots) {
+    const sig = positionsSignature(s);
+    if (sig) counts.set(sig, (counts.get(sig) ?? 0) + 1);
+  }
+  return (slot: Slot) => {
+    const sig = positionsSignature(slot);
+    return sig ? (counts.get(sig) ?? 1) - 1 : 0;
+  };
+}
+
 
 interface SlotRowProps {
   slot: Slot;
@@ -45,6 +75,9 @@ interface SlotRowProps {
   groupPos: "top" | "middle" | "bottom" | null;
   wirelessChannels: WirelessChannel[];
   teamPositions: TeamPositionDTO[];
+  /** How many OTHER slots share this slot's exact positions set. Those slots
+   *  compete for distinct people, which is otherwise invisible in the editor. */
+  sharesWith: number;
   onChange: (updated: Slot) => void;
   onRemove: () => void;
   /** Drag-handle props from the owning sortable group (a whole stacked column is
@@ -53,7 +86,7 @@ interface SlotRowProps {
   dragListeners: DraggableSyntheticListeners;
 }
 
-function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onChange, onRemove, dragAttributes, dragListeners }: SlotRowProps) {
+function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, sharesWith, onChange, onRemove, dragAttributes, dragListeners }: SlotRowProps) {
   const isPco = slot.link.kind === "pco";
   const isStatic = slot.link.kind === "static";
   const isEmpty = slot.link.kind === "empty";
@@ -82,7 +115,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
     } else {
       onChange({
         ...slot,
-        link: { kind: "pco", matchBy: "position", teamPositionName: "" },
+        link: { kind: "pco", matchBy: "position", positions: [] },
       });
     }
   }
@@ -91,7 +124,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
     if (matchBy === "person") {
       onChange({ ...slot, link: { kind: "pco", matchBy: "person", personId: "" } });
     } else {
-      onChange({ ...slot, link: { kind: "pco", matchBy: "position", teamPositionName: "" } });
+      onChange({ ...slot, link: { kind: "pco", matchBy: "position", positions: [] } });
     }
   }
 
@@ -104,7 +137,10 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
     } else if (!channelId || channelId === "__none__") {
       onChange({ ...slot, deviceBinding: null, deviceLabel: null });
     } else {
-      onChange({ ...slot, deviceBinding: { providerId: "wireless", channelId }, deviceLabel: null });
+      // A live channel keeps any label already typed — the label stands in for the
+      // frequency on the cell, so it is meaningful for live devices too, not just
+      // offline ones.
+      onChange({ ...slot, deviceBinding: { providerId: "wireless", channelId }, deviceLabel: slot.deviceLabel });
     }
   }
 
@@ -114,11 +150,23 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
     } else if (!channelId || channelId === "__none__") {
       onChange({ ...slot, iemBinding: null, iemLabel: null });
     } else {
-      onChange({ ...slot, iemBinding: { providerId: "wireless", channelId }, iemLabel: null });
+      onChange({ ...slot, iemBinding: { providerId: "wireless", channelId }, iemLabel: slot.iemLabel });
     }
   }
 
   const currentMode: "pco" | "static" | "empty" = isPco ? "pco" : isStatic ? "static" : "empty";
+
+  // The receiver's own channel name, offered as a one-click fill for the mic label.
+  // listChannels already uses CHAN_NAME as the channel's label (shure-base.ts), so
+  // there is nothing extra to fetch — but it falls back to "Ch N" when the receiver
+  // reports no name, and that is not worth putting on a display.
+  const boundChannel = slot.deviceBinding
+    ? wirelessChannels.find((c) => c.id === slot.deviceBinding!.channelId)
+    : undefined;
+  const receiverName =
+    boundChannel && !/^Ch \d+$/.test(boundChannel.label) && boundChannel.label !== slot.deviceLabel
+      ? boundChannel.label
+      : null;
 
   // Collapsed-state hint for the "Options" drop-down — surfaces what's set so an
   // operator doesn't have to expand every slot to see its wiring.
@@ -135,7 +183,6 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
   // Spacers are a horizontal gap for charger alignment — width + remove, plus an
   // optional empty-slot image centered in the gap.
   if (isSpacer) {
-    const showImage = (slot.link as { kind: "spacer"; showEmptyImage?: boolean }).showEmptyImage ?? false;
     return (
       <div className="relative flex flex-wrap items-center gap-2 py-3 pl-4">
         <button
@@ -148,20 +195,6 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
           <GripVerticalIcon className="size-4 text-gray-7" />
         </button>
         <span className="text-callout text-gray-9 flex-1 italic">Spacer</span>
-        <label
-          className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0"
-          title="Center the empty-slot image (from Branding) in this spacer"
-        >
-          <ImageIcon className="size-3.5 text-gray-9" />
-          Image
-          <Switch
-            checked={showImage}
-            onCheckedChange={(v: boolean) =>
-              onChange({ ...slot, link: { kind: "spacer", showEmptyImage: v } })
-            }
-            aria-label="Show empty-slot image in spacer"
-          />
-        </label>
         <label className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0">
           Width
           <NumberInput
@@ -169,7 +202,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
             step={0.5}
             min={0.1}
             suffix="in"
-            className="w-24"
+            className="w-32"
             aria-label="Spacer width (inches)"
             onChange={(n) => onChange({ ...slot, widthIn: n })}
           />
@@ -254,7 +287,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
           disabled={index === 0}
           onClick={() => onChange({ ...slot, stackWithPrevious: !slot.stackWithPrevious })}
           aria-label="Stack into the column above"
-          title={
+          tooltip={
             index === 0
               ? "The first slot can't stack onto a previous one"
               : "Stack into the same column as the slot above (shared charger)"
@@ -273,61 +306,43 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
       {/* PCO-linked fields */}
       {isPco && (
         <div className="flex flex-col gap-1.5 pl-4 sm:pl-9">
-          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-            <Select
-              value={(slot.link as { kind: "pco"; matchBy: string }).matchBy}
-              onValueChange={(v: string) => setPcoMatchBy(v as "person" | "position")}
-            >
-              <SelectTrigger className="w-full sm:w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="position">By position</SelectItem>
-                <SelectItem value="person">By person ID</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* Top-aligned, not centered: the position editor is a trigger with note
+              rows under it, so centering pushed this select down beside the notes
+              instead of level with the trigger it belongs to. */}
+          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start">
+            {/* Mode select + its hint stay one row at every width. `self-center` on
+                the hint alone put it on its own centred line once the parent wraps
+                to a column on mobile. */}
+            <div className="flex h-7 items-center gap-2 shrink-0">
+              <InfoHint className="shrink-0">
+                How this slot fills from Planning Center. By position: tick every position this slot may
+                accept — the first one with someone available fills it, so a slot can cover acoustic OR
+                electric week to week. Give a position a note to pin it to one person (e.g. &quot;1&quot; for the
+                vocalist noted 1, &quot;HH&quot; for a handheld). Tick &quot;Any position&quot; to match on the note alone.
+                By person ID: locks to one individual.
+              </InfoHint>
+              <Select
+                value={(slot.link as { kind: "pco"; matchBy: string }).matchBy}
+                onValueChange={(v: string) => setPcoMatchBy(v as "person" | "position")}
+              >
+                <SelectTrigger className="w-full sm:w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="position">By position</SelectItem>
+                  <SelectItem value="person">By person ID</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
             {(slot.link as { kind: "pco"; matchBy: string }).matchBy === "position" ? (
-              teamPositions.length > 0 ? (
-                <PositionPicker
-                  value={
-                    (slot.link as { kind: "pco"; matchBy: "position"; teamPositionName: string })
-                      .teamPositionName || ""
-                  }
-                  teamPositions={teamPositions}
-                  onChange={(v) =>
-                    onChange({
-                      ...slot,
-                      link: {
-                        kind: "pco",
-                        matchBy: "position",
-                        teamPositionName: v,
-                        notesStartsWith: (slot.link as { kind: "pco"; matchBy: "position"; notesStartsWith?: string }).notesStartsWith,
-                      },
-                    })
-                  }
-                />
-              ) : (
-                <Input
-                  value={
-                    (slot.link as { kind: "pco"; matchBy: "position"; teamPositionName: string })
-                      .teamPositionName
-                  }
-                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                    onChange({
-                      ...slot,
-                      link: {
-                        kind: "pco",
-                        matchBy: "position",
-                        teamPositionName: e.target.value,
-                        notesStartsWith: (slot.link as { kind: "pco"; matchBy: "position"; notesStartsWith?: string }).notesStartsWith,
-                      },
-                    })
-                  }
-                  placeholder="e.g. Electric Guitar"
-                  className="flex-1 min-w-0"
-                />
-              )
+              <PositionRangeEditor
+                positions={(slot.link as { kind: "pco"; matchBy: "position"; positions: SlotPositionMatch[] }).positions}
+                teamPositions={teamPositions}
+                onChange={(positions) =>
+                  onChange({ ...slot, link: { kind: "pco", matchBy: "position", positions } })
+                }
+              />
             ) : (
               <Input
                 value={(slot.link as { kind: "pco"; matchBy: "person"; personId: string }).personId}
@@ -341,42 +356,12 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
                 className="flex-1 min-w-0"
               />
             )}
-            <InfoHint className="self-center">
-              How this slot fills from Planning Center. By position: uses whoever holds that team position this
-              week (roster-driven, updates automatically). By person ID: locks to one individual. Use &quot;Notes
-              starts with&quot; to pick between multiple people in the same position.
-            </InfoHint>
           </div>
-          {/* Notes starts-with filter — only shown for "by position" */}
-          {(slot.link as { kind: "pco"; matchBy: string }).matchBy === "position" && (
-            <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="flex items-center gap-1 text-caption1 text-gray-9 shrink-0 sm:w-32">
-                Notes starts with:
-                <InfoHint>
-                  Narrows a &quot;by position&quot; match using each person&apos;s note in PCO. E.g. &quot;1&quot; picks the one
-                  noted 1, &quot;HH&quot; a handheld. Leave blank to take the first person in the position.
-                </InfoHint>
-              </span>
-              <Input
-                value={
-                  (slot.link as { kind: "pco"; matchBy: "position"; notesStartsWith?: string })
-                    .notesStartsWith ?? ""
-                }
-                onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  onChange({
-                    ...slot,
-                    link: {
-                      kind: "pco",
-                      matchBy: "position",
-                      teamPositionName: (slot.link as { kind: "pco"; matchBy: "position"; teamPositionName: string }).teamPositionName,
-                      notesStartsWith: e.target.value || undefined,
-                    },
-                  })
-                }
-                placeholder="e.g. 1  or  HH"
-                className="w-full sm:w-24"
-              />
-            </div>
+          {sharesWith > 0 && (
+            <p className="text-caption2 text-gray-9">
+              Shares people with {sharesWith} other slot{sharesWith === 1 ? "" : "s"} configured
+              identically — each fills with a different person, in board order.
+            </p>
           )}
         </div>
       )}
@@ -449,15 +434,31 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
               </SelectContent>
             </Select>
           </div>
-          {slot.deviceLabel != null && (
+          {(slot.deviceLabel != null || slot.deviceBinding != null) && (
             <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="text-caption1 text-gray-9 shrink-0">Offline label:</span>
+              <span className="flex items-center gap-1 text-caption1 text-gray-9 shrink-0">
+                Mic label:
+                <InfoHint>
+                  Shown on the cell in place of the frequency. Leave blank to keep the frequency. On an
+                  offline mic this is the whole pill, since there is no telemetry to show.
+                </InfoHint>
+              </span>
               <Input
-                value={slot.deviceLabel}
+                value={slot.deviceLabel ?? ""}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => onChange({ ...slot, deviceLabel: e.target.value })}
-                placeholder="e.g. PSM 900 — Lead"
+                placeholder="e.g. VOX 3"
                 className="w-full sm:w-40"
               />
+              {receiverName && (
+                <Button
+                  variant="transparent"
+                  size="small"
+                  onClick={() => onChange({ ...slot, deviceLabel: receiverName })}
+                  tooltip={`Use the receiver's own channel name (${receiverName})`}
+                >
+                  Use receiver name
+                </Button>
+              )}
             </div>
           )}
 
@@ -485,13 +486,19 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
               </SelectContent>
             </Select>
           </div>
-          {slot.iemLabel != null && (
+          {(slot.iemLabel != null || slot.iemBinding != null) && (
             <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-              <span className="text-caption1 text-gray-9 shrink-0">Offline IEM label:</span>
+              <span className="flex items-center gap-1 text-caption1 text-gray-9 shrink-0">
+                IEM label:
+                <InfoHint>
+                  Shown on a second line under the mic label, so a player can see both their vocal mix
+                  and their IEM mix on one cell. Leave blank to show nothing.
+                </InfoHint>
+              </span>
               <Input
-                value={slot.iemLabel}
+                value={slot.iemLabel ?? ""}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => onChange({ ...slot, iemLabel: e.target.value })}
-                placeholder="e.g. PSM 900 — Lead"
+                placeholder="e.g. IEM 2"
                 className="w-full sm:w-40"
               />
             </div>
@@ -531,14 +538,19 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, onCha
                 </SelectContent>
               </Select>
             )}
-            <label className="flex items-center gap-1.5 text-caption1 text-gray-9 shrink-0">
-              <Switch checked={slot.hideRf ?? false} onCheckedChange={(v: boolean) => onChange({ ...slot, hideRf: v })} />
-              Hide RF
-            </label>
-            <InfoHint className="self-center">
-              Hide the RF signal bars and show only the battery/charge level. Use for charge-only or IEM
-              slots, or RF-silent setups.
-            </InfoHint>
+            {/* Toggle + its hint stay one row at every width. `self-center` alone
+                would center the hint on its own line once the parent wraps to a
+                column on mobile. */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <label className="flex items-center gap-1.5 text-caption1 text-gray-9">
+                <Switch checked={slot.hideRf ?? false} onCheckedChange={(v: boolean) => onChange({ ...slot, hideRf: v })} />
+                Hide RF
+              </label>
+              <InfoHint>
+                Hide the RF signal bars and show only the battery/charge level. Use for charge-only or IEM
+                slots, or RF-silent setups.
+              </InfoHint>
+            </div>
           </div>
           <p className="text-caption2 text-gray-8">
             {slot.chargeSource === "off"
@@ -562,6 +574,7 @@ export function SortableSlotGroup({
   startIndex,
   wirelessChannels,
   teamPositions,
+  sharesWith,
   onChange,
   onRemove,
 }: {
@@ -569,6 +582,8 @@ export function SortableSlotGroup({
   startIndex: number;
   wirelessChannels: WirelessChannel[];
   teamPositions: TeamPositionDTO[];
+  /** How many OTHER slots on the board share this slot's exact positions set. */
+  sharesWith: (slot: Slot) => number;
   onChange: (index: number, updated: Slot) => void;
   onRemove: (index: number) => void;
 }) {
@@ -601,6 +616,7 @@ export function SortableSlotGroup({
             groupPos={groupPos}
             wirelessChannels={wirelessChannels}
             teamPositions={teamPositions}
+            sharesWith={sharesWith(slot)}
             onChange={(updated) => onChange(index, updated)}
             onRemove={() => onRemove(index)}
             dragAttributes={attributes}
@@ -663,6 +679,8 @@ export function SlotEditor({
     else groups.push({ slots: [slot], start: i });
   });
 
+  const sharesWith = makeSharesWith(localSlots);
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
@@ -701,6 +719,7 @@ export function SlotEditor({
                   startIndex={g.start}
                   wirelessChannels={wirelessChannels}
                   teamPositions={teamPositions}
+                  sharesWith={sharesWith}
                   onChange={handlers.updateSlot}
                   onRemove={handlers.removeSlot}
                 />
@@ -813,7 +832,7 @@ function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers:
           if (await confirm({ title: "Overwrite preset?", message: `Overwrite "${preset.name}" with the current slots?`, confirmLabel: "Overwrite" })) handlers.handleOverwritePreset(preset.id);
         }}
         aria-label={`Overwrite ${preset.name} with current slots`}
-        title="Overwrite with current slots"
+        tooltip="Overwrite with current slots"
       >
         <SaveIcon className="size-3.5 text-gray-9" />
       </Button>
@@ -1003,7 +1022,7 @@ export function AlignmentPanel({
                 step={0.25}
                 min={1}
                 suffix="in"
-                className="w-28"
+                className="w-32"
                 aria-label="Display active width (inches)"
                 onChange={(n) => onChange({ ...layout, displayWidthIn: n })}
               />
@@ -1015,7 +1034,7 @@ export function AlignmentPanel({
                 step={0.1}
                 min={0.1}
                 suffix="in"
-                className="w-28"
+                className="w-32"
                 aria-label="Charger column width (inches)"
                 onChange={(n) => onChange({ ...layout, columnWidthIn: n })}
               />

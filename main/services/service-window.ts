@@ -67,6 +67,28 @@ class ServiceWindowService {
       : Math.min(this.sched.dormantMin * 60_000, this.msUntilNextOpen());
     return Math.max(1000, Math.min(rawMs, cap)); // floor at 1s
   }
+
+  /**
+   * How long a *poller* should wait before its next tick.
+   *
+   * The inverse of `capDelayMs`: that one clamps a retry that has already grown,
+   * this one stretches a steady cadence when nothing is happening. The PCO live
+   * poll runs at 4s around the clock, which is ~151,000 requests a week against a
+   * rate-limited cloud API for the ~5% of it that is a service.
+   *
+   * Fails OPEN. With no windows known — no PCO credentials, a failed fetch, the
+   * feature switched off — this returns the active cadence, because going quiet
+   * because we could not work out the schedule is how a service gets missed.
+   */
+  pollDelayMs(activeMs: number, dormantCeilingMs = 5 * 60_000, now = Date.now()): number {
+    if (!this.sched.enabled) return activeMs;
+    if (this.windows.length === 0) return activeMs; // schedule unknown → stay awake
+    if (this.isActive(now)) return activeMs;
+    // Never sleep past the moment the next window opens, so the ramp-up is not
+    // missed by up to a whole dormant interval.
+    const untilOpen = this.msUntilNextOpen(now);
+    return Math.max(activeMs, Math.min(dormantCeilingMs, untilOpen));
+  }
 }
 
 export const serviceWindow = new ServiceWindowService();

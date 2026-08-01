@@ -66,17 +66,17 @@ export function ConfirmHost() {
         <AlertDialogPrimitive.Content
           className={cn(
             "fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
-            "w-full max-w-sm rounded-xl border border-gray-a6 bg-gray-1 p-6 shadow-xl",
+            "w-full max-w-sm rounded-xl border border-line-strong bg-bg p-6 shadow-xl",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
             "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           )}
         >
-          <AlertDialogPrimitive.Title className="text-[15px] font-semibold text-gray-12 mb-1">
+          <AlertDialogPrimitive.Title className="text-subheadline font-semibold text-fg mb-1">
             {state?.title}
           </AlertDialogPrimitive.Title>
           {state?.message && (
-            <AlertDialogPrimitive.Description className="text-[12px] text-gray-10 mb-4 whitespace-pre-line">
+            <AlertDialogPrimitive.Description className="text-caption1 text-fg-subtle mb-4 whitespace-pre-line">
               {state.message}
             </AlertDialogPrimitive.Description>
           )}

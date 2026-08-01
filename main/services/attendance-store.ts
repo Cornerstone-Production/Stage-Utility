@@ -4,46 +4,28 @@
 // DataStore (attendance-history.json in the data dir).
 
 import type { ServiceAttendance } from "../types/stage.js";
-import { DataStore } from "./data-store.js";
-
-interface AttendanceFile {
-  services: Record<string, ServiceAttendance>;
-}
+import { KeyedRecordStore } from "./keyed-record-store.js";
 
 class AttendanceStore {
-  private store = new DataStore<AttendanceFile>("attendance-history.json", { services: {} });
+  private store = new KeyedRecordStore<ServiceAttendance>("attendance-history", "attendance-history.json", (r) => r.startedAt);
 
   /** All recorded services, newest first (by start time). */
   async list(): Promise<ServiceAttendance[]> {
-    const file = await this.store.load();
-    return Object.values(file.services).sort(
-      (a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt),
-    );
+    return this.store.list();
   }
 
   async get(serviceKey: string): Promise<ServiceAttendance | null> {
-    const file = await this.store.load();
-    return file.services[serviceKey] ?? null;
+    return this.store.get(serviceKey);
   }
 
   /** Insert or replace one service record (serialized read-modify-write). */
   async upsert(record: ServiceAttendance): Promise<void> {
-    await this.store.update((file) => ({
-      services: { ...file.services, [record.serviceKey]: record },
-    }));
+    return this.store.upsert(record);
   }
 
   /** Delete one service record by key. Returns true if it existed. */
   async delete(serviceKey: string): Promise<boolean> {
-    let existed = false;
-    await this.store.update((file) => {
-      existed = serviceKey in file.services;
-      if (!existed) return file;
-      const services = { ...file.services };
-      delete services[serviceKey];
-      return { services };
-    });
-    return existed;
+    return this.store.delete(serviceKey);
   }
 }
 

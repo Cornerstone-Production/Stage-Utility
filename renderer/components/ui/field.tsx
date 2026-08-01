@@ -3,11 +3,22 @@ import { cn } from "../../lib/cn";
 
 // ── FieldSet ──────────────────────────────────────────────────────────────────
 
-interface FieldSetProps extends React.HTMLAttributes<HTMLDivElement> {}
+interface FieldSetProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Render without the card material — for a FieldSet nested inside another
+   *  card (e.g. an integration row), so we never stack cards within cards. */
+  flat?: boolean;
+}
 
-export function FieldSet({ className, children, ...props }: FieldSetProps) {
+export function FieldSet({ className, flat, children, ...props }: FieldSetProps) {
   return (
-    <div className={cn("rounded-lg border border-gray-a4 overflow-hidden", className)} {...props}>
+    <div
+      className={cn(
+        "overflow-hidden",
+        flat ? "" : "rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]",
+        className,
+      )}
+      {...props}
+    >
       {children}
     </div>
   );
@@ -35,7 +46,7 @@ export function Field({ className, orientation = "horizontal", children, ...prop
   return (
     <div
       className={cn(
-        "flex px-3 py-2.5 bg-gray-1",
+        "flex px-4 py-3 bg-transparent",
         // Horizontal fields stack (label above control) on phones, go side-by-side at ≥sm.
         orientation === "horizontal" && "flex-col items-stretch gap-1.5 sm:flex-row sm:items-center sm:gap-3",
         orientation === "vertical" && "flex-col gap-1.5",
@@ -66,7 +77,7 @@ interface FieldLabelProps extends React.HTMLAttributes<HTMLSpanElement> {}
 
 export function FieldLabel({ className, children, ...props }: FieldLabelProps) {
   return (
-    <span className={cn("text-[13px] font-medium text-gray-12 leading-tight", className)} {...props}>
+    <span className={cn("text-footnote font-medium text-fg leading-tight", className)} {...props}>
       {children}
     </span>
   );
@@ -78,7 +89,7 @@ interface FieldDescriptionProps extends React.HTMLAttributes<HTMLSpanElement> {}
 
 export function FieldDescription({ className, children, ...props }: FieldDescriptionProps) {
   return (
-    <span className={cn("text-[11px] text-gray-10 leading-tight mt-0.5", className)} {...props}>
+    <span className={cn("text-caption2 text-fg-subtle leading-tight mt-0.5", className)} {...props}>
       {children}
     </span>
   );
