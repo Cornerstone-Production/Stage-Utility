@@ -937,6 +937,9 @@ export interface PlanDTO {
   seriesTitle: string | null;
   sortDate: string | null;
   dates: string | null;
+  /** True for a plan that has already happened. Set when the manual picker's list
+   *  is built, so the UI does not have to re-derive it against the clock. */
+  past?: boolean;
 }
 
 /** One line-item of a PCO plan (song / header / media / item). */
@@ -1162,6 +1165,9 @@ export interface StageState {
   planId: string | null;
   planTitle: string | null;
   planSeriesTitle: string | null;
+  /** The plan's own date label from Planning Center ("August 3, 2026"), so the
+   *  active plan can be told apart from next week's. */
+  planDates: string | null;
 
   // ── Views/Outputs model (canonical) ──────────────────────────────────
   /** All content definitions. */

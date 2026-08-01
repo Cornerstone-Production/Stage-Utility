@@ -51,7 +51,9 @@ other gear you run; each integration is independent and shows its own connection
 state. See [integrations](../integrations/README.md).
 
 **Plan** — Auto follows the next upcoming service and rolls forward after it ends;
-Manual pins one. Active Service Types limits which types Auto considers.
+Manual pins one, and its picker also lists the last 30 days so you can point the
+screens at a service that has already happened. Active Service Types limits which
+types Auto considers.
 
 **Views** — the content you build. A view is a slot grid, dashboard, stage screen,
 captions, script rundown, SPL rundown, or a custom layout you design on a canvas.

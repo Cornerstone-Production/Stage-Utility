@@ -14,6 +14,7 @@ export interface SettingsData {
   planId: string | null;
   planTitle: string | null;
   planSeriesTitle: string | null;
+  planDates?: string | null;
   integrationConfigs: Record<string, Record<string, unknown>>;
   integrationEnabled: Record<string, boolean>;
   showQr: boolean;
@@ -82,6 +83,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   planId: null,
   planTitle: null,
   planSeriesTitle: null,
+  planDates: null,
   integrationConfigs: {},
   integrationEnabled: {},
   showQr: true,
