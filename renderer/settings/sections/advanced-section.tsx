@@ -9,6 +9,7 @@ import {
   FieldContent,
   FieldLabel,
   FieldDescription,
+  InfoHint,
   Collapsible,
   Switch,
   Input,
@@ -606,7 +607,6 @@ export function AdvancedSection({
   // local mirror needed; it selects-all on focus and clamps to min/max itself.
   const rc = stageState.reconnectSchedule ?? { enabled: true, leadMin: 120, tailMin: 60, dormantMin: 30 };
   const tw = stageState.taperWindow ?? { preMin: 60, postMin: 60 };
-  const bas = stageState.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" };
 
   return (
     <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
@@ -650,10 +650,21 @@ export function AdvancedSection({
         <FieldGroup>
           <Field orientation="horizontal">
             <FieldContent>
-              <FieldLabel>Wake around service times</FieldLabel>
+              <FieldLabel>
+                Wake around service times
+                <InfoHint className="ml-1.5 align-middle">
+                  Church gear is off most of the week, so retrying at full speed is wasted
+                  traffic and log noise. Rehearsal and service windows come from Planning
+                  Center; outside them connections back off toward the idle interval below,
+                  and the Planning Center poll slows too. Nothing ever sleeps past the moment
+                  the next window opens, and if the schedule cannot be worked out — no
+                  credentials, a failed fetch — everything stays at full speed rather than
+                  going quiet.
+                </InfoHint>
+              </FieldLabel>
               <FieldDescription>
-                Quiet ProPresenter / OBS / Smaart / wireless reconnects when gear is off for the week,
-                then ramp back up before a Planning Center rehearsal or service. Off = a fixed 2-minute retry.
+                Back off reconnects when gear is off for the week, and ramp up before a
+                rehearsal or service. Off = a fixed 2-minute retry.
               </FieldDescription>
             </FieldContent>
             <Switch
@@ -699,33 +710,6 @@ export function AdvancedSection({
         <FieldGroup>
           <Field orientation="horizontal">
             <FieldContent>
-              <FieldLabel>Start baptism testimonies from the plan</FieldLabel>
-              <FieldDescription>
-                When a plan item whose title contains this goes live, the baptism timer starts
-                timing testimonies — so the producer isn&rsquo;t advancing Planning Center and
-                starting a timer at the same moment. The switch to the baptisms themselves is
-                picked per plan on the Baptisms tab, since that usually happens during a song.
-              </FieldDescription>
-            </FieldContent>
-            <div className="flex items-center gap-2">
-              <Input
-                value={bas.testimonyKeyword}
-                onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  handlers.handleSetBaptismAutoStart({ testimonyKeyword: e.target.value })
-                }
-                placeholder="baptism stories"
-                className="w-48"
-                aria-label="Testimony item keyword"
-              />
-              <Switch
-                checked={bas.enabled}
-                onCheckedChange={(v: boolean) => handlers.handleSetBaptismAutoStart({ enabled: v })}
-                aria-label="Start baptism testimonies from the plan"
-              />
-            </div>
-          </Field>
-          <Field orientation="horizontal">
-            <FieldContent>
               <FieldLabel>Pre-service ramp (minutes)</FieldLabel>
               <FieldDescription>Start sampling attendance this long before the service start, so the graph shows the room filling up. 0 = off.</FieldDescription>
             </FieldContent>
@@ -735,8 +719,15 @@ export function AdvancedSection({
           </Field>
           <Field orientation="horizontal">
             <FieldContent>
-              <FieldLabel>Post-service taper (minutes)</FieldLabel>
-              <FieldDescription>Keep sampling this long after the service ends (even once PCO Live is cleared) to capture how fast the room empties. Excluded from Peak/Lowest stats. 0 = off.</FieldDescription>
+              <FieldLabel>
+                Post-service taper (minutes)
+                <InfoHint className="ml-1.5 align-middle">
+                  Sampling continues even once the live plan is cleared, so an emptying room
+                  is still recorded. These samples are excluded from the Peak and Lowest
+                  figures — otherwise the taper would drag the low toward an empty room.
+                </InfoHint>
+              </FieldLabel>
+              <FieldDescription>Keep sampling this long after the service ends, to capture how fast the room empties. 0 = off.</FieldDescription>
             </FieldContent>
             <NumberInput value={tw.postMin} min={0} max={240} className="w-28"
               onChange={(v) => { if (v !== tw.postMin) handlers.handleSetTaperWindow({ postMin: Math.round(v) }); }}
