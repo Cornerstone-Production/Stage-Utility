@@ -41,6 +41,8 @@ jobs:
       # actually reached the remote, so a run that stood down builds nothing.
       version: ${{ steps.version.outputs.version }}
       published: ${{ steps.push.outputs.pushed }}
+      last: ${{ steps.version.outputs.last }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -169,22 +171,8 @@ jobs:
             echo "::notice::${GITHUB_REF_NAME} advanced during this run — skipping v$V. The run for the newer commit will release it."
           fi
 
-      # Only when the tag actually reached the remote — a skipped push means this
-      # run stood down and there is no tag to publish against.
-      - name: Publish the release
-        if: steps.version.outputs.skip == 'false' && steps.push.outputs.pushed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          V: ${{ steps.version.outputs.version }}
-          LAST: ${{ steps.version.outputs.last }}
-          PRE: ${{ steps.version.outputs.prerelease }}
-        run: |
-          set -euo pipefail
-          NOTES=$(git log --no-merges --format='- %s' ${LAST:+$LAST..}HEAD~1 || true)
-          gh release create "v$V" \
-            --title "v$V" \
-            --notes "${NOTES:-No notable changes.}" \
-            $([ "$PRE" = true ] && echo --prerelease || echo --latest)
+      # The release itself is created by the artifacts job, once the archives
+      # exist — see the note there. This job only tags.
 
   # Downloadable installs, attached to the release the job above just published.
   #
@@ -202,6 +190,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: v${{ needs.release.outputs.version }} # the tagged tree, not the branch
+          # The release notes are a commit range from the previous tag, so the
+          # default shallow clone would have nothing to compute them over.
+          fetch-depth: 0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -241,10 +232,28 @@ jobs:
           [ "$got" = "${{ needs.release.outputs.version }}" ] \
             || { echo "::error::version reported as $got"; exit 1; }
 
-      - name: Attach to the release
+      # Created WITH its assets, in one call.
+      #
+      # Publishing first and uploading afterwards fails on a full release:
+      # "HTTP 422: Cannot upload assets to an immutable release". A published
+      # release cannot be added to, so v1.9.2 shipped with no downloads and every
+      # install command that resolves releases/latest broke. Prereleases were
+      # unaffected, which is why this survived the whole beta line.
+      - name: Create the release with its archives
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "v${{ needs.release.outputs.version }}" dist/* --clobber
+          V: ${{ needs.release.outputs.version }}
+          LAST: ${{ needs.release.outputs.last }}
+          PRE: ${{ needs.release.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          NOTES=$(git log --no-merges --format='- %s' ${LAST:+$LAST..}"v$V"~1 || true)
+          gh release create "v$V" \
+            --title "v$V" \
+            --notes "${NOTES:-No notable changes.}" \
+            $([ "$PRE" = true ] && echo --prerelease || echo --latest) \
+            dist/*
+          echo "published v$V with $(ls dist | wc -l) files"
 
       - name: Update the Homebrew tap
         # Skipped until STAGE_TAP_TOKEN exists, so this cannot fail a release

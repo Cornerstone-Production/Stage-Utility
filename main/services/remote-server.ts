@@ -4,6 +4,7 @@
 
 
 import * as fs from "fs/promises";
+import { scrub } from "./scrub.js";
 import * as http from "http";
 import * as net from "net";
 import * as os from "os";
@@ -436,7 +437,7 @@ export class RemoteServer {
       // Enforcement, independent of whatever the preflight advertised: reads stay
       // open (LAN appliance), writes must be same-origin.
       if (MUTATING_METHODS.has(req.method ?? "") && isCrossOrigin(req.headers.origin, req.headers.host)) {
-        console.warn(`[remote-server] rejected cross-origin ${req.method} ${pathname} from ${req.headers.origin}`);
+        console.warn(`[remote-server] rejected cross-origin ${scrub(req.method)} ${scrub(pathname)} from ${scrub(req.headers.origin)}`);
         error(res, "cross-origin request rejected", 403);
         return;
       }
@@ -445,7 +446,7 @@ export class RemoteServer {
         await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[remote-server] handler error ${pathname}:`, msg);
+        console.error(`[remote-server] handler error ${scrub(pathname)}:`, msg);
         error(res, msg, 500);
       }
     };

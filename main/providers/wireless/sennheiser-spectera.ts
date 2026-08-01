@@ -17,6 +17,7 @@
 // there is no per-device mute in v17.0 (documented limitation).
 
 import * as https from "node:https";
+import { scrub } from "../../services/scrub.js";
 
 import type { DeviceChannel, DeviceProvider, DeviceStatus } from "../../types/devices.js";
 import type { ConfigField, ConnectionState } from "../../types/integrations.js";
@@ -158,7 +159,7 @@ export class SennheiserSpectera implements DeviceProvider {
     );
     this.req = req;
     req.on("error", (err) => {
-      if (DEBUG) console.log(`[spectera] request error: ${err.message}`);
+      if (DEBUG) console.log(`[spectera] request error: ${scrub(err.message)}`);
       this.onStreamClosed();
     });
     req.end();
@@ -260,7 +261,7 @@ export class SennheiserSpectera implements DeviceProvider {
       },
     );
     put.on("error", (err) => {
-      if (DEBUG) console.log(`[spectera] subscribe error: ${err.message}`);
+      if (DEBUG) console.log(`[spectera] subscribe error: ${scrub(err.message)}`);
     });
     put.write(body);
     put.end();

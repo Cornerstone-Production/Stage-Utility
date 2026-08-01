@@ -2,6 +2,7 @@
 // Every mutating method ends with broadcast("stage:state-changed").
 
 import { randomUUID } from "crypto";
+import { scrub } from "./scrub.js";
 
 import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart,
   TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
@@ -365,7 +366,7 @@ export class StageController {
     const next = { ...(this.state.iconColors ?? {}) };
     if (c === "") delete next[k];
     else next[k] = c;
-    console.log(`[stage-controller] setIconColor ${k} → ${c || "(cleared)"}`);
+    console.log(`[stage-controller] setIconColor ${scrub(k)} → ${scrub(c || "(cleared)")}`);
     this.state = { ...this.state, iconColors: next };
     await settingsStore.patch({ iconColors: next });
     this.broadcast();
@@ -374,7 +375,7 @@ export class StageController {
 
   async setPublicUrl(url: string | null): Promise<StageState> {
     const normalized = normalizeBaseUrl(url);
-    console.log(`[stage-controller] setPublicUrl → ${normalized ?? "(cleared)"}`);
+    console.log(`[stage-controller] setPublicUrl → ${scrub(normalized ?? "(cleared)")}`);
     this.publicUrl = normalized;
     this.state = { ...this.state, publicUrl: normalized };
     await settingsStore.patch({ publicUrl: normalized });
@@ -424,7 +425,7 @@ export class StageController {
     const found = types.find((t) => t.id === id);
     if (!found) throw new Error(`Service type ${id} not found`);
 
-    console.log(`[stage-controller] setServiceType → ${id} (${found.name})`);
+    console.log(`[stage-controller] setServiceType → ${scrub(id)} (${scrub(found.name)})`);
 
     this.state = {
       ...this.state,
@@ -779,7 +780,7 @@ export class StageController {
     const found = plans.find((p) => p.id === id);
     if (!found) throw new Error(`Plan ${id} not found`);
 
-    console.log(`[stage-controller] setPlan → ${id} (${found.title})`);
+    console.log(`[stage-controller] setPlan → ${scrub(id)} (${scrub(found.title)})`);
     await this.applyPlan(found);
     return this.state;
   }
@@ -933,7 +934,7 @@ export class StageController {
   }
 
   async setAllowedServiceTypes(ids: string[]): Promise<StageState> {
-    console.log(`[stage-controller] setAllowedServiceTypes → [${ids.join(", ")}]`);
+    console.log(`[stage-controller] setAllowedServiceTypes → [${scrub(ids.join(", "))}]`);
     this.state = { ...this.state, allowedServiceTypeIds: ids };
     await settingsStore.patch({ allowedServiceTypeIds: ids });
     broadcast("settings:allowedServiceTypeIds-changed", { value: ids });
@@ -948,7 +949,7 @@ export class StageController {
   }
 
   async setPlanMode(mode: "auto" | "manual"): Promise<StageState> {
-    console.log(`[stage-controller] setPlanMode → ${mode}`);
+    console.log(`[stage-controller] setPlanMode → ${scrub(mode)}`);
     this.state = { ...this.state, planMode: mode };
     await settingsStore.patch({ planMode: mode });
 
@@ -983,7 +984,7 @@ export class StageController {
     if (!this.state.serviceTypeId) {
       console.log("[stage-controller] setViewSlots: no active service type — slots not persisted");
     } else {
-      console.log(`[stage-controller] setViewSlots (${slots.length} slots) for view=${viewId} serviceType=${this.state.serviceTypeId}`);
+      console.log(`[stage-controller] setViewSlots (${slots.length} slots) for view=${scrub(viewId)} serviceType=${scrub(this.state.serviceTypeId)}`);
       await slotsStore.setSlots(viewId, this.state.serviceTypeId, slots);
     }
     this.rawSlotsByView.set(viewId, slots);
@@ -999,7 +1000,7 @@ export class StageController {
     if (!this.state.serviceTypeId) {
       console.log("[stage-controller] setLayoutObjectSlots: no active service type — slots not persisted");
     } else {
-      console.log(`[stage-controller] setLayoutObjectSlots (${slots.length} slots) for object=${objectId} serviceType=${this.state.serviceTypeId}`);
+      console.log(`[stage-controller] setLayoutObjectSlots (${slots.length} slots) for object=${scrub(objectId)} serviceType=${scrub(this.state.serviceTypeId)}`);
       await slotsStore.setSlots(objectId, this.state.serviceTypeId, slots);
     }
     this.rawSlotsByObject.set(objectId, slots);
@@ -1011,7 +1012,7 @@ export class StageController {
   // ── QR visibility ─────────────────────────────────────────────────────
 
   async setShowQr(show: boolean): Promise<StageState> {
-    console.log(`[stage-controller] setShowQr → ${show}`);
+    console.log(`[stage-controller] setShowQr → ${scrub(show)}`);
     this.state = { ...this.state, showQr: show };
     await settingsStore.patch({ showQr: show });
     this.broadcast();
@@ -1029,7 +1030,7 @@ export class StageController {
   // ── NDI visibility ────────────────────────────────────────────────────
 
   async setNdiEnabled(enabled: boolean): Promise<StageState> {
-    console.log(`[stage-controller] setNdiEnabled → ${enabled}`);
+    console.log(`[stage-controller] setNdiEnabled → ${scrub(enabled)}`);
     this.state = { ...this.state, ndiEnabled: enabled };
     await settingsStore.patch({ ndiEnabled: enabled });
     this.broadcast();
@@ -1043,7 +1044,7 @@ export class StageController {
    *  one-off SSE event — no state change. */
   refreshDisplays(target: string): void {
     const t = target || "all";
-    console.log(`[stage-controller] refreshDisplays → ${t}`);
+    console.log(`[stage-controller] refreshDisplays → ${scrub(t)}`);
     broadcast("display:refresh", { target: t });
   }
 
@@ -1278,7 +1279,7 @@ export class StageController {
 
   async savePreset(target: string, name: string): Promise<SlotPreset[]> {
     const viewId = this.viewIdForTarget(target);
-    console.log(`[stage-controller] savePreset "${name}" for view=${viewId}`);
+    console.log(`[stage-controller] savePreset "${scrub(name)}" for view=${scrub(viewId)}`);
     const presets = await presetsStore.load();
     const rawSlots = this.rawSlotsByView.get(viewId) ?? [];
     const newPreset: SlotPreset = {
@@ -1299,7 +1300,7 @@ export class StageController {
     const preset = presets.find((p) => p.id === id);
     if (!preset) throw new Error(`Preset ${id} not found`);
 
-    console.log(`[stage-controller] applyPreset "${preset.name}" (${id}) for view=${viewId}`);
+    console.log(`[stage-controller] applyPreset "${scrub(preset.name)}" (${scrub(id)}) for view=${scrub(viewId)}`);
 
     // Deep-clone with fresh slot ids so applied slots are independent of the preset.
     const slots: Slot[] = preset.slots.map((s) => ({ ...s, id: randomUUID() }));
@@ -1323,7 +1324,7 @@ export class StageController {
       slots: slots.map((s, i) => ({ ...s, id: randomUUID(), order: i })),
       createdAt: new Date().toISOString(),
     };
-    console.log(`[stage-controller] importPreset "${newPreset.name}" (${newPreset.slots.length} slots)`);
+    console.log(`[stage-controller] importPreset "${scrub(newPreset.name)}" (${newPreset.slots.length} slots)`);
     const updated = [...presets, newPreset];
     await presetsStore.save(updated);
     return updated;
@@ -1352,7 +1353,7 @@ export class StageController {
     const presets = await presetsStore.load();
     const trimmed = name.trim();
     if (!trimmed) return presets;
-    console.log(`[stage-controller] renamePreset ${id} → "${trimmed}"`);
+    console.log(`[stage-controller] renamePreset ${scrub(id)} → "${scrub(trimmed)}"`);
     const updated = presets.map((p) => (p.id === id ? { ...p, name: trimmed } : p));
     await presetsStore.save(updated);
     return updated;
@@ -1367,7 +1368,7 @@ export class StageController {
     const presets = await presetsStore.load();
     if (!presets.find((p) => p.id === id)) throw new Error(`Preset ${id} not found`);
     const rawSlots = explicitSlots ?? this.rawSlotsByView.get(viewId) ?? [];
-    console.log(`[stage-controller] overwritePreset ${id} (${rawSlots.length} slots)`);
+    console.log(`[stage-controller] overwritePreset ${scrub(id)} (${rawSlots.length} slots)`);
     const updated = presets.map((p) =>
       p.id === id ? { ...p, slots: rawSlots.map((s) => ({ ...s, id: randomUUID() })) } : p,
     );
@@ -1389,7 +1390,7 @@ export class StageController {
       layout: cloneLayout(layout),
       createdAt: new Date().toISOString(),
     };
-    console.log(`[stage-controller] saveLayoutTemplate "${tpl.name}" (${tpl.layout.objects.length} objects)`);
+    console.log(`[stage-controller] saveLayoutTemplate "${scrub(tpl.name)}" (${tpl.layout.objects.length} objects)`);
     const updated = [...list, tpl];
     await layoutTemplatesStore.save(updated);
     return updated;
@@ -1437,7 +1438,7 @@ export class StageController {
       object: cloneLayoutObject(object), // fresh ids so the library copy is isolated
       createdAt: new Date().toISOString(),
     };
-    console.log(`[stage-controller] saveLayoutGroup "${group.name}" (${(group.object.children?.length ?? 0)} children)`);
+    console.log(`[stage-controller] saveLayoutGroup "${scrub(group.name)}" (${scrub((group.object.children?.length ?? 0))} children)`);
     const updated = [...list, group];
     await layoutGroupsStore.save(updated);
     return updated;
@@ -1467,7 +1468,7 @@ export class StageController {
       createdAt: new Date().toISOString(),
       layout: kind === "custom" ? defaultCustomLayout() : null,
     };
-    console.log(`[stage-controller] createView id=${id} name="${view.name}" kind=${kind}`);
+    console.log(`[stage-controller] createView id=${scrub(id)} name="${scrub(view.name)}" kind=${scrub(kind)}`);
     const views = [...this.state.views, view];
     this.state = { ...this.state, views };
     await viewsStore.save(views);
@@ -1484,7 +1485,7 @@ export class StageController {
       throw new Error(`views:rename — view ${id} not found`);
     }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, name: trimmed } : v));
-    console.log(`[stage-controller] renameView id=${id} name="${trimmed}"`);
+    console.log(`[stage-controller] renameView id=${scrub(id)} name="${scrub(trimmed)}"`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();
@@ -1502,7 +1503,7 @@ export class StageController {
         ? { ...v, kind, layout: kind === "custom" ? (v.layout ?? defaultCustomLayout()) : v.layout }
         : v,
     );
-    console.log(`[stage-controller] setViewKind id=${id} kind=${kind}`);
+    console.log(`[stage-controller] setViewKind id=${scrub(id)} kind=${scrub(kind)}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     if (kind === "slots" && !this.rawSlotsByView.has(id)) {
@@ -1523,7 +1524,7 @@ export class StageController {
     }
     const ndiSource = source?.trim() ? source.trim() : null;
     const views = this.state.views.map((v) => (v.id === id ? { ...v, ndiSource } : v));
-    console.log(`[stage-controller] setViewNdiSource id=${id} source=${ndiSource ?? "(none)"}`);
+    console.log(`[stage-controller] setViewNdiSource id=${scrub(id)} source=${scrub(ndiSource ?? "(none)")}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();
@@ -1537,7 +1538,7 @@ export class StageController {
       throw new Error(`views:setSlotsLayout — view ${id} not found`);
     }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, slotsLayout } : v));
-    console.log(`[stage-controller] setViewSlotsLayout id=${id} ${slotsLayout ? `${slotsLayout.displayWidthIn}in` : "(off)"}`);
+    console.log(`[stage-controller] setViewSlotsLayout id=${scrub(id)} ${slotsLayout ? `${scrub(slotsLayout.displayWidthIn)}in` : "(off)"}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();
@@ -1551,7 +1552,7 @@ export class StageController {
       throw new Error(`views:setShowLiveControls — view ${id} not found`);
     }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, showLiveControls } : v));
-    console.log(`[stage-controller] setViewShowLiveControls id=${id} → ${showLiveControls}`);
+    console.log(`[stage-controller] setViewShowLiveControls id=${scrub(id)} → ${scrub(showLiveControls)}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();
@@ -1565,7 +1566,7 @@ export class StageController {
       throw new Error(`views:setLayout — view ${id} not found`);
     }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, layout } : v));
-    console.log(`[stage-controller] setViewLayout id=${id} (${layout.objects.length} objects)`);
+    console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${layout.objects.length} objects)`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     // Load raw slots for any newly-added inline mic-slots objects, and drop the
@@ -1598,7 +1599,7 @@ export class StageController {
       createdAt: new Date().toISOString(),
       layout: cloned?.layout ?? null,
     };
-    console.log(`[stage-controller] duplicateView ${id} → ${newId} "${copy.name}"`);
+    console.log(`[stage-controller] duplicateView ${scrub(id)} → ${scrub(newId)} "${scrub(copy.name)}"`);
     const views = [...this.state.views, copy];
     this.state = { ...this.state, views };
     await viewsStore.save(views);
@@ -1708,7 +1709,7 @@ export class StageController {
       name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
       viewId: viewId ?? null,
     };
-    console.log(`[stage-controller] addOutput id=${id} name="${output.name}" viewId=${output.viewId ?? "(none)"}`);
+    console.log(`[stage-controller] addOutput id=${scrub(id)} name="${scrub(output.name)}" viewId=${scrub(output.viewId ?? "(none)")}`);
     const outputs = [...this.state.outputs, output];
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
@@ -1724,7 +1725,7 @@ export class StageController {
       throw new Error(`outputs:rename — output ${id} not found`);
     }
     const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, name: trimmed } : o));
-    console.log(`[stage-controller] renameOutput id=${id} name="${trimmed}"`);
+    console.log(`[stage-controller] renameOutput id=${scrub(id)} name="${scrub(trimmed)}"`);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
     this.recomputeResolved();
@@ -1760,7 +1761,7 @@ export class StageController {
     const outputs = this.state.outputs.map((o) =>
       o.id === id ? { ...o, slug: trimmed === "" ? undefined : trimmed } : o,
     );
-    console.log(`[stage-controller] setOutputSlug id=${id} slug="${trimmed}"`);
+    console.log(`[stage-controller] setOutputSlug id=${scrub(id)} slug="${scrub(trimmed)}"`);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
     this.recomputeResolved();
@@ -1777,7 +1778,7 @@ export class StageController {
       throw new Error(`outputs:setView — view ${viewId} not found`);
     }
     const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, viewId } : o));
-    console.log(`[stage-controller] setOutputView output=${id} → view=${viewId ?? "(none)"}`);
+    console.log(`[stage-controller] setOutputView output=${scrub(id)} → view=${scrub(viewId ?? "(none)")}`);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
     this.recomputeResolved();

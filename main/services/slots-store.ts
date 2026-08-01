@@ -6,6 +6,7 @@
 // Migration from v0:  Slot[] (flat array)             → placed under "display-1" / "default"
 
 import type { Slot, SlotLink } from "../types/stage.js";
+import { scrub } from "./scrub.js";
 import { DataStore } from "./data-store.js";
 import { assertSafeKey } from "./safe-key.js";
 
@@ -114,7 +115,7 @@ export const slotsStore = {
       delete displayMap["default"];
       map[displayId] = displayMap;
       await store.save(map);
-      console.log(`[slots-store] adoptDefaultInto display=${displayId} serviceType=${serviceTypeId} (${fallback.length} slots)`);
+      console.log(`[slots-store] adoptDefaultInto display=${scrub(displayId)} serviceType=${scrub(serviceTypeId)} (${fallback.length} slots)`);
       return fallback;
     }
     return existing;
