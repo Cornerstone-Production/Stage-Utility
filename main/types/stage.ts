@@ -16,9 +16,6 @@ export type ViewKind =
   | "script"
   | "spl-rundown";
 
-/** @deprecated Back-compat alias retained for the legacy display model. Use ViewKind. */
-export type DisplayKind = ViewKind;
-
 /** A live transcript line from ProdCom (pushed on "prodcom:transcript"). */
 export interface TranscriptLineDTO {
   /** Stable id for keying/dedupe (falls back to a synthesized one). */
@@ -63,7 +60,7 @@ export interface DisplayInfo {
   id: string;
   name: string;
   /** Defaults to "slots" when absent (back-compat with older settings). */
-  kind?: DisplayKind;
+  kind?: ViewKind;
   /** NDI source name (mirrors the routed View's ndiSource). */
   ndiSource?: string | null;
 }
@@ -1146,8 +1143,6 @@ export interface StageState {
   resolvedByOutput: Record<string, ResolvedOutput>;
 
   // ── Compat shim (computed from outputs + views) ──────────────────────
-  /** @deprecated Each output joined with its routed view's kind/ndiSource. */
-  displays: DisplayInfo[];
 
   pcoConfigured: boolean;
   lastRefreshedAt: string | null;

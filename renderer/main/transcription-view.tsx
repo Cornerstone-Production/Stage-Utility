@@ -23,7 +23,7 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
     );
   }
 
-  const display = state.displays?.find((d) => d.id === displayId) ?? null;
+  const display = state.outputs?.find((o) => o.id === displayId) ?? null;
   const displayName = display?.name ?? null;
 
   return (

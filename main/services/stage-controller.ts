@@ -151,7 +151,6 @@ export class StageController {
     slotsByLayoutObject: {},
     resolvedByOutput: {},
     chargerBays: [],
-    displays: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots", ndiSource: null }],
     pcoConfigured: false,
     lastRefreshedAt: null,
     remoteUrl: null,
@@ -391,8 +390,19 @@ export class StageController {
     return { ...this.state };
   }
 
+  /**
+   * The DisplayInfo compatibility shim, built on demand for `GET /api/displays`.
+   *
+   * It used to be stored on StageState and broadcast to every client, but nothing
+   * in the app read it — each view wanted a name (on the Output) or a kind (on the
+   * routed View). Only external callers still ask for this shape, and they ask over
+   * HTTP, so it is assembled here instead of riding in every push.
+   */
   getDisplays(): DisplayInfo[] {
-    return [...this.state.displays];
+    return this.state.outputs.map((o) => {
+      const view = o.viewId ? this.state.views.find((v) => v.id === o.viewId) ?? null : null;
+      return { id: o.id, name: o.name, kind: view?.kind ?? "slots", ndiSource: view?.ndiSource ?? null };
+    });
   }
 
   // ── Service type ──────────────────────────────────────────────────────
@@ -2062,7 +2072,6 @@ export class StageController {
     for (const oid of this.rawSlotsByObject.keys()) if (!(oid in slotsByLayoutObject)) resolveObjectSlots(oid);
 
     const resolvedByOutput: Record<string, ResolvedOutput> = {};
-    const displays: DisplayInfo[] = [];
     for (const output of this.state.outputs) {
       const view = output.viewId ? this.state.views.find((v) => v.id === output.viewId) ?? null : null;
       const kind = view?.kind ?? "slots";
@@ -2075,7 +2084,6 @@ export class StageController {
         blackout: output.blackout ?? false,
         locked: output.locked ?? false,
       };
-      displays.push({ id: output.id, name: output.name, kind, ndiSource });
     }
     this.state = {
       ...this.state,
@@ -2083,7 +2091,6 @@ export class StageController {
       slotsByLayoutObject,
       resolvedByOutput,
       chargerBays: this.computeChargerBays(),
-      displays,
     };
   }
 

@@ -56,7 +56,7 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
     );
   }
 
-  const display = state.displays?.find((d) => d.id === displayId) ?? null;
+  const display = state.outputs?.find((o) => o.id === displayId) ?? null;
   const clock = new Date(now);
   const h12 = String(((clock.getHours() + 11) % 12) + 1).padStart(2, "0");
   const mm = String(clock.getMinutes()).padStart(2, "0");

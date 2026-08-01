@@ -7,7 +7,7 @@
 
 import * as http from "http";
 
-import type { DisplayKind } from "../../types/stage.js";
+import type { ViewKind } from "../../types/stage.js";
 
 /** Everything a route handler needs about the request in flight. */
 export interface RouteCtx {
@@ -75,8 +75,8 @@ export async function readBody(req: http.IncomingMessage): Promise<unknown> {
   });
 }
 
-/** Narrow an untrusted body value to a DisplayKind. */
-export function isDisplayKind(v: unknown): v is DisplayKind {
+/** Narrow an untrusted body value to a ViewKind. */
+export function isDisplayKind(v: unknown): v is ViewKind {
   return (
     v === "slots" ||
     v === "dashboard" ||

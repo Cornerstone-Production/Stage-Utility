@@ -7,7 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { type RouteCtx, json, error, readBody, isDisplayKind } from "./context.js";
-import type { DisplayKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
+import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
 import { stageController } from "../stage-controller.js";
 
 export async function viewRoutes(c: RouteCtx): Promise<void> {
@@ -131,7 +131,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameView(id, body.name as string);
-      if (hasKind) state = await stageController.setViewKind(id, body.kind as DisplayKind);
+      if (hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
       if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
       if (hasLayout) state = await stageController.setViewLayout(id, body.layout as LayoutDTO);
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
