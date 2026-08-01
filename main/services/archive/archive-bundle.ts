@@ -25,6 +25,13 @@ import { baptismStore } from "../baptism-store.js";
 import { serviceTimelineStore } from "../service-timeline-store.js";
 import { splHistoryStore } from "../spl-history-store.js";
 import { archiveRoot, serviceDirName } from "./archive-paths.js";
+import { encodeRow, parseRows } from "./csv.js";
+import {
+  mergeAttendanceRecord,
+  mergeCsv,
+  mergeSplRecord,
+  mergeTimelineRecord,
+} from "./merge-records.js";
 
 // main/services/archive/archive-bundle.ts → repo root is three levels up.
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -45,6 +52,8 @@ const STORE_FILES = [
 export interface ArchiveServiceMeta {
   serviceKey: string;
   serviceDate: string;
+  /** Plan title, so a readout can name the service rather than show a PCO id triple. */
+  label?: string | null;
   /** Raw directory inside the zip, or null when the service predates the archive. */
   dir: string | null;
 }
@@ -59,14 +68,25 @@ export interface ArchiveManifest {
 
 export interface ImportPlan {
   manifest: ArchiveManifest;
+  /** Not on this box at all — imported. */
   newServices: ArchiveServiceMeta[];
-  presentServices: ArchiveServiceMeta[];
+  /** Here already and the archive's copy matches — nothing to do, not worth a decision. */
+  identicalServices: ArchiveServiceMeta[];
+  /** Here already but the two copies disagree — the only case worth asking about. */
+  differingServices: ArchiveServiceMeta[];
   newBaptismSessions: number;
 }
+
+/** What to do with a service this box already has.
+ *  - skip    keep what is here, ignore the archive's copy (the default)
+ *  - merge   fill the gaps: take what is missing, never overwrite what is here
+ *  - replace discard the local copy entirely in favour of the archive's */
+export type ServiceDisposition = "skip" | "merge" | "replace";
 
 export interface ImportResult {
   added: string[];
   skipped: string[];
+  merged: string[];
   replaced: string[];
   baptismSessionsAdded: number;
 }
@@ -79,13 +99,17 @@ function pkgVersion(): string {
   }
 }
 
-/** serviceKey → serviceDate for everything this box knows about. The three keyed
- *  stores are unioned: a service may have SPL but no attendance, or vice versa. */
-async function localServices(): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
-  for (const r of await splHistoryStore.list()) out.set(r.serviceKey, r.serviceDate);
-  for (const r of await attendanceStore.list()) out.set(r.serviceKey, r.serviceDate);
-  for (const r of await serviceTimelineStore.list()) out.set(r.serviceKey, r.serviceDate);
+/** serviceKey → date + a human label, for everything this box knows about. The three
+ *  keyed stores are unioned: a service may have SPL but no attendance, or vice versa. */
+async function localServices(): Promise<Map<string, { serviceDate: string; label: string | null }>> {
+  const out = new Map<string, { serviceDate: string; label: string | null }>();
+  const put = (r: { serviceKey: string; serviceDate: string; planTitle?: string | null }) => {
+    const prev = out.get(r.serviceKey);
+    out.set(r.serviceKey, { serviceDate: r.serviceDate, label: prev?.label ?? r.planTitle ?? null });
+  };
+  for (const r of await splHistoryStore.list()) put(r);
+  for (const r of await attendanceStore.list()) put(r);
+  for (const r of await serviceTimelineStore.list()) put(r);
   return out;
 }
 
@@ -117,10 +141,10 @@ export async function buildArchive(): Promise<Uint8Array> {
 
   const local = await localServices();
   const services: ArchiveServiceMeta[] = [...local.entries()]
-    .map(([serviceKey, serviceDate]) => {
+    .map(([serviceKey, { serviceDate, label }]) => {
       const dir = serviceDirName(serviceKey, serviceDate);
       const hasRaw = Object.keys(files).some((n) => n.startsWith(`archive/${dir}/`));
-      return { serviceKey, serviceDate, dir: hasRaw ? dir : null };
+      return { serviceKey, serviceDate, label, dir: hasRaw ? dir : null };
     })
     .sort((a, b) => a.serviceDate.localeCompare(b.serviceDate) || a.serviceKey.localeCompare(b.serviceKey));
 
@@ -202,19 +226,69 @@ function requireStore<T>(files: Record<string, Uint8Array>, name: string): T | n
   }
 }
 
+/** Stable JSON: keys sorted at every depth, so two records that differ only in the
+ *  order their producer happened to emit fields compare as equal. */
+function canonical(v: unknown): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
+  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
+  const o = v as Record<string, unknown>;
+  return `{${Object.keys(o)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`)
+    .join(",")}}`;
+}
+
+/** Every record this box holds for a serviceKey, across the three keyed stores. */
+async function localRecordsByKey(): Promise<Map<string, Record<string, unknown>>> {
+  const out = new Map<string, Record<string, unknown>>();
+  const put = (store: string, r: { serviceKey: string }) => {
+    const e = out.get(r.serviceKey) ?? {};
+    e[store] = r;
+    out.set(r.serviceKey, e);
+  };
+  for (const r of await splHistoryStore.list()) put("spl", r);
+  for (const r of await attendanceStore.list()) put("attendance", r);
+  for (const r of await serviceTimelineStore.list()) put("timeline", r);
+  return out;
+}
+
+/** The same, for the records inside an archive. */
+function archiveRecordsByKey(files: Record<string, Uint8Array>): Map<string, Record<string, unknown>> {
+  const out = new Map<string, Record<string, unknown>>();
+  const put = (store: string, r: { serviceKey: string }) => {
+    const e = out.get(r.serviceKey) ?? {};
+    e[store] = r;
+    out.set(r.serviceKey, e);
+  };
+  for (const r of keyedRecords(requireStore<KeyedFile>(files, "spl-history.json"))) put("spl", r);
+  for (const r of keyedRecords(requireStore<KeyedFile>(files, "attendance-history.json"))) put("attendance", r);
+  for (const r of keyedRecords(requireStore<KeyedFile>(files, "service-timeline.json"))) put("timeline", r);
+  return out;
+}
+
 /** What an import would do. Writes nothing. */
 export async function inspectArchive(zip: Uint8Array): Promise<ImportPlan> {
   const { files, manifest } = open(zip);
   const local = await localServices();
   const services = manifest.services ?? [];
 
+  // A service already here is not automatically uninteresting: the archive's copy
+  // may hold a longer recording of the same service (a box that stayed up through
+  // the whole thing, against one that restarted). Comparing content is what turns
+  // "41 already here" into the one number worth acting on.
+  const mine = await localRecordsByKey();
+  const theirs = archiveRecordsByKey(files);
+  const differs = (key: string) => canonical(mine.get(key) ?? {}) !== canonical(theirs.get(key) ?? {});
+
+  const present = services.filter((s) => local.has(s.serviceKey));
   const localIds = new Set((await baptismStore.listSessions()).map((s) => s.id));
   const incoming = requireStore<{ sessions?: { id: string }[] }>(files, "baptism.json");
 
   return {
     manifest,
     newServices: services.filter((s) => !local.has(s.serviceKey)),
-    presentServices: services.filter((s) => local.has(s.serviceKey)),
+    identicalServices: present.filter((s) => !differs(s.serviceKey)),
+    differingServices: present.filter((s) => differs(s.serviceKey)),
     newBaptismSessions: (incoming?.sessions ?? []).filter((s) => !localIds.has(s.id)).length,
   };
 }
@@ -226,9 +300,13 @@ export async function inspectArchive(zip: Uint8Array): Promise<ImportPlan> {
  * through must not leave half a year imported, which is the failure this ordering
  * exists to prevent — so every parse happens above the first upsert.
  */
-export async function importArchive(zip: Uint8Array, opts: { replace?: string[] } = {}): Promise<ImportResult> {
+export async function importArchive(
+  zip: Uint8Array,
+  opts: { replace?: string[]; merge?: string[] } = {},
+): Promise<ImportResult> {
   const { files, manifest } = open(zip);
   const replace = new Set(opts.replace ?? []);
+  const merge = new Set((opts.merge ?? []).filter((k) => !replace.has(k))); // replace wins
   const local = await localServices();
 
   // ── Read phase: parse every member. Throws before anything is written. ──
@@ -239,32 +317,81 @@ export async function importArchive(zip: Uint8Array, opts: { replace?: string[] 
   const baptisms = requireStore<{ sessions?: { id: string }[] }>(files, "baptism.json");
 
   const services = manifest.services ?? [];
-  const wanted = services.filter((s) => !local.has(s.serviceKey) || replace.has(s.serviceKey));
-  const wantedKeys = new Set(wanted.map((s) => s.serviceKey));
-  const added = wanted.filter((s) => !local.has(s.serviceKey)).map((s) => s.serviceKey);
-  const replaced = wanted.filter((s) => local.has(s.serviceKey)).map((s) => s.serviceKey);
+  const isNew = (k: string) => !local.has(k);
+  const touched = services.filter((s) => isNew(s.serviceKey) || replace.has(s.serviceKey) || merge.has(s.serviceKey));
+  const touchedKeys = new Set(touched.map((s) => s.serviceKey));
+
+  const added = services.filter((s) => isNew(s.serviceKey)).map((s) => s.serviceKey);
+  const replaced = services.filter((s) => !isNew(s.serviceKey) && replace.has(s.serviceKey)).map((s) => s.serviceKey);
+  const merged = services.filter((s) => !isNew(s.serviceKey) && merge.has(s.serviceKey)).map((s) => s.serviceKey);
   const skipped = services
-    .filter((s) => local.has(s.serviceKey) && !replace.has(s.serviceKey))
+    .filter((s) => !isNew(s.serviceKey) && !replace.has(s.serviceKey) && !merge.has(s.serviceKey))
     .map((s) => s.serviceKey);
 
   const localBaptismIds = new Set((await baptismStore.listSessions()).map((s) => s.id));
   const freshSessions = (baptisms?.sessions ?? []).filter((s) => !localBaptismIds.has(s.id));
 
   // ── Write phase: everything below is known-good. ──
-  for (const r of spl) if (wantedKeys.has(r.serviceKey)) await splHistoryStore.upsert(r as never);
-  for (const r of attendance) if (wantedKeys.has(r.serviceKey)) await attendanceStore.upsert(r as never);
-  for (const r of timeline) if (wantedKeys.has(r.serviceKey)) await serviceTimelineStore.upsert(r as never);
+  // A merged service fills its gaps from the archive; a new or replaced one takes
+  // the archive's record wholesale. See merge-records.ts for what "fill" means.
+  const write = async <T extends { serviceKey: string }>(
+    incoming: T[],
+    get: (k: string) => Promise<T | null>,
+    upsert: (r: T) => Promise<void>,
+    mergeOne: (mine: T, theirs: T) => T,
+  ) => {
+    for (const r of incoming) {
+      if (!touchedKeys.has(r.serviceKey)) continue;
+      if (!merge.has(r.serviceKey)) {
+        await upsert(r);
+        continue;
+      }
+      const mine = await get(r.serviceKey);
+      await upsert(mine ? mergeOne(mine, r) : r);
+    }
+  };
 
-  // Raw files for the services being brought in. A null dir means the service
-  // predates the archive and simply has none — its derived record is enough.
-  for (const s of wanted) {
+  await write(
+    spl,
+    (k) => splHistoryStore.get(k) as never,
+    (r) => splHistoryStore.upsert(r as never),
+    (a, b) => mergeSplRecord(a as never, b as never) as never,
+  );
+  await write(
+    attendance,
+    (k) => attendanceStore.get(k) as never,
+    (r) => attendanceStore.upsert(r as never),
+    (a, b) => mergeAttendanceRecord(a as never, b as never) as never,
+  );
+  await write(
+    timeline,
+    (k) => serviceTimelineStore.get(k) as never,
+    (r) => serviceTimelineStore.upsert(r as never),
+    (a, b) => mergeTimelineRecord(a as never, b as never) as never,
+  );
+
+  // Raw files. A null dir means the service predates the archive and has none.
+  // Merging unions rows by timestamp; replacing overwrites the file outright.
+  for (const s of touched) {
     if (!s.dir) continue;
     const prefix = `archive/${s.dir}/`;
     for (const [name, bytes] of Object.entries(files)) {
       if (!name.startsWith(prefix)) continue;
       const dest = path.join(archiveRoot(), s.dir, path.basename(name));
       await fs.mkdir(path.dirname(dest), { recursive: true });
-      await fs.writeFile(dest, bytes);
+      let out = new TextDecoder().decode(bytes);
+      if (merge.has(s.serviceKey) && name.endsWith(".csv")) {
+        let existing = "";
+        try {
+          existing = await fs.readFile(dest, "utf8");
+        } catch {
+          /* nothing here yet — take theirs whole */
+        }
+        // A null merge means the column sets disagree, so the rows cannot be
+        // interleaved. Keep what is here rather than produce a ragged file.
+        if (existing) out = mergeCsv(existing, out, parseRows, encodeRow) ?? existing;
+      }
+      await fs.writeFile(dest, name.endsWith(".csv") ? out : bytes);
     }
   }
 
@@ -272,5 +399,5 @@ export async function importArchive(zip: Uint8Array, opts: { replace?: string[] 
   // can hold several sessions.
   for (const s of freshSessions) await baptismStore.addSession(s as never);
 
-  return { added, skipped, replaced, baptismSessionsAdded: freshSessions.length };
+  return { added, skipped, merged, replaced, baptismSessionsAdded: freshSessions.length };
 }

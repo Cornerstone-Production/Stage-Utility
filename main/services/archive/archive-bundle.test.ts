@@ -11,6 +11,7 @@ process.env.STAGE_UTILITY_DATA = dataDir;
 
 const { ARCHIVE_KIND, buildArchive, importArchive, inspectArchive } = await import("./archive-bundle.js");
 const { splHistoryStore } = await import("../spl-history-store.js");
+const { parseRows: parseRowsForTest } = await import("./csv.js");
 
 function record(serviceKey: string, serviceDate: string, planTitle = "Plan") {
   return {
@@ -61,13 +62,54 @@ test("bundles the raw files and the derived records", async () => {
 test("inspect reports which services are new and which are already here", async () => {
   const zip = await buildArchive();
   const plan = await inspectArchive(zip);
-  assert.equal(plan.presentServices.length, 1, "this box produced it");
+  assert.equal(plan.identicalServices.length, 1, "this box produced it, byte for byte");
+  assert.equal(plan.differingServices.length, 0);
   assert.equal(plan.newServices.length, 0);
 
   await splHistoryStore.delete("st1:p1:t9");
   const after = await inspectArchive(zip);
   assert.equal(after.newServices.length, 1);
-  assert.equal(after.presentServices.length, 0);
+  assert.equal(after.identicalServices.length, 0);
+});
+
+test("a service already here with matching content is identical, not merely present", async () => {
+  await splHistoryStore.upsert(record("st1:pSame:t1", "2026-09-06"));
+  const zip = await buildArchive();
+  const plan = await inspectArchive(zip);
+  assert.ok(
+    plan.identicalServices.some((s) => s.serviceKey === "st1:pSame:t1"),
+    JSON.stringify(plan.identicalServices),
+  );
+  assert.ok(!plan.differingServices.some((s) => s.serviceKey === "st1:pSame:t1"));
+});
+
+test("a service whose local copy has since changed is reported as differing", async () => {
+  await splHistoryStore.upsert(record("st1:pDiff:t1", "2026-09-13"));
+  const zip = await buildArchive();
+  await splHistoryStore.upsert(record("st1:pDiff:t1", "2026-09-13", "edited since the archive"));
+
+  const plan = await inspectArchive(zip);
+  assert.ok(
+    plan.differingServices.some((s) => s.serviceKey === "st1:pDiff:t1"),
+    JSON.stringify(plan.differingServices),
+  );
+  assert.ok(!plan.identicalServices.some((s) => s.serviceKey === "st1:pDiff:t1"));
+});
+
+test("field order alone never counts as a difference", async () => {
+  // Same data, keys emitted in a different order — a record round-tripped through
+  // another tool would otherwise read as changed and prompt a pointless decision.
+  const forward = record("st1:pOrder:t1", "2026-09-20") as unknown as Record<string, unknown>;
+  const reversed = Object.fromEntries(Object.entries(forward).reverse());
+  await splHistoryStore.upsert(forward as never);
+  const zip = await buildArchive();
+  await splHistoryStore.upsert(reversed as never);
+
+  const plan = await inspectArchive(zip);
+  assert.ok(
+    plan.identicalServices.some((s) => s.serviceKey === "st1:pOrder:t1"),
+    JSON.stringify(plan.differingServices),
+  );
 });
 
 test("a config snapshot is rejected by name, not read as an empty archive", async () => {
@@ -181,4 +223,60 @@ test("a service with no raw files still imports its derived record", async () =>
   const res = await importArchive(zip);
   assert.ok(res.added.includes("st1:pOld:t1"), JSON.stringify(res));
   assert.ok(await splHistoryStore.get("st1:pOld:t1"));
+});
+
+test("merge fills the gap without touching what this box already recorded", async () => {
+  // A box that recorded only the second half; the archive has the first half.
+  const full = {
+    ...(record("st1:pMerge:t1", "2026-10-04") as unknown as Record<string, unknown>),
+    items: [
+      { itemId: "i1", title: "Welcome", sequence: 0, metrics: {}, maxSpl: 80, sampleCount: 1 },
+      { itemId: "i2", title: "Song", sequence: 1, metrics: {}, maxSpl: 95, sampleCount: 1 },
+    ],
+  };
+  await splHistoryStore.upsert(full as never);
+  const dir = await writeRaw("2026-10-04_st1-pMerge-t1", "at,db\n09:00,80\n09:05,95\n");
+  const zip = await buildArchive();
+
+  // Now this box only has the second item, with its own figure, and only the later row.
+  await splHistoryStore.upsert({
+    ...full,
+    items: [{ itemId: "i2", title: "Song", sequence: 1, metrics: {}, maxSpl: 91, sampleCount: 1 }],
+  } as never);
+  await fs.writeFile(path.join(dir, "spl.csv"), "at,db\n09:05,91\n");
+
+  const res = await importArchive(zip, { merge: ["st1:pMerge:t1"] });
+  assert.deepEqual(res.merged, ["st1:pMerge:t1"]);
+  assert.equal(res.replaced.length, 0);
+
+  const after = (await splHistoryStore.get("st1:pMerge:t1"))! as unknown as {
+    items: { itemId: string; maxSpl: number }[];
+  };
+  assert.deepEqual(after.items.map((i) => i.itemId), ["i1", "i2"], "missing item filled in");
+  assert.equal(after.items[1].maxSpl, 91, "the item this box recorded is untouched");
+
+  const csv = await fs.readFile(path.join(dir, "spl.csv"), "utf8");
+  assert.deepEqual(parseRowsForTest(csv), [
+    ["at", "db"],
+    ["09:00", "80"],
+    ["09:05", "91"],
+  ]);
+});
+
+test("merge is idempotent end to end", async () => {
+  const zip = await buildArchive();
+  const once = await importArchive(zip, { merge: ["st1:pMerge:t1"] });
+  const before = JSON.stringify(await splHistoryStore.get("st1:pMerge:t1"));
+  const twice = await importArchive(zip, { merge: ["st1:pMerge:t1"] });
+  assert.deepEqual(twice.merged, once.merged);
+  assert.equal(JSON.stringify(await splHistoryStore.get("st1:pMerge:t1")), before);
+});
+
+test("replace wins over merge when a key is somehow in both lists", async () => {
+  const res = await importArchive(await buildArchive(), {
+    merge: ["st1:pMerge:t1"],
+    replace: ["st1:pMerge:t1"],
+  });
+  assert.deepEqual(res.replaced, ["st1:pMerge:t1"]);
+  assert.equal(res.merged.length, 0);
 });

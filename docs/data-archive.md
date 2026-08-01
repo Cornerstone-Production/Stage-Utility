@@ -42,11 +42,31 @@ This is not the config snapshot. **Backup & restore** covers how the app is set 
 the **Data archive** covers what it recorded. They are separate files with separate
 importers, and handing one to the other is refused by name.
 
-Import merges rather than replaces:
+Choosing a file inspects it and sorts every service into three buckets: **new**,
+**already here and identical**, and **already here but recorded differently**. Only
+the last needs a decision, and each one gets its own:
 
-- A `serviceKey` already on this box is **skipped** and reported.
-- Replacing is explicit and per service, never blanket.
-- Importing the same archive twice changes nothing.
+| Choice | What it does |
+|---|---|
+| **Keep** (default) | Leaves this machine's recording exactly as it is. |
+| **Merge** | Fills what this machine is missing — plan items, attendance samples and raw CSV rows it never recorded — and changes nothing it already has. |
+| **Replace** | Discards the local copy and takes the archive's. |
+
+Merge exists for one service recorded on two machines, neither with the whole
+thing: a box that restarted at 09:20 is missing twenty minutes another box has.
+Replacing would trade one gap for another; keeping leaves the gap.
+
+**What merge deliberately does not do** is combine the per-item SPL aggregates when
+both sides recorded the same item. `max`/`leq`/`count` can be combined exactly, but
+only if the two recordings cover disjoint seconds — and two boxes watching the same
+live service overlap almost entirely, so combining would count the same sound twice.
+Where both sides have an item, the local figures stand. The raw CSVs *are* merged by
+timestamp, so the samples needed to recompute it properly are retained.
+
+Other rules:
+
+- Importing the same archive twice changes nothing; merging twice changes nothing.
+- `Replace` wins if a service somehow ends up in both lists.
 - Every member is parsed before anything is written, so a corrupt file cannot leave
   a half-imported year.
 - A derived record whose raw files are missing still imports — that is what every

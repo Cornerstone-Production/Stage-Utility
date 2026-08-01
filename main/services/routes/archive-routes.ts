@@ -35,10 +35,12 @@ export async function archiveRoutes({ req, res, pathname, method }: RouteCtx): P
   if (method === "POST" && pathname === "/api/archive/import") {
     try {
       const raw = await readRawBody(req);
-      // `replace` rides in a header because the body is the zip itself.
-      const header = req.headers["x-archive-replace"];
-      const replace = typeof header === "string" && header ? header.split(",").map((s) => s.trim()) : [];
-      json(res, await importArchive(raw, { replace }));
+      // The per-service choices ride in headers because the body is the zip itself.
+      const keys = (name: string): string[] => {
+        const v = req.headers[name];
+        return typeof v === "string" && v ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
+      };
+      json(res, await importArchive(raw, { replace: keys("x-archive-replace"), merge: keys("x-archive-merge") }));
     } catch (err) {
       error(res, err instanceof Error ? err.message : String(err));
     }
