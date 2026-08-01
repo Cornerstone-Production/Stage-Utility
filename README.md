@@ -33,6 +33,7 @@ screens, the settings UI and a phone remote from one port.
 | [Reliability and data](docs/ops/reliability.md) | behaviour under load, where your data lives |
 | [Network traffic](docs/ops/network-traffic.md) | what it puts on your LAN |
 | [Updates and logs](docs/ops/updates-and-logs.md) | the in-app updater |
+| [Releases and distribution](docs/ops/distribution.md) | how versions are cut, and how a server gets one |
 | [API reference](docs/reference/api.md) | the HTTP surface |
 | [Contributing](docs/contributing.md) | commit convention, branching, releases |
 | [Project structure](docs/contributing-appendix.md) | orientation in the codebase |

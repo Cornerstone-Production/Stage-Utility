@@ -82,7 +82,8 @@ These are informational and do not affect the release level.
 
 ## Releases
 
-Automated from the commit types above, by `.github/workflows/release.yml`.
+Automated from the commit types above, by `.github/workflows/release.yml`. Your
+commit type is what picks the version, so it is worth getting right.
 
 | Push to | Produces |
 |---|---|
@@ -90,24 +91,12 @@ Automated from the commit types above, by `.github/workflows/release.yml`.
 | `main` | the release `X.Y.Z`, tagged, published as the latest GitHub release |
 
 A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build` produces **no
-release at all**, so documentation churn does not mint versions.
+release at all**, so documentation churn does not mint versions. Otherwise the level
+is the highest severity among every commit since the last stable release — one `feat`
+among twenty `docs` makes it a minor.
 
-Otherwise the level is the **highest** severity among every commit since the last
-**stable** release — one `feat` among twenty `docs` makes it a minor. Reaching back
-to the last stable, rather than to the last tag, is what keeps a beta line coherent:
-
-```
-v1.9.2            last stable release
-  fix             -> v1.9.3-beta.1     a patch line opens
-  fix             -> v1.9.3-beta.2     refinements ride the same base
-  feat            -> v1.10.0-beta.1    a feature raises the line to minor
-  fix             -> v1.10.0-beta.2    and later fixes ride that
-  (merge to main) -> v1.10.0
-```
-
-The base moves only when the pending release changes class. Refinements and UI
-tweaks advance `-beta.N`, never the third decimal. The version never decreases: if
-the beta line already sits above what the level implies, it stays where it is.
+How that turns into a number, and how a running server gets the result, is in
+[Releases and distribution](ops/distribution.md).
 
 `package.json` is bumped and committed forward, then tagged. **Nothing is ever
 force-pushed** — deployments track `beta` and a rewrite breaks their in-app updater.

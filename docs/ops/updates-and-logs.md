@@ -2,14 +2,17 @@
 
 ## How updating works
 
-The server runs from a git checkout under a service manager (systemd
-`Restart=always` / launchd `KeepAlive` / NSSM). An in-app update (Settings →
-Advanced → Updates) spawns a **detached** `scripts/update.sh` (`update.ps1` on
-Windows) that does:
+The server runs under a service manager (systemd `Restart=always` / launchd
+`KeepAlive` / a Windows service). An in-app update (Settings → Advanced → Updates)
+spawns a **detached** `scripts/update.sh` (`update.ps1` on Windows) that does:
 
 ```
-git pull --ff-only  →  npm ci --include=dev  →  npm run build
+fetch  →  fast-forward to the target release  →  npm ci --include=dev  →  npm run build
 ```
+
+The target is a **release tag**, not the tip of the branch — see
+[distribution.md](distribution.md). The merge is `--ff-only`, so a checkout that has
+somehow diverged fails loudly instead of having its history rewritten underneath it.
 
 The server stays alive through pull/install/build, polling two files the script
 writes (`update-progress.json`, `update-result.json`) and broadcasting sub-phase
@@ -18,8 +21,25 @@ result file, sleeps briefly, then **kills the server** — the service manager
 relaunches it on the new build. On failure it writes the result and leaves the
 server running on the old build.
 
-`npm ci` and the build only run when the update actually changed the lockfile /
-renderer inputs; a backend-only update just restarts (the backend runs via tsx).
+### When the reinstall and rebuild are skipped
+
+`npm ci` and the build only run when they are actually needed; a backend-only update
+just restarts, because the backend runs via tsx.
+
+That decision compares the **content** of `package.json` and `package-lock.json` at
+each revision, with the root version removed (`scripts/manifest-changed.mjs`), rather
+than matching filenames. Every release carries the workflow's own version bump, which
+rewrites both manifests without changing a single dependency:
+
+```
+chore(release): v1.9.2-beta.2 [skip ci]
+  package.json      | 2 +-
+  package-lock.json | 4 ++--
+```
+
+A filename rule fires on that every time, so the skip never happened. Anything
+unreadable or unparseable is treated as changed, so an unknown state does the work
+rather than skipping it.
 
 ### What's new
 
