@@ -16,6 +16,11 @@ updates:
     labels:
       - "dependencies"
       - "javascript/typescript"
+    groups:
+      # One PR for the routine churn instead of five. Majors stay on their own,
+      # because those are the ones worth reading before merging.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
 
   # 2. GitHub Actions Dependencies
   - package-ecosystem: "github-actions"
@@ -27,3 +32,6 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]

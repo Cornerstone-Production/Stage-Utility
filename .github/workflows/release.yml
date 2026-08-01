@@ -42,6 +42,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       published: ${{ steps.push.outputs.pushed }}
       last: ${{ steps.version.outputs.last }}
+      stable: ${{ steps.version.outputs.stable }}
       prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -145,6 +146,7 @@ jobs:
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "level=$LEVEL" >> "$GITHUB_OUTPUT"
           echo "last=$LAST" >> "$GITHUB_OUTPUT"
+          echo "stable=$STABLE" >> "$GITHUB_OUTPUT"
 
       - name: Verify before tagging
         if: steps.version.outputs.skip == 'false'
@@ -254,13 +256,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           V: ${{ needs.release.outputs.version }}
           LAST: ${{ needs.release.outputs.last }}
+          STABLE: ${{ needs.release.outputs.stable }}
           PRE: ${{ needs.release.outputs.prerelease }}
         run: |
           set -euo pipefail
-          NOTES=$(git log --no-merges --format='- %s' ${LAST:+$LAST..}"v$V"~1 || true)
+          # Scope the notes the way the version is scoped: a stable release spans
+          # everything since the last stable one, a prerelease only what is new
+          # since the previous tag. Reading from the last tag on main is what made
+          # v1.9.3 ship two lines, one of them its own release-bump commit.
+          if [ "$PRE" = true ]; then FROM="$LAST"; else FROM="$STABLE"; fi
+          node scripts/release-notes.mjs "$V" "$FROM" > /tmp/notes.md
           gh release create "v$V" \
             --title "v$V" \
-            --notes "${NOTES:-No notable changes.}" \
+            --notes-file /tmp/notes.md \
             $([ "$PRE" = true ] && echo --prerelease || echo --latest) \
             dist/*.tar.gz
           echo "published v$V with $(ls dist/*.tar.gz | wc -l) archives"
@@ -283,7 +291,12 @@ jobs:
           cd tap
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet; then echo "tap already at $V"; exit 0; fi
-          git commit -am "stage-utility $V"
+          # add -A, not commit -a: on the first run Formula/stage-utility.rb is a
+          # NEW file, and both `git diff` and `commit -a` ignore untracked files.
+          # The original check saw a clean tree, said "already at", and would have
+          # published the formula exactly never — a green step and no formula.
+          git add -A
+          if git diff --cached --quiet; then echo "tap already at $V"; exit 0; fi
+          git commit -m "stage-utility $V"
           git push
 

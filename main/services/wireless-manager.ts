@@ -4,6 +4,8 @@
 
 import { randomUUID } from "crypto";
 
+import { scrub } from "./scrub.js";
+
 import type { WirelessConnection } from "../types/devices.js";
 import type { ConnectionState, IntegrationDescriptor } from "../types/integrations.js";
 import { providerRegistry } from "../providers/registry.js";
@@ -101,7 +103,7 @@ class WirelessManager {
       config: {},
     };
 
-    console.log(`[wireless] addConnection — ${conn.id} (${conn.name}, provider=${conn.providerId})`);
+    console.log(`[wireless] addConnection — ${scrub(conn.id)} (${scrub(conn.name)}, provider=${scrub(conn.providerId)})`);
     this.connections.push(conn);
     await this.persist();
     await deviceManager.applyConnections(this.connections);

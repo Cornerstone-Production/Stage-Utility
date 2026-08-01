@@ -57,3 +57,35 @@ jobs:
       # train people to ignore this.
       - name: Audit dependencies
         run: npm audit --audit-level=high
+
+      # Informational, never a gate.
+      #
+      # A percentage threshold rewards tests written to touch lines rather than
+      # to catch bugs, which is the opposite of what the suite does today. What
+      # this is for is visibility: the HTTP route handlers are the least-covered
+      # code in the project and the only LAN-facing surface, which is where the
+      # prototype-pollution bug lived. A PR that drops one further should be
+      # visible in the log without failing anyone's build.
+      - name: Coverage (routes and services)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          node --import tsx --test --experimental-test-coverage \
+            "main/**/*.test.ts" "renderer/**/*.test.ts" "scripts/**/*.test.ts" \
+            > /tmp/cov.txt 2>&1 || true
+
+          echo "### Coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep "all files" /tmp/cov.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Least-covered server modules — the LAN-facing surface:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          awk '/start of coverage report/,/end of coverage report/' /tmp/cov.txt \
+            | grep -oE "[a-z0-9-]+\.tsx? +\| +[0-9.]+" \
+            | awk '{gsub(/\|/,""); print $2, $1}' | sort -n | head -10 \
+            >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          grep "all files" /tmp/cov.txt || true

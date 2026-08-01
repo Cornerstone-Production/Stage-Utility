@@ -446,7 +446,7 @@ export class RemoteServer {
         await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[remote-server] handler error ${scrub(pathname)}:`, msg);
+        console.error(`[remote-server] handler error ${scrub(pathname)}: ${scrub(msg)}`);
         error(res, msg, 500);
       }
     };
