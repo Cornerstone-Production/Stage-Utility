@@ -16,6 +16,27 @@ const EMPTY_DEVICE: SlotDevice = {
   iemLabel: null,
 };
 
+
+/**
+ * Coerce a provider's audio level to the documented 0–1 contract.
+ *
+ * Providers disagree: Shure normalises against its own dB range (Axient −60..0,
+ * ULXD −50..0), while the Sennheiser paths pass the device's raw value straight
+ * through. So the field arrived as 0–1 from some receivers and as dBFS from
+ * others, and the one place that renders it printed `Math.round(v)` followed by
+ * "dB" — which could only ever say "0 dB" or "1 dB" for a Shure rig.
+ *
+ * Normalising here rather than in each provider keeps one definition of the unit,
+ * and means a receiver added later cannot quietly reintroduce the mismatch.
+ */
+export function normaliseAudioLevel(v: number | null | undefined): number | null {
+  if (v == null || !Number.isFinite(v)) return null;
+  if (v >= 0 && v <= 1) return v; // already normalised
+  if (v < 0) return Math.max(0, Math.min(1, (v + 60) / 60)); // dBFS-ish, −60..0
+  if (v <= 100) return v / 100; // percentage
+  return null; // nothing sensible to make of it
+}
+
 function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
   if (!ds.online) {
     return { status: "error", rf: null, battery: null, freq: ds.frequencyLabel, audioLevel: null, charge: null, iemCharge: null, label: null, iemLabel: null };
@@ -29,7 +50,7 @@ function deviceStatusToSlotDevice(ds: DeviceStatus): SlotDevice {
     rf: ds.rfBars,
     battery: ds.battery,
     freq: ds.frequencyLabel,
-    audioLevel: ds.audioLevel,
+    audioLevel: normaliseAudioLevel(ds.audioLevel),
     charge: ds.battery,
     iemCharge: null,
     label: null,

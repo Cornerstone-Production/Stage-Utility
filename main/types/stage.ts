@@ -1058,6 +1058,9 @@ export interface SlotDevice {
   rf: number | null;
   battery: number | null;
   freq: string | null;
+  /** Live audio level, **normalised 0–1**. Receivers report this on different
+   *  scales (Shure against its own dB range, Sennheiser raw), so it is coerced to
+   *  one unit in slot-resolver.ts — never assume it is dB. */
   audioLevel: number | null;
   /** Resolved level for the charge bar, from the slot's chargeSource: the bound
    *  mic's battery, a chosen SBC charger bay, or null (off / no source). */

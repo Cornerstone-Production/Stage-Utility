@@ -1,8 +1,8 @@
 # What this puts on your network
 
 Short version: during a service with every integration running and six screens
-connected, Stage Utility uses **roughly 11 Mbit/s across the whole LAN** — about
-2 Mbit/s per screen. Idle, between services, it is close to zero.
+connected, Stage Utility uses **roughly 1.4 Mbit/s across the whole LAN** — about
+0.25 Mbit/s per screen. Idle, between services, it is close to zero.
 
 The figures below are computed from payloads measured on a real install and the
 cadences in the code, not captured from a packet trace. Where a number depends on
@@ -15,39 +15,44 @@ one-off HTTP fetches when the page first loads.
 
 | Channel | Size | Cadence | Notes |
 |---|---|---|---|
-| `stage:state` | **34.6 KB** | up to ~6.7/s during a service | the big one — see below |
+| `stage:state` | ~35 KB | only when something structural changes | plan, slots, views, routing |
+| `slots:devices` | **4.5 KB** | up to ~6.7/s during a service | RF, battery, audio level — see below |
 | `pco:live` | ~1.2 KB | on change, else a 15s keepalive | the countdown ticks client-side |
 | `spl:metrics` | <1 KB | 1 Hz while Smaart is connected | |
 | photos | ~1.3 MB total | **once**, then cached forever | content-addressed URLs |
 | app bundle | ~900 KB | **once per deploy** | fingerprinted, `immutable` |
 
-## Why `stage:state` dominates
+## Why the telemetry channel exists
 
 Wireless receivers report RF and audio level about once per second per channel.
-Those values live on the slots inside `stage:state`, so each batch of updates
-means the state genuinely changed and has to go out. A 150 ms trailing debounce
-collapses sixteen channels' worth of chatter into at most **~6.7 pushes a second**
-(`DEVICE_STATUS_FLUSH_MS` in `stage-controller.ts`).
+A 150 ms trailing debounce collapses sixteen channels' worth of chatter into at
+most **~6.7 pushes a second** (`DEVICE_STATUS_FLUSH_MS` in `stage-controller.ts`).
 
-That cadence is what makes the payload size matter so much:
+Those readings used to live on the slots inside `stage:state`, so every one of
+those pushes re-sent the whole document — and **88% of it was views, slot
+configuration, layouts and routing that had not changed**. There is no HTTP cache
+to lean on here: SSE is a push stream, so the only way to stop re-sending
+something is to stop putting it in the message. Telemetry now travels on its own
+channel and the client merges it back onto the slots.
 
-| | payload | per screen | 6 screens |
-|---|---|---|---|
-| before the 2026-08 efficiency pass | 217.9 KB | ~1.4 MB/s | **~70 Mbit/s** |
-| now | 34.6 KB | ~230 KB/s | **~11 Mbit/s** |
+Three changes, compounding, on the same 6.7/s cadence:
 
-Most of that came from two things that had no business being in a broadcast: the
-branding logos, which were 168 KB of base64 re-sent on every push, and two
-deprecated fields that carried duplicate copies of the slot list. Neither changed
-between pushes; both are now fetched once (logos) or derived client-side (slots).
+| | payload | 6 screens |
+|---|---|---|
+| originally | 217.9 KB | **~70 Mbit/s** |
+| after moving logos out and dropping duplicate slot copies | 36.6 KB | ~11.8 Mbit/s |
+| after splitting telemetry onto its own channel | **4.5 KB** | **~1.4 Mbit/s** |
 
-Gigabit copper never cared either way. Wi-Fi screens did.
+The logos were 168 KB of base64 re-sent on every push; two deprecated fields
+carried second and third copies of the slot list. None of it changed between
+pushes. Gigabit copper never cared. Wi-Fi screens did.
 
 ## What keeps it small
 
-- **Broadcast on change, not on a timer.** `stage:state` is deduped by a signature
-  of its own contents, so a setter called with the value it already had sends
-  nothing. Idle, the SSE stream is genuinely silent — measured at **0 bytes over
+- **Volatile data is separated from static data.** What changes every tick travels
+  on `slots:devices`; what changes when someone edits something travels on
+  `stage:state`. Both are deduped by a signature of their own contents, so a
+  setter called with the value it already had sends nothing. Idle, the SSE stream is genuinely silent — measured at **0 bytes over
   12 seconds** on a server with nothing happening.
 - **Channel filtering.** A client subscribes to the channels it renders; a screen
   showing slots is not sent the transcript.

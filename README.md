@@ -165,7 +165,7 @@ Moved to [scriptview and baptisms](docs/features/scriptview-and-baptisms.md).
 ## Reliability & efficiency
 
 Moved to [reliability](docs/ops/reliability.md). For what the app puts on the
-network — about 11 Mbit/s across six screens during a service, and close to
+network — about 1.4 Mbit/s across six screens during a service, and close to
 nothing between them — see [network traffic](docs/ops/network-traffic.md).
 
 ## Backups & portability

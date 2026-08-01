@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { resolveSlots, fitAvatarToColumn } from "./slot-resolver.js";
+import { resolveSlots, fitAvatarToColumn, normaliseAudioLevel } from "./slot-resolver.js";
 import type { Slot, SlotLink, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 
@@ -238,4 +238,43 @@ test("no photo stays no photo", () => {
 test("an absurd column count still yields a usable width", () => {
   const w = Number(/g=(\d+)x/.exec(fitAvatarToColumn("https://x/a.png", 500)!)![1]);
   assert.ok(w >= 120, `floor keeps it legible, got ${w}`);
+});
+
+// ── Audio level normalisation ──────────────────────────────────────────────
+// Receivers disagree on the unit; the resolver is where it becomes one thing.
+
+test("an already-normalised level passes through (Shure)", () => {
+  assert.equal(normaliseAudioLevel(0), 0);
+  assert.equal(normaliseAudioLevel(0.73), 0.73);
+  assert.equal(normaliseAudioLevel(1), 1);
+});
+
+test("a dBFS level is normalised against a -60..0 range (Sennheiser raw)", () => {
+  assert.equal(normaliseAudioLevel(-60), 0);
+  assert.equal(normaliseAudioLevel(-30), 0.5);
+  assert.ok(Math.abs(normaliseAudioLevel(-6)! - 0.9) < 1e-9);
+});
+
+test("a level below the floor clamps rather than going negative", () => {
+  assert.equal(normaliseAudioLevel(-120), 0);
+});
+
+test("a percentage is scaled down", () => {
+  assert.equal(normaliseAudioLevel(50), 0.5);
+  assert.equal(normaliseAudioLevel(100), 1);
+});
+
+test("absent or nonsensical values become null, not NaN", () => {
+  assert.equal(normaliseAudioLevel(null), null);
+  assert.equal(normaliseAudioLevel(undefined), null);
+  assert.equal(normaliseAudioLevel(NaN), null);
+  assert.equal(normaliseAudioLevel(Infinity), null);
+  assert.equal(normaliseAudioLevel(5000), null);
+});
+
+test("every output is renderable as a percentage", () => {
+  for (const v of [0, 0.5, 1, -60, -30, -120, 50, 100]) {
+    const out = normaliseAudioLevel(v);
+    assert.ok(out !== null && out >= 0 && out <= 1, `${v} -> ${out}`);
+  }
 });
