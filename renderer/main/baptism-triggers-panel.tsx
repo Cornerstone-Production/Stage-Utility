@@ -1,7 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 
 import { invoke } from "../lib/api";
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue, toast } from "../components/ui";
+import {
+  InfoHint,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  toast,
+} from "../components/ui";
 import { usePlanItems } from "./use-plan-items";
 import { useStageState } from "./use-stage-state";
 
@@ -22,6 +32,24 @@ export function BaptismTriggersPanel() {
   const [testimonyItemId, setTestimony] = useState<string>("");
   const [baptismItemId, setBaptism] = useState<string>("");
   const [loaded, setLoaded] = useState(false);
+  // Typing stays local until blur, so a save round-trip cannot fight the cursor.
+  // Adjusted during render rather than in an effect — the documented way to reset
+  // state when a prop changes.
+  const stored = auto?.testimonyKeyword ?? "";
+  const [keywordDraft, setKeywordDraft] = useState(stored);
+  const [lastStored, setLastStored] = useState(stored);
+  if (stored !== lastStored) {
+    setLastStored(stored);
+    setKeywordDraft(stored);
+  }
+
+  async function saveAuto(partial: { enabled?: boolean; testimonyKeyword?: string }) {
+    try {
+      await invoke("settings:setBaptismAutoStart", partial);
+    } catch (err) {
+      toast.error(`Couldn't save: ${String(err)}`);
+    }
+  }
 
   const planId = plan?.planId ?? null;
 
@@ -98,7 +126,18 @@ export function BaptismTriggersPanel() {
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-gray-5 bg-gray-2 p-4">
-      <span className="text-caption1 font-medium text-gray-11">Start from this plan</span>
+      <div className="flex items-center gap-1.5">
+        <span className="text-caption1 font-medium text-gray-11">Start from this plan</span>
+        <InfoHint className="shrink-0">
+          Starts the baptism timer off the plan, so the producer is not advancing Planning
+          Center and starting a timer at the same moment. The two ends are set differently
+          because they behave differently: the testimonies happen during an item named the
+          same thing every week, so a keyword finds it on any plan; the baptisms happen
+          during whichever songs are on that week, so that end is pinned per plan here.
+          Auto-start only moves forward — idle to testimonies to baptisms — and never
+          interrupts a phase already running.
+        </InfoHint>
+      </div>
       <span className="text-caption2 text-gray-9">
         {armed ? (
           <>
@@ -121,6 +160,30 @@ export function BaptismTriggersPanel() {
           </>
         )}
       </span>
+      <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <span className="w-32 shrink-0 text-caption1 text-gray-11">Testimony keyword</span>
+        <div className="flex flex-1 items-center gap-2">
+          <Input
+            value={keywordDraft}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setKeywordDraft(e.target.value)}
+            onBlur={() => void saveAuto({ testimonyKeyword: keywordDraft })}
+            placeholder="baptism stories"
+            className="w-full sm:w-52"
+            aria-label="Testimony item keyword"
+            disabled={!auto?.enabled}
+          />
+          <Switch
+            checked={auto?.enabled ?? false}
+            onCheckedChange={(v: boolean) => void saveAuto({ enabled: v })}
+            aria-label="Start testimonies from a matching plan item"
+          />
+        </div>
+      </div>
+      <span className="text-caption2 text-gray-9">
+        Matches any plan whose item title contains this. Leave it on all year — an ordinary
+        weekend has no matching item, so nothing fires.
+      </span>
+
       <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
         <span className="w-32 shrink-0 text-caption1 text-gray-11">Testimonies</span>
         {picker(testimonyItemId, setTestimony, "testimony")}
