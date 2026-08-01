@@ -73,14 +73,32 @@ on (a Pi is enough), and screens that can open a URL. Everything else is optiona
 — the app works with whatever subset of gear you have, and each integration is
 enabled independently.
 
-## Get the code
+## Install it
+
+**Linux and macOS**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.sh | sudo bash
+```
+
+**Windows** — in an Administrator PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.ps1 | iex
+```
+
+Nothing to clone and no Node to install: the download carries its own runtime.
+It verifies the download, registers an auto-starting service, and prints the
+address to open. After that it updates itself from Settings.
+
+To work on the code instead:
 
 ```bash
 git clone https://github.com/Cornerstone-Production/Stage-Utility.git
-cd Stage-Utility
+cd Stage-Utility && npm ci && npm run dev
 ```
 
-Installing on a display device, or running it locally to develop against, is in
+Both routes, and every option, are in
 [install and config](docs/ops/install-and-config.md).
 
 ## What it connects to
