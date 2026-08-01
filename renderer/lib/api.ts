@@ -309,6 +309,15 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/update/restart");
 
     // ── Config snapshot (backup / restore) ───────────────────────────────
+    case "backup:getSchedule":
+      return apiFetch<T>("/api/backup/schedule");
+
+    case "backup:setSchedule":
+      return post<T>("/api/backup/schedule", p);
+
+    case "backup:runNow":
+      return post<T>("/api/backup/run", {});
+
     case "config:listSnapshots":
       return apiFetch<T>("/api/config/snapshots");
 

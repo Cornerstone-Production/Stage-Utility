@@ -8,6 +8,7 @@
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
+import { backupScheduler } from "../backup-scheduler.js";
 import { configSnapshot } from "../config-snapshot.js";
 import { splRecorder } from "../spl-recorder.js";
 import { attendanceRecorder } from "../attendance-recorder.js";
@@ -143,6 +144,27 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       }
       return;
     }
+    // ── Automatic backups ───────────────────────────────────────────────────
+    if (method === "GET" && pathname === "/api/backup/schedule") {
+      json(res, await backupScheduler.getSchedule());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/backup/schedule") {
+      const body = (await readBody(req)) as Record<string, unknown>;
+      const partial: Record<string, unknown> = {};
+      if (typeof body.enabled === "boolean") partial.enabled = body.enabled;
+      if (typeof body.includeArchive === "boolean") partial.includeArchive = body.includeArchive;
+      if (typeof body.destination === "string") partial.destination = body.destination;
+      for (const k of ["intervalDays", "keep"]) if (typeof body[k] === "number") partial[k] = body[k];
+      json(res, await backupScheduler.setSchedule(partial));
+      return;
+    }
+    // Run one immediately — also how the operator proves the destination works.
+    if (method === "POST" && pathname === "/api/backup/run") {
+      json(res, await backupScheduler.runNow());
+      return;
+    }
+
     // List saved snapshots.
     if (method === "GET" && pathname === "/api/config/snapshots") {
       json(res, await configSnapshot.list());

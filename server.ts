@@ -31,6 +31,7 @@ initUpdateLog();
 import { getUserDataPath } from "./main/services/app-paths.js";
 import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";
+import { backupScheduler } from "./main/services/backup-scheduler.js";
 import { integrationManager } from "./main/services/integration-manager.js";
 import { livePoller } from "./main/services/live-poller.js";
 import { prodcomService } from "./main/services/prodcom-service.js";
@@ -57,6 +58,8 @@ console.log("[server] initialising services...");
 await stageController.init();
 await integrationManager.init();
 await baptismTimerService.init();
+// Unattended backups, if the operator has turned them on.
+backupScheduler.start();
 
 // Close any history record left open by a prior run (crash / restart mid/after a
 // service) before the poller starts — a genuinely-live service reopens on the next tick.

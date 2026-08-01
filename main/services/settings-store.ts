@@ -15,6 +15,7 @@ export interface SettingsData {
   planTitle: string | null;
   planSeriesTitle: string | null;
   planDates?: string | null;
+  backupSchedule?: import("./backup-scheduler.js").BackupSchedule;
   integrationConfigs: Record<string, Record<string, unknown>>;
   integrationEnabled: Record<string, boolean>;
   showQr: boolean;

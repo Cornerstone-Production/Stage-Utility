@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Button,
   FieldSet,
   FieldGroup,
   Field,
@@ -108,19 +109,22 @@ function ToolsPanel({ baseUrl, iconColors }: { baseUrl: string; iconColors?: Rec
               <span className="min-w-0 flex-1 truncate text-callout font-semibold leading-tight text-fg">
                 {t.label}
               </span>
-              <Tooltip label={`Open ${t.label}`}>
-                <a
-                  href={t.path}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="shrink-0 rounded-md p-1 text-fg-subtle transition-colors hover:bg-fill hover:text-fg"
-                  aria-label={`Open ${t.label}`}
-                >
-                  <ExternalLinkIcon className="size-4" />
-                </a>
-              </Tooltip>
             </div>
-            <p className="px-3 pb-2 pt-1 text-caption2 text-fg-muted">{t.description}</p>
+            <p className="px-3 pt-1 text-caption2 text-fg-muted">{t.description}</p>
+            {/* Same shape as a display card: a labelled Open button on its own row,
+                rather than a bare icon floating in the title bar at a different
+                inset from the copy icon below it. */}
+            <div className="flex items-center gap-3 px-3 pb-2 pt-2">
+              <Button
+                variant="filled"
+                size="small"
+                onClick={() => window.open(t.path, "_blank", "noopener,noreferrer")}
+                aria-label={`Open ${t.label}`}
+              >
+                <ExternalLinkIcon className="size-3.5 text-gray-9" />
+                Open window
+              </Button>
+            </div>
             <Tooltip label="Copy URL">
               <button
                 type="button"

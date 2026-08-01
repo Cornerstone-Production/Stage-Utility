@@ -25,6 +25,7 @@ import {
 } from "../../components/ui";
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { DataArchivePanel } from "./data-archive-panel";
+import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -445,6 +446,144 @@ interface SnapshotMeta {
 
 // Backup / restore the whole config (secrets excluded). Download/upload a file,
 // or save/recall named snapshots. Restoring overwrites config + restarts.
+
+// Unattended backups. One control covers both the config snapshot and the data
+// archive, since "did my backups run" should have one answer, not two.
+function AutoBackupPanel() {
+  const queryClient = useQueryClient();
+  const { data: sched } = useQuery({
+    queryKey: ["backup:schedule"],
+    queryFn: () => invoke<BackupSchedule>("backup:getSchedule"),
+    staleTime: 10_000,
+  });
+  const [busy, setBusy] = useState(false);
+  const [dest, setDest] = useState("");
+  const stored = sched?.destination ?? "";
+  const [lastDest, setLastDest] = useState(stored);
+  if (stored !== lastDest) {
+    setLastDest(stored);
+    setDest(stored);
+  }
+
+  async function patch(partial: Partial<BackupSchedule>) {
+    try {
+      const next = await invoke<BackupSchedule>("backup:setSchedule", partial);
+      queryClient.setQueryData(["backup:schedule"], next);
+    } catch (e) {
+      toast.error(`Couldn't save: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function runNow() {
+    setBusy(true);
+    try {
+      const next = await invoke<BackupSchedule>("backup:runNow");
+      queryClient.setQueryData(["backup:schedule"], next);
+      if (next.lastError) toast.error(`Backup failed: ${next.lastError}`);
+      else toast.success("Backup written.");
+    } catch (e) {
+      toast.error(`Backup failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!sched) return null;
+
+  return (
+    <FieldSet flat>
+      <FieldGroup>
+        <Field orientation="horizontal">
+          <FieldContent>
+            <FieldLabel>
+              Automatic backups
+              <InfoHint className="ml-1.5 align-middle">
+                Writes a config snapshot, and optionally the data archive, on the interval
+                below — keeping the most recent few and deleting the rest. A run that fails
+                leaves the existing backups alone and is retried, rather than being skipped
+                until the next interval. A machine that was switched off runs one backup when
+                it comes back, not one per interval it missed.
+              </InfoHint>
+            </FieldLabel>
+            <FieldDescription>
+              Save a copy on a schedule, so a backup exists without anyone remembering to make one.
+            </FieldDescription>
+          </FieldContent>
+          <Switch checked={sched.enabled} onCheckedChange={(v: boolean) => void patch({ enabled: v })} />
+        </Field>
+
+        {sched.enabled && (
+          <>
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel>Every (days)</FieldLabel>
+                <FieldDescription>1 = daily, 7 = weekly, 30 = monthly.</FieldDescription>
+              </FieldContent>
+              <NumberInput value={sched.intervalDays} min={1} max={365} className="w-28"
+                onChange={(v) => { if (v !== sched.intervalDays) void patch({ intervalDays: Math.round(v) }); }}
+                aria-label="Backup interval (days)" />
+            </Field>
+
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel>Keep</FieldLabel>
+                <FieldDescription>How many of each to keep. Older ones are deleted.</FieldDescription>
+              </FieldContent>
+              <NumberInput value={sched.keep} min={1} max={100} className="w-28"
+                onChange={(v) => { if (v !== sched.keep) void patch({ keep: Math.round(v) }); }}
+                aria-label="How many backups to keep" />
+            </Field>
+
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel>Include recorded services</FieldLabel>
+                <FieldDescription>
+                  Adds the data archive — every recorded service and its raw samples. Much
+                  larger than the config alone.
+                </FieldDescription>
+              </FieldContent>
+              <Switch checked={sched.includeArchive}
+                onCheckedChange={(v: boolean) => void patch({ includeArchive: v })} />
+            </Field>
+
+            <Field orientation="vertical">
+              <FieldContent>
+                <FieldLabel>Where to write</FieldLabel>
+                <FieldDescription>
+                  Blank keeps them in the data directory. Point this at a mounted network
+                  share to keep the copies off this machine — a disk failure takes the data
+                  directory with it.
+                </FieldDescription>
+              </FieldContent>
+              <Input
+                value={dest}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setDest(e.target.value)}
+                onBlur={() => { if (dest !== stored) void patch({ destination: dest }); }}
+                placeholder="/mnt/nas/stage-backups"
+                className="w-full font-mono text-gray-12"
+                aria-label="Backup destination directory"
+              />
+            </Field>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="filled" size="small" onClick={runNow} disabled={busy}>
+                <SaveIcon className="size-3.5 text-gray-9" /> Back up now
+              </Button>
+              <span className="text-caption2 text-gray-9">
+                {sched.lastError
+                  ? `Last run failed: ${sched.lastError}`
+                  : sched.lastRunAt
+                    ? `Last backup ${new Date(sched.lastRunAt).toLocaleString()}`
+                    : "No backup yet."}
+              </span>
+            </div>
+          </>
+        )}
+      </FieldGroup>
+    </FieldSet>
+  );
+}
+
 function ConfigSnapshotPanel() {
   const queryClient = useQueryClient();
   const { data: snapshots } = useQuery({
@@ -741,6 +880,12 @@ export function AdvancedSection({
       <FieldSet>
         <Collapsible label="Backup & restore" summary="Save, download & recall how the app is set up" headerClassName="px-4 py-2.5">
           <ConfigSnapshotPanel />
+        </Collapsible>
+      </FieldSet>
+
+      <FieldSet>
+        <Collapsible label="Automatic backups" summary="Save a copy on a schedule" headerClassName="px-4 py-2.5">
+          <AutoBackupPanel />
         </Collapsible>
       </FieldSet>
 
