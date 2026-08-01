@@ -197,6 +197,14 @@ Pure and file-level, no network:
   `wireless.csv` alongside the others, so adding it later is a new caller rather than
   a change to anything here — but it does mean battery and RF history only starts
   whenever that happens, not now.
+- **OBS, REAPER and OSC in the event log.** They have no single change-detection
+  chokepoint today — their state flows through the stage-state object rather than a
+  dedicated broadcast — so wiring them means adding one, which is a separate change.
+  `recordEvent(source, kind, detail)` is generic, so each is a one-line call once a
+  chokepoint exists. v1 logs plan-item changes and automation fires.
+- **A separate `baptisms.csv`.** Per-person durations are already the raw data —
+  there is no fold to undo — and they ride in `baptism.json`, which the bundle
+  carries. A CSV would be a second copy of the same numbers.
 - Converting the existing stores to CSV. They stay JSON; see Design.
 - Retention/pruning.
 - Continuous (non-service) capture.

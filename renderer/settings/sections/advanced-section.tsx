@@ -23,6 +23,7 @@ import {
   confirm,
 } from "../../components/ui";
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
+import { DataArchivePanel } from "./data-archive-panel";
 import type { SectionProps } from "../types";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -719,8 +720,18 @@ export function AdvancedSection({
       </FieldSet>
 
       <FieldSet>
-        <Collapsible label="Backup & restore" summary="Save, download & recall config snapshots" headerClassName="px-4 py-2.5">
+        <Collapsible label="Backup & restore" summary="Save, download & recall how the app is set up" headerClassName="px-4 py-2.5">
           <ConfigSnapshotPanel />
+        </Collapsible>
+      </FieldSet>
+
+      <FieldSet>
+        <Collapsible
+          label="Data archive"
+          summary="Download & restore what the app recorded"
+          headerClassName="px-4 py-2.5"
+        >
+          <DataArchivePanel />
         </Collapsible>
       </FieldSet>
     </div>
