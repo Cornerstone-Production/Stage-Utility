@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { BaptismTriggersPanel } from "./baptism-triggers-panel";
+import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
-import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, Trash2Icon, ChevronRightIcon } from "lucide-react";
+import { DropletIcon, RotateCcwIcon, Undo2Icon, FlagIcon, Trash2Icon, ChevronRightIcon, PauseIcon, PlayIcon } from "lucide-react";
 
 import { invoke } from "../lib/api";
 import { Button, confirm, toast } from "../components/ui";
@@ -38,6 +40,9 @@ export function BaptismOperator() {
 
   // Tick the live segment clock while a segment is running.
   const segStart = state?.segmentStartedAt ?? null;
+  // Paused = a phase is running but its clock is not. The readout keeps showing what
+  // was banked, so a paused timer looks stopped rather than looking broken.
+  const paused = !!state && state.phase !== "idle" && !state.segmentStartedAt;
   useEffect(() => {
     if (!segStart) return;
     const id = setInterval(() => setNow(Date.now()), 250);
@@ -61,7 +66,10 @@ export function BaptismOperator() {
   }
 
   const phase = state.phase;
-  const liveMs = segStart ? Math.max(0, now - Date.parse(segStart)) : 0;
+  // Includes what the segment banked before a pause, or a paused clock reads 0:00
+  // and looks broken. `now` is only ticking while it runs, which is why the paused
+  // value holds steady.
+  const liveMs = segmentElapsedMs(state, now);
   const sum = summarizeBaptism(state);
   const justFinished = phase === "idle" && state.finishedAt != null && state.people.length > 0;
 
@@ -137,6 +145,8 @@ export function BaptismOperator() {
         </span>
       </div>
 
+      <BaptismTriggersPanel />
+
       {/* Live readout */}
       <div className="flex flex-col items-center gap-1 rounded-xl border border-gray-5 bg-gray-2 py-6">
         <span className={`text-caption1 font-medium uppercase tracking-wide ${phaseColor}`}>
@@ -150,11 +160,32 @@ export function BaptismOperator() {
         </span>
       </div>
 
+      {state?.autoStartedFrom && phase !== "idle" && (
+        <span className="text-caption2 text-gray-9">
+          Started automatically from &ldquo;{state.autoStartedFrom}&rdquo; — reset if that was wrong.
+        </span>
+      )}
+
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="accent" disabled={busy} onClick={() => void act(primaryChannel, primaryChannel === "baptism:finish" ? reloadSessions : undefined)} className="px-6 py-2 text-body">
           {primaryLabel}
         </Button>
+        {phase !== "idle" && (
+          <Button
+            variant="filled"
+            disabled={busy}
+            onClick={() => void act(paused ? "baptism:resume" : "baptism:pause")}
+            tooltip={
+              paused
+                ? "Start the clock again from where it stopped"
+                : "Stop the clock — vows, prayer and talking between people should not land on someone's time"
+            }
+          >
+            {paused ? <PlayIcon className="size-4 text-gray-9" /> : <PauseIcon className="size-4 text-gray-9" />}
+            {paused ? "Resume" : "Pause"}
+          </Button>
+        )}
         {grouped && phase === "testimony" && (
           <Button variant="filled" disabled={busy} onClick={() => void act("baptism:startBaptisms")} tooltip="Done with testimonies — start timing baptisms">
             Start baptisms →

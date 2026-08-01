@@ -1,10 +1,12 @@
 // Persists non-secret settings: service type/plan selection, planMode,
 // integration configs (non-secret fields), display options.
 
-import type { DisplayInfo, Output } from "../types/stage.js";
+import type { BaptismAutoStart, DisplayInfo, Output } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
 
 export interface SettingsData {
+  /** Whether and how the baptism timer starts itself from the plan. */
+  baptismAutoStart?: BaptismAutoStart;
   serviceTypeId: string | null;
   serviceTypeName: string | null;
   planMode: "auto" | "manual";
@@ -70,6 +72,9 @@ export interface SettingsData {
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
+  // Off until someone turns it on: a timer that starts itself unasked during a
+  // service is worse than one that has to be started.
+  baptismAutoStart: { enabled: false, testimonyKeyword: "baptism stories" },
   serviceTypeId: null,
   serviceTypeName: null,
   planMode: "auto",

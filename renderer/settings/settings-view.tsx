@@ -712,6 +712,15 @@ export function SettingsView() {
     }
   }
 
+  async function handleSetBaptismAutoStart(partial: { enabled?: boolean; testimonyKeyword?: string }) {
+    try {
+      const next = await ipc<StageState>("settings:setBaptismAutoStart", partial);
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to update baptism auto-start: ${String(err)}`);
+    }
+  }
+
   async function handleSetTaperWindow(partial: { preMin?: number; postMin?: number }) {
     try {
       const next = await ipc<StageState>("settings:setTaperWindow", partial);
@@ -1155,6 +1164,7 @@ export function SettingsView() {
     handleSetAutoUpdate,
     handleSetReconnectSchedule,
     handleSetTaperWindow,
+    handleSetBaptismAutoStart,
     handleSetAllowedServiceTypes,
     handleSetBranding,
     updateSlot,
