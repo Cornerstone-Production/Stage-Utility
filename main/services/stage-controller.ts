@@ -1666,7 +1666,8 @@ export class StageController {
       throw new LayoutConflictError(id, expectedRev, rev);
     }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, layout, layoutRev: rev + 1 } : v));
-    console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${layout.objects.length} objects) rev=${rev + 1}`);
+    const objectCount = Array.isArray(layout.objects) ? layout.objects.length : 0;
+    console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${scrub(objectCount)} objects) rev=${rev + 1}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     // Load raw slots for any newly-added inline mic-slots objects, and drop the
