@@ -187,7 +187,7 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, teamPositions, s
   // optional empty-slot image centered in the gap.
   if (isSpacer) {
     return (
-      <div className="relative flex flex-wrap items-center gap-2 py-3 pl-4">
+      <div className="relative flex flex-wrap items-center gap-2 py-3 pl-4 pr-3">
         <button
           {...dragAttributes}
           {...dragListeners}
@@ -220,7 +220,7 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, teamPositions, s
   return (
     <div
       className={cn(
-        "relative flex flex-col gap-2 py-3 pl-4",
+        "relative flex flex-col gap-2 py-3 pl-4 pr-3",
         // Inside a stack container: inset from its edge, and ruled off from the
         // slot above so the members stay readable as separate slots.
         stackDivider && "border-t border-line",
@@ -621,7 +621,10 @@ export function SortableSlotGroup({
         // positioned against a row whose height changes when Options open, so it
         // slid out of alignment the moment anything expanded; a container has no
         // geometry to keep in sync and cannot drift.
-        <div className="rounded-lg border border-line bg-surface-raised">
+        // overflow-hidden so a row's divider stops at the rounded corner instead
+        // of poking through it; my-2 so consecutive stacks are not flush against
+        // each other and the list separator.
+        <div className="my-2 overflow-hidden rounded-lg border border-line bg-surface-raised">
           <div className="flex items-center gap-1.5 px-3 pt-2">
             <Layers2Icon className="size-3 text-fg-subtle" />
             <span className="text-caption2 font-medium uppercase tracking-wide text-fg-subtle">

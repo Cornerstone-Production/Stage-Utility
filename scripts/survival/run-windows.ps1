@@ -36,7 +36,27 @@ try {
   Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal | Out-Null
   Start-ScheduledTask -TaskName $taskName
 
-  Start-Sleep -Seconds 5
+  # Wait for the parent to actually BE running before stopping the task. A blind
+  # sleep here raced a cold PowerShell + Node start on a slow runner: the task
+  # had not written PARENT-START yet, so stopping it tore down nothing, the log
+  # came back empty, and the run failed as though the child had been killed.
+  # That is a false alarm indistinguishable from a real survival failure, which
+  # is the one thing this test must never produce.
+  $deadline = (Get-Date).AddSeconds(60)
+  do {
+    Start-Sleep -Milliseconds 500
+    $started = Get-Content $log -Raw -ErrorAction SilentlyContinue
+  } while (-not ($started -match "PARENT-START") -and (Get-Date) -lt $deadline)
+
+  if (-not ($started -match "PARENT-START")) {
+    # Deliberately a DIFFERENT message: nothing was ever torn down, so this says
+    # nothing about whether a child survives. Reported as a failure because the
+    # test did not run, not because the behaviour is wrong.
+    Write-Host "  windows survival: INCONCLUSIVE - the scheduled task never started within 60s"
+    Write-Host "  Nothing was torn down, so this does not indicate a survival failure."
+    exit 1
+  }
+
   Stop-ScheduledTask -TaskName $taskName
   Start-Sleep -Seconds 14
 

@@ -219,6 +219,13 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
       console.log("[IntegrationsPanel:save]", descriptor.id, Object.keys(config));
       const next = await ipc<IntegrationState>("integrations:setConfig", { id: descriptor.id, config });
       onStateChange(next);
+      // Re-seed the form from what was actually saved. `dirty` compares the form
+      // against initialConfig(state), and that is not always what was typed: a
+      // password comes back MASKED, and any value the backend normalises comes
+      // back in its own form. Leaving the typed value in place made the two
+      // permanently unequal, so "Unsaved changes" stayed up after a successful
+      // save — most visibly after changing a secret.
+      setLocalConfig(initialConfig(descriptor, next));
       toast.success(`${descriptor.label} settings saved.`);
     } catch (err) {
       console.error("[IntegrationsPanel:save] error", err);
