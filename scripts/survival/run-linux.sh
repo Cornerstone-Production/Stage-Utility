@@ -52,7 +52,26 @@ run_case() { # $1 = swap|stopfirst   $2 = expected yes|no
   got=no
   grep -q FINISHED "$log" 2>/dev/null && got=yes
   stop_unit
-  echo "  case=$mode expected=$expect got=$got"
+
+  # Before trusting either verdict, prove the case measured anything at all.
+  # "no FINISHED" is also what a log nobody could write to looks like - which is
+  # exactly how two earlier CI runs reported a Linux failure that turned out to
+  # be an unwritable /tmp path and no evidence about the update path whatsoever.
+  # A case that cannot show the worker STARTED is a broken test, not a result.
+  if ! grep -q "PARENT-START" "$log" 2>/dev/null; then
+    echo "  case=$mode INVALID - the service never recorded starting"
+    echo "  --- survival log ($(wc -c <"$log" | tr -d ' ') bytes) ---"; sed 's/^/    /' "$log"
+    echo "  --- unit output ---"
+    sudo journalctl -u "$UNIT" --no-pager --lines=25 2>&1 | tail -25 | sed 's/^/    /' || true
+    return 1
+  fi
+  if ! grep -q "^START " "$log" 2>/dev/null; then
+    echo "  case=$mode INVALID - the parent ran but the worker never started"
+    echo "  --- survival log ---"; sed 's/^/    /' "$log"
+    return 1
+  fi
+
+  echo "  case=$mode expected=$expect got=$got (worker started: yes)"
   if [ "$got" != "$expect" ]; then
     echo "  --- survival log ($(wc -c <"$log" | tr -d ' ') bytes) ---"
     sed 's/^/    /' "$log"
