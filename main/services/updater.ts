@@ -168,10 +168,37 @@ class Updater {
     }
   }
 
+  /**
+   * Whether in-app updates are possible here, and why not when they are not.
+   *
+   * Asks the strategy layer rather than assuming a checkout: a Homebrew or
+   * tarball install updates fine and is not a git repo. The UI used to gate on
+   * isGitRepo, so the moment that became correct for packaged installs those
+   * installs were told to update from the command line — with a working updater
+   * sitting right behind the message.
+   */
+  private updatability(): { canUpdate: boolean; updateBlockedReason: string | null } {
+    const kind = detectInstallKind(process.env, REPO_ROOT, fs.existsSync);
+    const strategy = selectStrategy(kind, process.platform);
+    if (!strategy) {
+      return {
+        canUpdate: false,
+        updateBlockedReason:
+          `Could not tell how this copy was installed (detected "${kind}"), so there is no ` +
+          "safe way to update it in place. Update from the command line on the server.",
+      };
+    }
+    const ok = strategy.canApply();
+    return ok.ok
+      ? { canUpdate: true, updateBlockedReason: null }
+      : { canUpdate: false, updateBlockedReason: ok.reason };
+  }
+
   /** Cached status (no network). Refreshes the local bits (sha, result file). */
   getStatus(): UpdateStatus {
     return {
       ...this.status,
+      ...this.updatability(),
       version: pkgVersion(),
       step: this.status.phase === "updating" ? this.status.step : null,
       restartPending: this.isRestartPending(),
@@ -347,13 +374,19 @@ class Updater {
    */
   async applyUpdate(opts: { deferRestart?: boolean } = {}): Promise<UpdateStatus> {
     if (this.status.phase === "updating") throw new Error("An update is already running.");
-    if (!this.status.isGitRepo) {
-      // Re-check in case we never fetched.
-      await this.checkForUpdate();
-      if (!this.status.isGitRepo) throw new Error("Not a git checkout — update from the command line.");
+    // Can this install update at all? Asked of the strategy layer, not of
+    // isGitRepo: a Homebrew or tarball install is not a checkout and updates
+    // through its own strategy. Refusing on isGitRepo blocked exactly those.
+    const { canUpdate, updateBlockedReason } = this.updatability();
+    if (!canUpdate) throw new Error(updateBlockedReason ?? "In-app updates are not available for this install.");
+
+    // The dirty-tree check is a GIT concern. A packaged install has no working
+    // tree, and running git here read whatever repository happened to be up the
+    // directory tree — on Homebrew, /opt/homebrew's own.
+    if (this.status.isGitRepo) {
+      const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
+      if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before updating.");
     }
-    const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
-    if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before updating.");
 
     const branch = this.status.branch ?? "main";
     return this.launch(branch, false, opts.deferRestart === true, this.status.targetTag ?? null);
@@ -389,16 +422,18 @@ class Updater {
   async switchTrack(branch: string): Promise<UpdateStatus> {
     if (!TRACKS.includes(branch)) throw new Error(`Unknown update track: ${branch}`);
     if (this.status.phase === "updating") throw new Error("An update is already running.");
-    if (!this.status.isGitRepo) {
-      await this.checkForUpdate();
-      if (!this.status.isGitRepo) throw new Error("Not a git checkout — switch tracks from the command line.");
-    }
+    const { canUpdate, updateBlockedReason } = this.updatability();
+    if (!canUpdate) throw new Error(updateBlockedReason ?? "Switching tracks is not available for this install.");
+
     if (branch === this.status.branch) {
       // Already on this track — just run a normal update so it's not a no-op.
       return this.applyUpdate();
     }
-    const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
-    if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before switching tracks.");
+    // Git-only, for the same reason as applyUpdate.
+    if (this.status.isGitRepo) {
+      const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
+      if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before switching tracks.");
+    }
 
     return this.launch(branch, true, false, await this.targetTagFor(branch));
   }

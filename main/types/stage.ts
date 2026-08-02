@@ -1313,6 +1313,18 @@ export interface ReconnectSchedule {
 export interface UpdateStatus {
   /** False when this isn't a git checkout (or git is unavailable) — update via CLI. */
   isGitRepo: boolean;
+  /**
+   * Whether in-app updates work here at all.
+   *
+   * NOT the same as `isGitRepo`. A Homebrew or tarball install is not a
+   * checkout and updates perfectly well through its own strategy; gating the UI
+   * on `isGitRepo` told those installs to update from the command line while a
+   * working updater sat behind the message. When false, `updateBlockedReason`
+   * says why.
+   */
+  canUpdate?: boolean;
+  /** Why in-app updates are unavailable, when `canUpdate` is false. */
+  updateBlockedReason?: string | null;
   branch: string | null;
   /**
    * Where `branch` came from. A packaged install has no branch to read, so the

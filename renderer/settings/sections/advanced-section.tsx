@@ -196,11 +196,14 @@ function UpdatesPanel({
     }
   }
 
-  // Not a git checkout → can't self-update. Only show this once a check has
-  // actually confirmed it (lastCheckedAt set) — otherwise a freshly-restarted
-  // server briefly serves the default `isGitRepo:false` and flashes this banner
-  // before the first check runs.
-  if (s && !s.isGitRepo && s.lastCheckedAt) {
+  // No usable updater → say so. Gated on canUpdate, NOT on isGitRepo: a Homebrew
+  // or tarball install is not a checkout and updates perfectly well through its
+  // own strategy. Keying this off isGitRepo told exactly those installs to update
+  // from the command line while a working updater sat behind the message.
+  //
+  // Only shown once a check has confirmed it (lastCheckedAt set) — otherwise a
+  // freshly-restarted server flashes this before the first check runs.
+  if (s && s.canUpdate === false && s.lastCheckedAt) {
     return (
       <FieldSet>
         <FieldGroup>
@@ -208,8 +211,9 @@ function UpdatesPanel({
             <FieldContent>
               <FieldLabel>Software updates</FieldLabel>
               <FieldDescription>
-                This install isn't a git checkout, so in-app updates aren't available. Update from the
-                command line on the server (see INSTALL.md). Current version: v{s.version}.
+                {s.updateBlockedReason ??
+                  "In-app updates aren't available for this install. Update from the command line on the server (see INSTALL.md)."}{" "}
+                Current version: v{s.version}.
               </FieldDescription>
             </FieldContent>
           </Field>
