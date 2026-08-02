@@ -25,7 +25,26 @@ SERVICE_NAME="stage-utility"
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m warn\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31merror\033[0m %s\n' "$*" >&2; exit 1; }
+die()  { printf '\033[1;31merror\033[0m %s\n' "$*" >&2; write_result false "$*"; exit 1; }
+
+# ── Update protocol (optional) ────────────────────────────────────────────────
+# When the app drives this script it passes these paths and reads them back to
+# narrate the update; a human running the installer by hand passes neither and
+# both helpers become no-ops. The format matches scripts/update.sh exactly,
+# because the app's poller already knows how to read it — which is why driving
+# the installer from the app needs no UI change at all.
+_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+write_progress() {
+  [ -n "${STAGE_UPDATE_PROGRESS:-}" ] || return 0
+  printf '{"step":"%s","at":"%s"}' "$1" "$(_now)" >"$STAGE_UPDATE_PROGRESS" 2>/dev/null || true
+}
+write_result() {
+  [ -n "${STAGE_UPDATE_RESULT:-}" ] || return 0
+  printf '{"ok":%s,"error":"%s","at":"%s"}' "$1" "${2:-}" "$(_now)" >"$STAGE_UPDATE_RESULT" 2>/dev/null || true
+}
+# Any unexpected failure reports too, so the UI can never wait forever on a run
+# that has already died.
+trap 'write_result false "installer failed - see the server log"' ERR
 
 # ── Where things go ───────────────────────────────────────────────────────────
 case "$(uname -s)" in
@@ -80,6 +99,7 @@ ARCHIVE="stage-utility-${VERSION}-${PLATFORM}.tar.gz"
 BASE="https://github.com/${REPO}/releases/download/${TAG}"
 
 say "Installing ${TAG} for ${PLATFORM}"
+write_progress pull
 
 # ── Download and verify ───────────────────────────────────────────────────────
 WORK="$(mktemp -d)"
@@ -99,6 +119,7 @@ if [ -z "${RELEASE_JSON:-}" ]; then
     || die "Could not read release ${TAG} to verify the download."
 fi
 
+write_progress install
 say "Verifying"
 # Within an asset object the API emits "name" before "digest", so the digest we
 # want is the first one after this archive's name. Anchoring on the exact name
@@ -146,7 +167,30 @@ fi
 
 chown -R "$SERVICE_USER" "$PREFIX" "$DATA" 2>/dev/null || true
 
+# The swap. Flipping a symlink is atomic, and the running server keeps its open
+# inodes on the old release, so it carries on serving until it is restarted.
+write_progress build
 ln -sfn "$RELEASE_DIR" "${PREFIX}/current"
+
+# ── Update mode ───────────────────────────────────────────────────────────────
+# The service already exists and is RUNNING: every slow step above - download,
+# verify, unpack - happened while it kept serving, and the swap above is done.
+# So do not stop it and do not re-register it. Ask it to exit; the service
+# manager relaunches it on the new files.
+#
+# The ordering is the point. Stopping the service first would blank every
+# display for the length of the download, and on systemd it would tear down the
+# cgroup this script runs in, killing the update midway through the swap.
+if [ "${STAGE_UPDATE_MODE:-}" = "swap" ]; then
+  say "Swap complete. Restarting the running server."
+  write_progress restarting
+  write_result true ""
+  if [ -n "${STAGE_UPDATE_SERVER_PID:-}" ]; then
+    sleep 1  # let the HTTP response that triggered this flush first
+    kill "$STAGE_UPDATE_SERVER_PID" 2>/dev/null || true
+  fi
+  exit 0
+fi
 
 if [ -n "${STAGE_NO_SERVICE:-}" ]; then
   say "Files installed. Skipping service registration (STAGE_NO_SERVICE set)."

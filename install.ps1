@@ -23,7 +23,24 @@ $data    = if ($env:STAGE_DATA)   { $env:STAGE_DATA }   else { "$env:ProgramData
 $taskName = "StageUtility"
 
 function Say  ($m) { Write-Host "==> $m" -ForegroundColor Cyan }
-function Fail ($m) { Write-Host "error $m" -ForegroundColor Red; exit 1 }
+function Fail ($m) { Write-Host "error $m" -ForegroundColor Red; Write-UpdateResult $false $m; exit 1 }
+
+# ── Update protocol (optional) ────────────────────────────────────────────────
+# Mirrors install.sh. When the app drives this script it passes these paths and
+# polls them to narrate the update; run by hand, both are unset and these are
+# no-ops. The format matches scripts/update.sh, which is why driving the
+# installer from the app needs no UI change.
+function Write-UpdateProgress ($Step) {
+  if (-not $env:STAGE_UPDATE_PROGRESS) { return }
+  $at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+  "{`"step`":`"$Step`",`"at`":`"$at`"}" | Set-Content -Path $env:STAGE_UPDATE_PROGRESS -Encoding utf8
+}
+function Write-UpdateResult ($Ok, $ErrorText) {
+  if (-not $env:STAGE_UPDATE_RESULT) { return }
+  $at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+  $b = if ($Ok) { "true" } else { "false" }
+  "{`"ok`":$b,`"error`":`"$ErrorText`",`"at`":`"$at`"}" | Set-Content -Path $env:STAGE_UPDATE_RESULT -Encoding utf8
+}
 
 # Administrator is required to write under Program Files and register a task that
 # runs at boot. Checked before anything is downloaded or written.
@@ -65,6 +82,7 @@ $archive = "stage-utility-$version-$platform.tar.gz"
 $base    = "https://github.com/$repo/releases/download/$tag"
 
 Say "Installing $tag for $platform"
+Write-UpdateProgress "pull"
 
 # ── Download and verify ───────────────────────────────────────────────────────
 $work = Join-Path $env:TEMP ("stage-utility-" + [guid]::NewGuid())
@@ -80,6 +98,7 @@ try {
     $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/$tag" -Headers $headers
   }
 
+  Write-UpdateProgress "install"
   Say "Verifying"
   $asset = $release.assets | Where-Object { $_.name -eq $archive } | Select-Object -First 1
   if (-not $asset -or -not $asset.digest) {
@@ -109,9 +128,28 @@ try {
 
   # A junction rather than a symlink: it needs no developer mode and no extra
   # privilege, and points at a directory just the same.
+  Write-UpdateProgress "build"
   $current = Join-Path $prefix "current"
   if (Test-Path $current) { (Get-Item $current).Delete() }
   New-Item -ItemType Junction -Path $current -Target $releaseDir | Out-Null
+
+  # ── Update mode ─────────────────────────────────────────────────────────────
+  # The task already exists and is RUNNING: the download, verify and unpack above
+  # all happened while it kept serving, and the junction has just been repointed.
+  # So do not stop it and do not re-register it - ask it to exit, and Task
+  # Scheduler restarts it on the new files.
+  #
+  # Stopping first would blank every display for the length of the download.
+  if ($env:STAGE_UPDATE_MODE -eq "swap") {
+    Say "Swap complete. Restarting the running server."
+    Write-UpdateProgress "restarting"
+    Write-UpdateResult $true ""
+    if ($env:STAGE_UPDATE_SERVER_PID) {
+      Start-Sleep -Seconds 1  # let the HTTP response that triggered this flush
+      Stop-Process -Id ([int]$env:STAGE_UPDATE_SERVER_PID) -Force -ErrorAction SilentlyContinue
+    }
+    exit 0
+  }
 
   # ── Register it ─────────────────────────────────────────────────────────────
   # A scheduled task rather than a Windows service: Node is not a service-aware
