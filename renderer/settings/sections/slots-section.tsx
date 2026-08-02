@@ -188,7 +188,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
         <button
           {...dragAttributes}
           {...dragListeners}
-          className="cursor-grab active:cursor-grabbing touch-none p-0.5 shrink-0"
+          className="cursor-grab active:cursor-grabbing touch-pan-y p-0.5 shrink-0"
           aria-label="Drag to reorder"
           tabIndex={-1}
         >
@@ -236,7 +236,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
         <button
           {...dragAttributes}
           {...dragListeners}
-          className="cursor-grab active:cursor-grabbing touch-none p-0.5 shrink-0"
+          className="cursor-grab active:cursor-grabbing touch-pan-y p-0.5 shrink-0"
           aria-label="Drag to reorder"
           tabIndex={-1}
         >
@@ -802,7 +802,7 @@ function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers:
       <button
         {...attributes}
         {...listeners}
-        className="cursor-grab active:cursor-grabbing touch-none p-0.5 shrink-0"
+        className="cursor-grab active:cursor-grabbing touch-pan-y p-0.5 shrink-0"
         aria-label="Drag to reorder"
         tabIndex={-1}
       >

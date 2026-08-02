@@ -116,7 +116,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
         <button
           {...attributes}
           {...listeners}
-          className="cursor-grab active:cursor-grabbing touch-none shrink-0 text-gray-7 hover:text-gray-9 transition-colors"
+          className="cursor-grab active:cursor-grabbing touch-pan-y shrink-0 text-gray-7 hover:text-gray-9 transition-colors"
           aria-label="Drag to reorder"
           tabIndex={-1}
         >

@@ -3,7 +3,7 @@ import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { buildLabel } from "../lib/build-label";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useState, useEffect, useRef, Fragment } from "react";
-import { PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import {
   SplitView,
@@ -562,8 +562,21 @@ export function SettingsView() {
     return unsub;
   }, [queryClient]);
 
-  // DnD sensors
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // DnD sensors — mouse and touch deliberately separate.
+  //
+  // A single PointerSensor treats them identically: it claims the gesture on
+  // touch-down and waits to see whether you move far enough to be dragging,
+  // which is exactly the window in which the page cannot scroll. On a phone
+  // that made the Displays and Views lists unscrollable, because every swipe
+  // that began on a card started as a maybe-drag.
+  //
+  // Distance works for a mouse, where a click is a distinct act from a drag.
+  // Touch needs TIME instead: hold briefly to drag, swipe to scroll. 200ms is
+  // short enough to feel deliberate and long enough that a flick never trips it.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  );
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;

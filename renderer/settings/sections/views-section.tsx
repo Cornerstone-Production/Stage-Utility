@@ -104,7 +104,7 @@ function SortableViewItem({
         onClick={onSelect}
         {...attributes}
         {...listeners}
-        className="flex w-full min-w-0 cursor-grab touch-none flex-col items-start gap-0.5 px-3 py-2 text-left active:cursor-grabbing"
+        className="flex w-full min-w-0 cursor-grab touch-pan-y flex-col items-start gap-0.5 px-3 py-2 text-left active:cursor-grabbing"
       >
         <span className="w-full truncate text-body text-fg">{view.name}</span>
         <span className="text-caption2 text-fg-subtle">{KIND_LABELS[view.kind]}</span>
