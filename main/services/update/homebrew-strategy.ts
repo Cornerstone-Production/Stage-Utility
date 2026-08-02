@@ -55,12 +55,19 @@ const bootout = (formula: string): string =>
  * complete with the service "started" and nothing listening. kickstart demands
  * the start explicitly, which is not subject to that deferral.
  *
+ * `-k` KILLS a running instance first. Without it, `-p` alone means "start if
+ * not running", so a process that survived the upgrade is left alone — and
+ * `brew upgrade` deletes the old keg out from under it. That happened: the
+ * server went on running from a directory that no longer existed, serving
+ * version 0.0.0 with no settings or control page, because node keeps its own
+ * binary's inode open while every file it reads has gone.
+ *
  * Best-effort across both domains, and never fatal: an install whose service is
  * already running must not report failure because the label sits elsewhere.
  */
 const kickstart = (formula: string): string =>
-  `(launchctl kickstart -p "gui/$(id -u)/${label(formula)}" 2>/dev/null || ` +
-  `launchctl kickstart -p "system/${label(formula)}" 2>/dev/null || true)`;
+  `(launchctl kickstart -k -p "gui/$(id -u)/${label(formula)}" 2>/dev/null || ` +
+  `launchctl kickstart -k -p "system/${label(formula)}" 2>/dev/null || true)`;
 
 export class HomebrewStrategy implements UpdateStrategy {
   readonly kind: InstallKind = "homebrew";

@@ -65,7 +65,10 @@ describe("HomebrewStrategy", () => {
     for (const opts of [base, { ...base, track: "beta", checkout: true }]) {
       const line = new HomebrewStrategy(brewAt(BREW_PATHS[0])).plan(opts).args.join(" ");
       const formula = opts.checkout ? FORMULA.beta : FORMULA.main;
-      assert.ok(line.includes(`kickstart -p "gui/$(id -u)/homebrew.mxcl.${formula}"`), "must force the spawn");
+      assert.ok(line.includes(`kickstart -k -p "gui/$(id -u)/homebrew.mxcl.${formula}"`), "must force the spawn");
+      // -k is load-bearing: -p alone is "start if not running", so a process that
+      // survived the upgrade keeps serving from the keg brew just deleted.
+      assert.ok(!/kickstart -p /.test(line), "kickstart must kill a running instance first");
       const started = Math.max(line.indexOf("services start"), line.indexOf("services restart"));
       assert.ok(line.indexOf("kickstart") > started, "kickstart must come after brew starts it");
     }
