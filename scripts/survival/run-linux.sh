@@ -21,15 +21,25 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 NODE="$(command -v node)"
 UNIT="stage-survival-test"
 
-cleanup() { sudo systemctl stop "$UNIT" >/dev/null 2>&1 || true; }
+stop_unit() { sudo systemctl stop "$UNIT" >/dev/null 2>&1 || true; }
+# Logs are removed only on the way out, never between cases - a case creates its
+# log and then stops any stale unit, so clearing logs in that step would delete
+# the file the case is about to measure.
+cleanup() { stop_unit; rm -f "$HERE"/.survival-*.log; }
 trap cleanup EXIT
 
 run_case() { # $1 = swap|stopfirst   $2 = expected yes|no
   local mode="$1" expect="$2" log got
-  log="$(mktemp)"
+  # NOT mktemp. systemd gives a unit its own view of /tmp and /var/tmp, so a
+  # path there is unreachable from inside the service - the first CI run failed
+  # with EACCES on the log while the unit itself was running perfectly, which
+  # measured nothing. A file beside the checkout is visible to both.
+  log="$HERE/.survival-$mode.log"
+  rm -f "$log"
+  : > "$log"
   chmod 666 "$log"
 
-  cleanup
+  stop_unit
   sudo systemd-run --unit="$UNIT" --setenv=SURVIVAL_LOG="$log" \
     "$NODE" "$HERE/parent.mjs" >/dev/null
 
@@ -41,6 +51,7 @@ run_case() { # $1 = swap|stopfirst   $2 = expected yes|no
 
   got=no
   grep -q FINISHED "$log" 2>/dev/null && got=yes
+  stop_unit
   echo "  case=$mode expected=$expect got=$got"
   if [ "$got" != "$expect" ]; then
     echo "  --- survival log ($(wc -c <"$log" | tr -d ' ') bytes) ---"

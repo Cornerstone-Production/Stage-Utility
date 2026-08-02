@@ -43,3 +43,4 @@ sensource-probe*.json
 docs/superpowers/
 docs/design-overhaul/
 DESIGN_TOKENS_PROPOSAL.md
+scripts/survival/.survival-*.log
