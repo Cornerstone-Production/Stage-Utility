@@ -382,6 +382,23 @@ class Updater {
     const isWin = process.platform === "win32";
     const script = path.join(REPO_ROOT, "scripts", isWin ? "update.ps1" : "update.sh");
 
+    // A packaged install — Homebrew, or a platform tarball — ships the built server
+    // and nothing else: no checkout, no scripts/. The git-based updater has nothing
+    // to work with there.
+    //
+    // Spawning anyway was silent rather than loud: the child is detached with stdio
+    // ignored, so bash exited immediately with "no such file" and NOTHING was written
+    // to the progress or result file. The poller had nothing to react to, so the UI
+    // sat on "Downloading update…" indefinitely with no way to learn it had already
+    // failed. Refuse up front instead, and say what does work.
+    if (!fs.existsSync(script) || !fs.existsSync(path.join(REPO_ROOT, ".git"))) {
+      throw new Error(
+        "This install updates through whatever installed it, not from here — " +
+          "`brew upgrade stage-utility` for a Homebrew install, or re-run the install " +
+          "command. In-app updates need a git checkout.",
+      );
+    }
+
     // Clear stale progress/result so the poller only reacts to this run.
     this.applyStartedAt = Date.now();
     try {

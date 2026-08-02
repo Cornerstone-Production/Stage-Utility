@@ -154,10 +154,17 @@ input,button{font:inherit;background:#1a1d22;color:#d6d9de;border:1px solid #2a2
 var token=new URLSearchParams(location.search).get('token');var q=token?('?token='+encodeURIComponent(token)):'';
 var logEl=document.getElementById('log'),filterEl=document.getElementById('filter'),autoEl=document.getElementById('auto'),countEl=document.getElementById('count');var lines=[];
 function esc(s){return String(s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
+/* Lines are stamped as UTC ISO. Slicing characters 11-19 out of that string
+   printed UTC verbatim, so an operator west of Greenwich read timestamps hours
+   adrift from the wall clock they were comparing against. Parse and format
+   instead, which renders in the VIEWER's zone - this page is served to whoever
+   opens it, so the browser's zone is the right one, not the server's. */
+function fmtT(iso){var d=new Date(iso);if(isNaN(d.getTime()))return esc(iso).slice(11,19);
+return d.toLocaleTimeString(undefined,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}
 function render(){var f=filterEl.value.toLowerCase();var atBottom=(window.innerHeight+window.scrollY)>=(document.body.scrollHeight-40);
 var shown=lines.filter(function(l){return !f||l.msg.toLowerCase().indexOf(f)>=0||l.level.indexOf(f)>=0});
 countEl.textContent=shown.length+' / '+lines.length+' lines';
-logEl.innerHTML=shown.map(function(l){return '<div class="ln '+l.level+'"><span class="t">'+esc(l.t).slice(11,19)+'</span> '+esc(l.msg)+'</div>'}).join('');
+logEl.innerHTML=shown.map(function(l){return '<div class="ln '+l.level+'"><span class="t">'+fmtT(l.t)+'</span> '+esc(l.msg)+'</div>'}).join('');
 if(autoEl.checked&&atBottom)window.scrollTo(0,document.body.scrollHeight)}
 function load(){fetch('/api/log'+q).then(function(r){return r.json()}).then(function(d){lines=d.lines||[];render()}).catch(function(){})}
 filterEl.oninput=render;document.getElementById('refresh').onclick=load;load();setInterval(function(){if(autoEl.checked)load()},2000);
