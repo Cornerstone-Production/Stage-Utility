@@ -81,15 +81,31 @@ function section(title, items) {
 
 const install = `## Install
 
+Three supported ways in. Pick whichever suits the machine.
+
+**Homebrew** — macOS
+
+\`\`\`bash
+brew tap Cornerstone-Production/stage-utility
+brew install stage-utility
+brew services start stage-utility
+\`\`\`
+
+**Linux and macOS** — one line, registers an auto-starting service
+
 \`\`\`bash
 curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.sh | sudo bash
 \`\`\`
+
+**Windows** — in an Administrator PowerShell
+
 \`\`\`powershell
 irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.ps1 | iex
 \`\`\`
 
 Each archive below carries its own Node runtime — nothing else to install. Already
-running it? Update from **Settings → Advanced → Updates**.
+running it? Update from **Settings → Advanced → Updates**, or
+\`brew upgrade stage-utility\` on a Homebrew install.
 `;
 
 const parts = [

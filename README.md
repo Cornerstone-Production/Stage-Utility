@@ -76,6 +76,16 @@ enabled independently.
 
 ## Install it
 
+Three supported ways in — pick whichever suits the machine.
+
+**Homebrew** — macOS
+
+```bash
+brew tap Cornerstone-Production/stage-utility
+brew install stage-utility
+brew services start stage-utility
+```
+
 **Linux and macOS**
 
 ```bash
@@ -89,8 +99,10 @@ irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/
 ```
 
 Nothing to clone and no Node to install: the download carries its own runtime.
-It verifies the download, registers an auto-starting service, and prints the
-address to open. After that it updates itself from Settings.
+The installers verify the download, register an auto-starting service, and print
+the address to open; Homebrew does the same through `brew services`. After that
+it updates itself from Settings, or with `brew upgrade stage-utility`.
+[Homebrew details](docs/ops/homebrew.md).
 
 To work on the code instead:
 

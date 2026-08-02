@@ -5,10 +5,21 @@ auto-starts.
 
 ## Install
 
-One line, on any supported machine. Nothing to clone, no Node to install, no
-build step — the download carries its own runtime.
+Three supported ways in, all equally current — they install the same release
+from the same published archives. Nothing to clone, no Node to install, no build
+step: the download carries its own runtime.
 
-**Linux and macOS**
+**Homebrew** — macOS. The natural choice on a laptop or workstation, where
+`brew upgrade` alongside everything else is convenient.
+
+```bash
+brew tap Cornerstone-Production/stage-utility
+brew install stage-utility
+brew services start stage-utility
+```
+
+**Linux and macOS** — one line. The right choice for a Pi or a server, because
+it registers a system-wide service that starts at boot rather than at login.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.sh | sudo bash
@@ -20,10 +31,10 @@ curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utilit
 irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.ps1 | iex
 ```
 
-It works out which build this machine needs, verifies the download against the
-published checksums, registers an auto-starting service, waits for the server to
-answer, and prints the address to open. If any of that fails it stops before
-writing anything.
+The one-line installers work out which build this machine needs, verify the
+download against the published checksums, register an auto-starting service, wait
+for the server to answer, and print the address to open. If any of that fails
+they stop before writing anything.
 
 | Platform | Architectures | Auto-start | Installs to |
 |---|---|---|---|
@@ -33,7 +44,8 @@ writing anything.
 
 A 32-bit Raspberry Pi OS is not published; the arm64 build runs on a 64-bit one.
 
-Options, set as environment variables before the command:
+Options for the one-line installers, set as environment variables before the
+command:
 
 | | |
 |---|---|
@@ -46,8 +58,9 @@ Options, set as environment variables before the command:
 After that, update from **Settings → Advanced → Updates** — see
 [Releases and distribution](distribution.md).
 
-On a laptop or workstation, [Homebrew](homebrew.md) is an alternative:
-`brew tap Cornerstone-Production/stage-utility && brew install stage-utility`.
+A Homebrew install keeps its data outside the keg and updates with
+`brew upgrade stage-utility` rather than from Settings —
+[Homebrew](homebrew.md) covers the differences.
 
 ### From a checkout instead
 
