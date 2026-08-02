@@ -187,6 +187,46 @@ function rfBarsGlyph(bars: number): string {
   return "▮".repeat(n) + "▯".repeat(5 - n);
 }
 
+/** The neutral dot: an integration that is not connected, a recorder that is idle. */
+const DOT_IDLE = "rgba(255,255,255,0.35)";
+
+/**
+ * A status dot with its label, sized in em so it tracks the object's font.
+ *
+ * Shared so the connection objects and the recording objects cannot drift into
+ * looking like two different conventions — a dot on a stage display means one
+ * thing, and it should be the same shape and size wherever it appears.
+ */
+function StatusDot({
+  color,
+  label,
+  ts,
+  dimmed = false,
+}: {
+  color: string;
+  label?: string | null;
+  ts: CSSProperties;
+  dimmed?: boolean;
+}) {
+  return (
+    <span
+      style={{
+        ...ts,
+        width: "auto",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "0.4em",
+        opacity: dimmed ? 0.4 : 1,
+      }}
+    >
+      <span
+        style={{ width: "0.6em", height: "0.6em", borderRadius: "50%", background: color, flexShrink: 0 }}
+      />
+      {label ? <span>{label}</span> : null}
+    </span>
+  );
+}
+
 // Shrinks the font so `text` fits its box (width + height) instead of clipping —
 // used by single-value text objects (current/next item) where a long title would
 // otherwise overflow. Converges in a pass or two by back-deriving the natural size
@@ -607,14 +647,19 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
             </div>
           );
         }
-        return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
+        // Not filling the box: same dot convention as the connection objects, so
+        // a red dot always means the same thing wherever it appears on a display.
+        return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
       }
       // Idle: dim when offline so a neutral badge is never mistaken for "not
       // active" when OBS is merely unreachable.
       return (
-        <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
-          {connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? "OBS: Offline")}
-        </span>
+        <StatusDot
+          color={DOT_IDLE}
+          label={connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? "OBS: Offline")}
+          ts={ts}
+          dimmed={!connected}
+        />
       );
     }
     case "reaper-status": {
@@ -637,14 +682,19 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
             </div>
           );
         }
-        return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
+        // Not filling the box: same dot convention as the connection objects, so
+        // a red dot always means the same thing wherever it appears on a display.
+        return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
       }
       // Idle: dim when offline so a neutral badge is never mistaken for "not
       // recording" when REAPER is merely unreachable.
       return (
-        <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
-          {connected ? (c.idleText ?? "REAPER: Standby") : (c.offlineText ?? "REAPER: Offline")}
-        </span>
+        <StatusDot
+          color={DOT_IDLE}
+          label={connected ? (c.idleText ?? "REAPER: Standby") : (c.offlineText ?? "REAPER: Offline")}
+          ts={ts}
+          dimmed={!connected}
+        />
       );
     }
     case "rosstalk-button":
@@ -672,14 +722,9 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         conn === "connected" ? "var(--green-10)"
         : conn === "error" ? "var(--red-10)"
         : conn === "connecting" ? "var(--yellow-10)"
-        : "rgba(255,255,255,0.35)";
+        : DOT_IDLE;
       const name = c.label ?? (st ? (ctx.integrationLabels[st.id] ?? st.id) : "—");
-      return (
-        <span style={{ ...ts, width: "auto", display: "inline-flex", alignItems: "center", gap: "0.4em" }}>
-          <span style={{ width: "0.6em", height: "0.6em", borderRadius: "50%", background: dot, flexShrink: 0 }} />
-          {(c.showLabel ?? true) && <span>{name}</span>}
-        </span>
-      );
+      return <StatusDot color={dot} label={(c.showLabel ?? true) ? name : null} ts={ts} />;
     }
     case "wireless-summary": {
       const ch = ctx.wireless;
