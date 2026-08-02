@@ -19,3 +19,26 @@ export function findItemByTitle<T extends PlanItem>(items: T[], title: string): 
   if (!want) return null;
   return items.find((i) => i.title.toLowerCase().includes(want)) ?? null;
 }
+
+/** Whether to step Live forward, and the wording for the Activity log either way. */
+export type AdvanceVerdict = { advance: boolean; reason: string };
+
+/**
+ * Decide whether advancing one item lands where the rule intends.
+ *
+ * PCO has no "jump to item" action — go_to_next_item is all there is — so a rule
+ * can only ever take ONE step. This is the check that makes that step safe: if
+ * the plan is not sitting where the rule expected, stepping anyway would fire
+ * whatever item happens to be next, live, in front of the room.
+ *
+ * An empty guard means the caller wants an unconditional single step.
+ */
+export function advanceGuard(nextItemTitle: string | null, guardTitle: string): AdvanceVerdict {
+  const want = guardTitle.trim();
+  if (!want) return { advance: true, reason: "no guard set" };
+  if (!nextItemTitle) return { advance: false, reason: "PCO reports no next item" };
+  const hit = findItemByTitle([{ title: nextItemTitle }], want);
+  return hit
+    ? { advance: true, reason: `next item is "${nextItemTitle}"` }
+    : { advance: false, reason: `next item is "${nextItemTitle}", not "${want}"` };
+}

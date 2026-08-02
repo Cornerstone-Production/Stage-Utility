@@ -620,6 +620,7 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "automation:registry": return apiFetch("/api/automation/registry");
     case "automation:rules": return apiFetch("/api/automation/rules");
+    case "automation:plan-items": return apiFetch("/api/automation/plan-items");
     case "automation:addRule": return post("/api/automation/rules", params);
     case "automation:updateRule": return patch(`/api/automation/rules/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);
     case "automation:removeRule": return del(`/api/automation/rules/${(params as { id: string }).id}`);
