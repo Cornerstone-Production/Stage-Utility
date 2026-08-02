@@ -58,6 +58,42 @@ describe("HomebrewStrategy", () => {
     assert.ok(line.includes(`services start ${FORMULA.beta}`), "switch must leave it running");
   });
 
+  it("kickstarts the service after starting it, on both paths", () => {
+    // brew only bootstraps the agent; outside a foreground GUI session launchd
+    // parks the RunAtLoad spawn (runs = 0, "pended nondemand spawn"), so brew
+    // reports success and nothing runs. The updater is such a session.
+    for (const opts of [base, { ...base, track: "beta", checkout: true }]) {
+      const line = new HomebrewStrategy(brewAt(BREW_PATHS[0])).plan(opts).args.join(" ");
+      const formula = opts.checkout ? FORMULA.beta : FORMULA.main;
+      assert.ok(line.includes(`kickstart -p "gui/$(id -u)/homebrew.mxcl.${formula}"`), "must force the spawn");
+      const started = Math.max(line.indexOf("services start"), line.indexOf("services restart"));
+      assert.ok(line.indexOf("kickstart") > started, "kickstart must come after brew starts it");
+    }
+  });
+
+  it("boots out the old label before uninstalling, so bootstrap cannot fail with EIO", () => {
+    // launchctl bootstrap refuses a label already registered in the domain, and
+    // uninstall does not always unregister it — that left every later start
+    // failing with "Bootstrap failed: 5: Input/output error".
+    const line = new HomebrewStrategy(brewAt(BREW_PATHS[0]))
+      .plan({ ...base, track: "beta", checkout: true })
+      .args.join(" ");
+    const boot = line.indexOf(`bootout "gui/$(id -u)/homebrew.mxcl.${FORMULA.main}"`);
+    assert.ok(boot >= 0, "must clear the outgoing formula's registration");
+    assert.ok(boot < line.indexOf("uninstall"), "bootout must precede uninstall");
+  });
+
+  it("never lets a kickstart or bootout failure fail the update", () => {
+    // A service already running, or a label in the other domain, must not turn a
+    // successful install into a reported failure.
+    const line = new HomebrewStrategy(brewAt(BREW_PATHS[0]))
+      .plan({ ...base, track: "beta", checkout: true })
+      .args.join(" ");
+    for (const frag of line.split(" && ").filter((s) => /kickstart|bootout/.test(s))) {
+      assert.ok(frag.trimEnd().endsWith("|| true)"), `must be best-effort: ${frag}`);
+    }
+  });
+
   it("switches back to stable the same way", () => {
     const line = new HomebrewStrategy(brewAt(BREW_PATHS[0]))
       .plan({ ...base, track: "main", checkout: true })

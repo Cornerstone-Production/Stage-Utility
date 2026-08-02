@@ -26,6 +26,42 @@ export const BREW_PATHS = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"];
 
 export const FORMULA = { main: "stage-utility", beta: "stage-utility-beta" } as const;
 
+/** launchd's label for a formula's service. */
+const label = (formula: string): string => `homebrew.mxcl.${formula}`;
+
+/**
+ * Clear a leftover registration for a label before brew tries to load it.
+ *
+ * `brew services start` shells out to `launchctl bootstrap`, which REFUSES a
+ * label already registered in the domain — "Bootstrap failed: 5: Input/output
+ * error". Uninstalling a formula does not always unregister it, so a track
+ * switch could leave the old label behind and every subsequent start failed with
+ * that error. Expected to fail when nothing is registered, hence `|| true`.
+ */
+const bootout = (formula: string): string =>
+  `(launchctl bootout "gui/$(id -u)/${label(formula)}" 2>/dev/null || ` +
+  `launchctl bootout "system/${label(formula)}" 2>/dev/null || true)`;
+
+/**
+ * Force the initial spawn after brew has loaded the job.
+ *
+ * `brew services start` only bootstraps the agent; launchd then decides when to
+ * honour RunAtLoad. Outside a foreground GUI session it parks it — launchd
+ * reports `runs = 0` with `pended nondemand spawn = speculative` — so brew
+ * reports success and nothing ever runs. KeepAlive does not rescue this: it
+ * restarts a job that has exited, and this one never started.
+ *
+ * The updater is exactly such a session, so a track switch would otherwise
+ * complete with the service "started" and nothing listening. kickstart demands
+ * the start explicitly, which is not subject to that deferral.
+ *
+ * Best-effort across both domains, and never fatal: an install whose service is
+ * already running must not report failure because the label sits elsewhere.
+ */
+const kickstart = (formula: string): string =>
+  `(launchctl kickstart -p "gui/$(id -u)/${label(formula)}" 2>/dev/null || ` +
+  `launchctl kickstart -p "system/${label(formula)}" 2>/dev/null || true)`;
+
 export class HomebrewStrategy implements UpdateStrategy {
   readonly kind: InstallKind = "homebrew";
 
@@ -58,13 +94,18 @@ export class HomebrewStrategy implements UpdateStrategy {
       ? [
           `${brew} update`,
           `${brew} info ${target} >/dev/null`,
+          bootout(other),
           `${brew} uninstall ${other} || true`,
           `${brew} install ${target}`,
           `${brew} services start ${target}`,
+          kickstart(target),
         ].join(" && ")
-      : [`${brew} update`, `${brew} upgrade ${target}`, `${brew} services restart ${target}`].join(
-          " && ",
-        );
+      : [
+          `${brew} update`,
+          `${brew} upgrade ${target}`,
+          `${brew} services restart ${target}`,
+          kickstart(target),
+        ].join(" && ");
 
     return { command: "bash", args: ["-c", script], env: { ...o.env } };
   }
