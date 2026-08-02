@@ -393,6 +393,9 @@ export function BrandingSection({
             <LogoCropper
               src={cropSrc}
               initial={cropInitial}
+              // The empty-slot image and the avatar are always drawn recoloured;
+              // only the app logo follows the toggle.
+              monochrome={cropTarget === "app" ? stageState.appLogoMonochrome : true}
               onCancel={() => setCropSrc(null)}
               onSave={onCropSave}
             />

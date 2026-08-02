@@ -151,7 +151,7 @@ export function DisplayPickerView() {
             className="flex items-center gap-3 su-card px-4 py-3 transition-colors hover:bg-white/10"
           >
             <ClockIcon className="size-5 shrink-0" style={tintOf("/history")} />
-            <span className="text-body font-medium text-fg truncate">Service history</span>
+            <span className="text-body font-medium text-fg truncate">Service History</span>
             <ChevronRightIcon className="size-4 text-fg-faint ml-auto shrink-0" />
           </a>
         </div>

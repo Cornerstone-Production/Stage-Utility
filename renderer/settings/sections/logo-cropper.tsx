@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { BrandLogo } from "../../components/brand-logo";
 import { Button } from "../../components/ui";
 
 // On-screen crop square. The exported PNG matches the cropped region's native
@@ -14,6 +15,11 @@ interface LogoCropperProps {
   src: string;
   /** Saved transform to restore when re-editing (retains zoom/position). */
   initial?: { scale: number; x: number; y: number } | null;
+  /**
+   * Preview the image recoloured to the theme, matching how it will actually be
+   * drawn. Off shows the artwork exactly as uploaded.
+   */
+  monochrome?: boolean;
   onCancel: () => void;
   /** Returns the rendered crop plus the source + transform to persist. */
   onSave: (result: {
@@ -31,7 +37,7 @@ interface LogoCropperProps {
  * displayed-pixels per source-pixel. Both are clamped so the image always
  * covers the viewport (no empty corners).
  */
-export function LogoCropper({ src, initial, onCancel, onSave }: LogoCropperProps) {
+export function LogoCropper({ src, initial, monochrome = false, onCancel, onSave }: LogoCropperProps) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
   const [minScale, setMinScale] = useState(1);
@@ -132,22 +138,37 @@ export function LogoCropper({ src, initial, onCancel, onSave }: LogoCropperProps
       <span className="text-caption1 text-gray-11 font-medium">Position &amp; zoom your logo</span>
       <div className="flex items-start gap-4 flex-wrap">
         <div
-          className="relative rounded-md overflow-hidden bg-gray-3 touch-none cursor-grab active:cursor-grabbing shrink-0"
+          // text-fg is explicit rather than inherited: the recoloured preview fills
+          // from currentColor, so the viewport must state the colour it is previewing
+          // against, exactly as the thumbnail tiles do.
+          className="relative rounded-md overflow-hidden bg-gray-3 text-fg touch-none cursor-grab active:cursor-grabbing shrink-0"
           style={{ width: VIEWPORT, height: VIEWPORT }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         >
-          {nat && (
-            <img
-              src={src}
-              alt=""
-              draggable={false}
-              className="absolute select-none max-w-none"
-              style={{ width: nat.w * scale, height: nat.h * scale, left: offset.x, top: offset.y }}
-            />
-          )}
+          {nat &&
+            (monochrome ? (
+              // Recoloured exactly as the app will draw it. A single-colour logo is
+              // usually white artwork meant for a dark kiosk, so showing the raw file
+              // here rendered it invisible against the light viewport — you were
+              // positioning something you could not see.
+              <BrandLogo
+                logo={src}
+                monochrome
+                className="absolute select-none max-w-none"
+                style={{ width: nat.w * scale, height: nat.h * scale, left: offset.x, top: offset.y }}
+              />
+            ) : (
+              <img
+                src={src}
+                alt=""
+                draggable={false}
+                className="absolute select-none max-w-none"
+                style={{ width: nat.w * scale, height: nat.h * scale, left: offset.x, top: offset.y }}
+              />
+            ))}
           <div className="absolute inset-0 ring-1 ring-inset ring-white/10 rounded-md pointer-events-none" />
         </div>
 

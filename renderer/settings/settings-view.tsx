@@ -2,7 +2,7 @@ import { invoke, onNotification } from "../lib/api";
 import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { buildLabel } from "../lib/build-label";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { useState, useEffect, useRef, useMemo, Fragment } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import {
@@ -371,30 +371,12 @@ export function SettingsView() {
     queryFn: () => ipc<SlotPreset[]>("presets:list"),
   });
 
-  // The unified History tab shows whenever PCO is configured or there's any recorded
-  // data (service timing, attendance, or SPL) — so past history stays reachable even
-  // after the recording integration is powered off/disabled.
-  const { data: splHistoryList } = useQuery({
-    queryKey: ["spl:listHistory"],
-    queryFn: () => ipc<ServiceSplHistory[]>("spl:listHistory"),
-  });
-  const { data: attendanceList } = useQuery({
-    queryKey: ["attendance:listHistory"],
-    queryFn: () => ipc<ServiceAttendance[]>("attendance:listHistory"),
-  });
-  const { data: timelineList } = useQuery({
-    queryKey: ["serviceTimeline:list"],
-    queryFn: () => ipc<ServiceTimeline[]>("serviceTimeline:list"),
-  });
-  const showHistory =
-    (stageState?.pcoConfigured ?? false) ||
-    (timelineList?.length ?? 0) > 0 ||
-    (attendanceList?.length ?? 0) > 0 ||
-    (splHistoryList?.length ?? 0) > 0;
-  const sections = useMemo(
-    () => SECTIONS.filter((s) => s.id !== "service-history" || showHistory),
-    [showHistory],
-  );
+  // Every section is always in the nav. History used to be hidden until PCO was
+  // configured or some history existed, which meant a fresh install offered it on
+  // the landing page and the Connect tab while the sidebar pretended it did not
+  // exist — the tab looked missing rather than empty. An empty section explains
+  // itself; an absent one reads as a bug.
+  const sections = SECTIONS;
 
   // In-app update status (git-based; surfaced in the Advanced tab).
   const { data: updateStatus = null } = useQuery({
