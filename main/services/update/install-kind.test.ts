@@ -31,7 +31,22 @@ describe("detectInstallKind", () => {
     assert.equal(detectInstallKind({}, "C:\\Program Files\\Stage Utility", noFiles), "tarball");
   });
 
+  it("infers tarball for a Windows install in a subdirectory of the prefix", () => {
+    const root = "C:\\Program Files\\Stage Utility\\current";
+    assert.equal(detectInstallKind({}, root, noFiles), "tarball");
+  });
+
   it("returns unknown for an unrecognised location", () => {
     assert.equal(detectInstallKind({}, "/home/someone/scratch", noFiles), "unknown");
+  });
+
+  it("prefers git over a tarball prefix when both are present", () => {
+    const root = "/opt/stage-utility";
+    const exists = (p: string) => p === `${root}/.git`;
+    assert.equal(detectInstallKind({}, root, exists), "git");
+  });
+
+  it("does not treat a prefix substring as a path segment match", () => {
+    assert.equal(detectInstallKind({}, "/opt/stage-utility-other", noFiles), "unknown");
   });
 });

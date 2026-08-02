@@ -15,6 +15,19 @@ const TARBALL_PREFIXES = [
   "C:\\Program Files\\Stage Utility",
 ];
 
+/**
+ * True when appRoot is exactly prefix, or a path segment below it.
+ *
+ * install.ps1 creates releases\<version> and a `current` junction below the
+ * Windows prefix, joined with a backslash — so the segment boundary must
+ * recognise either separator. A plain startsWith(prefix) would also match
+ * "/opt/stage-utility-other", which must NOT be treated as a tarball install.
+ */
+function isUnder(appRoot: string, prefix: string): boolean {
+  if (appRoot === prefix) return true;
+  return appRoot.startsWith(`${prefix}/`) || appRoot.startsWith(`${prefix}\\`);
+}
+
 export function detectInstallKind(
   env: NodeJS.ProcessEnv,
   appRoot: string,
@@ -28,6 +41,6 @@ export function detectInstallKind(
   }
   if (exists(`${appRoot}/.git`)) return "git";
   if (appRoot.includes("/Cellar/stage-utility/")) return "homebrew";
-  if (TARBALL_PREFIXES.some((p) => appRoot === p || appRoot.startsWith(`${p}/`))) return "tarball";
+  if (TARBALL_PREFIXES.some((p) => isUnder(appRoot, p))) return "tarball";
   return "unknown";
 }
