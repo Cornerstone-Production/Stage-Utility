@@ -644,12 +644,19 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         // against the content box, so on a padded object the red stopped short of
         // its own edges.
         if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
-        return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
+        // Not filling the box: same dot convention as the connection objects, so
+        // a red dot always means the same thing wherever it appears on a display.
+        return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
       }
+      // Idle: dim when offline so a neutral badge is never mistaken for "not
+      // recording" when no recorder is reachable at all.
       return (
-        <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
-          {connected ? (c.idleText ?? "STANDBY") : (c.offlineText ?? "NO RECORDER")}
-        </span>
+        <StatusDot
+          color={DOT_IDLE}
+          label={connected ? (c.idleText ?? "STANDBY") : (c.offlineText ?? "NO RECORDER")}
+          ts={ts}
+          dimmed={!connected}
+        />
       );
     }
     case "obs-status": {
