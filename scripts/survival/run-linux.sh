@@ -43,7 +43,14 @@ run_case() { # $1 = swap|stopfirst   $2 = expected yes|no
   grep -q FINISHED "$log" 2>/dev/null && got=yes
   echo "  case=$mode expected=$expect got=$got"
   if [ "$got" != "$expect" ]; then
-    echo "  --- log ---"; sed 's/^/    /' "$log"
+    echo "  --- survival log ($(wc -c <"$log" | tr -d ' ') bytes) ---"
+    sed 's/^/    /' "$log"
+    # An empty log is ambiguous on its own: it could mean the worker was killed,
+    # or that the unit never ran at all. These say which.
+    echo "  --- unit state ---"
+    sudo systemctl status "$UNIT" --no-pager --lines=0 2>&1 | head -6 | sed 's/^/    /' || true
+    echo "  --- unit output ---"
+    sudo journalctl -u "$UNIT" --no-pager --lines=25 2>&1 | tail -25 | sed 's/^/    /' || true
     if [ "$mode" = stopfirst ]; then
       echo "  stopfirst survived, which means the teardown is not reaching the"
       echo "  process. This case no longer proves anything - investigate before"
