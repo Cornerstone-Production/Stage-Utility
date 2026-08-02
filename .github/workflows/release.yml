@@ -292,7 +292,16 @@ jobs:
           git clone --depth 1 \
             "https://x-access-token:${TAP_TOKEN}@github.com/Cornerstone-Production/homebrew-stage-utility.git" tap
           mkdir -p tap/Formula
-          cp packaging/homebrew/stage-utility.rb tap/Formula/stage-utility.rb
+          # Copy whichever formula the script actually wrote: a prerelease updates
+          # the BETA formula and leaves the stable one untouched. Copying the
+          # stable one unconditionally published its unedited template — that is
+          # how v1.10.0-beta.1 downgraded the tap from 1.9.6-beta.3 to the
+          # placeholder 1.9.2-beta.5, for everyone on the stable track.
+          if [[ "$V" == *-* ]]; then
+            cp packaging/homebrew/stage-utility-beta.rb tap/Formula/stage-utility-beta.rb
+          else
+            cp packaging/homebrew/stage-utility.rb tap/Formula/stage-utility.rb
+          fi
           cd tap
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
