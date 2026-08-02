@@ -29,6 +29,27 @@ cached so kiosk displays get a stable URL that always tracks the current plan.
 Testing the integration lists service types as a minimal auth check. The Secret
 is stored encrypted (secret key `secret`).
 
+## Item times
+
+PCO publishes no scheduled time on a plan item — an Item carries a title, a type,
+a length and a position, and its `item_times` stay empty until something actually
+goes live. Stage therefore derives an item clock, exactly as the plan editor does:
+the service time plus the running total of item lengths, anchored on the
+`SERVICE START` header.
+
+**Plan times override it.** A `plan_time` whose name matches an item's title pins
+that item to a real clock instead. This is the way to make an item exact, and it
+holds when the service runs long. Match is on the whole name, case-insensitively.
+
+Automation reads this clock — see [Automation](../automation.md#firing-an-item-on-time).
+
+## Controlling Live
+
+`controlLive()` posts PCO's own `go_to_next_item` / `go_to_previous_item`. There is
+**no jump action** in the API, so nothing in Stage can skip to an item. The
+connected account must be permitted to control Live for that service type; Stage
+never calls `toggle_control`, so it cannot take control from whoever is driving.
+
 ## Setup
 
 **In Planning Center:** api.planningcenteronline.com → Developers → Personal
