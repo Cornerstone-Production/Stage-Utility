@@ -99,6 +99,13 @@ export interface View {
   slotsLayout?: SlotsLayout | null;
   /** Show the PCO Live Prev/Next controls on a "script" View (default false). */
   showLiveControls?: boolean;
+  /**
+   * Bumped on every layout save. An editor sends back the revision it opened, so
+   * a save built on a layout someone else has since replaced can be detected
+   * instead of silently overwriting their work. Absent on views saved before
+   * this existed, which are treated as "no revision known" and never conflict.
+   */
+  layoutRev?: number;
 }
 
 /** Physical layout config for a slots-View. All measurements in inches. */

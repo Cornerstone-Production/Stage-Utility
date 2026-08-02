@@ -139,6 +139,28 @@ function defaultCustomLayout(): LayoutDTO {
   };
 }
 
+/**
+ * A layout save was built on a revision someone else has already replaced.
+ *
+ * Its own type so the route can answer 409 rather than a generic 500: this is not
+ * a failure, it is two people editing the same view, and the caller has a real
+ * choice to make between reloading and overwriting.
+ */
+export class LayoutConflictError extends Error {
+  readonly code = "layout-conflict";
+  constructor(
+    readonly viewId: string,
+    readonly expectedRev: number,
+    readonly currentRev: number,
+  ) {
+    super(
+      `This view was changed by someone else while you were editing it ` +
+        `(you started from revision ${expectedRev}, it is now ${currentRev}).`,
+    );
+    this.name = "LayoutConflictError";
+  }
+}
+
 export class StageController {
   private state: StageState = {
     serviceTypeId: null,
@@ -1626,13 +1648,25 @@ export class StageController {
     return this.state;
   }
 
-  /** Replace a custom View's layout (visual editor save). */
-  async setViewLayout(id: string, layout: LayoutDTO): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
+  /**
+   * Replace a custom View's layout (visual editor save).
+   *
+   * `expectedRev` is the revision the editor opened. When it no longer matches,
+   * someone else has saved this view in the meantime and this save would erase
+   * their work, so it is REFUSED and the caller decides. Omitting it forces the
+   * save through — that is the deliberate "overwrite anyway" path.
+   */
+  async setViewLayout(id: string, layout: LayoutDTO, expectedRev?: number): Promise<StageState> {
+    const current = this.state.views.find((v) => v.id === id);
+    if (!current) {
       throw new Error(`views:setLayout — view ${id} not found`);
     }
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, layout } : v));
-    console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${layout.objects.length} objects)`);
+    const rev = current.layoutRev ?? 0;
+    if (expectedRev !== undefined && expectedRev !== rev) {
+      throw new LayoutConflictError(id, expectedRev, rev);
+    }
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, layout, layoutRev: rev + 1 } : v));
+    console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${layout.objects.length} objects) rev=${rev + 1}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     // Load raw slots for any newly-added inline mic-slots objects, and drop the

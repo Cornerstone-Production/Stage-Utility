@@ -1,4 +1,4 @@
-import { invoke, onNotification } from "../lib/api";
+import { invoke, onNotification, type ApiError } from "../lib/api";
 import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { buildLabel } from "../lib/build-label";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -16,6 +16,7 @@ import {
   Tooltip,
   toast,
   ErrorBoundary,
+  confirm,
 } from "../components/ui";
 import {
   Loader2Icon,
@@ -955,11 +956,44 @@ export function SettingsView() {
     }
   }
 
-  async function handleSetViewLayout(id: string, layout: LayoutDTO) {
+  const revOf = (s: StageState | undefined, id: string) =>
+    s?.views?.find((v) => v.id === id)?.layoutRev ?? 0;
+
+  async function handleSetViewLayout(
+    id: string,
+    layout: LayoutDTO,
+    layoutRev?: number,
+  ): Promise<{ rev: number; discarded: boolean }> {
     try {
-      const next = await ipc<StageState>("views:setLayout", { id, layout });
+      const next = await ipc<StageState>("views:setLayout", { id, layout, layoutRev });
       queryClient.setQueryData(["stage:getState"], next);
+      return { rev: revOf(next, id), discarded: false };
     } catch (err) {
+      // 409: someone else saved this view since this editor opened it. Neither
+      // outcome is safe to pick automatically — one loses their work, the other
+      // loses yours — so the person who can see both decides.
+      if ((err as ApiError).code === "layout-conflict") {
+        const overwrite = await confirm({
+          title: "Someone else changed this view",
+          message: `${(err as Error).message} Overwrite their version with yours, or discard your changes and load theirs?`,
+          confirmLabel: "Overwrite theirs",
+          cancelLabel: "Keep theirs",
+          destructive: true,
+        });
+        if (overwrite) {
+          // No layoutRev = save unconditionally. Deliberate, and only reachable
+          // from the dialog above.
+          const next = await ipc<StageState>("views:setLayout", { id, layout });
+          queryClient.setQueryData(["stage:getState"], next);
+          toast.success("Layout saved, replacing the other version.");
+          return { rev: revOf(next, id), discarded: false };
+        }
+        await queryClient.invalidateQueries({ queryKey: ["stage:getState"] });
+        toast.success("Loaded their version. Your changes were discarded.");
+        // Not an error to the caller — a chosen outcome. `discarded` tells the
+        // editor to restart on the layout it just pulled.
+        return { rev: revOf(queryClient.getQueryData<StageState>(["stage:getState"]), id), discarded: true };
+      }
       toast.error(`Failed to save layout: ${String(err)}`);
       throw err;
     }

@@ -8,7 +8,7 @@
 
 import { type RouteCtx, json, error, readBody, isDisplayKind } from "./context.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
-import { stageController } from "../stage-controller.js";
+import { LayoutConflictError, stageController } from "../stage-controller.js";
 
 export async function viewRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -133,7 +133,22 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       if (hasName) state = await stageController.renameView(id, body.name as string);
       if (hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
       if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
-      if (hasLayout) state = await stageController.setViewLayout(id, body.layout as LayoutDTO);
+      if (hasLayout) {
+        // layoutRev is the revision the editor opened. Present = "only save if
+        // nobody else has since"; absent = an explicit overwrite.
+        const expectedRev = typeof body.layoutRev === "number" ? body.layoutRev : undefined;
+        try {
+          state = await stageController.setViewLayout(id, body.layout as LayoutDTO, expectedRev);
+        } catch (err) {
+          if (err instanceof LayoutConflictError) {
+            // 409, not 500 — the request was well-formed and the caller has a
+            // real choice to make. currentRev lets them retry as an overwrite.
+            json(res, { error: err.message, code: err.code, currentRev: err.currentRev }, 409);
+            return;
+          }
+          throw err;
+        }
+      }
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
       if (hasShowLiveControls) state = await stageController.setViewShowLiveControls(id, body.showLiveControls as boolean);
       json(res, state);
