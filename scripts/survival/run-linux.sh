@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+#
+# run-linux.sh — does the updater survive long enough to finish?
+#
+# Two cases, and the second matters as much as the first:
+#
+#   swap       nothing stops the unit, so the work finishes. This is the
+#              shipped ordering: stage, swap, then signal the server last.
+#   stopfirst  the unit is stopped mid-work, as a stop-first installer would.
+#              systemd kills by CGROUP and setsid does NOT escape a cgroup, so
+#              the work must die. That failure is the evidence that keeps
+#              anyone from reintroducing a stop-first installer later.
+#
+# A stopfirst run that REPORTS SUCCESS is a failing test, not a passing one: it
+# means the teardown is no longer reaching the process and the case has stopped
+# proving anything.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+NODE="$(command -v node)"
+UNIT="stage-survival-test"
+
+cleanup() { sudo systemctl stop "$UNIT" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+
+run_case() { # $1 = swap|stopfirst   $2 = expected yes|no
+  local mode="$1" expect="$2" log got
+  log="$(mktemp)"
+  chmod 666 "$log"
+
+  cleanup
+  sudo systemd-run --unit="$UNIT" --setenv=SURVIVAL_LOG="$log" \
+    "$NODE" "$HERE/parent.mjs" >/dev/null
+
+  sleep 4
+  if [ "$mode" = stopfirst ]; then
+    sudo systemctl stop "$UNIT" >/dev/null 2>&1 || true
+  fi
+  sleep 14
+
+  got=no
+  grep -q FINISHED "$log" 2>/dev/null && got=yes
+  echo "  case=$mode expected=$expect got=$got"
+  if [ "$got" != "$expect" ]; then
+    echo "  --- log ---"; sed 's/^/    /' "$log"
+    if [ "$mode" = stopfirst ]; then
+      echo "  stopfirst survived, which means the teardown is not reaching the"
+      echo "  process. This case no longer proves anything - investigate before"
+      echo "  trusting the swap case."
+    fi
+    return 1
+  fi
+}
+
+run_case swap      yes
+run_case stopfirst no
+echo "  linux survival: both cases behaved as expected"
