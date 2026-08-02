@@ -225,6 +225,16 @@ try {
   [Environment]::SetEnvironmentVariable("STAGE_UTILITY_INSTALL_KIND", "tarball", "Machine")
   $env:STAGE_UTILITY_DATA = $data; $env:STAGE_UTILITY_PORT = $port; $env:STAGE_UTILITY_ROOT = $current; $env:STAGE_UTILITY_INSTALL_KIND = "tarball"
 
+  # Registering a task and having it run at boot are different things. Verify
+  # the second - an install that skipped it looks identical to one that worked
+  # until the building loses power.
+  $registered = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue  # GetScheduledTaskBootCheck
+  if (-not $registered) { Fail "The startup task was not registered; it would not survive a restart." }
+  if (-not ($registered.Triggers | Where-Object { $_.CimClass.CimClassName -eq "MSFT_TaskBootTrigger" })) {
+    Fail "The task has no at-startup trigger; it would not come back after a power loss."
+  }
+  Log "boot: at-startup task registered - will restart after a power loss"
+
   Start-ScheduledTask -TaskName $taskName
 
   # ── Confirm it is actually serving ──────────────────────────────────────────

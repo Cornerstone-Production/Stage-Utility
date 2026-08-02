@@ -284,7 +284,11 @@ UNIT
   setcap 'cap_net_bind_service=+ep' "${RELEASE_DIR}/node" 2>/dev/null \
     || warn "Could not grant port-80 binding; the app will still serve on ${PORT}."
   systemctl daemon-reload
-  systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || true
+  # NOT "|| true". This is the line that decides whether the server comes back
+  # after a power cut, and an install that silently skipped it looks identical
+  # to one that worked until the day the building loses power.
+  systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1 \
+    || die "Could not enable ${SERVICE_NAME} to start at boot. It would not survive a restart."
   systemctl restart "${SERVICE_NAME}"
 else
   say "Installing the launchd daemon"
@@ -315,6 +319,23 @@ PLIST
 fi
 
 # ── Confirm it is actually serving ────────────────────────────────────────────
+# ── Will it come back by itself? ──────────────────────────────────────────────
+# Registering a service and having it start at boot are different things. This
+# checks the second one, because the first is what an installer usually proves.
+if [ "$OS" = linux ]; then
+  if systemctl is-enabled "${SERVICE_NAME}" >/dev/null 2>&1; then
+    log "boot: enabled - will restart after a power loss"
+  else
+    die "${SERVICE_NAME} is not enabled at boot; it would not survive a restart."
+  fi
+else
+  if launchctl print "system/com.cornerstone.${SERVICE_NAME}" >/dev/null 2>&1; then
+    log "boot: loaded as a launchd daemon - will restart after a power loss"
+  else
+    warn "The launchd daemon does not appear loaded; it may not survive a restart."
+  fi
+fi
+
 say "Waiting for it to come up"
 for _ in $(seq 1 30); do
   sleep 1
