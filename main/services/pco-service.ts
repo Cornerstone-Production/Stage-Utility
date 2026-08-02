@@ -144,6 +144,8 @@ function toItemColors(raw: unknown, custom: boolean): PcoItemTypeColor[] {
 }
 
 class PcoService {
+  /** One-shot: log the Live session's available actions the first time we drive it. */
+  private static loggedLiveActions = false;
   private inFlight = 0;
   private pending: (() => void)[] = [];
 
@@ -324,7 +326,17 @@ class PcoService {
     // PCO exposes the action URL in the live resource's `links` — use it. The
     // Live resource is a singleton, so the path has NO live id (the fallback
     // `.../live/{action}` matches; an id in the path 404s).
-    const linkUrl = (live as unknown as { links?: Record<string, string> }).links?.[action];
+    const links = (live as unknown as { links?: Record<string, string> }).links ?? {};
+    // Log every action PCO offers on this Live session, once per run. We only
+    // consume next/previous, so whether PCO can jump straight to an item has been
+    // an open question - and the answer is in this object rather than in the
+    // documentation. Automating "fire the Doors item" is materially safer with a
+    // direct jump than by stepping through (and firing) everything in between.
+    if (!PcoService.loggedLiveActions) {
+      PcoService.loggedLiveActions = true;
+      console.log(`[pco] live actions offered: ${Object.keys(links).sort().join(", ") || "(none)"}`);
+    }
+    const linkUrl = links[action];
     const url = typeof linkUrl === "string" && linkUrl ? linkUrl : `${base}/live/${action}`;
     await this.postAction(url, appId, secret);
   }
