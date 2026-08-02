@@ -10,6 +10,31 @@ import { type RouteCtx, json, error, readBody, isDisplayKind } from "./context.j
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
 import { LayoutConflictError, stageController } from "../stage-controller.js";
 
+/**
+ * The minimum shape a layout must have to be stored and rendered.
+ *
+ * This used to be `typeof layout === "object"` followed by a cast, which let any
+ * object through. Two consequences, both real: the renderer reads
+ * `canvas.width` unguarded, so a layout without one crashed the display it was
+ * saved to; and `objects.length` went straight into a log line, so an `objects`
+ * of `{ length: "…\n[stage-controller] …" }` forged entries on the LAN-visible
+ * /log page. Validating the shape closes both at the door.
+ *
+ * Deliberately shallow — it checks what the renderer and the log actually
+ * require, not every optional field of a LayoutObject.
+ */
+function isLayoutShape(v: unknown): v is LayoutDTO {
+  if (!v || typeof v !== "object") return false;
+  const l = v as { objects?: unknown; canvas?: unknown };
+  if (!Array.isArray(l.objects)) return false;
+  if (!l.canvas || typeof l.canvas !== "object") return false;
+  const c = l.canvas as { width?: unknown; height?: unknown };
+  return (
+    typeof c.width === "number" && Number.isFinite(c.width) &&
+    typeof c.height === "number" && Number.isFinite(c.height)
+  );
+}
+
 export async function viewRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
     if (method === "GET" && pathname === "/api/displays") {
@@ -121,7 +146,13 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasKind = isDisplayKind(body.kind);
       const hasNdiSource = "ndiSource" in body
         && (typeof body.ndiSource === "string" || body.ndiSource === null);
-      const hasLayout = "layout" in body && body.layout != null && typeof body.layout === "object";
+      const hasLayout = "layout" in body && isLayoutShape(body.layout);
+      // Present but malformed is a client error, not "no layout given" — falling
+      // through would report the generic "one of these fields is required".
+      if ("layout" in body && !hasLayout) {
+        error(res, "body.layout must be an object with an objects array and a canvas of numeric width and height");
+        return;
+      }
       const hasSlotsLayout = "slotsLayout" in body
         && (body.slotsLayout === null || typeof body.slotsLayout === "object");
       const hasShowLiveControls = typeof body.showLiveControls === "boolean";
@@ -171,11 +202,13 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
 
     if (method === "POST" && pathname === "/api/layout-templates") {
       const body = await readBody(req) as Record<string, unknown>;
-      if (typeof body.name !== "string" || body.layout == null || typeof body.layout !== "object") {
-        error(res, "body.name (string) and body.layout (object) required");
+      if (typeof body.name !== "string" || !isLayoutShape(body.layout)) {
+        error(res, "body.name (string) and body.layout (objects array + numeric canvas) required");
         return;
       }
-      const list = await stageController.saveLayoutTemplate(body.name, body.layout as LayoutDTO);
+      // A template is instantiated into a view later, so a malformed one crashes
+      // a display just as surely — validated at the same door.
+      const list = await stageController.saveLayoutTemplate(body.name, body.layout);
       json(res, list, 201);
       return;
     }
@@ -185,7 +218,13 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const body = await readBody(req) as Record<string, unknown>;
       const patch: { name?: string; layout?: LayoutDTO } = {};
       if (typeof body.name === "string") patch.name = body.name;
-      if (body.layout != null && typeof body.layout === "object") patch.layout = body.layout as LayoutDTO;
+      if ("layout" in body) {
+        if (!isLayoutShape(body.layout)) {
+          error(res, "body.layout must be an object with an objects array and a canvas of numeric width and height");
+          return;
+        }
+        patch.layout = body.layout;
+      }
       if (patch.name === undefined && patch.layout === undefined) {
         error(res, "body.name (string) or body.layout (object) required");
         return;
