@@ -50,3 +50,21 @@ describe("detectInstallKind", () => {
     assert.equal(detectInstallKind({}, "/opt/stage-utility-other", noFiles), "unknown");
   });
 });
+
+describe("Homebrew keg detection covers every published formula", () => {
+  it("recognises the beta formula's keg, not just the stable one", () => {
+    // This matched only "/Cellar/stage-utility/", so every beta install detected
+    // as "unknown" and could select no update strategy at all.
+    for (const formula of ["stage-utility", "stage-utility-beta"]) {
+      const root = `/opt/homebrew/Cellar/${formula}/1.10.0-beta.4/libexec`;
+      assert.equal(detectInstallKind({}, root, () => false), "homebrew", `${formula} must be homebrew`);
+    }
+  });
+
+  it("does not mistake a similarly-named keg for one of ours", () => {
+    assert.equal(
+      detectInstallKind({}, "/opt/homebrew/Cellar/stage-utility-other/1.0.0/libexec", () => false),
+      "unknown",
+    );
+  });
+});

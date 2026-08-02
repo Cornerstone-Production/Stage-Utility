@@ -362,7 +362,12 @@ function UpdatesPanel({
             </FieldContent>
             <div className="flex items-center gap-2">
               <Select value={trackSel ?? s.branch ?? ""} onValueChange={setTrackSel} disabled={updating}>
-                <SelectTrigger className="w-28" aria-label="Update track"><SelectValue /></SelectTrigger>
+                {/* Placeholder rather than a default: the track is unknown on an
+                    install whose layout we cannot read, and showing "main" there
+                    is how a beta box came to report itself as stable. */}
+                <SelectTrigger className="w-28" aria-label="Update track">
+                  <SelectValue placeholder="unknown" />
+                </SelectTrigger>
                 <SelectContent>
                   {s.tracks.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                 </SelectContent>

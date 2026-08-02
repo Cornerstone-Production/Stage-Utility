@@ -1314,6 +1314,14 @@ export interface UpdateStatus {
   /** False when this isn't a git checkout (or git is unavailable) — update via CLI. */
   isGitRepo: boolean;
   branch: string | null;
+  /**
+   * Where `branch` came from. A packaged install has no branch to read, so the
+   * track is derived — from the Homebrew formula, or inferred from whether the
+   * version is a prerelease. Surfaced so the UI need not present a derived
+   * answer as though it were read from a checkout, and so a wrong one is
+   * visible rather than silent.
+   */
+  trackSource?: "git" | "formula" | "version" | "unknown";
   /** Selectable update tracks (git branches) the operator can switch between. */
   tracks: string[];
   /** App version from package.json. */

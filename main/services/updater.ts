@@ -29,6 +29,7 @@ import { promisify } from "node:util";
 import type { UpdateStatus } from "../types/stage.js";
 import { getUserDataPath } from "./app-paths.js";
 import { detectInstallKind } from "./update/install-kind.js";
+import { detectTrack } from "./update/detect-track.js";
 import { selectStrategy } from "./update/select-strategy.js";
 import { broadcast } from "./broadcaster.js";
 import { latestOnTrack, newerThan } from "./release-tags.js";
@@ -130,6 +131,26 @@ class Updater {
     }
   }
 
+  /**
+   * The track a packaged install follows, plus where that answer came from.
+   *
+   * A packaged install has no branch to read, so this is derived from the
+   * install: the formula name for Homebrew, the version for a tarball. The sha
+   * and commit date are cleared with it — on a packaged install they described
+   * whichever repository happened to be up the tree, which was worse than
+   * showing nothing.
+   */
+  private packagedTrack(): Pick<UpdateStatus, "branch" | "trackSource" | "currentSha" | "currentDate"> {
+    const kind = detectInstallKind(process.env, REPO_ROOT, fs.existsSync);
+    const { track, source } = detectTrack({
+      kind,
+      appRoot: REPO_ROOT,
+      version: pkgVersion(),
+      gitBranch: null,
+    });
+    return { branch: track, trackSource: source, currentSha: null, currentDate: null };
+  }
+
   private async git(args: string[], timeoutMs = 60_000): Promise<string> {
     const { stdout } = await execFileAsync("git", args, { cwd: REPO_ROOT, timeout: timeoutMs });
     return stdout.trim();
@@ -165,10 +186,34 @@ class Updater {
     this.status.phase = "checking";
     this.status.error = null;
     try {
-      // Is this a git checkout at all?
-      const inside = await this.git(["rev-parse", "--is-inside-work-tree"]).catch(() => "false");
-      if (inside !== "true") {
-        this.status = { ...this.status, isGitRepo: false, phase: "idle", lastCheckedAt: new Date().toISOString() };
+      // Is THIS DIRECTORY a checkout — not merely inside somebody's?
+      //
+      // `git rev-parse` walks UP the tree, and a Homebrew keg lives inside
+      // /opt/homebrew, which is a git repository (that is how brew updates
+      // itself). --is-inside-work-tree therefore answered "true" on every
+      // Homebrew install, and the branch, sha, commit date and "behind" count
+      // all described HOMEBREW. A box running beta reported main, with one of
+      // Homebrew's commits as its sha.
+      //
+      // Worse than the wrong label: applyUpdate gates on this and then runs
+      // `git status --porcelain`, so a dirty Homebrew checkout refused in-app
+      // updates with an error about a working tree the operator cannot see.
+      //
+      // Comparing the toplevel to the app root answers the question actually
+      // being asked. A checkout matches; a keg inside Homebrew's repo does not.
+      const top = await this.git(["rev-parse", "--show-toplevel"]).catch(() => "");
+      const isCheckout = top !== "" && path.resolve(top) === path.resolve(REPO_ROOT);
+      if (!isCheckout) {
+        this.status = {
+          ...this.status,
+          isGitRepo: false,
+          // Derived from the install itself — the formula for Homebrew, the
+          // version for a tarball. Never defaulted: a confidently wrong track is
+          // the bug this replaces.
+          ...this.packagedTrack(),
+          phase: "idle",
+          lastCheckedAt: new Date().toISOString(),
+        };
         this.broadcast();
         return this.getStatus();
       }
@@ -248,6 +293,7 @@ class Updater {
         ...this.status,
         isGitRepo: true,
         branch,
+        trackSource: "git" as const,
         version: pkgVersion(),
         currentSha,
         currentDate,

@@ -4,7 +4,12 @@
 // writes to the wrong place. Inference exists only for installs that predate the
 // launcher change: it picks a STRATEGY and never decides a path.
 
+import { FORMULA } from "./homebrew-strategy.js";
+
 export type InstallKind = "git" | "tarball" | "homebrew" | "unknown";
+
+/** Keg path fragment for each published formula, e.g. "/Cellar/stage-utility-beta/". */
+const HOMEBREW_KEGS = Object.values(FORMULA).map((f) => `/Cellar/${f}/`);
 
 const DECLARED: readonly InstallKind[] = ["git", "tarball", "homebrew"];
 
@@ -40,7 +45,11 @@ export function detectInstallKind(
       : "unknown";
   }
   if (exists(`${appRoot}/.git`)) return "git";
-  if (appRoot.includes("/Cellar/stage-utility/")) return "homebrew";
+  // Every formula we publish, not one hardcoded name. This matched only
+  // "/Cellar/stage-utility/", so the moment a beta formula existed every install
+  // from it detected as "unknown" — no strategy, no in-app update. Derived from
+  // FORMULA so adding a third track cannot reintroduce that.
+  if (HOMEBREW_KEGS.some((keg) => appRoot.includes(keg))) return "homebrew";
   if (TARBALL_PREFIXES.some((p) => isUnder(appRoot, p))) return "tarball";
   return "unknown";
 }
