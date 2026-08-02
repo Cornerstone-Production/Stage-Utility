@@ -120,7 +120,17 @@ for (const platform of PLATFORMS) {
   src = src.replace(re, (_full, before, after) => `${before}${sha}${after}`);
 }
 
-const existing = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : null;
+// Read and let a missing file be the answer, rather than asking whether it exists
+// and then reading it. The two-step version is a check-then-use race: the state it
+// tested for can change before the read, and the "does it exist" answer is already
+// carried by the read itself.
+let existing = null;
+try {
+  existing = fs.readFileSync(target, "utf8");
+} catch (err) {
+  // No formula yet is the create case. Anything else is a real failure.
+  if (err.code !== "ENOENT") throw err;
+}
 if (existing === src) {
   console.log(`[homebrew] ${path.basename(target)} already at ${version}`);
 } else {
