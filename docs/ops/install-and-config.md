@@ -78,9 +78,26 @@ removes it. Step-by-step per platform is in [INSTALL.md](../../INSTALL.md).
 
 ## Updates
 
-**Advanced → Updates** installs in place: fetch, fast-forward, reinstall if the
-lockfile changed, rebuild if the UI changed, restart. A live service or an active
-recording blocks it until you override.
+**Advanced → Updates** works however the server was installed, and so does
+switching between the stable and beta tracks. A live service or an active
+recording blocks an update until you override.
+
+**It keeps serving while it updates.** The new version is downloaded, verified
+and swapped into place while the current one is still running, and only then is
+the server asked to exit so its service manager relaunches it. The interruption
+is a single restart, not the length of the download.
+
+What actually happens depends on the install:
+
+| Installed by | How it updates |
+|---|---|
+| the one-line installer | re-runs the current installer, which downloads, verifies the checksum, swaps, and restarts |
+| Homebrew | `brew update && brew upgrade` — see [Homebrew](homebrew.md) |
+| a git checkout | fetch, reinstall if the lockfile moved, rebuild if the UI changed, restart |
+
+There is no extra tooling requirement on any platform. If the app cannot work out
+how it was installed, it refuses and says so rather than starting something it
+cannot finish.
 
 A server follows **release tags, not the tip of its branch**. Tags are cut only
 after lint, type-check, tests and the build all pass, so a failed build cannot
