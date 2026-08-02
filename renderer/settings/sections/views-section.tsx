@@ -18,6 +18,7 @@ import {
   Dialog,
   EmptyState,
   UnsavedBanner,
+  confirm,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import type { SectionProps } from "../types";
@@ -191,7 +192,24 @@ function ViewDetail({
           variant="transparent"
           size="small"
           iconOnly
-          onClick={() => handlers.handleRemoveView(view.id)}
+          onClick={async () => {
+            // Name the outputs that would lose their content. Deleting a view is
+            // not recoverable, and a custom view can be a lot of layout work.
+            const usedBy = (stageState.outputs ?? [])
+              .filter((o) => o.viewId === view.id)
+              .map((o) => o.name || o.id);
+            const inUse =
+              usedBy.length > 0
+                ? ` It is currently shown on ${usedBy.join(", ")}, which will have no view assigned.`
+                : "";
+            const ok = await confirm({
+              title: `Delete "${view.name}"?`,
+              message: `This cannot be undone.${inUse}`,
+              confirmLabel: "Delete view",
+              destructive: true,
+            });
+            if (ok) await handlers.handleRemoveView(view.id);
+          }}
           disabled={!canDelete}
           aria-label="Delete view"
         >
