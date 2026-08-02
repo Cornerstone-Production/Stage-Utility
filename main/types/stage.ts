@@ -99,6 +99,13 @@ export interface View {
   slotsLayout?: SlotsLayout | null;
   /** Show the PCO Live Prev/Next controls on a "script" View (default false). */
   showLiveControls?: boolean;
+  /**
+   * Bumped on every layout save. An editor sends back the revision it opened, so
+   * a save built on a layout someone else has since replaced can be detected
+   * instead of silently overwriting their work. Absent on views saved before
+   * this existed, which are treated as "no revision known" and never conflict.
+   */
+  layoutRev?: number;
 }
 
 /** Physical layout config for a slots-View. All measurements in inches. */
@@ -507,6 +514,12 @@ export interface PcoLiveDTO {
   serviceTimeId: string | null;
   /** ISO start of the chosen service occurrence (also the preservice target). */
   serviceTimeStartsAt: string | null;
+  /** Start time per plan item, so the automation engine's pure triggers can tell
+   *  when an item is due without reaching for the PCO client. PCO puts no time on
+   *  an Item, so each entry is either EXACT (a plan_time named after the item) or
+   *  derived from summed item lengths — `exact` says which, and derived times
+   *  drift once a service runs long. See automation-item-schedule.ts. */
+  itemSchedule?: { title: string; dueAt: string; exact: boolean }[];
   /** True once the live controller has reached the plan's "SERVICE END" marker —
    *  the service is over (recording should finalize) even though an item is still
    *  "live". Only set when the plan has an explicit end header. */

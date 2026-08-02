@@ -63,6 +63,47 @@ describe("matching one slot", () => {
     assert.deepEqual(names(resolveSlots([slot("s", pos({ name: "Vocals", notesStartsWith: "3" }))], bgv, NO_DEVICES)), ["Chris"]);
   });
 
+  describe("a named sub-variant means THAT variant", () => {
+    // Stripping the parenthetical made "Audio (MON)" and "Audio (FOH)" the same
+    // query, so a lone MON slot took whichever engineer PCO listed first. Adding
+    // the FOH slot only appeared to fix it: the two then competed for distinct
+    // people and happened to land the right way round.
+    const audio = [
+      member("pF", "Foh Person", "Audio (FOH)"),
+      member("pM", "Mon Person", "Audio (MON)"),
+    ];
+
+    test("a lone MON slot picks the MON engineer, not the first audio person", () => {
+      assert.deepEqual(names(resolveSlots([slot("s", pos({ name: "Audio (MON)" }))], audio, NO_DEVICES)), ["Mon Person"]);
+    });
+
+    test("a lone FOH slot picks the FOH engineer", () => {
+      assert.deepEqual(names(resolveSlots([slot("s", pos({ name: "Audio (FOH)" }))], audio, NO_DEVICES)), ["Foh Person"]);
+    });
+
+    test("both slots stay correct regardless of their order", () => {
+      const monFirst = [slot("a", pos({ name: "Audio (MON)" }), 0), slot("b", pos({ name: "Audio (FOH)" }), 1)];
+      const fohFirst = [slot("a", pos({ name: "Audio (FOH)" }), 0), slot("b", pos({ name: "Audio (MON)" }), 1)];
+      assert.deepEqual(names(resolveSlots(monFirst, audio, NO_DEVICES)), ["Mon Person", "Foh Person"]);
+      assert.deepEqual(names(resolveSlots(fohFirst, audio, NO_DEVICES)), ["Foh Person", "Mon Person"]);
+    });
+
+    test("a variant slot stays empty when nobody holds that variant", () => {
+      // Better empty than confidently wrong: silently showing the FOH tech on the
+      // MON slot is the failure this whole rule exists to stop.
+      const fohOnly = [member("pF", "Foh Person", "Audio (FOH)")];
+      assert.deepEqual(names(resolveSlots([slot("s", pos({ name: "Audio (MON)" }))], fohOnly, NO_DEVICES)), [null]);
+    });
+
+    test("the base name still covers every variant", () => {
+      // The behaviour the stripping existed for, unchanged.
+      assert.deepEqual(
+        names(resolveSlots([slot("s", pos({ name: "Audio" }))], [member("pM", "Mon Person", "Audio (MON)")], NO_DEVICES)),
+        ["Mon Person"],
+      );
+    });
+  });
+
   test("entries are tried in order — first hit wins", () => {
     const link = pos({ name: "Vocals", notesStartsWith: "4" }, { name: "Acoustic" });
     // No vocalist noted 4, so it falls through to Acoustic.

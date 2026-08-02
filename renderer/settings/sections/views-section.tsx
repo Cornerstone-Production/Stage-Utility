@@ -18,6 +18,7 @@ import {
   Dialog,
   EmptyState,
   UnsavedBanner,
+  confirm,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import type { SectionProps } from "../types";
@@ -135,6 +136,12 @@ function ViewDetail({
   // Parent remounts this component on view change (key={view.id}), so local
   // field state initializes fresh per view.
   const [editName, setEditName] = useState(view.name);
+  // The layout revision THIS editing session started from. Deliberately not read
+  // off the live `view` prop at save time: that updates the moment anyone else
+  // saves, so every save would look up to date and the conflict check would
+  // never fire. Advanced only by our own saves.
+  const [sessionRev, setSessionRev] = useState(view.layoutRev ?? 0);
+  const [editorEpoch, setEditorEpoch] = useState(0);
   // Preview aspect ratio — shapes the thumbnail to match the target monitor
   // (default 16:9, e.g. a 37″ 4K panel). Editor-only; doesn't affect the kiosk.
   const [previewAspect, setPreviewAspect] = useState<number>(16 / 9);
@@ -191,7 +198,24 @@ function ViewDetail({
           variant="transparent"
           size="small"
           iconOnly
-          onClick={() => handlers.handleRemoveView(view.id)}
+          onClick={async () => {
+            // Name the outputs that would lose their content. Deleting a view is
+            // not recoverable, and a custom view can be a lot of layout work.
+            const usedBy = (stageState.outputs ?? [])
+              .filter((o) => o.viewId === view.id)
+              .map((o) => o.name || o.id);
+            const inUse =
+              usedBy.length > 0
+                ? ` It is currently shown on ${usedBy.join(", ")}, which will have no view assigned.`
+                : "";
+            const ok = await confirm({
+              title: `Delete "${view.name}"?`,
+              message: `This cannot be undone.${inUse}`,
+              confirmLabel: "Delete view",
+              destructive: true,
+            });
+            if (ok) await handlers.handleRemoveView(view.id);
+          }}
           disabled={!canDelete}
           aria-label="Delete view"
         >
@@ -204,11 +228,18 @@ function ViewDetail({
       {view.kind === "custom" ? (
         <div className="flex-1 min-h-0">
           <LayoutEditor
-            key={view.id}
+            // Remounting on `editorEpoch` restarts the editor on whatever layout
+            // is in state — used when a conflict is resolved by keeping the other
+            // version, so the canvas stops showing edits that were thrown away.
+            key={`${view.id}:${editorEpoch}`}
             view={view}
             slotsViews={(stageState.views ?? []).filter((v) => v.kind === "slots")}
             templates={layoutTemplates}
-            onSave={(layout) => handlers.handleSetViewLayout(view.id, layout)}
+            onSave={async (layout) => {
+              const r = await handlers.handleSetViewLayout(view.id, layout, sessionRev);
+              setSessionRev(r.rev);
+              if (r.discarded) setEditorEpoch((e) => e + 1);
+            }}
             onSaveTemplate={handlers.handleSaveLayoutTemplate}
             onUpdateTemplate={handlers.handleUpdateLayoutTemplate}
             onDeleteTemplate={handlers.handleDeleteLayoutTemplate}

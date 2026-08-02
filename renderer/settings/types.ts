@@ -76,7 +76,17 @@ export interface SectionHandlers {
   handleDuplicateView: (id: string) => Promise<void>;
   handleRemoveView: (id: string) => Promise<void>;
   handleSetViewKind: (id: string, kind: ViewKind) => Promise<void>;
-  handleSetViewLayout: (id: string, layout: LayoutDTO) => Promise<void>;
+  /**
+   * `layoutRev` is the revision the editor opened; omit to overwrite regardless.
+   * Resolves with the view's authoritative revision afterwards, and `discarded`
+   * when a conflict was resolved by keeping the other version — the editor must
+   * then restart on the layout that was just pulled.
+   */
+  handleSetViewLayout: (
+    id: string,
+    layout: LayoutDTO,
+    layoutRev?: number,
+  ) => Promise<{ rev: number; discarded: boolean }>;
   handleSaveLayoutTemplate: (name: string, layout: LayoutDTO) => Promise<void>;
   handleUpdateLayoutTemplate: (id: string, patch: { name?: string; layout?: LayoutDTO }) => Promise<void>;
   handleDeleteLayoutTemplate: (id: string) => Promise<void>;

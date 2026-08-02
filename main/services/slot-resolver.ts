@@ -93,13 +93,43 @@ function normalizePosition(name: string | null | undefined): string {
   return (name ?? "").replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase();
 }
 
+/** True when a name ends in a "(…)" sub-variant, e.g. "Audio (MON)". */
+const hasVariant = (name: string): boolean => /\([^)]*\)$/.test(name);
+
+/**
+ * What a CONFIGURED slot position matches on.
+ *
+ * A base name ("Vocals") is deliberately broad: it matches every sub-variant, so
+ * one slot can cover a range and the note picks the person. A name that already
+ * NAMES a variant ("Audio (MON)") is not broad — it means that variant.
+ *
+ * Both used to collapse to the base, so "Audio (MON)" and "Audio (FOH)" were the
+ * same query and a MON slot took whichever audio engineer PCO listed first.
+ * Adding the FOH slot appeared to fix it only because the two then competed for
+ * distinct people and happened to land the right way round.
+ */
+function positionKey(name: string | null | undefined): string {
+  const t = (name ?? "").trim().toLowerCase();
+  return hasVariant(t) ? t : normalizePosition(t);
+}
+
+/** Does `memberPosition` satisfy a slot configured for `configured`? */
+function positionMatches(configured: string | null | undefined, memberPosition: string | null | undefined): boolean {
+  const key = positionKey(configured);
+  if (!key) return false;
+  // An explicitly-named variant is exact; a base name covers its sub-variants.
+  return hasVariant(key)
+    ? key === (memberPosition ?? "").trim().toLowerCase()
+    : normalizePosition(memberPosition) === key;
+}
+
 /** Canonical identity of a positions range. Two slots compete for people only when
  *  these are equal — same (position, note) pairs, order-insensitive. Notes are part
  *  of the identity, so "Vocals note 1" and "Vocals note 2" never compete. */
 function positionSignature(positions: SlotPositionMatch[]): string {
   return JSON.stringify(
     positions
-      .map((p) => [normalizePosition(p.name), (p.notesStartsWith ?? "").trim().toLowerCase()] as const)
+      .map((p) => [positionKey(p.name), (p.notesStartsWith ?? "").trim().toLowerCase()] as const)
       .sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0]))),
   );
 }
@@ -129,12 +159,12 @@ function heldPositions(
   members: TeamMemberDTO[],
 ): string[] {
   const key = claimKey(member);
-  const held = new Set(
-    members.filter((m) => claimKey(m) === key).map((m) => normalizePosition(m.teamPositionName)),
-  );
+  const held = members.filter((m) => claimKey(m) === key).map((m) => m.teamPositionName);
   const named = positions.filter((p) => p.name && p.name.trim());
   // An entry with no position name matches on notes alone, so it names nothing.
-  const shown = named.filter((p) => held.has(normalizePosition(p.name)));
+  // Uses the same rule as matching, so a label is only shown when the person
+  // really holds that position — a "(MON)" label never appears for the FOH tech.
+  const shown = named.filter((p) => held.some((h) => positionMatches(p.name, h)));
   if (shown.length > 0) return shown.map((p) => p.name as string);
   // Matched on a note rather than a position, or PCO calls it something the slot
   // does not list. Name what PCO actually says over a configured label the person
@@ -148,17 +178,17 @@ function matchByPositions(
   taken: Set<string>,
 ): TeamMemberDTO | null {
   for (const entry of positions) {
-    const wantPos = entry.name && entry.name.trim() ? normalizePosition(entry.name) : null;
+    const wantPos = entry.name && entry.name.trim() ? entry.name : null;
     const prefix = entry.notesStartsWith?.trim().toLowerCase() || null;
 
     // Neither constraint = a misconfigured entry. Skip it rather than claim the
     // first person on the team.
     if (wantPos === null && prefix === null) continue;
 
-    // Match on the normalized position so sub-variants group with their base
-    // (e.g. "Vocals (BGVs)" → "Vocals"), disambiguated by notes.
+    // A base name groups sub-variants under it ("Vocals" takes "Vocals (BGVs)"),
+    // disambiguated by notes; a name that already states a variant means that one.
     const pool = (
-      wantPos === null ? members : members.filter((m) => normalizePosition(m.teamPositionName) === wantPos)
+      wantPos === null ? members : members.filter((m) => positionMatches(wantPos, m.teamPositionName))
     ).filter((m) => !taken.has(claimKey(m)));
 
     if (prefix) {

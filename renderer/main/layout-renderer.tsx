@@ -173,6 +173,39 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
   );
 }
 
+/**
+ * The "recording" fill state — a solid red block covering the whole object.
+ *
+ * ABSOLUTE, not width/height 100%. A normal child sized to 100% resolves against
+ * the CONTENT box, so on an object with padding the red stopped short of its own
+ * edges: the object's background and border went on drawing a ring around it, and
+ * `borderRadius: inherit` gave the inner block the same absolute radius at a
+ * smaller size, so the corners were not concentric either. How wrong it looked
+ * therefore depended on the object's style, which is why a flat one looked right
+ * and a padded one did not. Positioned this way it covers the padding too, and
+ * the fill is the same shape as the object at any style.
+ */
+function RecordingFill({ label, ts }: { label: string; ts: CSSProperties }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: "var(--red-9)",
+        borderRadius: "inherit",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        // A long label (a record timecode pushes it wider) clips rather than
+        // spilling past the object.
+        overflow: "hidden",
+      }}
+    >
+      <span style={{ ...ts, color: "#ffffff" }}>{label}</span>
+    </div>
+  );
+}
+
 /** Render one object's inner content (the positioned box wraps this). */
 // Format a signed pacing delta — over plan reads "+M:SS", under reads "−M:SS".
 function fmtSignedDuration(sec: number): string {
@@ -607,13 +640,10 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
 
       if (active) {
         const label = c.recordingText ?? "RECORDING";
-        if (c.fillWhenRecording ?? true) {
-          return (
-            <div style={{ ...ts, color: "#ffffff", background: "var(--red-9)", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "inherit" }}>
-              {label}
-            </div>
-          );
-        }
+        // Same fill as the OBS and REAPER objects — a child sized 100% resolves
+        // against the content box, so on a padded object the red stopped short of
+        // its own edges.
+        if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
         return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
       }
       return (
@@ -640,13 +670,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         const tc = mode === "recording" && c.showTimecode && obs?.recordTimecode ? ` ${obs.recordTimecode}` : "";
         const label = `${c.recordingText ?? activeDefault}${tc}`;
         // Fill the whole box red (a strong room cue) or just color the text.
-        if (c.fillWhenRecording ?? true) {
-          return (
-            <div style={{ ...ts, color: "#ffffff", background: "var(--red-9)", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "inherit" }}>
-              {label}
-            </div>
-          );
-        }
+        if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
         // Not filling the box: same dot convention as the connection objects, so
         // a red dot always means the same thing wherever it appears on a display.
         return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
@@ -675,13 +699,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         const pos = c.showPosition && posRaw ? ` ${dot === -1 ? posRaw : posRaw.slice(0, dot)}` : "";
         const label = `${c.recordingText ?? "REAPER: Recording"}${pos}`;
         // Fill the whole box red (a strong room cue) or just color the text.
-        if (c.fillWhenRecording ?? true) {
-          return (
-            <div style={{ ...ts, color: "#ffffff", background: "var(--red-9)", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "inherit" }}>
-              {label}
-            </div>
-          );
-        }
+        if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
         // Not filling the box: same dot convention as the connection objects, so
         // a red dot always means the same thing wherever it appears on a display.
         return <StatusDot color="var(--red-10)" label={label} ts={ts} />;

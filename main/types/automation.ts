@@ -9,7 +9,7 @@ export interface ParamDef {
   max?: number;
   options?: { value: string; label: string }[];
   /** Options that can only be known at runtime (targets, service types, commands). */
-  optionsFrom?: "rosstalk-targets" | "rosstalk-commands" | "osc-targets" | "service-types" | "displays";
+  optionsFrom?: "rosstalk-targets" | "rosstalk-commands" | "osc-targets" | "service-types" | "displays" | "plan-items";
   optional?: boolean;
   help?: string;
 }

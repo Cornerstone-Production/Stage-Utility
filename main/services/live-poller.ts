@@ -36,6 +36,10 @@ function liveSignature(l: PcoLiveDTO): string {
   return JSON.stringify([
     l.mode, l.currentItemId, l.label, l.lengthSec, l.liveStartAt, l.targetAt,
     l.serviceTimeId, l.serviceTimeStartsAt, l.currentItemTitle, l.nextItemTitle,
+    // The derived item clock changes only when the plan is edited or the service
+    // time moves — rare, but automation rules read it, so a stale one would arm
+    // them against yesterday's rundown.
+    l.itemSchedule,
   ]);
 }
 // Re-push at least this often even when unchanged, so a client's clock-skew estimate

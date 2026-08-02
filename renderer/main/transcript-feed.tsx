@@ -67,7 +67,10 @@ export function TranscriptFeed({
       style={textStyle}
       className={cn(
         "flex flex-col min-h-0",
-        scrollable ? "overflow-y-auto" : "overflow-hidden",
+        // A CLIPPED feed has to overflow off the TOP: the newest line is the one
+        // being read, so it is the one that must survive. justify-end does that.
+        // mt-auto alone cannot — see the note on the inner element.
+        scrollable ? "overflow-y-auto" : "overflow-hidden justify-end",
         className,
       )}
     >
@@ -76,10 +79,15 @@ export function TranscriptFeed({
           <span className="text-title3 text-fg-faint">{emptyText}</span>
         </div>
       ) : (
-        // `mt-auto` bottom-anchors the lines when they don't fill the box, but
-        // (unlike justify-end on a scroll container) collapses once they
-        // overflow so the viewer can still scroll up to older lines.
-        <div className={cn("mt-auto flex flex-col", gapClassName)}>
+        // SCROLLABLE only: `mt-auto` bottom-anchors the lines when they don't
+        // fill the box, then collapses once they overflow so the viewer can
+        // still scroll up to older lines — which justify-end would make
+        // unreachable.
+        //
+        // That collapse is exactly why it is wrong for the clipped feed: with no
+        // scrollbar to recover them, the overflowing lines spilled off the
+        // BOTTOM and cut off the newest one mid-sentence.
+        <div className={cn(scrollable && "mt-auto", "flex flex-col", gapClassName)}>
           {visible.map((l) => (
             <p
               key={l.id}
