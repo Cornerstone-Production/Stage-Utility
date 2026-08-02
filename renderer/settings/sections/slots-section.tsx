@@ -8,6 +8,7 @@ import {
   Loader2Icon,
   GripVerticalIcon,
   Rows2Icon,
+  Layers2Icon,
   BookmarkIcon,
   RotateCcwIcon,
   DownloadIcon,
@@ -31,6 +32,7 @@ import {
   toast,
   confirm,
 } from "../../components/ui";
+import { cn } from "../../lib/cn";
 import type { SectionHandlers, WirelessChannel } from "../types";
 import { PositionRangeEditor } from "./position-picker";
 import { useStageState } from "../../main/use-stage-state";
@@ -71,8 +73,9 @@ export function makeSharesWith(slots: Slot[]): (slot: Slot) => number {
 interface SlotRowProps {
   slot: Slot;
   index: number;
-  /** Position within a stacked column group, or null when not grouped. */
-  groupPos: "top" | "middle" | "bottom" | null;
+  /** True for a stacked slot that is not the first in its column — draws the
+   *  rule separating it from the slot above inside the shared container. */
+  stackDivider?: boolean;
   wirelessChannels: WirelessChannel[];
   teamPositions: TeamPositionDTO[];
   /** How many OTHER slots share this slot's exact positions set. Those slots
@@ -86,7 +89,7 @@ interface SlotRowProps {
   dragListeners: DraggableSyntheticListeners;
 }
 
-function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, sharesWith, onChange, onRemove, dragAttributes, dragListeners }: SlotRowProps) {
+function SlotRow({ slot, index, stackDivider, wirelessChannels, teamPositions, sharesWith, onChange, onRemove, dragAttributes, dragListeners }: SlotRowProps) {
   const isPco = slot.link.kind === "pco";
   const isStatic = slot.link.kind === "static";
   const isEmpty = slot.link.kind === "empty";
@@ -188,7 +191,7 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
         <button
           {...dragAttributes}
           {...dragListeners}
-          className="cursor-grab active:cursor-grabbing touch-none p-0.5 shrink-0"
+          className="cursor-grab active:cursor-grabbing touch-pan-y p-0.5 shrink-0"
           aria-label="Drag to reorder"
           tabIndex={-1}
         >
@@ -215,28 +218,20 @@ function SlotRow({ slot, index, groupPos, wirelessChannels, teamPositions, share
   }
 
   return (
-    <div className="relative flex flex-col gap-2 py-3 pl-4">
-      {/* Group bracket — connects slots stacked into one column (shared charger) */}
-      {groupPos && (
-        <>
-          <span
-            className={`absolute left-1.5 w-[2px] rounded-full bg-gray-a7 pointer-events-none ${
-              groupPos === "top"
-                ? "top-1/2 bottom-0"
-                : groupPos === "bottom"
-                  ? "top-0 bottom-1/2"
-                  : "top-0 bottom-0"
-            }`}
-          />
-          <span className="absolute left-1.5 top-1/2 -translate-y-1/2 w-2 h-[2px] rounded-full bg-gray-a7 pointer-events-none" />
-        </>
+    <div
+      className={cn(
+        "relative flex flex-col gap-2 py-3 pl-4",
+        // Inside a stack container: inset from its edge, and ruled off from the
+        // slot above so the members stay readable as separate slots.
+        stackDivider && "border-t border-line",
       )}
+    >
       <div className="flex flex-wrap items-center gap-2">
         {/* Drag handle (drags the whole stacked group) */}
         <button
           {...dragAttributes}
           {...dragListeners}
-          className="cursor-grab active:cursor-grabbing touch-none p-0.5 shrink-0"
+          className="cursor-grab active:cursor-grabbing touch-pan-y p-0.5 shrink-0"
           aria-label="Drag to reorder"
           tabIndex={-1}
         >
@@ -597,33 +592,50 @@ export function SortableSlotGroup({
   };
   const stacked = slots.length > 1;
 
+  const rows = slots.map((slot, i) => {
+    const index = startIndex + i;
+    return (
+      <SlotRow
+        key={slot.id}
+        slot={slot}
+        index={index}
+        // Rows after the first carry a rule, so the members of a stack read as
+        // separate slots inside one column rather than one long run of fields.
+        stackDivider={stacked && i > 0}
+        wirelessChannels={wirelessChannels}
+        teamPositions={teamPositions}
+        sharesWith={sharesWith(slot)}
+        onChange={(updated) => onChange(index, updated)}
+        onRemove={() => onRemove(index)}
+        dragAttributes={attributes}
+        dragListeners={listeners}
+      />
+    );
+  });
+
   return (
     <div ref={setNodeRef} style={style}>
-      {slots.map((slot, i) => {
-        const index = startIndex + i;
-        const groupPos: "top" | "middle" | "bottom" | null = !stacked
-          ? null
-          : i === 0
-            ? "top"
-            : i === slots.length - 1
-              ? "bottom"
-              : "middle";
-        return (
-          <SlotRow
-            key={slot.id}
-            slot={slot}
-            index={index}
-            groupPos={groupPos}
-            wirelessChannels={wirelessChannels}
-            teamPositions={teamPositions}
-            sharesWith={sharesWith(slot)}
-            onChange={(updated) => onChange(index, updated)}
-            onRemove={() => onRemove(index)}
-            dragAttributes={attributes}
-            dragListeners={listeners}
-          />
-        );
-      })}
+      {stacked ? (
+        // A stack IS one column sharing one charger, so it gets one container
+        // rather than a bracket drawn beside its rows. The bracket had to be
+        // positioned against a row whose height changes when Options open, so it
+        // slid out of alignment the moment anything expanded; a container has no
+        // geometry to keep in sync and cannot drift.
+        <div className="rounded-lg border border-line bg-surface-raised">
+          <div className="flex items-center gap-1.5 px-3 pt-2">
+            <Layers2Icon className="size-3 text-fg-subtle" />
+            <span className="text-caption2 font-medium uppercase tracking-wide text-fg-subtle">
+              Stacked
+            </span>
+            <span className="text-caption2 text-fg-muted">
+              {slots.length} slots share one column
+            </span>
+          </div>
+          {rows}
+        </div>
+      ) : (
+        rows
+      )}
     </div>
   );
 }
@@ -802,7 +814,7 @@ function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers:
       <button
         {...attributes}
         {...listeners}
-        className="cursor-grab active:cursor-grabbing touch-none p-0.5 shrink-0"
+        className="cursor-grab active:cursor-grabbing touch-pan-y p-0.5 shrink-0"
         aria-label="Drag to reorder"
         tabIndex={-1}
       >

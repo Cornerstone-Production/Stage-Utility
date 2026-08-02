@@ -2,6 +2,8 @@
 // Flattens JSON:API responses to slim DTOs. ~30s in-memory cache.
 
 import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
+import { scheduleItems } from "./automation-item-schedule.js";
+import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
 import { scrub } from "./scrub.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
@@ -74,23 +76,12 @@ interface ServiceTime {
   endsAt: string | null;
 }
 
-/** True when a header title marks the start of the service (the anchor the "service
- *  time" sits at), so items above it are pre-service. Matches common phrasings
- *  case-insensitively — PCO exposes no explicit anchor, so this header is the signal.
- *  Deliberately narrow (won't match "pre-service", "service order", etc.). */
-export function isServiceStartHeader(title: string): boolean {
-  const t = (title ?? "").toUpperCase().replace(/[^A-Z ]+/g, " ").replace(/\s+/g, " ").trim();
-  return t === "SERVICE START" || t.includes("SERVICE START") || t.includes("START OF SERVICE") || t.includes("SERVICE BEGIN");
-}
-
-/** True when a header title marks the END of the service — items at/after it are
- *  post-service (buffer, stream padding, dismissal). When the live controller
- *  reaches this boundary, the service is over even if PCO still reports an item
- *  "live" (operators often park on a trailing buffer), so recording should stop.
- *  Deliberately narrow so it only matches a purpose-placed end marker. */
-export function isServiceEndHeader(title: string): boolean {
-  const t = (title ?? "").toUpperCase().replace(/[^A-Z ]+/g, " ").replace(/\s+/g, " ").trim();
-  return t === "SERVICE END" || t.includes("SERVICE END") || t.includes("END OF SERVICE") || t.includes("SERVICE DISMISS");
+/** Any of a plan's times: service occurrences, rehearsal, call times, and the
+ *  named ones a church adds for its own cues. Named times are the only exact
+ *  clock PCO offers for a point inside a plan — Items carry no time at all. */
+interface PlanTime extends ServiceTime {
+  name: string | null;
+  timeType: string;
 }
 
 /**
@@ -144,6 +135,8 @@ function toItemColors(raw: unknown, custom: boolean): PcoItemTypeColor[] {
 }
 
 class PcoService {
+  /** One-shot: log the Live session's available actions the first time we drive it. */
+  private static loggedLiveActions = false;
   private inFlight = 0;
   private pending: (() => void)[] = [];
 
@@ -324,7 +317,17 @@ class PcoService {
     // PCO exposes the action URL in the live resource's `links` — use it. The
     // Live resource is a singleton, so the path has NO live id (the fallback
     // `.../live/{action}` matches; an id in the path 404s).
-    const linkUrl = (live as unknown as { links?: Record<string, string> }).links?.[action];
+    const links = (live as unknown as { links?: Record<string, string> }).links ?? {};
+    // Log every action PCO offers on this Live session, once per run. We only
+    // consume next/previous, so whether PCO can jump straight to an item has been
+    // an open question - and the answer is in this object rather than in the
+    // documentation. Automating "fire the Doors item" is materially safer with a
+    // direct jump than by stepping through (and firing) everything in between.
+    if (!PcoService.loggedLiveActions) {
+      PcoService.loggedLiveActions = true;
+      console.log(`[pco] live actions offered: ${Object.keys(links).sort().join(", ") || "(none)"}`);
+    }
+    const linkUrl = links[action];
     const url = typeof linkUrl === "string" && linkUrl ? linkUrl : `${base}/live/${action}`;
     await this.postAction(url, appId, secret);
   }
@@ -886,9 +889,8 @@ class PcoService {
     // The chosen "service" plan_time occurrence (e.g. 9am vs 11am). Resolved in
     // EVERY mode (cached LONG) so it can (a) supply the pre-service countdown target
     // and (b) let SPL history separate back-to-back services that share one plan.
-    const serviceTime = this.pickServiceTime(
-      await this.getServiceTimes(appId, secret, serviceTypeId, planId),
-    );
+    const planTimes = await this.getPlanTimes(appId, secret, serviceTypeId, planId);
+    const serviceTime = this.pickServiceTime(planTimes.filter((t) => t.timeType === "service"));
     const serviceTimeId = serviceTime?.id ?? null;
     const serviceTimeStartsAt = serviceTime?.startsAt ?? null;
 
@@ -910,6 +912,14 @@ class PcoService {
     // listPlanItems is cached, so this is essentially free on most live ticks.
     const planItems = await this.listPlanItems(appId, secret, serviceTypeId, planId).catch(() => []);
     const { currentItemTitle, nextItemTitle } = resolvePlanCurrentNext(planItems, itemId);
+    // Item clock for the automation engine (PCO puts no time on an Item). Built
+    // from the already-cached rundown and plan times, so it costs no extra request.
+    // A plan_time named after an item pins that item exactly; the rest are derived.
+    const itemSchedule = scheduleItems(
+      planItems,
+      serviceTimeStartsAt,
+      planTimes.flatMap((t) => (t.name ? [{ name: t.name, startsAt: t.startsAt }] : [])),
+    );
 
     if (it && typeof liveStartAt === "string" && liveStartAt && itemNode) {
       // "Full Item Length" = the *plan item's* length (ItemTime.length is often 0)
@@ -943,6 +953,7 @@ class PcoService {
         itemType: curIdx >= 0 ? (planItems[curIdx]?.itemType ?? null) : null,
         serviceTimeId,
         serviceTimeStartsAt,
+        itemSchedule,
         serviceEnded,
         beforeServiceStart,
       };
@@ -978,6 +989,7 @@ class PcoService {
         nextItemTitle,
         serviceTimeId,
         serviceTimeStartsAt,
+        itemSchedule,
       };
     }
 
@@ -993,39 +1005,55 @@ class PcoService {
       nextItemTitle,
       serviceTimeId,
       serviceTimeStartsAt,
+      itemSchedule,
     };
   }
 
   /**
-   * Fetch + cache a plan's "service" plan_times ONCE (start countdown and
-   * auto-rollover end both derive from this). Previously start + end each made a
-   * separate request to the identical /plan_times URL; this collapses them to one
-   * call per plan, cached LONG since service times are effectively static day-of.
+   * Fetch + cache a plan's plan_times ONCE. The start countdown, the auto-rollover
+   * end and the derived item clock all read this one list, so it is fetched whole
+   * and filtered by callers rather than re-requested per use. Cached LONG — plan
+   * times are effectively static day-of.
+   *
+   * per_page is explicit: a plan routinely carries rehearsal, call, review and
+   * several service times, and the default page would quietly clip the tail.
    */
+  private async getPlanTimes(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<PlanTime[]> {
+    const cacheKey = `plan-times:${planId}`;
+    const cached = this.cacheGet<PlanTime[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times?per_page=100`;
+    const json = await this.request(url, appId, secret).catch(() => null);
+    const raw = json && Array.isArray(json.data) ? json.data : [];
+    const times = raw
+      .map((t) => ({
+        id: t.id,
+        name: typeof t.attributes.name === "string" ? t.attributes.name : null,
+        timeType: typeof t.attributes.time_type === "string" ? t.attributes.time_type : "",
+        startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
+        endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
+      }))
+      .filter((t): t is PlanTime => !!t.startsAt);
+
+    this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    return times;
+  }
+
+  /** Just the "service" occurrences (e.g. 9am vs 11am). */
   private async getServiceTimes(
     appId: string,
     secret: string,
     serviceTypeId: string,
     planId: string,
   ): Promise<ServiceTime[]> {
-    const cacheKey = `plan-times:${planId}`;
-    const cached = this.cacheGet<ServiceTime[]>(cacheKey);
-    if (cached) return cached;
-
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const times = json && Array.isArray(json.data) ? json.data : [];
-    const services = times
-      .filter((t) => t.attributes.time_type === "service")
-      .map((t) => ({
-        id: t.id,
-        startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
-        endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
-      }))
-      .filter((t): t is ServiceTime => !!t.startsAt);
-
-    this.cacheSet(cacheKey, services, TTL_LONG_MS);
-    return services;
+    const times = await this.getPlanTimes(appId, secret, serviceTypeId, planId);
+    return times.filter((t) => t.timeType === "service");
   }
 
   /** Choose the relevant "service" time: the soonest whose end is still in the

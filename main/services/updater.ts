@@ -28,6 +28,8 @@ import { promisify } from "node:util";
 
 import type { UpdateStatus } from "../types/stage.js";
 import { getUserDataPath } from "./app-paths.js";
+import { detectInstallKind } from "./update/install-kind.js";
+import { selectStrategy } from "./update/select-strategy.js";
 import { broadcast } from "./broadcaster.js";
 import { latestOnTrack, newerThan } from "./release-tags.js";
 import { appendUpdateLog, updateLogPath } from "./update-log.js";
@@ -379,25 +381,22 @@ class Updater {
 
   /** Spawn the detached update/switch script and enter the "updating" phase. */
   private launch(branch: string, checkout: boolean, deferRestart: boolean, tag: string | null): UpdateStatus {
-    const isWin = process.platform === "win32";
-    const script = path.join(REPO_ROOT, "scripts", isWin ? "update.ps1" : "update.sh");
-
-    // A packaged install — Homebrew, or a platform tarball — ships the built server
-    // and nothing else: no checkout, no scripts/. The git-based updater has nothing
-    // to work with there.
-    //
-    // Spawning anyway was silent rather than loud: the child is detached with stdio
-    // ignored, so bash exited immediately with "no such file" and NOTHING was written
-    // to the progress or result file. The poller had nothing to react to, so the UI
-    // sat on "Downloading update…" indefinitely with no way to learn it had already
-    // failed. Refuse up front instead, and say what does work.
-    if (!fs.existsSync(script) || !fs.existsSync(path.join(REPO_ROOT, ".git"))) {
+    // How this copy was installed decides how it updates. A git checkout pulls
+    // and builds; a packaged install re-runs its own installer; a Homebrew
+    // install asks brew. Refusing here rather than spawning is the point: the
+    // child is detached with stdio ignored, so anything that fails after the
+    // spawn fails silently, writes nothing to the progress or result file, and
+    // leaves the UI on "Downloading update..." with no way to learn it is over.
+    const kind = detectInstallKind(process.env, REPO_ROOT, fs.existsSync);
+    const strategy = selectStrategy(kind, process.platform);
+    if (!strategy) {
       throw new Error(
-        "This install updates through whatever installed it, not from here — " +
-          "`brew upgrade stage-utility` for a Homebrew install, or re-run the install " +
-          "command. In-app updates need a git checkout.",
+        `Cannot update: this install was not recognised (detected "${kind}"). ` +
+          "Reinstall with the documented installer, or use brew upgrade.",
       );
     }
+    const ready = strategy.canApply();
+    if (!ready.ok) throw new Error(`Cannot update: ${ready.reason}`);
 
     // Clear stale progress/result so the poller only reacts to this run.
     this.applyStartedAt = Date.now();
@@ -448,15 +447,30 @@ class Updater {
         `${this.status.currentTag ?? this.status.currentSha ?? "?"} -> ${tag ?? this.status.latestSha ?? "tip"}` +
         ` (${this.status.behind} commit${this.status.behind === 1 ? "" : "s"})`,
     );
-    const child = isWin
-      ? spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], {
-          cwd: REPO_ROOT,
-          detached: true,
-          stdio: "ignore",
-          env,
-          windowsHide: true,
-        })
-      : spawn("bash", [script], { cwd: REPO_ROOT, detached: true, stdio: "ignore", env });
+    // The strategy decides what runs; this stays the only place that spawns.
+    const plan = strategy.plan({
+      track: branch,
+      checkout,
+      deferRestart,
+      version: tag,
+      env: env as Record<string, string>,
+    });
+
+    // Record exactly what is about to run. When an update fails on a machine
+    // nobody can attach to, this line plus the installer's own output in
+    // update.log is the whole diagnosis: which install kind was detected, which
+    // strategy that chose, and the literal command it ran.
+    this.logEvent(
+      `install kind=${kind} strategy=${strategy.kind} platform=${process.platform} root=${REPO_ROOT}`,
+    );
+    this.logEvent(`spawning: ${plan.command} ${plan.args.join(" ")}`);
+    const child = spawn(plan.command, plan.args, {
+      cwd: REPO_ROOT,
+      detached: true,
+      stdio: "ignore",
+      env: plan.env,
+      ...(process.platform === "win32" ? { windowsHide: true } : {}),
+    });
     child.unref();
 
     this.status = { ...this.status, phase: "updating", step: "pull" };

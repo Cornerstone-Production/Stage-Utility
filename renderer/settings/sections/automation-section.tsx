@@ -116,6 +116,30 @@ function ParamField({
       </Row>
     );
   }
+  // A string param can still name a runtime source. It stays typeable on purpose:
+  // the list only knows the plan that is loaded right now, and a rule is written
+  // for every week — so picking is a convenience, not a constraint.
+  if (spec.optionsFrom && options.length > 0) {
+    const listId = `opts-${spec.optionsFrom}`;
+    return (
+      <Row label={spec.label} hint={spec.help}>
+        <>
+          <Input
+            value={String(value ?? "")}
+            list={listId}
+            onChange={(e) => onChange(e.target.value)}
+            className="h-7 text-footnote"
+          />
+          <datalist id={listId}>
+            {options.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </datalist>
+        </>
+      </Row>
+    );
+  }
+
   return (
     <Row label={spec.label} hint={spec.help}>
       <Input
@@ -442,12 +466,17 @@ export function AutomationSection() {
     queryKey: ["rosstalk:commands"],
     queryFn: () => invoke<{ id: string; label: string }[]>("rosstalk:commands"),
   });
+  const { data: planItems } = useQuery({
+    queryKey: ["automation:plan-items"],
+    queryFn: () => invoke<{ items: { value: string; label: string }[] }>("automation:plan-items"),
+  });
   const dynamicOptions = useMemo(
     () => ({
       "rosstalk-targets": (rt?.targets ?? []).map((t) => ({ value: t.id, label: t.name })),
       "rosstalk-commands": (rtCmds ?? []).map((c) => ({ value: c.id, label: c.label })),
+      "plan-items": planItems?.items ?? [],
     }),
-    [rt, rtCmds],
+    [rt, rtCmds, planItems],
   );
 
   const rules = data?.rules ?? [];
@@ -462,7 +491,7 @@ export function AutomationSection() {
     // The same wrapper every other section uses. This one had no horizontal or
     // vertical padding at all, so its cards ran to the pane edges while every
     // neighbouring tab inset them.
-    <div className="px-5 max-sm:px-3 flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh]">
+    <div className="px-5 max-sm:px-3 flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       {/* No title here — settings-view renders the page heading and its blurb from
           SECTION_DESC, same as every other section. A local h1 duplicated it. */}
 

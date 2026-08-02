@@ -139,6 +139,28 @@ function defaultCustomLayout(): LayoutDTO {
   };
 }
 
+/**
+ * A layout save was built on a revision someone else has already replaced.
+ *
+ * Its own type so the route can answer 409 rather than a generic 500: this is not
+ * a failure, it is two people editing the same view, and the caller has a real
+ * choice to make between reloading and overwriting.
+ */
+export class LayoutConflictError extends Error {
+  readonly code = "layout-conflict";
+  constructor(
+    readonly viewId: string,
+    readonly expectedRev: number,
+    readonly currentRev: number,
+  ) {
+    super(
+      `This view was changed by someone else while you were editing it ` +
+        `(you started from revision ${expectedRev}, it is now ${currentRev}).`,
+    );
+    this.name = "LayoutConflictError";
+  }
+}
+
 export class StageController {
   private state: StageState = {
     serviceTypeId: null,
@@ -192,6 +214,10 @@ export class StageController {
   // Raw (unresolved) slots for inline mic-slots objects, keyed by layout object id,
   // for the active service type. Resolved into state.slotsByLayoutObject.
   private rawSlotsByObject = new Map<string, Slot[]>();
+  // In-flight background plan re-selection, and whether the selection changed
+  // again while it was running. See scheduleGlobalReselect.
+  private reselectInFlight: Promise<void> | null = null;
+  private reselectAgain = false;
 
   // PCO credentials (set by IntegrationManager after config saves).
   private pcoAppId: string | null = null;
@@ -938,27 +964,57 @@ export class StageController {
     this.state = { ...this.state, allowedServiceTypeIds: ids };
     await settingsStore.patch({ allowedServiceTypeIds: ids });
     broadcast("settings:allowedServiceTypeIds-changed", { value: ids });
-
-    if (this.state.planMode === "auto") {
-      await this.selectGlobalNextPlan();
-      return this.state;
-    }
-
     this.broadcast();
+
+    // Returns NOW. The re-selection sweep used to be awaited here, which froze the
+    // settings checkbox for as long as it took — measured at 12.7s over 43
+    // sequential PCO requests on a 20-service-type account. Nothing about the
+    // answer is needed to acknowledge the toggle: the new list is already
+    // persisted and broadcast above, and the chosen plan arrives as its own
+    // broadcast when the sweep lands.
+    if (this.state.planMode === "auto") this.scheduleGlobalReselect();
     return this.state;
+  }
+
+  /**
+   * Re-pick the globally-next plan in the background, at most one sweep at a time.
+   *
+   * Ticking several service types in a row must not launch a sweep each: they
+   * would race to set the plan, and the last one to FINISH would win rather than
+   * the last one requested. Instead a sweep already running is asked to repeat
+   * once when it finishes, so the final run always reflects the final selection.
+   */
+  private scheduleGlobalReselect(): void {
+    if (this.reselectInFlight) {
+      this.reselectAgain = true;
+      return;
+    }
+    this.reselectInFlight = (async () => {
+      try {
+        do {
+          this.reselectAgain = false;
+          await this.selectGlobalNextPlan();
+        } while (this.reselectAgain);
+      } catch (err) {
+        // Never throws to a caller — there isn't one. A failed sweep leaves the
+        // previous plan in place, which is the safe outcome mid-service.
+        console.error("[stage-controller] background plan re-selection failed:", err);
+      } finally {
+        this.reselectInFlight = null;
+      }
+    })();
   }
 
   async setPlanMode(mode: "auto" | "manual"): Promise<StageState> {
     console.log(`[stage-controller] setPlanMode → ${scrub(mode)}`);
     this.state = { ...this.state, planMode: mode };
     await settingsStore.patch({ planMode: mode });
-
-    if (mode === "auto") {
-      await this.selectGlobalNextPlan();
-      return this.state;
-    }
-
     this.broadcast();
+
+    // Backgrounded for the same reason as setAllowedServiceTypes: the mode change
+    // itself is instant, and waiting on the PCO sweep made the Auto button appear
+    // frozen for seconds.
+    if (mode === "auto") this.scheduleGlobalReselect();
     return this.state;
   }
 
@@ -1277,11 +1333,43 @@ export class StageController {
     return presetsStore.load();
   }
 
+  /**
+   * The slots an arrangement should capture for a view.
+   *
+   * A slots-kind View keeps its slots under its own id. A CUSTOM view does not:
+   * its slots belong to inline `slots-grid` layout objects and are keyed by object
+   * id, so looking it up by view id finds nothing. Resolved here only when the
+   * view has exactly one such grid — with several, "the view's slots" has no one
+   * meaning and the caller should be saving from the grid's own editor, which
+   * sends its slots directly.
+   */
+  private slotsForPresetTarget(viewId: string): Slot[] {
+    const own = this.rawSlotsByView.get(viewId);
+    if (own?.length) return own;
+
+    const view = this.state.views.find((v) => v.id === viewId);
+    if (view?.kind === "custom" && view.layout) {
+      const gridIds: string[] = [];
+      forEachInlineSlotsGrid([view], (oid) => gridIds.push(oid));
+      if (gridIds.length === 1) return this.rawSlotsByObject.get(gridIds[0]) ?? [];
+    }
+    return [];
+  }
+
   async savePreset(target: string, name: string): Promise<SlotPreset[]> {
     const viewId = this.viewIdForTarget(target);
     console.log(`[stage-controller] savePreset "${scrub(name)}" for view=${scrub(viewId)}`);
     const presets = await presetsStore.load();
-    const rawSlots = this.rawSlotsByView.get(viewId) ?? [];
+    const rawSlots = this.slotsForPresetTarget(viewId);
+    // REFUSE rather than save nothing. This used to be `?? []`, so a target with
+    // no entry in rawSlotsByView — every custom view, whose slots live per layout
+    // object — silently produced an empty arrangement, saved and toasted as a
+    // success. An arrangement that captures nothing is never what was meant.
+    if (rawSlots.length === 0) {
+      throw new Error(
+        `Nothing to save: view ${viewId} has no slots. An arrangement captures a view's current slots.`,
+      );
+    }
     const newPreset: SlotPreset = {
       id: randomUUID(),
       name,
@@ -1560,13 +1648,26 @@ export class StageController {
     return this.state;
   }
 
-  /** Replace a custom View's layout (visual editor save). */
-  async setViewLayout(id: string, layout: LayoutDTO): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
+  /**
+   * Replace a custom View's layout (visual editor save).
+   *
+   * `expectedRev` is the revision the editor opened. When it no longer matches,
+   * someone else has saved this view in the meantime and this save would erase
+   * their work, so it is REFUSED and the caller decides. Omitting it forces the
+   * save through — that is the deliberate "overwrite anyway" path.
+   */
+  async setViewLayout(id: string, layout: LayoutDTO, expectedRev?: number): Promise<StageState> {
+    const current = this.state.views.find((v) => v.id === id);
+    if (!current) {
       throw new Error(`views:setLayout — view ${id} not found`);
     }
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, layout } : v));
-    console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${layout.objects.length} objects)`);
+    const rev = current.layoutRev ?? 0;
+    if (expectedRev !== undefined && expectedRev !== rev) {
+      throw new LayoutConflictError(id, expectedRev, rev);
+    }
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, layout, layoutRev: rev + 1 } : v));
+    const objectCount = Array.isArray(layout.objects) ? layout.objects.length : 0;
+    console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${scrub(objectCount)} objects) rev=${rev + 1}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     // Load raw slots for any newly-added inline mic-slots objects, and drop the

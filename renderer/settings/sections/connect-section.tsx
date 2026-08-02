@@ -31,7 +31,7 @@ import type { SectionProps } from "../types";
 
 export function ConnectSection({ stageState, handlers }: Pick<SectionProps, "stageState" | "handlers">) {
   return (
-    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
+    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       <FieldSet>
         <FieldGroup>
           <Field orientation="horizontal">

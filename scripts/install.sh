@@ -153,6 +153,17 @@ UNIT
 log "Enabling and (re)starting the service..."
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
+
+# Registering a service and having it start at boot are different things. This
+# checks the second, because the first is what an installer usually proves - and
+# an install that skipped it looks identical to one that worked, right up until
+# the building loses power.
+if systemctl is-enabled "${SERVICE_NAME}" >/dev/null 2>&1; then
+  echo "==> boot: enabled - will restart after a power loss"
+else
+  echo "error: ${SERVICE_NAME} is not enabled at boot; it would not survive a restart." >&2
+  exit 1
+fi
 systemctl restart "${SERVICE_NAME}"
 
 sleep 1

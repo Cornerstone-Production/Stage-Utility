@@ -6,12 +6,27 @@
 // the next rule.
 
 import type { ActionDef, ActionResult } from "../types/automation.js";
+import type { PcoLiveDTO } from "../types/stage.js";
+import { advanceGuard } from "./automation-pco-items.js";
 import { broadcast } from "./broadcaster.js";
 import { oscManager } from "./osc-manager.js";
 import { rosstalkManager } from "./rosstalk-manager.js";
+import { stageController } from "./stage-controller.js";
 
 const ok = (detail: string): ActionResult => ({ ok: true, detail });
 const fail = (detail: string): ActionResult => ({ ok: false, detail });
+
+/** The two things the PCO Live action touches, behind a seam. Tests replace them;
+ *  nothing else should. Kept deliberately narrow — the point is to be able to
+ *  assert that one invocation issues at MOST one step, which is the guarantee
+ *  that stops a rule running away through a live plan. */
+export const liveDeps: {
+  getLive: () => PcoLiveDTO | null;
+  advance: () => Promise<void>;
+} = {
+  getLive: () => stageController.getLastLive(),
+  advance: () => stageController.controlLive("next"),
+};
 
 export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
   "log.message": {
@@ -58,6 +73,41 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
         await oscManager.send(String(params.targetId), String(params.address), []);
         return ok(`sent ${String(params.address)}`);
       } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  },
+
+  "pco.live.advance": {
+    id: "pco.live.advance",
+    label: "Advance PCO Live one item",
+    help:
+      "Takes exactly one step forward, the same as PCO's own next-item control. PCO has no jump action, so a rule can never skip ahead. Needs the connected account to be permitted to control Live for this service type; it never takes control from whoever is driving.",
+    params: [
+      {
+        key: "guardTitle",
+        label: "Only if the next item is",
+        type: "string",
+        optional: true,
+        optionsFrom: "plan-items",
+        help: "Leave blank to step forward unconditionally.",
+      },
+    ],
+    run: async (params, ctx) => {
+      try {
+        const live = liveDeps.getLive();
+        const verdict = advanceGuard(live?.nextItemTitle ?? null, String(params.guardTitle ?? ""));
+        // A skip is a real outcome, not a silent no-op: the reason has to reach
+        // the Activity log or a rule that never fires looks identical to one that
+        // was never armed.
+        if (!verdict.advance) return ok(`skipped - ${verdict.reason}`);
+        if (ctx.simulate) return ok(`would advance - ${verdict.reason}`);
+        // ONE step. Never a loop: PCO would fire every item stepped over.
+        await liveDeps.advance();
+        return ok(`advanced - ${verdict.reason}`);
+      } catch (e) {
+        // PCO's own wording (e.g. a 403 refusing an account that cannot control
+        // Live) is the useful part — pass it through verbatim.
         return fail(e instanceof Error ? e.message : String(e));
       }
     },

@@ -15,6 +15,8 @@ import { fileURLToPath } from "url";
 
 
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
+import { execFileSync } from "node:child_process";
+
 import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
 import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
@@ -372,6 +374,94 @@ export class RemoteServer {
     return `http://${getLanIp()}:${PORT}`;
   }
 
+  /**
+   * Best-effort "who is holding this port", for the log only.
+   *
+   * Fixed argument vectors, no shell, no interpolation of anything a request can
+   * reach — the port is a number this process chose. Any failure is silent: this
+   * runs while something has already gone wrong, and it must not become a second
+   * problem.
+   */
+  private portHolder(): string {
+    const probes: [string, string[]][] =
+      process.platform === "win32"
+        ? [["netstat", ["-ano", "-p", "TCP"]]]
+        : [
+            ["lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]],
+            ["ss", ["-lptn", `sport = :${PORT}`]],
+          ];
+    for (const [cmd, args] of probes) {
+      try {
+        const out = execFileSync(cmd, args, { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] });
+        const line = out.split("\n").find((l: string) => l.includes(String(PORT)));
+        if (line?.trim()) return line.trim();
+      } catch {
+        // Tool missing or nothing listening — try the next one.
+      }
+    }
+    return "could not determine which process holds it";
+  }
+
+  /**
+   * Bind the main port, tolerating a previous instance that has not let go yet.
+   *
+   * This used to reject straight into an unhandled rejection, which exited with a
+   * bare EADDRINUSE stack trace. Under `Restart=always` that becomes an
+   * unrecoverable loop: systemd relaunches, the port is still held, it dies
+   * again, forever — and the log shows a stack trace rather than the one fact
+   * that resolves it, which is WHICH process holds the port.
+   *
+   * The friendly port (80) has always retried for exactly this reason. The main
+   * port now does too, and says what is in the way.
+   */
+  private async listenWithRetry(): Promise<void> {
+    const RETRY_MS = 2000;
+    const GIVE_UP_AFTER_MS = 60_000;
+    const started = Date.now();
+
+    for (;;) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          // Both handlers are removed on either outcome. Passing the success
+          // callback to listen() instead left one registered per failed attempt,
+          // and every one of them fired once the port finally freed - three
+          // retries produced three "listening" lines for a single bind.
+          const onListening = () => {
+            this.server!.removeListener("error", onError);
+            console.log(`[remote-server] listening on 0.0.0.0:${PORT} (LAN: ${this.getLanUrl()})`);
+            resolve();
+          };
+          const onError = (err: NodeJS.ErrnoException) => {
+            this.server!.removeListener("listening", onListening);
+            reject(err);
+          };
+          this.server!.once("listening", onListening);
+          this.server!.once("error", onError);
+          this.server!.listen(PORT, "0.0.0.0");
+        });
+        return;
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        if (e.code !== "EADDRINUSE") throw err;
+
+        const waited = Date.now() - started;
+        if (waited >= GIVE_UP_AFTER_MS) {
+          console.error(
+            `[remote-server] port ${PORT} is still held after ${Math.round(waited / 1000)}s. ` +
+              `Holder: ${this.portHolder()}. ` +
+              `Stop that process (kill its pid, or: sudo fuser -k ${PORT}/tcp) and start the service again.`,
+          );
+          throw err;
+        }
+        console.warn(
+          `[remote-server] port ${PORT} in use, retrying in ${RETRY_MS / 1000}s ` +
+            `(${Math.round(waited / 1000)}s so far). Holder: ${this.portHolder()}`,
+        );
+        await new Promise((r) => setTimeout(r, RETRY_MS));
+      }
+    }
+  }
+
   async start(): Promise<void> {
     if (this.server) return;
 
@@ -471,13 +561,7 @@ export class RemoteServer {
     this.server = http.createServer(handler);
     this.server.on("connection", trackConn);
 
-    await new Promise<void>((resolve, reject) => {
-      this.server!.listen(PORT, "0.0.0.0", () => {
-        console.log(`[remote-server] listening on 0.0.0.0:${PORT} (LAN: ${this.getLanUrl()})`);
-        resolve();
-      });
-      this.server!.on("error", reject);
-    });
+    await this.listenWithRetry();
 
     // Friendly port (e.g. 80) so the LAN URL needs no port. Bound in addition to
     // PORT and self-healing: if it can't bind right now (e.g. the previous process

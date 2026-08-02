@@ -10,8 +10,16 @@
 // in automation-triggers.test.ts.
 
 import type { ParamDef, TriggerDef } from "../types/automation.js";
+import { dueAt } from "./automation-due-time.js";
+import { findItemByTitle } from "./automation-pco-items.js";
 
-type Live = { mode?: string; currentItemTitle?: string | null; serviceTimeStartsAt?: string | null };
+type Live = {
+  mode?: string;
+  currentItemTitle?: string | null;
+  serviceTimeStartsAt?: string | null;
+  serverNow?: string;
+  itemSchedule?: { title: string; dueAt: string }[];
+};
 type People = { total?: { attendance?: number | null; occupancy?: number | null } | null };
 type Rec = { connected?: boolean; recording?: boolean };
 
@@ -74,6 +82,68 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
       const after = (asLive(next).currentItemTitle ?? "").toLowerCase();
       // Fire on the transition INTO a matching item, not while sitting on it.
       return !before.includes(want) && after.includes(want);
+    },
+  }),
+
+  "pco.item-due": def({
+    id: "pco.item-due",
+    label: "Plan item is due",
+    channel: "pco:live",
+    params: [
+      {
+        key: "title",
+        label: "Item",
+        type: "string",
+        optionsFrom: "plan-items",
+        help: "Case-insensitive, matches part of the title. Renaming the item in PCO stops the rule.",
+      },
+      {
+        key: "anchor",
+        label: "Relative to",
+        type: "enum",
+        options: [
+          { value: "item", label: "The item's own time" },
+          { value: "service-start", label: "The service start" },
+        ],
+      },
+      {
+        key: "offsetMinutes",
+        label: "Offset (minutes)",
+        type: "number",
+        min: -720,
+        max: 720,
+        help: "Negative fires before, positive after.",
+      },
+    ],
+    help:
+      "Fires once, when the chosen moment passes. An item is exact if a plan time is named after it; otherwise its time is estimated from item lengths and drifts if the service runs long.",
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      const before = asLive(prev);
+      const after = asLive(next);
+
+      // THE EDGE IS IN TIME, not in the payload — nothing about the live state
+      // changes when an item falls due. serverNow is the clock the payload was
+      // built against, and consecutive snapshots' windows are contiguous by
+      // construction, so the due moment lands in exactly one of them: fires once,
+      // and never twice, with no state kept here. Using the engine's own `now` as
+      // the upper bound instead would overlap successive windows and double-fire.
+      const from = Date.parse(before.serverNow ?? "");
+      const to = Date.parse(after.serverNow ?? "");
+      if (Number.isNaN(from) || Number.isNaN(to) || to <= from) return false;
+
+      const item = findItemByTitle(after.itemSchedule ?? [], String(params.title ?? ""));
+      if (!item) return false; // unknown item: never guess at a moment to fire
+
+      const due = dueAt({
+        anchor: params.anchor === "service-start" ? "service-start" : "item",
+        itemTimeIso: item.dueAt,
+        serviceStartIso: after.serviceTimeStartsAt ?? null,
+        offsetMinutes: Number(params.offsetMinutes) || 0,
+      });
+      if (due === null) return false;
+
+      return due > from && due <= to;
     },
   }),
 

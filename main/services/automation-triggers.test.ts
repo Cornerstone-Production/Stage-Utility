@@ -122,6 +122,77 @@ describe("recording triggers", () => {
   });
 });
 
+describe("pco.item-due", () => {
+  const t = AUTOMATION_TRIGGERS["pco.item-due"];
+  const DOORS = NOW + 300_000; // due five minutes from NOW
+  // Two consecutive snapshots. The trigger's edge is in time, not in the payload,
+  // so what distinguishes them is serverNow — exactly as the live poller sends it.
+  const at = (ms: number) =>
+    live({
+      serverNow: new Date(ms).toISOString(),
+      itemSchedule: [
+        { title: "Doors Open", dueAt: new Date(DOORS).toISOString(), exact: true },
+        { title: "Welcome", dueAt: new Date(DOORS + 900_000).toISOString(), exact: false },
+      ],
+    });
+  const params = { title: "doors", anchor: "item", offsetMinutes: 0 };
+
+  test("does not fire before the due time", () => {
+    assert.equal(t.didFire(at(NOW), at(NOW + 60_000), params, NOW), false);
+  });
+
+  test("fires on the snapshot whose window contains the due time", () => {
+    assert.equal(t.didFire(at(DOORS - 30_000), at(DOORS + 30_000), params, NOW), true);
+  });
+
+  test("does NOT fire again on the next snapshot", () => {
+    // The window that already covered the due moment must not cover it twice —
+    // a second fire would advance the plan an extra item, live.
+    assert.equal(t.didFire(at(DOORS - 30_000), at(DOORS + 30_000), params, NOW), true);
+    assert.equal(t.didFire(at(DOORS + 30_000), at(DOORS + 90_000), params, NOW), false);
+  });
+
+  test("does not fire long after the due time", () => {
+    // Starting the app mid-service must not fire a cue whose moment has passed.
+    assert.equal(t.didFire(at(DOORS + 3_600_000), at(DOORS + 3_660_000), params, NOW), false);
+  });
+
+  test("does not fire when no item matches the title", () => {
+    assert.equal(t.didFire(at(DOORS - 30_000), at(DOORS + 30_000), { ...params, title: "offering" }, NOW), false);
+  });
+
+  test("does not fire on an empty title rather than matching the first item", () => {
+    assert.equal(t.didFire(at(DOORS - 30_000), at(DOORS + 30_000), { ...params, title: "" }, NOW), false);
+  });
+
+  test("a negative offset fires early by that many minutes", () => {
+    const p = { ...params, offsetMinutes: -2 };
+    const due = DOORS - 120_000;
+    assert.equal(t.didFire(at(due - 10_000), at(due + 10_000), p, NOW), true);
+    assert.equal(t.didFire(at(DOORS - 10_000), at(DOORS + 10_000), p, NOW), false);
+  });
+
+  test("the service-start anchor ignores the item's own time", () => {
+    // serviceTimeStartsAt is NOW + 10m in the fixture; Doors is due at NOW + 5m.
+    const p = { title: "doors", anchor: "service-start", offsetMinutes: 0 };
+    const start = NOW + 600_000;
+    assert.equal(t.didFire(at(start - 10_000), at(start + 10_000), p, NOW), true);
+    assert.equal(t.didFire(at(DOORS - 10_000), at(DOORS + 10_000), p, NOW), false);
+  });
+
+  test("does not fire when the payload carries no schedule", () => {
+    const bare = live({ serverNow: new Date(DOORS - 30_000).toISOString() });
+    const bare2 = live({ serverNow: new Date(DOORS + 30_000).toISOString() });
+    assert.equal(t.didFire(bare, bare2, params, NOW), false);
+  });
+
+  test("does not fire when the clock did not advance between snapshots", () => {
+    // A repeated or out-of-order snapshot must not re-open a window.
+    assert.equal(t.didFire(at(DOORS + 30_000), at(DOORS + 30_000), params, NOW), false);
+    assert.equal(t.didFire(at(DOORS + 30_000), at(DOORS - 30_000), params, NOW), false);
+  });
+});
+
 describe("malformed payloads", () => {
   test("no trigger throws on a payload missing its fields", () => {
     for (const [id, t] of Object.entries(AUTOMATION_TRIGGERS)) {

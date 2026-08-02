@@ -17,7 +17,7 @@ touches them.
 |---|---|
 | `brew services start stage-utility` | run it now and at login |
 | `brew services stop stage-utility` | stop it |
-| `brew upgrade stage-utility` | move to the newest release |
+| `brew update && brew upgrade stage-utility` | move to the newest release |
 | `brew services info stage-utility` | is it running, and where are the logs |
 
 The formula installs a prebuilt archive that already contains its own Node
@@ -35,9 +35,31 @@ run, and where `brew upgrade` alongside everything else is convenient.
 
 ## In-app updates
 
-A Homebrew install is not a git checkout, so **Settings → Advanced → Updates**
-reports the running version but does not apply updates — Homebrew owns the
-files. Use `brew upgrade stage-utility`.
+**Settings → Advanced → Updates** works here, and so does switching tracks. The
+app never writes into the keg: it runs `brew update && brew upgrade` for you, so
+Homebrew stays the source of truth and `brew info` keeps telling the truth.
+
+Switching tracks swaps which formula is installed, because brew has no notion of
+a channel within one formula:
+
+| Track | Formula |
+|---|---|
+| main | `stage-utility` |
+| beta | `stage-utility-beta` |
+
+The app resolves the target formula **before** uninstalling the current one, so a
+formula that cannot be found fails while the machine still has a working install.
+Uninstalling stops the background agent, so the switch finishes by starting the
+new formula's service explicitly.
+
+**Your data survives a switch.** Config, history and secrets live in
+`$(brew --prefix)/var/stage-utility`, outside the keg, and `brew uninstall`
+removes the keg only.
+
+If a switch fails partway — after the uninstall but before the install — the
+machine is left with nothing installed and one `brew install stage-utility`
+puts it back. That window is the price of brew owning the keg; installing both
+formulae at once is not an option, since they collide on the same binary name.
 
 ## The tap
 

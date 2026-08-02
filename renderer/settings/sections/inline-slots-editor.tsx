@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Loader2Icon, PlusIcon } from "lucide-react";
 import { Button, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Separator, toast } from "../../components/ui";
@@ -63,7 +63,13 @@ export function InlineSlotsEditor({
     setLocalSlots([...slots].sort((a, b) => a.order - b.order));
   });
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // Mouse and touch separately - see the note in settings-view.tsx. A single
+  // PointerSensor claims the gesture on touch-down, which stops the list
+  // scrolling on a phone.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  );
 
   function updateSlot(idx: number, updated: Slot) {
     setLocalSlots((prev) => prev.map((s, i) => (i === idx ? updated : s)));

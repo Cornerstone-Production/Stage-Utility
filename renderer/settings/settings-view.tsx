@@ -1,9 +1,9 @@
-import { invoke, onNotification } from "../lib/api";
+import { invoke, onNotification, type ApiError } from "../lib/api";
 import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { buildLabel } from "../lib/build-label";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useState, useEffect, useRef, Fragment } from "react";
-import { PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import {
   SplitView,
@@ -16,6 +16,7 @@ import {
   Tooltip,
   toast,
   ErrorBoundary,
+  confirm,
 } from "../components/ui";
 import {
   Loader2Icon,
@@ -562,8 +563,21 @@ export function SettingsView() {
     return unsub;
   }, [queryClient]);
 
-  // DnD sensors
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // DnD sensors — mouse and touch deliberately separate.
+  //
+  // A single PointerSensor treats them identically: it claims the gesture on
+  // touch-down and waits to see whether you move far enough to be dragging,
+  // which is exactly the window in which the page cannot scroll. On a phone
+  // that made the Displays and Views lists unscrollable, because every swipe
+  // that began on a card started as a maybe-drag.
+  //
+  // Distance works for a mouse, where a click is a distinct act from a drag.
+  // Touch needs TIME instead: hold briefly to drag, swipe to scroll. 200ms is
+  // short enough to feel deliberate and long enough that a flick never trips it.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  );
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -955,11 +969,44 @@ export function SettingsView() {
     }
   }
 
-  async function handleSetViewLayout(id: string, layout: LayoutDTO) {
+  const revOf = (s: StageState | undefined, id: string) =>
+    s?.views?.find((v) => v.id === id)?.layoutRev ?? 0;
+
+  async function handleSetViewLayout(
+    id: string,
+    layout: LayoutDTO,
+    layoutRev?: number,
+  ): Promise<{ rev: number; discarded: boolean }> {
     try {
-      const next = await ipc<StageState>("views:setLayout", { id, layout });
+      const next = await ipc<StageState>("views:setLayout", { id, layout, layoutRev });
       queryClient.setQueryData(["stage:getState"], next);
+      return { rev: revOf(next, id), discarded: false };
     } catch (err) {
+      // 409: someone else saved this view since this editor opened it. Neither
+      // outcome is safe to pick automatically — one loses their work, the other
+      // loses yours — so the person who can see both decides.
+      if ((err as ApiError).code === "layout-conflict") {
+        const overwrite = await confirm({
+          title: "Someone else changed this view",
+          message: `${(err as Error).message} Overwrite their version with yours, or discard your changes and load theirs?`,
+          confirmLabel: "Overwrite theirs",
+          cancelLabel: "Keep theirs",
+          destructive: true,
+        });
+        if (overwrite) {
+          // No layoutRev = save unconditionally. Deliberate, and only reachable
+          // from the dialog above.
+          const next = await ipc<StageState>("views:setLayout", { id, layout });
+          queryClient.setQueryData(["stage:getState"], next);
+          toast.success("Layout saved, replacing the other version.");
+          return { rev: revOf(next, id), discarded: false };
+        }
+        await queryClient.invalidateQueries({ queryKey: ["stage:getState"] });
+        toast.success("Loaded their version. Your changes were discarded.");
+        // Not an error to the caller — a chosen outcome. `discarded` tells the
+        // editor to restart on the layout it just pulled.
+        return { rev: revOf(queryClient.getQueryData<StageState>(["stage:getState"]), id), discarded: true };
+      }
       toast.error(`Failed to save layout: ${String(err)}`);
       throw err;
     }
@@ -1295,19 +1342,19 @@ export function SettingsView() {
         return <BrandingSection stageState={stageState} handlers={handlers} />;
       case "service-history":
         return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
             <ServiceHistorySection key={historyNonce} />
           </div>
         );
       case "baptisms":
         return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
             <BaptismsSection />
           </div>
         );
       case "patch":
         return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
             <PatchSection />
           </div>
         );
