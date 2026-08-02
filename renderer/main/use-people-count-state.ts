@@ -118,7 +118,15 @@ export function useLiveServiceAttendance(enabled: boolean): number | null {
   return val;
 }
 
-export type PeopleMetric = "attendance" | "serviceAttendance" | "occupancy" | "peak" | "min" | "avg";
+export type PeopleMetric =
+  | "attendance"
+  | "serviceAttendance"
+  | "occupancy"
+  | "peak"
+  | "servicePeak"
+  | "servicePeakAttendance"
+  | "min"
+  | "avg";
 
 /** Resolve the value an object should show, by metric + optional zone. Returns
  *  null when there's no data (so the renderer can show a placeholder).
@@ -132,7 +140,11 @@ export function resolvePeopleValue(
   if (!people) return null;
   // Per-service attendance isn't a live building-count field — it comes from the
   // in-progress record (ctx.serviceAttendance) and is special-cased at the call site.
-  if (metric === "serviceAttendance") return null;
+  // These three come from the in-progress attendance RECORD, not the live
+  // building counts, and are special-cased at the call site.
+  if (metric === "serviceAttendance" || metric === "servicePeak" || metric === "servicePeakAttendance") {
+    return null;
+  }
   if (zoneId) {
     if (metric === "attendance" || metric === "occupancy") {
       const z = people.zones.find((zone) => zone.id === zoneId);
@@ -141,4 +153,41 @@ export function resolvePeopleValue(
     return null;
   }
   return people.total[metric] ?? null;
+}
+
+/**
+ * This service's peaks, from the in-progress attendance record.
+ *
+ * The building's `peak` is TODAY's maximum, so a second event on the same day
+ * inherits the morning's number — an Events night showing the weekend's 1,249.
+ * The record is scoped to one service occurrence, so these reset with it.
+ */
+export function useLiveServicePeaks(
+  enabled: boolean,
+): { occupancy: number | null; attendance: number | null } {
+  const [val, setVal] = useState<{ occupancy: number | null; attendance: number | null }>({
+    occupancy: null,
+    attendance: null,
+  });
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    const take = (rec: ServiceAttendance | null) => ({
+      occupancy: rec?.peakOccupancy ?? null,
+      attendance: rec?.peakAttendance ?? null,
+    });
+    invoke<ServiceAttendance | null>("attendance:getHistoryCurrent")
+      .then((rec) => {
+        if (!cancelled) setVal(take(rec));
+      })
+      .catch(() => {
+        /* ignore */
+      });
+    const off = onNotification("attendance:history", (p) => setVal(take(p as ServiceAttendance | null)));
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [enabled]);
+  return val;
 }

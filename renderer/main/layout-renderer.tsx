@@ -12,7 +12,7 @@ import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
 import { useReaperState } from "./use-reaper-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
-import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance } from "./use-people-count-state";
+import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessChannels } from "./use-wireless-channels";
@@ -53,6 +53,9 @@ export interface LayoutRenderCtx {
   /** Per-service attendance for the current live service (baselined) — the
    *  "Attendance (this service)" metric, vs the day-total `peopleCount.attendance`. */
   serviceAttendance: number | null;
+  /** This service's peaks, from the attendance record (not today's building peak). */
+  servicePeak: number | null;
+  servicePeakAttendance: number | null;
   /** Live baptism-timer state — for the baptism-timer object. */
   baptism: BaptismState | null;
   /** In-progress service timeline (planned vs actual item timing) — for the
@@ -602,10 +605,12 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       const value =
         metric === "min" ? ctx.serviceLow
         : metric === "serviceAttendance" ? ctx.serviceAttendance
+        : metric === "servicePeak" ? ctx.servicePeak
+        : metric === "servicePeakAttendance" ? ctx.servicePeakAttendance
         : resolvePeopleValue(ctx.peopleCount, metric, c.zoneId);
       if (value == null) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
       const fallbackLabel =
-        metric === "occupancy" ? "in room" : metric === "peak" ? "peak att." : metric === "min" ? "low" : metric === "avg" ? "avg att." : metric === "serviceAttendance" ? "svc entries" : "entries";
+        metric === "occupancy" ? "in room" : metric === "peak" ? "peak att." : metric === "min" ? "low" : metric === "avg" ? "avg att." : metric === "serviceAttendance" ? "svc entries" : metric === "servicePeak" ? "svc peak" : metric === "servicePeakAttendance" ? "svc peak att." : "entries";
       return (
         <span style={ts}>
           {value.toLocaleString()}
@@ -620,7 +625,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "people-graph":
       return <PeopleGraphObject ctx={ctx} config={c} ts={ts} />;
     case "people-panel":
-      return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} ts={ts} H={ctx.H} />;
+      return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} servicePeak={ctx.servicePeak} servicePeakAttendance={ctx.servicePeakAttendance} ts={ts} H={ctx.H} />;
     case "baptism-timer":
       return <BaptismTimer state={ctx.baptism} config={c} ts={ts} now={ctx.now} />;
     case "record-status": {
@@ -1175,6 +1180,8 @@ const PEOPLE_PANEL_LABELS: Record<string, string> = {
   peak: "Peak att.",
   attendance: "Entries (day)",
   serviceAttendance: "Entries (svc)",
+  servicePeak: "Peak in room (svc)",
+  servicePeakAttendance: "Peak att. (svc)",
   min: "Low",
   avg: "Avg att.",
   avgService: "Avg / service",
@@ -1186,6 +1193,8 @@ function PeoplePanel({
   people,
   serviceLow,
   serviceAttendance,
+  servicePeak,
+  servicePeakAttendance,
   ts,
   H,
 }: {
@@ -1193,6 +1202,8 @@ function PeoplePanel({
   people: PeopleCountDTO | null;
   serviceLow: number | null;
   serviceAttendance: number | null;
+  servicePeak: number | null;
+  servicePeakAttendance: number | null;
   ts: CSSProperties;
   H: number;
 }) {
@@ -1221,7 +1232,12 @@ function PeoplePanel({
     // "min" = lowest in-room during the live service (the service "floor"), from
     // the attendance record — not the whole-day minimum (which is ~always 0).
     const v =
-      k === "avgService" ? serviceAvg : k === "min" ? serviceLow : k === "serviceAttendance" ? serviceAttendance : ((t as Record<string, number | null> | undefined)?.[k] ?? null);
+      k === "avgService" ? serviceAvg
+      : k === "min" ? serviceLow
+      : k === "serviceAttendance" ? serviceAttendance
+      : k === "servicePeak" ? servicePeak
+      : k === "servicePeakAttendance" ? servicePeakAttendance
+      : ((t as Record<string, number | null> | undefined)?.[k] ?? null);
     return { text: v == null ? "—" : v.toLocaleString(), color: base };
   };
   return (
@@ -1800,6 +1816,7 @@ export function useLayoutData(layout?: LayoutDTO) {
   const peopleCount = usePeopleCountState(peopleWanted);
   const serviceLow = useLiveServiceLow(peopleWanted);
   const serviceAttendance = useLiveServiceAttendance(peopleWanted);
+  const servicePeaks = useLiveServicePeaks(peopleWanted);
   const wireless = useWirelessChannels(want(["wireless-summary", "wireless-channel"]));
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
@@ -1817,7 +1834,7 @@ export function useLayoutData(layout?: LayoutDTO) {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   });
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -1825,7 +1842,7 @@ export function useLayoutData(layout?: LayoutDTO) {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -1869,7 +1886,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // with the window instead of the design canvas.
   const fill = canvas.fit === "fill";
   const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

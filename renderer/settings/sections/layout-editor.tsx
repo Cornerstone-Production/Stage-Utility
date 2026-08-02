@@ -1779,7 +1779,7 @@ export function LayoutEditor({
               selectedIds={selectedIds}
               gridOn={gridOn && isEditing}
               interactive={isEditing}
-              ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels }}
+              ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}
@@ -2811,6 +2811,8 @@ function Inspector({
                   <SelectItem value="peak">Peak attendance (today)</SelectItem>
                   <SelectItem value="min">Lowest attendance (today)</SelectItem>
                   <SelectItem value="avg">Avg attendance (today)</SelectItem>
+                  <SelectItem value="servicePeak">Peak in room (this service)</SelectItem>
+                  <SelectItem value="servicePeakAttendance">Peak attendance (this service)</SelectItem>
                   <SelectItem value="serviceAttendance">Total entries (this service)</SelectItem>
                   <SelectItem value="attendance">Total entries (day)</SelectItem>
                 </SelectContent>
@@ -2838,11 +2840,13 @@ function Inspector({
       })()}
       {c.type === "people-graph" && <PeopleGraphInspector c={c} onConfig={onConfig} />}
       {c.type === "people-panel" && (() => {
-        const ORDER = ["occupancy", "peak", "serviceAttendance", "attendance", "capacity", "avg", "avgService", "vsAverage", "min"] as const;
-        const LABEL: Record<string, string> = { occupancy: "In room", peak: "Peak att.", serviceAttendance: "Entries (svc)", attendance: "Entries (day)", capacity: "% capacity", avg: "Avg att.", avgService: "Avg / service", vsAverage: "vs average", min: "Lowest att." };
+        const ORDER = ["occupancy", "servicePeak", "peak", "servicePeakAttendance", "serviceAttendance", "attendance", "capacity", "avg", "avgService", "vsAverage", "min"] as const;
+        const LABEL: Record<string, string> = { occupancy: "In room", peak: "Peak att.", servicePeak: "Peak in room (svc)", servicePeakAttendance: "Peak att. (svc)", serviceAttendance: "Entries (svc)", attendance: "Entries (day)", capacity: "% capacity", avg: "Avg att.", avgService: "Avg / service", vsAverage: "vs average", min: "Lowest att." };
         const HINT: Record<string, string> = {
           occupancy: "People currently in the room right now (entries minus exits).",
           peak: "Peak attendance — the highest number of people in the room today.",
+          servicePeak: "Highest number in the room during THIS service — resets each service, unlike the day-wide peak.",
+          servicePeakAttendance: "Highest cumulative entries during THIS service — resets each service.",
           serviceAttendance: "Total entries THIS service — cumulative door count (double-counts re-entries), reset per service.",
           attendance: "Total entries today across ALL services — cumulative door count, double-counts re-entries.",
           capacity: "In-room now as a percentage of the configured building capacity.",

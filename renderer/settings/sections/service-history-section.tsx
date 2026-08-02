@@ -88,6 +88,10 @@ interface OverviewData {
   overrunTrend: Trend | null;
   peakAttendance: string;
   peakSub?: string;
+  /** The service type these figures are scoped to, for the labels. The overview
+   *  has always filtered by activeType; the labels said "weekend" regardless, so
+   *  an Events night showed Events numbers under a Weekend heading. */
+  scopeName: string | null;
 }
 
 /** ISO → local "HH:MM" for a <input type="time">, or "" if absent/invalid. */
@@ -519,8 +523,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       overrunTrend,
       peakAttendance: peakWeekend ? peakWeekend.value.toLocaleString() : "—",
       peakSub: peakWeekend ? shortDay(peakWeekend.day) : undefined,
+      scopeName: activeTypeName,
     };
-  }, [list, attList, day, activeType]);
+  }, [list, attList, day, activeType, activeTypeName]);
 
   async function deleteService(key: string, title: string) {
     if (!(await confirm({ title: "Delete recording?", message: `Delete the service-timing recording for "${title}"? This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
@@ -977,7 +982,9 @@ function OverviewBlend({ overview }: { overview: OverviewData }) {
     <div className="su-card px-5 py-5 flex flex-col">
       <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-8">
         <div className="shrink-0">
-          <div className="text-caption1 uppercase tracking-[0.08em] text-fg-muted">Avg weekend</div>
+          <div className="text-caption1 uppercase tracking-[0.08em] text-fg-muted">
+            Avg {overview.scopeName ?? "service"}
+          </div>
           <div className="mt-1 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
             {overview.avgAttendance}
           </div>
@@ -988,7 +995,9 @@ function OverviewBlend({ overview }: { overview: OverviewData }) {
                 {overview.attTrend.pct != null
                   ? `${overview.attTrend.pct >= 0 ? "+" : "−"}${Math.round(Math.abs(overview.attTrend.pct) * 100)}%`
                   : "changed"}{" "}
-                vs the prior {overview.attTrend.priorCount} weekend{overview.attTrend.priorCount === 1 ? "" : "s"}
+                vs the prior {overview.attTrend.priorCount}{" "}
+                {overview.scopeName ?? "service"}
+                {overview.attTrend.priorCount === 1 ? "" : "s"}
               </span>
             </div>
           )}

@@ -351,7 +351,19 @@ export type LayoutObjectConfig =
       type: "people-counter";
       // attendance (Σins) / occupancy (in-room now) resolve per-zone or building;
       // peak/min/avg (today, from the space endpoint) are building-only.
-      metric?: "attendance" | "serviceAttendance" | "occupancy" | "peak" | "min" | "avg";
+      /** "peak"/"avg"/"attendance" are TODAY's building figures, so a second
+       *  event on the same day inherits the morning's numbers. The "service*"
+       *  metrics come from the in-progress attendance record and reset per
+       *  service occurrence. */
+      metric?:
+        | "attendance"
+        | "serviceAttendance"
+        | "occupancy"
+        | "peak"
+        | "servicePeak"
+        | "servicePeakAttendance"
+        | "min"
+        | "avg";
       zoneId?: string | null;
       label?: string;
       showLabel?: boolean;
@@ -388,7 +400,7 @@ export type LayoutObjectConfig =
   // peak occupancy across recorded services (from Attendance history).
   | {
       type: "people-panel";
-      metrics?: ("occupancy" | "peak" | "attendance" | "serviceAttendance" | "min" | "avg" | "avgService" | "capacity" | "vsAverage")[];
+      metrics?: ("occupancy" | "peak" | "servicePeak" | "servicePeakAttendance" | "attendance" | "serviceAttendance" | "min" | "avg" | "avgService" | "capacity" | "vsAverage")[];
       showLabels?: boolean;
       orientation?: "row" | "column";
     }
