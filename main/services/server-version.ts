@@ -10,7 +10,9 @@ import * as path from "node:path";
 
 import { APP_ROOT } from "./app-root.js";
 
-const RENDERER_BUILD_DIR = path.join(process.cwd(), "build", "renderer");
+// Against the install root, not cwd — a packaged install runs from wherever the
+// operator launched it, and a cwd-relative path silently resolves to nothing.
+const RENDERER_BUILD_DIR = path.join(APP_ROOT, "build", "renderer");
 const REPO_ROOT = APP_ROOT;
 
 /**

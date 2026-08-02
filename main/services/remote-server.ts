@@ -15,6 +15,7 @@ import { fileURLToPath } from "url";
 
 
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
+import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
 import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
 import { getLogLines } from "./log-buffer.js";
@@ -54,8 +55,12 @@ import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
 
 // ── Static renderer build path candidates ──────────────────────────────────────
-// In standalone mode the renderer is built to build/renderer/ relative to cwd.
-const RENDERER_BUILD_DIR = path.join(process.cwd(), "build", "renderer");
+// Resolved against the install root, NOT the working directory. A packaged
+// install is launched from wherever the operator happens to be — `brew install`
+// then running the binary from the home directory looked for
+// ~/build/renderer, found nothing, and served "Control page not found" while
+// the files sat correctly in libexec/build/renderer.
+const RENDERER_BUILD_DIR = path.join(APP_ROOT, "build", "renderer");
 
 const PORT = Number(process.env.STAGE_UTILITY_PORT) || 8788;
 // "Friendly" port so operators can browse without typing the port. We bind it in
@@ -266,8 +271,8 @@ export class RemoteServer {
     this._controlHtmlCandidates = [
       path.join(__dirname, "..", "control.html"),           // build output
       path.join(__dirname, "..", "..", "control.html"),     // tsx dev
-      path.join(process.cwd(), "control.html"),             // cwd
-      path.join(process.cwd(), "public", "control.html"),  // public/
+      path.join(APP_ROOT, "control.html"),                  // install root
+      path.join(APP_ROOT, "public", "control.html"),        // public/
     ];
   }
 
