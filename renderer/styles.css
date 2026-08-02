@@ -328,6 +328,26 @@
   .text-caption1     { font-size: 12px; line-height: 16px; }
   .text-caption2     { font-size: 11px; line-height: 13px; }
 
+  /* Briefly outlines the control a Getting-started step sends you to, so landing
+     on a dense tab does not mean hunting for the field. Applied for ~2s and then
+     removed. Colour comes from the brand accent so it reads as "here", not as an
+     error. Motion is opt-out: reduced-motion holds a steady outline for the same
+     duration instead of pulsing. */
+  @keyframes su-flash-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 transparent; }
+    15%, 60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent-9, #2e6691) 55%, transparent); }
+  }
+  .su-flash {
+    animation: su-flash-pulse 2s ease-in-out;
+    border-radius: 0.875rem;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .su-flash {
+      animation: none;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent-9, #2e6691) 55%, transparent);
+    }
+  }
+
   /* ── Material: one refined surface (replaces the ad-hoc glass tiles as
      components migrate in Phase 2). Theme-aware via --su tokens; Pi-safe. ── */
   .su-card {

@@ -256,7 +256,11 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    // Getting-started sends "Connect Planning Center" straight at this card's form.
+    <div
+      className="flex flex-col gap-3"
+      data-flash-id={descriptor.id === "planning-center" ? "pco-credentials" : undefined}
+    >
       {/* Schema-driven form */}
       <FieldSet flat>
         <FieldGroup>

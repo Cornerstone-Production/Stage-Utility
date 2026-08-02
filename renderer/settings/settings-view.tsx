@@ -330,10 +330,15 @@ export function SettingsView() {
     applyAccentVar(stageState?.accentColor);
   }, [stageState?.accentColor]);
 
-  // Fetch all service types
+  // Fetch all service types. Gated on PCO being configured, as the plan and
+  // team-position queries below already are: without credentials the request can
+  // only fail, and it was retrying on every settings load — filling the server log
+  // with "PCO not configured" handler errors on a machine that simply has not been
+  // set up yet.
   const { data: serviceTypes = [] } = useQuery({
     queryKey: ["stage:listServiceTypes"],
     queryFn: () => ipc<ServiceTypeDTO[]>("stage:listServiceTypes"),
+    enabled: !!stageState?.pcoConfigured,
   });
 
   // Fetch plans (depends on selected service type)
@@ -648,9 +653,33 @@ export function SettingsView() {
   }
 
   // Jump to another settings section (with the same crossfade as the sidebar).
-  function navigateToSection(id: string) {
+  /**
+   * Switch tabs, and optionally point at the control that actually does the job.
+   *
+   * Landing on the right tab still leaves you hunting for the field, which on a
+   * dense tab like Integrations is most of the work. `flash` names a
+   * `data-flash-id` somewhere in the destination; once it has rendered, it is
+   * scrolled into view and outlined briefly. Matching by attribute rather than by
+   * ref means a section needs only to label its target, not export anything.
+   */
+  function navigateToSection(id: string, flash?: string) {
     const sec = sections.find((s) => s.id === id);
-    if (sec) withViewTransition(() => setActiveSection(sec));
+    if (!sec) return;
+    withViewTransition(() => setActiveSection(sec));
+    if (!flash) return;
+    // Two frames: one for React to commit the new section, one for layout to
+    // settle so scrollIntoView lands somewhere real.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const el = document.querySelector<HTMLElement>(`[data-flash-id="${flash}"]`);
+        if (!el) return;
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.remove("su-flash");
+        void el.offsetWidth; // restart the animation if it is already running
+        el.classList.add("su-flash");
+        window.setTimeout(() => el.classList.remove("su-flash"), 2000);
+      }),
+    );
   }
 
   async function handleSetPublicUrl(url: string | null) {

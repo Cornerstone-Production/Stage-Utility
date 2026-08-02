@@ -363,6 +363,7 @@ export function ViewsSection({
 
   return (
     <div
+      data-flash-id="views-list"
       className={cn(
         "px-5 max-sm:px-3 flex gap-5 max-sm:gap-0 pt-5 max-sm:pt-4",
         // Custom views fill the viewport (editor fits, no page scroll); other kinds

@@ -289,7 +289,7 @@ export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "sta
   }
 
   return (
-    <div className="px-5 max-sm:px-3 flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh]">
+    <div data-flash-id="displays-list" className="px-5 max-sm:px-3 flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh]">
       <p className="text-caption1 text-gray-9">
         Each display is a physical screen at its own URL. Point it at a <span className="font-medium">View</span>{" "}
         (built under the Views tab) to choose what it shows — and many screens can share one View, so you
