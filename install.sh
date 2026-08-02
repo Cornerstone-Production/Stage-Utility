@@ -23,9 +23,14 @@ TRACK="${STAGE_TRACK:-main}"
 PORT="${STAGE_PORT:-8788}"
 SERVICE_NAME="stage-utility"
 
-say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m warn\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31merror\033[0m %s\n' "$*" >&2; write_result false "$*"; exit 1; }
+# Colour only for a human at a terminal. When the app drives this the output is
+# redirected to log files, where escape codes are noise that also break grep.
+if [ -t 1 ]; then C_INFO=$'\033[1;36m'; C_WARN=$'\033[1;33m'; C_ERR=$'\033[1;31m'; C_OFF=$'\033[0m'
+else C_INFO=""; C_WARN=""; C_ERR=""; C_OFF=""; fi
+
+say()  { printf '%s==>%s %s\n' "$C_INFO" "$C_OFF" "$*"; }
+warn() { printf '%s warn%s %s\n' "$C_WARN" "$C_OFF" "$*" >&2; }
+die()  { printf '%serror%s %s\n' "$C_ERR" "$C_OFF" "$*" >&2; write_result false "$*"; exit 1; }
 
 # ── Update protocol (optional) ────────────────────────────────────────────────
 # When the app drives this script it passes these paths and reads them back to
@@ -38,13 +43,43 @@ write_progress() {
   [ -n "${STAGE_UPDATE_PROGRESS:-}" ] || return 0
   printf '{"step":"%s","at":"%s"}' "$1" "$(_now)" >"$STAGE_UPDATE_PROGRESS" 2>/dev/null || true
 }
+# Error text goes into a JSON string, and these messages are multi-line and
+# contain quotes. Left raw they produce a file JSON.parse rejects - and the
+# result file is precisely what tells the UI an update is over, so an
+# unparseable one puts it back to waiting forever on a run that has already
+# failed. Backslash and quote are escaped; every control character (newlines
+# included) collapses to a space.
+_json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\n\r\t' '   '
+}
 write_result() {
   [ -n "${STAGE_UPDATE_RESULT:-}" ] || return 0
-  printf '{"ok":%s,"error":"%s","at":"%s"}' "$1" "${2:-}" "$(_now)" >"$STAGE_UPDATE_RESULT" 2>/dev/null || true
+  printf '{"ok":%s,"error":"%s","at":"%s"}' "$1" "$(_json_escape "${2:-}")" "$(_now)" \
+    >"$STAGE_UPDATE_RESULT" 2>/dev/null || true
 }
 # Any unexpected failure reports too, so the UI can never wait forever on a run
 # that has already died.
 trap 'write_result false "installer failed - see the server log"' ERR
+
+# ── Where this script's output goes ───────────────────────────────────────────
+# The app spawns the installer detached with stdio ignored, so ANYTHING printed
+# here is thrown away unless it is written to a file. That is the difference
+# between "the update failed" and knowing which step failed and why.
+#
+# STAGE_UPDATE_LIVE_LOG is tailed into /log while the update runs; STAGE_UPDATE_LOG
+# is the persistent record that survives the restart. Everything - including curl
+# and tar errors on stderr - goes to both, and still to the console for a human
+# running this by hand.
+_logs=""
+[ -n "${STAGE_UPDATE_LIVE_LOG:-}" ] && _logs="$_logs $STAGE_UPDATE_LIVE_LOG"
+[ -n "${STAGE_UPDATE_LOG:-}" ] && _logs="$_logs $STAGE_UPDATE_LOG"
+if [ -n "$_logs" ]; then
+  # shellcheck disable=SC2086
+  exec > >(tee -a $_logs) 2>&1
+fi
+
+# Timestamped so a slow step is visible as a gap rather than having to be guessed.
+log() { printf '[install %s] %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
 
 # ── Where things go ───────────────────────────────────────────────────────────
 case "$(uname -s)" in
@@ -98,6 +133,10 @@ VERSION="${TAG#v}"
 ARCHIVE="stage-utility-${VERSION}-${PLATFORM}.tar.gz"
 BASE="https://github.com/${REPO}/releases/download/${TAG}"
 
+log "mode=${STAGE_UPDATE_MODE:-install} track=${TRACK} tag=${TAG} platform=${PLATFORM}"
+log "prefix=${PREFIX} data=${DATA} port=${PORT} user=$(id -un) pid=$$"
+log "archive=${ARCHIVE}"
+log "url=${BASE}/${ARCHIVE}"
 say "Installing ${TAG} for ${PLATFORM}"
 write_progress pull
 
@@ -105,8 +144,10 @@ write_progress pull
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+log "downloading to $WORK/$ARCHIVE"
 curl -fsSL --retry 3 -o "$WORK/$ARCHIVE" "$BASE/$ARCHIVE" \
-  || die "No build for ${PLATFORM} in ${TAG}."
+  || die "No build for ${PLATFORM} in ${TAG}. Check that the release publishes ${ARCHIVE}."
+log "downloaded $(wc -c < "$WORK/$ARCHIVE" | tr -d " ") bytes"
 
 # The expected hash comes from the releases API, not from anything inside the
 # archive — a checksum shipped inside the file it describes proves nothing,
@@ -136,8 +177,11 @@ WANT=$(printf '%s' "$RELEASE_JSON" | awk -v want="\"name\": \"${ARCHIVE}\"" '
   || die "Release ${TAG} publishes no checksum for ${ARCHIVE}; refusing to install unverified."
 
 GOT=$(cd "$WORK" && $SHASUM "$ARCHIVE" | cut -d" " -f1)
+log "checksum expected=${WANT}"
+log "checksum actual  =${GOT}"
 [ "$WANT" = "$GOT" ] \
   || die "Checksum mismatch — the download does not match the published release. Nothing installed."
+log "checksum verified"
 
 # ── Unpack beside the current release, then switch ────────────────────────────
 # A versioned directory plus a pointer means the running install is untouched
@@ -146,7 +190,9 @@ RELEASE_DIR="${PREFIX}/releases/${VERSION}"
 say "Unpacking to ${RELEASE_DIR}"
 rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR"
-tar -xzf "$WORK/$ARCHIVE" -C "$RELEASE_DIR"
+log "unpacking into ${RELEASE_DIR}"
+tar -xzf "$WORK/$ARCHIVE" -C "$RELEASE_DIR" || die "Could not unpack ${ARCHIVE} into ${RELEASE_DIR}."
+log "unpacked $(ls -1 "$RELEASE_DIR" | wc -l | tr -d " ") entries"
 [ -x "${RELEASE_DIR}/node" ] || die "Archive is missing its runtime — refusing to switch to it."
 
 mkdir -p "$DATA"
@@ -170,7 +216,9 @@ chown -R "$SERVICE_USER" "$PREFIX" "$DATA" 2>/dev/null || true
 # The swap. Flipping a symlink is atomic, and the running server keeps its open
 # inodes on the old release, so it carries on serving until it is restarted.
 write_progress build
+log "pointing ${PREFIX}/current at ${RELEASE_DIR}"
 ln -sfn "$RELEASE_DIR" "${PREFIX}/current"
+log "swap complete"
 
 # ── Update mode ───────────────────────────────────────────────────────────────
 # The service already exists and is RUNNING: every slow step above - download,
@@ -186,9 +234,14 @@ if [ "${STAGE_UPDATE_MODE:-}" = "swap" ]; then
   write_progress restarting
   write_result true ""
   if [ -n "${STAGE_UPDATE_SERVER_PID:-}" ]; then
+    log "signalling server pid ${STAGE_UPDATE_SERVER_PID} to exit for restart"
     sleep 1  # let the HTTP response that triggered this flush first
-    kill "$STAGE_UPDATE_SERVER_PID" 2>/dev/null || true
+    kill "$STAGE_UPDATE_SERVER_PID" 2>/dev/null \
+      || log "WARNING: could not signal pid ${STAGE_UPDATE_SERVER_PID}; it may have already exited"
+  else
+    log "WARNING: no STAGE_UPDATE_SERVER_PID given - the new build is in place but nothing was restarted"
   fi
+  log "update finished"
   exit 0
 fi
 

@@ -455,6 +455,15 @@ class Updater {
       version: tag,
       env: env as Record<string, string>,
     });
+
+    // Record exactly what is about to run. When an update fails on a machine
+    // nobody can attach to, this line plus the installer's own output in
+    // update.log is the whole diagnosis: which install kind was detected, which
+    // strategy that chose, and the literal command it ran.
+    this.logEvent(
+      `install kind=${kind} strategy=${strategy.kind} platform=${process.platform} root=${REPO_ROOT}`,
+    );
+    this.logEvent(`spawning: ${plan.command} ${plan.args.join(" ")}`);
     const child = spawn(plan.command, plan.args, {
       cwd: REPO_ROOT,
       detached: true,
