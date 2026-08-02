@@ -175,7 +175,10 @@ try {
   [Environment]::SetEnvironmentVariable("STAGE_UTILITY_DATA", $data,    "Machine")
   [Environment]::SetEnvironmentVariable("STAGE_UTILITY_PORT", $port,    "Machine")
   [Environment]::SetEnvironmentVariable("STAGE_UTILITY_ROOT", $current, "Machine")
-  $env:STAGE_UTILITY_DATA = $data; $env:STAGE_UTILITY_PORT = $port; $env:STAGE_UTILITY_ROOT = $current
+  # Declares how this copy was installed, so the in-app updater picks the right
+  # strategy instead of inferring one from the path.
+  [Environment]::SetEnvironmentVariable("STAGE_UTILITY_INSTALL_KIND", "tarball", "Machine")
+  $env:STAGE_UTILITY_DATA = $data; $env:STAGE_UTILITY_PORT = $port; $env:STAGE_UTILITY_ROOT = $current; $env:STAGE_UTILITY_INSTALL_KIND = "tarball"
 
   Start-ScheduledTask -TaskName $taskName
 

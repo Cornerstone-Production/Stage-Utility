@@ -215,6 +215,9 @@ Environment=NODE_ENV=production
 Environment=STAGE_UTILITY_DATA=${DATA}
 Environment=STAGE_UTILITY_PORT=${PORT}
 Environment=STAGE_UTILITY_ROOT=${PREFIX}/current
+# Declares how this copy was installed, so the in-app updater picks the right
+# strategy instead of inferring one from the path.
+Environment=STAGE_UTILITY_INSTALL_KIND=tarball
 WorkingDirectory=${PREFIX}/current
 ExecStart=${PREFIX}/current/node ${PREFIX}/current/server.mjs
 Restart=always
@@ -247,6 +250,7 @@ else
     <key>STAGE_UTILITY_DATA</key><string>${DATA}</string>
     <key>STAGE_UTILITY_PORT</key><string>${PORT}</string>
     <key>STAGE_UTILITY_ROOT</key><string>${PREFIX}/current</string>
+    <key>STAGE_UTILITY_INSTALL_KIND</key><string>tarball</string>
   </dict>
   <key>WorkingDirectory</key><string>${PREFIX}/current</string>
   <key>RunAtLoad</key><true/>

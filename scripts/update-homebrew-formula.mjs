@@ -52,9 +52,41 @@ if (missing.length) {
   process.exit(1);
 }
 
-let src = fs.readFileSync(FORMULA, "utf8");
-const before = src;
+// A prerelease updates the beta formula, a full release the stable one. Two
+// formulae exist because a Homebrew install switches tracks by swapping which
+// one is installed — brew has no notion of a channel within a single formula.
+//
+// The beta formula is DERIVED from the stable one rather than kept as a second
+// file: two hand-maintained formulae drift, and the drift would only show up
+// when someone on the beta track tried to update. The only differences are the
+// class name and the conflict declaration.
+const isPrerelease = version.includes("-");
+const BETA_FORMULA = path.join(ROOT, "packaging", "homebrew", "stage-utility-beta.rb");
+const target = isPrerelease ? BETA_FORMULA : FORMULA;
 
+let src = fs.readFileSync(FORMULA, "utf8");
+if (isPrerelease) {
+  src = src
+    .replace(/^class StageUtility\b/m, "class StageUtilityBeta")
+    .replace(/^(class StageUtilityBeta.*\n)/m, "$1  # Generated from stage-utility.rb - do not edit by hand.\n");
+  // Both formulae install a binary called stage-utility, so brew must be told
+  // they cannot coexist. The updater uninstalls one before installing the other;
+  // this is what makes a direct `brew install` fail loudly rather than clobber.
+  if (!/conflicts_with/.test(src)) {
+    // Anchored on the top-level `version` line, NOT on the first `url` - the
+    // first url sits inside a per-platform block, and conflicts_with is only
+    // valid at formula scope.
+    const anchor = /^(\s*version\s+"[^"]+"\n)/m;
+    if (!anchor.test(src)) {
+      console.error("[homebrew] could not find the version line to anchor conflicts_with");
+      process.exit(1);
+    }
+    src = src.replace(
+      anchor,
+      '$1  conflicts_with "stage-utility", because: "both install a stage-utility binary"\n',
+    );
+  }
+}
 src = src.replace(/^(\s*version\s+)"[^"]+"/m, `$1"${version}"`);
 
 // Each sha256 sits directly under the url naming its platform, so anchor on that
@@ -88,9 +120,11 @@ for (const platform of PLATFORMS) {
   src = src.replace(re, (_full, before, after) => `${before}${sha}${after}`);
 }
 
-if (src === before) {
-  console.log(`[homebrew] already at ${version}`);
+const existing = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : null;
+if (existing === src) {
+  console.log(`[homebrew] ${path.basename(target)} already at ${version}`);
 } else {
-  fs.writeFileSync(FORMULA, src);
-  console.log(`[homebrew] formula updated to ${version} (${PLATFORMS.length} platforms)`);
+  fs.writeFileSync(target, src);
+  const what = isPrerelease ? "beta formula" : "formula";
+  console.log(`[homebrew] ${what} updated to ${version} (${PLATFORMS.length} platforms)`);
 }
