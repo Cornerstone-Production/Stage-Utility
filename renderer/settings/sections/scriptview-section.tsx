@@ -163,7 +163,7 @@ export function ScriptViewSection() {
   const openId = sortedLayouts.some((l) => l.id === expandedId) ? expandedId : null;
 
   return (
-    <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+    <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       {/* "Open ScriptView" lives inline in the section header (settings-view). */}
       {error && <p className="text-caption1 text-red-11 mb-3">{error}</p>}
 

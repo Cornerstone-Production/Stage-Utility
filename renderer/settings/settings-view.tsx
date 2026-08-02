@@ -1308,19 +1308,19 @@ export function SettingsView() {
         return <BrandingSection stageState={stageState} handlers={handlers} />;
       case "service-history":
         return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
             <ServiceHistorySection key={historyNonce} />
           </div>
         );
       case "baptisms":
         return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
             <BaptismsSection />
           </div>
         );
       case "patch":
         return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
             <PatchSection />
           </div>
         );
