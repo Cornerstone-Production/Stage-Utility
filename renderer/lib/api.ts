@@ -14,6 +14,12 @@ type Params = Record<string, unknown> | undefined;
 // surfaces as an error instead of hanging a query in its loading state forever.
 const REQUEST_TIMEOUT_MS = 15000;
 
+/** An HTTP error carrying its status and the server's machine-readable `code`. */
+export interface ApiError extends Error {
+  status?: number;
+  code?: string;
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -30,11 +36,18 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     let msg = res.statusText;
+    let body: { error?: string; code?: string } | null = null;
     try {
-      const body = await res.json();
+      body = await res.json();
       if (typeof body?.error === "string") msg = body.error;
     } catch { /* ignore */ }
-    throw new Error(msg);
+    // Carry the status and any machine-readable `code` on the Error. Callers that
+    // only interpolate the message are unaffected, but one that has to tell a
+    // conflict from a failure (a 409 is a choice, not an error) now can.
+    const err = new Error(msg) as ApiError;
+    err.status = res.status;
+    if (typeof body?.code === "string") err.code = body.code;
+    throw err;
   }
   return res.json() as Promise<T>;
 }
@@ -408,7 +421,10 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "views:setLayout": {
       const id = p.id as string;
-      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { layout: p.layout });
+      // layoutRev omitted = save unconditionally (the explicit overwrite path).
+      const body: Record<string, unknown> = { layout: p.layout };
+      if (typeof p.layoutRev === "number") body.layoutRev = p.layoutRev;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, body);
     }
 
     case "views:setSlotsLayout": {
@@ -812,13 +828,54 @@ function ensureEventSource(): EventSource {
 
   // (Re)report our channel set on every (re)connect — the server drops the filter
   // when a stream closes, so a transparent reconnect needs a fresh report.
-  eventSource.onopen = () => reportChannels();
+  eventSource.onopen = () => {
+    sseReconnectDelayMs = SSE_RECONNECT_MIN_MS;
+    reportChannels();
+  };
 
   eventSource.onerror = (e) => {
-    console.warn("[api] SSE error — browser will auto-reconnect", e);
+    // CONNECTING means the browser is retrying on its own — leave it alone.
+    // CLOSED means it has GIVEN UP, and nothing else would ever reopen the
+    // stream: the page goes on rendering its last snapshot, silently receiving
+    // nothing, until someone reloads it. That is what a display looks like when
+    // it "stops updating" after a server restart — the browser closes the stream
+    // on an error response and never comes back on its own.
+    if (eventSource?.readyState === EventSource.CLOSED) {
+      console.warn("[api] SSE closed — scheduling reconnect", e);
+      scheduleSseReconnect();
+    }
   };
 
   return eventSource;
+}
+
+let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let sseReconnectDelayMs = 1000;
+const SSE_RECONNECT_MIN_MS = 1000;
+const SSE_RECONNECT_MAX_MS = 30_000;
+
+/** Reopen a permanently-closed stream, backing off so a server that is still
+ *  down is not hammered by every display in the building at once. */
+function scheduleSseReconnect(): void {
+  if (sseReconnectTimer) return;
+  sseReconnectTimer = setTimeout(() => {
+    sseReconnectTimer = null;
+    sseReconnectDelayMs = Math.min(sseReconnectDelayMs * 2, SSE_RECONNECT_MAX_MS);
+    ensureEventSource();
+  }, sseReconnectDelayMs);
+}
+
+// A kiosk display can sit untouched for days. When its tab is shown again, make
+// sure the stream is actually alive rather than trusting that it survived —
+// a closed one reconnects immediately instead of waiting out the backoff.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+      sseReconnectDelayMs = SSE_RECONNECT_MIN_MS;
+      ensureEventSource();
+    }
+  });
 }
 
 /**
