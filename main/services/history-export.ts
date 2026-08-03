@@ -12,6 +12,7 @@
 import writeXlsxFile, { type Cell, type Row } from "write-excel-file/node";
 
 import { tableFeature, type TableSpec } from "./xlsx-table.js";
+import { appTimeZone } from "./app-timezone.js";
 
 import { attendanceStore } from "./attendance-store.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
@@ -56,7 +57,14 @@ function serviceTimeLabel(iso: string | null | undefined): string {
   if (!iso) return "";
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return "";
-  return new Date(t).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  // Explicitly the APP's zone. Formatting in the server's locale meant a UTC host
+  // exported a 10:30 service as "3:30 PM" — the column that exists to tell a 9am
+  // from an 11am was naming neither.
+  return new Date(t).toLocaleTimeString("en-US", {
+    timeZone: appTimeZone(),
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 /** Songs are prefixed so a filter on the Item column isolates them — the recorded
