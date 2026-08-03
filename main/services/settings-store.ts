@@ -2,6 +2,7 @@
 // integration configs (non-secret fields), display options.
 
 import type { BaptismAutoStart, DisplayInfo, Output } from "../types/stage.js";
+import { setAppTimeZone } from "./app-timezone.js";
 import { externalizeBrandingImages } from "./branding-image-store.js";
 import { DataStore } from "./data-store.js";
 
@@ -66,6 +67,11 @@ export interface SettingsData {
   reconnectSchedule?: { enabled: boolean; leadMin: number; tailMin: number; dormantMin: number };
   /** Attendance ramp/taper capture windows in minutes (preMin/postMin). */
   taperWindow?: { preMin: number; postMin: number };
+  /** IANA zone every wall-clock decision is made in (schedules, day-of-week and
+   *  time-of-day automation conditions, which day a service files under). Null =
+   *  follow the host clock — fine on a machine set to local time, wrong on the
+   *  UTC default most servers and containers ship with. */
+  timezone?: string | null;
   /** Local UDP port the OSC integration listens on for device feedback. */
   oscFeedbackPort: number;
   /** Smaart metric keys to surface in the SPL History tab (empty = auto default). */
@@ -119,17 +125,26 @@ export const DEFAULT_TAPER_WINDOW = { preMin: 60, postMin: 60 };
 
 const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS);
 
+/** Keep the process-wide zone in step with what was just read or written. Every
+ *  path in and out of settings funnels through here so no caller can forget, and
+ *  a sync `appTimeZone()` (automation conditions, schedules) is always current. */
+function syncTimeZone(data: SettingsData): SettingsData {
+  setAppTimeZone(data.timezone ?? null);
+  return data;
+}
+
 export const settingsStore = {
   async load(): Promise<SettingsData> {
-    return store.load();
+    return syncTimeZone(await store.load());
   },
 
   async save(data: SettingsData): Promise<void> {
+    syncTimeZone(data);
     return store.save(data);
   },
 
   async get(): Promise<SettingsData> {
-    return store.load();
+    return syncTimeZone(await store.load());
   },
 
   async patch(partial: Partial<SettingsData>): Promise<SettingsData> {
@@ -141,6 +156,6 @@ export const settingsStore = {
     // Serialized atomic read-modify-write — prevents a concurrent patch (e.g. the
     // live poller advancing the plan while the operator changes display routing)
     // from clobbering this one's fields.
-    return store.update((current) => ({ ...current, ...clean }));
+    return syncTimeZone(await store.update((current) => ({ ...current, ...clean })));
   },
 };

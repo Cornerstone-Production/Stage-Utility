@@ -13,6 +13,7 @@ import { rebuildSplRecord } from "./archive/rebuild.js";
 import { sampleArchive } from "./archive/sample-archive.js";
 import { addLeqSample } from "./spl-leq.js";
 import { broadcast } from "./broadcaster.js";
+import { serviceDateKey, shouldRecordLive } from "./live-service-gate.js";
 import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { stageController } from "./stage-controller.js";
@@ -33,30 +34,10 @@ const SERVICE_GAP_MS = 10 * 60_000;
 /** Metric preference for the recorded level (A-weighted, slow → broadband). */
 const PREFERRED_METRICS = ["SPL A Slow", "SPL A Fast", "LAeq 10", "SPL Slow", "SPL Fast"];
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-function localDate(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-function todayLocal(): string {
-  return localDate(new Date());
-}
-
-// A live item is only recordable when its service is actually happening today.
-// PCO keeps returning a `current_item_time` for a Live session that was started
-// but never cleared, so stepping through an *upcoming* plan's items in PCO Live
-// during the week (rehearsal, pre-building a service) would otherwise create a
-// stray history record dated today for a service days away. Gate on the service
-// occurrence's local date (falling back to the item's live_start_at), and only
-// record when that date is today.
-export function isLiveServiceToday(live: PcoLiveDTO): boolean {
-  const ref = live.serviceTimeStartsAt ?? live.liveStartAt;
-  if (!ref) return true; // no date signal at all — preserve legacy behavior
-  const d = new Date(ref);
-  if (Number.isNaN(d.getTime())) return true; // unparseable — don't block recording
-  return localDate(d) === todayLocal();
-}
+// Whether a live tick may be recorded lives in live-service-gate.ts — shared by
+// all three recorders so they cannot drift into disagreeing about when a service
+// is happening. It replaced a local-date comparison that stopped every recorder
+// mid-service at midnight UTC (19:00 in Chicago).
 
 interface MeterSample {
   meterId: string;
@@ -96,7 +77,10 @@ class SplRecorder {
     if (!live || this.busy) return;
     this.busy = true;
     try {
-      if (live.mode === "item" && live.currentItemId && !live.serviceEnded && isLiveServiceToday(live)) {
+      // `currentItemId` is re-tested here purely so TypeScript narrows it; the
+      // recording policy itself lives entirely in shouldRecordLive.
+      const open = this.current != null && this.current.endedAt == null;
+      if (live.currentItemId && !live.serviceEnded && shouldRecordLive(live, open)) {
         const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
         this.lastLiveAt = Date.now();
         await this.ensureRecord(live, gapSinceLive);
@@ -147,7 +131,7 @@ class SplRecorder {
   private async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<void> {
     const st = stageController.getState();
     if (!st.serviceTypeId || !st.planId) return; // can't key a record yet
-    const date = todayLocal();
+    const date = serviceDateKey(live);
     // Separate back-to-back services that share one plan by the PCO service-time
     // occurrence (9am vs 11am). Fall back to the date when no service time is known.
     const serviceTimeId = live.serviceTimeId;

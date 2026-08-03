@@ -3,6 +3,7 @@
 
 import { randomUUID } from "crypto";
 import { scrub } from "./scrub.js";
+import { hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
 
 import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart,
   TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
@@ -194,6 +195,8 @@ export class StageController {
     autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
     reconnectSchedule: { ...DEFAULT_RECONNECT_SCHEDULE },
     taperWindow: { ...DEFAULT_TAPER_WINDOW },
+    timezone: null,
+    hostTimezone: hostTimeZone(),
     baptismAutoStart: { enabled: false, testimonyKeyword: "baptism stories" },
     onboardingDismissed: false,
   };
@@ -282,6 +285,8 @@ export class StageController {
       autoUpdate: migrateAutoUpdate(settings.autoUpdate),
       reconnectSchedule: settings.reconnectSchedule ?? { ...DEFAULT_RECONNECT_SCHEDULE },
       taperWindow: settings.taperWindow ?? { ...DEFAULT_TAPER_WINDOW },
+      timezone: settings.timezone ?? null,
+      hostTimezone: hostTimeZone(),
       baptismAutoStart: settings.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" },
       onboardingDismissed: settings.onboardingDismissed ?? false,
     };
@@ -1156,6 +1161,23 @@ export class StageController {
     return this.state;
   }
 
+  /**
+   * Set the zone every wall-clock decision is made in, or null to follow the host.
+   *
+   * Rejects an unknown zone rather than storing it: a typo here would silently
+   * move every schedule and day-of-week condition back to the host clock.
+   */
+  async setTimezone(tz: string | null): Promise<StageState> {
+    const next = tz && tz.trim() ? tz.trim() : null;
+    if (next !== null && !isValidTimeZone(next)) throw new Error(`Unknown time zone: ${next}`);
+    console.log(`[stage-controller] setTimezone -> ${next ?? "follow host"} (host is ${hostTimeZone()})`);
+    setAppTimeZone(next);
+    this.state = { ...this.state, timezone: next, hostTimezone: hostTimeZone() };
+    await settingsStore.patch({ timezone: next });
+    this.broadcast();
+    return this.state;
+  }
+
   /** Recompute the upcoming rehearsal/service windows (from PCO) that gate the
    *  integration reconnect cadence. Cheap (cached PCO calls); runs on refresh +
    *  when creds/allowed/schedule change. Never throws. */
@@ -1221,8 +1243,11 @@ export class StageController {
     if (cfg.mode === "manual" || behind <= 0) return false;
     if (updater.phase === "updating") return false;
     if (this.isServiceLive()) return false;
-    if (cfg.dayOfWeek != null && now.getDay() !== cfg.dayOfWeek) return false;
-    return now.getHours() === cfg.hour;
+    // The APP's zone. On a UTC host "Monday 03:00" fires at 22:00 Sunday in
+    // Chicago — i.e. an unattended restart in the middle of an evening service.
+    const p = zonedParts(now.getTime());
+    if (cfg.dayOfWeek != null && p.weekday !== cfg.dayOfWeek) return false;
+    return p.hour === cfg.hour;
   }
 
   // ── Branding (app name + logo) ────────────────────────────────────────

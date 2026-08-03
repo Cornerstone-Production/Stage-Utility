@@ -10,6 +10,13 @@ service time so a 9am and an 11am stay separate. They finalise at the plan's
 service-end marker and are reconciled on startup, so a restart mid-service does
 not lose the record.
 
+While Planning Center reports a service live, **nothing time-based can stop it
+being recorded** — no clock, calendar or time zone. A recording ends only when the
+plan leaves item mode or reaches its service-end marker. Wall-clock checks apply
+only to *starting* a record: a plan more than 12 hours from now is treated as
+rehearsal and is not recorded, so stepping through next Sunday's plan during the
+week creates nothing.
+
 | | |
 |---|---|
 | **Attendance** | building occupancy, sampled every 30s |

@@ -45,6 +45,7 @@ export interface SectionHandlers {
   handleSetAutoUpdate: (partial: { mode?: "manual" | "auto-install" | "auto-full"; enabled?: boolean; dayOfWeek?: number | null; hour?: number }) => Promise<void>;
   handleSetReconnectSchedule: (partial: { enabled?: boolean; leadMin?: number; tailMin?: number; dormantMin?: number }) => Promise<void>;
   handleSetTaperWindow: (partial: { preMin?: number; postMin?: number }) => Promise<void>;
+  handleSetTimezone: (tz: string | null) => Promise<void>;
   handleSetBaptismAutoStart: (partial: { enabled?: boolean; testimonyKeyword?: string }) => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {

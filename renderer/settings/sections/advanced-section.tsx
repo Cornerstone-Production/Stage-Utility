@@ -766,6 +766,95 @@ function ConfigSnapshotPanel() {
   );
 }
 
+/**
+ * The zone the server makes wall-clock decisions in.
+ *
+ * Worth a control of its own because the failure it prevents is invisible: a
+ * server left on UTC (the default on most Linux images and every container) rolls
+ * its date at 7pm in Chicago, which once stopped every recorder in the middle of a
+ * live service. Showing the host's own zone next to a live clock makes a wrong one
+ * obvious at a glance, instead of at 7pm on a Sunday.
+ */
+function TimezoneField({
+  timezone,
+  hostTimezone,
+  onChange,
+}: {
+  timezone: string | null;
+  hostTimezone: string;
+  onChange: (tz: string | null) => Promise<void>;
+}) {
+  const FOLLOW = "__host__";
+  const zones = (() => {
+    // supportedValuesOf is widely available but not universal; fall back to the
+    // zones we can name rather than rendering an empty picker.
+    const f = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
+    const all = typeof f === "function" ? f("timeZone") : [];
+    if (all.length) return all;
+    const browser = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return Array.from(new Set([hostTimezone, browser, "UTC"].filter(Boolean)));
+  })();
+
+  const effective = timezone ?? hostTimezone;
+  // A live clock in the chosen zone — the fastest way to confirm it is right.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const reads = (() => {
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        timeZone: effective,
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).format(new Date(now));
+    } catch {
+      return "—";
+    }
+  })();
+
+  return (
+    <Field orientation="horizontal">
+      <FieldContent>
+        <FieldLabel>
+          Time zone
+          <InfoHint className="ml-1.5 align-middle">
+            Everything the server decides by the clock reads this: which day a service is
+            filed under, the update window, and the day-of-week and time-of-day automation
+            conditions. Recording a live service does not — once Planning Center reports a
+            service live, nothing time-based can stop it being recorded.
+          </InfoHint>
+        </FieldLabel>
+        <FieldDescription>
+          The server clock reads <span className="font-mono">{hostTimezone}</span>. Set this
+          if that is not your local zone — servers commonly run UTC.
+          {" "}Now: <span className="font-mono tabular-nums">{reads}</span>
+        </FieldDescription>
+      </FieldContent>
+      <Select
+        value={timezone ?? FOLLOW}
+        onValueChange={(v: string) => void onChange(v === FOLLOW ? null : v)}
+      >
+        <SelectTrigger className="w-64" aria-label="Time zone">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={FOLLOW}>Follow server clock ({hostTimezone})</SelectItem>
+          {zones.map((z) => (
+            <SelectItem key={z} value={z}>
+              {z}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
 export function AdvancedSection({
   stageState,
   updateStatus,
@@ -885,6 +974,16 @@ export function AdvancedSection({
               </Field>
             </>
           )}
+        </FieldGroup>
+      </FieldSet>
+
+          <FieldSet flat>
+        <FieldGroup>
+          <TimezoneField
+            timezone={stageState.timezone ?? null}
+            hostTimezone={stageState.hostTimezone ?? "UTC"}
+            onChange={handlers.handleSetTimezone}
+          />
         </FieldGroup>
       </FieldSet>
 

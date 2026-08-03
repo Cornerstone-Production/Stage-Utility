@@ -14,7 +14,7 @@ import { sampleArchive } from "./archive/sample-archive.js";
 import { attendanceStore } from "./attendance-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { sensourceService } from "./sensource-service.js";
-import { isLiveServiceToday } from "./spl-recorder.js";
+import { isServiceNearNow, serviceDateKey, shouldRecordLive } from "./live-service-gate.js";
 import { stageController } from "./stage-controller.js";
 
 const PERSIST_DEBOUNCE_MS = 4000;
@@ -29,14 +29,6 @@ type Phase = "pre" | "service" | "post";
  *  new service occurrence → new record. Services are far enough apart that 10 min
  *  cleanly separates them while bridging any within-service lull. */
 const SERVICE_GAP_MS = 10 * 60_000;
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-function todayLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 
 class AttendanceRecorder {
   private current: ServiceAttendance | null = null;
@@ -64,12 +56,17 @@ class AttendanceRecorder {
    *    window after the service ended.
    *  - null: nothing to record. */
   private classify(live: PcoLiveDTO): Phase | null {
-    if (live.mode === "item" && live.currentItemId && isLiveServiceToday(live)) {
+    // The latch: an already-open record plus a live item is ALWAYS "service".
+    // Nothing time-based may demote a running recording to the taper — that is
+    // exactly how a live service was silently reclassified as post-service at
+    // 19:00 local and lost the back half of its night.
+    const open = this.current != null && this.current.endedAt == null;
+    if (shouldRecordLive(live, open)) {
       if (live.serviceEnded) return "post"; // still parked on an item past SERVICE END
       if (live.beforeServiceStart) return "pre"; // pre-roll item above SERVICE START
       return "service";
     }
-    if (live.mode === "preservice" && this.preMs > 0 && isLiveServiceToday(live)) {
+    if (live.mode === "preservice" && this.preMs > 0 && isServiceNearNow(live)) {
       // Only once the countdown is within the arrival window (and not absurdly early).
       const start = live.serviceTimeStartsAt ? Date.parse(live.serviceTimeStartsAt) : NaN;
       if (Number.isFinite(start) && start - Date.now() <= this.preMs && Date.now() <= start + 5 * 60_000) {
@@ -181,7 +178,7 @@ class AttendanceRecorder {
   private async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<void> {
     const st = stageController.getState();
     if (!st.serviceTypeId || !st.planId) return;
-    const date = todayLocal();
+    const date = serviceDateKey(live);
     const serviceTimeId = live.serviceTimeId;
     const key = `${st.serviceTypeId}:${st.planId}:${serviceTimeId ?? date}`;
     if (this.currentKey === key && this.current) return;

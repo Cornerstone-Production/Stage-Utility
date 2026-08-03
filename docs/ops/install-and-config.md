@@ -147,7 +147,24 @@ Build once, route to any number of screens.
 **Branding, Automation, History, Baptisms, Patch** — appearance, event-driven
 rules, recorded services, the baptism timer and the stage patch sheet.
 
-**Advanced** — network address, update track, backups and the data archive.
+**Advanced** — time zone, network address, update track, backups and the data
+archive.
+
+### Time zone
+
+Set this if the server's own clock is not your local zone. Servers and containers
+commonly run UTC, and a UTC clock rolls its date mid-evening everywhere west of
+Greenwich — 19:00 in Chicago, 16:00 in Los Angeles.
+
+The setting shows what the host clock reads plus a live clock in the zone you
+pick, so a wrong one is obvious immediately. It governs which day a service is
+filed under, the scheduled update window, and the day-of-week and time-of-day
+automation conditions. It does not govern whether a live service is recorded —
+that is deliberately independent of the clock.
+
+Setting the host's own zone (`timedatectl set-timezone America/Chicago`) also
+works and is worth doing for sane log timestamps, but the app no longer depends on
+it.
 
 ## URLs and ports
 

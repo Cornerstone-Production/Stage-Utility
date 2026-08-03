@@ -8,6 +8,7 @@
 // trigger, not a query language.
 
 import type { ConditionCtx, ConditionDef } from "../types/automation.js";
+import { zonedMinuteOfDay, zonedParts } from "./app-timezone.js";
 
 /** "HH:MM" -> minutes since midnight, or null. */
 function hhmm(v: unknown): number | null {
@@ -51,7 +52,9 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
       // Unconfigured must not silently block every rule that carries it.
       if (!raw) return true;
       const days = raw.split(",").map((d) => Number(d.trim()));
-      return days.includes(new Date(now).getDay());
+      // The APP's zone, not the host's: on a UTC server "Sunday" ends at 19:00
+      // local, so an evening rule would read the wrong day for its last five hours.
+      return days.includes(zonedParts(now).weekday);
     },
   },
 
@@ -66,8 +69,9 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
       const from = hhmm(params.from);
       const to = hhmm(params.to);
       if (from === null || to === null) return true; // unconfigured -> no opinion
-      const d = new Date(now);
-      const cur = d.getHours() * 60 + d.getMinutes();
+      // Wall-clock in the APP's zone. An operator typing "18:30" means half six
+      // where they are, never half six UTC.
+      const cur = zonedMinuteOfDay(now);
       // A window may cross midnight (22:00 -> 02:00).
       return from <= to ? cur >= from && cur <= to : cur >= from || cur <= to;
     },

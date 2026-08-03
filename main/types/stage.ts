@@ -1249,6 +1249,12 @@ export interface StageState {
   reconnectSchedule: ReconnectSchedule;
   /** Attendance ramp/taper capture windows (Advanced tab). */
   taperWindow: TaperWindow;
+  /** IANA zone the server makes wall-clock decisions in, or null to follow its
+   *  own clock. See `hostTimezone` for what that clock currently reads. */
+  timezone: string | null;
+  /** The zone the SERVER's clock is set to — shown so an operator can see when it
+   *  is UTC (the default on most servers) and override it. */
+  hostTimezone: string;
   /** Keyword auto-start for the baptism timer (see BaptismAutoStart). */
   baptismAutoStart?: BaptismAutoStart;
   /** Operator dismissed the first-run "Getting started" checklist (machine-wide). */

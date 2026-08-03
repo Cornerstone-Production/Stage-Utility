@@ -776,6 +776,15 @@ export function SettingsView() {
     }
   }
 
+  async function handleSetTimezone(tz: string | null) {
+    try {
+      const next = await ipc<StageState>("settings:setTimezone", { timezone: tz });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to set the time zone: ${String(err)}`);
+    }
+  }
+
   async function handleSetAllowedServiceTypes(ids: string[]) {
     try {
       const next = await ipc<StageState>("stage:setAllowedServiceTypes", { ids });
@@ -1243,6 +1252,7 @@ export function SettingsView() {
     handleSetAutoUpdate,
     handleSetReconnectSchedule,
     handleSetTaperWindow,
+    handleSetTimezone,
     handleSetBaptismAutoStart,
     handleSetAllowedServiceTypes,
     handleSetBranding,

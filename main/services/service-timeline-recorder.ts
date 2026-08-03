@@ -12,21 +12,13 @@
 import type { PcoLiveDTO, ServiceTimeline } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
-import { isLiveServiceToday } from "./spl-recorder.js";
+import { serviceDateKey, shouldRecordLive } from "./live-service-gate.js";
 import { stageController } from "./stage-controller.js";
 
 const PERSIST_DEBOUNCE_MS = 4000;
 /** Short gap between live-item ticks = same service (hold the record through a
  *  serviceTimeId roll on overrun); a long gap = a new service occurrence. */
 const SERVICE_GAP_MS = 10 * 60_000;
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-function todayLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 
 class ServiceTimelineRecorder {
   private current: ServiceTimeline | null = null;
@@ -48,7 +40,10 @@ class ServiceTimelineRecorder {
     if (!live || this.busy) return;
     this.busy = true;
     try {
-      if (live.mode === "item" && live.currentItemId && !live.serviceEnded && isLiveServiceToday(live)) {
+      // `currentItemId` is re-tested here purely so TypeScript narrows it; the
+      // recording policy itself lives entirely in shouldRecordLive.
+      const open = this.current != null && this.current.endedAt == null;
+      if (live.currentItemId && !live.serviceEnded && shouldRecordLive(live, open)) {
         const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
         this.lastLiveAt = Date.now();
         await this.ensureRecord(live, gapSinceLive);
@@ -79,7 +74,7 @@ class ServiceTimelineRecorder {
   private async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<void> {
     const st = stageController.getState();
     if (!st.serviceTypeId || !st.planId) return;
-    const date = todayLocal();
+    const date = serviceDateKey(live);
     const serviceTimeId = live.serviceTimeId;
     const key = `${st.serviceTypeId}:${st.planId}:${serviceTimeId ?? date}`;
     if (this.currentKey === key && this.current) return;

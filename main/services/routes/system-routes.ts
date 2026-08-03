@@ -119,6 +119,17 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    if (method === "POST" && pathname === "/api/timezone") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const tz = typeof body.timezone === "string" ? body.timezone : null;
+      try {
+        json(res, await stageController.setTimezone(tz));
+      } catch (err) {
+        json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+      }
+      return;
+    }
+
     // ── Config snapshot (backup / restore) ──────────────────────────────────
     // Download the full config (secrets excluded) as a .json file.
     if (method === "GET" && pathname === "/api/config/export") {
