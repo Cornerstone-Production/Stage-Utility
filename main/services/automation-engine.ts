@@ -20,6 +20,7 @@ import { automationStore } from "./automation-store.js";
 import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { reaperService } from "./reaper-service.js";
+import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, triggersForChannel } from "./automation-triggers.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
@@ -235,6 +236,7 @@ class AutomationEngine {
       integrations,
       obsRecording: obsService.getLatest().recording === true,
       reaperRecording: reaperService.getLatest().recording === true,
+      baptismPhase: baptismTimerService.getState()?.phase ?? null,
     };
   }
 

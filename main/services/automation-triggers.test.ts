@@ -303,3 +303,103 @@ describe("obs outputs", () => {
     );
   });
 });
+
+// ── ProdCom transcript ─────────────────────────────────────────────────────
+
+describe("prodcom.phrase-said", () => {
+  const t = () => AUTOMATION_TRIGGERS["prodcom.phrase-said"];
+  const line = (id: string, text: string, channelName: string | null = null) =>
+    ({ id, text, channelName, channel: null, color: null, isFinal: true });
+  const feed = (...lines: unknown[]) => lines;
+
+  test("fires when a NEW line contains the phrase", () => {
+    assert.equal(
+      t().didFire(feed(line("1", "standby")), feed(line("1", "standby"), line("2", "go for doors")),
+        { phrase: "go for doors" }, NOW),
+      true,
+    );
+  });
+
+  test("does not fire again for a line already seen", () => {
+    // The transcript is a growing list, so matching the whole feed would fire
+    // on every broadcast for the rest of the service.
+    const before = feed(line("1", "go for doors"));
+    assert.equal(t().didFire(before, before, { phrase: "go for doors" }, NOW), false);
+  });
+
+  test("matches case-insensitively", () => {
+    assert.equal(
+      t().didFire(feed(), feed(line("1", "GO FOR DOORS")), { phrase: "go for doors" }, NOW),
+      true,
+    );
+  });
+
+  test("an empty phrase matches nothing", () => {
+    assert.equal(t().didFire(feed(), feed(line("1", "anything")), { phrase: "" }, NOW), false);
+  });
+
+  test("an optional channel filter restricts which channel counts", () => {
+    assert.equal(
+      t().didFire(feed(), feed(line("1", "go", "Director")), { phrase: "go", channel: "Director" }, NOW),
+      true,
+    );
+    assert.equal(
+      t().didFire(feed(), feed(line("1", "go", "Audio")), { phrase: "go", channel: "Director" }, NOW),
+      false,
+    );
+  });
+});
+
+// ── Baptism timer ──────────────────────────────────────────────────────────
+
+describe("baptism triggers", () => {
+  const b = (phase: string, personNumber = 1) =>
+    ({ mode: "grouped", phase, personNumber, baptismIndex: 0, segmentStartedAt: null });
+
+  test("started fires when the timer leaves idle", () => {
+    const t = AUTOMATION_TRIGGERS["baptism.started"];
+    assert.equal(t.didFire(b("idle"), b("testimony"), {}, NOW), true);
+    assert.equal(t.didFire(b("testimony"), b("baptism"), {}, NOW), false);
+  });
+
+  test("phase-changed fires on any phase transition", () => {
+    const t = AUTOMATION_TRIGGERS["baptism.phase-changed"];
+    assert.equal(t.didFire(b("testimony"), b("baptism"), {}, NOW), true);
+    assert.equal(t.didFire(b("baptism"), b("baptism"), {}, NOW), false);
+  });
+
+  test("finished fires when it returns to idle", () => {
+    const t = AUTOMATION_TRIGGERS["baptism.finished"];
+    assert.equal(t.didFire(b("baptism"), b("idle"), {}, NOW), true);
+    assert.equal(t.didFire(b("idle"), b("idle"), {}, NOW), false);
+  });
+});
+
+// ── Display presence ───────────────────────────────────────────────────────
+
+describe("display presence", () => {
+  const p = (...connected: string[]) => ({ connected });
+
+  test("connected fires for a named display arriving", () => {
+    const t = AUTOMATION_TRIGGERS["display.connected"];
+    assert.equal(t.didFire(p("display-1"), p("display-1", "display-2"), { name: "display-2" }, NOW), true);
+    assert.equal(t.didFire(p("display-1"), p("display-1", "display-2"), { name: "display-3" }, NOW), false);
+  });
+
+  test("with no name it fires for any display arriving", () => {
+    const t = AUTOMATION_TRIGGERS["display.connected"];
+    assert.equal(t.didFire(p(), p("display-9"), {}, NOW), true);
+  });
+
+  test("disconnected fires for one leaving", () => {
+    const t = AUTOMATION_TRIGGERS["display.disconnected"];
+    assert.equal(t.didFire(p("display-1", "display-2"), p("display-1"), { name: "display-2" }, NOW), true);
+  });
+
+  test("none-connected fires only on the transition to empty", () => {
+    // The alarm case: every display in the building has gone.
+    const t = AUTOMATION_TRIGGERS["display.none-connected"];
+    assert.equal(t.didFire(p("display-1"), p(), {}, NOW), true);
+    assert.equal(t.didFire(p(), p(), {}, NOW), false);
+  });
+});

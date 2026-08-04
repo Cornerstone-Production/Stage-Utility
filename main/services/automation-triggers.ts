@@ -143,10 +143,130 @@ function obsOutputTriggers(
   };
 }
 
+type Line = { id?: string; text?: string; channelName?: string | null };
+const asLines = (v: unknown): Line[] => (Array.isArray(v) ? (v as Line[]) : []);
+
+type Baptism = { phase?: string };
+const asBaptism = (v: unknown): Baptism => (v && typeof v === "object" ? (v as Baptism) : {});
+
+const asConnected = (v: unknown): string[] => {
+  const c = v && typeof v === "object" ? (v as { connected?: unknown }).connected : null;
+  return Array.isArray(c) ? (c as string[]) : [];
+};
+
+const DISPLAY_NAME: ParamDef = {
+  key: "name",
+  label: "Display",
+  type: "string",
+  optional: true,
+  optionsFrom: "displays",
+  help: "Leave blank for any.",
+};
+
 export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
   ...Object.assign({}, ...INTEGRATIONS.map((i) => connectionTriggers(i.id, i.label))),
   ...obsOutputTriggers("streaming", "streaming", "streaming"),
   ...obsOutputTriggers("virtualCam", "virtualcam", "the virtual camera"),
+
+  "prodcom.phrase-said": def({
+    id: "prodcom.phrase-said",
+    label: "A phrase is said on ProdCom",
+    channel: "prodcom:transcript",
+    params: [
+      { key: "phrase", label: "Phrase", type: "string", help: "Case-insensitive, matches part of a line." },
+      { key: "channel", label: "On channel", type: "string", optional: true, help: "Leave blank for any channel." },
+    ],
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      const want = String(params.phrase ?? "").trim().toLowerCase();
+      if (!want) return false; // an empty phrase would match every line
+      const onlyChannel = String(params.channel ?? "").trim().toLowerCase();
+
+      // Only lines NOT already present: the transcript grows, so matching the
+      // whole feed would fire on every broadcast for the rest of the service.
+      const seen = new Set(asLines(prev).map((l) => l.id));
+      return asLines(next).some((l) => {
+        if (seen.has(l.id)) return false;
+        if (onlyChannel && (l.channelName ?? "").trim().toLowerCase() !== onlyChannel) return false;
+        return (l.text ?? "").toLowerCase().includes(want);
+      });
+    },
+  }),
+
+  "baptism.started": def({
+    id: "baptism.started",
+    label: "Baptism timer starts",
+    channel: "baptism:state",
+    params: [],
+    didFire: (prev, next) => {
+      if (prev === null) return false;
+      return asBaptism(prev).phase === "idle" && asBaptism(next).phase !== "idle";
+    },
+  }),
+
+  "baptism.phase-changed": def({
+    id: "baptism.phase-changed",
+    label: "Baptism moves to another phase",
+    channel: "baptism:state",
+    params: [],
+    didFire: (prev, next) => {
+      if (prev === null) return false;
+      const a = asBaptism(prev).phase;
+      const b = asBaptism(next).phase;
+      return a !== undefined && b !== undefined && a !== b;
+    },
+  }),
+
+  "baptism.finished": def({
+    id: "baptism.finished",
+    label: "Baptism timer finishes",
+    channel: "baptism:state",
+    params: [],
+    didFire: (prev, next) => {
+      if (prev === null) return false;
+      return asBaptism(prev).phase !== "idle" && asBaptism(next).phase === "idle";
+    },
+  }),
+
+  "display.connected": def({
+    id: "display.connected",
+    label: "A display connects",
+    channel: "displays:presence",
+    params: [DISPLAY_NAME],
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      const want = String(params.name ?? "").trim();
+      const before = new Set(asConnected(prev));
+      const arrived = asConnected(next).filter((d) => !before.has(d));
+      return want ? arrived.includes(want) : arrived.length > 0;
+    },
+  }),
+
+  "display.disconnected": def({
+    id: "display.disconnected",
+    label: "A display disconnects",
+    channel: "displays:presence",
+    params: [DISPLAY_NAME],
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      const want = String(params.name ?? "").trim();
+      const after = new Set(asConnected(next));
+      const left = asConnected(prev).filter((d) => !after.has(d));
+      return want ? left.includes(want) : left.length > 0;
+    },
+  }),
+
+  "display.none-connected": def({
+    id: "display.none-connected",
+    label: "Every display has disconnected",
+    channel: "displays:presence",
+    params: [],
+    help: "Fires once when the last display drops off, not repeatedly while none are connected.",
+    didFire: (prev, next) => {
+      if (prev === null) return false;
+      return asConnected(prev).length > 0 && asConnected(next).length === 0;
+    },
+  }),
 
   "pco.service-started": def({
     id: "pco.service-started",

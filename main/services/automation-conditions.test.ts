@@ -16,6 +16,7 @@ const ctx = (over: Partial<ConditionCtx> = {}): ConditionCtx => ({
   integrations: {},
   obsRecording: false,
   reaperRecording: false,
+  baptismPhase: null,
   ...over,
 });
 
@@ -146,5 +147,17 @@ describe("recorder conditions", () => {
       AUTOMATION_CONDITIONS["obs.is-recording"].holds(ctx({ reaperRecording: true }), {}, SUNDAY_10AM),
       false,
     );
+  });
+});
+
+describe("baptism.phase-is", () => {
+  const c = () => AUTOMATION_CONDITIONS["baptism.phase-is"];
+  test("holds only for the named phase", () => {
+    assert.ok(c(), "baptism.phase-is must be registered");
+    assert.equal(c().holds(ctx({ baptismPhase: "testimony" }), { phase: "testimony" }, SUNDAY_10AM), true);
+    assert.equal(c().holds(ctx({ baptismPhase: "baptism" }), { phase: "testimony" }, SUNDAY_10AM), false);
+  });
+  test("does not hold when the timer has never run", () => {
+    assert.equal(c().holds(ctx({ baptismPhase: null }), { phase: "idle" }, SUNDAY_10AM), false);
   });
 });

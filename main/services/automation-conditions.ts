@@ -53,6 +53,22 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
     holds: (ctx) => ctx.reaperRecording === true,
   },
 
+  "baptism.phase-is": {
+    id: "baptism.phase-is",
+    label: "Baptism phase is",
+    params: [{
+      key: "phase", label: "Phase", type: "enum",
+      options: [
+        { value: "idle", label: "Idle" },
+        { value: "testimony", label: "Testimony" },
+        { value: "baptism", label: "Baptism" },
+      ],
+    }],
+    // A null phase means the timer has never run this session — no phase holds,
+    // including "idle", because we do not know that it is idle.
+    holds: (ctx, params) => ctx.baptismPhase !== null && ctx.baptismPhase === String(params.phase ?? ""),
+  },
+
   "service.is-live": {
     id: "service.is-live",
     label: "A service is live",

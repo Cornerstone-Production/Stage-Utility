@@ -45,6 +45,8 @@ export interface ConditionCtx {
   /** Whether each recorder is rolling right now, for the `is-recording` conditions. */
   obsRecording: boolean;
   reaperRecording: boolean;
+  /** Current baptism-timer phase, or null when the timer has never run. */
+  baptismPhase: string | null;
 }
 
 export interface ActionResult {
