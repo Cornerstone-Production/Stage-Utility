@@ -1,5 +1,18 @@
 # Homebrew
 
+> **Not currently supported. Use the [one-line installer](install-and-config.md#install)
+> instead.**
+>
+> Homebrew installs work, but **updating them does not, reliably**. `brew upgrade`
+> stops the service and never restarts it, and on macOS the restart afterwards hits
+> two launchd failures — a stale label that refuses to bootstrap, and a spawn that
+> launchd parks. Even the recovery script below has not proved dependable in
+> practice, so it is off the supported list until that is fixed.
+>
+> This page is kept for machines already installed this way. It is not a
+> recommendation, and Homebrew has been removed from the README, the install guide
+> and the release notes.
+
 On macOS and Linux, Stage Utility can be installed and kept running by Homebrew
 instead of the [one-line installer](install-and-config.md#install).
 

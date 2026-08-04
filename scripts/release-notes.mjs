@@ -81,15 +81,7 @@ function section(title, items) {
 
 const install = `## Install
 
-Three supported ways in. Pick whichever suits the machine.
-
-**Homebrew** — macOS
-
-\`\`\`bash
-brew tap Cornerstone-Production/stage-utility
-brew install stage-utility
-brew services start stage-utility
-\`\`\`
+Two supported ways in. Pick whichever suits the machine.
 
 **Linux and macOS** — one line, registers an auto-starting service
 
@@ -104,8 +96,7 @@ irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/
 \`\`\`
 
 Each archive below carries its own Node runtime — nothing else to install. Already
-running it? Update from **Settings → Advanced → Updates**, or
-\`brew upgrade stage-utility\` on a Homebrew install.
+running it? Update from **Settings → Advanced → Updates**.
 `;
 
 const parts = [

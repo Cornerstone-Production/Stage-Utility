@@ -5,18 +5,9 @@ auto-starts.
 
 ## Install
 
-Three supported ways in, all equally current — they install the same release
-from the same published archives. Nothing to clone, no Node to install, no build
-step: the download carries its own runtime.
-
-**Homebrew** — macOS. The natural choice on a laptop or workstation, where
-`brew upgrade` alongside everything else is convenient.
-
-```bash
-brew tap Cornerstone-Production/stage-utility
-brew install stage-utility
-brew services start stage-utility
-```
+Two supported ways in, both equally current — they install the same release from
+the same published archives. Nothing to clone, no Node to install, no build step:
+the download carries its own runtime.
 
 **Linux and macOS** — one line. The right choice for a Pi or a server, because
 it registers a system-wide service that starts at boot rather than at login.
@@ -58,10 +49,6 @@ command:
 After that, update from **Settings → Advanced → Updates** — see
 [Releases and distribution](distribution.md).
 
-A Homebrew install keeps its data outside the keg and updates with
-`brew upgrade stage-utility` rather than from Settings —
-[Homebrew](homebrew.md) covers the differences.
-
 ### From a checkout instead
 
 For development, or to run a modified copy:
@@ -92,7 +79,6 @@ What actually happens depends on the install:
 | Installed by | How it updates |
 |---|---|
 | the one-line installer | re-runs the current installer, which downloads, verifies the checksum, swaps, and restarts |
-| Homebrew | `brew update && brew upgrade` — see [Homebrew](homebrew.md) |
 | a git checkout | fetch, reinstall if the lockfile moved, rebuild if the UI changed, restart |
 
 There is no extra tooling requirement on any platform. If the app cannot work out
