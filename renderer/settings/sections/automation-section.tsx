@@ -20,13 +20,15 @@ import {
 interface ParamSpec {
   key: string;
   label: string;
-  type: "number" | "string" | "enum" | "multi-enum";
+  type: "number" | "string" | "enum" | "multi-enum" | "key-value";
   min?: number;
   max?: number;
   options?: { value: string; label: string }[];
   optionsFrom?: string;
   optional?: boolean;
   help?: string;
+  keyLabel?: string;
+  valueLabel?: string;
 }
 interface Spec {
   id: string;
@@ -77,6 +79,81 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
 const selectCls =
   "h-7 w-full rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus";
 
+/**
+ * A two-column table stored as a JSON object string.
+ *
+ * Exists for values that must be typed EXACTLY as some other system spells them —
+ * a Dante channel name may carry a numeric prefix or be renamed at will, so nothing
+ * can generate it and nothing here validates it. The operator reads it off the
+ * other system and types it; the point is that they can see what they typed.
+ */
+function KeyValueField({
+  spec,
+  value,
+  onChange,
+}: {
+  spec: ParamSpec;
+  value: string | number | undefined;
+  onChange: (v: string) => void;
+}) {
+  const rows = useMemo(() => {
+    try {
+      const parsed: unknown = JSON.parse(String(value ?? "") || "{}");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [] as [string, string][];
+      return Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [k, String(v ?? "")] as [string, string]);
+    } catch {
+      return [] as [string, string][];
+    }
+  }, [value]);
+
+  const write = (next: [string, string][]) =>
+    onChange(JSON.stringify(Object.fromEntries(next.filter(([k]) => k.trim() !== ""))));
+
+  return (
+    <div className="flex flex-col gap-1.5 py-1">
+      <span className="text-caption1 text-fg-muted">
+        {spec.label}
+        {spec.help ? <InfoHint>{spec.help}</InfoHint> : null}
+      </span>
+      <div className="flex flex-col gap-1">
+        {rows.map(([k, v], i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <Input
+              value={k}
+              onChange={(e) => write(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))}
+              className="h-7 w-20 text-footnote"
+              aria-label={spec.keyLabel ?? "Key"}
+              placeholder={spec.keyLabel ?? "Key"}
+            />
+            <Input
+              value={v}
+              onChange={(e) => write(rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))}
+              className="h-7 flex-1 text-footnote"
+              aria-label={spec.valueLabel ?? "Value"}
+              placeholder={spec.valueLabel ?? "Value"}
+            />
+            <button
+              type="button"
+              onClick={() => write(rows.filter((_, j) => j !== i))}
+              className="rounded p-0.5 text-fg-subtle hover:text-warn-11"
+              aria-label="Remove row"
+            >
+              <Trash2Icon className="size-3.5" />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => write([...rows, ["", ""]])}
+          className="inline-flex w-fit items-center gap-1 rounded px-1 py-0.5 text-caption2 text-fg-subtle hover:text-fg"
+        >
+          <PlusIcon className="size-3" /> row
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Renders one param from its spec — the reason a new provider needs no UI work. */
 function ParamField({
   spec,
@@ -90,6 +167,10 @@ function ParamField({
   dynamicOptions: Record<string, { value: string; label: string }[]>;
 }) {
   const options = spec.optionsFrom ? (dynamicOptions[spec.optionsFrom] ?? []) : (spec.options ?? []);
+
+  if (spec.type === "key-value") {
+    return <KeyValueField spec={spec} value={value} onChange={onChange} />;
+  }
 
   if (spec.type === "number") {
     return (

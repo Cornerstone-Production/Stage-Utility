@@ -4,7 +4,11 @@
 export interface ParamDef {
   key: string;
   label: string;
-  type: "number" | "string" | "enum" | "multi-enum";
+  /** "key-value" renders a small two-column table and stores a JSON object string,
+   *  so the param shape stays Record<string, string | number>. Used where an
+   *  operator must type exact external names (Dante channels) that no template can
+   *  safely generate. */
+  type: "number" | "string" | "enum" | "multi-enum" | "key-value";
   min?: number;
   max?: number;
   options?: { value: string; label: string }[];
@@ -12,6 +16,9 @@ export interface ParamDef {
   optionsFrom?: "rosstalk-targets" | "rosstalk-commands" | "osc-targets" | "service-types" | "displays" | "plan-items";
   optional?: boolean;
   help?: string;
+  /** Column headings for a "key-value" param. */
+  keyLabel?: string;
+  valueLabel?: string;
 }
 
 export interface TriggerDef {
