@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
-import { UploadIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { UploadIcon, PlusIcon, Trash2Icon, DownloadIcon, PrinterIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { Button, Input, SkeletonRows, toast, confirm , UnsavedBanner} from "../../components/ui";
@@ -25,6 +25,48 @@ const EMPTY: PatchFile = {
  * patch:save (broadcasts patch:updated for live sync). Within a sheet, editing
  * "Default" changes its base patch; editing a variant stores only diffs.
  */
+/**
+ * Export and print for the active sheet.
+ *
+ * The export is served from the SAVED file, so it is deliberately unavailable
+ * while there are unsaved edits: handing back a document that differs from the
+ * screen is the one failure a patch sheet cannot afford, and it would be silent.
+ *
+ * Downloads are plain navigations rather than fetches — the browser then handles
+ * the file and honours the Content-Disposition filename, which a blob round-trip
+ * would discard.
+ */
+function ExportControls({
+  sheetId,
+  variantId,
+  dirty,
+}: {
+  sheetId: string;
+  variantId: string | null;
+  dirty: boolean;
+}) {
+  const download = (format: "csv" | "xlsx") => {
+    const q = new URLSearchParams({ sheetId, format });
+    if (variantId) q.set("variantId", variantId);
+    window.location.href = `/api/patch/export?${q.toString()}`;
+  };
+  const blocked = dirty ? "Save your changes first — the export comes from the saved sheet" : undefined;
+
+  return (
+    <div className="patch-print-hide flex items-center gap-1.5">
+      <Button variant="filled" size="small" disabled={dirty} title={blocked} onClick={() => download("csv")}>
+        <DownloadIcon className="size-3.5" /> Export CSV
+      </Button>
+      <Button variant="filled" size="small" disabled={dirty} title={blocked} onClick={() => download("xlsx")}>
+        <DownloadIcon className="size-3.5" /> Export Excel
+      </Button>
+      <Button variant="filled" size="small" onClick={() => window.print()}>
+        <PrinterIcon className="size-3.5" /> Print
+      </Button>
+    </div>
+  );
+}
+
 export function PatchSection() {
   const [saved, setSaved] = useState<PatchFile | null>(null);
   const [draft, setDraft] = useState<PatchFile | null>(null);
@@ -185,7 +227,7 @@ export function PatchSection() {
       )}
 
       {/* Sheet tabs (Analog / Dante / WSG / Monitoring / …) + add / rename / delete */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-line pb-3">
+      <div className="patch-print-hide flex flex-wrap items-center gap-2 border-b border-line pb-3">
         <div className="flex items-center gap-1 overflow-x-auto">
           {draft.sheets.map((s) => (
             <button
@@ -212,7 +254,7 @@ export function PatchSection() {
       </div>
 
       {/* Inputs / Outputs tabs (peers) + import */}
-      <div className="flex items-center justify-between gap-2">
+      <div className="patch-print-hide flex items-center justify-between gap-2">
         <div className="inline-flex rounded-lg border border-line bg-surface p-1">
           {(["in", "out"] as const).map((t) => (
             <button
@@ -225,19 +267,24 @@ export function PatchSection() {
             </button>
           ))}
         </div>
-        <Button variant="filled" size="small" onClick={() => setImporting((v) => !v)}>
-          <UploadIcon className="size-3.5" /> Import CSV
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button variant="filled" size="small" onClick={() => setImporting((v) => !v)}>
+            <UploadIcon className="size-3.5" /> Import CSV
+          </Button>
+          <ExportControls sheetId={sheet.id} variantId={editingVariant?.id ?? null} dirty={dirty} />
+        </div>
       </div>
 
       {importing && (
         <PatchImport devices={sheet.devices} endpoints={sheet.endpoints} dir={tab} onChange={setEndpoints} onClose={() => setImporting(false)} />
       )}
 
-      <PatchDeviceManager devices={sheet.devices} onChange={setDevices} />
+      <div className="patch-print-hide">
+        <PatchDeviceManager devices={sheet.devices} onChange={setDevices} />
+      </div>
 
       {/* Variant switcher — Default patch vs a named overlay */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="patch-print-hide flex flex-wrap items-center gap-2">
         <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Editing</span>
         <select
           value={editingVariantId ?? ""}
@@ -274,9 +321,15 @@ export function PatchSection() {
         </div>
       </div>
 
-      <PatchTable dir={tab} group={group} racks={racks} stageDevices={stageDevices} endpoints={tableEndpoints} onChange={onTableChange} showOwner={sheet.kind !== "analog"} />
+      {/* The only thing that belongs on paper. Everything above and below is
+          editing chrome and is hidden by the print stylesheet. */}
+      <div className="patch-print-sheet">
+        <PatchTable dir={tab} group={group} racks={racks} stageDevices={stageDevices} endpoints={tableEndpoints} onChange={onTableChange} showOwner={sheet.kind !== "analog"} />
+      </div>
 
-      <PatchWeekly variants={sheet.variants} assignments={sheet.assignments} plan={plan} onChange={setAssignments} />
+      <div className="patch-print-hide">
+        <PatchWeekly variants={sheet.variants} assignments={sheet.assignments} plan={plan} onChange={setAssignments} />
+      </div>
     </div>
   );
 }
