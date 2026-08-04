@@ -12,6 +12,7 @@
 import type { ParamDef, TriggerDef } from "../types/automation.js";
 import { dueAt } from "./automation-due-time.js";
 import { findItemByTitle } from "./automation-pco-items.js";
+import { PREFERRED_METRICS } from "./spl-recorder.js";
 
 type Live = {
   mode?: string;
@@ -154,6 +155,106 @@ const asConnected = (v: unknown): string[] => {
   return Array.isArray(c) ? (c as string[]) : [];
 };
 
+/**
+ * One meter's current level, or null when absent.
+ *
+ * `spl:metrics` keys meters "device::channel" and each carries a `metrics` map
+ * named exactly as Smaart names them — there is no single "level" field, so a
+ * rule either names the metric or gets the same preference order the recorder
+ * uses when it picks one for a recording.
+ */
+function splLevel(v: unknown, meter: string, metric: string): number | null {
+  const meters = (v && typeof v === "object" ? (v as { meters?: unknown }).meters : null) ?? null;
+  if (!meters || typeof meters !== "object") return null;
+  const m = (meters as Record<string, { metrics?: unknown }>)[meter];
+  const values = m?.metrics;
+  if (!values || typeof values !== "object") return null;
+  const map = values as Record<string, unknown>;
+  const key = metric || PREFERRED_METRICS.find((k) => k in map) || Object.keys(map)[0];
+  const n = key ? map[key] : undefined;
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
+
+/** Threshold crossing in one direction, sharing the "no baseline, no crossing" rule. */
+function splCrossed(
+  prev: unknown,
+  next: unknown,
+  params: Record<string, unknown>,
+  dir: "above" | "below",
+): boolean {
+  const meter = String(params.meter ?? "").trim();
+  const metric = String(params.metric ?? "").trim();
+  const a = splLevel(prev, meter, metric);
+  const b = splLevel(next, meter, metric);
+  if (a === null || b === null) return false; // no baseline, no crossing
+  const th = Number(params.threshold);
+  if (!Number.isFinite(th)) return false;
+  return dir === "above" ? a <= th && b > th : a >= th && b < th;
+}
+
+/** slots:devices broadcasts Record<slotId, DeviceStatus>; the label a rule names
+ *  is the device's own `name`, and a reading is null when the pack is offline. */
+type Dev = { name?: string | null; battery?: unknown; rfBars?: unknown };
+const asDevices = (v: unknown): Dev[] =>
+  v && typeof v === "object" && !Array.isArray(v) ? Object.values(v as Record<string, Dev>) : [];
+
+/** Readings by device name for the watched slot (all slots when `slot` is blank).
+ *  A pack with no reading is omitted entirely: unknown is not a low value. */
+function deviceReadings(v: unknown, slot: string, field: "battery" | "rfBars"): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const d of asDevices(v)) {
+    const name = (d?.name ?? "").trim();
+    if (!name) continue;
+    if (slot && name !== slot) continue;
+    const n = d[field];
+    if (typeof n === "number" && Number.isFinite(n)) out.set(name, n);
+  }
+  return out;
+}
+
+/** Crossed downward for any watched pack present on BOTH sides. */
+function deviceCrossedBelow(
+  prev: unknown,
+  next: unknown,
+  slot: string,
+  field: "battery" | "rfBars",
+  th: number,
+): boolean {
+  if (!Number.isFinite(th)) return false;
+  const before = deviceReadings(prev, slot, field);
+  for (const [name, b] of deviceReadings(next, slot, field)) {
+    const a = before.get(name);
+    if (a === undefined) continue; // no baseline for this pack
+    if (a >= th && b < th) return true;
+  }
+  return false;
+}
+
+/**
+ * Cumulative minutes over plan across FINISHED counted items.
+ *
+ * The timeline record carries no pre-computed drift, so this derives it the way
+ * the History tab does: only items that have ended contribute, and pre-service
+ * padding is excluded (a per-item `counted` override wins, else `preService`).
+ */
+function overrunMinutes(v: unknown): number | null {
+  const items = (v && typeof v === "object" ? (v as { items?: unknown }).items : null) ?? null;
+  if (!Array.isArray(items)) return null;
+  let sec = 0;
+  for (const raw of items as Record<string, unknown>[]) {
+    const counted = typeof raw.counted === "boolean" ? raw.counted : raw.preService !== true;
+    if (!counted) continue;
+    if (raw.endedAt == null) continue; // still running — not yet a known overrun
+    const actual = raw.actualDurationSec;
+    const planned = raw.plannedLengthSec;
+    if (typeof actual !== "number" || !Number.isFinite(actual)) continue;
+    // An item PCO gave no planned length reads as neutral rather than as overrun.
+    if (typeof planned !== "number" || !Number.isFinite(planned)) continue;
+    sec += actual - planned;
+  }
+  return sec / 60;
+}
+
 const DISPLAY_NAME: ParamDef = {
   key: "name",
   label: "Display",
@@ -253,6 +354,98 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
       const after = new Set(asConnected(next));
       const left = asConnected(prev).filter((d) => !after.has(d));
       return want ? left.includes(want) : left.length > 0;
+    },
+  }),
+
+  "spl.crossed-above": def({
+    id: "spl.crossed-above",
+    label: "SPL rises above",
+    channel: "spl:metrics",
+    params: [
+      { key: "meter", label: "Meter", type: "string", help: 'The Smaart meter key, "device::channel".' },
+      { key: "threshold", label: "Threshold (dB)", type: "number", min: 0, max: 140 },
+      { key: "metric", label: "Metric", type: "string", optional: true, help: 'e.g. "SPL A Slow". Blank picks the usual one.' },
+    ],
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      return splCrossed(prev, next, params, "above");
+    },
+  }),
+
+  "spl.crossed-below": def({
+    id: "spl.crossed-below",
+    label: "SPL falls below",
+    channel: "spl:metrics",
+    params: [
+      { key: "meter", label: "Meter", type: "string", help: 'The Smaart meter key, "device::channel".' },
+      { key: "threshold", label: "Threshold (dB)", type: "number", min: 0, max: 140 },
+      { key: "metric", label: "Metric", type: "string", optional: true, help: 'e.g. "SPL A Slow". Blank picks the usual one.' },
+    ],
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      return splCrossed(prev, next, params, "below");
+    },
+  }),
+
+  "wireless.battery-below": def({
+    id: "wireless.battery-below",
+    label: "A pack's battery falls below",
+    channel: "slots:devices",
+    params: [
+      { key: "threshold", label: "Battery (%)", type: "number", min: 0, max: 100 },
+      { key: "slot", label: "Mic", type: "string", optional: true, help: "The mic's name. Leave blank for any." },
+    ],
+    help: "A pack going offline does not fire this — a missing reading is unknown, not low.",
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      return deviceCrossedBelow(prev, next, String(params.slot ?? "").trim(), "battery", Number(params.threshold));
+    },
+  }),
+
+  "wireless.rf-below": def({
+    id: "wireless.rf-below",
+    label: "A pack's RF falls below",
+    channel: "slots:devices",
+    params: [
+      { key: "threshold", label: "RF bars", type: "number", min: 0, max: 5 },
+      { key: "slot", label: "Mic", type: "string", optional: true, help: "The mic's name. Leave blank for any." },
+    ],
+    help: "A pack going offline does not fire this — a missing reading is unknown, not low.",
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      return deviceCrossedBelow(prev, next, String(params.slot ?? "").trim(), "rfBars", Number(params.threshold));
+    },
+  }),
+
+  "service.running-over": def({
+    id: "service.running-over",
+    label: "The service runs over plan by",
+    channel: "service-timeline:history",
+    params: [{ key: "minutes", label: "Minutes over", type: "number", min: 1, max: 120 }],
+    help: "Measured across finished items, so it is checked as each item ends.",
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      const th = Number(params.minutes);
+      if (!Number.isFinite(th)) return false;
+      const a = overrunMinutes(prev);
+      const b = overrunMinutes(next);
+      if (a === null || b === null) return false;
+      return a <= th && b > th;
+    },
+  }),
+
+  "update.available": def({
+    id: "update.available",
+    label: "An update becomes available",
+    channel: "update:status",
+    params: [],
+    didFire: (prev, next) => {
+      if (prev === null) return false;
+      const n = (v: unknown) => {
+        const x = v && typeof v === "object" ? (v as { releasesBehind?: unknown }).releasesBehind : null;
+        return typeof x === "number" && Number.isFinite(x) ? x : 0;
+      };
+      return n(prev) === 0 && n(next) > 0;
     },
   }),
 

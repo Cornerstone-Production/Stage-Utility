@@ -403,3 +403,152 @@ describe("display presence", () => {
     assert.equal(t.didFire(p(), p(), {}, NOW), false);
   });
 });
+
+// ── SPL thresholds ─────────────────────────────────────────────────────────
+//
+// The real payload keys meters "device::channel" and carries a `metrics` map
+// named exactly as Smaart names them — there is no single `value` field, so the
+// trigger takes the metric name too.
+
+describe("spl thresholds", () => {
+  const spl = (v: number | null, metric = "SPL A Slow") => ({
+    connected: true,
+    apiVersion: "4",
+    meters: {
+      "Smaart::FOH": {
+        deviceName: "Smaart", channelName: "FOH", ts: null,
+        metrics: v === null ? {} : { [metric]: v },
+      },
+    },
+  });
+  const P = { meter: "Smaart::FOH", metric: "SPL A Slow", threshold: 95 };
+
+  test("crossed-above fires on the crossing, not while it stays high", () => {
+    const t = AUTOMATION_TRIGGERS["spl.crossed-above"];
+    assert.equal(t.didFire(spl(90), spl(96), P, NOW), true);
+    assert.equal(t.didFire(spl(96), spl(97), P, NOW), false);
+  });
+
+  test("crossed-below fires on the way down", () => {
+    const t = AUTOMATION_TRIGGERS["spl.crossed-below"];
+    assert.equal(t.didFire(spl(96), spl(90), P, NOW), true);
+    assert.equal(t.didFire(spl(90), spl(88), P, NOW), false);
+  });
+
+  test("a missing reading is no baseline, so nothing fires", () => {
+    // Same rule the occupancy triggers follow: without both sides there is no
+    // crossing, and inventing one fires on a reconnect.
+    const t = AUTOMATION_TRIGGERS["spl.crossed-above"];
+    assert.equal(t.didFire(spl(null), spl(96), P, NOW), false);
+  });
+
+  test("an unknown meter fires nothing", () => {
+    const t = AUTOMATION_TRIGGERS["spl.crossed-above"];
+    assert.equal(t.didFire(spl(90), spl(96), { ...P, meter: "Nope" }, NOW), false);
+  });
+
+  test("with no metric named it uses the first preferred one present", () => {
+    const t = AUTOMATION_TRIGGERS["spl.crossed-above"];
+    assert.equal(t.didFire(spl(90), spl(96), { meter: "Smaart::FOH", threshold: 95 }, NOW), true);
+  });
+});
+
+// ── Wireless battery and RF ────────────────────────────────────────────────
+//
+// slots:devices broadcasts Record<slotId, DeviceStatus>; the human label is the
+// device's own `name`, and levels are `battery` (%) and `rfBars` (0-5).
+
+describe("wireless thresholds", () => {
+  const dev = (name: string, battery: number | null, rfBars: number | null, online = true) => ({
+    "slot-1": {
+      channelId: "c1", name, deviceType: "receiver", online,
+      rfBars, rfLevelDbm: null, battery, charging: null,
+      frequencyLabel: null, audioLevel: null, cycles: null, health: null, tempC: null,
+      updatedAt: new Date(NOW).toISOString(),
+    },
+  });
+
+  test("battery-below fires on the crossing for the named mic", () => {
+    const t = AUTOMATION_TRIGGERS["wireless.battery-below"];
+    const p = { slot: "Vox 1", threshold: 20 };
+    assert.equal(t.didFire(dev("Vox 1", 25, 5), dev("Vox 1", 18, 5), p, NOW), true);
+    assert.equal(t.didFire(dev("Vox 1", 18, 5), dev("Vox 1", 15, 5), p, NOW), false);
+  });
+
+  test("with no mic named it fires for any pack crossing", () => {
+    const t = AUTOMATION_TRIGGERS["wireless.battery-below"];
+    assert.equal(t.didFire(dev("Vox 1", 25, 5), dev("Vox 1", 18, 5), { threshold: 20 }, NOW), true);
+  });
+
+  test("a pack going offline is not a low battery", () => {
+    // null is UNKNOWN. Firing a low-battery rule because a receiver dropped
+    // would page someone about a pack that is fine.
+    const t = AUTOMATION_TRIGGERS["wireless.battery-below"];
+    assert.equal(
+      t.didFire(dev("Vox 1", 25, 5), dev("Vox 1", null, null, false), { slot: "Vox 1", threshold: 20 }, NOW),
+      false,
+    );
+  });
+
+  test("another mic's low battery does not fire a named rule", () => {
+    const t = AUTOMATION_TRIGGERS["wireless.battery-below"];
+    assert.equal(
+      t.didFire(dev("Vox 2", 25, 5), dev("Vox 2", 18, 5), { slot: "Vox 1", threshold: 20 }, NOW),
+      false,
+    );
+  });
+
+  test("rf-below fires on bars dropping past the threshold", () => {
+    const t = AUTOMATION_TRIGGERS["wireless.rf-below"];
+    assert.equal(
+      t.didFire(dev("Vox 1", 80, 4), dev("Vox 1", 80, 1), { slot: "Vox 1", threshold: 2 }, NOW),
+      true,
+    );
+  });
+});
+
+// ── Service pacing and updates ─────────────────────────────────────────────
+
+describe("service pacing and updates", () => {
+  // Cumulative overrun = sum of (actual - planned) across FINISHED counted items.
+  // The timeline record carries no pre-computed drift field, so it is derived
+  // here the same way the History tab derives it.
+  const item = (seq: number, planned: number, actual: number | null, over: Record<string, unknown> = {}) => ({
+    itemId: `i${seq}`, title: `Item ${seq}`, sequence: seq,
+    plannedLengthSec: planned,
+    startedAt: new Date(NOW).toISOString(),
+    endedAt: actual === null ? null : new Date(NOW + actual * 1000).toISOString(),
+    actualDurationSec: actual,
+    ...over,
+  });
+  const timeline = (...items: unknown[]) => ({ serviceKey: "k", items });
+
+  test("running-over fires once as the plan goes past the margin", () => {
+    const t = AUTOMATION_TRIGGERS["service.running-over"];
+    // 120s over, then 360s over, against a 5-minute margin.
+    const before = timeline(item(1, 300, 420));
+    const after = timeline(item(1, 300, 420), item(2, 300, 540));
+    assert.equal(t.didFire(before, after, { minutes: 5 }, NOW), true);
+    assert.equal(t.didFire(after, after, { minutes: 5 }, NOW), false);
+  });
+
+  test("an item still running does not count toward the overrun", () => {
+    const t = AUTOMATION_TRIGGERS["service.running-over"];
+    const before = timeline(item(1, 300, 420));
+    const after = timeline(item(1, 300, 420), item(2, 300, null));
+    assert.equal(t.didFire(before, after, { minutes: 5 }, NOW), false);
+  });
+
+  test("pre-service items are excluded, as they are in History", () => {
+    const t = AUTOMATION_TRIGGERS["service.running-over"];
+    const before = timeline(item(1, 60, 60));
+    const after = timeline(item(1, 60, 60), item(2, 60, 600, { preService: true }));
+    assert.equal(t.didFire(before, after, { minutes: 5 }, NOW), false);
+  });
+
+  test("update.available fires when a release appears, not while one waits", () => {
+    const t = AUTOMATION_TRIGGERS["update.available"];
+    assert.equal(t.didFire({ releasesBehind: 0 }, { releasesBehind: 1 }, {}, NOW), true);
+    assert.equal(t.didFire({ releasesBehind: 1 }, { releasesBehind: 1 }, {}, NOW), false);
+  });
+});
