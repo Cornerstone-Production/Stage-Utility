@@ -920,6 +920,12 @@ class PcoService {
       serviceTimeStartsAt,
       planTimes.flatMap((t) => (t.name ? [{ name: t.name, startsAt: t.startsAt }] : [])),
     );
+    // Rehearsal + service times for the time-relative automation triggers. Carried
+    // in every mode below: "an hour before rehearsal" has to fire when nothing is
+    // live, which is most of the week.
+    const planTimesDto = planTimes
+      .filter((t) => t.timeType === "service" || t.timeType === "rehearsal")
+      .map((t) => ({ id: t.id, name: t.name, timeType: t.timeType, startsAt: t.startsAt }));
 
     if (it && typeof liveStartAt === "string" && liveStartAt && itemNode) {
       // "Full Item Length" = the *plan item's* length (ItemTime.length is often 0)
@@ -954,6 +960,7 @@ class PcoService {
         serviceTimeId,
         serviceTimeStartsAt,
         itemSchedule,
+        planTimes: planTimesDto,
         serviceEnded,
         beforeServiceStart,
       };
@@ -990,6 +997,7 @@ class PcoService {
         serviceTimeId,
         serviceTimeStartsAt,
         itemSchedule,
+        planTimes: planTimesDto,
       };
     }
 
@@ -1006,6 +1014,7 @@ class PcoService {
       serviceTimeId,
       serviceTimeStartsAt,
       itemSchedule,
+      planTimes: planTimesDto,
     };
   }
 

@@ -212,6 +212,14 @@ export class StageController {
   private deviceStatusDirty = false; // device status changed while no client watched
   // Cached team members for the active plan.
   private teamMembers: TeamMemberDTO[] = [];
+
+  /** The plan's scheduled team, for the roster-driven automation action. A copy,
+   *  so a caller cannot mutate the controller's own list. */
+  getTeamMembers(): TeamMemberDTO[] {
+    // Defensive: an action provider must never throw, and this is the seam it
+    // reads the roster through.
+    return Array.isArray(this.teamMembers) ? this.teamMembers.map((m) => ({ ...m })) : [];
+  }
   // Raw (un-resolved) slot configs per VIEW id for the ACTIVE service type.
   private rawSlotsByView = new Map<string, Slot[]>();
   // Raw (unresolved) slots for inline mic-slots objects, keyed by layout object id,

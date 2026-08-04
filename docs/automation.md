@@ -49,6 +49,7 @@ poll after.
 | A pack's RF falls below | the same for RF bars (0-5) |
 | The service runs over plan by | cumulative overrun across finished items passes your margin — checked as each item ends |
 | An update becomes available | a new release appears, not repeatedly while one waits |
+| Before a rehearsal or service | a set number of minutes before any rehearsal or service time on the plan |
 
 Every trigger fires on an **edge** — the moment something changes — never on a
 state that merely persists. The channels carry state snapshots, re-sent
@@ -88,6 +89,7 @@ for "idle", because before it runs we do not know that it is idle.
 | Send an OSC message | to an OSC target |
 | Advance PCO Live one item | steps the live plan forward once |
 | Refresh all displays | reloads every connected display |
+| Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
 
 ## Firing an item on time
 

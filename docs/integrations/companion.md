@@ -50,7 +50,79 @@ that writes the count onto a button.
 **Variables** — plan and series title, service type, plan mode, ProPresenter
 current/next item and slide position, PCO countdown label and seconds, mics
 online and total, lowest battery and its channel, last caption text and speaker,
-people attendance and occupancy (with per-zone variables), last sync time.
+people attendance and occupancy (with per-zone variables), last sync time. Plus
+one pair per automation signal — see below.
+
+## Signals
+
+An automation rule can publish a named value that a **Companion Trigger** acts on.
+Stage Utility never presses a button and never contacts the device: it says what is
+true, and Companion decides what to do. That keeps device actions — a Dante
+crosspoint, say — inside the module that owns them.
+
+Each signal becomes two variables:
+
+| | |
+|---|---|
+| `$(stage:signal_<name>)` | the published value |
+| `$(stage:signal_<name>_error)` | why the last evaluation failed; blank when healthy |
+
+with feedbacks **Automation signal equals** and **Automation signal failed to
+resolve**.
+
+### Worked example: routing talkback
+
+Production marks the talkback vocalist in Planning Center by adding a marker to
+their note for that event, alongside the slot number they already use: `4 TB`.
+
+In Stage Utility, under **Settings -> Automation**:
+
+```
+When:  Before a rehearsal or service      60 minutes, rehearsal + service
+Then:  Set a Companion signal from the roster
+         Signal name:      dante-tb
+         Marker in notes:  TB
+         Only this position: Vocals
+         Send for each slot:  1 -> Vox 1
+                              2 -> Vox 2
+                              4 -> 31.Vox 4
+```
+
+In Companion:
+
+```
+Trigger
+  When:  variable $(stage:signal_dante-tb) changes
+  Then:  audinate-dantecontroller: Make Crosspoint
+           Source Channel Name:  $(stage:signal_dante-tb)
+           Destination Channel:  Lead TB
+```
+
+One trigger covers every slot, because the Dante module accepts variables in
+every field. Adding a fifth slot is one row in the rule and nothing in Companion.
+
+### What it does on failure
+
+**Nothing, and it holds the previous value.** If nobody is marked, or two people
+are, or the matched slot has no row in the table, the rule refuses and records why.
+The last good route stays in place — an unrelated scheduling mistake must not take
+talkback off mid-service.
+
+Every outcome is in the automation Activity log, and the failure also lights the
+**signal failed to resolve** feedback, so a button on the wall can go red. That is
+the only way anyone learns about it in the moment.
+
+### Two things to know
+
+**The value you type is sent verbatim, and nothing validates it.** Dante channel
+names may carry numeric prefixes (`31.Vox 4`) or be renamed at will, so the table
+takes exactly what you see in Dante Controller. A typo produces a perfectly valid
+signal that fails silently at the crosspoint — **test each row once after setting
+it up.**
+
+**A restart re-asserts the routing.** Variables are re-sent when the module
+reconnects, so Companion re-runs the trigger. That is deliberate and self-healing,
+but it does mean a crosspoint someone changed by hand will be put back.
 
 ## Network cost
 

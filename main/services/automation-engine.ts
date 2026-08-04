@@ -18,6 +18,7 @@ import { sampleArchive } from "./archive/sample-archive.js";
 import { automationLog } from "./automation-log.js";
 import { automationStore } from "./automation-store.js";
 import { integrationManager } from "./integration-manager.js";
+import { signalStore } from "./signal-store.js";
 import { obsService } from "./obs-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
@@ -40,6 +41,8 @@ class AutomationEngine {
 
   async init(): Promise<void> {
     await automationLog.init();
+    // Populate the signal cache before any client can ask for the hello burst.
+    await signalStore.init();
     this.rules = await automationStore.loadRules();
     this.settings = await automationStore.loadSettings();
     // Re-seeding on every init is deliberate: a restart must never inherit stale

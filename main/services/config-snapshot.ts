@@ -63,6 +63,9 @@ export const RUNTIME_FILES = [
   // legacy single-document names are kept here because that is what the drift scan
   // matches on, and because an install that has not booted since the split still
   // has them on disk.
+  // Derived from the PCO roster, not authored: restoring it onto another install
+  // would assert an audio routing that machine never computed.
+  "signals.json",
   "spl-history.json",
   "attendance-history.json",
   "service-timeline.json",
