@@ -68,7 +68,10 @@ Each signal becomes two variables:
 | `$(stage:signal_<name>_error)` | why the last evaluation failed; blank when healthy |
 
 with feedbacks **Automation signal equals** and **Automation signal failed to
-resolve**.
+resolve**. `stage` is whatever you named the connection in Companion.
+
+**Use letters, digits and underscores in a signal name.** The name becomes part of
+a Companion variable id, and anything else may not resolve.
 
 ### Worked example: routing talkback
 
@@ -80,7 +83,7 @@ In Stage Utility, under **Settings -> Automation**:
 ```
 When:  Before a rehearsal or service      60 minutes, rehearsal + service
 Then:  Set a Companion signal from the roster
-         Signal name:      dante-tb
+         Signal name:      dante_tb
          Marker in notes:  TB
          Only this position: Vocals
          Send for each slot:  1 -> Vox 1
@@ -92,9 +95,9 @@ In Companion:
 
 ```
 Trigger
-  When:  variable $(stage:signal_dante-tb) changes
+  When:  variable $(stage:signal_dante_tb) changes
   Then:  audinate-dantecontroller: Make Crosspoint
-           Source Channel Name:  $(stage:signal_dante-tb)
+           Source Channel Name:  $(stage:signal_dante_tb)
            Destination Channel:  Lead TB
 ```
 
