@@ -15,25 +15,37 @@ import { zonedDateKey } from "./app-timezone.js";
 import { mergeOverrides } from "./patch-resolve.js";
 
 export interface ExportRow {
-  channel: string;
+  rackCh: string;
+  console: string;
   dir: string;
   label: string;
   source: string;
+  phantom: string;
   rack: string;
-  connector: string;
   path: string;
   owner: string;
   notes: string;
 }
 
-/** Column order is reading order for an engineer holding the sheet. */
+/**
+ * Column order is reading order for an engineer holding the sheet.
+ *
+ * The names are not arbitrary: each is one the patch IMPORTER's column detection
+ * already recognises, so a sheet exported from here re-imports without hand-mapping.
+ * Getting this wrong is not cosmetic — an earlier draft called the console channel
+ * "Channel", which the importer auto-maps to the RACK channel number, silently
+ * shifting every row's identity on the way back in. Changing a header here means
+ * checking autoMap() in patch-import.tsx, and patch-export-roundtrip.test.ts fails
+ * if the two stop agreeing.
+ */
 export const EXPORT_HEADERS = [
-  "Channel",
+  "Rack ch",
+  "Console",
   "Dir",
-  "Label",
+  "Source / Name",
   "Mic / Feed",
+  "48V",
   "Rack",
-  "Connector",
   "Path",
   "Owner",
   "Notes",
@@ -68,13 +80,7 @@ function renderPath(devices: PatchDevice[], hops: PatchHop[] | undefined): strin
 
 /** What is plugged in: the mic for an input, the feed type for an output. */
 function sourceOf(e: PatchEndpoint): string {
-  if (e.dir === "in") {
-    const mic = (e.mic ?? "").trim();
-    // Phantom is a property of the input, and an engineer reading a paper sheet
-    // needs it beside the mic rather than in a column of its own.
-    return mic && e.phantom ? `${mic} (+48V)` : mic || (e.phantom ? "+48V" : "");
-  }
-  return (e.feedType ?? "").trim();
+  return ((e.dir === "in" ? e.mic : e.feedType) ?? "").trim();
 }
 
 /**
@@ -115,12 +121,15 @@ export function exportRows(
     .filter((e) => (options.includeUnused ? true : e.unused !== true))
     .sort(inRackOrder(devices))
     .map((e) => ({
-      channel: (e.consoleChannel ?? "").trim() || String(e.index),
+      rackCh: rackConnector(devices, e),
+      console: (e.consoleChannel ?? "").trim(),
       dir: e.dir === "in" ? "in" : "out",
       label: (e.label ?? "").trim(),
       source: sourceOf(e),
+      // A value the importer's truthy() accepts, so phantom survives a round trip
+      // as a boolean rather than as prose folded into the mic cell.
+      phantom: e.phantom ? "48V" : "",
       rack: deviceName(devices, e.rackId),
-      connector: rackConnector(devices, e),
       path: renderPath(devices, e.path),
       owner: (e.owner ?? "").trim(),
       notes: (e.notes ?? "").trim(),
@@ -129,7 +138,7 @@ export function exportRows(
 
 /** A row as the flat cell list the serialisers write, in EXPORT_HEADERS order. */
 export function rowCells(r: ExportRow): string[] {
-  return [r.channel, r.dir, r.label, r.source, r.rack, r.connector, r.path, r.owner, r.notes];
+  return [r.rackCh, r.console, r.dir, r.label, r.source, r.phantom, r.rack, r.path, r.owner, r.notes];
 }
 
 /**

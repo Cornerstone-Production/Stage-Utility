@@ -5,8 +5,8 @@ import { toCsv } from "./patch-export-csv.js";
 import { EXPORT_HEADERS, type ExportRow } from "./patch-export.js";
 
 const row = (over: Partial<ExportRow> = {}): ExportRow => ({
-  channel: "01", dir: "in", label: "Kick", source: "Beta91",
-  rack: "SD Rack", connector: "1", path: "", owner: "", notes: "",
+  rackCh: "1", console: "01", dir: "in", label: "Kick", source: "Beta91",
+  phantom: "48V", rack: "SD Rack", path: "", owner: "", notes: "",
   ...over,
 });
 
@@ -32,13 +32,13 @@ describe("toCsv", () => {
   });
 
   it("leaves an ordinary value unquoted", () => {
-    assert.equal(toCsv([row()]).split("\n")[1], "01,in,Kick,Beta91,SD Rack,1,,,");
+    assert.equal(toCsv([row()]).split("\n")[1], "1,01,in,Kick,Beta91,48V,SD Rack,,,");
   });
 
   it("writes one cell per header on every row", () => {
     // A row that drifted out of step with the headers would silently shift every
     // column after it in the spreadsheet.
-    const lines = toCsv([row(), row({ channel: "02" })]).trim().split("\n");
+    const lines = toCsv([row(), row({ console: "02" })]).trim().split("\n");
     for (const l of lines) assert.equal(l.split(",").length, EXPORT_HEADERS.length);
   });
 

@@ -13,7 +13,7 @@ import { EXPORT_HEADERS, rowCells, type ExportRow } from "./patch-export.js";
 
 /** Widths in characters, sized for what each column actually holds — Path carries
  *  a whole hop chain and is unreadable at the default width. */
-const COLUMN_WIDTHS = [10, 6, 24, 18, 18, 12, 40, 16, 30];
+const COLUMN_WIDTHS = [8, 10, 6, 24, 18, 6, 18, 40, 16, 30];
 
 export async function toXlsx(rows: ExportRow[]): Promise<Buffer> {
   const header: Row = EXPORT_HEADERS.map(

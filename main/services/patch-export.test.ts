@@ -28,23 +28,23 @@ const sheet = (over: Partial<PatchSheet> = {}): PatchSheet => ({
 describe("exportRows", () => {
   it("orders rows by rack, then direction, then index", () => {
     const rows = exportRows(sheet());
-    assert.deepEqual(rows.map((r) => r.channel), ["01", "02"]);
+    assert.deepEqual(rows.map((r) => r.console), ["01", "02"]);
   });
 
   it("renders the whole hop chain, which is the column an engineer reads", () => {
-    const vox = exportRows(sheet()).find((r) => r.channel === "02")!;
+    const vox = exportRows(sheet()).find((r) => r.console === "02")!;
     assert.equal(vox.path, "Snake A:2");
   });
 
   it("leaves the path blank for a direct patch rather than inventing a hop", () => {
-    const kick = exportRows(sheet()).find((r) => r.channel === "01")!;
+    const kick = exportRows(sheet()).find((r) => r.console === "01")!;
     assert.equal(kick.path, "");
   });
 
   it("names the endpoint's own rack and connector", () => {
-    const kick = exportRows(sheet()).find((r) => r.channel === "01")!;
+    const kick = exportRows(sheet()).find((r) => r.console === "01")!;
     assert.equal(kick.rack, "SD Rack");
-    assert.equal(kick.connector, "1");
+    assert.equal(kick.rackCh, "1");
   });
 
   it("uses a device's custom connector labels when it has them", () => {
@@ -53,13 +53,15 @@ describe("exportRows", () => {
     const s = sheet({
       devices: [{ id: "r1", name: "SD Rack", kind: "rack", inputs: 32, outputs: 8, inLabels: ["B-1", "B-2"] }],
     });
-    assert.deepEqual(exportRows(s).map((r) => r.connector), ["B-1", "B-2"]);
+    assert.deepEqual(exportRows(s).map((r) => r.rackCh), ["B-1", "B-2"]);
   });
 
-  it("puts phantom beside the mic, where a paper sheet needs it", () => {
+  it("keeps phantom in its own column, so it survives a re-import as a boolean", () => {
     const rows = exportRows(sheet());
-    assert.equal(rows.find((r) => r.channel === "01")!.source, "Beta91 (+48V)");
-    assert.equal(rows.find((r) => r.channel === "02")!.source, "SM58");
+    const kick = rows.find((r) => r.console === "01")!;
+    assert.equal(kick.source, "Beta91");
+    assert.equal(kick.phantom, "48V");
+    assert.equal(rows.find((r) => r.console === "02")!.phantom, "");
   });
 
   it("shows an output's feed type in the same column as an input's mic", () => {
@@ -70,18 +72,19 @@ describe("exportRows", () => {
     assert.equal(exportRows(s)[0].dir, "out");
   });
 
-  it("falls back to the index when no console channel is set", () => {
+  it("leaves the console column blank when none is set, and still names the rack channel", () => {
     const s = sheet({ endpoints: [ep({ rackId: "r1", dir: "in", index: 7, label: "X" })] });
-    assert.equal(exportRows(s)[0].channel, "7");
+    assert.equal(exportRows(s)[0].console, "");
+    assert.equal(exportRows(s)[0].rackCh, "7");
   });
 
   it("applies a variant's overrides through the shared resolver", () => {
     const s = sheet({
       variants: [{ id: "v1", name: "Baptism", overrides: { "r1:in:1": { label: "Handheld", mic: "SM58" } } }],
     });
-    assert.equal(exportRows(s, "v1").find((r) => r.channel === "01")!.label, "Handheld");
+    assert.equal(exportRows(s, "v1").find((r) => r.console === "01")!.label, "Handheld");
     // The default patch is untouched by the variant.
-    assert.equal(exportRows(s, null).find((r) => r.channel === "01")!.label, "Kick");
+    assert.equal(exportRows(s, null).find((r) => r.console === "01")!.label, "Kick");
   });
 
   it("renders a hop whose device was deleted rather than dropping it", () => {
@@ -115,7 +118,7 @@ describe("exportRows", () => {
   it("exposes headers matching the row fields, in reading order", () => {
     assert.deepEqual(
       [...EXPORT_HEADERS],
-      ["Channel", "Dir", "Label", "Mic / Feed", "Rack", "Connector", "Path", "Owner", "Notes"],
+      ["Rack ch", "Console", "Dir", "Source / Name", "Mic / Feed", "48V", "Rack", "Path", "Owner", "Notes"],
     );
   });
 
