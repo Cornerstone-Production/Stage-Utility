@@ -1,0 +1,78 @@
+#!/bin/bash
+# stage-upgrade — upgrade Stage Utility and make sure it actually comes back.
+#
+# Homebrew does not restart a service after an upgrade; it stops it and prints a
+# caveat telling you to restart it yourself. On top of that, launchd sometimes
+# parks the RunAtLoad spawn ("pended nondemand spawn"), so brew can report success
+# while nothing is listening. This does the restart, and then confirms the server
+# is actually answering rather than trusting either of them.
+#
+#   stage-upgrade                     # beta track
+#   stage-upgrade stage-utility       # stable track
+
+set -uo pipefail
+
+FORMULA="${1:-stage-utility-beta}"
+LABEL="homebrew.mxcl.${FORMULA}"
+DOMAIN="gui/$(id -u)"
+PORT="${STAGE_UTILITY_PORT:-8788}"
+URL="http://127.0.0.1:${PORT}/api/version"
+BREW="$(command -v brew || echo /opt/homebrew/bin/brew)"
+
+alive() { curl -fsS --max-time 2 "$URL" 2>/dev/null; }
+
+was_up=""
+alive >/dev/null && was_up=1
+
+echo "==> Upgrading ${FORMULA}"
+"$BREW" upgrade "$FORMULA" || {
+  echo "stage-upgrade: brew upgrade failed; leaving the service alone" >&2
+  exit 1
+}
+
+# Only touch the service if brew knows about one here. Ask brew, not the
+# filesystem: `brew services stop` DELETES the plist, so a plist check reports
+# "no service" for exactly the machine that has one and needs restarting.
+if ! "$BREW" services list 2>/dev/null | awk '{print $1}' | grep -qx "$FORMULA"; then
+  echo "==> ${FORMULA} is not set up as a service here; nothing to restart"
+  exit 0
+fi
+
+echo "==> Restarting the service"
+if ! "$BREW" services restart "$FORMULA" >/dev/null 2>&1; then
+  if [ "$(uname -s)" = "Darwin" ]; then
+    # "Bootstrap failed: 5" means the old label is still registered, and launchd
+    # refuses to load a label twice. Clearing it is what lets the start succeed.
+    # bootout is asynchronous, so wait for the label to actually go.
+    echo "==> Restart refused; clearing the stale launchd registration"
+    launchctl bootout "${DOMAIN}/${LABEL}" >/dev/null 2>&1
+    for _ in $(seq 1 20); do
+      launchctl print "${DOMAIN}/${LABEL}" >/dev/null 2>&1 || break
+      sleep 0.2
+    done
+  fi
+  "$BREW" services start "$FORMULA" >/dev/null 2>&1
+fi
+
+# The only success signal that counts is the server answering.
+for i in $(seq 1 25); do
+  if v="$(alive)"; then
+    echo "==> Up: ${v}"
+    exit 0
+  fi
+  # launchd parks a RunAtLoad spawn outside a foreground session ("pended
+  # nondemand spawn"), so brew reports success and nothing runs. kickstart
+  # demands the start; it is idempotent, and skipped entirely if it came up.
+  if [ "$i" = 4 ] && [ "$(uname -s)" = "Darwin" ]; then
+    echo "==> Not answering yet; forcing the spawn"
+    launchctl kickstart -k -p "${DOMAIN}/${LABEL}" >/dev/null 2>&1
+  fi
+  sleep 1
+done
+
+echo "stage-upgrade: ${FORMULA} did not come back on ${URL}" >&2
+echo "  brew services list" >&2
+echo "  launchctl print ${DOMAIN}/${LABEL}" >&2
+echo "  tail -40 $(brew --prefix)/var/log/stage-utility.log" >&2
+[ -n "$was_up" ] && echo "  (it WAS running before this upgrade)" >&2
+exit 1
