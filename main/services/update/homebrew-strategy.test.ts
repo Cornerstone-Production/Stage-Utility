@@ -92,8 +92,16 @@ describe("HomebrewStrategy", () => {
     const line = new HomebrewStrategy(brewAt(BREW_PATHS[0]))
       .plan({ ...base, track: "beta", checkout: true })
       .args.join(" ");
+    // The property that matters is that the group cannot fail the chain, not the
+    // exact text: bootout now ends with a wait loop rather than `|| true`, and a
+    // for-loop exits 0 regardless of what happened inside it.
     for (const frag of line.split(" && ").filter((s) => /kickstart|bootout/.test(s))) {
-      assert.ok(frag.trimEnd().endsWith("|| true)"), `must be best-effort: ${frag}`);
+      const t = frag.trimEnd();
+      assert.ok(
+        t.endsWith("|| true)") || t.endsWith("done)"),
+        `must not be able to fail the update: ${frag}`,
+      );
+      assert.ok(t.includes("|| true"), `must swallow its own failure: ${frag}`);
     }
   });
 
@@ -103,5 +111,39 @@ describe("HomebrewStrategy", () => {
       .args.join(" ");
     assert.ok(line.includes(`uninstall ${FORMULA.beta}`));
     assert.ok(line.includes(`install ${FORMULA.main}`));
+  });
+});
+
+describe("HomebrewStrategy — the stale-registration failures", () => {
+  const line = (over = {}) =>
+    new HomebrewStrategy(brewAt(BREW_PATHS[0])).plan({ ...base, ...over }).args.join(" ");
+
+  it("boots out the TARGET's own label before starting it, on a plain upgrade", () => {
+    // The bug behind "it never comes back after an update": this path had no
+    // bootout at all. `brew uninstall` does not unregister a service, so an
+    // orphaned label makes every later `brew services start` fail with
+    // "Bootstrap failed: 5" — permanently, across reinstalls — and kickstart
+    // cannot rescue a job that was never bootstrapped.
+    const l = line();
+    const boot = l.indexOf(`bootout "gui/$(id -u)/homebrew.mxcl.${FORMULA.main}"`);
+    assert.ok(boot >= 0, "an upgrade must clear its own stale registration");
+    assert.ok(boot < l.indexOf("services restart"), "bootout must precede the start");
+  });
+
+  it("confirms the label has gone before bootstrapping", () => {
+    // A guard, not a proven fix: a controlled probe could not reproduce a
+    // bootout/bootstrap race (0/5 either way). It exits on the first check in the
+    // normal case, so it costs nothing and removes a variable from a failure that
+    // is otherwise miserable to diagnose.
+    for (const l of [line(), line({ track: "beta", checkout: true })]) {
+      assert.match(l, /launchctl print .*>\/dev\/null 2>&1 \|\| break/, "must poll until it clears");
+      assert.match(l, /sleep 0\.25/, "must back off between polls");
+    }
+  });
+
+  it("still boots out the OUTGOING formula when switching tracks", () => {
+    const l = line({ track: "beta", checkout: true });
+    assert.ok(l.includes(`bootout "gui/$(id -u)/homebrew.mxcl.${FORMULA.main}"`));
+    assert.ok(l.includes(`bootout "gui/$(id -u)/homebrew.mxcl.${FORMULA.beta}"`));
   });
 });

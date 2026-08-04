@@ -40,7 +40,18 @@ const label = (formula: string): string => `homebrew.mxcl.${formula}`;
  */
 const bootout = (formula: string): string =>
   `(launchctl bootout "gui/$(id -u)/${label(formula)}" 2>/dev/null || ` +
-  `launchctl bootout "system/${label(formula)}" 2>/dev/null || true)`;
+  `launchctl bootout "system/${label(formula)}" 2>/dev/null || true; ` +
+  // Then confirm the label has actually gone before anyone bootstraps it.
+  //
+  // Honest about what this is: a cheap guard, not a proven fix. launchd documents
+  // bootout as asynchronous, but a controlled probe (bootout then immediately
+  // bootstrap, 5 iterations against a throwaway agent) failed to reproduce a race
+  // — 0/5 either way. The loop exits on the first check when the label is already
+  // gone, which is the normal case, so it costs nothing and removes one variable
+  // from a failure that is otherwise miserable to diagnose.
+  `for _ in $(seq 1 40); do ` +
+  `launchctl print "gui/$(id -u)/${label(formula)}" >/dev/null 2>&1 || break; ` +
+  `sleep 0.25; done)`;
 
 /**
  * Force the initial spawn after brew has loaded the job.
@@ -104,12 +115,26 @@ export class HomebrewStrategy implements UpdateStrategy {
           bootout(other),
           `${brew} uninstall ${other} || true`,
           `${brew} install ${target}`,
+          // The incoming formula needs its own label cleared too: switching back
+          // and forth leaves a registration behind each time, and the second
+          // switch to a track would otherwise fail to bootstrap.
+          bootout(target),
           `${brew} services start ${target}`,
           kickstart(target),
         ].join(" && ")
       : [
           `${brew} update`,
           `${brew} upgrade ${target}`,
+          // Clear the target's OWN registration before starting it again.
+          //
+          // This path had no bootout at all, and that is the bug behind "it never
+          // comes back after an update". A stale registration for this label makes
+          // every `brew services start` fail with "Bootstrap failed: 5", and the
+          // kickstart below cannot rescue a job that was never bootstrapped. The
+          // registration outlives `brew uninstall` — which does NOT unregister a
+          // service — so once one is orphaned it breaks every future install and
+          // upgrade, permanently, until something boots it out.
+          bootout(target),
           `${brew} services restart ${target}`,
           kickstart(target),
         ].join(" && ");
