@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { OctagonXIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
@@ -79,6 +79,18 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
 const selectCls =
   "h-7 w-full rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus";
 
+/** The saved JSON object as editable rows. Malformed config yields no rows rather
+ *  than throwing — the operator can then just add them. */
+function parseRows(value: string | number | undefined): [string, string][] {
+  try {
+    const parsed: unknown = JSON.parse(String(value ?? "") || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+    return Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [k, String(v ?? "")] as [string, string]);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * A two-column table stored as a JSON object string.
  *
@@ -96,18 +108,29 @@ function KeyValueField({
   value: string | number | undefined;
   onChange: (v: string) => void;
 }) {
-  const rows = useMemo(() => {
-    try {
-      const parsed: unknown = JSON.parse(String(value ?? "") || "{}");
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [] as [string, string][];
-      return Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [k, String(v ?? "")] as [string, string]);
-    } catch {
-      return [] as [string, string][];
-    }
+  // The rows being edited live here rather than being derived from the saved
+  // value, because a half-typed row cannot be represented in what gets saved: the
+  // param is a JSON OBJECT, and an object has no key for a row whose key is still
+  // blank. Deriving them meant "add row" created a row that was filtered out
+  // before it could render, so the button appeared to do nothing.
+  const [rows, setRows] = useState<[string, string][]>(() => parseRows(value));
+  // What we last sent up, so an echo of our own write does not clobber a blank row
+  // the operator is still filling in.
+  const lastWritten = useRef<string | null>(null);
+
+  useEffect(() => {
+    const incoming = String(value ?? "");
+    if (incoming === lastWritten.current) return;
+    setRows(parseRows(value));
   }, [value]);
 
-  const write = (next: [string, string][]) =>
-    onChange(JSON.stringify(Object.fromEntries(next.filter(([k]) => k.trim() !== ""))));
+  const write = (next: [string, string][]) => {
+    setRows(next);
+    // Blank keys are dropped on the way out only — they stay visible while typing.
+    const json = JSON.stringify(Object.fromEntries(next.filter(([k]) => k.trim() !== "")));
+    lastWritten.current = json;
+    onChange(json);
+  };
 
   return (
     <div className="flex flex-col gap-1.5 py-1">
