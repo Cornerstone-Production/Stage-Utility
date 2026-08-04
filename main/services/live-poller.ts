@@ -40,6 +40,10 @@ function liveSignature(l: PcoLiveDTO): string {
     // time moves — rare, but automation rules read it, so a stale one would arm
     // them against yesterday's rundown.
     l.itemSchedule,
+    // Changes only when the plan or its times change, so this adds no broadcast
+    // volume — and omitting it would let a stale copy arm a time-relative trigger
+    // against last week's rehearsal.
+    l.planTimes,
   ]);
 }
 // Re-push at least this often even when unchanged, so a client's clock-skew estimate

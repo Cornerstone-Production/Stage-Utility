@@ -13,6 +13,8 @@ import type { ParamDef, TriggerDef } from "../types/automation.js";
 import { dueAt } from "./automation-due-time.js";
 import { findItemByTitle } from "./automation-pco-items.js";
 import { PREFERRED_METRICS } from "./spl-recorder.js";
+import { planTimeDueIn } from "./automation-plan-times.js";
+import type { PlanTimeDTO } from "../types/stage.js";
 
 type Live = {
   mode?: string;
@@ -255,6 +257,12 @@ function overrunMinutes(v: unknown): number | null {
   return sec / 60;
 }
 
+/** The plan's rehearsal + service times off a live payload. */
+function planTimesOf(v: unknown): PlanTimeDTO[] {
+  const p = v && typeof v === "object" ? (v as { planTimes?: unknown }).planTimes : null;
+  return Array.isArray(p) ? (p as PlanTimeDTO[]) : [];
+}
+
 const DISPLAY_NAME: ParamDef = {
   key: "name",
   label: "Display",
@@ -268,6 +276,42 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
   ...Object.assign({}, ...INTEGRATIONS.map((i) => connectionTriggers(i.id, i.label))),
   ...obsOutputTriggers("streaming", "streaming", "streaming"),
   ...obsOutputTriggers("virtualCam", "virtualcam", "the virtual camera"),
+
+  "pco.before-plan-time": def({
+    id: "pco.before-plan-time",
+    label: "Before a rehearsal or service",
+    channel: "pco:live",
+    params: [
+      {
+        key: "minutes",
+        label: "Minutes before",
+        type: "number",
+        min: 1,
+        max: 1440,
+        help: "Keep this inside the reconnect lead time (Advanced) or the gear may still be off.",
+      },
+      {
+        key: "timeTypes",
+        label: "Applies to",
+        type: "multi-enum",
+        options: [
+          { value: "rehearsal", label: "Rehearsal" },
+          { value: "service", label: "Service" },
+        ],
+      },
+    ],
+    help:
+      "Fires before EVERY matching time on the plan, so a roster change after rehearsal still takes effect before the service.",
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      const from = Date.parse(asLive(prev).serverNow ?? "");
+      const to = Date.parse(asLive(next).serverNow ?? "");
+      const raw = String(params.timeTypes ?? "").trim();
+      // Unconfigured means both, matching how the other multi-enum params read.
+      const types = raw ? raw.split(",").map((t) => t.trim()) : ["rehearsal", "service"];
+      return planTimeDueIn(planTimesOf(next), from, to, Number(params.minutes), types) !== null;
+    },
+  }),
 
   "prodcom.phrase-said": def({
     id: "prodcom.phrase-said",

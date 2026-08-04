@@ -540,6 +540,20 @@ export interface PcoLiveDTO {
    *  a pre-service item (doors, pre-roll). Position-based, so early/late starts
    *  don't misclassify it. Only set when the plan has a start header. */
   beforeServiceStart?: boolean;
+  /** Every rehearsal + service time on the active plan, for time-relative triggers
+   *  ("an hour before rehearsal"). Sourced from the already-cached plan times, so
+   *  it costs no extra request, and carried in EVERY mode — a trigger that only
+   *  worked while a service was live could never fire an hour beforehand. */
+  planTimes?: PlanTimeDTO[];
+}
+
+/** One of a plan's scheduled times, as the automation engine sees it. */
+export interface PlanTimeDTO {
+  id: string;
+  name: string | null;
+  /** PCO's `time_type`: "service" or "rehearsal" (others are filtered out). */
+  timeType: string;
+  startsAt: string;
 }
 
 /** Live ProPresenter status (pushed on "propresenter:status"). */
