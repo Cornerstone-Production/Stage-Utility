@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { PatchEndpoint, PatchSheet } from "../types/stage.js";
+import { setAppTimeZone } from "./app-timezone.js";
 import { EXPORT_HEADERS, exportFilename, exportRows, rowCells } from "./patch-export.js";
 
 const ep = (over: Partial<PatchEndpoint> & Pick<PatchEndpoint, "rackId" | "dir" | "index">): PatchEndpoint => over;
@@ -126,7 +127,7 @@ describe("exportRows", () => {
 });
 
 describe("exportFilename", () => {
-  const DAY = new Date("2026-08-03T12:00:00Z");
+  const DAY = Date.parse("2026-08-03T12:00:00Z");
 
   it("slugifies, includes the variant, and dates the file", () => {
     assert.equal(exportFilename("FOH Inputs", "Baptism Week", "csv", DAY), "foh-inputs-baptism-week-2026-08-03.csv");
@@ -138,5 +139,16 @@ describe("exportFilename", () => {
 
   it("falls back to 'patch' when a name slugifies to nothing", () => {
     assert.equal(exportFilename("!!!", null, "xlsx", DAY), "patch-2026-08-03.xlsx");
+  });
+
+  it("dates the file in the app's zone, not the server's clock", () => {
+    // 03:35 UTC on the 4th is still the evening of the 3rd in Chicago. A file
+    // exported then must not claim to be tomorrow's patch.
+    setAppTimeZone("America/Chicago");
+    try {
+      assert.equal(exportFilename("FOH", null, "csv", Date.parse("2026-08-04T03:35:00Z")), "foh-2026-08-03.csv");
+    } finally {
+      setAppTimeZone(null);
+    }
   });
 });

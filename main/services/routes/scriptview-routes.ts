@@ -11,6 +11,9 @@ import type { CategoryRole } from "../../types/scriptview-roles.js";
 import { stageController } from "../stage-controller.js";
 import { patchStore } from "../patch-store.js";
 import { parseXlsx } from "../patch-xlsx.js";
+import { exportFilename, exportRows } from "../patch-export.js";
+import { toCsv } from "../patch-export-csv.js";
+import { toXlsx } from "../patch-export-xlsx.js";
 import { broadcast } from "../broadcaster.js";
 
 export async function scriptviewRoutes(c: RouteCtx): Promise<void> {
@@ -43,6 +46,51 @@ export async function scriptviewRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       json(res, await stageController.setScriptViewConfig(body.serviceTypeIds.map(String)));
+      return;
+    }
+
+    // Download one sheet as a file. Registered BEFORE "/api/patch" so the more
+    // specific path wins; a plain navigation hits this, so the browser handles the
+    // download and honours the Content-Disposition filename.
+    if (method === "GET" && pathname === "/api/patch/export") {
+      const sheetId = url.searchParams.get("sheetId") ?? "";
+      const variantId = url.searchParams.get("variantId") || null;
+      const format = url.searchParams.get("format") ?? "csv";
+      const includeUnused = url.searchParams.get("includeUnused") === "1";
+
+      const file = await patchStore.load();
+      const sheet = file.sheets.find((s) => s.id === sheetId);
+      // 400 naming what was not found, not a 500: the request was well-formed, it
+      // just referenced something that is gone.
+      if (!sheet) {
+        error(res, `No patch sheet with id "${sheetId}"`);
+        return;
+      }
+      const variant = variantId ? sheet.variants.find((v) => v.id === variantId) : null;
+      if (variantId && !variant) {
+        error(res, `No variant with id "${variantId}" on sheet "${sheet.name}"`);
+        return;
+      }
+      if (format !== "csv" && format !== "xlsx") {
+        error(res, `Unsupported export format "${format}"`);
+        return;
+      }
+
+      const rows = exportRows(sheet, variantId, { includeUnused });
+      const filename = exportFilename(sheet.name, variant?.name ?? null, format);
+      if (format === "xlsx") {
+        res.writeHead(200, {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="${filename}"`,
+        });
+        res.end(await toXlsx(rows));
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      });
+      res.end(toCsv(rows));
       return;
     }
 
