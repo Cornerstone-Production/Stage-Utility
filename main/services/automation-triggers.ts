@@ -101,8 +101,52 @@ function connectionTriggers(id: string, label: string): Record<string, TriggerDe
   };
 }
 
+type Obs = { connected?: boolean; recording?: boolean; streaming?: boolean; virtualCam?: boolean };
+const asObs = (v: unknown): Obs => (v && typeof v === "object" ? (v as Obs) : {});
+
+/**
+ * Start/stop pair for one boolean OBS output (streaming, virtual cam).
+ *
+ * The stop half deliberately refuses to fire when OBS has gone unreachable: a
+ * dropped connection reports every output as false, and treating that as "stopped"
+ * would fire a stop rule because a machine went offline. Unknown is not a value.
+ */
+function obsOutputTriggers(
+  key: "streaming" | "virtualCam",
+  slug: string,
+  label: string,
+): Record<string, TriggerDef> {
+  return {
+    [`obs.${slug}-started`]: def({
+      id: `obs.${slug}-started`,
+      label: `OBS starts ${label}`,
+      channel: "obs:status",
+      params: [],
+      didFire: (prev, next) => {
+        if (prev === null) return false;
+        return asObs(prev)[key] !== true && asObs(next)[key] === true;
+      },
+    }),
+    [`obs.${slug}-stopped`]: def({
+      id: `obs.${slug}-stopped`,
+      label: `OBS stops ${label}`,
+      channel: "obs:status",
+      params: [],
+      help: "Does not fire when OBS simply goes offline — unreachable is unknown, not stopped.",
+      didFire: (prev, next) => {
+        if (prev === null) return false;
+        const n = asObs(next);
+        if (n.connected === false) return false;
+        return asObs(prev)[key] === true && n[key] === false;
+      },
+    }),
+  };
+}
+
 export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
   ...Object.assign({}, ...INTEGRATIONS.map((i) => connectionTriggers(i.id, i.label))),
+  ...obsOutputTriggers("streaming", "streaming", "streaming"),
+  ...obsOutputTriggers("virtualCam", "virtualcam", "the virtual camera"),
 
   "pco.service-started": def({
     id: "pco.service-started",

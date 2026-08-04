@@ -42,6 +42,9 @@ export interface ConditionCtx {
   serviceTypeId: string | null;
   /** Connection state per integration id, for the `<id>.is-connected` conditions. */
   integrations: Record<string, string>;
+  /** Whether each recorder is rolling right now, for the `is-recording` conditions. */
+  obsRecording: boolean;
+  reaperRecording: boolean;
 }
 
 export interface ActionResult {

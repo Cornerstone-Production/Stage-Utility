@@ -18,6 +18,8 @@ import { sampleArchive } from "./archive/sample-archive.js";
 import { automationLog } from "./automation-log.js";
 import { automationStore } from "./automation-store.js";
 import { integrationManager } from "./integration-manager.js";
+import { obsService } from "./obs-service.js";
+import { reaperService } from "./reaper-service.js";
 import { AUTOMATION_TRIGGERS, triggersForChannel } from "./automation-triggers.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
@@ -231,6 +233,8 @@ class AutomationEngine {
       pcoLive: live ? { mode: live.mode, serviceTimeId: live.serviceTimeId ?? null } : null,
       serviceTypeId: state.serviceTypeId ?? null,
       integrations,
+      obsRecording: obsService.getLatest().recording === true,
+      reaperRecording: reaperService.getLatest().recording === true,
     };
   }
 

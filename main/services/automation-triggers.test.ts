@@ -264,3 +264,42 @@ describe("integration connection triggers", () => {
     assert.equal(t.didFire(states({ obs: "connected" }), without, {}, NOW), false);
   });
 });
+
+// ── OBS outputs ────────────────────────────────────────────────────────────
+
+describe("obs outputs", () => {
+  const obs = (over: Record<string, unknown> = {}) => ({
+    connected: true, recording: false, recordPaused: false,
+    streaming: false, virtualCam: false, recordTimecode: null, ...over,
+  });
+
+  test("streaming fires on start and on stop, not while it runs", () => {
+    const started = AUTOMATION_TRIGGERS["obs.streaming-started"];
+    const stopped = AUTOMATION_TRIGGERS["obs.streaming-stopped"];
+    assert.equal(started.didFire(obs(), obs({ streaming: true }), {}, NOW), true);
+    assert.equal(started.didFire(obs({ streaming: true }), obs({ streaming: true }), {}, NOW), false);
+    assert.equal(stopped.didFire(obs({ streaming: true }), obs(), {}, NOW), true);
+  });
+
+  test("virtual cam fires on start and stop", () => {
+    const on = AUTOMATION_TRIGGERS["obs.virtualcam-started"];
+    const off = AUTOMATION_TRIGGERS["obs.virtualcam-stopped"];
+    assert.equal(on.didFire(obs(), obs({ virtualCam: true }), {}, NOW), true);
+    assert.equal(off.didFire(obs({ virtualCam: true }), obs(), {}, NOW), true);
+  });
+
+  test("OBS dropping off the network is not 'stopped'", () => {
+    // Same rule the existing recording.stopped trigger follows: unreachable is
+    // unknown, and firing a stop rule because a machine went offline is wrong.
+    const stopped = AUTOMATION_TRIGGERS["obs.streaming-stopped"];
+    assert.equal(
+      stopped.didFire(obs({ streaming: true }), obs({ connected: false, streaming: false }), {}, NOW),
+      false,
+    );
+    const cam = AUTOMATION_TRIGGERS["obs.virtualcam-stopped"];
+    assert.equal(
+      cam.didFire(obs({ virtualCam: true }), obs({ connected: false, virtualCam: false }), {}, NOW),
+      false,
+    );
+  });
+});

@@ -14,6 +14,8 @@ const ctx = (over: Partial<ConditionCtx> = {}): ConditionCtx => ({
   pcoLive: { mode: "item", serviceTimeId: "st1" },
   serviceTypeId: "weekend",
   integrations: {},
+  obsRecording: false,
+  reaperRecording: false,
   ...over,
 });
 
@@ -119,5 +121,30 @@ describe("integration connection conditions", () => {
   test("one integration's state does not satisfy another's condition", () => {
     const c = AUTOMATION_CONDITIONS["obs.is-connected"];
     assert.equal(c.holds(ctx({ integrations: { reaper: "connected" } }), {}, SUNDAY_10AM), false);
+  });
+});
+
+// ── Recording state ────────────────────────────────────────────────────────
+
+describe("recorder conditions", () => {
+  test("obs.is-recording holds only while OBS records", () => {
+    const c = AUTOMATION_CONDITIONS["obs.is-recording"];
+    assert.ok(c, "obs.is-recording must be registered");
+    assert.equal(c.holds(ctx({ obsRecording: true }), {}, SUNDAY_10AM), true);
+    assert.equal(c.holds(ctx({ obsRecording: false }), {}, SUNDAY_10AM), false);
+  });
+
+  test("reaper.is-recording holds only while REAPER records", () => {
+    const c = AUTOMATION_CONDITIONS["reaper.is-recording"];
+    assert.ok(c, "reaper.is-recording must be registered");
+    assert.equal(c.holds(ctx({ reaperRecording: true }), {}, SUNDAY_10AM), true);
+    assert.equal(c.holds(ctx({ reaperRecording: false }), {}, SUNDAY_10AM), false);
+  });
+
+  test("the two recorders are independent", () => {
+    assert.equal(
+      AUTOMATION_CONDITIONS["obs.is-recording"].holds(ctx({ reaperRecording: true }), {}, SUNDAY_10AM),
+      false,
+    );
   });
 });

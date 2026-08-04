@@ -39,6 +39,20 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
     INTEGRATIONS.map((i) => [`${i.id}.is-connected`, isConnectedCondition(i.id, i.label)]),
   ),
 
+  "obs.is-recording": {
+    id: "obs.is-recording",
+    label: "OBS is recording",
+    params: [],
+    holds: (ctx) => ctx.obsRecording === true,
+  },
+
+  "reaper.is-recording": {
+    id: "reaper.is-recording",
+    label: "REAPER is recording",
+    params: [],
+    holds: (ctx) => ctx.reaperRecording === true,
+  },
+
   "service.is-live": {
     id: "service.is-live",
     label: "A service is live",
