@@ -440,3 +440,53 @@
 .so-scroll.scrolling::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Printing a patch sheet — the copy that gets taped to the rack.
+   Everything that is not the patch is chrome, and chrome wastes paper.
+
+   The app is a dark UI; printed as-is it is grey-on-grey and eats toner, so the
+   patch area is forced back to black on white. The table is a CSS grid of divs
+   rather than a <table>, so `display: table-header-group` is not available —
+   the column header instead repeats per rack group, which the layout already
+   does, and groups are kept off page boundaries. */
+@media print {
+  .patch-print-hide {
+    display: none !important;
+  }
+
+  /* Nothing sticky on paper — a fixed bar prints on top of the first rows. */
+  .patch-print-sheet .sticky {
+    position: static !important;
+  }
+
+  .patch-print-sheet,
+  .patch-print-sheet * {
+    background: #fff !important;
+    color: #000 !important;
+    box-shadow: none !important;
+    /* Keep device colour coding legible as a border rather than a fill. */
+    border-color: #999 !important;
+  }
+
+  .patch-print-sheet {
+    font-size: 10pt;
+  }
+
+  /* A rack group is one unit of meaning; splitting it across pages makes the
+     header land on the previous sheet of paper. */
+  .patch-print-sheet > * > * {
+    break-inside: avoid;
+  }
+
+  /* A hop chain must wrap rather than be cut off at the page edge. */
+  .patch-print-sheet [class*="overflow-x-auto"] {
+    overflow: visible !important;
+  }
+  .patch-print-sheet * {
+    overflow-wrap: anywhere;
+  }
+
+  @page {
+    margin: 12mm;
+  }
+}
