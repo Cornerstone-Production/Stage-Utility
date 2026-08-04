@@ -722,6 +722,7 @@ export const HYDRATED_CHANNELS = [
   "reaper:status",
   "update:status",
   "osc:feedback",
+  "companion:signals",
   "people:count",
   "displays:presence",
 ] as const;
