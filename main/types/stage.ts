@@ -547,6 +547,18 @@ export interface PcoLiveDTO {
   planTimes?: PlanTimeDTO[];
 }
 
+/** One published Companion signal.
+ *
+ *  `error` sits ALONGSIDE the value rather than replacing it: a failed evaluation
+ *  records why without clearing a working route, because a scheduling mistake must
+ *  not take talkback off mid-service. */
+export interface SignalState {
+  value: string;
+  at: string;
+  ruleId: string | null;
+  error: string | null;
+}
+
 /** One of a plan's scheduled times, as the automation engine sees it. */
 export interface PlanTimeDTO {
   id: string;

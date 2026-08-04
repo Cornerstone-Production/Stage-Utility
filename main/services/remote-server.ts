@@ -29,6 +29,7 @@ import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
+import { signalStore } from "./signal-store.js";
 import { propresenterService, propresenterManager } from "./propresenter-service.js";
 import { sensourceService } from "./sensource-service.js";
 import { smaartService } from "./smaart-service.js";
@@ -779,6 +780,9 @@ export class RemoteServer {
       // Updates panel never learns the post-restart state and stays stuck on its
       // last-seen step ("Downloading…") until a manual refresh.
       sseWrite(res, "update:status", updater.getStatus());
+      // Without this a reconnecting Companion module has blank signal variables
+      // until the next evaluation — potentially days.
+      sseWrite(res, "companion:signals", signalStore.all());
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
       sseWrite(res, "displays:presence", presenceSnapshot());
