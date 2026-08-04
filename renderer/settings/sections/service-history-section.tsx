@@ -243,6 +243,12 @@ const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
 export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean } = {}) {
   const [list, setList] = useState<ServiceTimeline[] | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // An explicit Overview scope, which STICKS. Without it the scope was derived from
+  // selectedKey — but opening a service hides the overview, and going back cleared
+  // the selection, so the scope snapped straight back to the day's newest service.
+  // On a day with a morning weekend service and an evening event you could never
+  // get the weekend overview to stay up. Null = follow the old derivation.
+  const [overviewType, setOverviewType] = useState<string | null>(null);
   const [detail, setDetail] = useState<ServiceTimeline | null>(null);
   // The matching attendance + SPL records (same serviceKey) for the combined report.
   const [attendance, setAttendance] = useState<ServiceAttendance | null>(null);
@@ -379,6 +385,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // newest-first; `day` auto-selects the newest day, so this lands on "most recent"
   // out of the box). Keeps each type's averages separate without a manual filter.
   const activeType = useMemo<string | null>(() => {
+    if (overviewType) return overviewType;
     if (selectedKey) {
       const s = (list ?? []).find((x) => x.serviceKey === selectedKey);
       if (s) return s.serviceTypeId;
@@ -388,7 +395,20 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       if (s) return s.serviceTypeId;
     }
     return (list ?? [])[0]?.serviceTypeId ?? null;
-  }, [selectedKey, day, list]);
+  }, [overviewType, selectedKey, day, list]);
+  /** Every service type in the history, for the Overview scope picker. Only worth
+   *  showing when there is more than one — a single-type church should not see a
+   *  control with one option in it. */
+  const serviceTypes = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const s of list ?? []) {
+      if (s.serviceTypeId && !seen.has(s.serviceTypeId)) {
+        seen.set(s.serviceTypeId, s.serviceTypeName ?? s.serviceTypeId);
+      }
+    }
+    return [...seen].map(([id, name]) => ({ id, name }));
+  }, [list]);
+
   const activeTypeName = useMemo<string | null>(() => {
     if (!activeType) return null;
     const s = (list ?? []).find((x) => x.serviceTypeId === activeType);
@@ -875,9 +895,24 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           instrument strip. Scoped to the active service type (from the selection /
           most-recent), labeled so the numbers are never a silent blend of types. */}
       <div className="flex flex-col gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">
-          Overview{activeTypeName ? ` · ${activeTypeName}` : ""}{day ? ` · through ${fmtDay(day)}` : " · all time"}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">
+            Overview{activeTypeName ? ` · ${activeTypeName}` : ""}{day ? ` · through ${fmtDay(day)}` : " · all time"}
+          </span>
+          {serviceTypes.length > 1 && (
+            <select
+              value={overviewType ?? ""}
+              onChange={(e) => setOverviewType(e.target.value || null)}
+              aria-label="Overview service type"
+              className="h-6 rounded-md border border-line-strong bg-field px-1.5 text-caption2 text-fg focus:border-focus focus:outline-none"
+            >
+              <option value="">Follow selection</option>
+              {serviceTypes.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
         <OverviewBlend overview={overview} />
       </div>
 
