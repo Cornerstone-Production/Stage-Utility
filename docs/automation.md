@@ -35,17 +35,49 @@ poll after.
 | People count falls below | crosses it downward |
 | Recording starts | OBS or REAPER begins recording |
 | Recording stops | stops. A recorder going offline does not count — that is unknown, not stopped |
+| *X* connects / disconnects | any integration's link comes up or drops. One pair per integration, named for it — "OBS connects", "Smaart disconnects" |
+| OBS starts / stops streaming | the stream output starts or stops |
+| OBS starts / stops the virtual camera | the virtual camera output starts or stops |
+| A phrase is said on ProdCom | a **new** transcript line contains your text, optionally on one channel only |
+| Baptism timer starts | the timer leaves idle |
+| Baptism moves to another phase | testimony to baptism, or either back to idle |
+| Baptism timer finishes | it returns to idle |
+| A display connects / disconnects | a named display arrives or goes, or any when left blank |
+| Every display has disconnected | the last display drops off — fires once, not repeatedly while none are connected |
+| SPL rises above / falls below | a Smaart meter crosses a level. Name the meter `device::channel`; leave the metric blank for the usual one |
+| A pack's battery falls below | a wireless pack crosses a percentage, for one mic or any |
+| A pack's RF falls below | the same for RF bars (0-5) |
+| The service runs over plan by | cumulative overrun across finished items passes your margin — checked as each item ends |
+| An update becomes available | a new release appears, not repeatedly while one waits |
+
+Every trigger fires on an **edge** — the moment something changes — never on a
+state that merely persists. The channels carry state snapshots, re-sent
+constantly, so a trigger that fired on a level would fire dozens of times per
+service.
+
+Nothing treats a device going offline as a value. A missing reading is unknown,
+so a pack dropping off the network is not a low battery, an unreachable OBS is
+not "stopped streaming", and an integration vanishing from a payload is not a
+disconnect.
 
 ## Conditions
 
-**A service is live**, **service type is**, **day of week**, **time is between**. All
-selected conditions must hold.
+**A service is live**, **service type is**, **day of week**, **time is between**,
+**baptism phase is**, **OBS is recording**, **REAPER is recording**, and *X* **is
+connected** for each integration. All selected conditions must hold.
 
 They keep triggers simple: "when occupancy rises above 50" would also fire for a
 Tuesday meeting, so you add "and a service is live".
 
-A time window may cross midnight. An unconfigured condition holds rather than
-blocking, so a half-built rule does not silently never fire.
+Conditions only **hold** or don't — unlike a trigger they never fire on their own.
+"OBS is recording" qualifies a rule that some other trigger started; it is not a
+way to act the moment recording begins. Use the matching trigger for that.
+
+A time window may cross midnight, and day-of-week and time-of-day both read the
+app's time zone (Settings → Advanced), not the server's clock. An unconfigured
+condition holds rather than blocking, so a half-built rule does not silently never
+fire. "Baptism phase is" does not hold at all until the timer has run — including
+for "idle", because before it runs we do not know that it is idle.
 
 ## Actions
 
