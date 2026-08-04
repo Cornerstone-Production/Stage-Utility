@@ -13,6 +13,7 @@ const SUNDAY_10AM = Date.parse("2026-07-26T10:00:00Z");
 const ctx = (over: Partial<ConditionCtx> = {}): ConditionCtx => ({
   pcoLive: { mode: "item", serviceTimeId: "st1" },
   serviceTypeId: "weekend",
+  integrations: {},
   ...over,
 });
 
@@ -91,5 +92,32 @@ describe("allConditionsHold", () => {
   test("an unknown condition id fails CLOSED", () => {
     // A rule referencing a condition this build does not have must not fire.
     assert.equal(allConditionsHold([{ id: "nope", params: {} }], ctx(), SUNDAY_10AM), false);
+  });
+});
+
+// ── Integration connections ────────────────────────────────────────────────
+
+const INTEGRATION_IDS = [
+  "companion", "obs", "osc", "planning-center", "prodcom", "propresenter",
+  "reaper", "ross-tsl", "rosstalk", "sensource", "smaart", "wireless",
+] as const;
+
+describe("integration connection conditions", () => {
+  test("is-connected is registered for every integration", () => {
+    for (const id of INTEGRATION_IDS) {
+      assert.ok(AUTOMATION_CONDITIONS[`${id}.is-connected`], `${id}.is-connected must be registered`);
+    }
+  });
+
+  test("holds only while that integration reports connected", () => {
+    const c = AUTOMATION_CONDITIONS["obs.is-connected"];
+    assert.equal(c.holds(ctx({ integrations: { obs: "connected" } }), {}, SUNDAY_10AM), true);
+    assert.equal(c.holds(ctx({ integrations: { obs: "connecting" } }), {}, SUNDAY_10AM), false);
+    assert.equal(c.holds(ctx({ integrations: {} }), {}, SUNDAY_10AM), false);
+  });
+
+  test("one integration's state does not satisfy another's condition", () => {
+    const c = AUTOMATION_CONDITIONS["obs.is-connected"];
+    assert.equal(c.holds(ctx({ integrations: { reaper: "connected" } }), {}, SUNDAY_10AM), false);
   });
 });

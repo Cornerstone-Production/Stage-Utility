@@ -45,7 +45,65 @@ function def(t: TriggerDef): TriggerDef {
   return t;
 }
 
+/** Live states arrive as an array on "integrations:state-changed". */
+type IntState = { id?: string; connection?: string };
+const asStates = (v: unknown): IntState[] => (Array.isArray(v) ? (v as IntState[]) : []);
+const connOf = (v: unknown, id: string): string | null =>
+  asStates(v).find((s) => s.id === id)?.connection ?? null;
+
+/** Labels for the twelve, so a rule reads "OBS connects" rather than an id.
+ *  Exported so the conditions read the same list and the two cannot diverge. */
+export const INTEGRATIONS: { id: string; label: string }[] = [
+  { id: "companion", label: "Companion" },
+  { id: "obs", label: "OBS" },
+  { id: "osc", label: "OSC" },
+  { id: "planning-center", label: "Planning Center" },
+  { id: "prodcom", label: "ProdCom" },
+  { id: "propresenter", label: "ProPresenter" },
+  { id: "reaper", label: "REAPER" },
+  { id: "ross-tsl", label: "Ross TSL" },
+  { id: "rosstalk", label: "RossTalk" },
+  { id: "sensource", label: "SenSource" },
+  { id: "smaart", label: "Smaart" },
+  { id: "wireless", label: "Wireless" },
+];
+
+/** Connect/disconnect pair for one integration. Generated rather than written out
+ *  twelve times over, because the entries are mechanically identical — only the
+ *  label differs, and that comes from the list above. */
+function connectionTriggers(id: string, label: string): Record<string, TriggerDef> {
+  return {
+    [`${id}.connected`]: def({
+      id: `${id}.connected`,
+      label: `${label} connects`,
+      channel: "integrations:state-changed",
+      params: [],
+      didFire: (prev, next) => {
+        if (prev === null) return false;
+        return connOf(prev, id) !== "connected" && connOf(next, id) === "connected";
+      },
+    }),
+    [`${id}.disconnected`]: def({
+      id: `${id}.disconnected`,
+      label: `${label} disconnects`,
+      channel: "integrations:state-changed",
+      params: [],
+      help: "Fires when the link drops, including into an error state.",
+      didFire: (prev, next) => {
+        if (prev === null) return false;
+        const after = connOf(next, id);
+        // A missing entry is UNKNOWN, not disconnected — an integration that
+        // vanished from the payload must not read as a device going down.
+        if (after === null) return false;
+        return connOf(prev, id) === "connected" && after !== "connected";
+      },
+    }),
+  };
+}
+
 export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
+  ...Object.assign({}, ...INTEGRATIONS.map((i) => connectionTriggers(i.id, i.label))),
+
   "pco.service-started": def({
     id: "pco.service-started",
     label: "Service goes live",

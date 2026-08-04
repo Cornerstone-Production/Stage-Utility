@@ -4,11 +4,14 @@
 // it apply across triggers? "Which PCO item" only means something to the plan
 // trigger (a param). "Only on Sundays" applies to every trigger (a condition).
 //
-// Four is the whole list on purpose. If a rule needs more, the answer is a better
-// trigger, not a query language.
+// The list stays short on purpose. If a rule needs something narrower, the answer
+// is a better trigger, not a query language. The one bulk exception is the
+// per-integration "is connected" set, which is generated from one list rather than
+// hand-written twelve times — see INTEGRATIONS in automation-triggers.ts.
 
 import type { ConditionCtx, ConditionDef } from "../types/automation.js";
 import { zonedMinuteOfDay, zonedParts } from "./app-timezone.js";
+import { INTEGRATIONS } from "./automation-triggers.js";
 
 /** "HH:MM" -> minutes since midnight, or null. */
 function hhmm(v: unknown): number | null {
@@ -20,7 +23,22 @@ function hhmm(v: unknown): number | null {
   return h * 60 + min;
 }
 
+/** "<id> is connected" for one integration. Reads the same INTEGRATIONS list the
+ *  triggers do, so a new integration cannot get triggers but no condition. */
+function isConnectedCondition(id: string, label: string): ConditionDef {
+  return {
+    id: `${id}.is-connected`,
+    label: `${label} is connected`,
+    params: [],
+    holds: (ctx) => ctx.integrations?.[id] === "connected",
+  };
+}
+
 export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
+  ...Object.fromEntries(
+    INTEGRATIONS.map((i) => [`${i.id}.is-connected`, isConnectedCondition(i.id, i.label)]),
+  ),
+
   "service.is-live": {
     id: "service.is-live",
     label: "A service is live",

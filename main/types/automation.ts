@@ -40,6 +40,8 @@ export interface ConditionDef {
 export interface ConditionCtx {
   pcoLive: { mode: string; serviceTimeId: string | null } | null;
   serviceTypeId: string | null;
+  /** Connection state per integration id, for the `<id>.is-connected` conditions. */
+  integrations: Record<string, string>;
 }
 
 export interface ActionResult {

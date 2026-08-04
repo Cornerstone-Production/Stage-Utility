@@ -211,3 +211,56 @@ describe("triggersForChannel", () => {
     assert.equal(triggersForChannel("nope:none").length, 0);
   });
 });
+
+// ── Integration connections ────────────────────────────────────────────────
+
+const INTEGRATION_IDS = [
+  "companion", "obs", "osc", "planning-center", "prodcom", "propresenter",
+  "reaper", "ross-tsl", "rosstalk", "sensource", "smaart", "wireless",
+] as const;
+
+const states = (over: Record<string, string> = {}) =>
+  INTEGRATION_IDS.map((id) => ({
+    id, enabled: true, connection: over[id] ?? "disconnected", message: null, config: {},
+  }));
+
+describe("integration connection triggers", () => {
+  test("each integration fires on connect, and only on the transition", () => {
+    for (const id of INTEGRATION_IDS) {
+      const t = AUTOMATION_TRIGGERS[`${id}.connected`];
+      assert.ok(t, `${id}.connected must be registered`);
+      assert.equal(t.didFire(states(), states({ [id]: "connected" }), {}, NOW), true, `${id} connect`);
+      // Already connected and still connected is a LEVEL, not an edge.
+      assert.equal(
+        t.didFire(states({ [id]: "connected" }), states({ [id]: "connected" }), {}, NOW), false,
+        `${id} must not fire while merely staying connected`,
+      );
+    }
+  });
+
+  test("each integration fires on disconnect", () => {
+    for (const id of INTEGRATION_IDS) {
+      const t = AUTOMATION_TRIGGERS[`${id}.disconnected`];
+      assert.ok(t, `${id}.disconnected must be registered`);
+      assert.equal(t.didFire(states({ [id]: "connected" }), states(), {}, NOW), true, `${id} disconnect`);
+      assert.equal(t.didFire(states(), states(), {}, NOW), false, `${id} stays down`);
+    }
+  });
+
+  test("one integration's transition does not fire another's trigger", () => {
+    const obs = AUTOMATION_TRIGGERS["obs.connected"];
+    assert.equal(obs.didFire(states(), states({ reaper: "connected" }), {}, NOW), false);
+  });
+
+  test("'connecting' and 'error' are not connected", () => {
+    const t = AUTOMATION_TRIGGERS["obs.connected"];
+    assert.equal(t.didFire(states(), states({ obs: "connecting" }), {}, NOW), false);
+    assert.equal(t.didFire(states(), states({ obs: "error" }), {}, NOW), false);
+  });
+
+  test("an integration vanishing from the payload is unknown, not disconnected", () => {
+    const t = AUTOMATION_TRIGGERS["obs.disconnected"];
+    const without = states({ obs: "connected" }).filter((s) => s.id !== "obs");
+    assert.equal(t.didFire(states({ obs: "connected" }), without, {}, NOW), false);
+  });
+});

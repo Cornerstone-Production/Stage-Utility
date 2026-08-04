@@ -17,6 +17,7 @@ import { allConditionsHold } from "./automation-conditions.js";
 import { sampleArchive } from "./archive/sample-archive.js";
 import { automationLog } from "./automation-log.js";
 import { automationStore } from "./automation-store.js";
+import { integrationManager } from "./integration-manager.js";
 import { AUTOMATION_TRIGGERS, triggersForChannel } from "./automation-triggers.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
@@ -224,9 +225,12 @@ class AutomationEngine {
   private conditionCtx(): ConditionCtx {
     const live = stageController.getLastLive();
     const state = stageController.getState();
+    const integrations: Record<string, string> = {};
+    for (const s of integrationManager.getStates()) integrations[s.id] = s.connection;
     return {
       pcoLive: live ? { mode: live.mode, serviceTimeId: live.serviceTimeId ?? null } : null,
       serviceTypeId: state.serviceTypeId ?? null,
+      integrations,
     };
   }
 
