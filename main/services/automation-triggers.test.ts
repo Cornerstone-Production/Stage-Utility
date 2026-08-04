@@ -211,3 +211,344 @@ describe("triggersForChannel", () => {
     assert.equal(triggersForChannel("nope:none").length, 0);
   });
 });
+
+// ── Integration connections ────────────────────────────────────────────────
+
+const INTEGRATION_IDS = [
+  "companion", "obs", "osc", "planning-center", "prodcom", "propresenter",
+  "reaper", "ross-tsl", "rosstalk", "sensource", "smaart", "wireless",
+] as const;
+
+const states = (over: Record<string, string> = {}) =>
+  INTEGRATION_IDS.map((id) => ({
+    id, enabled: true, connection: over[id] ?? "disconnected", message: null, config: {},
+  }));
+
+describe("integration connection triggers", () => {
+  test("each integration fires on connect, and only on the transition", () => {
+    for (const id of INTEGRATION_IDS) {
+      const t = AUTOMATION_TRIGGERS[`${id}.connected`];
+      assert.ok(t, `${id}.connected must be registered`);
+      assert.equal(t.didFire(states(), states({ [id]: "connected" }), {}, NOW), true, `${id} connect`);
+      // Already connected and still connected is a LEVEL, not an edge.
+      assert.equal(
+        t.didFire(states({ [id]: "connected" }), states({ [id]: "connected" }), {}, NOW), false,
+        `${id} must not fire while merely staying connected`,
+      );
+    }
+  });
+
+  test("each integration fires on disconnect", () => {
+    for (const id of INTEGRATION_IDS) {
+      const t = AUTOMATION_TRIGGERS[`${id}.disconnected`];
+      assert.ok(t, `${id}.disconnected must be registered`);
+      assert.equal(t.didFire(states({ [id]: "connected" }), states(), {}, NOW), true, `${id} disconnect`);
+      assert.equal(t.didFire(states(), states(), {}, NOW), false, `${id} stays down`);
+    }
+  });
+
+  test("one integration's transition does not fire another's trigger", () => {
+    const obs = AUTOMATION_TRIGGERS["obs.connected"];
+    assert.equal(obs.didFire(states(), states({ reaper: "connected" }), {}, NOW), false);
+  });
+
+  test("'connecting' and 'error' are not connected", () => {
+    const t = AUTOMATION_TRIGGERS["obs.connected"];
+    assert.equal(t.didFire(states(), states({ obs: "connecting" }), {}, NOW), false);
+    assert.equal(t.didFire(states(), states({ obs: "error" }), {}, NOW), false);
+  });
+
+  test("an integration vanishing from the payload is unknown, not disconnected", () => {
+    const t = AUTOMATION_TRIGGERS["obs.disconnected"];
+    const without = states({ obs: "connected" }).filter((s) => s.id !== "obs");
+    assert.equal(t.didFire(states({ obs: "connected" }), without, {}, NOW), false);
+  });
+});
+
+// ── OBS outputs ────────────────────────────────────────────────────────────
+
+describe("obs outputs", () => {
+  const obs = (over: Record<string, unknown> = {}) => ({
+    connected: true, recording: false, recordPaused: false,
+    streaming: false, virtualCam: false, recordTimecode: null, ...over,
+  });
+
+  test("streaming fires on start and on stop, not while it runs", () => {
+    const started = AUTOMATION_TRIGGERS["obs.streaming-started"];
+    const stopped = AUTOMATION_TRIGGERS["obs.streaming-stopped"];
+    assert.equal(started.didFire(obs(), obs({ streaming: true }), {}, NOW), true);
+    assert.equal(started.didFire(obs({ streaming: true }), obs({ streaming: true }), {}, NOW), false);
+    assert.equal(stopped.didFire(obs({ streaming: true }), obs(), {}, NOW), true);
+  });
+
+  test("virtual cam fires on start and stop", () => {
+    const on = AUTOMATION_TRIGGERS["obs.virtualcam-started"];
+    const off = AUTOMATION_TRIGGERS["obs.virtualcam-stopped"];
+    assert.equal(on.didFire(obs(), obs({ virtualCam: true }), {}, NOW), true);
+    assert.equal(off.didFire(obs({ virtualCam: true }), obs(), {}, NOW), true);
+  });
+
+  test("OBS dropping off the network is not 'stopped'", () => {
+    // Same rule the existing recording.stopped trigger follows: unreachable is
+    // unknown, and firing a stop rule because a machine went offline is wrong.
+    const stopped = AUTOMATION_TRIGGERS["obs.streaming-stopped"];
+    assert.equal(
+      stopped.didFire(obs({ streaming: true }), obs({ connected: false, streaming: false }), {}, NOW),
+      false,
+    );
+    const cam = AUTOMATION_TRIGGERS["obs.virtualcam-stopped"];
+    assert.equal(
+      cam.didFire(obs({ virtualCam: true }), obs({ connected: false, virtualCam: false }), {}, NOW),
+      false,
+    );
+  });
+});
+
+// ── ProdCom transcript ─────────────────────────────────────────────────────
+
+describe("prodcom.phrase-said", () => {
+  const t = () => AUTOMATION_TRIGGERS["prodcom.phrase-said"];
+  const line = (id: string, text: string, channelName: string | null = null) =>
+    ({ id, text, channelName, channel: null, color: null, isFinal: true });
+  const feed = (...lines: unknown[]) => lines;
+
+  test("fires when a NEW line contains the phrase", () => {
+    assert.equal(
+      t().didFire(feed(line("1", "standby")), feed(line("1", "standby"), line("2", "go for doors")),
+        { phrase: "go for doors" }, NOW),
+      true,
+    );
+  });
+
+  test("does not fire again for a line already seen", () => {
+    // The transcript is a growing list, so matching the whole feed would fire
+    // on every broadcast for the rest of the service.
+    const before = feed(line("1", "go for doors"));
+    assert.equal(t().didFire(before, before, { phrase: "go for doors" }, NOW), false);
+  });
+
+  test("matches case-insensitively", () => {
+    assert.equal(
+      t().didFire(feed(), feed(line("1", "GO FOR DOORS")), { phrase: "go for doors" }, NOW),
+      true,
+    );
+  });
+
+  test("an empty phrase matches nothing", () => {
+    assert.equal(t().didFire(feed(), feed(line("1", "anything")), { phrase: "" }, NOW), false);
+  });
+
+  test("an optional channel filter restricts which channel counts", () => {
+    assert.equal(
+      t().didFire(feed(), feed(line("1", "go", "Director")), { phrase: "go", channel: "Director" }, NOW),
+      true,
+    );
+    assert.equal(
+      t().didFire(feed(), feed(line("1", "go", "Audio")), { phrase: "go", channel: "Director" }, NOW),
+      false,
+    );
+  });
+});
+
+// ── Baptism timer ──────────────────────────────────────────────────────────
+
+describe("baptism triggers", () => {
+  const b = (phase: string, personNumber = 1) =>
+    ({ mode: "grouped", phase, personNumber, baptismIndex: 0, segmentStartedAt: null });
+
+  test("started fires when the timer leaves idle", () => {
+    const t = AUTOMATION_TRIGGERS["baptism.started"];
+    assert.equal(t.didFire(b("idle"), b("testimony"), {}, NOW), true);
+    assert.equal(t.didFire(b("testimony"), b("baptism"), {}, NOW), false);
+  });
+
+  test("phase-changed fires on any phase transition", () => {
+    const t = AUTOMATION_TRIGGERS["baptism.phase-changed"];
+    assert.equal(t.didFire(b("testimony"), b("baptism"), {}, NOW), true);
+    assert.equal(t.didFire(b("baptism"), b("baptism"), {}, NOW), false);
+  });
+
+  test("finished fires when it returns to idle", () => {
+    const t = AUTOMATION_TRIGGERS["baptism.finished"];
+    assert.equal(t.didFire(b("baptism"), b("idle"), {}, NOW), true);
+    assert.equal(t.didFire(b("idle"), b("idle"), {}, NOW), false);
+  });
+});
+
+// ── Display presence ───────────────────────────────────────────────────────
+
+describe("display presence", () => {
+  const p = (...connected: string[]) => ({ connected });
+
+  test("connected fires for a named display arriving", () => {
+    const t = AUTOMATION_TRIGGERS["display.connected"];
+    assert.equal(t.didFire(p("display-1"), p("display-1", "display-2"), { name: "display-2" }, NOW), true);
+    assert.equal(t.didFire(p("display-1"), p("display-1", "display-2"), { name: "display-3" }, NOW), false);
+  });
+
+  test("with no name it fires for any display arriving", () => {
+    const t = AUTOMATION_TRIGGERS["display.connected"];
+    assert.equal(t.didFire(p(), p("display-9"), {}, NOW), true);
+  });
+
+  test("disconnected fires for one leaving", () => {
+    const t = AUTOMATION_TRIGGERS["display.disconnected"];
+    assert.equal(t.didFire(p("display-1", "display-2"), p("display-1"), { name: "display-2" }, NOW), true);
+  });
+
+  test("none-connected fires only on the transition to empty", () => {
+    // The alarm case: every display in the building has gone.
+    const t = AUTOMATION_TRIGGERS["display.none-connected"];
+    assert.equal(t.didFire(p("display-1"), p(), {}, NOW), true);
+    assert.equal(t.didFire(p(), p(), {}, NOW), false);
+  });
+});
+
+// ── SPL thresholds ─────────────────────────────────────────────────────────
+//
+// The real payload keys meters "device::channel" and carries a `metrics` map
+// named exactly as Smaart names them — there is no single `value` field, so the
+// trigger takes the metric name too.
+
+describe("spl thresholds", () => {
+  const spl = (v: number | null, metric = "SPL A Slow") => ({
+    connected: true,
+    apiVersion: "4",
+    meters: {
+      "Smaart::FOH": {
+        deviceName: "Smaart", channelName: "FOH", ts: null,
+        metrics: v === null ? {} : { [metric]: v },
+      },
+    },
+  });
+  const P = { meter: "Smaart::FOH", metric: "SPL A Slow", threshold: 95 };
+
+  test("crossed-above fires on the crossing, not while it stays high", () => {
+    const t = AUTOMATION_TRIGGERS["spl.crossed-above"];
+    assert.equal(t.didFire(spl(90), spl(96), P, NOW), true);
+    assert.equal(t.didFire(spl(96), spl(97), P, NOW), false);
+  });
+
+  test("crossed-below fires on the way down", () => {
+    const t = AUTOMATION_TRIGGERS["spl.crossed-below"];
+    assert.equal(t.didFire(spl(96), spl(90), P, NOW), true);
+    assert.equal(t.didFire(spl(90), spl(88), P, NOW), false);
+  });
+
+  test("a missing reading is no baseline, so nothing fires", () => {
+    // Same rule the occupancy triggers follow: without both sides there is no
+    // crossing, and inventing one fires on a reconnect.
+    const t = AUTOMATION_TRIGGERS["spl.crossed-above"];
+    assert.equal(t.didFire(spl(null), spl(96), P, NOW), false);
+  });
+
+  test("an unknown meter fires nothing", () => {
+    const t = AUTOMATION_TRIGGERS["spl.crossed-above"];
+    assert.equal(t.didFire(spl(90), spl(96), { ...P, meter: "Nope" }, NOW), false);
+  });
+
+  test("with no metric named it uses the first preferred one present", () => {
+    const t = AUTOMATION_TRIGGERS["spl.crossed-above"];
+    assert.equal(t.didFire(spl(90), spl(96), { meter: "Smaart::FOH", threshold: 95 }, NOW), true);
+  });
+});
+
+// ── Wireless battery and RF ────────────────────────────────────────────────
+//
+// slots:devices broadcasts Record<slotId, DeviceStatus>; the human label is the
+// device's own `name`, and levels are `battery` (%) and `rfBars` (0-5).
+
+describe("wireless thresholds", () => {
+  const dev = (name: string, battery: number | null, rfBars: number | null, online = true) => ({
+    "slot-1": {
+      channelId: "c1", name, deviceType: "receiver", online,
+      rfBars, rfLevelDbm: null, battery, charging: null,
+      frequencyLabel: null, audioLevel: null, cycles: null, health: null, tempC: null,
+      updatedAt: new Date(NOW).toISOString(),
+    },
+  });
+
+  test("battery-below fires on the crossing for the named mic", () => {
+    const t = AUTOMATION_TRIGGERS["wireless.battery-below"];
+    const p = { slot: "Vox 1", threshold: 20 };
+    assert.equal(t.didFire(dev("Vox 1", 25, 5), dev("Vox 1", 18, 5), p, NOW), true);
+    assert.equal(t.didFire(dev("Vox 1", 18, 5), dev("Vox 1", 15, 5), p, NOW), false);
+  });
+
+  test("with no mic named it fires for any pack crossing", () => {
+    const t = AUTOMATION_TRIGGERS["wireless.battery-below"];
+    assert.equal(t.didFire(dev("Vox 1", 25, 5), dev("Vox 1", 18, 5), { threshold: 20 }, NOW), true);
+  });
+
+  test("a pack going offline is not a low battery", () => {
+    // null is UNKNOWN. Firing a low-battery rule because a receiver dropped
+    // would page someone about a pack that is fine.
+    const t = AUTOMATION_TRIGGERS["wireless.battery-below"];
+    assert.equal(
+      t.didFire(dev("Vox 1", 25, 5), dev("Vox 1", null, null, false), { slot: "Vox 1", threshold: 20 }, NOW),
+      false,
+    );
+  });
+
+  test("another mic's low battery does not fire a named rule", () => {
+    const t = AUTOMATION_TRIGGERS["wireless.battery-below"];
+    assert.equal(
+      t.didFire(dev("Vox 2", 25, 5), dev("Vox 2", 18, 5), { slot: "Vox 1", threshold: 20 }, NOW),
+      false,
+    );
+  });
+
+  test("rf-below fires on bars dropping past the threshold", () => {
+    const t = AUTOMATION_TRIGGERS["wireless.rf-below"];
+    assert.equal(
+      t.didFire(dev("Vox 1", 80, 4), dev("Vox 1", 80, 1), { slot: "Vox 1", threshold: 2 }, NOW),
+      true,
+    );
+  });
+});
+
+// ── Service pacing and updates ─────────────────────────────────────────────
+
+describe("service pacing and updates", () => {
+  // Cumulative overrun = sum of (actual - planned) across FINISHED counted items.
+  // The timeline record carries no pre-computed drift field, so it is derived
+  // here the same way the History tab derives it.
+  const item = (seq: number, planned: number, actual: number | null, over: Record<string, unknown> = {}) => ({
+    itemId: `i${seq}`, title: `Item ${seq}`, sequence: seq,
+    plannedLengthSec: planned,
+    startedAt: new Date(NOW).toISOString(),
+    endedAt: actual === null ? null : new Date(NOW + actual * 1000).toISOString(),
+    actualDurationSec: actual,
+    ...over,
+  });
+  const timeline = (...items: unknown[]) => ({ serviceKey: "k", items });
+
+  test("running-over fires once as the plan goes past the margin", () => {
+    const t = AUTOMATION_TRIGGERS["service.running-over"];
+    // 120s over, then 360s over, against a 5-minute margin.
+    const before = timeline(item(1, 300, 420));
+    const after = timeline(item(1, 300, 420), item(2, 300, 540));
+    assert.equal(t.didFire(before, after, { minutes: 5 }, NOW), true);
+    assert.equal(t.didFire(after, after, { minutes: 5 }, NOW), false);
+  });
+
+  test("an item still running does not count toward the overrun", () => {
+    const t = AUTOMATION_TRIGGERS["service.running-over"];
+    const before = timeline(item(1, 300, 420));
+    const after = timeline(item(1, 300, 420), item(2, 300, null));
+    assert.equal(t.didFire(before, after, { minutes: 5 }, NOW), false);
+  });
+
+  test("pre-service items are excluded, as they are in History", () => {
+    const t = AUTOMATION_TRIGGERS["service.running-over"];
+    const before = timeline(item(1, 60, 60));
+    const after = timeline(item(1, 60, 60), item(2, 60, 600, { preService: true }));
+    assert.equal(t.didFire(before, after, { minutes: 5 }, NOW), false);
+  });
+
+  test("update.available fires when a release appears, not while one waits", () => {
+    const t = AUTOMATION_TRIGGERS["update.available"];
+    assert.equal(t.didFire({ releasesBehind: 0 }, { releasesBehind: 1 }, {}, NOW), true);
+    assert.equal(t.didFire({ releasesBehind: 1 }, { releasesBehind: 1 }, {}, NOW), false);
+  });
+});

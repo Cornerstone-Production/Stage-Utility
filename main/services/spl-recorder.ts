@@ -32,7 +32,9 @@ const LIVE_BROADCAST_MS = 5_000;
  *  serviceTimeId roll on overrun); a long gap = a new service occurrence. */
 const SERVICE_GAP_MS = 10 * 60_000;
 /** Metric preference for the recorded level (A-weighted, slow → broadband). */
-const PREFERRED_METRICS = ["SPL A Slow", "SPL A Fast", "LAeq 10", "SPL Slow", "SPL Fast"];
+/** Metric preference order, shared with the SPL automation triggers so a rule
+ *  that names no metric picks the same one the recorder does. */
+export const PREFERRED_METRICS = ["SPL A Slow", "SPL A Fast", "LAeq 10", "SPL Slow", "SPL Fast"];
 
 // Whether a live tick may be recorded lives in live-service-gate.ts — shared by
 // all three recorders so they cannot drift into disagreeing about when a service

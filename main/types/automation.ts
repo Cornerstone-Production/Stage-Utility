@@ -40,6 +40,13 @@ export interface ConditionDef {
 export interface ConditionCtx {
   pcoLive: { mode: string; serviceTimeId: string | null } | null;
   serviceTypeId: string | null;
+  /** Connection state per integration id, for the `<id>.is-connected` conditions. */
+  integrations: Record<string, string>;
+  /** Whether each recorder is rolling right now, for the `is-recording` conditions. */
+  obsRecording: boolean;
+  reaperRecording: boolean;
+  /** Current baptism-timer phase, or null when the timer has never run. */
+  baptismPhase: string | null;
 }
 
 export interface ActionResult {

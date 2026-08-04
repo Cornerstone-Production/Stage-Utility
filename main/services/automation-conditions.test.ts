@@ -13,6 +13,10 @@ const SUNDAY_10AM = Date.parse("2026-07-26T10:00:00Z");
 const ctx = (over: Partial<ConditionCtx> = {}): ConditionCtx => ({
   pcoLive: { mode: "item", serviceTimeId: "st1" },
   serviceTypeId: "weekend",
+  integrations: {},
+  obsRecording: false,
+  reaperRecording: false,
+  baptismPhase: null,
   ...over,
 });
 
@@ -91,5 +95,69 @@ describe("allConditionsHold", () => {
   test("an unknown condition id fails CLOSED", () => {
     // A rule referencing a condition this build does not have must not fire.
     assert.equal(allConditionsHold([{ id: "nope", params: {} }], ctx(), SUNDAY_10AM), false);
+  });
+});
+
+// ── Integration connections ────────────────────────────────────────────────
+
+const INTEGRATION_IDS = [
+  "companion", "obs", "osc", "planning-center", "prodcom", "propresenter",
+  "reaper", "ross-tsl", "rosstalk", "sensource", "smaart", "wireless",
+] as const;
+
+describe("integration connection conditions", () => {
+  test("is-connected is registered for every integration", () => {
+    for (const id of INTEGRATION_IDS) {
+      assert.ok(AUTOMATION_CONDITIONS[`${id}.is-connected`], `${id}.is-connected must be registered`);
+    }
+  });
+
+  test("holds only while that integration reports connected", () => {
+    const c = AUTOMATION_CONDITIONS["obs.is-connected"];
+    assert.equal(c.holds(ctx({ integrations: { obs: "connected" } }), {}, SUNDAY_10AM), true);
+    assert.equal(c.holds(ctx({ integrations: { obs: "connecting" } }), {}, SUNDAY_10AM), false);
+    assert.equal(c.holds(ctx({ integrations: {} }), {}, SUNDAY_10AM), false);
+  });
+
+  test("one integration's state does not satisfy another's condition", () => {
+    const c = AUTOMATION_CONDITIONS["obs.is-connected"];
+    assert.equal(c.holds(ctx({ integrations: { reaper: "connected" } }), {}, SUNDAY_10AM), false);
+  });
+});
+
+// ── Recording state ────────────────────────────────────────────────────────
+
+describe("recorder conditions", () => {
+  test("obs.is-recording holds only while OBS records", () => {
+    const c = AUTOMATION_CONDITIONS["obs.is-recording"];
+    assert.ok(c, "obs.is-recording must be registered");
+    assert.equal(c.holds(ctx({ obsRecording: true }), {}, SUNDAY_10AM), true);
+    assert.equal(c.holds(ctx({ obsRecording: false }), {}, SUNDAY_10AM), false);
+  });
+
+  test("reaper.is-recording holds only while REAPER records", () => {
+    const c = AUTOMATION_CONDITIONS["reaper.is-recording"];
+    assert.ok(c, "reaper.is-recording must be registered");
+    assert.equal(c.holds(ctx({ reaperRecording: true }), {}, SUNDAY_10AM), true);
+    assert.equal(c.holds(ctx({ reaperRecording: false }), {}, SUNDAY_10AM), false);
+  });
+
+  test("the two recorders are independent", () => {
+    assert.equal(
+      AUTOMATION_CONDITIONS["obs.is-recording"].holds(ctx({ reaperRecording: true }), {}, SUNDAY_10AM),
+      false,
+    );
+  });
+});
+
+describe("baptism.phase-is", () => {
+  const c = () => AUTOMATION_CONDITIONS["baptism.phase-is"];
+  test("holds only for the named phase", () => {
+    assert.ok(c(), "baptism.phase-is must be registered");
+    assert.equal(c().holds(ctx({ baptismPhase: "testimony" }), { phase: "testimony" }, SUNDAY_10AM), true);
+    assert.equal(c().holds(ctx({ baptismPhase: "baptism" }), { phase: "testimony" }, SUNDAY_10AM), false);
+  });
+  test("does not hold when the timer has never run", () => {
+    assert.equal(c().holds(ctx({ baptismPhase: null }), { phase: "idle" }, SUNDAY_10AM), false);
   });
 });
