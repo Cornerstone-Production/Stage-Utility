@@ -232,11 +232,34 @@ const AVATAR_MAX_PX = 1000;
  *  2.2 rounds that up so a column is never under-served. */
 const COLUMN_ASPECT_BUDGET = 2.2;
 
+/** Roughly how much of a slot's height the name/RF card takes. It is sized by the
+ *  card's width, so it is a fixed cost per slot — which is why a stacked slot keeps
+ *  less than its 1/depth share of the photo. ~110px of a ~1027px card, measured. */
+const INFO_CARD_FRACTION = 0.12;
+
 /** Columns a view renders: stacked slots share one, so they do not each get a
  *  column's width. Mirrors the grouping the kiosk does with `stackWithPrevious`. */
 function columnCount(slots: Slot[]): number {
   const n = slots.filter((s) => !s.stackWithPrevious).length;
   return Math.max(1, n);
+}
+
+/**
+ * How many slots share each slot's column, by slot index.
+ *
+ * A stacked column splits its height between its slots, so each one is drawn
+ * roughly `depth` times shorter than a full-height slot — and needs a crop that
+ * short. Grouping mirrors what the kiosk does with `stackWithPrevious`.
+ */
+function stackDepths(slots: Slot[]): number[] {
+  const columns: number[][] = [];
+  slots.forEach((slot, i) => {
+    if (slot.stackWithPrevious && columns.length > 0) columns[columns.length - 1].push(i);
+    else columns.push([i]);
+  });
+  const depths = new Array<number>(slots.length).fill(1);
+  for (const col of columns) for (const i of col) depths[i] = col.length;
+  return depths;
 }
 
 /**
@@ -248,14 +271,35 @@ function columnCount(slots: Slot[]): number {
  * away, and the fixed 1000px request was itself an upscale of a 960px original.
  * Matching the geometry to the column keeps exactly the pixels that get drawn:
  * ~183 KB per photo instead of ~1093 KB, with nothing visibly different.
+ *
+ * HEIGHT MATTERS TOO. This asked for a full-height crop for every slot, including
+ * the ones in a stacked column that are drawn half as tall. `object-fit: cover`
+ * then scaled the too-tall image to the slot's WIDTH and cropped away the excess
+ * height — with `object-position: top`, that left a stacked slot showing the top
+ * 45% of the photo. Foreheads. Dividing the height by the stack depth asks for the
+ * shape that will actually be drawn, and downloads less of it.
  */
-export function fitAvatarToColumn(url: string | null, columns: number): string | null {
+export function fitAvatarToColumn(
+  url: string | null,
+  columns: number,
+  stackDepth = 1,
+): string | null {
   if (!url) return null;
   const width = Math.min(
     AVATAR_MAX_PX,
     Math.max(120, Math.ceil((AVATAR_MAX_PX * COLUMN_ASPECT_BUDGET) / columns)),
   );
-  const geometry = `${width}x${AVATAR_MAX_PX}%23`;
+  // Not simply height/depth: the info card under the photo is sized by the card's
+  // WIDTH, so it costs the same pixels in a half-height slot as a full one. A slot
+  // in a 2-stack therefore keeps well under half the photo height, not half.
+  // Measured on a real display: full photo 915px, stacked 396px — 0.433, where a
+  // naive 1/depth would say 0.5. Modelling the card as a fixed fraction of the slot
+  // reproduces that: (1/depth - card) / (1 - card).
+  const depth = Math.max(1, stackDepth);
+  const share = (1 / depth - INFO_CARD_FRACTION) / (1 - INFO_CARD_FRACTION);
+  // A floor keeps a deep stack from asking for a letterbox sliver.
+  const height = Math.max(240, Math.round(AVATAR_MAX_PX * Math.max(0, share)));
+  const geometry = `${width}x${height}%23`;
   return /[?&]g=\d+x\d+(%23|#)?/.test(url)
     ? url.replace(/([?&]g=)\d+x\d+(%23|#)?/, `$1${geometry}`)
     : url + (url.includes("?") ? "&" : "?") + `g=${geometry}`;
@@ -268,6 +312,8 @@ export function resolveSlots(
 ): Slot[] {
   // How wide each column will be drawn, which sets the avatar crop below.
   const columns = columnCount(slots);
+  // Per-slot, because a stacked slot is drawn shorter and needs a shorter crop.
+  const depths = stackDepths(slots);
 
   // Claimed people, keyed by positions-signature. Slots with the same signature
   // compete for distinct people; slots with different signatures are independent,
@@ -275,7 +321,7 @@ export function resolveSlots(
   // is the array order the caller passes.
   const claimed = new Map<string, Set<string>>();
 
-  return slots.map((slot): Slot => {
+  return slots.map((slot, slotIndex): Slot => {
     // Spacers + empty slots: no display name, no photo, no PCO lookup.
     if (slot.link.kind === "spacer" || slot.link.kind === "empty") {
       return { ...slot, displayName: null, photoUrl: null, device: EMPTY_DEVICE };
@@ -338,7 +384,7 @@ export function resolveSlots(
     return {
       ...slot,
       displayName: member?.name ?? null,
-      photoUrl: fitAvatarToColumn(member?.photoUrl ?? null, columns),
+      photoUrl: fitAvatarToColumn(member?.photoUrl ?? null, columns, depths[slotIndex] ?? 1),
       shownPositions,
       device,
     };

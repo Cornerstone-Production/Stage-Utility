@@ -319,3 +319,66 @@ test("every output is renderable as a percentage", () => {
     assert.ok(out !== null && out >= 0 && out <= 1, `${v} -> ${out}`);
   }
 });
+
+describe("avatar crop matches the shape the slot is drawn at", () => {
+  const geom = (url: string | null) => (url?.match(/g=(\d+x\d+)/) ?? [])[1] ?? null;
+  const pcoSlot = (id: string, over: Partial<Slot> = {}): Slot =>
+    ({ id, channel: id, order: Number(id), link: { kind: "pco", matchBy: "position", positions: [{ name: "Vocals" }] }, ...over }) as unknown as Slot;
+
+  test("asks for a shorter crop for a stacked slot than a full-height one", () => {
+    // The bug: every slot got a full-height crop, so a half-height stacked slot
+    // was handed twice the image it could draw. object-fit: cover then threw the
+    // bottom half away and object-position: top left only foreheads visible.
+    const full = fitAvatarToColumn("http://x/a.jpg", 4, 1);
+    const stacked = fitAvatarToColumn("http://x/a.jpg", 4, 2);
+    const [, fullH] = geom(full)!.split("x").map(Number);
+    const [, stackedH] = geom(stacked)!.split("x").map(Number);
+    assert.ok(stackedH < fullH, `stacked (${stackedH}) must be shorter than full (${fullH})`);
+    // Less than HALF, not exactly half: the info card is sized by width, so it
+    // costs the same pixels in a half-height slot and eats into the photo's share.
+    assert.ok(stackedH < fullH / 2, `expected under half of ${fullH}, got ${stackedH}`);
+    assert.ok(stackedH > fullH / 3, `but not a sliver: got ${stackedH}`);
+  });
+
+  test("keeps the width, which is set by the column and does not change when stacked", () => {
+    const a = geom(fitAvatarToColumn("http://x/a.jpg", 6, 1))!.split("x")[0];
+    const b = geom(fitAvatarToColumn("http://x/a.jpg", 6, 2))!.split("x")[0];
+    assert.equal(a, b, "a stacked slot is the same width, only shorter");
+  });
+
+  test("crops a stacked slot no harder than a full-height one", () => {
+    // The point of the whole fix. Boxes measured on a real display.
+    const visible = (geometry: string, w: number, h: number) => {
+      const [iw, ih] = geometry.split("x").map(Number);
+      const scale = Math.max(w / iw, h / ih);
+      return (w * h) / (iw * scale * ih * scale);
+    };
+    const full = visible(geom(fitAvatarToColumn("http://x/a.jpg", 13, 1))!, 194, 915);
+    const stacked = visible(geom(fitAvatarToColumn("http://x/a.jpg", 13, 2))!, 194, 396);
+    assert.ok(
+      Math.abs(full - stacked) < 0.1,
+      `stacked (${(stacked * 100).toFixed(1)}%) should waste about as little as full (${(full * 100).toFixed(1)}%)`,
+    );
+  });
+
+  test("floors the height so a deep stack cannot ask for a sliver", () => {
+    const [, h] = geom(fitAvatarToColumn("http://x/a.jpg", 4, 12))!.split("x").map(Number);
+    assert.ok(h >= 240, `expected a sensible floor, got ${h}`);
+  });
+
+  test("gives stacked slots in a resolved board the shorter crop", () => {
+    // End to end: the second slot stacks onto the first, so BOTH are half-height.
+    const resolved = resolveSlots(
+      [pcoSlot("1"), pcoSlot("2", { stackWithPrevious: true }), pcoSlot("3")],
+      [
+        { id: "m1", name: "A", personId: "p1", photoUrl: "http://x/a.jpg", teamPositionName: "Vocals", teamName: "B", status: "C", notes: null },
+        { id: "m2", name: "B", personId: "p2", photoUrl: "http://x/b.jpg", teamPositionName: "Vocals", teamName: "B", status: "C", notes: null },
+        { id: "m3", name: "C", personId: "p3", photoUrl: "http://x/c.jpg", teamPositionName: "Vocals", teamName: "B", status: "C", notes: null },
+      ],
+      new Map(),
+    );
+    const heights = resolved.map((s) => Number(geom(s.photoUrl)?.split("x")[1] ?? 0));
+    assert.ok(heights[0] < heights[2], "a stacked slot gets a shorter crop than a lone one");
+    assert.equal(heights[0], heights[1], "both halves of a stack match");
+  });
+});
