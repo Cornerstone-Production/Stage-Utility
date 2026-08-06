@@ -377,7 +377,7 @@ describe("avatar crop matches the shape the slot is drawn at", () => {
       ],
       new Map(),
     );
-    const heights = resolved.map((s) => Number(geom(s.photoUrl)?.split("x")[1] ?? 0));
+    const heights = resolved.map((s) => Number(geom(s.photoUrl ?? null)?.split("x")[1] ?? 0));
     assert.ok(heights[0] < heights[2], "a stacked slot gets a shorter crop than a lone one");
     assert.equal(heights[0], heights[1], "both halves of a stack match");
   });
