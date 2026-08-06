@@ -377,7 +377,10 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "presets:apply": {
       const id = p.id as string;
-      return post<T>(`/api/presets/${encodeURIComponent(id)}/apply`, { displayId: p.displayId });
+      return post<T>(`/api/presets/${encodeURIComponent(id)}/apply`, {
+        viewId: p.viewId,
+        displayId: p.displayId,
+      });
     }
 
     case "presets:delete": {
