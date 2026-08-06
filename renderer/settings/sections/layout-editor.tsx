@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
+import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import {
   UndoIcon,
   Trash2Icon,
@@ -443,6 +444,7 @@ function OverlayNode({
   const kids = o.children?.length ? [...o.children].sort((a, b) => a.z - b.z) : null;
   return (
     <div
+      data-obj-id={o.id}
       onPointerDown={(e) => onStart(e, o, "move", parentAbs, depth)}
       className="absolute"
       style={{
@@ -489,6 +491,7 @@ function OverlayNode({
 function EditorCanvas({
   canvas, objects, selectedId, selectedIds, gridOn, ctx, ndiSource, interactive,
   onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
+  onContextMenu,
 }: {
   canvas: LayoutCanvas;
   objects: LayoutObject[];
@@ -513,6 +516,9 @@ function EditorCanvas({
    *  `objAbs` is the object's final absolute canvas rect; `containerAbs` the
    *  container's absolute rect — together they give the new parent-local geom. */
   onReparent: (id: string, containerId: string, objAbs: FracRect, containerAbs: FracRect) => void;
+  /** Right-click anywhere on the canvas. The handler works out which object (if
+   *  any) was under the cursor from `data-obj-id` on the event target. */
+  onContextMenu?: (e: ReactMouseEvent) => void;
 }) {
   // Measure the available area (this wrapper), then letterbox the design canvas to
   // fit BOTH axes so it never overflows on ultrawide/portrait/short screens.
@@ -673,6 +679,11 @@ function EditorCanvas({
   // only the background reaches here) drags a rectangle; on release, select every
   // top-level object it intersects. A plain click (no drag) clears the selection.
   function startMarquee(e: ReactPointerEvent) {
+    // PRIMARY BUTTON ONLY. A right-click also fires pointerdown, and the context
+    // menu that follows swallows the matching pointerup — so the move/up listeners
+    // below stayed bound to the window and the next mouse movement drew a marquee
+    // out of nowhere. Same for middle-click and stylus barrel taps.
+    if (e.button !== 0 || !e.isPrimary) return;
     const box = boxRef.current;
     if (!box) { onSelect(null); return; }
     const rect = box.getBoundingClientRect();
@@ -758,6 +769,7 @@ function EditorCanvas({
                 : canvas.background,
           }}
           onPointerDown={interactive ? startMarquee : undefined}
+          onContextMenu={interactive && onContextMenu ? onContextMenu : undefined}
         >
           {/* Content layer (visual only). Letterbox: design dims scaled. Fill: the
               layer IS the box (objects positioned by % of the live box). The grid
@@ -1111,6 +1123,11 @@ export function LayoutEditor({
   }
   // In-editor clipboard for Cmd/Ctrl-C / -V (stores fresh-id clones).
   const clipboard = useRef<LayoutObject[]>([]);
+  // Right-click menu: where it opened, and which object was under the cursor.
+  // Items are captured when the menu OPENS, not rebuilt on render: they depend on
+  // the clipboard, which is a ref, and a menu should describe the moment it was
+  // summoned rather than quietly re-deciding underneath the cursor.
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   // Layers-panel drag-to-reorder: the row currently being hovered as a drop target.
   const [dragLayerOver, setDragLayerOver] = useState<string | null>(null);
   const [history, setHistory] = useState<LayoutObject[][]>([]);
@@ -1419,9 +1436,14 @@ export function LayoutEditor({
     }
     return { tree: out, ids };
   }
-  // Bulk actions over the whole selection (Delete key / Cmd-D / toolbar).
+  // Bulk actions. The *Ids forms take the selection explicitly, because the
+  // right-click menu decides what it is acting on BEFORE setSelectedIds has
+  // landed — reading state there would act on the previous selection.
   function removeSelected() {
-    const ids = [...selectedIds].filter((id) => !isLockedInTree(objects, id));
+    removeIds(selectedIds);
+  }
+  function removeIds(selection: Set<string>) {
+    const ids = [...selection].filter((id) => !isLockedInTree(objects, id));
     if (ids.length === 0) return;
     pushHistory();
     setObjects((prev) => ids.reduce((tree, id) => removeById(tree, id).tree, prev));
@@ -1429,7 +1451,10 @@ export function LayoutEditor({
     setDirty(true);
   }
   function duplicateSelected() {
-    const srcs = [...selectedIds].map((id) => findById(objects, id)).filter((o): o is LayoutObject => !!o);
+    duplicateIds(selectedIds);
+  }
+  function duplicateIds(selection: Set<string>) {
+    const srcs = [...selection].map((id) => findById(objects, id)).filter((o): o is LayoutObject => !!o);
     if (srcs.length === 0) return;
     pushHistory();
     const { tree, ids } = cloneInto(objects, srcs, true);
@@ -1440,7 +1465,10 @@ export function LayoutEditor({
   // Cmd/Ctrl-C / -V. Copy snapshots the selection; paste drops fresh clones at the
   // top level (offset) and selects them.
   function copySelected() {
-    const srcs = [...selectedIds].map((id) => findById(objects, id)).filter((o): o is LayoutObject => !!o);
+    copyIds(selectedIds);
+  }
+  function copyIds(selection: Set<string>) {
+    const srcs = [...selection].map((id) => findById(objects, id)).filter((o): o is LayoutObject => !!o);
     if (srcs.length) clipboard.current = srcs.map((o) => deepCloneFreshIds(o, uid));
   }
   function pasteClipboard() {
@@ -1451,6 +1479,51 @@ export function LayoutEditor({
     setSelectedIds(ids);
     setDirty(true);
   }
+  /** Right-click on the canvas: select what is under the cursor, then open the menu. */
+  function openContextMenu(e: ReactMouseEvent) {
+    e.preventDefault();
+    const el = (e.target as HTMLElement | null)?.closest?.("[data-obj-id]") as HTMLElement | null;
+    const objectId = el?.dataset.objId ?? null;
+    // Right-clicking an object that is not in the selection selects it first, so
+    // the menu always acts on what was actually clicked. Right-clicking one that
+    // IS selected keeps the whole selection, so "Delete" can act on all of it.
+    // The selection the menu will act on. Computed here rather than read back
+    // from state, which has not updated yet inside this handler.
+    let selection = selectedIds;
+    if (objectId && !selectedIds.has(objectId)) selection = new Set([objectId]);
+    else if (!objectId) selection = new Set();
+    if (selection !== selectedIds) setSelectedIds(selection);
+    setMenu({ x: e.clientX, y: e.clientY, items: contextMenuItems(selection) });
+  }
+
+  /** Items for the current right-click, built fresh so counts and enablement are
+   *  right at the moment it opens. */
+  function contextMenuItems(selection: Set<string>): ContextMenuItem[] {
+    const count = selection.size;
+    const many = count > 1 ? ` (${count})` : "";
+    const addSub: ContextMenuItem[] = PALETTE_GROUPS.flatMap((g) => {
+      const types = g.types.filter((t) => {
+        const need = objectIntegration(t);
+        return !(hideUnconfigured && need && !configuredIntegrations.has(need.id));
+      });
+      if (types.length === 0) return [];
+      return [
+        { separator: true } as ContextMenuItem,
+        ...types.map((t) => ({ label: typeLabel(t), onSelect: () => addObject(t) })),
+      ];
+    }).slice(1); // drop the leading separator
+
+    return [
+      { label: "Add object", items: addSub },
+      { separator: true },
+      { label: `Copy${many}`, shortcut: "⌘C", disabled: count === 0, onSelect: () => copyIds(selection) },
+      { label: "Paste", shortcut: "⌘V", disabled: clipboard.current.length === 0, onSelect: pasteClipboard },
+      { label: `Duplicate${many}`, shortcut: "⌘D", disabled: count === 0, onSelect: () => duplicateIds(selection) },
+      { separator: true },
+      { label: `Delete${many}`, shortcut: "⌫", danger: true, disabled: count === 0, onSelect: () => removeIds(selection) },
+    ];
+  }
+
   // Keyboard: Delete/Backspace removes the selection; Cmd/Ctrl-D duplicates,
   // -C copies, -V pastes. Ignored while typing in a form field.
   useEffect(() => {
@@ -1788,6 +1861,7 @@ export function LayoutEditor({
               onCommitStart={pushHistory}
               onReparent={reparentIntoContainer}
               onBoxSize={handleBoxSize}
+              onContextMenu={isEditing ? openContextMenu : undefined}
             />
           ) : (
             <div className="w-full h-full rounded-xl border border-line flex items-center justify-center text-fg-subtle">
@@ -1795,6 +1869,17 @@ export function LayoutEditor({
             </div>
           )}
         </div>
+
+        {/* Right-click menu. Positioned fixed to the viewport, so it lives outside
+            the canvas box rather than inside its ternary. */}
+        {menu && (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            items={menu.items}
+            onClose={() => setMenu(null)}
+          />
+        )}
 
         {/* Side panel: layers + inspector (edit mode only). Capped to the canvas
             height (which is measured to reach the viewport bottom) and scrolls
