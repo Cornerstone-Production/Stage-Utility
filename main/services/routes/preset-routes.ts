@@ -25,7 +25,12 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       // Optional displayId — defaults to primary display if omitted.
-      const displayIdForPreset = typeof body.displayId === "string" ? body.displayId : "";
+      const displayIdForPreset =
+        typeof body.viewId === "string" && body.viewId
+          ? body.viewId
+          : typeof body.displayId === "string"
+            ? body.displayId
+            : "";
       const presets = await stageController.savePreset(displayIdForPreset, (body.name as string).trim());
       json(res, presets);
       return;
@@ -64,9 +69,19 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
     if (method === "POST" && presetApplyMatch) {
       const id = presetApplyMatch[1];
       const body = await readBody(req) as Record<string, unknown>;
-      const displayIdForApply = typeof body.displayId === "string" ? body.displayId : "";
-      const state = await stageController.applyPreset(displayIdForApply, id);
-      json(res, state);
+      // `viewId` is explicit and unambiguous. `displayId` is the legacy shape and
+      // resolves through outputs, which is how an apply could land on a different
+      // view than the caller was editing.
+      const target =
+        typeof body.viewId === "string" && body.viewId
+          ? body.viewId
+          : typeof body.displayId === "string"
+            ? body.displayId
+            : "";
+      const { state, viewId } = await stageController.applyPreset(target, id);
+      // The caller needs to know WHICH view was written, so it can read the right
+      // slots back — and notice when that is not the view it was showing.
+      json(res, { ...state, appliedViewId: viewId });
       return;
     }
 

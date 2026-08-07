@@ -1068,7 +1068,7 @@ export function SettingsView() {
     try {
       // Persist any pending editor edits first so the preset captures what's on screen.
       if (slotsDirty) await saveSlots();
-      const presets = await ipc<SlotPreset[]>("presets:save", { name, displayId: selectedViewId });
+      const presets = await ipc<SlotPreset[]>("presets:save", { name, viewId: selectedViewId });
       queryClient.setQueryData(["presets:list"], presets);
       toast.success(`Saved arrangement "${name}".`);
     } catch (err) {
@@ -1078,9 +1078,21 @@ export function SettingsView() {
 
   async function handleApplyPreset(id: string) {
     try {
-      const next = await ipc<StageState>("presets:apply", { id, displayId: selectedViewId });
+      const next = await ipc<StageState & { appliedViewId?: string }>("presets:apply", {
+        id,
+        viewId: selectedViewId,
+      });
       queryClient.setQueryData(["stage:getState"], next);
-      const viewSlots = next.slotsByView?.[selectedViewId] ?? [];
+      // Read back the view the SERVER says it wrote, not the one we asked for.
+      // Those differed when an output shared an id with a view, and reading the
+      // requested id showed the unchanged slots — a silent no-op under a success
+      // toast. If they still differ, that is a bug worth surfacing, not hiding.
+      const appliedTo = next.appliedViewId ?? selectedViewId;
+      if (appliedTo !== selectedViewId) {
+        toast.error(`Arrangement went to "${appliedTo}", not the view you are editing. Nothing was changed here.`);
+        return;
+      }
+      const viewSlots = next.slotsByView?.[appliedTo] ?? [];
       setLocalSlots([...viewSlots].sort((a, b) => a.order - b.order));
       setSlotsDirty(false);
       toast.success("Arrangement applied.");

@@ -1415,17 +1415,37 @@ export class StageController {
     return updated;
   }
 
-  async applyPreset(target: string, id: string): Promise<StageState> {
+  /**
+   * Apply a saved arrangement to a view.
+   *
+   * Returns the view it actually wrote to, not just the new state. The caller
+   * reads the applied slots back by that id: assuming it matched the id passed in
+   * is what let a misdirected apply look like a success — nine slots written to
+   * another view, and a toast saying "Arrangement applied".
+   */
+  async applyPreset(target: string, id: string): Promise<{ state: StageState; viewId: string }> {
     const viewId = this.viewIdForTarget(target);
     const presets = await presetsStore.load();
     const preset = presets.find((p) => p.id === id);
     if (!preset) throw new Error(`Preset ${id} not found`);
 
+    // Refuse rather than write somewhere nothing reads. A custom view's slots live
+    // per layout object, and a view that owns no slots at all (one embedding
+    // another view's grid) can never show what we would write here.
+    const view = this.state.views.find((v) => v.id === viewId);
+    if (view && view.kind !== "slots") {
+      throw new Error(
+        `"${view.name}" is a ${view.kind} view and has no slots of its own. ` +
+          "Recall the arrangement on the Mic Slots view it shows instead.",
+      );
+    }
+
     console.log(`[stage-controller] applyPreset "${scrub(preset.name)}" (${scrub(id)}) for view=${scrub(viewId)}`);
 
     // Deep-clone with fresh slot ids so applied slots are independent of the preset.
     const slots: Slot[] = preset.slots.map((s) => ({ ...s, id: randomUUID() }));
-    return this.setViewSlots(viewId, slots);
+    const state = await this.setViewSlots(viewId, slots);
+    return { state, viewId };
   }
 
   async deletePreset(id: string): Promise<SlotPreset[]> {
@@ -2118,11 +2138,35 @@ export class StageController {
 
   /** Resolve a legacy target (output id, empty for primary, or a raw view id)
    *  to a View id for slot writes. */
+  /**
+   * Resolve a caller's target to a view id.
+   *
+   * VIEWS WIN. Output ids and view ids live in one namespace and can collide —
+   * an install with an output `display-2` routed to view `view-2`, plus a view
+   * also called `display-2`, is not hypothetical: it is what shipped. Resolving
+   * outputs first meant the Views page asking for view `display-2` silently got
+   * `view-2`, so recalling an arrangement wrote nine slots into a different view
+   * and reported success. Nineteen times, in one log.
+   *
+   * Every modern caller passes a view id. Output resolution stays for the legacy
+   * output-shaped callers, but only when nothing owns that id as a view.
+   */
   private viewIdForTarget(target: string): string {
     if (!target) return this.primaryViewId();
+    const view = this.state.views.find((v) => v.id === target);
     const output = this.state.outputs.find((o) => o.id === target);
+    if (view) {
+      // Ambiguity is never silent: it is exactly the condition that hid this bug.
+      if (output && output.viewId && output.viewId !== target) {
+        console.warn(
+          `[stage-controller] target "${scrub(target)}" names both a view and an output ` +
+            `routed to "${scrub(output.viewId)}" — using the VIEW. Pass viewId to be explicit.`,
+        );
+      }
+      return view.id;
+    }
     if (output) return output.viewId ?? this.primaryViewId();
-    return target; // already a view id
+    return target; // already a view id, or an id we do not know
   }
 
   private nextViewId(): string {
