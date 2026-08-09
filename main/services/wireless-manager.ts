@@ -157,7 +157,18 @@ class WirelessManager {
       // against what is stored: mask keeps, "" clears, anything else replaces.
       const stored = await secretsStore.getSecrets(WirelessManager.secretId(conn.id));
       const merged = mergeSecrets(conn.providerId, patch.config, stored);
-      conn.config = withSecrets({ ...conn.config, ...splitConfig(conn.providerId, patch.config).safe }, merged);
+      // Rebuild from the credential-free parts of BOTH, then add back only what
+      // mergeSecrets kept. Spreading the patch over conn.config cannot clear a
+      // credential — an object that merely lacks the key does not delete it — so
+      // clearing a password left the old one live in memory: the API kept
+      // reporting it as set and the driver kept authenticating with it.
+      conn.config = withSecrets(
+        {
+          ...splitConfig(conn.providerId, conn.config).safe,
+          ...splitConfig(conn.providerId, patch.config).safe,
+        },
+        merged,
+      );
     }
 
     console.log(`[wireless] updateConnection — ${conn.id} patch keys: ${Object.keys(patch).join(", ")}`);
@@ -226,10 +237,13 @@ class WirelessManager {
     // operator downloads, which the snapshot promises does not happen.
     const rows = [];
     for (const { id, name, providerId, enabled, config } of this.connections) {
-      const slot = WirelessManager.secretId(id);
-      const stored = await secretsStore.getSecrets(slot);
-      await secretsStore.setSecrets(slot, mergeSecrets(providerId, config, stored));
-      rows.push({ id, name, providerId, enabled, config: splitConfig(providerId, config).safe });
+      // Write exactly what is in memory — do NOT merge against what is stored.
+      // Merging is the patch boundary's job (updateConnection), where "absent"
+      // correctly means "unchanged". Here absent means the operator cleared it,
+      // and merging resurrected the old password from the store on every save.
+      const { safe, secret } = splitConfig(providerId, config);
+      await secretsStore.setSecrets(WirelessManager.secretId(id), secret);
+      rows.push({ id, name, providerId, enabled, config: safe });
     }
     await wirelessStore.save(rows);
   }

@@ -100,6 +100,36 @@ describe("mergeSecrets", () => {
   });
 });
 
+describe("rebuilding a connection's config from a patch", () => {
+  // What wireless-manager.updateConnection does. Spreading the patch straight
+  // over the existing config cannot CLEAR a credential — an object that merely
+  // lacks the key does not delete it — so a cleared password stayed live in
+  // memory, the API kept reporting it as set, and the driver kept using it.
+  const rebuild = (existing: Record<string, unknown>, patch: Record<string, unknown>) => {
+    const merged = mergeSecrets(SPECTERA, patch, splitConfig(SPECTERA, existing).secret);
+    return withSecrets(
+      { ...splitConfig(SPECTERA, existing).safe, ...splitConfig(SPECTERA, patch).safe },
+      merged,
+    );
+  };
+
+  it("clears the password when the patch clears it", () => {
+    const next = rebuild(full, { host: "10.0.0.99", port: 443, password: "" });
+    assert.equal(next.password, undefined, "the old password must not survive a clear");
+    assert.equal(next.host, "10.0.0.99");
+  });
+
+  it("keeps the password when the patch only changes the host", () => {
+    const next = rebuild(full, { host: "10.0.0.99", port: 443, password: MASK });
+    assert.equal(next.password, "hunter2");
+    assert.equal(next.host, "10.0.0.99");
+  });
+
+  it("replaces the password when a new one is given", () => {
+    assert.equal(rebuild(full, { password: "changed" }).password, "changed");
+  });
+});
+
 describe("withSecrets", () => {
   it("gives the driver the real password back", () => {
     assert.deepEqual(withSecrets({ host: "h", port: 443 }, { password: "hunter2" }), {
