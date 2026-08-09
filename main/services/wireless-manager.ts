@@ -13,7 +13,7 @@ import { broadcast } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
 import { secretsStore } from "./secrets.js";
 import { settingsStore } from "./settings-store.js";
-import { credentialKeys, mergeSecrets, publicConfig, splitConfig, withSecrets } from "./wireless-credentials.js";
+import { allCredentialKeys, mergeSecrets, publicConfig, splitConfig, withSecrets } from "./wireless-credentials.js";
 import { wirelessStore } from "./wireless-store.js";
 
 /** The fastest metering interval worth allowing. Below this the polling costs
@@ -53,7 +53,14 @@ class WirelessManager {
     // and therefore in every config snapshot — until someone happens to edit the
     // connection. persist() moves it into the encrypted store and rewrites the
     // file without it.
-    const legacy = configs.filter((cfg) => credentialKeys(cfg.providerId).some((k) => cfg.config[k]));
+    //
+    // Filtered on the UNION of every provider's credential keys, not this
+    // connection's provider. Only Spectera declares a password, so keying off the
+    // current provider skipped exactly the rows the provider-switch leak created:
+    // a configured Spectera switched to another provider left cleartext under a
+    // providerId with no password field. Those would have stayed in the file
+    // permanently, with the API masking them so nothing ever revealed it.
+    const legacy = configs.filter((cfg) => allCredentialKeys().some((k) => cfg.config[k]));
     if (legacy.length > 0) {
       console.log(`[wireless] migrating ${legacy.length} stored credential(s) out of wireless-connections.json`);
       await this.persist();
@@ -239,16 +246,22 @@ class WirelessManager {
     // Credentials never reach wireless-connections.json — that file is in
     // CONFIG_FILES, so anything left in it lands in every config snapshot the
     // operator downloads, which the snapshot promises does not happen.
+    // Write exactly what is in memory — do NOT merge against what is stored.
+    // Merging is the patch boundary's job (updateConnection), where "absent"
+    // correctly means "unchanged". Here absent means the operator cleared it, and
+    // merging resurrected the old password from the store on every save.
+    //
+    // Collected and written ONCE. Calling setSecrets per connection re-encrypted
+    // and rewrote the entire secrets blob — which also holds every integration
+    // credential — once per connection, on the request path and on boot.
     const rows = [];
+    const secrets: Record<string, Record<string, string>> = {};
     for (const { id, name, providerId, enabled, config } of this.connections) {
-      // Write exactly what is in memory — do NOT merge against what is stored.
-      // Merging is the patch boundary's job (updateConnection), where "absent"
-      // correctly means "unchanged". Here absent means the operator cleared it,
-      // and merging resurrected the old password from the store on every save.
-      const { safe, secret } = splitConfig(config);
-      await secretsStore.setSecrets(WirelessManager.secretId(id), secret);
-      rows.push({ id, name, providerId, enabled, config: safe });
+      const split = splitConfig(config);
+      secrets[WirelessManager.secretId(id)] = split.secret;
+      rows.push({ id, name, providerId, enabled, config: split.safe });
     }
+    await secretsStore.setManySecrets(secrets);
     await wirelessStore.save(rows);
   }
 

@@ -164,6 +164,24 @@ class SecretsStore {
     await this.persist();
   }
 
+  /**
+   * Replace several slots in one write.
+   *
+   * The whole blob is re-encrypted and rewritten on every save, so a caller with
+   * N things to store must not call setSecrets N times — wireless did, once per
+   * connection, on every edit and on the boot migration. On a Pi's SD card that
+   * is a visible stall on the request path, and it widens the window for any
+   * concurrent write.
+   */
+  async setManySecrets(entries: Record<string, Record<string, string>>): Promise<void> {
+    const blob = await this.load();
+    for (const [id, secrets] of Object.entries(entries)) {
+      if (Object.keys(secrets).length === 0) delete blob[id];
+      else blob[id] = secrets;
+    }
+    await this.persist();
+  }
+
   async clearSecrets(integrationId: string): Promise<void> {
     const blob = await this.load();
     delete blob[integrationId];
