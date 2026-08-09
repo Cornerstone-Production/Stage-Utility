@@ -19,6 +19,14 @@ const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 const CACHE_TTL_MS = 30_000; // default / fallback
 const TTL_LONG_MS = 15 * 60_000;
 const TTL_MEDIUM_MS = 3 * 60_000;
+// A request that FAILED is cached for this long, and no longer. Not caching a
+// failure at all was the other half of the mistake: getLive() calls getPlanTimes
+// on every live tick (~1/s during a service), and its only rate limiter is this
+// cache, so a PCO incident turned into ~1 req/s of retries per failing endpoint
+// and the app rate-limited itself out of PCO's quota. Long enough to throttle a
+// retry storm, short enough that a blip does not blank the countdown for the
+// fifteen minutes a success is held for.
+const TTL_FAILED_MS = 30_000;
 /** Short-lived cache for attachment `open` signed URLs (PCO issues ~1h links). */
 const ATTACH_OPEN_TTL_MS = 10 * 60_000;
 /** Retry budget for transient PCO failures (429 / 5xx / network). */
@@ -569,7 +577,7 @@ class PcoService {
     // Only cache a real answer. The request above yields null on failure and the
     // parse below turns that into an empty list; caching it would store a FAILURE
     // as data, with a success's TTL.
-    if (json) this.cacheSet(cacheKey, result, TTL_LONG_MS);
+    this.cacheSet(cacheKey, result, json ? TTL_LONG_MS : TTL_FAILED_MS);
     return result;
   }
 
@@ -669,7 +677,7 @@ class PcoService {
       .map((t) => t.attributes.starts_at as string)
       .sort((a, b) => Date.parse(a) - Date.parse(b));
 
-    if (json) this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    this.cacheSet(cacheKey, times, json ? TTL_LONG_MS : TTL_FAILED_MS);
     return times;
   }
 
@@ -696,7 +704,7 @@ class PcoService {
         endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
       }));
 
-    if (json) this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    this.cacheSet(cacheKey, times, json ? TTL_LONG_MS : TTL_FAILED_MS);
     return times;
   }
 
@@ -1054,7 +1062,7 @@ class PcoService {
       }))
       .filter((t): t is PlanTime => !!t.startsAt);
 
-    if (json) this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    this.cacheSet(cacheKey, times, json ? TTL_LONG_MS : TTL_FAILED_MS);
     return times;
   }
 
