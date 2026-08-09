@@ -35,13 +35,42 @@ function handledChannels(): Set<string> {
   return new Set([...src.matchAll(/case\s+"([^"]+)"\s*:/g)].map((m) => m[1]!));
 }
 
-/** Channels the UI passes to invoke(), as a literal, with the file that does it. */
+/**
+ * The names that dispatch an IPC channel in this file.
+ *
+ * Scanning for `invoke("...")` alone missed roughly ninety call sites: four
+ * panels define a local `ipc()` that forwards to invoke, and one aliases the
+ * import. Between them they cover the whole wireless, integrations and settings
+ * surface — exactly where the failure this test exists for lives. A guard blind
+ * to the code it guards is worse than none, because it reads as covered.
+ *
+ * Resolved per file rather than by matching any callee: `onNotification` takes a
+ * channel-shaped string too, but those are SSE event names with no case in
+ * api.ts and never should have one.
+ */
+function dispatcherNames(src: string): string[] {
+  const names = new Set(["invoke"]);
+  for (const m of src.matchAll(/\bimport\s*\{[^}]*\binvoke\s+as\s+([\w$]+)/g)) names.add(m[1]!);
+  for (const m of src.matchAll(/\bconst\s+([\w$]+)\s*=\s*invoke\b/g)) names.add(m[1]!);
+  // A local forwarder: `function ipc<T>(channel, ...) { return invoke<T>(...) }`.
+  for (const m of src.matchAll(/\bfunction\s+([\w$]+)\s*(?:<[^>]*>)?\s*\([^)]*\)[^{]*\{[^}]*\binvoke\b/g)) {
+    names.add(m[1]!);
+  }
+  return [...names];
+}
+
+/** Every channel the UI dispatches, with the file that does it. */
 function invokedChannels(): Map<string, string[]> {
   const found = new Map<string, string[]>();
   for (const file of walk(RENDERER)) {
     if (path.resolve(file) === API_TS) continue;
     const src = fs.readFileSync(file, "utf8");
-    for (const m of src.matchAll(/\binvoke\s*(?:<[^>]*>)?\s*\(\s*"([^"]+)"/g)) {
+    const callee = dispatcherNames(src).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+    // The colon is required: every one of api.ts's 174 cases is namespaced
+    // `area:action`, and demanding it keeps an over-eager wrapper match from
+    // dragging in ordinary string arguments like useState<Target>("app").
+    const re = new RegExp(`\\b(?:${callee})\\s*(?:<[^>()]*>)?\\s*\\(\\s*"([\\w-]+:[\\w-]+)"`, "g");
+    for (const m of src.matchAll(re)) {
       const chan = m[1]!;
       const where = path.relative(RENDERER, file);
       const list = found.get(chan);
@@ -66,10 +95,23 @@ describe("IPC channel wiring", () => {
   });
 
   it("finds the channels at all, so a broken scan cannot pass silently", () => {
-    // If the regex stops matching (invoke is renamed, call sites are reshaped),
-    // the test above passes vacuously. Anchor it to a channel that must exist.
+    // If the scan stops matching (invoke renamed, call sites reshaped), the test
+    // above passes vacuously. The floor is set well above what the old
+    // invoke-only regex found, so narrowing back to it fails here rather than
+    // quietly reducing coverage — that narrowing is the bug this pair replaces.
     const invoked = invokedChannels();
-    assert.ok(invoked.size > 20, `only found ${invoked.size} invoked channels — scan looks broken`);
-    assert.ok(invoked.has("stage:getState"), "expected stage:getState among the invoked channels");
+    assert.ok(invoked.size >= 90, `only found ${invoked.size} dispatched channels — scan looks broken`);
+    assert.ok(invoked.has("stage:getState"), "expected stage:getState among them");
+  });
+
+  it("sees channels dispatched through a local ipc() wrapper", () => {
+    // The specific blind spot: four panels forward through a local `ipc()` and one
+    // aliases the import, covering the entire wireless, integrations and settings
+    // surface. Naming one here means a future scan cannot lose them silently.
+    const invoked = invokedChannels();
+    const viaWrapper = [...invoked].filter(([, files]) =>
+      files.some((f) => f.endsWith("wireless-connections-panel.tsx")),
+    );
+    assert.ok(viaWrapper.length > 0, "found no channels in wireless-connections-panel.tsx");
   });
 });
