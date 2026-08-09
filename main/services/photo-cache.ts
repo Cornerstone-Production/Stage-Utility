@@ -103,6 +103,38 @@ export async function prunePhotoCache(): Promise<void> {
   }
 }
 
+/**
+ * Read a response body, giving up once it exceeds `maxBytes`.
+ *
+ * Returns null rather than throwing when it is over — the caller treats that the
+ * same as any other unusable response. Cancels the stream so the transfer stops
+ * rather than running to completion in the background.
+ */
+export async function readCapped(response: Response, maxBytes: number): Promise<Buffer | null> {
+  if (!response.body) {
+    const buf = Buffer.from(await response.arrayBuffer());
+    return buf.byteLength > maxBytes ? null : buf;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, total);
+}
+
 async function fetchPhoto(photoUrl: string): Promise<Buffer | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -131,17 +163,22 @@ async function fetchPhoto(photoUrl: string): Promise<Buffer | null> {
       }
       // The 250 MB cache cap is only enforced by a once-daily prune, so without a
       // per-photo ceiling a stream of large responses can fill a Pi's card between
-      // runs. An avatar that trips this is not an avatar. Check the declared length
-      // BEFORE buffering: reading the body first would still put the whole thing in
-      // a Pi's heap, cap or no cap.
+      // runs. An avatar that trips this is not an avatar.
+      //
+      // The declared length is a fast path, not the guard. A chunked response has
+      // no content-length, Number(null) is 0, and the check passed — so the cap
+      // only ever applied to responses that declared a size, and everything else
+      // was fully materialised in a Pi's heap before the size was even looked at.
+      // The body is therefore read incrementally and abandoned the moment it goes
+      // over, which is what the guarantee needs to be.
       const declared = Number(response.headers.get("content-length"));
       if (Number.isFinite(declared) && declared > MAX_PHOTO_BYTES) {
         console.error(`[photo-cache] refused ${declared} declared bytes from ${photoUrl} (over cap)`);
         return null;
       }
-      const buf = Buffer.from(await response.arrayBuffer());
-      if (buf.byteLength > MAX_PHOTO_BYTES) {
-        console.error(`[photo-cache] refused ${buf.byteLength} bytes from ${photoUrl} (over cap)`);
+      const buf = await readCapped(response, MAX_PHOTO_BYTES);
+      if (!buf) {
+        console.error(`[photo-cache] refused an over-cap body from ${photoUrl}`);
         return null;
       }
       return buf;

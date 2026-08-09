@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { isAllowedPhotoUrl } from "./photo-cache.js";
+import { isAllowedPhotoUrl, readCapped } from "./photo-cache.js";
 
 describe("photo proxy host allowlist", () => {
   it("allows the avatars production actually serves", () => {
@@ -54,5 +54,54 @@ describe("photo proxy host allowlist", () => {
   it("is not fooled by userinfo pointing at another host", () => {
     // https://allowed@evil.test/ has hostname evil.test, not the allowed domain.
     assert.equal(isAllowedPhotoUrl("https://avatars.planningcenteronline.com@evil.test/x.jpg"), false);
+  });
+});
+
+describe("readCapped", () => {
+  // The cap used to be checked against content-length only. A chunked response
+  // has none, Number(null) is 0, and the guard passed — so the whole body was
+  // materialised in a Pi's heap before its size was ever looked at, which is the
+  // opposite of what the comment on that hunk claimed.
+  const streamOf = (chunks: Uint8Array[], headers: Record<string, string> = {}): Response =>
+    new Response(
+      new ReadableStream({
+        start(c) {
+          for (const ch of chunks) c.enqueue(ch);
+          c.close();
+        },
+      }),
+      { headers },
+    );
+
+  it("returns a body that fits", async () => {
+    const buf = await readCapped(streamOf([new Uint8Array(10), new Uint8Array(10)]), 100);
+    assert.equal(buf?.byteLength, 20);
+  });
+
+  it("refuses an over-cap body that declares no length", async () => {
+    // No content-length header at all — the case the old check could not see.
+    const res = streamOf([new Uint8Array(60), new Uint8Array(60)]);
+    assert.equal(res.headers.get("content-length"), null, "fixture must not declare a length");
+    assert.equal(await readCapped(res, 100), null);
+  });
+
+  it("stops reading rather than draining the whole body", async () => {
+    let produced = 0;
+    const res = new Response(
+      new ReadableStream({
+        pull(c) {
+          produced += 1;
+          if (produced > 50) return c.close();
+          c.enqueue(new Uint8Array(32));
+        },
+      }),
+    );
+    assert.equal(await readCapped(res, 64), null);
+    assert.ok(produced < 10, `kept pulling after the cap: ${produced} chunks`);
+  });
+
+  it("is exact at the boundary", async () => {
+    assert.equal((await readCapped(streamOf([new Uint8Array(100)]), 100))?.byteLength, 100);
+    assert.equal(await readCapped(streamOf([new Uint8Array(101)]), 100), null);
   });
 });
