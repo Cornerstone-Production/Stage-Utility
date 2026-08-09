@@ -28,6 +28,33 @@ import { initUpdateLog } from "./main/services/update-log.js";
 // on-disk log) so an update that just restarted us is still visible at /log.
 initUpdateLog();
 
+// ── Crash handling ────────────────────────────────────────────────────────────
+//
+// Registered HERE, above every top-level await below, and not at the foot of the
+// module where they started. Module evaluation suspends at each await, so
+// handlers declared after them do not exist yet while the whole startup sequence
+// runs — the one stretch where a failure is least diagnosable, because the box
+// dies before it serves and keeps dying on every supervisor restart. Node's own
+// printer writes past the log capture installed above, so /log showed nothing.
+//
+// The two are deliberately different trades:
+//
+//   unhandledRejection — keep serving. For an appliance driving live displays,
+//   exiting over a failed sample write costs every screen in the building to save
+//   one data point. Callers that must not swallow a failure handle it themselves.
+//
+//   uncaughtException — exit. A synchronous throw can leave a lock held or a
+//   socket unpaused, so resuming risks a process that is alive and quietly wrong,
+//   and it would stop the supervisor restarting something genuinely wedged. This
+//   exists only so the crash reaches /log first.
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] unhandled rejection (kept running):", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[server] uncaught exception — exiting so the supervisor restarts us:", err);
+  process.exit(1);
+});
+
 import { getUserDataPath } from "./main/services/app-paths.js";
 import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";
@@ -112,21 +139,4 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGTERM", () => { shutdown("SIGTERM").catch(console.error); });
 process.on("SIGINT",  () => { shutdown("SIGINT").catch(console.error); });
 
-// Node's default for an unhandled rejection is to terminate. For an appliance
-// driving live stage displays that trade is backwards: a failed sample write
-// costs one data point, exiting costs every screen in the building for the rest
-// of the service. Log it loudly — it belongs in /log where it can be found after
-// the fact — and keep serving. Callers that must not swallow a failure handle it
-// themselves; this is the floor, not permission to skip a .catch().
-process.on("unhandledRejection", (reason) => {
-  console.error("[server] unhandled rejection (kept running):", reason);
-});
-// A synchronous throw is NOT the same trade. It can leave a lock held or a socket
-// unpaused, so resuming risks a process that is alive and quietly wrong — and it
-// would stop the service manager restarting something genuinely wedged. So this
-// still exits; it exists only so the crash reaches /log, where it can be found
-// after the fact. Node's own printer writes past the log capture installed above.
-process.on("uncaughtException", (err) => {
-  console.error("[server] uncaught exception — exiting so the supervisor restarts us:", err);
-  process.exit(1);
-});
+// Crash handlers are registered at the top of this file, above the awaits.
