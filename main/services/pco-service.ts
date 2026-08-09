@@ -4,6 +4,7 @@
 import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 import { scheduleItems } from "./automation-item-schedule.js";
 import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
+import { pickServiceTime } from "./pick-service-time.js";
 import { scrub } from "./scrub.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
@@ -1065,14 +1066,27 @@ class PcoService {
     return times.filter((t) => t.timeType === "service");
   }
 
-  /** Choose the relevant "service" time: the soonest whose end is still in the
-   *  future, else the latest. (Same selection start + end always shared.) */
+  /**
+   * Choose the relevant "service" time: the soonest that has not finished, else
+   * the latest. (Same selection start + end always shared.)
+   *
+   * PCO only sets `ends_at` when a plan time was given a length, and plenty are
+   * entered without one. The old test treated a missing end as "still upcoming",
+   * which never went false — so on a Sunday with two end-less times the ascending
+   * sort returned the 9am one all day. serviceTimeId feeds the
+   * `${serviceTypeId}:${planId}:${serviceTimeId}` key in all three recorders, so
+   * the 11am was recorded into the 9am's record: one merged curve, a peak spanning
+   * both, and an attendance baseline never re-taken. That is precisely the
+   * separation this field exists to provide.
+   *
+   * With no end time there is no direct signal that a service is over, but there
+   * is an indirect one: a later service has begun. So an end-less time is finished
+   * once any later-starting time has started. Where ends_at IS set it is used as
+   * before, which stays more precise — the gap between one service ending and the
+   * next beginning belongs to the next.
+   */
   private pickServiceTime(services: ServiceTime[]): ServiceTime | null {
-    const now = Date.now();
-    const upcoming = services
-      .filter((t) => (t.endsAt ? Date.parse(t.endsAt) > now : true))
-      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
-    return upcoming ?? services.slice().sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt))[0] ?? null;
+    return pickServiceTime(services);
   }
 
   /** The current plan's service END time (ISO) — used by auto-mode rollover. */

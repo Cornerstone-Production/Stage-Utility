@@ -279,7 +279,10 @@ class SplRecorder {
     if (!this.current) return;
     const now = new Date().toISOString();
     for (const it of this.current.items) if (!it.endedAt) it.endedAt = now;
-    this.current.endedAt = now;
+    // Stamp once — see service-timeline-recorder.finalizeRecord. Re-finalizing on
+    // a key change would rewrite the outgoing service's end to the moment the next
+    // one began.
+    if (!this.current.endedAt) this.current.endedAt = now;
     // The record is closed: name what the raw layer captured, then release the
     // appenders. A later item going live reopens the record and the files resume.
     const ctx = { serviceKey: this.current.serviceKey, serviceDate: this.current.serviceDate };
