@@ -11,6 +11,38 @@ import { pruneCacheDir } from "./cache-prune.js";
 // Photos are small; keep ~90 days of them, capped at 250 MB.
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_BYTES = 250 * 1024 * 1024;
+/** A single photo is an avatar, not a payload. Refuse anything absurd. */
+const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
+
+/**
+ * Hosts this proxy will fetch from.
+ *
+ * `/photos?u=` is reachable unauthenticated from the LAN and hands the response
+ * body straight back, so without this it is an open proxy: `?u=http://192.168.1.1/`
+ * or `?u=http://127.0.0.1:9090/metrics` makes the appliance fetch an internal host
+ * the caller cannot reach itself, and reads the result. Every photo URL originates
+ * from a PCO Person record — production serves them all from
+ * avatars.planningcenteronline.com — so the legitimate surface is one domain.
+ *
+ * If PCO ever moves its avatars to another CDN the symptom is a default avatar
+ * plus a named line in /log, not a silent blank: see the rejection log below.
+ */
+const ALLOWED_HOSTS = ["planningcenteronline.com"];
+
+/** Is this a URL we are willing to fetch on a caller's behalf? */
+export function isAllowedPhotoUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  // https only: PCO serves avatars over TLS, and plain http would additionally
+  // permit a downgrade to an internal host that happens to answer on port 80.
+  if (u.protocol !== "https:") return false;
+  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  return ALLOWED_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+}
 
 let cacheDir: string | null = null;
 
@@ -32,6 +64,10 @@ function urlToFilename(url: string): string {
 }
 
 export async function getPhotoPath(photoUrl: string): Promise<string | null> {
+  if (!isAllowedPhotoUrl(photoUrl)) {
+    console.warn(`[photo-cache] refused to fetch a photo from outside PCO: ${photoUrl}`);
+    return null;
+  }
   try {
     const dir = await getCacheDir();
     const filename = urlToFilename(photoUrl);
@@ -76,7 +112,15 @@ async function fetchPhoto(photoUrl: string): Promise<Buffer | null> {
         if (response.status >= 400 && response.status < 500) return null; // don't retry client errors
         continue;
       }
-      return Buffer.from(await response.arrayBuffer());
+      const buf = Buffer.from(await response.arrayBuffer());
+      // The 250 MB cache cap is only enforced by a once-daily prune, so without a
+      // per-photo ceiling a stream of large responses can fill a Pi's card between
+      // runs. An avatar that trips this is not an avatar.
+      if (buf.byteLength > MAX_PHOTO_BYTES) {
+        console.error(`[photo-cache] refused ${buf.byteLength} bytes from ${photoUrl} (over cap)`);
+        return null;
+      }
+      return buf;
     } catch (err) {
       console.error(`[photo-cache] fetch attempt ${attempt + 1} failed for ${photoUrl}:`, err instanceof Error ? err.message : err);
     }

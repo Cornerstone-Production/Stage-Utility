@@ -25,7 +25,7 @@ import { attendanceStore } from "../attendance-store.js";
 import { baptismStore } from "../baptism-store.js";
 import { serviceTimelineStore } from "../service-timeline-store.js";
 import { splHistoryStore } from "../spl-history-store.js";
-import { archiveRoot, serviceDirName } from "./archive-paths.js";
+import { archiveRoot, isInside, serviceDirName } from "./archive-paths.js";
 import { encodeRow, parseRows } from "./csv.js";
 import {
   mergeAttendanceRecord,
@@ -397,10 +397,19 @@ export async function importArchive(
   // Merging unions rows by timestamp; replacing overwrites the file outright.
   for (const s of touched) {
     if (!s.dir) continue;
+    // `s.dir` is the uploaded manifest's claim about where its files go — it is
+    // attacker-controlled and never used as a path. The export side always writes
+    // serviceDirName(serviceKey, serviceDate), so recomputing it here is identical
+    // for any real bundle and immune to a crafted one; `..` in the manifest can no
+    // longer walk out of the archive root and drop a file anywhere the service user
+    // can write. It stays a plain string match against the zip's entry names.
     const prefix = `archive/${s.dir}/`;
+    const dirName = serviceDirName(s.serviceKey, s.serviceDate);
     for (const [name, bytes] of Object.entries(files)) {
       if (!name.startsWith(prefix)) continue;
-      const dest = path.join(archiveRoot(), s.dir, path.basename(name));
+      const dest = path.join(archiveRoot(), dirName, path.basename(name));
+      // Belt and braces: whatever the pieces above did, the result is under root.
+      if (!isInside(archiveRoot(), dest)) continue;
       await fs.mkdir(path.dirname(dest), { recursive: true });
       let out = new TextDecoder().decode(bytes);
       if (merge.has(s.serviceKey) && name.endsWith(".csv")) {

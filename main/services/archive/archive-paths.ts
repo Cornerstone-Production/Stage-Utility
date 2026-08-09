@@ -23,6 +23,21 @@ export function archiveRoot(): string {
   return path.join(getUserDataPath(), "archive");
 }
 
+/**
+ * Is `target` inside `root`?
+ *
+ * The last line of defence for anything built from a path component that came off
+ * the network — an uploaded bundle's manifest names its own directory, and a
+ * crafted one must not be able to walk out of the archive and write over an SSH
+ * key or an update script. Compares resolved paths, and requires a separator so
+ * `/data/archive-evil` does not pass as inside `/data/archive`.
+ */
+export function isInside(root: string, target: string): boolean {
+  const r = path.resolve(root);
+  const t = path.resolve(target);
+  return t === r || t.startsWith(r.endsWith(path.sep) ? r : r + path.sep);
+}
+
 /** `2026-07-26_st1-p123-t9` — sortable by date, unique by occurrence. */
 export function serviceDirName(serviceKey: string, serviceDate: string): string {
   return `${safe(serviceDate)}_${safe(serviceKey)}`;
