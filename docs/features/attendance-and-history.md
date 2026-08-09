@@ -54,6 +54,18 @@ A gap of more than three minutes in the samples renders as a break in the curve
 rather than a straight line, since missing samples mean the counter was
 unreachable, not that the room emptied.
 
+### Ramp and taper
+
+Recording covers more than the service proper. Sampling starts during the arrival
+ramp — the lead window before the service time, default 60 minutes — and continues
+through a taper after the last item, also 60 minutes by default, so the curve shows
+the room emptying. Both windows are set in Advanced.
+
+Only the service proper feeds peak, low and last; the ramp and taper would
+otherwise drag those figures toward an empty room. Where two services are close
+enough that one's taper overlaps the next one's ramp, the ramp wins — the room is
+filling for the next service, not emptying from the last.
+
 ## Sound levels
 
 Levels are energy-averaged (Leq), not arithmetically. Decibels are logarithmic, so

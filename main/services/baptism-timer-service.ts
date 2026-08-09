@@ -127,7 +127,9 @@ class BaptismTimerService {
     if (!this.persistTimer) {
       this.persistTimer = setTimeout(() => {
         this.persistTimer = null;
-        void baptismStore.saveCurrent(this.state);
+        void baptismStore
+          .saveCurrent(this.state)
+          .catch((err) => console.error("[baptism-timer] persist failed:", err));
       }, 800);
     }
     return this.state;
@@ -241,7 +243,7 @@ class BaptismTimerService {
         serviceTypeId: this.state.serviceTypeId,
         planId: this.state.planId,
         serviceKey: this.state.serviceKey ?? null,
-      });
+      }).catch((err) => console.error("[baptism-timer] session save failed:", err));
     }
     return this.commit();
   }

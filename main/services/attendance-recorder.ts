@@ -14,7 +14,8 @@ import { sampleArchive } from "./archive/sample-archive.js";
 import { attendanceStore } from "./attendance-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { sensourceService } from "./sensource-service.js";
-import { isServiceNearNow, serviceDateKey, shouldRecordLive } from "./live-service-gate.js";
+import { classifyPhase, type Phase } from "./attendance-phase.js";
+import { serviceDateKey } from "./live-service-gate.js";
 import { stageController } from "./stage-controller.js";
 
 const PERSIST_DEBOUNCE_MS = 4000;
@@ -22,7 +23,6 @@ const PERSIST_DEBOUNCE_MS = 4000;
 const SAMPLE_INTERVAL_MS = 30_000;
 /** Max cadence for pushing the (O(n)) live record to trend viewers between samples. */
 const LIVE_BROADCAST_MS = 5_000;
-type Phase = "pre" | "service" | "post";
 /** A gap between live-item ticks shorter than this = still the SAME service, so a
  *  serviceTimeId change (a service running past its planned end rolls pickServiceTime
  *  to the next occurrence) must NOT split the recording. A longer gap = a genuinely
@@ -48,38 +48,15 @@ class AttendanceRecorder {
     return this.current;
   }
 
-  /** Classify what (if anything) to sample this tick:
-   *  - "service": a live plan item is running (the service proper) → feeds the stats.
-   *  - "pre": the arrival ramp — the preservice countdown (within the lead window) or a
-   *    pre-roll item positioned above the plan's SERVICE START header.
-   *  - "post": the emptying room — parked past SERVICE END, or within the cooldown
-   *    window after the service ended.
-   *  - null: nothing to record. */
+  /** What (if anything) to sample this tick — see attendance-phase.ts. */
   private classify(live: PcoLiveDTO): Phase | null {
-    // The latch: an already-open record plus a live item is ALWAYS "service".
-    // Nothing time-based may demote a running recording to the taper — that is
-    // exactly how a live service was silently reclassified as post-service at
-    // 19:00 local and lost the back half of its night.
-    const open = this.current != null && this.current.endedAt == null;
-    if (shouldRecordLive(live, open)) {
-      if (live.serviceEnded) return "post"; // still parked on an item past SERVICE END
-      if (live.beforeServiceStart) return "pre"; // pre-roll item above SERVICE START
-      return "service";
-    }
-    if (live.mode === "preservice" && this.preMs > 0 && isServiceNearNow(live)) {
-      // Only once the countdown is within the arrival window (and not absurdly early).
-      const start = live.serviceTimeStartsAt ? Date.parse(live.serviceTimeStartsAt) : NaN;
-      if (Number.isFinite(start) && start - Date.now() <= this.preMs && Date.now() <= start + 5 * 60_000) {
-        return "pre";
-      }
-      return null;
-    }
-    // No live item (mode "none"): keep sampling the taper if a service ended recently.
-    if (this.postMs > 0 && this.current?.endedAt) {
-      const ended = Date.parse(this.current.endedAt);
-      if (Number.isFinite(ended) && Date.now() - ended <= this.postMs) return "post";
-    }
-    return null;
+    return classifyPhase(live, {
+      hasOpenRecord: this.current != null && this.current.endedAt == null,
+      endedAt: this.current?.endedAt ?? null,
+      heldServiceTimeId: this.current?.serviceTimeId ?? null,
+      preMs: this.preMs,
+      postMs: this.postMs,
+    });
   }
 
   /** Called by the live-poller after each pco:live broadcast. */
@@ -252,7 +229,12 @@ class AttendanceRecorder {
       this.persistTimer = null;
       if (this.dirty && this.current) {
         this.dirty = false;
-        void attendanceStore.upsert(this.current);
+        // Inside a timer, so nothing upstream can catch this. Losing a debounced
+        // write costs the samples since the last one; an unhandled rejection here
+        // would cost the server.
+        void attendanceStore
+          .upsert(this.current)
+          .catch((err) => console.error("[attendance-recorder] persist failed:", err));
       }
     }, PERSIST_DEBOUNCE_MS);
   }

@@ -15,6 +15,11 @@ import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { serviceWindow } from "./service-window.js";
 import { stageController } from "./stage-controller.js";
 
+/** Fire-and-forget a per-tick side effect, naming it if it fails. */
+function tick(who: string, p: Promise<unknown>): void {
+  void p.catch((err) => console.error(`[live-poller] ${who} tick failed:`, err));
+}
+
 const LIVE_INTERVAL_MS = 1000;
 // Preservice/idle: still poll often enough to notice a service going live quickly
 // (the countdown itself ticks client-side, so this is just change detection).
@@ -99,18 +104,22 @@ class LivePoller {
         this.lastSig = sig;
         this.lastBroadcastAt = now;
       }
+      // Each recorder is independent: one failing (a full disk, a read-only data
+      // dir) must cost that recorder's sample and nothing else. Without these the
+      // rejection is unhandled, and Node's default is to take the whole server —
+      // and every stage display with it — down mid-service.
       // Fold the current SPL reading into the live item's running max/avg.
-      void splRecorder.onLiveTick(live);
+      tick("spl-recorder", splRecorder.onLiveTick(live));
       // Sample the live attendance/occupancy into the service's trend.
-      void attendanceRecorder.onLiveTick(live);
+      tick("attendance-recorder", attendanceRecorder.onLiveTick(live));
       // Record the actual rundown timing (item starts/durations vs planned).
-      void serviceTimelineRecorder.onLiveTick(live);
+      tick("service-timeline-recorder", serviceTimelineRecorder.onLiveTick(live));
       // Start the baptism timer from the plan, when it has been told how.
-      void baptismTimerService.onLiveTick(live);
+      tick("baptism-timer", baptismTimerService.onLiveTick(live));
     }
 
     // Auto mode: roll to the next event once the current one ended (+1h grace).
-    void stageController.maybeAutoAdvance();
+    tick("auto-advance", stageController.maybeAutoAdvance());
 
     // Fast cadence while a live item is running (so item switches reflect quickly);
     // a calmer cadence for the preservice countdown (it ticks client-side anyway).

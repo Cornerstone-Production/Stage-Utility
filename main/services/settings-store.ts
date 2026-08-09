@@ -52,7 +52,14 @@ export interface SettingsData {
   defaultAvatarOriginal: string | null;
   defaultAvatarCrop: { scale: number; x: number; y: number } | null;
   /** Show NDI-related controls (source field, NDI video object). Off by default —
-   *  NDI is only used by the native Apple client. */
+   *  NDI is only used by the native Apple client.
+   *
+   *  Deliberately dormant on this branch, not dead: the NDI UI was removed from
+   *  `main` while the schema stayed, so nothing in renderer/ reads this and the
+   *  only writer is stageController.setNdiEnabled. It reads like an oversight and
+   *  is not one — deleting it costs the migration path back when the Apple client
+   *  lands. Same for a View's `ndiSource`, which layout-renderer and layout-editor
+   *  still read. */
   ndiEnabled: boolean;
   /** Public base URL (e.g. a DNS name behind a reverse proxy) used for the connect
    *  QR code and display links instead of the LAN IP. Null = use the LAN IP. */

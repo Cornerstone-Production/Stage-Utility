@@ -176,7 +176,12 @@ class ServiceTimelineRecorder {
         it.actualDurationSec = Number.isFinite(startMs) ? Math.max(0, Math.round((endMs - startMs) / 1000)) : null;
       }
     }
-    this.current.endedAt = iso;
+    // Stamp the service-end boundary only once. finalizeRecord runs again on a
+    // key change, so re-stamping pushes a closed record's end forward: on a
+    // two-service Sunday the 9am's end became the moment the 11am started, and it
+    // read as a 2-hour service in History and in every export. attendance-recorder
+    // has carried this guard for a while; the lesson never reached here.
+    if (!this.current.endedAt) this.current.endedAt = iso;
   }
 
   private schedulePersist(): void {
@@ -186,7 +191,10 @@ class ServiceTimelineRecorder {
       this.persistTimer = null;
       if (this.dirty && this.current) {
         this.dirty = false;
-        void serviceTimelineStore.upsert(this.current);
+        // Inside a timer — see attendance-recorder.schedulePersist.
+        void serviceTimelineStore
+          .upsert(this.current)
+          .catch((err) => console.error("[service-timeline-recorder] persist failed:", err));
       }
     }, PERSIST_DEBOUNCE_MS);
   }

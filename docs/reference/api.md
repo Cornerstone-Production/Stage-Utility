@@ -102,4 +102,4 @@ screens.
 | POST | `/api/branding` | Update app name + logos |
 | GET | `/api/events` | Multiplexed Server-Sent Events stream with per-connection channel filtering. Channels: `stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `spl:metrics`, `spl:history`, `people:count`, `attendance:history`, `service-timeline:history`, `obs:status`, `osc:feedback`, `baptism`, `integrations:state-changed`, `wireless:connections-changed` |
 | POST | `/api/events/subscribe` | Set the channels a connection wants (channel filtering) |
-| GET | `/photos?u=…` | Cached Planning Center photo proxy |
+| GET | `/photos?u=…` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy |

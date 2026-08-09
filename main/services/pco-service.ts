@@ -4,6 +4,7 @@
 import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 import { scheduleItems } from "./automation-item-schedule.js";
 import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
+import { pickServiceTime } from "./pick-service-time.js";
 import { scrub } from "./scrub.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
@@ -18,6 +19,14 @@ const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 const CACHE_TTL_MS = 30_000; // default / fallback
 const TTL_LONG_MS = 15 * 60_000;
 const TTL_MEDIUM_MS = 3 * 60_000;
+// A request that FAILED is cached for this long, and no longer. Not caching a
+// failure at all was the other half of the mistake: getLive() calls getPlanTimes
+// on every live tick (~1/s during a service), and its only rate limiter is this
+// cache, so a PCO incident turned into ~1 req/s of retries per failing endpoint
+// and the app rate-limited itself out of PCO's quota. Long enough to throttle a
+// retry storm, short enough that a blip does not blank the countdown for the
+// fifteen minutes a success is held for.
+const TTL_FAILED_MS = 30_000;
 /** Short-lived cache for attachment `open` signed URLs (PCO issues ~1h links). */
 const ATTACH_OPEN_TTL_MS = 10 * 60_000;
 /** Retry budget for transient PCO failures (429 / 5xx / network). */
@@ -565,7 +574,10 @@ class PcoService {
       .sort((a, b) => a.sequence - b.sequence)
       .map((c) => c.name);
 
-    this.cacheSet(cacheKey, result, TTL_LONG_MS);
+    // Only cache a real answer. The request above yields null on failure and the
+    // parse below turns that into an empty list; caching it would store a FAILURE
+    // as data, with a success's TTL.
+    this.cacheSet(cacheKey, result, json ? TTL_LONG_MS : TTL_FAILED_MS);
     return result;
   }
 
@@ -665,7 +677,7 @@ class PcoService {
       .map((t) => t.attributes.starts_at as string)
       .sort((a, b) => Date.parse(a) - Date.parse(b));
 
-    this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    this.cacheSet(cacheKey, times, json ? TTL_LONG_MS : TTL_FAILED_MS);
     return times;
   }
 
@@ -692,7 +704,7 @@ class PcoService {
         endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
       }));
 
-    this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    this.cacheSet(cacheKey, times, json ? TTL_LONG_MS : TTL_FAILED_MS);
     return times;
   }
 
@@ -1050,7 +1062,7 @@ class PcoService {
       }))
       .filter((t): t is PlanTime => !!t.startsAt);
 
-    this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    this.cacheSet(cacheKey, times, json ? TTL_LONG_MS : TTL_FAILED_MS);
     return times;
   }
 
@@ -1065,14 +1077,27 @@ class PcoService {
     return times.filter((t) => t.timeType === "service");
   }
 
-  /** Choose the relevant "service" time: the soonest whose end is still in the
-   *  future, else the latest. (Same selection start + end always shared.) */
+  /**
+   * Choose the relevant "service" time: the soonest that has not finished, else
+   * the latest. (Same selection start + end always shared.)
+   *
+   * PCO only sets `ends_at` when a plan time was given a length, and plenty are
+   * entered without one. The old test treated a missing end as "still upcoming",
+   * which never went false — so on a Sunday with two end-less times the ascending
+   * sort returned the 9am one all day. serviceTimeId feeds the
+   * `${serviceTypeId}:${planId}:${serviceTimeId}` key in all three recorders, so
+   * the 11am was recorded into the 9am's record: one merged curve, a peak spanning
+   * both, and an attendance baseline never re-taken. That is precisely the
+   * separation this field exists to provide.
+   *
+   * With no end time there is no direct signal that a service is over, but there
+   * is an indirect one: a later service has begun. So an end-less time is finished
+   * once any later-starting time has started. Where ends_at IS set it is used as
+   * before, which stays more precise — the gap between one service ending and the
+   * next beginning belongs to the next.
+   */
   private pickServiceTime(services: ServiceTime[]): ServiceTime | null {
-    const now = Date.now();
-    const upcoming = services
-      .filter((t) => (t.endsAt ? Date.parse(t.endsAt) > now : true))
-      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
-    return upcoming ?? services.slice().sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt))[0] ?? null;
+    return pickServiceTime(services);
   }
 
   /** The current plan's service END time (ISO) — used by auto-mode rollover. */

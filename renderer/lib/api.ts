@@ -115,9 +115,6 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     // Adds a role for any category this service type defines that no role covers.
     // Only ever adds — never merges, never removes.
-    case "scriptview:seedRoles":
-      return post<T>("/api/scriptview/roles/seed", { serviceTypeId: p.serviceTypeId });
-
     case "scriptview:noteCategories": {
       const id = p.serviceTypeId as string;
       return apiFetch<T>(`/api/scriptview/note-categories?serviceTypeId=${encodeURIComponent(id)}`);
@@ -150,9 +147,6 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "stage:setPlanMode":
       return post<T>("/api/plan/mode", p);
-
-    case "stage:setSlots":
-      return post<T>("/api/slots", p);
 
     case "stage:refresh":
       return post<T>("/api/refresh");
@@ -263,6 +257,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       const id = p.id as string;
       return del<T>(`/api/baptism/sessions/${encodeURIComponent(id)}`);
     }
+    case "baptism:getTriggers":
+      return apiFetch<T>(`/api/baptism/triggers?planId=${encodeURIComponent(String(p.planId ?? ""))}`);
+    case "baptism:setTriggers":
+      return post<T>("/api/baptism/triggers", {
+        planId: p.planId,
+        testimonyItemId: p.testimonyItemId,
+        baptismItemId: p.baptismItemId,
+      });
 
     case "spl:getVisibleMetrics":
       return apiFetch<T>("/api/spl/visible-metrics");
@@ -419,10 +421,6 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { kind: p.kind });
     }
 
-    case "views:setNdiSource": {
-      const id = p.id as string;
-      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { ndiSource: p.ndiSource });
-    }
 
     case "views:setLayout": {
       const id = p.id as string;
@@ -657,7 +655,6 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "rosstalk:test": return post(`/api/rosstalk/targets/${(params as { id: string }).id}/test`);
     case "rosstalk:commands": return apiFetch("/api/rosstalk/commands");
     case "rosstalk:send": return post("/api/rosstalk/send", params);
-    case "rosstalk:simulate": return apiFetch("/api/rosstalk/simulate");
     case "rosstalk:setSimulate": return post("/api/rosstalk/simulate", params);
     case "osc:send":
       return post<T>("/api/osc/send", p);
