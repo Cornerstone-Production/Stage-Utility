@@ -22,6 +22,12 @@ and carries its own host / port / channel-count config:
 State broadcasts on the `wireless:connections-changed` SSE channel (connection
 list + runtime status). Charger bays flow through the shared stage state.
 
+Where a driver needs a password — Spectera's base-station API password — it is
+kept in the encrypted `secrets.bin`, not in `wireless-connections.json`, so it is
+excluded from config snapshots like every other credential. The API and the SSE
+channel report it as `••••` when set and `""` when not; saving the mask back
+leaves it unchanged, and saving an empty value clears it.
+
 ## Setup
 
 **On the gear:** give each receiver / charger a static IP and enable its network
