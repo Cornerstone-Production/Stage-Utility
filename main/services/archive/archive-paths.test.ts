@@ -45,6 +45,17 @@ describe("serviceDirName", () => {
     assert.equal(serviceDirName("st1:p123:t9", "2026-08-09"), "2026-08-09_st1-p123-t9");
   });
 
+  it("survives a manifest field that is not a string", () => {
+    // The manifest is never shape-checked, and a TypeError here would abort an
+    // import that has already written records.
+    const bad = [123, null, undefined, {}, []] as unknown as string[];
+    for (const v of bad) {
+      const dir = serviceDirName(v, "2026-08-09");
+      assert.equal(typeof dir, "string");
+      assert.ok(!dir.includes("/") && !dir.includes(".."), `unsafe: ${dir}`);
+    }
+  });
+
   it("recomputing from a manifest's own fields lands under the root", () => {
     // The import path derives the destination this way instead of trusting
     // manifest.dir, so a crafted dir cannot escape however it is spelled.

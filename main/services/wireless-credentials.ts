@@ -38,12 +38,36 @@ export function credentialKeys(providerId: string): string[] {
   return schema.filter((f) => f.type === "password").map((f) => f.key);
 }
 
+/**
+ * Every key that is a credential for ANY registered provider.
+ *
+ * Stripping keys off the CURRENT provider's schema is not enough. Changing a
+ * connection's provider assigns the new id before the config is rebuilt, and only
+ * Spectera declares a password — so switching a configured Spectera to any other
+ * provider made credentialKeys() return [] while the real password was still
+ * sitting in conn.config. Every guard became a no-op at once: the plaintext went
+ * into wireless-connections.json (and therefore into config snapshots) and came
+ * back unmasked from GET /api/wireless/connections. One click in the panel.
+ *
+ * So anything that removes or masks a credential works from the union. Only the
+ * merge semantics, which reason about the incoming patch, stay provider-specific.
+ */
+export function allCredentialKeys(): string[] {
+  const keys = new Set<string>();
+  for (const d of providerRegistry.getDescriptors()) {
+    for (const f of d.configSchema) if (f.type === "password") keys.add(f.key);
+  }
+  return [...keys];
+}
+
 /** Split a full config into the part safe to persist and the part that is not. */
-export function splitConfig(
-  providerId: string,
-  config: Record<string, unknown>,
-): { safe: Record<string, unknown>; secret: Record<string, string> } {
-  const keys = credentialKeys(providerId);
+export function splitConfig(config: Record<string, unknown>): {
+  safe: Record<string, unknown>;
+  secret: Record<string, string>;
+} {
+  // Deliberately takes no providerId: it splits on the union, so it cannot be
+  // weakened by being handed the wrong provider. See allCredentialKeys.
+  const keys = allCredentialKeys();
   const safe: Record<string, unknown> = { ...config };
   const secret: Record<string, string> = {};
   for (const key of keys) {
@@ -66,7 +90,10 @@ export function publicConfig(
   providerId: string,
   config: Record<string, unknown>,
 ): Record<string, unknown> {
-  const { safe } = splitConfig(providerId, config);
+  // Strip on the union so nothing can slip through, then re-add placeholders only
+  // for THIS provider's fields — a phantom `password` on a provider that has none
+  // would show up as an empty field the panel never asked for.
+  const { safe } = splitConfig(config);
   for (const key of credentialKeys(providerId)) {
     const value = config[key];
     safe[key] = typeof value === "string" && value !== "" ? MASK : "";

@@ -12,7 +12,10 @@ import { getUserDataPath } from "../app-paths.js";
 /** Reduce to a filename-safe token. Collapses runs and trims leading/trailing
  *  separators so `..` cannot survive, and never returns an empty segment. */
 function safe(part: string): string {
-  const s = part
+  // Coerced, not assumed: these fields also arrive from an uploaded manifest,
+  // which is never shape-checked. A number or null there used to throw a
+  // TypeError out of the middle of an import that had already written records.
+  const s = String(part ?? "")
     .replace(/[^A-Za-z0-9._-]+/g, "-")
     .replace(/\.{2,}/g, ".")
     .replace(/^[-.]+|[-.]+$/g, "");

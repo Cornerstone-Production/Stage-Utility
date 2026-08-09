@@ -121,6 +121,12 @@ process.on("SIGINT",  () => { shutdown("SIGINT").catch(console.error); });
 process.on("unhandledRejection", (reason) => {
   console.error("[server] unhandled rejection (kept running):", reason);
 });
+// A synchronous throw is NOT the same trade. It can leave a lock held or a socket
+// unpaused, so resuming risks a process that is alive and quietly wrong — and it
+// would stop the service manager restarting something genuinely wedged. So this
+// still exits; it exists only so the crash reaches /log, where it can be found
+// after the fact. Node's own printer writes past the log capture installed above.
 process.on("uncaughtException", (err) => {
-  console.error("[server] uncaught exception (kept running):", err);
+  console.error("[server] uncaught exception — exiting so the supervisor restarts us:", err);
+  process.exit(1);
 });

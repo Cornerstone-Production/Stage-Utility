@@ -18,8 +18,10 @@ process.env.HOME = path.join(TMP, "home");
 const { secretsStore } = await import("./secrets.js");
 const BIN = path.join(TMP, "secrets.bin");
 
-const corruptFiles = async (): Promise<string[]> =>
-  (await fs.readdir(TMP)).filter((f) => f.startsWith("secrets.bin.corrupt-"));
+const keptFiles = async (): Promise<string[]> =>
+  (await fs.readdir(TMP)).filter((f) => f.startsWith("secrets.bin.unreadable-"));
+
+const UNREADABLE = "not a valid GCM payload";
 
 describe("secrets store", () => {
   before(async () => {
@@ -40,36 +42,47 @@ describe("secrets store", () => {
     assert.equal((await fs.readdir(TMP)).filter((f) => f.endsWith(".tmp")).length, 0);
   });
 
-  describe("when the file will not decrypt", () => {
+  describe("when the file cannot be read", () => {
     before(async () => {
-      // Simulate the wrong key / a truncated write, and drop the memoised cache
-      // so the next read actually goes to disk.
-      await fs.writeFile(BIN, Buffer.from("not a valid GCM payload"));
-      (secretsStore as unknown as { cache: unknown }).cache = null;
-    });
-
-    it("preserves the original bytes instead of destroying them", async () => {
-      await secretsStore.getSecrets("planning-center");
-      const backups = await corruptFiles();
-      assert.equal(backups.length, 1, "expected exactly one quarantined copy");
-      assert.equal(
-        await fs.readFile(path.join(TMP, backups[0]!), "utf8"),
-        "not a valid GCM payload",
-        "the quarantined copy must be the original bytes, byte for byte",
-      );
+      // Stands in for both causes that look identical here: damaged ciphertext,
+      // and a wrong or unavailable key. Drop the memoised cache so the next read
+      // actually goes to disk.
+      await fs.writeFile(BIN, Buffer.from(UNREADABLE));
+      (secretsStore as unknown as { cache: unknown; unreadable: boolean }).cache = null;
     });
 
     it("reports empty rather than throwing, so the app still starts", async () => {
       assert.deepEqual(await secretsStore.getSecrets("planning-center"), {});
     });
 
-    it("a later save cannot clobber the quarantined copy", async () => {
-      // This is the data loss: re-entering one credential used to overwrite the
-      // file that held the others. The backup is what makes it recoverable.
+    it("leaves the file completely untouched on a read", async () => {
+      // The important case: the KEY may be what is wrong, and the file perfectly
+      // good. Moving it aside here would turn "fix the key and restart" into
+      // permanent loss.
+      await secretsStore.getSecrets("propresenter");
+      assert.equal(await fs.readFile(BIN, "utf8"), UNREADABLE, "the file must not be modified");
+      assert.deepEqual(await keptFiles(), [], "nothing should be set aside on a read");
+    });
+
+    it("preserves the old bytes at the moment a save would destroy them", async () => {
+      // Re-entering one credential used to overwrite the file holding the others.
       await secretsStore.setSecrets("planning-center", { appId: "new", secret: "new" });
-      const backups = await corruptFiles();
-      assert.equal(backups.length, 1);
-      assert.equal(await fs.readFile(path.join(TMP, backups[0]!), "utf8"), "not a valid GCM payload");
+      const kept = await keptFiles();
+      assert.equal(kept.length, 1, "expected the old file to be set aside exactly once");
+      assert.equal(
+        await fs.readFile(path.join(TMP, kept[0]!), "utf8"),
+        UNREADABLE,
+        "the preserved copy must be the original bytes, byte for byte",
+      );
+    });
+
+    it("writes the new secrets normally once the old file is preserved", async () => {
+      assert.deepEqual(await secretsStore.getSecrets("planning-center"), { appId: "new", secret: "new" });
+    });
+
+    it("does not set the file aside again on the next save", async () => {
+      await secretsStore.setSecrets("obs", { password: "p" });
+      assert.equal((await keptFiles()).length, 1, "one preserved copy, not one per save");
     });
   });
 });

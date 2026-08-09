@@ -164,8 +164,8 @@ class WirelessManager {
       // reporting it as set and the driver kept authenticating with it.
       conn.config = withSecrets(
         {
-          ...splitConfig(conn.providerId, conn.config).safe,
-          ...splitConfig(conn.providerId, patch.config).safe,
+          ...splitConfig(conn.config).safe,
+          ...splitConfig(patch.config).safe,
         },
         merged,
       );
@@ -184,6 +184,10 @@ class WirelessManager {
 
     console.log(`[wireless] removeConnection — ${params.id}`);
     this.connections.splice(idx, 1);
+    // persist() only walks surviving connections, so without this the encrypted
+    // credential outlives the connection the operator just deleted — a password
+    // they believe is gone, accumulating in secrets.bin.
+    await secretsStore.clearSecrets(WirelessManager.secretId(params.id));
     await this.persist();
     // applyConnections reconciles — the removed entry will be disconnected.
     await deviceManager.applyConnections(this.connections);
@@ -241,7 +245,7 @@ class WirelessManager {
       // Merging is the patch boundary's job (updateConnection), where "absent"
       // correctly means "unchanged". Here absent means the operator cleared it,
       // and merging resurrected the old password from the store on every save.
-      const { safe, secret } = splitConfig(providerId, config);
+      const { safe, secret } = splitConfig(config);
       await secretsStore.setSecrets(WirelessManager.secretId(id), secret);
       rows.push({ id, name, providerId, enabled, config: safe });
     }

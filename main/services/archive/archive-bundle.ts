@@ -407,23 +407,43 @@ export async function importArchive(
     const dirName = serviceDirName(s.serviceKey, s.serviceDate);
     for (const [name, bytes] of Object.entries(files)) {
       if (!name.startsWith(prefix)) continue;
-      const dest = path.join(archiveRoot(), dirName, path.basename(name));
-      // Belt and braces: whatever the pieces above did, the result is under root.
-      if (!isInside(archiveRoot(), dest)) continue;
-      await fs.mkdir(path.dirname(dest), { recursive: true });
-      let out = new TextDecoder().decode(bytes);
-      if (merge.has(s.serviceKey) && name.endsWith(".csv")) {
-        let existing = "";
-        try {
-          existing = await fs.readFile(dest, "utf8");
-        } catch {
-          /* nothing here yet — take theirs whole */
-        }
-        // A null merge means the column sets disagree, so the rows cannot be
-        // interleaved. Keep what is here rather than produce a ragged file.
-        if (existing) out = mergeCsv(existing, out, parseRows, encodeRow) ?? existing;
+      // basename() alone is not a safe filename. An entry ending in `/..` yields
+      // "..", whose join is the archive ROOT — which isInside accepts, and writing
+      // to it throws EISDIR partway through an import that has already upserted
+      // records, breaking this function's own "validate everything, then write"
+      // contract. An entry ending in `/.` yields ".", which writes a FILE where the
+      // service's directory belongs, so every later recording for that key fails
+      // at mkdir with ENOTDIR. A NUL byte throws outright. None of these need to
+      // traverse anywhere to do damage.
+      const leaf = path.basename(name);
+      if (leaf === "" || leaf === "." || leaf === ".." || leaf.includes("\0")) {
+        console.warn(`[archive] skipped a bundle entry with an unusable name: ${JSON.stringify(name)}`);
+        continue;
       }
-      await fs.writeFile(dest, name.endsWith(".csv") ? out : bytes);
+      const dest = path.join(archiveRoot(), dirName, leaf);
+      // Belt and braces: whatever the pieces above did, the result is under root —
+      // and strictly under it, never the root itself.
+      if (!isInside(archiveRoot(), dest) || path.resolve(dest) === path.resolve(archiveRoot())) continue;
+      try {
+        await fs.mkdir(path.dirname(dest), { recursive: true });
+        let out = new TextDecoder().decode(bytes);
+        if (merge.has(s.serviceKey) && name.endsWith(".csv")) {
+          let existing = "";
+          try {
+            existing = await fs.readFile(dest, "utf8");
+          } catch {
+            /* nothing here yet — take theirs whole */
+          }
+          // A null merge means the column sets disagree, so the rows cannot be
+          // interleaved. Keep what is here rather than produce a ragged file.
+          if (existing) out = mergeCsv(existing, out, parseRows, encodeRow) ?? existing;
+        }
+        await fs.writeFile(dest, name.endsWith(".csv") ? out : bytes);
+      } catch (err) {
+        // One unwritable member must not abort an import whose records are already
+        // applied. The raw layer is a supplement to those records, not the source.
+        console.error(`[archive] could not write ${dest} from the bundle:`, err);
+      }
     }
   }
 

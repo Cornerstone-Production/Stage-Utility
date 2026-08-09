@@ -106,16 +106,40 @@ export async function prunePhotoCache(): Promise<void> {
 async function fetchPhoto(photoUrl: string): Promise<Buffer | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const response = await fetch(photoUrl, { signal: AbortSignal.timeout(8000) });
+      // redirect: "manual" is load-bearing, not a tidy-up. fetch follows redirects
+      // by default and only the FIRST url is checked against the allowlist, so a
+      // single redirect on any allowed host — including https to plain http —
+      // walks straight to an internal address and hands the body back to the
+      // caller. That is the exact attack the allowlist exists to stop, and it
+      // reduced the guarantee to "PCO has no open redirect anywhere on its
+      // domain", which this code cannot assert. Real avatars answer 200 with no
+      // Location, so refusing 3xx costs nothing.
+      const response = await fetch(photoUrl, {
+        signal: AbortSignal.timeout(8000),
+        redirect: "manual",
+      });
+      if (response.status >= 300 && response.status < 400) {
+        console.warn(
+          `[photo-cache] refused a redirect from ${photoUrl} to ${response.headers.get("location") ?? "?"}`,
+        );
+        return null;
+      }
       if (!response.ok) {
         console.error(`[photo-cache] Failed to fetch ${photoUrl}: ${response.status}`);
         if (response.status >= 400 && response.status < 500) return null; // don't retry client errors
         continue;
       }
-      const buf = Buffer.from(await response.arrayBuffer());
       // The 250 MB cache cap is only enforced by a once-daily prune, so without a
       // per-photo ceiling a stream of large responses can fill a Pi's card between
-      // runs. An avatar that trips this is not an avatar.
+      // runs. An avatar that trips this is not an avatar. Check the declared length
+      // BEFORE buffering: reading the body first would still put the whole thing in
+      // a Pi's heap, cap or no cap.
+      const declared = Number(response.headers.get("content-length"));
+      if (Number.isFinite(declared) && declared > MAX_PHOTO_BYTES) {
+        console.error(`[photo-cache] refused ${declared} declared bytes from ${photoUrl} (over cap)`);
+        return null;
+      }
+      const buf = Buffer.from(await response.arrayBuffer());
       if (buf.byteLength > MAX_PHOTO_BYTES) {
         console.error(`[photo-cache] refused ${buf.byteLength} bytes from ${photoUrl} (over cap)`);
         return null;

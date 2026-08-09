@@ -33,20 +33,38 @@ describe("credentialKeys", () => {
 
 describe("splitConfig", () => {
   it("keeps the password out of what gets persisted", () => {
-    const { safe, secret } = splitConfig(SPECTERA, full);
+    const { safe, secret } = splitConfig(full);
     assert.deepEqual(safe, { host: "192.168.1.130", port: 443 });
     assert.equal("password" in safe, false, "password must not survive into the config file");
     assert.deepEqual(secret, { password: "hunter2" });
   });
 
   it("never stores the mask as if it were a password", () => {
-    const { secret } = splitConfig(SPECTERA, { ...full, password: MASK });
+    const { secret } = splitConfig({ ...full, password: MASK });
     assert.deepEqual(secret, {});
   });
 
   it("leaves a provider without credentials untouched", () => {
     const cfg = { host: "10.0.0.9", port: 2202 };
-    assert.deepEqual(splitConfig("shure-ulxd", cfg).safe, cfg);
+    assert.deepEqual(splitConfig(cfg).safe, cfg);
+  });
+});
+
+describe("switching a connection's provider", () => {
+  // The one-click leak. The panel sends { providerId, config: {} }, and the
+  // manager assigns the new id BEFORE rebuilding the config. Spectera is the only
+  // provider declaring a password, so keying the guards off the new provider made
+  // every one of them a no-op while the real password was still in conn.config —
+  // straight into wireless-connections.json, the config snapshot, and the LAN API.
+  it("still strips a password when the config is read as another provider", () => {
+    assert.equal("password" in splitConfig(full).safe, false);
+    assert.deepEqual(splitConfig(full).secret, { password: "hunter2" });
+  });
+
+  it("does not echo the old password back for a provider with no password field", () => {
+    const out = publicConfig("shure-ulxd", full);
+    assert.equal(JSON.stringify(out).includes("hunter2"), false, "leaked through a provider switch");
+    assert.equal("password" in out, false, "and no phantom field the panel never asked for");
   });
 });
 
@@ -96,7 +114,7 @@ describe("mergeSecrets", () => {
     // as the base station's password — and the UI shows bullets either way, so
     // nothing would look wrong until the receiver stopped connecting.
     assert.deepEqual(mergeSecrets(SPECTERA, { password: "••••••••" }, stored), { password: "hunter2" });
-    assert.deepEqual(splitConfig(SPECTERA, { ...full, password: "••••••••" }).secret, {});
+    assert.deepEqual(splitConfig({ ...full, password: "••••••••" }).secret, {});
   });
 });
 
@@ -106,9 +124,9 @@ describe("rebuilding a connection's config from a patch", () => {
   // lacks the key does not delete it — so a cleared password stayed live in
   // memory, the API kept reporting it as set, and the driver kept using it.
   const rebuild = (existing: Record<string, unknown>, patch: Record<string, unknown>) => {
-    const merged = mergeSecrets(SPECTERA, patch, splitConfig(SPECTERA, existing).secret);
+    const merged = mergeSecrets(SPECTERA, patch, splitConfig(existing).secret);
     return withSecrets(
-      { ...splitConfig(SPECTERA, existing).safe, ...splitConfig(SPECTERA, patch).safe },
+      { ...splitConfig(existing).safe, ...splitConfig(patch).safe },
       merged,
     );
   };
@@ -140,7 +158,7 @@ describe("withSecrets", () => {
   });
 
   it("round-trips: split then rejoin is the original config", () => {
-    const { safe, secret } = splitConfig(SPECTERA, full);
+    const { safe, secret } = splitConfig(full);
     assert.deepEqual(withSecrets(safe, secret), full);
   });
 });
