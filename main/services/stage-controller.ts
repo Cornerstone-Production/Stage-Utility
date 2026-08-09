@@ -212,6 +212,9 @@ export class StageController {
   private deviceStatusDirty = false; // device status changed while no client watched
   // Cached team members for the active plan.
   private teamMembers: TeamMemberDTO[] = [];
+  /** `serviceTypeId:planId` the roster above belongs to, so a failed refresh can
+   *  tell "the same plan, momentarily unreachable" from "a different plan". */
+  private teamMembersKey: string | null = null;
 
   /** The plan's scheduled team, for the roster-driven automation action. A copy,
    *  so a caller cannot mutate the controller's own list. */
@@ -2219,6 +2222,7 @@ export class StageController {
   }
 
   private async fetchTeamMembers(serviceTypeId: string, planId: string): Promise<void> {
+    const key = `${serviceTypeId}:${planId}`;
     try {
       this.teamMembers = await pcoService.listTeamMembers(
         this.pcoAppId!,
@@ -2226,10 +2230,25 @@ export class StageController {
         serviceTypeId,
         planId,
       );
+      this.teamMembersKey = key;
       console.log(`[stage-controller] fetched ${this.teamMembers.length} team members`);
     } catch (err) {
+      // Offline is not "nobody is scheduled". This used to clear the roster, and
+      // the caller re-resolves every slot straight afterwards — so a 30-second
+      // network blip during the hourly refresh blanked every name and photo on
+      // every stage display at once, and left them blank until the next refresh
+      // an hour later. Keep the last-known roster when it belongs to this same
+      // plan; only a roster for some OTHER plan is worse than nothing.
+      if (this.teamMembersKey === key && this.teamMembers.length > 0) {
+        console.error(
+          `[stage-controller] fetchTeamMembers failed — keeping ${this.teamMembers.length} known member(s):`,
+          err,
+        );
+        return;
+      }
       console.error("[stage-controller] fetchTeamMembers error:", err);
       this.teamMembers = [];
+      this.teamMembersKey = null;
     }
   }
 

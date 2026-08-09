@@ -566,7 +566,10 @@ class PcoService {
       .sort((a, b) => a.sequence - b.sequence)
       .map((c) => c.name);
 
-    this.cacheSet(cacheKey, result, TTL_LONG_MS);
+    // Only cache a real answer. The request above yields null on failure and the
+    // parse below turns that into an empty list; caching it would store a FAILURE
+    // as data, with a success's TTL.
+    if (json) this.cacheSet(cacheKey, result, TTL_LONG_MS);
     return result;
   }
 
@@ -666,7 +669,7 @@ class PcoService {
       .map((t) => t.attributes.starts_at as string)
       .sort((a, b) => Date.parse(a) - Date.parse(b));
 
-    this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    if (json) this.cacheSet(cacheKey, times, TTL_LONG_MS);
     return times;
   }
 
@@ -693,7 +696,7 @@ class PcoService {
         endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
       }));
 
-    this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    if (json) this.cacheSet(cacheKey, times, TTL_LONG_MS);
     return times;
   }
 
@@ -1051,7 +1054,7 @@ class PcoService {
       }))
       .filter((t): t is PlanTime => !!t.startsAt);
 
-    this.cacheSet(cacheKey, times, TTL_LONG_MS);
+    if (json) this.cacheSet(cacheKey, times, TTL_LONG_MS);
     return times;
   }
 
