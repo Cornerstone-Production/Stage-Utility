@@ -263,6 +263,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       const id = p.id as string;
       return del<T>(`/api/baptism/sessions/${encodeURIComponent(id)}`);
     }
+    case "baptism:getTriggers":
+      return apiFetch<T>(`/api/baptism/triggers?planId=${encodeURIComponent(String(p.planId ?? ""))}`);
+    case "baptism:setTriggers":
+      return post<T>("/api/baptism/triggers", {
+        planId: p.planId,
+        testimonyItemId: p.testimonyItemId,
+        baptismItemId: p.baptismItemId,
+      });
 
     case "spl:getVisibleMetrics":
       return apiFetch<T>("/api/spl/visible-metrics");

@@ -63,7 +63,14 @@ export function BaptismTriggersPanel() {
         setBaptism(t?.baptismItemId ?? "");
         setLoaded(true);
       })
-      .catch(() => !cancelled && setLoaded(true));
+      // Render the panel either way, but say so — swallowing this is what let the
+      // triggers read as "none set" for months while the channel was unwired.
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("[baptism-triggers] load failed:", err);
+        toast.error("Couldn't load the saved triggers");
+        setLoaded(true);
+      });
     return () => {
       cancelled = true;
     };
