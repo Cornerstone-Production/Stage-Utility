@@ -53,6 +53,7 @@ class AttendanceRecorder {
     return classifyPhase(live, {
       hasOpenRecord: this.current != null && this.current.endedAt == null,
       endedAt: this.current?.endedAt ?? null,
+      heldServiceTimeId: this.current?.serviceTimeId ?? null,
       preMs: this.preMs,
       postMs: this.postMs,
     });

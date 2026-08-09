@@ -42,6 +42,15 @@ export interface PhaseContext {
   hasOpenRecord: boolean;
   /** `endedAt` of the record being held, if it has been closed. */
   endedAt: string | null;
+  /**
+   * `serviceTimeId` of the record being held.
+   *
+   * The taper describes a room emptying from the service that just ran, so it
+   * must never be applied to the record for the service we are ramping TOWARD.
+   * Without this the two are indistinguishable, and a late-starting service
+   * tapered its own arrival crowd — see the header.
+   */
+  heldServiceTimeId: string | null;
   /** Arrival-ramp lead window (ms). 0 disables the ramp. */
   preMs: number;
   /** Post-service taper window (ms). 0 disables the taper. */
@@ -70,8 +79,16 @@ export function classifyPhase(
     // Deliberately falls through to the taper rather than returning. See the header.
   }
 
-  // 3. The taper.
-  if (ctx.postMs > 0 && ctx.endedAt) {
+  // 3. The taper — the room emptying from the service that just ran.
+  //
+  // The held record must be a DIFFERENT occurrence from the one PCO is currently
+  // reporting. A service that starts late sits in "preservice" past the ramp
+  // grace; the fall-through above then reached here, the recorder closed the
+  // fresh record, and the taper immediately reopened it — so the room filling
+  // for that service was recorded as its own post-service taper, before it had
+  // begun. Comparing the occurrence is what separates "emptying from the last"
+  // from "filling for the next".
+  if (ctx.postMs > 0 && ctx.endedAt && ctx.heldServiceTimeId !== live.serviceTimeId) {
     const ended = Date.parse(ctx.endedAt);
     if (Number.isFinite(ended) && nowMs - ended <= ctx.postMs) return "post";
   }

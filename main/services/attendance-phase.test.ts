@@ -40,6 +40,9 @@ function item(over: Partial<PcoLiveDTO> = {}): PcoLiveDTO {
 const ctx = (over: Partial<PhaseContext> = {}): PhaseContext => ({
   hasOpenRecord: false,
   endedAt: null,
+  // Default: the held record is a PREVIOUS occurrence, which is what the taper
+  // is for. Cases about the current occurrence set this explicitly.
+  heldServiceTimeId: "st-previous",
   preMs: 60 * 60_000,
   postMs: 60 * 60_000,
   ...over,
@@ -107,6 +110,36 @@ describe("arrival ramp", () => {
       SERVICE_START + RAMP_GRACE_MS + 60_000,
     );
     assert.equal(phase, "post", "an unreachable ramp must fall through, not return null");
+  });
+});
+
+describe("a service that starts late", () => {
+  // The regression the fall-through introduced. PCO sits in "preservice" past the
+  // ramp grace because the service has not gone live yet; the recorder closes the
+  // fresh record, and the taper then reopened it — recording the room FILLING for
+  // that service as its own post-service taper, before it had begun.
+  // "st-1" is the occurrence the preservice() fixture reports, so holding it
+  // means the held record IS the service we are waiting on.
+  const HELD_IS_THIS_SERVICE = "st-1";
+
+  it("never tapers the occurrence PCO is currently reporting", () => {
+    const c = ctx({
+      endedAt: new Date(SERVICE_START + 5 * 60_000).toISOString(),
+      heldServiceTimeId: HELD_IS_THIS_SERVICE,
+    });
+    const phase = classifyPhase(preservice(), c, SERVICE_START + 12 * 60_000);
+    assert.notEqual(phase, "post", "the arrival crowd must not be recorded as taper");
+  });
+
+  it("still tapers a genuinely previous occurrence", () => {
+    // The case the taper exists for must keep working. Placed BEFORE the ramp
+    // window opens, since the ramp deliberately outranks the taper where the two
+    // overlap — covered separately above.
+    const c = ctx({
+      endedAt: new Date(SERVICE_START - 100 * 60_000).toISOString(),
+      heldServiceTimeId: "st-9",
+    });
+    assert.equal(classifyPhase(preservice(), c, SERVICE_START - 90 * 60_000), "post");
   });
 });
 
