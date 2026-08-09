@@ -42,6 +42,23 @@ describe("secrets store", () => {
     assert.equal((await fs.readdir(TMP)).filter((f) => f.endsWith(".tmp")).length, 0);
   });
 
+  it("survives concurrent saves without corrupting the blob", async () => {
+    // The bug: every caller wrote a fixed `${file}.tmp`. Two overlapping saves
+    // — wireless persisting per connection while integration config saves, both
+    // reachable from unauthenticated LAN POSTs — interleaved their bytes, and the
+    // winning rename promoted a blob whose GCM tag no longer verified. Every
+    // credential gone, and the loser's rename threw ENOENT at an HTTP handler.
+    const ids = Array.from({ length: 12 }, (_, i) => `svc-${i}`);
+    await Promise.all(ids.map((id) => secretsStore.setSecrets(id, { token: `t-${id}` })));
+
+    // Re-read from disk, not from the cache, or this proves nothing.
+    (secretsStore as unknown as { cache: unknown }).cache = null;
+    for (const id of ids) {
+      assert.deepEqual(await secretsStore.getSecrets(id), { token: `t-${id}` }, `${id} lost`);
+    }
+    assert.equal((await fs.readdir(TMP)).filter((f) => f.includes(".tmp")).length, 0, "temp file left behind");
+  });
+
   describe("when the file cannot be read", () => {
     before(async () => {
       // Stands in for both causes that look identical here: damaged ciphertext,
@@ -83,6 +100,41 @@ describe("secrets store", () => {
     it("does not set the file aside again on the next save", async () => {
       await secretsStore.setSecrets("obs", { password: "p" });
       assert.equal((await keptFiles()).length, 1, "one preserved copy, not one per save");
+    });
+  });
+
+  describe("when the file cannot be opened at all", () => {
+    // Distinct from "will not decrypt": here the read itself fails — EACCES after
+    // a restore changed ownership, EIO on a dying card, EPERM on a late mount.
+    // This used to rethrow. getSecrets is awaited unguarded inside
+    // integrationManager.init(), itself a top-level await in server.ts, so an
+    // unreadable file stopped the appliance booting at all and it kept dying on
+    // every supervisor restart — where beta came up degraded but fully serving.
+    // Root ignores mode bits, so skip rather than pass vacuously.
+    const asRoot = process.getuid?.() === 0;
+
+    it("resolves empty instead of rejecting, so boot survives", async (t) => {
+      if (asRoot) return t.skip("mode bits do not apply to root");
+      await secretsStore.setSecrets("planning-center", { appId: "keep-me" });
+      await fs.chmod(BIN, 0o000);
+      (secretsStore as unknown as { cache: unknown; unreadable: boolean }).cache = null;
+      try {
+        assert.deepEqual(
+          await secretsStore.getSecrets("planning-center"),
+          {},
+          "must degrade to empty, not reject",
+        );
+      } finally {
+        await fs.chmod(BIN, 0o600);
+      }
+    });
+
+    it("leaves the unreadable file untouched", async (t) => {
+      if (asRoot) return t.skip("mode bits do not apply to root");
+      // Fixing the permissions and restarting must recover in place.
+      (secretsStore as unknown as { cache: unknown; unreadable: boolean }).cache = null;
+      (secretsStore as unknown as { unreadable: boolean }).unreadable = false;
+      assert.deepEqual(await secretsStore.getSecrets("planning-center"), { appId: "keep-me" });
     });
   });
 });

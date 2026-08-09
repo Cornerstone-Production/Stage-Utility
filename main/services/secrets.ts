@@ -7,6 +7,7 @@ import * as path from "path";
 
 import { getEncryptionBackend } from "./encryption.js";
 import { getUserDataPath } from "./app-paths.js";
+import { WriteQueue, atomicWrite } from "./write-queue.js";
 
 type SecretsBlob = Record<string, Record<string, string>>;
 
@@ -17,6 +18,9 @@ class SecretsStore {
   private loading: Promise<SecretsBlob> | null = null;
   /** The file on disk exists but could not be read — do not overwrite it blind. */
   private unreadable = false;
+  /** Serialises saves. Integration config, wireless config and the boot-time
+   *  migration all write this file, several from unauthenticated LAN routes. */
+  private writes = new WriteQueue();
 
   private async getFilePath(): Promise<string> {
     if (!this.filePath) {
@@ -47,14 +51,29 @@ class SecretsStore {
     try {
       raw = await fs.readFile(filePath);
     } catch (err) {
-      // No file yet is the ordinary first run. Anything else — a permissions
-      // problem, an I/O error — is NOT evidence that there are no secrets, and
-      // must not be answered with an empty blob that the next save writes back.
+      // No file yet is the ordinary first run — nothing is at risk, so no flag.
       if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
         this.cache = {};
         return this.cache;
       }
-      throw err;
+      // Anything else — EACCES after a restore changed ownership, EIO on a dying
+      // card, EPERM on a data dir mounted late — means a file we could not read,
+      // NOT the absence of secrets. This used to rethrow, which was worse than the
+      // bug it guarded: getSecrets is awaited unguarded inside
+      // integrationManager.init(), itself a top-level await, so an unreadable file
+      // stopped the appliance booting at all and it kept dying on every supervisor
+      // restart. Degrade the way an undecryptable file does — empty, loudly, file
+      // untouched — and let the `unreadable` flag protect the bytes on the next
+      // save. That flag is what preserves the data; rejecting here never did.
+      this.unreadable = true;
+      console.error(
+        `[secrets] secrets.bin could not be read (${(err as NodeJS.ErrnoException)?.code ?? "error"}). ` +
+          "Starting with no secrets; the file has been left untouched. Fix the " +
+          "permissions or the mount and restart to recover in place.",
+        err,
+      );
+      this.cache = {};
+      return this.cache;
     }
 
     const backend = getEncryptionBackend();
@@ -89,33 +108,43 @@ class SecretsStore {
     }
   }
 
-  private async persist(): Promise<void> {
-    const backend = getEncryptionBackend();
-    const filePath = await this.getFilePath();
+  /**
+   * Encrypt and write the whole blob.
+   *
+   * Serialised: integration config, wireless config and the boot migration all
+   * write this one file, several of them from unauthenticated LAN routes. Two
+   * overlapping saves used to share a fixed `.tmp` path and could splice into a
+   * blob that no longer decrypted — every credential lost.
+   */
+  private persist(): Promise<void> {
+    return this.writes.enqueue(async () => {
+      const backend = getEncryptionBackend();
+      const filePath = await this.getFilePath();
 
-    // The load could not read the existing file, and we are about to write over
-    // it. THIS is the moment the old bytes are at risk, so preserve them now
-    // rather than on the read — an operator who fixes the key and restarts never
-    // reaches here, and gets their secrets back in place.
-    if (this.unreadable) {
-      const kept = `${filePath}.unreadable-${Date.now()}`;
-      try {
-        await fs.rename(filePath, kept);
-        console.error(`[secrets] kept the unreadable secrets.bin as ${kept} before writing a new one.`);
-      } catch {
-        /* best-effort: if it cannot be preserved, the write below still proceeds */
+      // The load could not read the existing file, and we are about to write over
+      // it. THIS is the moment the old bytes are at risk, so preserve them now
+      // rather than on the read — an operator who fixes the key and restarts never
+      // reaches here, and gets their secrets back in place.
+      if (this.unreadable) {
+        const kept = `${filePath}.unreadable-${Date.now()}`;
+        try {
+          await fs.rename(filePath, kept);
+          console.error(
+            `[secrets] kept the unreadable secrets.bin as ${kept} before writing a new one.`,
+          );
+        } catch {
+          /* best-effort: if it cannot be preserved, the write below still proceeds */
+        }
+        this.unreadable = false;
       }
-      this.unreadable = false;
-    }
 
-    const json = JSON.stringify(this.cache ?? {});
-    const body = (await backend.isAvailable()) ? await backend.encrypt(json) : Buffer.from(json, "utf-8");
-    // Atomic, for the same reason data-store is: a plain writeFile truncates in
-    // place, so an update or a power cut mid-write leaves a short file that fails
-    // its GCM auth tag on the next boot — every credential gone.
-    const tmp = `${filePath}.tmp`;
-    await fs.writeFile(tmp, body, { mode: 0o600 });
-    await fs.rename(tmp, filePath);
+      const json = JSON.stringify(this.cache ?? {});
+      const body = (await backend.isAvailable())
+        ? await backend.encrypt(json)
+        : Buffer.from(json, "utf-8");
+      // Atomic, and with a uniquely-named scratch file — see write-queue.ts.
+      await atomicWrite(filePath, body, { mode: 0o600 });
+    });
   }
 
   async getSecrets(integrationId: string): Promise<Record<string, string>> {

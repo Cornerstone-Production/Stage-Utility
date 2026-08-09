@@ -4,6 +4,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
+import { WriteQueue, atomicWrite } from "./write-queue.js";
 
 export class DataStore<T> {
   private cache: T | null = null;
@@ -12,7 +13,11 @@ export class DataStore<T> {
   // write isn't atomic) or clobber each other's read-modify-write. Critical
   // because `settings.json` is patched both by user actions and by background
   // tasks (the live poller advancing the plan), which would otherwise race.
-  private writeChain: Promise<unknown> = Promise.resolve();
+  //
+  // Shared with secrets.ts rather than duplicated: this store had the guard and
+  // that one did not, which is how two concurrent saves there could splice a
+  // secrets blob that no longer decrypted.
+  private writes = new WriteQueue();
 
   constructor(
     private readonly filename: string,
@@ -21,27 +26,15 @@ export class DataStore<T> {
 
   /** Run `fn` after all prior queued writes settle (success or failure). */
   private enqueue<R>(fn: () => Promise<R>): Promise<R> {
-    const result = this.writeChain.then(fn, fn);
-    // Keep the chain alive even if a write rejects.
-    this.writeChain = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+    return this.writes.enqueue(fn);
   }
 
   private async writeRaw(data: T): Promise<void> {
     this.cache = data;
-    const filePath = await this.getFilePath();
-    // Atomic write: serialize to a sibling temp file, then rename over the target.
-    // rename(2) is atomic on a single filesystem, so a reader never observes a
-    // partial file and an interrupted write (crash / shutdown / in-app update)
-    // leaves the previous file fully intact. A plain writeFile truncates in place
-    // first, which could corrupt the store mid-write and, on the next load, look
-    // like an empty file — silently destroying history.
-    const tmp = `${filePath}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf-8");
-    await fs.rename(tmp, filePath);
+    // Atomic: a plain writeFile truncates in place first, which could corrupt the
+    // store mid-write and, on the next load, look like an empty file — silently
+    // destroying history. See write-queue.ts for why the temp name is unique.
+    await atomicWrite(await this.getFilePath(), JSON.stringify(data, null, 2));
   }
 
   private async getFilePath(): Promise<string> {
