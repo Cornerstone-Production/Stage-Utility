@@ -10,6 +10,10 @@ interface BaptismFile {
   sessions: BaptismSession[];
 }
 
+/** How many sessions a LIVE append keeps. A restore is deliberately not bound
+ *  by this — see addSessions. */
+const LIVE_CAP = 100;
+
 class BaptismStore {
   private store = new DataStore<BaptismFile>("baptism.json", { current: null, sessions: [] });
 
@@ -28,9 +32,39 @@ class BaptismStore {
     await this.store.update((file) => ({ ...file, current: state }));
   }
 
-  /** Append a finished session (capped to the most recent 100). */
+  /** Append a finished session, keeping the most recent LIVE_CAP. */
   async addSession(session: BaptismSession): Promise<void> {
-    await this.store.update((file) => ({ ...file, sessions: [session, ...file.sessions].slice(0, 100) }));
+    await this.store.update((file) => ({ ...file, sessions: [session, ...file.sessions].slice(0, LIVE_CAP) }));
+  }
+
+  /**
+   * Merge in sessions from a restore, newest first, without a cap.
+   *
+   * An archive import used to call addSession once per session, and every call
+   * re-applied the cap — so importing 45 sessions into a box holding 80 pushed 25
+   * of the operator's OWN recordings past index 100 and deleted them, while the
+   * API cheerfully reported only what had been added. That directly contradicts
+   * importArchive's documented "merges and never overwrites".
+   *
+   * The cap exists to bound an append during a live service, where the list grows
+   * one session at a time and old ones stop mattering. A restore is the opposite
+   * situation: the operator is deliberately putting history back, and silently
+   * dropping the oldest of it is the one thing they would not forgive. Existing
+   * ids win, so a re-import is idempotent.
+   */
+  async addSessions(sessions: BaptismSession[]): Promise<number> {
+    if (sessions.length === 0) return 0;
+    let added = 0;
+    await this.store.update((file) => {
+      const have = new Set(file.sessions.map((s) => s.id));
+      const fresh = sessions.filter((s) => !have.has(s.id));
+      added = fresh.length;
+      const merged = [...fresh, ...file.sessions].sort((a, b) =>
+        (b.startedAt ?? "").localeCompare(a.startedAt ?? ""),
+      );
+      return { ...file, sessions: merged };
+    });
+    return added;
   }
 
   async deleteSession(id: string): Promise<boolean> {

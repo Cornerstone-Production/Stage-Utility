@@ -465,7 +465,12 @@ export async function importArchive(
 
   // Baptism sessions dedupe on id, not serviceKey: the id is a UUID and one service
   // can hold several sessions.
-  for (const s of freshSessions) await baptismStore.addSession(s as never);
+  //
+  // One call, not one per session. addSession re-applies its live cap on every
+  // call, so looping here silently deleted the operator's OWN oldest sessions —
+  // importing 45 into a box holding 80 destroyed 25 of them, while the result
+  // reported only what had been added.
+  const baptismSessionsAdded = await baptismStore.addSessions(freshSessions as never);
 
-  return { added, skipped, merged, replaced, baptismSessionsAdded: freshSessions.length, rawFilesFailed };
+  return { added, skipped, merged, replaced, baptismSessionsAdded, rawFilesFailed };
 }
