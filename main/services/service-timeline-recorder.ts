@@ -186,7 +186,10 @@ class ServiceTimelineRecorder {
       this.persistTimer = null;
       if (this.dirty && this.current) {
         this.dirty = false;
-        void serviceTimelineStore.upsert(this.current);
+        // Inside a timer — see attendance-recorder.schedulePersist.
+        void serviceTimelineStore
+          .upsert(this.current)
+          .catch((err) => console.error("[service-timeline-recorder] persist failed:", err));
       }
     }, PERSIST_DEBOUNCE_MS);
   }

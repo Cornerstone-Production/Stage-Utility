@@ -111,3 +111,16 @@ async function shutdown(signal: string): Promise<void> {
 
 process.on("SIGTERM", () => { shutdown("SIGTERM").catch(console.error); });
 process.on("SIGINT",  () => { shutdown("SIGINT").catch(console.error); });
+
+// Node's default for an unhandled rejection is to terminate. For an appliance
+// driving live stage displays that trade is backwards: a failed sample write
+// costs one data point, exiting costs every screen in the building for the rest
+// of the service. Log it loudly — it belongs in /log where it can be found after
+// the fact — and keep serving. Callers that must not swallow a failure handle it
+// themselves; this is the floor, not permission to skip a .catch().
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] unhandled rejection (kept running):", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[server] uncaught exception (kept running):", err);
+});

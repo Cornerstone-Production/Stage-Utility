@@ -228,7 +228,12 @@ class AttendanceRecorder {
       this.persistTimer = null;
       if (this.dirty && this.current) {
         this.dirty = false;
-        void attendanceStore.upsert(this.current);
+        // Inside a timer, so nothing upstream can catch this. Losing a debounced
+        // write costs the samples since the last one; an unhandled rejection here
+        // would cost the server.
+        void attendanceStore
+          .upsert(this.current)
+          .catch((err) => console.error("[attendance-recorder] persist failed:", err));
       }
     }, PERSIST_DEBOUNCE_MS);
   }
