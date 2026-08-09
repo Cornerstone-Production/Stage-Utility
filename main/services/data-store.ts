@@ -30,11 +30,16 @@ export class DataStore<T> {
   }
 
   private async writeRaw(data: T): Promise<void> {
-    this.cache = data;
     // Atomic: a plain writeFile truncates in place first, which could corrupt the
     // store mid-write and, on the next load, look like an empty file — silently
     // destroying history. See write-queue.ts for why the temp name is unique.
     await atomicWrite(await this.getFilePath(), JSON.stringify(data, null, 2));
+    // Cache only AFTER the write lands. Assigning first meant a failed write —
+    // ENOSPC on a full card, EROFS once a card drops to read-only — left the
+    // cache reporting a value that was never persisted: the settings UI, the API
+    // and every SSE snapshot showed the edit as saved, and after the next restart
+    // everything since the disk filled was gone with no error ever shown.
+    this.cache = data;
   }
 
   private async getFilePath(): Promise<string> {
