@@ -1,13 +1,13 @@
 // Single source of truth for all stage state.
 // Every mutating method ends with broadcast("stage:state-changed").
 
+import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub } from "./scrub.js";
 import { hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart,
-  TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -17,11 +17,9 @@ import { migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
-import { layoutGroupsStore } from "./layout-groups-store.js";
 import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
 import { scriptViewConfigStore } from "./scriptview-config-store.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
-import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { updater } from "./updater.js";
 import { validateSlug } from "./reserved-slugs.js";
 import { scriptViewRolesStore, seedRoles } from "./scriptview-roles-store.js";
@@ -63,82 +61,6 @@ function normalizeBaseUrl(url: string | null): string | null {
   if (!s) return null;
   if (!/^https?:\/\//i.test(s)) s = `http://${s}`;
   return s.replace(/\/+$/, "");
-}
-
-// Deep-clone an object and its whole subtree, minting a fresh id at every depth.
-// Nested children must be cloned too, or duplicated Views/templates would share
-// child object references and collide on child ids.
-function cloneLayoutObject(o: LayoutObject): LayoutObject {
-  return {
-    ...o,
-    id: randomUUID(),
-    style: o.style ? { ...o.style } : undefined,
-    config: { ...o.config },
-    children: o.children?.map(cloneLayoutObject),
-  };
-}
-
-function cloneLayout(l: LayoutDTO): LayoutDTO {
-  return {
-    version: 1,
-    canvas: { ...l.canvas },
-    objects: l.objects.map(cloneLayoutObject),
-  };
-}
-
-// Like cloneLayoutObject, but records each old→new id so callers can carry
-// per-object side data (e.g. inline mic-slots stored by object id) to the copy.
-function cloneLayoutObjectMapped(o: LayoutObject, idMap: Map<string, string>): LayoutObject {
-  const id = randomUUID();
-  idMap.set(o.id, id);
-  return {
-    ...o,
-    id,
-    style: o.style ? { ...o.style } : undefined,
-    config: { ...o.config },
-    children: o.children?.map((c) => cloneLayoutObjectMapped(c, idMap)),
-  };
-}
-
-function cloneLayoutWithMap(l: LayoutDTO): { layout: LayoutDTO; idMap: Map<string, string> } {
-  const idMap = new Map<string, string>();
-  const layout: LayoutDTO = { version: 1, canvas: { ...l.canvas }, objects: l.objects.map((o) => cloneLayoutObjectMapped(o, idMap)) };
-  return { layout, idMap };
-}
-
-// Visit every inline mic-slots object id across all custom views' layouts (a
-// `slots-grid` with source "inline"); recurses into container children.
-function forEachInlineSlotsGrid(views: View[], cb: (objectId: string) => void): void {
-  const walk = (objs: LayoutObject[]): void => {
-    for (const o of objs) {
-      if (o.config.type === "slots-grid" && o.config.source === "inline") cb(o.id);
-      if (o.children?.length) walk(o.children);
-    }
-  };
-  for (const v of views) if (v.kind === "custom" && v.layout) walk(v.layout.objects);
-}
-
-function defaultViewName(kind: ViewKind): string {
-  switch (kind) {
-    case "dashboard": return "Dashboard";
-    case "stage": return "Stage";
-    case "transcription": return "Transcription";
-    case "custom": return "Custom";
-    default: return "Slots";
-  }
-}
-
-/** A sensible starting layout for a new custom View — proves the schema and
- *  gives the editor something to manipulate (clock, countdown, slide text). */
-// A new custom view starts BLANK — the operator builds from scratch, or picks a
-// starter template in the create dialog / editor. (It used to seed 5 objects,
-// which meant every new custom layout had to be cleared by hand first.)
-function defaultCustomLayout(): LayoutDTO {
-  return {
-    version: 1,
-    canvas: { width: 1920, height: 1080, background: null },
-    objects: [],
-  };
 }
 
 /**
@@ -1520,82 +1442,6 @@ export class StageController {
       p.id === id ? { ...p, slots: rawSlots.map((s) => ({ ...s, id: randomUUID() })) } : p,
     );
     await presetsStore.save(updated);
-    return updated;
-  }
-
-  // ── Layout templates (reusable custom layouts) ───────────────────────
-
-  async listLayoutTemplates(): Promise<LayoutTemplate[]> {
-    return layoutTemplatesStore.load();
-  }
-
-  async saveLayoutTemplate(name: string, layout: LayoutDTO): Promise<LayoutTemplate[]> {
-    const list = await layoutTemplatesStore.load();
-    const tpl: LayoutTemplate = {
-      id: randomUUID(),
-      name: name.trim() || "Layout",
-      layout: cloneLayout(layout),
-      createdAt: new Date().toISOString(),
-    };
-    console.log(`[stage-controller] saveLayoutTemplate "${scrub(tpl.name)}" (${tpl.layout.objects.length} objects)`);
-    const updated = [...list, tpl];
-    await layoutTemplatesStore.save(updated);
-    return updated;
-  }
-
-  async updateLayoutTemplate(id: string, patch: { name?: string; layout?: LayoutDTO }): Promise<LayoutTemplate[]> {
-    const list = await layoutTemplatesStore.load();
-    if (!list.find((t) => t.id === id)) throw new Error(`layout template ${id} not found`);
-    const updated = list.map((t) =>
-      t.id === id
-        ? {
-            ...t,
-            name: patch.name !== undefined ? (patch.name.trim() || t.name) : t.name,
-            layout: patch.layout ? cloneLayout(patch.layout) : t.layout,
-          }
-        : t,
-    );
-    console.log(`[stage-controller] updateLayoutTemplate ${id}`);
-    await layoutTemplatesStore.save(updated);
-    return updated;
-  }
-
-  async deleteLayoutTemplate(id: string): Promise<LayoutTemplate[]> {
-    console.log(`[stage-controller] deleteLayoutTemplate ${id}`);
-    const list = await layoutTemplatesStore.load();
-    const updated = list.filter((t) => t.id !== id);
-    await layoutTemplatesStore.save(updated);
-    return updated;
-  }
-
-  // ── Layout groups (reusable object/container library) ───────────────────
-  // Like templates, but a single object subtree the operator inserts into a view
-  // rather than a whole-layout replace. (Inline mic-slot data is per-object/
-  // per-service-type and is NOT carried — same as templates; re-pick slots after.)
-
-  async listLayoutGroups(): Promise<LayoutGroup[]> {
-    return layoutGroupsStore.load();
-  }
-
-  async saveLayoutGroup(name: string, object: LayoutObject): Promise<LayoutGroup[]> {
-    const list = await layoutGroupsStore.load();
-    const group: LayoutGroup = {
-      id: randomUUID(),
-      name: name.trim() || "Group",
-      object: cloneLayoutObject(object), // fresh ids so the library copy is isolated
-      createdAt: new Date().toISOString(),
-    };
-    console.log(`[stage-controller] saveLayoutGroup "${scrub(group.name)}" (${scrub((group.object.children?.length ?? 0))} children)`);
-    const updated = [...list, group];
-    await layoutGroupsStore.save(updated);
-    return updated;
-  }
-
-  async deleteLayoutGroup(id: string): Promise<LayoutGroup[]> {
-    console.log(`[stage-controller] deleteLayoutGroup ${id}`);
-    const list = await layoutGroupsStore.load();
-    const updated = list.filter((g) => g.id !== id);
-    await layoutGroupsStore.save(updated);
     return updated;
   }
 
