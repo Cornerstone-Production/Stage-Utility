@@ -21,6 +21,7 @@ import { APP_ROOT } from "./app-root.js";
 import { getUserDataPath } from "./app-paths.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { listImages, readImage, restoreImage } from "./image-files.js";
+import { configFilenames, storesOfClass } from "./stores.js";
 import { atomicWrite } from "./write-queue.js";
 
 // main/services/config-snapshot.ts → repo root is two levels up.
@@ -35,46 +36,33 @@ const REPO_ROOT = APP_ROOT;
  *  work gone. `config-snapshot.test.ts` scans main/services for every DataStore and
  *  fails unless it appears here or in RUNTIME_FILES — adding a store without
  *  classifying it breaks CI. */
-export const CONFIG_FILES = [
-  "settings.json",
-  "views.json",
-  "slots.json",
-  "layout-templates.json",
-  "layout-groups.json",
-  "presets.json",
-  "wireless-connections.json",
-  "osc-targets.json",
-  "rosstalk-targets.json",
-  "rosstalk-settings.json",
-  "automation-rules.json",
-  "automation-settings.json",
-  "scriptview-layouts.json",
-  "scriptview-config.json",
-  "scriptview-roles.json",
-  "baptism-triggers.json",
-  "patch.json",
-] as const;
+/**
+ * Config stores a snapshot carries — derived from the store registry, not
+ * hand-maintained.
+ *
+ * This was a literal array, guarded by a test that scanned the source for
+ * `new DataStore<…>(`. The regex could not cross a `>`, so signal-store's nested
+ * generic was invisible and the scan found 22 of 23 stores; CI was green only
+ * because someone had independently classified that one. The read was also not
+ * recursive, so a store under archive/ or routes/ could never be seen.
+ *
+ * Classification is now a constructor argument, so a store cannot exist without
+ * declaring which half it belongs to. See store-registry.ts.
+ */
+export function configFiles(): string[] {
+  return configFilenames();
+}
 
 /** Stores deliberately excluded: recorded history and logs, which are observations
  *  of what happened rather than configuration. Restoring them onto another install
  *  would fabricate services that machine never ran. Listed explicitly so the drift
  *  test can tell "considered and excluded" from "forgotten". */
-export const RUNTIME_FILES = [
-  // These three are now directories of per-service files (spl-history/, …); the
-  // legacy single-document names are kept here because that is what the drift scan
-  // matches on, and because an install that has not booted since the split still
-  // has them on disk.
-  // Derived from the PCO roster, not authored: restoring it onto another install
-  // would assert an audio routing that machine never computed.
-  "signals.json",
-  "spl-history.json",
-  "attendance-history.json",
-  "service-timeline.json",
-  "automation-log.json",
-  // { current, sessions } — an in-progress session plus finished records.
-  // Restoring it onto another install would fabricate baptisms that never happened.
-  "baptism.json",
-] as const;
+/** Stores deliberately excluded: recorded history and logs — observations of what
+ *  happened rather than configuration. Restoring them onto another install would
+ *  fabricate services that machine never ran. */
+export function runtimeFiles(): string[] {
+  return storesOfClass("runtime").map((s) => s.filename);
+}
 
 /** Image directories carried in a snapshot. Allowlisted for the same reason
  *  CONFIG_FILES is: it bounds what an applied bundle can write. */
@@ -172,7 +160,7 @@ class ConfigSnapshotService {
   /** Build a snapshot of the live config (secrets excluded). */
   async build(name?: string): Promise<ConfigSnapshot> {
     const files: Record<string, unknown> = {};
-    for (const f of CONFIG_FILES) {
+    for (const f of configFiles()) {
       const v = await this.readFile(f);
       if (v !== undefined) files[f] = v;
     }
@@ -214,7 +202,7 @@ class ConfigSnapshotService {
 
     const applied: string[] = [];
     for (const [name, contents] of Object.entries(bundle.files)) {
-      if (!(CONFIG_FILES as readonly string[]).includes(name)) continue; // allowlist only
+      if (!configFiles().includes(name)) continue; // allowlist only
       if (contents === undefined || contents === null) continue;
       const dest = path.join(getUserDataPath(), name);
       // Atomic, for the reason data-store.ts spells out: a plain writeFile

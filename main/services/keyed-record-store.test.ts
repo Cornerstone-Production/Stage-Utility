@@ -16,7 +16,7 @@ interface Rec {
 }
 
 const make = (dir: string, legacy: string) =>
-  new KeyedRecordStore<Rec>(dir, legacy, (r) => r.startedAt);
+  new KeyedRecordStore<Rec>(dir, legacy, (r) => r.startedAt, "runtime");
 
 const rec = (key: string, startedAt: string, title = "x"): Rec => ({ serviceKey: key, startedAt, title });
 

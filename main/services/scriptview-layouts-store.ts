@@ -12,7 +12,7 @@ import { migrateLayouts } from "./scriptview-layout-migration.js";
 // "MD + Playback Tech" — which only exist in some churches, and in this org only in some
 // service types, so a fresh install got layouts whose columns rendered empty. A layout
 // is cheap to add; a wrong one that looks broken is not.
-const store = new DataStore<ScriptViewLayout[]>("scriptview-layouts.json", []);
+const store = new DataStore<ScriptViewLayout[]>("scriptview-layouts.json", [], "config");
 
 export const scriptViewLayoutsStore = {
   async load(): Promise<ScriptViewLayout[]> {

@@ -4,7 +4,7 @@
 import type { CategoryRole } from "../types/scriptview-roles.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<CategoryRole[]>("scriptview-roles.json", []);
+const store = new DataStore<CategoryRole[]>("scriptview-roles.json", [], "config");
 
 /** Stable id from a category name, so re-seeding does not churn ids. */
 function idFor(name: string): string {

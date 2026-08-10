@@ -7,7 +7,7 @@ import type { ServiceTimeline } from "../types/stage.js";
 import { KeyedRecordStore } from "./keyed-record-store.js";
 
 class ServiceTimelineStore {
-  private store = new KeyedRecordStore<ServiceTimeline>("service-timeline", "service-timeline.json", (r) => r.startedAt);
+  private store = new KeyedRecordStore<ServiceTimeline>("service-timeline", "service-timeline.json", (r) => r.startedAt, "runtime");
 
   /** All recorded services, newest first (by start time). */
   async list(): Promise<ServiceTimeline[]> {

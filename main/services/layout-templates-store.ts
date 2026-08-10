@@ -4,7 +4,7 @@
 import type { LayoutTemplate } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<LayoutTemplate[]>("layout-templates.json", []);
+const store = new DataStore<LayoutTemplate[]>("layout-templates.json", [], "config");
 
 export const layoutTemplatesStore = {
   async load(): Promise<LayoutTemplate[]> {

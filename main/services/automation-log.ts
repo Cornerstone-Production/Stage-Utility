@@ -11,7 +11,7 @@ import { DataStore } from "./data-store.js";
 /** Enough to cover several services; small enough to keep in memory and on disk. */
 const CAP = 500;
 
-const store = new DataStore<AutomationLogEntry[]>("automation-log.json", []);
+const store = new DataStore<AutomationLogEntry[]>("automation-log.json", [], "runtime");
 let entries: AutomationLogEntry[] = [];
 let loaded = false;
 

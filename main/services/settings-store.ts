@@ -130,7 +130,7 @@ const DEFAULT_SETTINGS: SettingsData = {
  *  when unset) and the stage state the Advanced tab reads. */
 export const DEFAULT_TAPER_WINDOW = { preMin: 60, postMin: 60 };
 
-const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS);
+const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS, "config");
 
 /** Keep the process-wide zone in step with what was just read or written. Every
  *  path in and out of settings funnels through here so no caller can forget, and

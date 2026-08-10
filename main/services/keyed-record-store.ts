@@ -18,6 +18,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { getUserDataPath } from "./app-paths.js";
+import { registerStore, type StoreClass } from "./store-registry.js";
 
 /** Everything this store holds is addressed by `serviceKey`. */
 export interface Keyed {
@@ -43,11 +44,21 @@ export class KeyedRecordStore<T extends Keyed> {
    * @param legacyFile the single-document file this replaces, migrated on first use
    * @param startedAt  sort key for `list()` — newest first
    */
+  /**
+   * @param classification See DataStore. A keyed store is a DIRECTORY of
+   *   per-service files, which the snapshot reader has to know: reading one with
+   *   readFile throws EISDIR, and the old allowlist could not express the
+   *   difference — a config store built on this would have been swallowed by a
+   *   bare catch and dropped from every backup while the drift test passed.
+   */
   constructor(
     private readonly dirName: string,
     private readonly legacyFile: string,
     private readonly startedAt: (r: T) => string,
-  ) {}
+    classification: StoreClass,
+  ) {
+    registerStore({ filename: legacyFile, classification, kind: "directory" });
+  }
 
   private dir(): string {
     return path.join(getUserDataPath(), this.dirName);

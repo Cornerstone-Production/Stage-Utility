@@ -17,7 +17,7 @@ import type { SignalState } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<Record<string, SignalState>>("signals.json", {});
+const store = new DataStore<Record<string, SignalState>>("signals.json", {}, "runtime");
 
 /** Kept in memory so reads are synchronous for the SSE hello burst. */
 let cache: Record<string, SignalState> | null = null;
