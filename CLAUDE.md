@@ -84,8 +84,10 @@ for:
   22 of 23 stores and was green by luck
 
 Prefer a check the type system enforces, or one that runs the real code path, over
-one that reads source text. If it must read source, assert a floor on what it
-finds so a later change cannot quietly empty it.
+one that reads source text. If it must read source: walk the tree recursively,
+match on something prose cannot satisfy (an assignment, not a bare constructor
+name), and assert an EXACT count rather than a floor — a floor with slack is how
+three config stores went missing from every backup with the suite green.
 
 ## Do not swallow a failure
 
@@ -125,9 +127,10 @@ Center reports a service live, nothing time-based may stop it.
 
 ## Data that outlives a release
 
-Every new persisted store goes in `CONFIG_FILES` (operator's work, restore it) or
-`RUNTIME_FILES` (observations, do not) in the same change — a drift test fails
-otherwise.
+Every persisted store declares itself as the operator's work (`"config"` —
+restore it) or an observation (`"runtime"` — do not) in its constructor. The type
+checker will not let you skip it, and `config-snapshot.test.ts` fails if the
+store is never imported, or lands in the wrong half.
 
 Do not delete an operator's data to tidy something up. Log it, or offer an
 explicit action, and let them choose.

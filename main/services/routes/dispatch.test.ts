@@ -147,16 +147,28 @@ describe("the production route list", () => {
     const { fileURLToPath } = await import("node:url");
     const { ROUTE_MODULES } = await import("../remote-server.js");
 
+    // Recursive, and matching both declaration forms. The first version read one
+    // directory and only saw `export async function xRoutes(` — the same
+    // "non-recursive source-text scan" shape this repo has been bitten by before.
     const dir = path.dirname(fileURLToPath(import.meta.url));
     const declared = new Set<string>();
-    for (const f of fs.readdirSync(dir)) {
-      if (!f.endsWith(".ts") || f.endsWith(".test.ts")) continue;
-      for (const m of fs.readFileSync(path.join(dir, f), "utf8").matchAll(
-        /export async function (\w+Routes)\s*\(/g,
-      )) {
-        declared.add(m[1]!);
+    const walk = (d: string): void => {
+      for (const entry of fs.readdirSync(d)) {
+        const full = path.join(d, entry);
+        if (fs.statSync(full).isDirectory()) {
+          walk(full);
+        } else if (entry.endsWith(".ts") && !entry.endsWith(".test.ts")) {
+          const src = fs.readFileSync(full, "utf8");
+          for (const re of [
+            /export async function (\w+Routes)\s*\(/g,
+            /export const (\w+Routes)\s*[:=]/g,
+          ]) {
+            for (const m of src.matchAll(re)) declared.add(m[1]!);
+          }
+        }
       }
-    }
+    };
+    walk(dir);
 
     const dispatched = new Set(ROUTE_MODULES.map((fn) => fn.name));
     const missing = [...declared].filter((n) => !dispatched.has(n));
@@ -165,6 +177,6 @@ describe("the production route list", () => {
       [],
       `these route modules exist but are never dispatched, so their paths 404:\n  ${missing.join("\n  ")}`,
     );
-    assert.ok(declared.size >= 10, `only found ${declared.size} route modules — scan looks broken`);
+    assert.equal(declared.size, ROUTE_MODULES.length, "declared route modules and dispatched ones disagree in count");
   });
 });

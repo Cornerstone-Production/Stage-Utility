@@ -68,7 +68,7 @@ import { presetRoutes } from "./routes/preset-routes.js";
  * loop, so the test pinned a contract it never actually exercised. Exported so it
  * can run over the real list.
  */
-export const ROUTE_MODULES: ((c: RouteCtx) => Promise<void>)[] = [
+export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   statusRoutes,
   historyRoutes,
   archiveRoutes,
@@ -83,7 +83,7 @@ export const ROUTE_MODULES: ((c: RouteCtx) => Promise<void>)[] = [
   systemRoutes,
   brandingRoutes,
   presetRoutes,
-];
+] as const;
 
 // ── Static renderer build path candidates ──────────────────────────────────────
 // Resolved against the install root, NOT the working directory. A packaged

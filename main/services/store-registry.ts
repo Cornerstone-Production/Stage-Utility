@@ -35,8 +35,15 @@ export interface RegisteredStore {
   /** Filename for a DataStore; the legacy single-document name for a keyed one. */
   filename: string;
   classification: StoreClass;
-  /** A keyed store is a DIRECTORY of per-service files, not one file — the
-   *  snapshot reader has to dispatch on this rather than assume readFile. */
+  /**
+   * Whether the store is one file or a DIRECTORY of per-service files.
+   *
+   * A keyed store registers its LEGACY single-document filename, so reading it
+   * with readFile succeeds — it just returns the stale pre-split document and
+   * omits every per-service file written since. Backing one up would look like
+   * it worked. configSnapshot.build refuses a config store of this kind rather
+   * than producing a backup that is quietly missing most of its content.
+   */
   kind: "file" | "directory";
 }
 

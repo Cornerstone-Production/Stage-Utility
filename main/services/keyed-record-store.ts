@@ -45,11 +45,12 @@ export class KeyedRecordStore<T extends Keyed> {
    * @param startedAt  sort key for `list()` — newest first
    */
   /**
-   * @param classification See DataStore. A keyed store is a DIRECTORY of
-   *   per-service files, which the snapshot reader has to know: reading one with
-   *   readFile throws EISDIR, and the old allowlist could not express the
-   *   difference — a config store built on this would have been swallowed by a
-   *   bare catch and dropped from every backup while the drift test passed.
+   * @param classification See DataStore. Registered under the LEGACY
+   *   single-document filename, which still exists on older installs — so a
+   *   snapshot reading it by name would silently capture that stale document and
+   *   none of the per-service files. `kind: "directory"` is what lets
+   *   configSnapshot refuse that rather than write a backup missing most of its
+   *   content.
    */
   constructor(
     private readonly dirName: string,

@@ -1,72 +1,154 @@
 import { strict as assert } from "node:assert";
 import { test, describe } from "node:test";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { configFiles, runtimeFiles } from "./config-snapshot.js";
 import { allStores } from "./stores.js";
 
 // Every persisted store must be classified as the operator's WORK (restored from
-// a backup) or an OBSERVATION (not restored). Getting it wrong is silent both
-// ways: a forgotten config store is simply missing after a restore, and a history
-// store wrongly included fabricates services a box never ran.
+// a backup) or an OBSERVATION (not restored). Both failure directions are silent:
+// a forgotten config store is simply missing after a restore, and a history store
+// wrongly included fabricates services a box never ran.
 //
-// This used to scan the source for `new DataStore<…>(` and check the result
-// against two hand-maintained arrays. That scan had holes it could not see past —
-// its regex could not cross a `>`, so signal-store's nested generic was invisible
-// and it found 22 of 23 stores; CI was green only because someone had
-// independently classified that one. It also read the directory non-recursively.
+// Classification is a constructor argument, so "forgot to classify" is now a
+// compile error. Two things that still cannot be type-checked are pinned here,
+// and both were briefly lost when this file was first rewritten:
 //
-// Classification is now a constructor argument, so the type checker enforces what
-// the regex approximated and the list is derived from what exists. What is left
-// to test is that the derivation is wired up and the two halves stay disjoint.
+//   1. the registry must be COMPLETE. It is populated by module construction, so
+//      a store whose module nobody imports is absent — and absent means missing
+//      from every backup, with nothing to notice. Deleting two lines from
+//      stores.ts dropped three config stores and left the suite green.
+//   2. WHICH half each store lands in. A sample of five let five one-word
+//      classification flips pass.
+
+const SERVICES_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * A store CONSTRUCTION: an assignment, which is what every real one is.
+ *
+ * Requiring the `=` is what separates code from prose. Matching the bare
+ * constructor counted three mentions inside comments — including the one in this
+ * refactor's own store-registry.ts explaining the bug — and reported 26 stores
+ * against 23. That is the third guard in this codebase a comment has satisfied.
+ */
+const CONSTRUCTION_SOURCE = "=\\s*new (?:DataStore|KeyedRecordStore)\\b";
+/** Fresh each call: a shared /g/ regex carries lastIndex between .test() calls
+ *  and silently starts mid-string, which under-counted by two. */
+const construction = (): RegExp => new RegExp(CONSTRUCTION_SOURCE, "g");
+
+/**
+ * Files under main/ that construct a store, found by walking the tree.
+ *
+ * Deliberately a plain substring match and a recursive walk. The scan this
+ * replaced parsed the generic — `new DataStore<…>(` — and its regex could not
+ * cross a `>`, so signal-store's `DataStore<Record<string, SignalState>>` was
+ * invisible and it found 22 of 23. It also read one directory, so a store under
+ * archive/ or routes/ could never be seen. Counting the constructor call needs
+ * neither.
+ */
+function filesConstructingStores(): string[] {
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      if (statSync(full).isDirectory()) {
+        walk(full);
+      } else if (entry.endsWith(".ts") && !entry.endsWith(".test.ts")) {
+        const src = readFileSync(full, "utf8");
+        if (construction().test(src)) out.push(full);
+      }
+    }
+  };
+  walk(path.resolve(SERVICES_DIR, ".."));
+  // The primitives themselves are not stores.
+  return out.filter((f) => !/[/\\](data-store|keyed-record-store)\.ts$/.test(f));
+}
+
+/** Count of store constructions on disk, whether or not anything imports them. */
+function declaredStoreCount(): number {
+  let n = 0;
+  for (const f of filesConstructingStores()) {
+    const src = readFileSync(f, "utf8");
+    n += (src.match(construction()) ?? []).length;
+  }
+  return n;
+}
+
+/**
+ * Exactly the stores a config snapshot carries.
+ *
+ * Spelled out rather than sampled. This is the assertion that pins WHICH half
+ * each store lands in — the thing the type checker cannot know and the thing a
+ * one-word edit changes. Adding a store here is a deliberate act; changing one
+ * that already exists should make a reviewer stop.
+ */
+const EXPECTED_CONFIG = [
+  "automation-rules.json",
+  "automation-settings.json",
+  "baptism-triggers.json",
+  "layout-groups.json",
+  "layout-templates.json",
+  "osc-targets.json",
+  "patch.json",
+  "presets.json",
+  "rosstalk-settings.json",
+  "rosstalk-targets.json",
+  "scriptview-config.json",
+  "scriptview-layouts.json",
+  "scriptview-roles.json",
+  "settings.json",
+  "slots.json",
+  "views.json",
+  "wireless-connections.json",
+].sort();
+
+const EXPECTED_RUNTIME = [
+  "attendance-history.json",
+  "automation-log.json",
+  "baptism.json",
+  "service-timeline.json",
+  "signals.json",
+  "spl-history.json",
+].sort();
 
 describe("store classification", () => {
-  test("the registry is populated, so nothing here is vacuous", () => {
-    // If the barrel in stores.ts stops importing the store modules, every
-    // assertion below would pass over an empty set.
-    assert.ok(allStores().length >= 20, `only ${allStores().length} stores registered`);
+  test("every store declared on disk is registered", () => {
+    // Catches the barrel in stores.ts falling behind: a store module nobody
+    // imports never constructs, never registers, and is silently absent from
+    // every backup. An exact count, not a floor — a floor with slack is what let
+    // three missing stores through when this was first written.
+    const declared = declaredStoreCount();
+    assert.equal(
+      allStores().length,
+      declared,
+      `${declared} stores are declared under main/ but ${allStores().length} registered — ` +
+        `a store module is probably missing from stores.ts`,
+    );
   });
 
-  test("every registered store lands in exactly one half", () => {
-    const config = new Set(configFiles());
-    const runtime = new Set(runtimeFiles());
-    for (const s of allStores()) {
-      const inConfig = config.has(s.filename);
-      const inRuntime = runtime.has(s.filename);
-      assert.ok(inConfig || inRuntime, `${s.filename} is in neither half`);
-      assert.ok(!(inConfig && inRuntime), `${s.filename} is in both halves`);
-    }
+  test("the config half is exactly this set", () => {
+    assert.deepEqual(configFiles().slice().sort(), EXPECTED_CONFIG);
+  });
+
+  test("the runtime half is exactly this set", () => {
+    assert.deepEqual(runtimeFiles().slice().sort(), EXPECTED_RUNTIME);
   });
 
   test("secrets and the encryption key are never in a snapshot", () => {
-    // The snapshot tells the operator it is safe to store. These must never
-    // appear whatever the registry says.
+    // The snapshot tells the operator it is safe to store.
     for (const forbidden of ["secrets.bin", "encryption.key"]) {
       assert.ok(!configFiles().includes(forbidden), `${forbidden} must never be backed up`);
     }
   });
 
-  test("recorded history is not restored onto another machine", () => {
-    for (const h of ["spl-history.json", "attendance-history.json", "service-timeline.json", "baptism.json"]) {
-      assert.ok(!configFiles().includes(h), `${h} must not be in a config snapshot`);
-      assert.ok(runtimeFiles().includes(h), `${h} should be declared runtime`);
-    }
-  });
-
-  test("the operator's work IS restored", () => {
-    for (const c of ["settings.json", "views.json", "slots.json", "patch.json", "presets.json"]) {
-      assert.ok(configFiles().includes(c), `${c} must survive a restore`);
-    }
-  });
-
-  test("a keyed store is recorded as a directory, not a file", () => {
-    // config-snapshot reads a file store with readFile; doing that to a directory
-    // throws EISDIR inside a bare catch, which would silently drop it from every
-    // backup while this test passed on the name alone.
-    const keyed = allStores().filter((s) => s.kind === "directory").map((s) => s.filename);
-    assert.deepEqual(
-      keyed.sort(),
-      ["attendance-history.json", "service-timeline.json", "spl-history.json"],
-      "keyed stores are not being registered as directories",
-    );
+  test("no config store is a keyed directory", () => {
+    // A KeyedRecordStore registers its LEGACY single-document filename, so
+    // readFile on it succeeds — it just reads the stale pre-split document and
+    // silently omits every per-service file. Backing one up would look like it
+    // worked. config-snapshot.build refuses this at runtime; this states it.
+    const bad = allStores().filter((s) => s.kind === "directory" && configFiles().includes(s.filename));
+    assert.deepEqual(bad, [], "a keyed store cannot be backed up by filename alone");
   });
 });

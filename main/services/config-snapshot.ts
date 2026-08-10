@@ -6,7 +6,7 @@
 // `secrets.bin`/`encryption.key` never leave the box, so a downloaded/saved
 // snapshot is safe to store; on recall the operator re-enters API keys/passwords.
 // Recorded history (SPL/attendance/timeline, the automation log, baptism sessions) is
-// runtime data rather than config, so it is excluded — see RUNTIME_FILES.
+// runtime data rather than config, so it is excluded — see runtimeFiles().
 //
 // Applying a snapshot writes the files then the server restarts (handled by the
 // route) so every integration cleanly re-initializes from the restored config.
@@ -27,15 +27,6 @@ import { atomicWrite } from "./write-queue.js";
 // main/services/config-snapshot.ts → repo root is two levels up.
 const REPO_ROOT = APP_ROOT;
 
-/** Config stores included in a snapshot (allowlist — anything else is ignored on
- *  apply, which also blocks path traversal). NB: secrets.bin / encryption.key are
- *  intentionally NOT here.
- *
- *  A store missing from this list is silently excluded from export AND import, so
- *  the omission stays invisible until someone restores a backup and finds their
- *  work gone. `config-snapshot.test.ts` scans main/services for every DataStore and
- *  fails unless it appears here or in RUNTIME_FILES — adding a store without
- *  classifying it breaks CI. */
 /**
  * Config stores a snapshot carries — derived from the store registry, not
  * hand-maintained.
@@ -53,10 +44,6 @@ export function configFiles(): string[] {
   return configFilenames();
 }
 
-/** Stores deliberately excluded: recorded history and logs, which are observations
- *  of what happened rather than configuration. Restoring them onto another install
- *  would fabricate services that machine never ran. Listed explicitly so the drift
- *  test can tell "considered and excluded" from "forgotten". */
 /** Stores deliberately excluded: recorded history and logs — observations of what
  *  happened rather than configuration. Restoring them onto another install would
  *  fabricate services that machine never ran. */
@@ -159,6 +146,15 @@ class ConfigSnapshotService {
 
   /** Build a snapshot of the live config (secrets excluded). */
   async build(name?: string): Promise<ConfigSnapshot> {
+    // A keyed store classified "config" would be read by its legacy filename and
+    // capture the stale pre-split document instead of the per-service files —
+    // a backup that succeeds and is mostly empty. Refuse rather than write it.
+    const keyed = storesOfClass("config").filter((s) => s.kind === "directory");
+    if (keyed.length > 0) {
+      throw new Error(
+        `[config-snapshot] cannot back up keyed store(s) by filename: ${keyed.map((s) => s.filename).join(", ")}`,
+      );
+    }
     const files: Record<string, unknown> = {};
     for (const f of configFiles()) {
       const v = await this.readFile(f);
