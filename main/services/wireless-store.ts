@@ -11,7 +11,7 @@ export interface WirelessConnectionConfig {
   config: Record<string, unknown>;
 }
 
-const store = new DataStore<WirelessConnectionConfig[]>("wireless-connections.json", []);
+const store = new DataStore<WirelessConnectionConfig[]>("wireless-connections.json", [], "config");
 
 export const wirelessStore = {
   async load(): Promise<WirelessConnectionConfig[]> {

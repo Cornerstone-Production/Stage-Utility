@@ -7,7 +7,7 @@ import type { ServiceAttendance } from "../types/stage.js";
 import { KeyedRecordStore } from "./keyed-record-store.js";
 
 class AttendanceStore {
-  private store = new KeyedRecordStore<ServiceAttendance>("attendance-history", "attendance-history.json", (r) => r.startedAt);
+  private store = new KeyedRecordStore<ServiceAttendance>("attendance-history", "attendance-history.json", (r) => r.startedAt, "runtime");
 
   /** All recorded services, newest first (by start time). */
   async list(): Promise<ServiceAttendance[]> {

@@ -9,7 +9,7 @@
 import type { View } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<View[]>("views.json", []);
+const store = new DataStore<View[]>("views.json", [], "config");
 
 export const viewsStore = {
   async load(): Promise<View[]> {

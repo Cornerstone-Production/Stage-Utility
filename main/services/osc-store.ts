@@ -4,7 +4,7 @@
 import type { OscTargetConfig } from "../types/osc.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<OscTargetConfig[]>("osc-targets.json", []);
+const store = new DataStore<OscTargetConfig[]>("osc-targets.json", [], "config");
 
 export const oscStore = {
   async load(): Promise<OscTargetConfig[]> {

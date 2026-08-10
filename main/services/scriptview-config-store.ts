@@ -4,7 +4,7 @@
 import type { ScriptViewConfig } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<ScriptViewConfig>("scriptview-config.json", { serviceTypeIds: [] });
+const store = new DataStore<ScriptViewConfig>("scriptview-config.json", { serviceTypeIds: [] }, "config");
 
 export const scriptViewConfigStore = {
   async load(): Promise<ScriptViewConfig> {

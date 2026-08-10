@@ -9,7 +9,7 @@ import { KeyedRecordStore } from "./keyed-record-store.js";
 import { settingsStore } from "./settings-store.js";
 
 class SplHistoryStore {
-  private store = new KeyedRecordStore<ServiceSplHistory>("spl-history", "spl-history.json", (r) => r.startedAt);
+  private store = new KeyedRecordStore<ServiceSplHistory>("spl-history", "spl-history.json", (r) => r.startedAt, "runtime");
 
   /** All recorded services, newest first (by start time). */
   async list(): Promise<ServiceSplHistory[]> {

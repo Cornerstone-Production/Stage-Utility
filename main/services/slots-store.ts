@@ -38,7 +38,7 @@ export function migrateSlotLink(link: unknown): SlotLink {
 // Outer key = displayId, inner key = serviceTypeId.
 type SlotsMap = Record<string, Record<string, Slot[]>>;
 
-const store = new DataStore<SlotsMap>("slots.json", {});
+const store = new DataStore<SlotsMap>("slots.json", {}, "config");
 
 /** Normalise whatever shape is on disk into the v2 SlotsMap. */
 async function loadNormalised(): Promise<SlotsMap> {

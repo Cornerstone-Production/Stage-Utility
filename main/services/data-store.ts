@@ -4,6 +4,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
+import { registerStore, type StoreClass } from "./store-registry.js";
 import { WriteQueue, atomicWrite } from "./write-queue.js";
 
 export class DataStore<T> {
@@ -19,10 +20,19 @@ export class DataStore<T> {
   // secrets blob that no longer decrypted.
   private writes = new WriteQueue();
 
+  /**
+   * @param classification Whether a config snapshot carries this store. Required
+   *   on purpose: it used to be a separate hand-maintained list, and a store
+   *   omitted from it was silently missing from every backup until an operator
+   *   restored one and found their work gone. Now it cannot be forgotten.
+   */
   constructor(
     private readonly filename: string,
     private readonly defaultValue: T,
-  ) {}
+    classification: StoreClass,
+  ) {
+    registerStore({ filename, classification, kind: "file" });
+  }
 
   /** Run `fn` after all prior queued writes settle (success or failure). */
   private enqueue<R>(fn: () => Promise<R>): Promise<R> {

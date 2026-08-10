@@ -18,6 +18,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { getUserDataPath } from "./app-paths.js";
+import { registerStore, type StoreClass } from "./store-registry.js";
 
 /** Everything this store holds is addressed by `serviceKey`. */
 export interface Keyed {
@@ -43,11 +44,22 @@ export class KeyedRecordStore<T extends Keyed> {
    * @param legacyFile the single-document file this replaces, migrated on first use
    * @param startedAt  sort key for `list()` — newest first
    */
+  /**
+   * @param classification See DataStore. Registered under the LEGACY
+   *   single-document filename, which still exists on older installs — so a
+   *   snapshot reading it by name would silently capture that stale document and
+   *   none of the per-service files. `kind: "directory"` is what lets
+   *   configSnapshot refuse that rather than write a backup missing most of its
+   *   content.
+   */
   constructor(
     private readonly dirName: string,
     private readonly legacyFile: string,
     private readonly startedAt: (r: T) => string,
-  ) {}
+    classification: StoreClass,
+  ) {
+    registerStore({ filename: legacyFile, classification, kind: "directory" });
+  }
 
   private dir(): string {
     return path.join(getUserDataPath(), this.dirName);

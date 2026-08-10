@@ -3,7 +3,7 @@
 import type { SlotPreset } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<SlotPreset[]>("presets.json", []);
+const store = new DataStore<SlotPreset[]>("presets.json", [], "config");
 
 export const presetsStore = {
   async load(): Promise<SlotPreset[]> {

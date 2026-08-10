@@ -41,7 +41,7 @@ let n = 0;
 /** A store backed by a filename unique to the calling test. */
 function freshStore() {
   const name = `store-${n++}.json`;
-  return { store: new DataStore<Doc>(name, DEFAULTS), file: path.join(DATA_DIR, name) };
+  return { store: new DataStore<Doc>(name, DEFAULTS, "runtime"), file: path.join(DATA_DIR, name) };
 }
 
 describe("DataStore", () => {
@@ -54,7 +54,7 @@ describe("DataStore", () => {
     const { store, file } = freshStore();
     await store.save({ count: 7, items: ["a"] });
 
-    const reread = new DataStore<Doc>(path.basename(file), DEFAULTS);
+    const reread = new DataStore<Doc>(path.basename(file), DEFAULTS, "runtime");
     assert.deepEqual(await reread.load(), { count: 7, items: ["a"] });
   });
 
@@ -122,7 +122,7 @@ describe("DataStore", () => {
 
     // Simulate a truncated write from a crash, and drop the memo so we re-read.
     await fs.writeFile(file, '{"count": 42, "items": ["prec', "utf8");
-    const reread = new DataStore<Doc>(path.basename(file), DEFAULTS);
+    const reread = new DataStore<Doc>(path.basename(file), DEFAULTS, "runtime");
 
     assert.deepEqual(await reread.load(), DEFAULTS, "load must not throw on corruption");
 

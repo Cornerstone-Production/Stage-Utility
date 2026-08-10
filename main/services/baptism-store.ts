@@ -24,7 +24,7 @@ interface BaptismFile {
 const MAX_SESSIONS = 2000;
 
 class BaptismStore {
-  private store = new DataStore<BaptismFile>("baptism.json", { current: null, sessions: [] });
+  private store = new DataStore<BaptismFile>("baptism.json", { current: null, sessions: [] }, "runtime");
 
   /** The in-progress session state persisted before a restart (or null). */
   async loadCurrent(): Promise<BaptismState | null> {

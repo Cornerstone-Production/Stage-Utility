@@ -5,7 +5,7 @@
 import type { LayoutGroup } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<LayoutGroup[]>("layout-groups.json", []);
+const store = new DataStore<LayoutGroup[]>("layout-groups.json", [], "config");
 
 export const layoutGroupsStore = {
   async load(): Promise<LayoutGroup[]> {

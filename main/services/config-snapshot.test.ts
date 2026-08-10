@@ -1,105 +1,155 @@
-// The snapshot allowlist is the whole backup contract, and it fails silently: a
-// store that is missing is excluded from BOTH export and import, so nothing looks
-// wrong until someone restores a backup and finds their work gone. Eight stores had
-// drifted out of it before this test existed — patch sheets, automation rules,
-// RossTalk targets and ScriptView layouts among them.
-//
-// So rather than trusting the list to be maintained by hand, this scans the source
-// for every DataStore and KeyedRecordStore and requires each one to be classified:
-// backed up, or
-// deliberately runtime. Adding a store without deciding which is a CI failure.
-
-import assert from "node:assert/strict";
+import { strict as assert } from "node:assert";
 import { test, describe } from "node:test";
 import { readdirSync, readFileSync } from "node:fs";
+import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import path from "node:path";
 
-import { CONFIG_FILES, RUNTIME_FILES } from "./config-snapshot.js";
+import { configFiles, runtimeFiles } from "./config-snapshot.js";
+import { allStores } from "./stores.js";
+
+// Every persisted store must be classified as the operator's WORK (restored from
+// a backup) or an OBSERVATION (not restored). Both failure directions are silent:
+// a forgotten config store is simply missing after a restore, and a history store
+// wrongly included fabricates services a box never ran.
+//
+// Classification is a constructor argument, so "forgot to classify" is now a
+// compile error. Two things that still cannot be type-checked are pinned here,
+// and both were briefly lost when this file was first rewritten:
+//
+//   1. the registry must be COMPLETE. It is populated by module construction, so
+//      a store whose module nobody imports is absent — and absent means missing
+//      from every backup, with nothing to notice. Deleting two lines from
+//      stores.ts dropped three config stores and left the suite green.
+//   2. WHICH half each store lands in. A sample of five let five one-word
+//      classification flips pass.
 
 const SERVICES_DIR = path.dirname(fileURLToPath(import.meta.url));
 
-/** Every `new DataStore<…>("name.json"` declared under main/services. */
-function declaredStores(): { file: string; store: string }[] {
-  const out: { file: string; store: string }[] = [];
-  for (const f of readdirSync(SERVICES_DIR)) {
-    if (!f.endsWith(".ts") || f.endsWith(".test.ts")) continue;
-    const src = readFileSync(path.join(SERVICES_DIR, f), "utf8");
-    // KeyedRecordStore is the other persistence primitive: it takes the legacy
-    // single-document filename as its second argument, which is the name that has
-    // to be classified. A store added through it must not slip past this scan.
-    for (const m of src.matchAll(/new KeyedRecordStore<[^>]*>\(\s*"[^"]+",\s*"([^"]+\.json)"/g)) {
-      out.push({ file: f, store: m[1] });
+/**
+ * A store CONSTRUCTION: an assignment, which is what every real one is.
+ *
+ * Requiring the `=` is what separates code from prose. Matching the bare
+ * constructor counted three mentions inside comments — including the one in this
+ * refactor's own store-registry.ts explaining the bug — and reported 26 stores
+ * against 23. That is the third guard in this codebase a comment has satisfied.
+ */
+const CONSTRUCTION_SOURCE = "=\\s*new (?:DataStore|KeyedRecordStore)\\b";
+/** Fresh each call: a shared /g/ regex carries lastIndex between .test() calls
+ *  and silently starts mid-string, which under-counted by two. */
+const construction = (): RegExp => new RegExp(CONSTRUCTION_SOURCE, "g");
+
+/**
+ * Files under main/ that construct a store, found by walking the tree.
+ *
+ * Deliberately a plain substring match and a recursive walk. The scan this
+ * replaced parsed the generic — `new DataStore<…>(` — and its regex could not
+ * cross a `>`, so signal-store's `DataStore<Record<string, SignalState>>` was
+ * invisible and it found 22 of 23. It also read one directory, so a store under
+ * archive/ or routes/ could never be seen. Counting the constructor call needs
+ * neither.
+ */
+function filesConstructingStores(): string[] {
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    // withFileTypes, not a separate statSync: one syscall instead of two, and no
+    // check-then-use gap between asking what an entry is and reading it.
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
+        if (construction().test(readFileSync(full, "utf8"))) out.push(full);
+      }
     }
-    for (const m of src.matchAll(/new DataStore<[^>]*>\(\s*"([^"]+\.json)"/g)) {
-      out.push({ file: f, store: m[1] });
-    }
-  }
-  return out;
+  };
+  walk(path.resolve(SERVICES_DIR, ".."));
+  // The primitives themselves are not stores.
+  return out.filter((f) => !/[/\\](data-store|keyed-record-store)\.ts$/.test(f));
 }
 
-describe("every persisted store is classified", () => {
-  test("the scan finds the stores at all", () => {
-    // Guards the regex itself — a silently-empty scan would make this file vacuous.
-    const found = declaredStores();
-    assert.ok(found.length >= 15, `expected to find DataStore declarations, found ${found.length}`);
-  });
+/** Count of store constructions on disk, whether or not anything imports them. */
+function declaredStoreCount(): number {
+  let n = 0;
+  for (const f of filesConstructingStores()) {
+    const src = readFileSync(f, "utf8");
+    n += (src.match(construction()) ?? []).length;
+  }
+  return n;
+}
 
-  test("no store is missing from both the backup list and the runtime list", () => {
-    const classified = new Set<string>([...CONFIG_FILES, ...RUNTIME_FILES]);
-    const missing = declaredStores().filter((s) => !classified.has(s.store));
-    assert.deepEqual(
-      missing,
-      [],
-      `these stores are neither backed up nor declared runtime — add each to CONFIG_FILES ` +
-        `(operator's work, must survive a restore) or RUNTIME_FILES (recorded history):\n` +
-        missing.map((m) => `  ${m.store}  (${m.file})`).join("\n"),
+/**
+ * Exactly the stores a config snapshot carries.
+ *
+ * Spelled out rather than sampled. This is the assertion that pins WHICH half
+ * each store lands in — the thing the type checker cannot know and the thing a
+ * one-word edit changes. Adding a store here is a deliberate act; changing one
+ * that already exists should make a reviewer stop.
+ */
+const EXPECTED_CONFIG = [
+  "automation-rules.json",
+  "automation-settings.json",
+  "baptism-triggers.json",
+  "layout-groups.json",
+  "layout-templates.json",
+  "osc-targets.json",
+  "patch.json",
+  "presets.json",
+  "rosstalk-settings.json",
+  "rosstalk-targets.json",
+  "scriptview-config.json",
+  "scriptview-layouts.json",
+  "scriptview-roles.json",
+  "settings.json",
+  "slots.json",
+  "views.json",
+  "wireless-connections.json",
+].sort();
+
+const EXPECTED_RUNTIME = [
+  "attendance-history.json",
+  "automation-log.json",
+  "baptism.json",
+  "service-timeline.json",
+  "signals.json",
+  "spl-history.json",
+].sort();
+
+describe("store classification", () => {
+  test("every store declared on disk is registered", () => {
+    // Catches the barrel in stores.ts falling behind: a store module nobody
+    // imports never constructs, never registers, and is silently absent from
+    // every backup. An exact count, not a floor — a floor with slack is what let
+    // three missing stores through when this was first written.
+    const declared = declaredStoreCount();
+    assert.equal(
+      allStores().length,
+      declared,
+      `${declared} stores are declared under main/ but ${allStores().length} registered — ` +
+        `a store module is probably missing from stores.ts`,
     );
   });
 
-  test("nothing is in both lists", () => {
-    const runtime = new Set<string>(RUNTIME_FILES);
-    const both = CONFIG_FILES.filter((f) => runtime.has(f));
-    assert.deepEqual(both, [], `classified as both config and runtime: ${both.join(", ")}`);
+  test("the config half is exactly this set", () => {
+    assert.deepEqual(configFiles().slice().sort(), EXPECTED_CONFIG);
   });
-});
 
-describe("what must never be backed up", () => {
-  test("secrets never enter a snapshot", () => {
-    // A downloaded snapshot is meant to be safe to email or drop in cloud storage.
+  test("the runtime half is exactly this set", () => {
+    assert.deepEqual(runtimeFiles().slice().sort(), EXPECTED_RUNTIME);
+  });
+
+  test("secrets and the encryption key are never in a snapshot", () => {
+    // The snapshot tells the operator it is safe to store.
     for (const forbidden of ["secrets.bin", "encryption.key"]) {
-      assert.ok(
-        !(CONFIG_FILES as readonly string[]).includes(forbidden),
-        `${forbidden} must never be in CONFIG_FILES`,
-      );
+      assert.ok(!configFiles().includes(forbidden), `${forbidden} must never be backed up`);
     }
   });
 
-  test("recorded history stays out, so a restore cannot fabricate services", () => {
-    for (const h of ["spl-history.json", "attendance-history.json", "service-timeline.json"]) {
-      assert.ok(
-        !(CONFIG_FILES as readonly string[]).includes(h),
-        `${h} is recorded history — restoring it onto another install would invent services`,
-      );
-    }
-  });
-});
-
-describe("the stores that regressed", () => {
-  test("the eight that had drifted out are covered", () => {
-    // Named explicitly: each of these was silently absent from every backup taken
-    // before 2026-07-29.
-    for (const f of [
-      "scriptview-layouts.json",
-      "scriptview-config.json",
-      "patch.json",
-      "automation-rules.json",
-      "automation-settings.json",
-      "rosstalk-targets.json",
-      "rosstalk-settings.json",
-      "layout-groups.json",
-    ]) {
-      assert.ok((CONFIG_FILES as readonly string[]).includes(f), `${f} must be backed up`);
-    }
+  test("no config store is a keyed directory", () => {
+    // A KeyedRecordStore registers its LEGACY single-document filename, so
+    // readFile on it succeeds — it just reads the stale pre-split document and
+    // silently omits every per-service file. Backing one up would look like it
+    // worked. config-snapshot.build refuses this at runtime; this states it.
+    const bad = allStores().filter((s) => s.kind === "directory" && configFiles().includes(s.filename));
+    assert.deepEqual(bad, [], "a keyed store cannot be backed up by filename alone");
   });
 });

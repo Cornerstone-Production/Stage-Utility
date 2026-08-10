@@ -19,7 +19,7 @@ import { assertSafeKey } from "./safe-key.js";
 /** planId → which items start each phase. */
 type File = Record<string, BaptismTriggers>;
 
-const store = new DataStore<File>("baptism-triggers.json", {});
+const store = new DataStore<File>("baptism-triggers.json", {}, "config");
 
 export const baptismTriggersStore = {
   async all(): Promise<File> {
