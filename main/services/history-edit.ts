@@ -10,6 +10,9 @@ import { serviceTimelineStore } from "./service-timeline-store.js";
 import { attendanceStore } from "./attendance-store.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { broadcast } from "./broadcaster.js";
+import { attendanceRecorder } from "./attendance-recorder.js";
+import { splRecorder } from "./spl-recorder.js";
+import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 
 /** Re-derive attendance aggregates from the (possibly trimmed) sample series. Note:
  *  totalAttendance is a raw daily counter we can't reconstruct from baselined
@@ -137,6 +140,7 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     const ends = tgtTl.items.map((i) => (i.endedAt ? Date.parse(i.endedAt) : NaN)).filter(Number.isFinite);
     if (ends.length) tgtTl.endedAt = new Date(Math.max(...ends)).toISOString();
     await serviceTimelineStore.upsert(tgtTl);
+    serviceTimelineRecorder.forget(sourceKey);
     await serviceTimelineStore.delete(sourceKey);
     broadcast("service-timeline:history", tgtTl);
   }
@@ -172,6 +176,7 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     tgtAt.totalAttendance = Math.max(tgtAt.totalAttendance, srcAt.totalAttendance);
     recomputeAttendance(tgtAt);
     await attendanceStore.upsert(tgtAt);
+    attendanceRecorder.forget(sourceKey);
     await attendanceStore.delete(sourceKey);
     broadcast("attendance:history", tgtAt);
   }
@@ -189,6 +194,7 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
       tgtSpl.endedAt = srcSpl.endedAt;
     }
     await splHistoryStore.upsert(tgtSpl);
+    splRecorder.forget(sourceKey);
     await splHistoryStore.delete(sourceKey);
     broadcast("spl:history", tgtSpl);
   }

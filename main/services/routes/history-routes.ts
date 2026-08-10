@@ -79,6 +79,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
           return;
         }
         if (method === "DELETE") {
+          attendanceRecorder.forget(key);
           json(res, { deleted: await attendanceStore.delete(key) });
           return;
         }
@@ -103,6 +104,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
           return;
         }
         if (method === "DELETE") {
+          serviceTimelineRecorder.forget(key);
           json(res, { deleted: await serviceTimelineStore.delete(key) });
           return;
         }

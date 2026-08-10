@@ -184,6 +184,32 @@ class ServiceTimelineRecorder {
     if (!this.current.endedAt) this.current.endedAt = iso;
   }
 
+  /**
+   * Drop an in-memory record so a delete of it is not undone.
+   *
+   * Deleting a record removed the file and the store's cache entry, but this
+   * recorder still held `current`/`currentKey`; ensureRecord short-circuits on a
+   * matching key, kept appending, and the debounced persist recreated the file
+   * seconds later. The row reappeared on the next refresh and the delete button
+   * read as broken. Merging had the same shape: the source key was deleted while
+   * still being recorded, so it came back with its items now duplicated across
+   * both records.
+   *
+   * Cancels the pending write too — otherwise the timer that is already queued
+   * puts the record straight back.
+   */
+  forget(serviceKey: string): boolean {
+    if (this.currentKey !== serviceKey && this.current?.serviceKey !== serviceKey) return false;
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    this.dirty = false;
+    this.current = null;
+    this.currentKey = null;
+    return true;
+  }
+
   private schedulePersist(): void {
     this.dirty = true;
     if (this.persistTimer) return;
