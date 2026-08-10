@@ -133,7 +133,7 @@ export class ShurePsm extends ShureBaseProvider {
         break;
     }
 
-    this.emitStatus(channel);
+    this.emitChannel(channel);
   }
 
   // ── SAMPLE messages ───────────────────────────────────────────────────────

@@ -4,28 +4,11 @@
 // leading `<` / whitespace and trim; tokenise by spaces. Ignore partial/empty.
 
 import * as net from "net";
-import type { DeviceChannel, DeviceProvider, DeviceStatus } from "../../types/devices.js";
-import type { ConfigField, ConnectionState } from "../../types/integrations.js";
-import { serviceWindow } from "../../services/service-window.js";
+import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
+import type { ConfigField } from "../../types/integrations.js";
+import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
 
 // Per-channel mutable runtime state.
-export interface ChannelState {
-  channelId: string;
-  name: string | null;
-  deviceType: "receiver" | "iem" | "charger";
-  online: boolean;
-  rfBars: number | null;
-  rfLevelDbm: number | null;
-  battery: number | null;
-  charging: boolean | null;
-  frequencyLabel: string | null;
-  audioLevel: number | null;
-  /** Charger-bay telemetry (null for mics & IEMs). */
-  cycles: number | null;
-  health: number | null;
-  tempC: number | null;
-}
-
 export interface ShureConfig {
   host: string;
   port: number;
@@ -44,7 +27,7 @@ const CONNECT_TIMEOUT_MS = 10_000;
 // slow backstop; halving it trims idle command chatter to each receiver.
 const HEARTBEAT_INTERVAL_MS = 60_000;
 
-export abstract class ShureBaseProvider implements DeviceProvider {
+export abstract class ShureBaseProvider extends DeviceProviderBase implements DeviceProvider {
   abstract readonly id: string;
   abstract readonly label: string;
   abstract readonly configSchema: ConfigField[];
@@ -55,10 +38,6 @@ export abstract class ShureBaseProvider implements DeviceProvider {
 
   private socket: net.Socket | null = null;
   private receiveBuffer = "";
-  private connectionState: ConnectionState = "disconnected";
-  private statusCallback: ((s: DeviceStatus) => void) | null = null;
-  private stateChangeCallback: ((state: ConnectionState) => void) | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   // Consecutive failed connect attempts, for exponential reconnect back-off.
   private reconnectAttempts = 0;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -75,18 +54,6 @@ export abstract class ShureBaseProvider implements DeviceProvider {
 
   // ââ DeviceProvider interface ââââââââââââââââââââââââââââââââââââââââââââââ
 
-  onStatus(cb: (s: DeviceStatus) => void): void {
-    this.statusCallback = cb;
-  }
-
-  onConnectionStateChange(cb: (state: ConnectionState) => void): void {
-    this.stateChangeCallback = cb;
-  }
-
-  getConnectionState(): ConnectionState {
-    return this.connectionState;
-  }
-
   async connect(cfg: Record<string, unknown>): Promise<void> {
     this.enabled = true;
     this.cfg = this.parseCfg(cfg);
@@ -99,7 +66,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
     this.reconnectAttempts = 0;
     this.clearTimers();
     this.destroySocket();
-    this.setConnectionState("disconnected");
+    this.setState("disconnected");
     this.markAllChannelsOffline();
   }
 
@@ -137,7 +104,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
 
   /** Send a command over the TCP socket. cmd must NOT include the `< >` framing. */
   protected send(cmd: string): void {
-    if (!this.socket || this.connectionState !== "connected") return;
+    if (!this.socket || this.getConnectionState() !== "connected") return;
     const raw = `< ${cmd} >\n`;
     try {
       this.socket.write(raw);
@@ -154,21 +121,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
   protected readonly maxDynamicChannels = 64;
 
   private buildDefaultChannelState(n: number): ChannelState {
-    return {
-      channelId: String(n),
-      name: null,
-      deviceType: this.defaultDeviceType,
-      online: false,
-      rfBars: null,
-      rfLevelDbm: null,
-      battery: null,
-      charging: null,
-      frequencyLabel: null,
-      audioLevel: null,
-      cycles: null,
-      health: null,
-      tempC: null,
-    };
+    return blankChannel(String(n), { deviceType: this.defaultDeviceType });
   }
 
   /** Initialise (or reset) channel states to their offline defaults. */
@@ -188,35 +141,15 @@ export abstract class ShureBaseProvider implements DeviceProvider {
     return true;
   }
 
-  /** Emit a DeviceStatus for the given channel. */
-  protected emitStatus(channelNumber: number): void {
+  /** Emit a DeviceStatus for the given channel number. */
+  protected emitChannel(channelNumber: number): void {
     const state = this.channelStates.get(channelNumber);
-    if (!state || !this.statusCallback) return;
-    const status: DeviceStatus = {
-      channelId: state.channelId,
-      name: state.name,
-      deviceType: state.deviceType,
-      online: state.online,
-      rfBars: state.rfBars,
-      rfLevelDbm: state.rfLevelDbm,
-      battery: state.battery,
-      charging: state.charging,
-      frequencyLabel: state.frequencyLabel,
-      audioLevel: state.audioLevel,
-      cycles: state.cycles,
-      health: state.health,
-      tempC: state.tempC,
-      updatedAt: new Date().toISOString(),
-    };
-    this.statusCallback(status);
+    if (state) this.emitStatus(state);
   }
 
   /** Emit offline status for all channels. */
   protected markAllChannelsOffline(): void {
-    for (const [n, state] of this.channelStates) {
-      state.online = false;
-      this.emitStatus(n);
-    }
+    this.offlineAll(this.channelStates.values());
   }
 
   // ââ Private networking ââââââââââââââââââââââââââââââââââââââââââââââââââââ
@@ -236,20 +169,14 @@ export abstract class ShureBaseProvider implements DeviceProvider {
     return { host, port, channels, meterRateMs };
   }
 
-  private setConnectionState(state: ConnectionState): void {
-    if (this.connectionState === state) return;
-    this.connectionState = state;
-    this.stateChangeCallback?.(state);
-  }
-
   private async openSocket(): Promise<void> {
     if (!this.cfg.host) {
       console.error(`[shure:${this.id}] no host configured`);
-      this.setConnectionState("error");
+      this.setState("error");
       return;
     }
 
-    this.setConnectionState("connecting");
+    this.setState("connecting");
     // Log the connect attempt only at the start of an outage (attempts === 0) so a
     // device off all week doesn't spam the log every retry cycle.
     if (this.reconnectAttempts === 0) console.log(`[shure:${this.id}] connecting to ${this.cfg.host}:${this.cfg.port}`);
@@ -266,7 +193,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
       console.log(`[shure:${this.id}] connected to ${this.cfg.host}:${this.cfg.port}`);
       socket.setTimeout(0); // disable connect timeout after connected
       this.reconnectAttempts = 0; // reset back-off on a successful connect
-      this.setConnectionState("connected");
+      this.setState("connected");
       this.startHeartbeat();
       this.onConnected();
     });
@@ -282,7 +209,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
 
     socket.on("error", (err) => {
       if (this.reconnectAttempts === 0) console.warn(`[shure:${this.id}] socket error: ${err.message}`);
-      this.setConnectionState("error");
+      this.setState("error");
       // Tear down so 'close' fires and we reconnect with back-off, rather than
       // leaving a half-open socket lingering.
       socket.destroy();
@@ -292,8 +219,8 @@ export abstract class ShureBaseProvider implements DeviceProvider {
       if (this.reconnectAttempts === 0) console.log(`[shure:${this.id}] socket closed`);
       this.stopHeartbeat();
       this.markAllChannelsOffline();
-      if (this.connectionState !== "disconnected") {
-        this.setConnectionState("disconnected");
+      if (this.getConnectionState() !== "disconnected") {
+        this.setState("disconnected");
       }
       if (this.enabled) {
         this.scheduleReconnect();
@@ -377,16 +304,15 @@ export abstract class ShureBaseProvider implements DeviceProvider {
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectTimer !== null) return;
-    const delay = serviceWindow.capDelayMs(RECONNECT_BASE_MS * 2 ** Math.min(this.reconnectAttempts, 20));
+    if (this.reconnectPending) return;
+    const raw = RECONNECT_BASE_MS * 2 ** Math.min(this.reconnectAttempts, 20);
     this.reconnectAttempts++;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
+    this.queueReconnect(raw, () => {
       if (this.enabled) {
         this.initChannelStates(this.cfg.channels);
         void this.openSocket();
       }
-    }, delay);
+    });
   }
 
   private startHeartbeat(): void {
@@ -405,10 +331,7 @@ export abstract class ShureBaseProvider implements DeviceProvider {
 
   private clearTimers(): void {
     this.stopHeartbeat();
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.clearReconnect();
   }
 
   private destroySocket(): void {

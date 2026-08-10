@@ -19,9 +19,9 @@
 import * as https from "node:https";
 import { scrub } from "../../services/scrub.js";
 
-import type { DeviceChannel, DeviceProvider, DeviceStatus } from "../../types/devices.js";
-import type { ConfigField, ConnectionState } from "../../types/integrations.js";
-import { serviceWindow } from "../../services/service-window.js";
+import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
+import type { ConfigField } from "../../types/integrations.js";
+import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
 
 const DEBUG = !!process.env.SPECTERA_DEBUG;
 const DEFAULT_PORT = 443;
@@ -31,31 +31,7 @@ const RECONNECT_MAX_MS = 3_600_000; // internal ceiling; the service-window sche
 // Resource branches we ask the base station to push.
 const SUBSCRIBE_PATHS = ["/api/mts/paired/all", "/api/rf/channels", "/api/audio/links"];
 
-/**
- * Per-channel telemetry.
- *
- * Field-for-field with ChannelState in shure-base, deliberately. This was a third
- * hand-copy that had quietly dropped rfLevelDbm, charging, cycles, health and
- * tempC — every one hardcoded to null in emit() — so a Spectera pack reported no
- * charge state and a Spectera charger no bay telemetry at all, while the same
- * fields worked on Shure. Telemetry had been added to two of the three copies.
- */
-interface SekState {
-  channelId: string;
-  name: string | null;
-  online: boolean;
-  battery: number | null;
-  rfBars: number | null;
-  rfLevelDbm: number | null;
-  charging: boolean | null;
-  frequencyLabel: string | null;
-  audioLevel: number | null;
-  cycles: number | null;
-  health: number | null;
-  tempC: number | null;
-}
-
-export class SennheiserSpectera implements DeviceProvider {
+export class SennheiserSpectera extends DeviceProviderBase implements DeviceProvider {
   readonly id = "sennheiser-spectera";
   readonly label = "Sennheiser Spectera";
   readonly configSchema: ConfigField[] = [
@@ -82,28 +58,15 @@ export class SennheiserSpectera implements DeviceProvider {
   private port = DEFAULT_PORT;
   private password = "";
   private running = false;
-  private connState: ConnectionState = "disconnected";
-  private statusCb: ((s: DeviceStatus) => void) | null = null;
-  private connCb: ((state: ConnectionState) => void) | null = null;
 
   private req: ReturnType<typeof https.request> | null = null;
   private sseBuffer = "";
   private sessionUuid: string | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectMs = RECONNECT_BASE_MS;
-  private channels = new Map<string, SekState>();
+  private channels = new Map<string, ChannelState>();
 
   // ── DeviceProvider interface ──────────────────────────────────────────────
 
-  onStatus(cb: (s: DeviceStatus) => void): void {
-    this.statusCb = cb;
-  }
-  onConnectionStateChange(cb: (state: ConnectionState) => void): void {
-    this.connCb = cb;
-  }
-  getConnectionState(): ConnectionState {
-    return this.connState;
-  }
 
   async connect(cfg: Record<string, unknown>): Promise<void> {
     this.host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
@@ -115,10 +78,9 @@ export class SennheiserSpectera implements DeviceProvider {
 
   async disconnect(): Promise<void> {
     this.running = false;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = null;
+    this.clearReconnect();
     this.abortStream();
-    this.markAllOffline();
+    this.markOffline();
     this.setState("disconnected");
   }
 
@@ -181,7 +143,7 @@ export class SennheiserSpectera implements DeviceProvider {
 
   private onStreamClosed(): void {
     this.abortStream();
-    this.markAllOffline();
+    this.markOffline();
     if (this.running) {
       this.setState("error");
       this.scheduleReconnect();
@@ -189,13 +151,10 @@ export class SennheiserSpectera implements DeviceProvider {
   }
 
   private scheduleReconnect(): void {
-    if (!this.running || this.reconnectTimer) return;
-    const delay = serviceWindow.capDelayMs(this.reconnectMs);
+    if (!this.running || this.reconnectPending) return;
+    const raw = this.reconnectMs;
     this.reconnectMs = Math.min(this.reconnectMs * 2, RECONNECT_MAX_MS);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.openStream();
-    }, delay);
+    this.queueReconnect(raw, () => this.openStream());
   }
 
   private abortStream(): void {
@@ -248,7 +207,7 @@ export class SennheiserSpectera implements DeviceProvider {
       this.sendSubscription(uuid);
       return;
     }
-    if (this.connState !== "connected") this.setState("connected");
+    this.setState("connected");
     this.applyData(data);
   }
 
@@ -316,22 +275,11 @@ export class SennheiserSpectera implements DeviceProvider {
   private updateSek(uid: string, value: unknown): void {
     if (!value || typeof value !== "object") return;
     const v = value as Record<string, unknown>;
+    // blankChannel, not a literal: the hand-written one here is exactly what had
+    // silently lost five fields, and a shared constructor cannot.
     let st = this.channels.get(uid);
     if (!st) {
-      st = {
-        channelId: uid,
-        name: uid,
-        online: false,
-        battery: null,
-        rfBars: null,
-        rfLevelDbm: null,
-        charging: null,
-        frequencyLabel: null,
-        audioLevel: null,
-        cycles: null,
-        health: null,
-        tempC: null,
-      };
+      st = blankChannel(uid, { name: uid });
       this.channels.set(uid, st);
     }
 
@@ -391,40 +339,13 @@ export class SennheiserSpectera implements DeviceProvider {
     const tempC = firstNum(readDeep(v, ["battery", "temperature"]), v.temperature, v.tempC);
     if (tempC != null && tempC > -40 && tempC < 100) st.tempC = tempC;
 
-    this.emit(st);
+    this.emitStatus(st);
   }
 
-  private emit(st: SekState): void {
-    this.statusCb?.({
-      channelId: st.channelId,
-      name: st.name,
-      deviceType: "receiver",
-      online: st.online,
-      rfBars: st.rfBars,
-      rfLevelDbm: st.rfLevelDbm,
-      battery: st.battery,
-      charging: st.charging,
-      frequencyLabel: st.frequencyLabel,
-      audioLevel: st.audioLevel,
-      cycles: st.cycles,
-      health: st.health,
-      tempC: st.tempC,
-      updatedAt: new Date().toISOString(),
-    });
+  private markOffline(): void {
+    this.offlineAll(this.channels.values());
   }
 
-  private markAllOffline(): void {
-    for (const st of this.channels.values()) {
-      st.online = false;
-      this.emit(st);
-    }
-  }
-
-  private setState(s: ConnectionState): void {
-    if (s === this.connState) return;
-    this.connState = s;
-    this.connCb?.(s);
-  }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
