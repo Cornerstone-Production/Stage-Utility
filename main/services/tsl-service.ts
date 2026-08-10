@@ -92,6 +92,12 @@ class TslService extends ConnectionLifecycle {
     return !!this.host && !!this.port;
   }
 
+  /** Is a scoreboard connected and being fed people counts right now? Read by
+   *  SenSource's poll gate, which otherwise counts only browsers. */
+  isSending(): boolean {
+    return this.connected && this.feeds.length > 0;
+  }
+
   configure(host: string, port: number, feeds: TslFeed[]): void {
     this.host = host?.trim() || null;
     this.port = port > 0 ? Math.floor(port) : null;
@@ -203,3 +209,7 @@ class TslService extends ConnectionLifecycle {
 }
 
 export const tslService = new TslService();
+
+// A connected scoreboard is watching the counts just as much as a browser is,
+// and the SSE subscriber check cannot see it. See addDemandSource.
+sensourceService.addDemandSource(() => tslService.isSending());

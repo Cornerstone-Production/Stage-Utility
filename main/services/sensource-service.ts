@@ -282,6 +282,31 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
   private zonesCache: { at: number; zones: VeaZone[] } | null = null;
   /** Cached /space listing for the authoritative building occupancy. */
   private spacesCache: { at: number; spaces: VeaSpace[] } | null = null;
+  /** Consumers that read getLatest() in-process. See addDemandSource. */
+  private demandSources: (() => boolean)[] = [];
+
+  /**
+   * Register something that consumes people counts without an SSE subscription.
+   *
+   * The idle gate below slows polling to once a minute when nobody is watching,
+   * and asked only `channelHasSubscribers` — a browser question. Two consumers
+   * live inside this process and are invisible to it: the attendance recorder
+   * pulls getLatest() on every live tick, and tslService pushes it to the
+   * scoreboard. On a Sunday with no people-count display open, the recorder was
+   * therefore sampling counts up to a minute stale for the whole service, and
+   * the graph it drew was the shape of the poll gate rather than of the room.
+   *
+   * A callback rather than an import: this service knowing about its consumers
+   * directly would be a cycle, since both of them import it.
+   */
+  addDemandSource(wantsFreshCounts: () => boolean): void {
+    this.demandSources.push(wantsFreshCounts);
+  }
+
+  /** Is anything — a browser or an in-process consumer — actually using this? */
+  private get inDemand(): boolean {
+    return this.hasSubscribers || this.demandSources.some((wants) => wants());
+  }
 
   constructor() {
     super("sensource", "people:count", OFFLINE);
@@ -663,7 +688,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
           // set 300s to stay inside Vea's quota would have been polled every 60s
           // all week by the idle path.
           const sec = Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
-          this.scheduleIn(this.hasSubscribers ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS));
+          this.scheduleIn(this.inDemand ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS));
         } else {
           this.scheduleReconnect();
         }

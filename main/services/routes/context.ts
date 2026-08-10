@@ -75,6 +75,27 @@ export const MAX_JSON_BODY_BYTES = 8 * 1024 * 1024;
  */
 export const MAX_UPLOAD_BODY_BYTES = 128 * 1024 * 1024;
 
+/**
+ * JSON ceilings for the two routes that legitimately carry a payload.
+ *
+ * The 8 MB default is the right size for config POSTs and wrong for these: the
+ * app's own image limit is 12 MB, base64 adds about a third, and a config
+ * snapshot embeds every stored image at once. So the app could export a backup
+ * it then refused to import, and reject an image the image store would have
+ * accepted — a 413 from a limit nobody had lined up against the limit beside it.
+ *
+ * Raised here per route rather than globally: the small default is what keeps an
+ * unauthenticated LAN POST from growing without bound, and these two are the
+ * only routes with a reason to be bigger. `bodyLimits.test.ts` fails if either
+ * of these ever drops below what the image store accepts, which is the drift
+ * that caused this.
+ */
+export const MAX_IMAGE_BODY_BYTES = 24 * 1024 * 1024;
+/** A snapshot carries every config file AND every uploaded image, base64'd. Big
+ *  enough for a real install's worth; a bundle past this wants streaming to a
+ *  temp file rather than a larger number held twice in memory on a Pi. */
+export const MAX_CONFIG_BODY_BYTES = 64 * 1024 * 1024;
+
 /** Thrown past the route handlers so remote-server can answer 413. */
 export class BodyTooLargeError extends Error {
   readonly status = 413;
@@ -121,7 +142,7 @@ export async function readBody(
 ): Promise<unknown> {
   refuseDeclared(req, limit);
   return new Promise((resolve, reject) => {
-    let body = "";
+    const chunks: Buffer[] = [];
     let total = 0;
     req.on("data", (chunk: Buffer) => {
       total += chunk.byteLength;
@@ -131,10 +152,16 @@ export async function readBody(
         reject(new BodyTooLargeError(limit));
         return;
       }
-      body += chunk.toString();
+      chunks.push(chunk);
     });
     req.on("end", () => {
       try {
+        // Decoded once, at the end. Decoding each chunk as it arrived split any
+        // multi-byte character that straddled a chunk boundary into two halves,
+        // each of which decodes to U+FFFD — so a curly apostrophe in a song
+        // title or an accent in a name came back as replacement characters,
+        // depending only on where TCP happened to cut the stream.
+        const body = Buffer.concat(chunks, total).toString("utf8");
         resolve(body ? JSON.parse(body) : {});
       } catch {
         reject(new Error("Invalid JSON body"));

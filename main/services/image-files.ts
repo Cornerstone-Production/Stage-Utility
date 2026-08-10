@@ -32,7 +32,9 @@ const MIME_BY_EXT: Record<string, string> = {
   svg: "image/svg+xml",
 };
 
-const MAX_BYTES = 12 * 1024 * 1024;
+/** The largest image the store will accept. Exported so the route body limits
+ *  can be checked against it rather than against a copy of the number. */
+export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
 /**
  * Do the bytes actually look like the format the data URL claimed?
@@ -80,7 +82,7 @@ export async function saveImage(dirName: string, dataUrl: string): Promise<strin
   if (!ext) throw new Error(`unsupported image type: ${m[1]}`);
   const bytes = Buffer.from(m[2], "base64");
   if (bytes.length === 0) throw new Error("empty image");
-  if (bytes.length > MAX_BYTES) throw new Error("image too large (max 12 MB)");
+  if (bytes.length > MAX_IMAGE_BYTES) throw new Error("image too large (max 12 MB)");
   if (!looksLike(m[1].toLowerCase(), bytes)) throw new Error(`not a valid ${m[1]} image`);
 
   const hash = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);

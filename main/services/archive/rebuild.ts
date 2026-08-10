@@ -13,43 +13,14 @@
 // Only services recorded since the archive shipped have samples. Anything older
 // returns null, which is the honest answer: there is nothing to rebuild from.
 
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
-
 import type { ServiceSplHistory, SplItemHistory } from "../../types/stage.js";
 import { addLeqSample } from "../spl-leq.js";
 import { serviceDirPath } from "./archive-paths.js";
-import { parseRows } from "./csv.js";
-
-/** Rows of one CSV as objects keyed by their header, across rolled files. */
-async function readRecords(dir: string, base: string): Promise<Record<string, string>[] | null> {
-  const out: Record<string, string>[] = [];
-  let found = false;
-  for (let i = 1; i <= 100; i++) {
-    const name = i === 1 ? `${base}.csv` : `${base}.${i}.csv`;
-    let text: string;
-    try {
-      text = await fs.readFile(path.join(dir, name), "utf8");
-    } catch {
-      if (i === 1) continue;
-      break;
-    }
-    found = true;
-    const rows = parseRows(text);
-    if (rows.length < 2) continue;
-    const header = rows[0];
-    for (const r of rows.slice(1)) {
-      const rec: Record<string, string> = {};
-      header.forEach((h, idx) => (rec[h] = r[idx] ?? ""));
-      out.push(rec);
-    }
-  }
-  return found ? out : null;
-}
+import { readArchiveRows } from "./archive-rows.js";
 
 /** How many SPL sample rows a service has archived, or 0 if none. */
 export async function archivedSampleCount(serviceKey: string, serviceDate: string): Promise<number> {
-  const rows = await readRecords(serviceDirPath(serviceKey, serviceDate), "spl");
+  const rows = await readArchiveRows(serviceDirPath(serviceKey, serviceDate), "spl");
   return rows?.length ?? 0;
 }
 
@@ -64,7 +35,7 @@ export async function rebuildSplItems(
   serviceKey: string,
   serviceDate: string,
 ): Promise<SplItemHistory[] | null> {
-  const rows = await readRecords(serviceDirPath(serviceKey, serviceDate), "spl");
+  const rows = await readArchiveRows(serviceDirPath(serviceKey, serviceDate), "spl");
   if (!rows || rows.length === 0) return null;
 
   const byItem = new Map<string, SplItemHistory>();

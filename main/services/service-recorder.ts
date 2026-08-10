@@ -114,6 +114,27 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   }
 
   /**
+   * Is this recorder writing to `serviceKey` right now?
+   *
+   * `currentKey` alone does not answer that: it is set when a record is
+   * established and only cleared by forget(), so it still names last Sunday's
+   * service on Tuesday. Liveness needs all three — the recorder holds this key,
+   * the record is still open, and a live item ticked within the gap that
+   * separates one occurrence from the next.
+   *
+   * This is what makes editing history safe to reason about. Deleting, merging
+   * or re-windowing a record the recorder is actively appending to is a race no
+   * ordering of forget() and upsert() wins: the operator's edit and the next
+   * tick are both correct about what they hold, and one of them loses. The
+   * routes refuse instead, so there is nothing to lose.
+   */
+  isRecording(serviceKey: string): boolean {
+    if (this.currentKey !== serviceKey || !this.current) return false;
+    if (this.current.endedAt) return false;
+    return this.lastLiveAt !== 0 && Date.now() - this.lastLiveAt < SERVICE_GAP_MS;
+  }
+
+  /**
    * Drop an in-memory record so a delete of it is not undone.
    *
    * Deleting a record removes the file and the store's cache entry, but the

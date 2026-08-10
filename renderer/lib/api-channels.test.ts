@@ -104,6 +104,53 @@ describe("IPC channel wiring", () => {
     assert.ok(invoked.has("stage:getState"), "expected stage:getState among them");
   });
 
+  it("names every channel the UI no longer dispatches", () => {
+    // The other direction, and the one that actually bit. Removing two settings
+    // panels as unreachable dead code took the last callers of
+    // spl:deleteHistory and attendance:deleteHistory with them — so History's
+    // Delete, which calls only serviceTimeline:delete, quietly stopped removing
+    // the SPL and attendance records. Nothing was broken at the call site; the
+    // call site was gone. A channel losing its last caller is a fact worth
+    // knowing at the moment it happens, not a Sunday later.
+    //
+    // An EXACT set, not a ceiling. A floor with slack is how three config
+    // stores went missing from every backup with the suite green: the point is
+    // that ADDING an entry has to be a deliberate edit here, with a reason.
+    const expected = new Map([
+      ["spl:listHistory", "superseded by the service-timeline list; route kept for the HTTP API"],
+      ["spl:deleteHistory", "History deletes all three records via serviceTimeline:delete"],
+      ["attendance:deleteHistory", "same — see deleteServiceRecords"],
+      ["stage:setNdiEnabled", "NDI schema is dormant on this branch; the UI ships with the native app"],
+      ["stage:getRemoteUrl", "the remote URL is read from stage:getState instead"],
+      ["outputs:openWindow", "Electron-era window opener; the web build navigates directly"],
+      ["app:getInfo", "version info comes from /api/version"],
+    ]);
+
+    // A deliberately LOOSER scan than invokedChannels(): any mention of the
+    // name anywhere in the renderer counts. The strict dispatcher scan answers
+    // "is this reached through a call shape we recognise", which is the right
+    // question for the missing-case test above and the wrong one here — the UI
+    // reaches channels through a ternary, through a variable, and through
+    // onNotification, and none of those are dead.
+    const referenced = new Set<string>();
+    for (const file of walk(RENDERER)) {
+      if (path.resolve(file) === API_TS) continue;
+      for (const m of fs.readFileSync(file, "utf8").matchAll(/"([\w-]+:[\w-]+)"/g)) referenced.add(m[1]!);
+    }
+    const undispatched = [...handledChannels()].filter((c) => !referenced.has(c)).sort();
+
+    const appeared = undispatched.filter((c) => !expected.has(c));
+    assert.deepEqual(
+      appeared,
+      [],
+      "these channels lost their last caller — either restore the caller, or add them " +
+        "here with the reason they are kept:\n  " + appeared.join("\n  "),
+    );
+
+    const revived = [...expected.keys()].filter((c) => referenced.has(c)).sort();
+    assert.deepEqual(revived, [], `these are dispatched again — drop them from the list: ${revived}`);
+  });
+
   it("sees channels dispatched through a local ipc() wrapper", () => {
     // The specific blind spot: four panels forward through a local `ipc()` and one
     // aliases the import, covering the entire wireless, integrations and settings

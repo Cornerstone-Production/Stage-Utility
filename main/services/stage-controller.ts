@@ -245,6 +245,8 @@ export class StageController {
 
   // Hourly auto-refresh of the active plan.
   private autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  /** Remembered so pauseBackgroundWork can restart at the same cadence. */
+  private autoRefreshIntervalMs = 60 * 60 * 1000;
   private isRefreshing = false;
 
   // ── Init ─────────────────────────────────────────────────────────────
@@ -2050,9 +2052,35 @@ export class StageController {
   startAutoRefresh(intervalMs = 60 * 60 * 1000): void {
     this.stopAutoRefresh();
     console.log(`[stage-controller] auto-refresh every ${Math.round(intervalMs / 60000)} min`);
+    this.autoRefreshIntervalMs = intervalMs;
     this.autoRefreshTimer = setInterval(() => {
       void this.autoRefreshTick();
     }, intervalMs);
+  }
+
+  /**
+   * Quiet this controller's periodic writers, and hand back the undo.
+   *
+   * A config restore has to stop everything that writes config before it lays
+   * the snapshot down, or the live poller's next tick reads a still-warm cache
+   * and writes it back over the file just restored. Stopping was the easy half;
+   * a restore that then FAILED left the box serving with nothing polling PCO —
+   * displays frozen, recorders never ticking again, and no way back but a
+   * restart. On success nothing calls the undo, because the process exits.
+   *
+   * Restores exactly what was running: the interval is whatever
+   * integration-manager last chose, not the default, and neither timer is
+   * started if it was not going in the first place.
+   */
+  pauseBackgroundWork(): () => void {
+    const refreshMs = this.autoRefreshTimer ? this.autoRefreshIntervalMs : null;
+    const hadUpdateChecks = this.updateCheckTimer !== null;
+    this.stopAutoRefresh();
+    this.stopUpdateChecks();
+    return () => {
+      if (refreshMs != null) this.startAutoRefresh(refreshMs);
+      if (hadUpdateChecks) this.startUpdateChecks();
+    };
   }
 
   stopAutoRefresh(): void {

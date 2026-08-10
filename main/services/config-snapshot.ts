@@ -101,20 +101,28 @@ function pkgVersion(): string {
  * Imported lazily: config-snapshot is pulled in by the backup scheduler at boot,
  * and a static import of the controller here would make that a cycle.
  */
-function stopBackgroundWriters(): void {
+async function pauseBackgroundWriters(): Promise<() => void> {
   // Logged, not swallowed: if either stop is ever renamed this would otherwise
   // proceed with the writers running and still report the restore as clean.
-  const failed = (what: string) => (err: unknown) =>
+  const failed = (what: string) => (err: unknown) => {
     console.error(`[config-snapshot] could not quiet ${what} before restoring:`, err);
-  void import("./live-poller.js")
-    .then((m) => m.livePoller.stop())
-    .catch(failed("the live poller"));
-  void import("./stage-controller.js")
-    .then((m) => {
-      m.stageController.stopAutoRefresh();
-      m.stageController.stopUpdateChecks();
-    })
-    .catch(failed("the stage controller"));
+    return null;
+  };
+  // Awaited, where these used to be fire-and-forget. The imports are lazy to
+  // break a cycle, not because the timing is unimportant: not waiting meant the
+  // writes below could begin before the poller had actually stopped, which is
+  // the race the stop exists to remove.
+  const undos = await Promise.all([
+    import("./live-poller.js")
+      .then((m) => m.livePoller.pause())
+      .catch(failed("the live poller")),
+    import("./stage-controller.js")
+      .then((m) => m.stageController.pauseBackgroundWork())
+      .catch(failed("the stage controller")),
+  ]);
+  return () => {
+    for (const undo of undos) undo?.();
+  };
 }
 
 class ConfigSnapshotService {
@@ -194,8 +202,21 @@ class ConfigSnapshotService {
     // still-warm cache and write it straight back over the file just restored,
     // reporting success. Stopping the background writers first removes the race
     // at its source rather than trying to win it.
-    stopBackgroundWriters();
+    const resumeBackgroundWriters = await pauseBackgroundWriters();
+    try {
+      return await this.writeSnapshot(bundle);
+    } catch (err) {
+      // Only on the failure path. A successful restore does not resume anything
+      // because the process exits ~1.2s later — but a failed one returns to a
+      // box that keeps serving, and leaving it with no poller froze every
+      // display and stopped the recorders for good.
+      resumeBackgroundWriters();
+      throw err;
+    }
+  }
 
+  /** The write half of `apply`, split out so the resume can wrap all of it. */
+  private async writeSnapshot(bundle: ConfigSnapshot): Promise<string[]> {
     const applied: string[] = [];
     for (const [name, contents] of Object.entries(bundle.files)) {
       if (!configFiles().includes(name)) continue; // allowlist only

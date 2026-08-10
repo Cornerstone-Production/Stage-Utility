@@ -29,7 +29,8 @@ const MIME_BY_EXT: Record<string, string> = {
   webp: "image/webp",
   svg: "image/svg+xml",
 };
-const MAX_BYTES = 12 * 1024 * 1024; // 12 MB
+/** See image-files.ts — exported for the same reason. */
+export const MAX_LAYOUT_IMAGE_BYTES = 12 * 1024 * 1024;
 
 function dir(): string {
   return path.join(getUserDataPath(), "layout-images");
@@ -44,7 +45,7 @@ export async function saveLayoutImage(dataUrl: string): Promise<string> {
   if (!ext) throw new Error(`unsupported image type: ${m[1]}`);
   const bytes = Buffer.from(m[2], "base64");
   if (bytes.length === 0) throw new Error("empty image");
-  if (bytes.length > MAX_BYTES) throw new Error("image too large (max 12 MB)");
+  if (bytes.length > MAX_LAYOUT_IMAGE_BYTES) throw new Error("image too large (max 12 MB)");
   const hash = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
   const file = `${hash}.${ext}`;
   const d = dir();

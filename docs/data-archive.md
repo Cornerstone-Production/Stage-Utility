@@ -59,6 +59,25 @@ figures can be recomputed properly.
 Importing the same archive twice changes nothing. Every file is read and validated
 before anything is written, so a corrupt archive cannot leave a half-imported year.
 
+## Editing a recording in History
+
+Correcting a recording — trimming its window, recalculating attendance, merging
+two same-day recordings, deleting one — is a different operation from importing
+an archive, and it treats the raw layer differently in each direction:
+
+- **Merging two recordings moves the raw rows.** The source's CSVs are rewritten
+  into the target's directory, chronologically and widened to the union of both
+  column sets, and the source directory is removed. Not optional: SPL rebuilds
+  its record from these rows after a restart, so a merge that left them behind
+  reverted itself the next time the box came up.
+- **Deleting a recording keeps the raw rows.** Their loss cannot be undone, and
+  nothing reads them for a service with no record. Removing an operator's raw
+  samples is a bigger decision than "delete this recording" asks for; the
+  directory is named `YYYY-MM-DD_serviceKey` if you want to remove it by hand.
+- **A service that is recording right now cannot be edited at all.** The
+  recorder holds the same record, so any change races its next write. History
+  refuses until the service ends.
+
 ## Not retroactive
 
 Services recorded before this shipped kept only their summaries. The raw layer
