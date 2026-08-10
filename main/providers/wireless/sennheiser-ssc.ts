@@ -17,9 +17,9 @@
 
 import * as dgram from "node:dgram";
 
-import type { DeviceChannel, DeviceProvider, DeviceStatus } from "../../types/devices.js";
-import type { ConfigField, ConnectionState } from "../../types/integrations.js";
-import { serviceWindow } from "../../services/service-window.js";
+import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
+import type { ConfigField } from "../../types/integrations.js";
+import { DeviceProviderBase, type ChannelState } from "./device-provider-base.js";
 
 export const SSC_DEFAULT_PORT = 45;
 const PING_INTERVAL_MS = 5_000; // liveness probe (GET /device/name)
@@ -32,23 +32,7 @@ export const SSC_DEBUG = !!process.env.SENNHEISER_DEBUG;
 
 // Per-channel mutable runtime state (same shape the Shure providers track, so a
 // Sennheiser channel maps onto DeviceStatus identically downstream).
-export interface SscChannelState {
-  channelId: string;
-  name: string | null;
-  deviceType: "receiver" | "iem" | "charger";
-  online: boolean;
-  rfBars: number | null;
-  rfLevelDbm: number | null;
-  battery: number | null;
-  charging: boolean | null;
-  frequencyLabel: string | null;
-  audioLevel: number | null;
-  cycles: number | null;
-  health: number | null;
-  tempC: number | null;
-}
-
-export abstract class SennheiserSscBase implements DeviceProvider {
+export abstract class SennheiserSscBase extends DeviceProviderBase implements DeviceProvider {
   abstract readonly id: string;
   abstract readonly label: string;
   abstract readonly configSchema: ConfigField[];
@@ -64,29 +48,13 @@ export abstract class SennheiserSscBase implements DeviceProvider {
 
   private socket: dgram.Socket | null = null;
   private running = false;
-  private connState: ConnectionState = "disconnected";
-  private statusCb: ((s: DeviceStatus) => void) | null = null;
-  private connCb: ((state: ConnectionState) => void) | null = null;
 
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private watchdog: ReturnType<typeof setTimeout> | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectMs = RECONNECT_BASE_MS;
 
-  protected channels = new Map<string, SscChannelState>();
-
-  // ── DeviceProvider interface ──────────────────────────────────────────────
-
-  onStatus(cb: (s: DeviceStatus) => void): void {
-    this.statusCb = cb;
-  }
-  onConnectionStateChange(cb: (state: ConnectionState) => void): void {
-    this.connCb = cb;
-  }
-  getConnectionState(): ConnectionState {
-    return this.connState;
-  }
+  protected channels = new Map<string, ChannelState>();
 
   async connect(cfg: Record<string, unknown>): Promise<void> {
     this.host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
@@ -137,7 +105,7 @@ export abstract class SennheiserSscBase implements DeviceProvider {
 
   // ── Protected helpers ─────────────────────────────────────────────────────
 
-  protected blankChannel(id: string, deviceType: "receiver" | "iem" | "charger"): SscChannelState {
+  protected blankChannel(id: string, deviceType: "receiver" | "iem" | "charger"): ChannelState {
     return {
       channelId: id,
       name: null,
@@ -164,30 +132,12 @@ export abstract class SennheiserSscBase implements DeviceProvider {
   }
 
   /** Emit a DeviceStatus for one channel to the pipeline. */
-  protected emit(st: SscChannelState): void {
-    this.statusCb?.({
-      channelId: st.channelId,
-      name: st.name,
-      deviceType: st.deviceType,
-      online: st.online,
-      rfBars: st.rfBars,
-      rfLevelDbm: st.rfLevelDbm,
-      battery: st.battery,
-      charging: st.charging,
-      frequencyLabel: st.frequencyLabel,
-      audioLevel: st.audioLevel,
-      cycles: st.cycles,
-      health: st.health,
-      tempC: st.tempC,
-      updatedAt: new Date().toISOString(),
-    });
+  protected emit(st: ChannelState): void {
+    this.emitStatus(st);
   }
 
   protected markAllOffline(): void {
-    for (const st of this.channels.values()) {
-      st.online = false;
-      this.emit(st);
-    }
+    super.markAllOffline(this.channels.values());
   }
 
   // ── Private networking / lifecycle ──────────────────────────────────────────
@@ -243,7 +193,7 @@ export abstract class SennheiserSscBase implements DeviceProvider {
       if (!msg || typeof msg !== "object") continue;
       // Any valid frame proves the device is alive → connected + reset watchdog.
       this.reconnectMs = RECONNECT_BASE_MS;
-      if (this.connState !== "connected") this.setState("connected");
+      this.setState("connected");
       this.armWatchdog();
       try {
         this.handleFrame(msg as Record<string, unknown>);
@@ -275,27 +225,21 @@ export abstract class SennheiserSscBase implements DeviceProvider {
   }
 
   private scheduleReconnect(): void {
-    if (!this.running || this.reconnectTimer) return;
-    const delay = serviceWindow.capDelayMs(this.reconnectMs);
+    if (!this.running || this.reconnectPending) return;
+    const raw = this.reconnectMs;
     this.reconnectMs = Math.min(this.reconnectMs * 2, RECONNECT_MAX_MS);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
+    this.queueReconnect(raw, () => {
       this.initChannels();
       this.open();
-    }, delay);
-  }
-
-  private setState(s: ConnectionState): void {
-    if (s === this.connState) return;
-    this.connState = s;
-    this.connCb?.(s);
+    });
   }
 
   private clearTimers(): void {
     for (const t of [this.pingTimer, this.pollTimer]) if (t) clearInterval(t);
-    for (const t of [this.watchdog, this.reconnectTimer]) if (t) clearTimeout(t);
+    if (this.watchdog) clearTimeout(this.watchdog);
     this.pingTimer = this.pollTimer = null;
-    this.watchdog = this.reconnectTimer = null;
+    this.watchdog = null;
+    this.clearReconnect();
   }
 
   private closeSocket(): void {
