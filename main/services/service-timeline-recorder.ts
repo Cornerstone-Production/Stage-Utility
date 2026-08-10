@@ -114,9 +114,10 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
 
   /** Close every open item, then let the base stamp the record's end once. */
   protected override finalizeRecord(): void {
+    // One clock read for the items AND the record's own end, as before.
+    const endMs = Date.now();
+    const iso = new Date(endMs).toISOString();
     if (this.current) {
-      const endMs = Date.now();
-      const iso = new Date(endMs).toISOString();
       for (const it of this.current.items) {
         if (!it.endedAt) {
           it.endedAt = iso;
@@ -125,7 +126,7 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
         }
       }
     }
-    super.finalizeRecord();
+    super.finalizeRecord(iso);
   }
 }
 

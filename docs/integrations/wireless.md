@@ -43,3 +43,11 @@ meter rate is set once and applies to all wireless gear.
 - **Wireless channel** — one channel's RF bars, battery %, frequency, audio level
   (each toggleable).
 - **Charger battery** — a charger bay's battery state.
+
+## Reconnecting
+
+A receiver that drops is retried with a growing back-off, clamped to the service
+window — so gear nobody is looking at is not polled hard all week. Opening the
+Wireless Gear panel overrides that: while you are watching, retries stay brisk
+regardless of the window, so a pack you are waiting on comes back promptly rather
+than on the dormant schedule.

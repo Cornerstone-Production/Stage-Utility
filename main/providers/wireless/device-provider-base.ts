@@ -48,13 +48,12 @@ export interface ChannelState {
 /** A blank channel: everything unknown until the device says otherwise. */
 export function blankChannel(
   channelId: string,
-  name: string | null = null,
-  deviceType: ChannelState["deviceType"] = "receiver",
+  opts: { name?: string | null; deviceType?: ChannelState["deviceType"] } = {},
 ): ChannelState {
   return {
     channelId,
-    name,
-    deviceType,
+    name: opts.name ?? null,
+    deviceType: opts.deviceType ?? "receiver",
     online: false,
     rfBars: null,
     rfLevelDbm: null,
@@ -101,8 +100,9 @@ export abstract class DeviceProviderBase {
     this.statusCb?.({ ...st, updatedAt: new Date().toISOString() });
   }
 
-  /** Mark every channel offline and report it — a socket closing, a stop(). */
-  protected markAllOffline(channels: Iterable<ChannelState>): void {
+  /** Mark every channel offline and report it — a socket closing, a stop().
+   *  One name and one shape for all three drivers. */
+  protected offlineAll(channels: Iterable<ChannelState>): void {
     for (const st of channels) {
       st.online = false;
       this.emitStatus(st);
@@ -131,7 +131,6 @@ export abstract class DeviceProviderBase {
       this.reconnectTimer = null;
       fn();
     }, this.reconnectDelayMs(rawMs));
-    this.reconnectTimer.unref?.();
   }
 
   protected clearReconnect(): void {

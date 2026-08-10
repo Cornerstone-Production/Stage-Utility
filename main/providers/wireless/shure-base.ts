@@ -6,7 +6,7 @@
 import * as net from "net";
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
 import type { ConfigField } from "../../types/integrations.js";
-import { DeviceProviderBase, type ChannelState } from "./device-provider-base.js";
+import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
 
 // Per-channel mutable runtime state.
 export interface ShureConfig {
@@ -121,21 +121,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   protected readonly maxDynamicChannels = 64;
 
   private buildDefaultChannelState(n: number): ChannelState {
-    return {
-      channelId: String(n),
-      name: null,
-      deviceType: this.defaultDeviceType,
-      online: false,
-      rfBars: null,
-      rfLevelDbm: null,
-      battery: null,
-      charging: null,
-      frequencyLabel: null,
-      audioLevel: null,
-      cycles: null,
-      health: null,
-      tempC: null,
-    };
+    return blankChannel(String(n), { deviceType: this.defaultDeviceType });
   }
 
   /** Initialise (or reset) channel states to their offline defaults. */
@@ -163,7 +149,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
 
   /** Emit offline status for all channels. */
   protected markAllChannelsOffline(): void {
-    this.markAllOffline(this.channelStates.values());
+    this.offlineAll(this.channelStates.values());
   }
 
   // ââ Private networking ââââââââââââââââââââââââââââââââââââââââââââââââââââ

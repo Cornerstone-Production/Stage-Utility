@@ -19,7 +19,7 @@ import * as dgram from "node:dgram";
 
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
 import type { ConfigField } from "../../types/integrations.js";
-import { DeviceProviderBase, type ChannelState } from "./device-provider-base.js";
+import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
 
 export const SSC_DEFAULT_PORT = 45;
 const PING_INTERVAL_MS = 5_000; // liveness probe (GET /device/name)
@@ -105,22 +105,8 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
 
   // ── Protected helpers ─────────────────────────────────────────────────────
 
-  protected blankChannel(id: string, deviceType: "receiver" | "iem" | "charger"): ChannelState {
-    return {
-      channelId: id,
-      name: null,
-      deviceType,
-      online: false,
-      rfBars: null,
-      rfLevelDbm: null,
-      battery: null,
-      charging: null,
-      frequencyLabel: null,
-      audioLevel: null,
-      cycles: null,
-      health: null,
-      tempC: null,
-    };
+  protected blankChannel(id: string, deviceType: ChannelState["deviceType"]): ChannelState {
+    return blankChannel(id, { deviceType });
   }
 
   /** Serialize an SSC message object and send it as one UDP datagram. */
@@ -137,7 +123,7 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
   }
 
   protected markAllOffline(): void {
-    super.markAllOffline(this.channels.values());
+    this.offlineAll(this.channels.values());
   }
 
   // ── Private networking / lifecycle ──────────────────────────────────────────

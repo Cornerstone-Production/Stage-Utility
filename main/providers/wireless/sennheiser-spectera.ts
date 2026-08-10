@@ -279,7 +279,7 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
     // silently lost five fields, and a shared constructor cannot.
     let st = this.channels.get(uid);
     if (!st) {
-      st = blankChannel(uid, uid);
+      st = blankChannel(uid, { name: uid });
       this.channels.set(uid, st);
     }
 
@@ -339,15 +339,11 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
     const tempC = firstNum(readDeep(v, ["battery", "temperature"]), v.temperature, v.tempC);
     if (tempC != null && tempC > -40 && tempC < 100) st.tempC = tempC;
 
-    this.emit(st);
-  }
-
-  private emit(st: ChannelState): void {
     this.emitStatus(st);
   }
 
   private markOffline(): void {
-    this.markAllOffline(this.channels.values());
+    this.offlineAll(this.channels.values());
   }
 
 }

@@ -36,7 +36,7 @@ import { stageController } from "./stage-controller.js";
  *
  * One definition: this was declared identically in all three recorders.
  */
-export const SERVICE_GAP_MS = 10 * 60_000;
+const SERVICE_GAP_MS = 10 * 60_000;
 
 /** The identity every service record carries. */
 export interface ServiceRecord {
@@ -138,8 +138,8 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * and re-stamping pushes a closed record's end forward — on a two-service
    * Sunday the 9am's end became the moment the 11am began.
    */
-  protected finalizeRecord(): void {
-    if (this.current && !this.current.endedAt) this.current.endedAt = new Date().toISOString();
+  protected finalizeRecord(iso = new Date().toISOString()): void {
+    if (this.current && !this.current.endedAt) this.current.endedAt = iso;
   }
 
   protected schedulePersist(): void {
@@ -167,10 +167,14 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   /**
    * Make sure `current` is the record for the occurrence this tick belongs to.
    *
-   * Returns false when no record could be established, so a caller can bail
-   * without repeating the check.
+   * Returns nothing on purpose. An earlier version returned a boolean described
+   * as "false = could not establish a record, bail" — but it also returns early
+   * when PCO momentarily has no serviceTypeId while `current` still holds a
+   * perfectly good open record, and bailing there would drop samples on every
+   * cache blip mid-service. Callers test `this.current`, which is the question
+   * they actually mean.
    */
-  protected async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<boolean> {
+  protected async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<void> {
     // Captured before the awaits below. forget() bumps it, so a delete landing
     // while this waits on the store abandons the work rather than re-assigning
     // this.current and writing the deleted record straight back.
@@ -179,7 +183,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     const st = stageController.getState();
     const serviceTypeId = st.serviceTypeId;
     const planId = st.planId;
-    if (!serviceTypeId || !planId) return false; // can't key a record yet
+    if (!serviceTypeId || !planId) return; // can't key a record yet
     // Captured, not re-read: narrowing does not survive the awaits below, and the
     // operator could switch plans mid-tick — this record belongs to the plan that
     // was selected when the tick began.
@@ -188,7 +192,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // occurrence (9am vs 11am). Fall back to the date when none is known.
     const serviceTimeId = live.serviceTimeId;
     const key = `${serviceTypeId}:${planId}:${serviceTimeId ?? date}`;
-    if (this.currentKey === key && this.current) return true;
+    if (this.currentKey === key && this.current) return;
 
     // Hold the open record through a serviceTimeId change WITHIN one live service
     // — see SERVICE_GAP_MS.
@@ -199,20 +203,26 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
       this.current.serviceDate === date &&
       (serviceTimeId == null || gapSinceLive < SERVICE_GAP_MS)
     ) {
-      return true;
+      return;
     }
 
     // Key changed → finalize + persist the outgoing record.
     if (this.current) {
       this.finalizeRecord();
       await this.store.upsert(this.current);
-      if (gen !== this.generation) return false; // forgotten while we waited
+      if (gen !== this.generation) return; // forgotten while we waited
     }
 
     const existing = await this.store.get(key);
-    if (gen !== this.generation) return false; // forgotten while we waited
+    if (gen !== this.generation) return; // forgotten while we waited
     if (existing) {
-      this.current = await this.resumeRecord(existing);
+      const resumed = await this.resumeRecord(existing);
+      // Checked again: resumeRecord awaits too, and for SPL it is the expensive
+      // one — it reads the whole raw archive to rebuild. A delete landing during
+      // that rebuild would otherwise be undone by the record it produces, which
+      // is exactly what forget() exists to prevent.
+      if (gen !== this.generation) return;
+      this.current = resumed;
       this.current.endedAt = null; // reopened
     } else {
       this.current = this.createRecord(
@@ -233,6 +243,5 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     }
     this.currentKey = key;
     this.onRecordEstablished();
-    return true;
   }
 }
