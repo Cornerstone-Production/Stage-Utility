@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { useState, type CSSProperties } from "react";
 import { Loader2Icon, RadioTowerIcon } from "lucide-react";
 
@@ -54,7 +55,7 @@ export function RossTalkButton({
       });
       if (r.simulated) toast.info(`Simulated: ${r.line}`);
     } catch (e) {
-      toast.error(`RossTalk failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`RossTalk failed: ${errorMessage(e)}`);
     } finally {
       setBusy(false);
     }

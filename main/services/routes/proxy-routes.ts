@@ -6,6 +6,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
+import { errorMessage } from "../errors.js";
 import * as fs from "fs/promises";
 import * as http from "http";
 
@@ -87,7 +88,7 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
         });
         res.end(data);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         error(res, `Attachment error: ${msg}`, 500);
       }
       return;
@@ -128,7 +129,7 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
         });
         res.end(data);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         error(res, `Photo error: ${msg}`, 500);
       }
       return;

@@ -6,6 +6,7 @@
 // "3 new, 41 already here" catches an archive from the wrong box while it is still
 // a click away, where a confirmation dialog would be dismissed unread.
 
+import { errorMessage } from "../errors.js";
 import { buildArchive, importArchive, inspectArchive } from "../archive/archive-bundle.js";
 import { BodyTooLargeError, error, json, readRawBody, type RouteCtx } from "./context.js";
 
@@ -30,7 +31,7 @@ export async function archiveRoutes({ req, res, pathname, method }: RouteCtx): P
       // An oversized upload must keep its 413 — flattening every failure to 400
       // told the operator their archive was malformed when it was simply too big.
       if (err instanceof BodyTooLargeError) throw err;
-      error(res, err instanceof Error ? err.message : String(err));
+      error(res, errorMessage(err));
     }
     return;
   }
@@ -48,7 +49,7 @@ export async function archiveRoutes({ req, res, pathname, method }: RouteCtx): P
       // An oversized upload must keep its 413 — flattening every failure to 400
       // told the operator their archive was malformed when it was simply too big.
       if (err instanceof BodyTooLargeError) throw err;
-      error(res, err instanceof Error ? err.message : String(err));
+      error(res, errorMessage(err));
     }
     return;
   }

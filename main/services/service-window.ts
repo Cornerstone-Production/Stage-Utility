@@ -12,6 +12,7 @@
 // The exponential ramp still runs first, so a simple mid-week restart reconnects
 // within a couple minutes before it ever goes dormant.
 
+import { clamp } from "./clamp.js";
 import type { ReconnectSchedule } from "../types/stage.js";
 
 const ACTIVE_CAP_MS = 120_000; // 2 min — the busy-window / demand ceiling
@@ -65,7 +66,7 @@ class ServiceWindowService {
     const cap = active
       ? ACTIVE_CAP_MS
       : Math.min(this.sched.dormantMin * 60_000, this.msUntilNextOpen());
-    return Math.max(1000, Math.min(rawMs, cap)); // floor at 1s
+    return clamp(rawMs, 1000, cap); // floor at 1s
   }
 
   /**
@@ -87,7 +88,7 @@ class ServiceWindowService {
     // Never sleep past the moment the next window opens, so the ramp-up is not
     // missed by up to a whole dormant interval.
     const untilOpen = this.msUntilNextOpen(now);
-    return Math.max(activeMs, Math.min(dormantCeilingMs, untilOpen));
+    return clamp(untilOpen, activeMs, dormantCeilingMs);
   }
 }
 

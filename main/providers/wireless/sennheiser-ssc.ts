@@ -15,6 +15,7 @@
 // and the frame→DeviceStatus mapping (via handleFrame). Everything transport/lifecycle
 // is shared here. Set SENNHEISER_DEBUG=1 to log every raw datagram in/out.
 
+import { clamp } from "../../services/clamp.js";
 import * as dgram from "node:dgram";
 
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
@@ -289,7 +290,7 @@ export function buildQuery(path: string[], leaf: unknown = null, into: Record<st
 
 /** Clamp a bar count to the 0–5 scale the UI expects. */
 export function clampBars(n: number): number {
-  return Math.max(0, Math.min(5, n));
+  return clamp(n, 0, 5);
 }
 
 /** Format an SSC frequency to `NNN.NNN MHz`. SSC reports kHz (e.g. 524150) or MHz

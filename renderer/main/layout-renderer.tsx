@@ -1,3 +1,4 @@
+import { clamp } from "@main/services/clamp";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
@@ -219,7 +220,7 @@ function fmtSignedDuration(sec: number): string {
 
 // 0–5 RF bars as filled/empty blocks, for the wireless-channel tile.
 function rfBarsGlyph(bars: number): string {
-  const n = Math.max(0, Math.min(5, Math.round(bars)));
+  const n = clamp(Math.round(bars), 0, 5);
   return "▮".repeat(n) + "▯".repeat(5 - n);
 }
 
@@ -287,7 +288,7 @@ function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign
       const natW = el.scrollWidth / cur;
       const natH = el.scrollHeight / cur;
       if (natW <= 0 || natH <= 0) return;
-      const desired = Math.max(0.3, Math.min(1, Math.min(availW / natW, availH / natH)));
+      const desired = clamp(Math.min(availW / natW, availH / natH), 0.3, 1);
       if (Math.abs(desired - cur) > 0.01) setScale(desired);
     };
     measure();
@@ -1028,7 +1029,7 @@ function PeopleGraph({
     if (r.width <= 0) return;
     const vbX = ((e.clientX - r.left) / r.width) * 100;
     const frac = (vbX - PADL) / (100 - PADL - PADR);
-    setHover(Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1)))));
+    setHover(clamp(Math.round(frac * (n - 1)), 0, n - 1));
   }
   // Guard the hover index against the current series: switching live↔recorded swaps
   // the data under a stale index, so clamp it out rather than indexing undefined.
@@ -1432,7 +1433,7 @@ async function rasterizePdf(data: ArrayBuffer, pageNum: number): Promise<HTMLCan
   const loadingTask = pdfjs.getDocument({ data });
   const doc = await loadingTask.promise;
   try {
-    const n = Math.min(Math.max(Math.round(pageNum) || 1, 1), doc.numPages);
+    const n = clamp(Math.round(pageNum) || 1, 1, doc.numPages);
     const page = await doc.getPage(n);
     const base = page.getViewport({ scale: 1 });
     const scale = Math.min(3, 1600 / base.width);
@@ -1471,10 +1472,10 @@ async function rasterizeImage(buf: ArrayBuffer, contentType: string): Promise<HT
 }
 
 function cropCanvas(src: HTMLCanvasElement, crop: { top: number; right: number; bottom: number; left: number }): HTMLCanvasElement {
-  const left = Math.max(0, Math.min(0.95, crop.left || 0));
-  const right = Math.max(0, Math.min(0.95, crop.right || 0));
-  const top = Math.max(0, Math.min(0.95, crop.top || 0));
-  const bottom = Math.max(0, Math.min(0.95, crop.bottom || 0));
+  const left = clamp(crop.left || 0, 0, 0.95);
+  const right = clamp(crop.right || 0, 0, 0.95);
+  const top = clamp(crop.top || 0, 0, 0.95);
+  const bottom = clamp(crop.bottom || 0, 0, 0.95);
   const x = Math.round(left * src.width);
   const y = Math.round(top * src.height);
   const w = Math.max(1, Math.round((1 - left - right) * src.width));
@@ -1672,7 +1673,7 @@ function ServiceOrderObject({
       if (ch <= 0 || sh <= 0) return;
       const cur = fitRef.current;
       const natural = sh / cur; // content height at scale 1
-      const desired = Math.max(MIN_FIT, Math.min(1, ch / natural));
+      const desired = clamp(ch / natural, MIN_FIT, 1);
       if (Math.abs(desired - cur) > 0.005) setFitScale(desired);
     };
     measure();

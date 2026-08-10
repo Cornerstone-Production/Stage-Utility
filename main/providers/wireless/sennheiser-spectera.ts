@@ -16,6 +16,7 @@
 // against a real base station. `connected` is deprecated in the API in favour of `state`;
 // there is no per-device mute in v17.0 (documented limitation).
 
+import { clamp } from "../../services/clamp.js";
 import * as https from "node:https";
 import { scrub } from "../../services/scrub.js";
 
@@ -301,7 +302,7 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
     if (battery != null) st.battery = battery;
 
     const rf = firstNum(readDeep(v, ["rf", "quality"]), v.rsqi, v.link_quality, v.rfQuality);
-    if (rf != null) st.rfBars = Math.max(0, Math.min(5, Math.round((rf / 100) * 5)));
+    if (rf != null) st.rfBars = clamp(Math.round((rf / 100) * 5), 0, 5);
 
     const freq = firstNum(v.frequency, readDeep(v, ["rf", "frequency"]));
     if (freq != null) st.frequencyLabel = `${(freq > 10_000 ? freq / 1000 : freq).toFixed(3)} MHz`;

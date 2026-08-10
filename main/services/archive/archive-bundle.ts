@@ -11,6 +11,7 @@
 // reported. See `importArchive` for the ordering that keeps a corrupt file from
 // leaving half a year behind.
 
+import { errorMessage } from "../errors.js";
 import { readFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
@@ -456,7 +457,7 @@ export async function importArchive(
         // happen. On a full card every write here throws, and the operator was
         // told the import succeeded while the raw sample layer was absent. Record
         // it and let the caller decide what to say.
-        const reason = err instanceof Error ? err.message : String(err);
+        const reason = errorMessage(err);
         console.error(`[archive] could not write ${dest} from the bundle:`, err);
         rawFilesFailed.push({ file: path.relative(archiveRoot(), dest), reason });
       }

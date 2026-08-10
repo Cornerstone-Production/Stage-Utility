@@ -6,6 +6,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
+import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind } from "./context.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
 import { LayoutConflictError, stageController } from "../stage-controller.js";
@@ -320,7 +321,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         try {
           state = await stageController.setOutputSlug(id, body.slug as string);
         } catch (err) {
-          error(res, err instanceof Error ? err.message : String(err));
+          error(res, errorMessage(err));
           return;
         }
       }

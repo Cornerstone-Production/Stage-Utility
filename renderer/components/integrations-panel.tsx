@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification } from "../lib/api";
 import { Tooltip } from "./ui/tooltip";
 import { useStageState } from "../main/use-stage-state";
@@ -437,7 +438,7 @@ function SenSourceScopePicker({
     try {
       setLocations(await invoke<{ locationId: string; name: string }[]>("sensource:listLocations"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -449,7 +450,7 @@ function SenSourceScopePicker({
     try {
       setZones(await invoke<VeaZone[]>("sensource:listZones"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setZonesLoading(false);
     }
@@ -468,7 +469,7 @@ function SenSourceScopePicker({
         setLocations(locs);
         setZones(zs);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(errorMessage(err));
       } finally {
         if (!cancelled) {
           setLoading(false);

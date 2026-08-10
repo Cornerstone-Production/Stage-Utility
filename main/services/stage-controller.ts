@@ -1,6 +1,7 @@
 // Single source of truth for all stage state.
 // Every mutating method ends with broadcast("stage:state-changed").
 
+import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub } from "./scrub.js";
 import { hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
@@ -1127,9 +1128,9 @@ export class StageController {
   async setAutoUpdate(partial: Partial<AutoUpdateSettings>): Promise<StageState> {
     const next: AutoUpdateSettings = { ...this.state.autoUpdate, ...partial };
     // Clamp hour to 0–23; dayOfWeek to 0–6 or null.
-    next.hour = Math.min(23, Math.max(0, Math.round(next.hour)));
+    next.hour = clamp(Math.round(next.hour), 0, 23);
     next.dayOfWeek =
-      next.dayOfWeek == null ? null : Math.min(6, Math.max(0, Math.round(next.dayOfWeek)));
+      next.dayOfWeek == null ? null : clamp(Math.round(next.dayOfWeek), 0, 6);
     console.log(`[stage-controller] setAutoUpdate →`, next);
     this.state = { ...this.state, autoUpdate: next };
     await settingsStore.patch({ autoUpdate: next });
@@ -1141,9 +1142,9 @@ export class StageController {
 
   async setReconnectSchedule(partial: Partial<ReconnectSchedule>): Promise<StageState> {
     const next: ReconnectSchedule = { ...this.state.reconnectSchedule, ...partial };
-    next.leadMin = Math.min(1440, Math.max(0, Math.round(next.leadMin)));
-    next.tailMin = Math.min(1440, Math.max(0, Math.round(next.tailMin)));
-    next.dormantMin = Math.min(1440, Math.max(1, Math.round(next.dormantMin)));
+    next.leadMin = clamp(Math.round(next.leadMin), 0, 1440);
+    next.tailMin = clamp(Math.round(next.tailMin), 0, 1440);
+    next.dormantMin = clamp(Math.round(next.dormantMin), 1, 1440);
     console.log(`[stage-controller] setReconnectSchedule → ${scrub(next)}`);
     this.state = { ...this.state, reconnectSchedule: next };
     await settingsStore.patch({ reconnectSchedule: next });
@@ -1165,8 +1166,8 @@ export class StageController {
 
   async setTaperWindow(partial: Partial<TaperWindow>): Promise<StageState> {
     const next: TaperWindow = { ...this.state.taperWindow, ...partial };
-    next.preMin = Math.min(240, Math.max(0, Math.round(next.preMin)));
-    next.postMin = Math.min(240, Math.max(0, Math.round(next.postMin)));
+    next.preMin = clamp(Math.round(next.preMin), 0, 240);
+    next.postMin = clamp(Math.round(next.postMin), 0, 240);
     console.log(`[stage-controller] setTaperWindow → ${scrub(next)}`);
     this.state = { ...this.state, taperWindow: next };
     await settingsStore.patch({ taperWindow: next });

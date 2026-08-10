@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -52,7 +53,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     const load = () =>
       invoke<ScriptViewRundownDTO>("scriptview:rundown", { serviceTypeId: resolvedTypeId })
         .then((r) => { if (!cancelled) { setRundown(r); setError(null); } })
-        .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
+        .catch((e) => { if (!cancelled) setError(errorMessage(e)); });
     load();
     const t = setInterval(load, 60_000);
     return () => { cancelled = true; clearInterval(t); };

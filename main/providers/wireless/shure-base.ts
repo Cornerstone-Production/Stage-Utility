@@ -353,10 +353,12 @@ export function safeInt(s: string | undefined): number {
   return n;
 }
 
-/** Clamp a number to [min, max]. */
-export function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, n));
-}
+// Re-exported, not redefined. There were three copies of clamp in this repo —
+// here, in the renderer's layout-geometry, and written out longhand in thirty
+// other places. The name stays exported here so the four Shure drivers that
+// import it from their base do not have to change.
+import { clamp } from "../../services/clamp.js";
+export { clamp };
 
 /**
  * Normalise a dB value within [minDb, maxDb] to a 0..1 float.

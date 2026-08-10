@@ -15,6 +15,7 @@
 // Nothing here throws at the caller. The recorders run on the live tick, and a gap
 // in the raw layer is recoverable where a crashed live service is not.
 
+import { errorMessage } from "../errors.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -42,7 +43,7 @@ export class CsvAppender {
   /** Queue a row. Resolves when it has landed; never rejects. */
   append(headers: string[], row: (string | number | null)[]): Promise<void> {
     this.chain = this.chain.then(() => this.write(headers, row)).catch((err: unknown) => {
-      console.error(`[archive] ${this.base}: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`[archive] ${this.base}: ${errorMessage(err)}`);
     });
     return this.chain;
   }

@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -359,7 +360,7 @@ function RuleCard({
       if (r.ok) toast.success(`Test fire: ${r.detail}`);
       else toast.error(`Test fire failed: ${r.detail}`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(errorMessage(e));
     }
   }
 

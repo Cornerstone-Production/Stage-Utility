@@ -1,3 +1,5 @@
+import { clamp } from "@main/services/clamp";
+import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
@@ -567,7 +569,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       // reads as a glitch, and the most likely reason for a refusal is one the
       // operator can act on: the service is still recording.
       reload();
-      toast.error(`Couldn't delete that recording: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Couldn't delete that recording: ${errorMessage(e)}`);
     }
   }
 
@@ -634,7 +636,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         setReloadKey((k) => k + 1);
         toast.success("Service times updated");
       } catch (e) {
-        toast.error(`Couldn't update times: ${e instanceof Error ? e.message : String(e)}`);
+        toast.error(`Couldn't update times: ${errorMessage(e)}`);
       }
     }
     async function recalc() {
@@ -666,7 +668,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         setReloadKey((k) => k + 1);
         toast.success("Merged");
       } catch (e) {
-        toast.error(`Merge failed: ${e instanceof Error ? e.message : String(e)}`);
+        toast.error(`Merge failed: ${errorMessage(e)}`);
       }
     }
     async function toggleCounted(item: ServiceTimelineItem) {
@@ -1115,7 +1117,7 @@ function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
           if (!svg) return;
           const r = svg.getBoundingClientRect();
           const frac = (e.clientX - r.left) / r.width; // 0..1 across the plotted width
-          setHover(Math.min(points.length - 1, Math.max(0, Math.round(frac * (points.length - 1)))));
+          setHover(clamp(Math.round(frac * (points.length - 1)), 0, points.length - 1));
         }}
         onPointerLeave={() => setHover(null)}
         role="img"

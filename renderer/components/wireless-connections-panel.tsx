@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification } from "../lib/api";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useState, useEffect, type ChangeEvent, type ReactNode } from "react";
@@ -620,7 +621,7 @@ export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanel
           Couldn’t load wireless connections.
         </span>
         <span className="text-caption1 text-gray-9">
-          {loadError instanceof Error ? loadError.message : String(loadError)}
+          {errorMessage(loadError)}
         </span>
         <Button variant="filled" size="small" onClick={retryLoad} className="mt-1">
           Retry

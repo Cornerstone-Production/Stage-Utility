@@ -1,3 +1,4 @@
+import { clamp } from "@main/services/clamp";
 import { useRef, useState } from "react";
 
 
@@ -262,7 +263,7 @@ function AttendanceChart({
 
   // Service-proper window: the arrival ramp sits left of it and the emptying-room
   // taper to the right, so those tails get dimmed while the service band stays clear.
-  const clampX = (v: number) => Math.max(padL, Math.min(W - padR, v));
+  const clampX = (v: number) => clamp(v, padL, W - padR);
   const sStart = serviceStartedAt ? Date.parse(serviceStartedAt) : NaN;
   const sEnd = serviceEndedAt ? Date.parse(serviceEndedAt) : NaN;
   const bandX0 = Number.isFinite(sStart) ? clampX(xt(serviceStartedAt as string)) : null;
@@ -405,9 +406,9 @@ function AttendanceChart({
                 if (showOccupancy) rows.push({ t: `Attendance ${hs.occupancy.toLocaleString()}`, kind: "val" });
                 if (showAttendance) rows.push({ t: `Entries ${hs.attendance.toLocaleString()}`, kind: "val" });
                 for (const m of hoverItems) rows.push({ t: `▸ ${m.label.length > 24 ? `${m.label.slice(0, 23)}…` : m.label}`, kind: "item" });
-                const boxW = Math.min(W - padL - padR, Math.max(96, Math.round(Math.max(...rows.map((r) => r.t.length)) * 5) + 14));
+                const boxW = clamp(Math.round(Math.max(...rows.map((r) => r.t.length)) * 5) + 14, 96, W - padL - padR);
                 const boxH = 6 + rows.length * 12;
-                const bx = Math.min(Math.max(hx + 6, padL), W - padR - boxW);
+                const bx = clamp(hx + 6, padL, W - padR - boxW);
                 return (
                   <g>
                     <rect x={bx} y={padT + 2} width={boxW} height={boxH} rx={4} fill="var(--gray-1)" stroke="var(--gray-6)" opacity={0.97} />
