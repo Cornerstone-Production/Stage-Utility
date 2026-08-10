@@ -76,6 +76,22 @@ class LivePoller {
     }
   }
 
+  /**
+   * Stop, and hand back the undo.
+   *
+   * start() is called from exactly one place — boot — so anything that stops the
+   * poller and does not put it back has stopped it for the life of the process.
+   * A config restore did that on its failure path: the box kept serving with
+   * nothing polling PCO. See stageController.pauseBackgroundWork.
+   */
+  pause(): () => void {
+    const wasRunning = this.running;
+    this.stop();
+    return () => {
+      if (wasRunning) this.start();
+    };
+  }
+
   private schedule(ms: number): void {
     if (!this.running) return;
     this.timer = setTimeout(() => void this.tick(), ms);
