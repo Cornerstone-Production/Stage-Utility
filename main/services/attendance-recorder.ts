@@ -64,6 +64,21 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
     });
   }
 
+  /**
+   * Does this recorder still want fresh people counts?
+   *
+   * Exactly the window in which onLiveTick calls sensourceService.getLatest()
+   * and keeps the answer: while a record is open, and on through the
+   * post-service taper, which is a record that HAS an end but is still being
+   * sampled as the room empties.
+   */
+  isSampling(): boolean {
+    if (!this.current) return false;
+    if (!this.current.endedAt) return true;
+    const ended = Date.parse(this.current.endedAt);
+    return Number.isFinite(ended) && Date.now() - ended <= this.postMs;
+  }
+
   /** Called by the live-poller after each pco:live broadcast. */
   async onLiveTick(live: PcoLiveDTO | null): Promise<void> {
     if (!live || this.busy) return;
@@ -160,3 +175,9 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
 }
 
 export const attendanceRecorder = new AttendanceRecorder();
+
+// Tell SenSource this recorder is a consumer. Without it the idle gate counts
+// only browsers, so a service with no people-count display open was recorded
+// from counts up to a minute stale — the trend graph drew the poll gate rather
+// than the room.
+sensourceService.addDemandSource(() => attendanceRecorder.isSampling());
