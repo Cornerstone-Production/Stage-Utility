@@ -127,13 +127,19 @@ function pkgVersion(): string {
  * and a static import of the controller here would make that a cycle.
  */
 function stopBackgroundWriters(): void {
-  void import("./live-poller.js").then((m) => m.livePoller.stop()).catch(() => {});
+  // Logged, not swallowed: if either stop is ever renamed this would otherwise
+  // proceed with the writers running and still report the restore as clean.
+  const failed = (what: string) => (err: unknown) =>
+    console.error(`[config-snapshot] could not quiet ${what} before restoring:`, err);
+  void import("./live-poller.js")
+    .then((m) => m.livePoller.stop())
+    .catch(failed("the live poller"));
   void import("./stage-controller.js")
     .then((m) => {
       m.stageController.stopAutoRefresh();
       m.stageController.stopUpdateChecks();
     })
-    .catch(() => {});
+    .catch(failed("the stage controller"));
 }
 
 class ConfigSnapshotService {

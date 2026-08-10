@@ -10,9 +10,18 @@ interface BaptismFile {
   sessions: BaptismSession[];
 }
 
-/** How many sessions a LIVE append keeps. A restore is deliberately not bound
- *  by this — see addSessions. */
-const LIVE_CAP = 100;
+/**
+ * Hard ceiling on stored sessions — a bound on file growth, NOT a retention
+ * policy, and deliberately far above any real history.
+ *
+ * It used to be 100 and applied on every live append, which quietly made the
+ * restore fix pointless: importing 240 sessions worked, and then the very next
+ * baptism sliced the list back to 100 and destroyed 139 of them for good. A
+ * number small enough to reach in normal use is a data-loss mechanism wearing a
+ * cap's clothing. At a few hundred bytes each, 2000 sessions is well under a
+ * megabyte and no church reaches it.
+ */
+const MAX_SESSIONS = 2000;
 
 class BaptismStore {
   private store = new DataStore<BaptismFile>("baptism.json", { current: null, sessions: [] });
@@ -32,9 +41,9 @@ class BaptismStore {
     await this.store.update((file) => ({ ...file, current: state }));
   }
 
-  /** Append a finished session, keeping the most recent LIVE_CAP. */
+  /** Append a finished session. */
   async addSession(session: BaptismSession): Promise<void> {
-    await this.store.update((file) => ({ ...file, sessions: [session, ...file.sessions].slice(0, LIVE_CAP) }));
+    await this.store.update((file) => ({ ...file, sessions: [session, ...file.sessions].slice(0, MAX_SESSIONS) }));
   }
 
   /**
@@ -62,7 +71,7 @@ class BaptismStore {
       const merged = [...fresh, ...file.sessions].sort((a, b) =>
         (b.startedAt ?? "").localeCompare(a.startedAt ?? ""),
       );
-      return { ...file, sessions: merged };
+      return { ...file, sessions: merged.slice(0, MAX_SESSIONS) };
     });
     return added;
   }

@@ -62,7 +62,18 @@ export function error(res: http.ServerResponse, message: string, status = 400): 
  * image.
  */
 export const MAX_JSON_BODY_BYTES = 8 * 1024 * 1024;
-export const MAX_UPLOAD_BODY_BYTES = 512 * 1024 * 1024;
+/**
+ * Upload ceiling, sized for the hardware rather than for the format.
+ *
+ * readRawBody holds the chunk list, then Buffer.concat allocates a second full
+ * copy — so the peak is roughly twice the body. 512 MB was above what a
+ * Raspberry Pi survives, which left the unauthenticated OOM this cap exists to
+ * prevent still one curl away; the number just had to be reached. 128 MB is
+ * comfortably larger than any real archive this app produces and safe to hold
+ * twice on the smallest supported box. A bundle genuinely bigger than this wants
+ * streaming to a temp file, not a bigger number.
+ */
+export const MAX_UPLOAD_BODY_BYTES = 128 * 1024 * 1024;
 
 /** Thrown past the route handlers so remote-server can answer 413. */
 export class BodyTooLargeError extends Error {
@@ -93,7 +104,10 @@ export async function readRawBody(
     // Checked as it arrives, not just against the header: content-length is the
     // sender's claim and a chunked request does not send one at all.
     if (total > limit) {
-      req.destroy();
+      // Pause, do NOT destroy. Destroying the request tears down the socket, and
+      // the 413 written afterwards is silently dropped — the caller saw
+      // ECONNRESET on exactly the path this streaming check exists for.
+      req.pause();
       throw new BodyTooLargeError(limit);
     }
     chunks.push(chunk as Buffer);
@@ -112,7 +126,8 @@ export async function readBody(
     req.on("data", (chunk: Buffer) => {
       total += chunk.byteLength;
       if (total > limit) {
-        req.destroy();
+        // Pause rather than destroy — see readRawBody.
+        req.pause();
         reject(new BodyTooLargeError(limit));
         return;
       }
@@ -127,6 +142,27 @@ export async function readBody(
     });
     req.on("error", reject);
   });
+}
+
+/**
+ * Read a JSON body, tolerating junk but NOT an oversized one.
+ *
+ * Replaces `readBody(req).catch(() => ({}))`, which was written to shrug off an
+ * unparseable body and also swallowed the size limit — so an over-cap request
+ * proceeded with an empty body and answered 200, and the 413 never reached
+ * anyone. A body too large to read is a different thing from a body we chose not
+ * to parse.
+ */
+export async function readBodyOrEmpty(
+  req: http.IncomingMessage,
+  limit = MAX_JSON_BODY_BYTES,
+): Promise<Record<string, unknown>> {
+  try {
+    return ((await readBody(req, limit)) ?? {}) as Record<string, unknown>;
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) throw err;
+    return {};
+  }
 }
 
 /** Narrow an untrusted body value to a ViewKind. */

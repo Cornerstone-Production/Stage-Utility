@@ -23,8 +23,20 @@ function recomputeAttendance(att: ServiceAttendance): void {
   // so a service not reset off the prior one reads its own count; on a trim, the new
   // first in-window sample re-baselines automatically.
   const base = s.length ? s[0].attendance : 0;
-  const perSvc = (v: number) => Math.max(0, v - base);
-  att.attendanceBaseline = base;
+  // attendanceBaseline is the RAW daily counter at this record's start — that is
+  // what the recorder writes and what a merge needs to convert between two
+  // records' frames. This used to assign `base`, an already-baselined value
+  // (normally 0), without touching the samples: after any Recalculate, window
+  // edit or earlier merge the field no longer meant what its writer meant, and a
+  // later merge reading it as raw shifted the other record by a hundred people.
+  // Advancing it by the same amount the samples are about to be re-based by keeps
+  // raw = sample + baseline true.
+  att.attendanceBaseline = (att.attendanceBaseline ?? 0) + base;
+  if (base !== 0) for (const x of s) x.attendance -= base;
+  // Samples are now expressed against this record's own start, so the aggregates
+  // read them directly. (Clamped only against a negative left by a hand-edited
+  // window.)
+  const perSvc = (v: number) => Math.max(0, v);
   // Peak/Lowest/Last reflect the SERVICE, not the pre-service arrival ramp or the
   // post-service emptying room — those tagged samples still draw the curve but must
   // not drag the "floor" or "last" toward an empty room. Fall back to all samples if
@@ -140,7 +152,10 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     const ends = tgtTl.items.map((i) => (i.endedAt ? Date.parse(i.endedAt) : NaN)).filter(Number.isFinite);
     if (ends.length) tgtTl.endedAt = new Date(Math.max(...ends)).toISOString();
     await serviceTimelineStore.upsert(tgtTl);
+    // Both sides: the recorder's in-memory copy of the TARGET would be written
+    // over the merged file by its debounced persist, silently reverting the merge.
     serviceTimelineRecorder.forget(sourceKey);
+    serviceTimelineRecorder.forget(targetKey);
     await serviceTimelineStore.delete(sourceKey);
     broadcast("service-timeline:history", tgtTl);
   }
@@ -161,22 +176,36 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     // Shifting the source into the target's frame is exact: both baselines are the
     // raw daily counter at their own start, so their difference is the offset.
     // Read before recomputeAttendance, which rewrites attendanceBaseline.
-    const offset =
-      srcAt.attendanceBaseline != null && tgtAt.attendanceBaseline != null
-        ? srcAt.attendanceBaseline - tgtAt.attendanceBaseline
-        : 0;
-    const srcSamples =
-      offset === 0
-        ? srcAt.samples
-        : srcAt.samples.map((s) => ({ ...s, attendance: Math.max(0, s.attendance + offset) }));
-    tgtAt.samples = [...tgtAt.samples, ...srcSamples].sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+    // Shift BOTH into the earlier of the two baselines rather than into the
+    // target's. The merge target is not necessarily the later record — the panel
+    // offers every same-day recording, and merging a spurious leading fragment
+    // INTO the main record is the natural repair — so shifting the source into
+    // the target's frame produced a negative offset, and clamping that at zero
+    // silently flattened the fragment's attendees to nothing. A common floor
+    // makes both shifts non-negative, so no clamp is needed and a bad offset
+    // would surface as a wrong number rather than as deleted data.
+    const srcBase = srcAt.attendanceBaseline;
+    const tgtBase = tgtAt.attendanceBaseline;
+    const shift =
+      srcBase != null && tgtBase != null
+        ? { base: Math.min(srcBase, tgtBase), src: srcBase - Math.min(srcBase, tgtBase), tgt: tgtBase - Math.min(srcBase, tgtBase) }
+        : { base: tgtBase ?? srcBase ?? 0, src: 0, tgt: 0 };
+    const bump = (list: typeof srcAt.samples, by: number) =>
+      by === 0 ? list : list.map((s) => ({ ...s, attendance: s.attendance + by }));
+    tgtAt.attendanceBaseline = shift.base;
+    tgtAt.samples = [...bump(tgtAt.samples, shift.tgt), ...bump(srcAt.samples, shift.src)].sort(
+      (a, b) => Date.parse(a.t) - Date.parse(b.t),
+    );
     if (srcAt.endedAt && (!tgtAt.endedAt || Date.parse(srcAt.endedAt) > Date.parse(tgtAt.endedAt))) {
       tgtAt.endedAt = srcAt.endedAt;
     }
     tgtAt.totalAttendance = Math.max(tgtAt.totalAttendance, srcAt.totalAttendance);
     recomputeAttendance(tgtAt);
     await attendanceStore.upsert(tgtAt);
+    // Both sides: the recorder's in-memory copy of the TARGET would be written
+    // over the merged file by its debounced persist, silently reverting the merge.
     attendanceRecorder.forget(sourceKey);
+    attendanceRecorder.forget(targetKey);
     await attendanceStore.delete(sourceKey);
     broadcast("attendance:history", tgtAt);
   }
@@ -194,7 +223,10 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
       tgtSpl.endedAt = srcSpl.endedAt;
     }
     await splHistoryStore.upsert(tgtSpl);
+    // Both sides: the recorder's in-memory copy of the TARGET would be written
+    // over the merged file by its debounced persist, silently reverting the merge.
     splRecorder.forget(sourceKey);
+    splRecorder.forget(targetKey);
     await splHistoryStore.delete(sourceKey);
     broadcast("spl:history", tgtSpl);
   }

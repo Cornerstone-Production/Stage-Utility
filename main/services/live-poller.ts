@@ -93,6 +93,13 @@ class LivePoller {
       return;
     }
 
+    // fetchLive is an HTTP call that can take seconds. stop() may have landed
+    // while it was in flight, and `running` was only checked on entry — so a
+    // config restore, which stops the poller precisely to keep anything from
+    // writing over the files it is about to lay down, could still have an
+    // auto-advance land afterwards and patch settings.json from a stale cache.
+    if (!this.running) return;
+
     if (live) {
       // Poll fast (to detect item switches promptly) but only PUSH when something
       // the client renders actually changed — or every LIVE_KEEPALIVE_MS for clock

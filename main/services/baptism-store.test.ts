@@ -34,9 +34,26 @@ describe("baptism sessions", () => {
     for (const s of await baptismStore.listSessions()) await baptismStore.deleteSession(s.id);
   });
 
-  it("caps a live append, which is what the cap is for", async () => {
-    for (let i = 0; i < 105; i++) await baptismStore.addSession(session(i));
-    assert.equal((await baptismStore.listSessions()).length, 100);
+  it("a live append does not truncate a restored history", async () => {
+    // The fix that mattered. Importing worked, and then the very next baptism
+    // sliced the list back to the old cap of 100 and destroyed 139 of the
+    // restored sessions for good — a ceiling small enough to reach in normal use
+    // is a data-loss mechanism wearing a cap's clothing.
+    await baptismStore.addSessions(Array.from({ length: 240 }, (_, i) => session(i)));
+    assert.equal((await baptismStore.listSessions()).length, 240);
+
+    await baptismStore.addSession(session(9999));
+    assert.equal(
+      (await baptismStore.listSessions()).length,
+      241,
+      "a single live baptism truncated the restored history",
+    );
+  });
+
+  it("still bounds growth, so the file cannot grow without limit", async () => {
+    await baptismStore.addSessions(Array.from({ length: 2100 }, (_, i) => session(10_000 + i)));
+    const n = (await baptismStore.listSessions()).length;
+    assert.ok(n <= 2000, `expected a ceiling, got ${n}`);
   });
 
   it("does NOT evict existing sessions on a restore", async () => {

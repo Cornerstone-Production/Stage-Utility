@@ -41,7 +41,7 @@ import { stageController } from "./stage-controller.js";
 import { updater } from "./updater.js";
 import { SERVER_VERSION } from "./server-version.js";
 
-import { type RouteCtx, json, error, readBody } from "./routes/context.js";
+import { type RouteCtx, json, error, readBodyOrEmpty } from "./routes/context.js";
 import { statusRoutes } from "./routes/status-routes.js";
 import { historyRoutes } from "./routes/history-routes.js";
 import { archiveRoutes } from "./routes/archive-routes.js";
@@ -553,6 +553,9 @@ export class RemoteServer {
         // caller can tell "too big" from "the server broke".
         const status = (err as { status?: number })?.status === 413 ? 413 : 500;
         console.error(`[remote-server] handler error ${scrub(pathname)}: ${scrub(msg)}`);
+        // The reader paused an over-limit body rather than destroying the socket,
+        // so the response reaches the client; closing after it releases the rest.
+        if (status === 413) res.setHeader("Connection", "close");
         error(res, msg, status);
       }
     };
@@ -684,7 +687,7 @@ export class RemoteServer {
       }
     }
     if (method === "POST" && pathname === "/api/layout-images") {
-      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const body = await readBodyOrEmpty(req);
       if (typeof body.dataUrl !== "string") {
         error(res, "body.dataUrl (base64 data:image/… URL) required");
         return;
@@ -815,7 +818,7 @@ export class RemoteServer {
       return;
     }
     if (method === "POST" && pathname === "/api/events/subscribe") {
-      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const body = await readBodyOrEmpty(req);
       const cid = typeof body.cid === "string" ? body.cid : null;
       const channels = Array.isArray(body.channels)
         ? body.channels.filter((c): c is string => typeof c === "string")
@@ -827,7 +830,7 @@ export class RemoteServer {
     // Display presence heartbeat — a kiosk page reports it's alive (or leaving).
     // Powers the Connected/Offline dot on Settings → Displays.
     if (method === "POST" && pathname === "/api/displays/presence") {
-      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const body = await readBodyOrEmpty(req);
       const outputId = typeof body.outputId === "string" ? body.outputId : null;
       if (outputId) {
         if (body.leaving === true) displayLeaving(outputId);

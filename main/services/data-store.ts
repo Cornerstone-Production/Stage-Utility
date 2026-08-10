@@ -30,16 +30,31 @@ export class DataStore<T> {
   }
 
   private async writeRaw(data: T): Promise<void> {
-    // Atomic: a plain writeFile truncates in place first, which could corrupt the
-    // store mid-write and, on the next load, look like an empty file — silently
-    // destroying history. See write-queue.ts for why the temp name is unique.
-    await atomicWrite(await this.getFilePath(), JSON.stringify(data, null, 2));
-    // Cache only AFTER the write lands. Assigning first meant a failed write —
-    // ENOSPC on a full card, EROFS once a card drops to read-only — left the
-    // cache reporting a value that was never persisted: the settings UI, the API
-    // and every SSE snapshot showed the edit as saved, and after the next restart
-    // everything since the disk filled was gone with no error ever shown.
+    // The cache is set BEFORE the write, and that ordering is load-bearing:
+    // load() is not enqueued, so a concurrent first read of a store that has
+    // never been read would otherwise see cache === null, go to disk, and install
+    // the pre-write contents over the fresh value once its readFile resolved —
+    // losing the save. Assigning first keeps that read returning early.
+    //
+    // What was actually wrong was leaving the cache populated when the write
+    // FAILED: on ENOSPC when the card fills, the UI, the API and every SSE
+    // snapshot went on reporting the edit as saved, and after the next restart
+    // everything since the disk filled was gone with no error ever shown. So the
+    // cache is dropped on failure and the error propagates — the next read
+    // re-reads from disk and the caller sees the failure.
+    const previous = this.cache;
     this.cache = data;
+    try {
+      // Atomic: a plain writeFile truncates in place first, which could corrupt
+      // the store mid-write and, on the next load, look like an empty file.
+      // See write-queue.ts for why the temp name is unique.
+      await atomicWrite(await this.getFilePath(), JSON.stringify(data, null, 2));
+    } catch (err) {
+      // Only roll back if nothing else has since written — a later save that did
+      // land must not be undone by an earlier one failing.
+      if (this.cache === data) this.cache = previous;
+      throw err;
+    }
   }
 
   private async getFilePath(): Promise<string> {
