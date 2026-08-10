@@ -21,7 +21,7 @@ import * as path from "node:path";
 import { encodeRow, parseRows } from "./csv.js";
 
 /** Guard against an unbounded scan if a directory somehow fills with rolled files. */
-const MAX_ROLL = 1000;
+export const MAX_ROLL = 1000;
 
 export class CsvAppender {
   private chain: Promise<void> = Promise.resolve();

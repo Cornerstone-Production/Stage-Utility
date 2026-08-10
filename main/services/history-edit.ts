@@ -76,12 +76,13 @@ export async function deleteServiceRecords(
 ): Promise<{ deleted: boolean; records: string[] }> {
   assertNotLive(serviceKey, "deleted");
   forgetAll(serviceKey);
-  const gone = await Promise.all([
-    serviceTimelineStore.delete(serviceKey),
-    attendanceStore.delete(serviceKey),
-    splHistoryStore.delete(serviceKey),
-  ]);
-  const records = ["timeline", "attendance", "spl"].filter((_, i) => gone[i]);
+  const stores = [
+    ["timeline", serviceTimelineStore],
+    ["attendance", attendanceStore],
+    ["spl", splHistoryStore],
+  ] as const;
+  const gone = await Promise.all(stores.map(([, store]) => store.delete(serviceKey)));
+  const records = stores.filter((_, i) => gone[i]).map(([name]) => name as string);
   return { deleted: records.length > 0, records };
 }
 

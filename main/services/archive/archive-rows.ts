@@ -9,13 +9,11 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
+import { MAX_ROLL } from "./csv-appender.js";
 import { parseRows } from "./csv.js";
 
 /** A parsed row keyed by its file's header. Key order is the header's order. */
 export type ArchiveRow = Record<string, string>;
-
-/** Guard against an unbounded scan, mirroring csv-appender's own roll ceiling. */
-const MAX_ROLL = 1000;
 
 /**
  * Every row of one source within one service directory, across rolled files.
@@ -60,8 +58,10 @@ export async function rolledFiles(dir: string, base: string): Promise<string[]> 
   } catch {
     return [];
   }
-  const rolled = names.filter((n) => n === `${base}.csv` || new RegExp(`^${base}\\.\\d+\\.csv$`).test(n));
-  return rolled.sort((a, b) => rollIndex(a, base) - rollIndex(b, base));
+  const rolled = new RegExp(`^${base}\\.\\d+\\.csv$`);
+  return names
+    .filter((n) => n === `${base}.csv` || rolled.test(n))
+    .sort((a, b) => rollIndex(a, base) - rollIndex(b, base));
 }
 
 function rollIndex(name: string, base: string): number {
