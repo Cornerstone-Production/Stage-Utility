@@ -11,14 +11,11 @@ export interface WirelessConnectionConfig {
   config: Record<string, unknown>;
 }
 
-const store = new DataStore<WirelessConnectionConfig[]>("wireless-connections.json", [], "config");
-
-export const wirelessStore = {
-  async load(): Promise<WirelessConnectionConfig[]> {
-    return store.load();
-  },
-
-  async save(connections: WirelessConnectionConfig[]): Promise<void> {
-    return store.save(connections);
-  },
-};
+/**
+ * This IS the DataStore — there is no wrapper.
+ *
+ * The object that used to sit here forwarded load() and save() verbatim and
+ * added nothing else, in seven files. It had to be edited every time the store's
+ * own API grew, and it hid update() and reload() from callers for no reason.
+ */
+export const wirelessStore = new DataStore<WirelessConnectionConfig[]>("wireless-connections.json", [], "config");

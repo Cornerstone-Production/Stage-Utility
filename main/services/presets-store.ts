@@ -3,14 +3,11 @@
 import type { SlotPreset } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<SlotPreset[]>("presets.json", [], "config");
-
-export const presetsStore = {
-  async load(): Promise<SlotPreset[]> {
-    return store.load();
-  },
-
-  async save(presets: SlotPreset[]): Promise<void> {
-    return store.save(presets);
-  },
-};
+/**
+ * This IS the DataStore — there is no wrapper.
+ *
+ * The object that used to sit here forwarded load() and save() verbatim and
+ * added nothing else, in seven files. It had to be edited every time the store's
+ * own API grew, and it hid update() and reload() from callers for no reason.
+ */
+export const presetsStore = new DataStore<SlotPreset[]>("presets.json", [], "config");

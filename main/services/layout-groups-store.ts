@@ -5,14 +5,11 @@
 import type { LayoutGroup } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<LayoutGroup[]>("layout-groups.json", [], "config");
-
-export const layoutGroupsStore = {
-  async load(): Promise<LayoutGroup[]> {
-    return store.load();
-  },
-
-  async save(groups: LayoutGroup[]): Promise<void> {
-    return store.save(groups);
-  },
-};
+/**
+ * This IS the DataStore — there is no wrapper.
+ *
+ * The object that used to sit here forwarded load() and save() verbatim and
+ * added nothing else, in seven files. It had to be edited every time the store's
+ * own API grew, and it hid update() and reload() from callers for no reason.
+ */
+export const layoutGroupsStore = new DataStore<LayoutGroup[]>("layout-groups.json", [], "config");

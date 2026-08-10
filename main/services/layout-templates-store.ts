@@ -4,14 +4,11 @@
 import type { LayoutTemplate } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<LayoutTemplate[]>("layout-templates.json", [], "config");
-
-export const layoutTemplatesStore = {
-  async load(): Promise<LayoutTemplate[]> {
-    return store.load();
-  },
-
-  async save(templates: LayoutTemplate[]): Promise<void> {
-    return store.save(templates);
-  },
-};
+/**
+ * This IS the DataStore — there is no wrapper.
+ *
+ * The object that used to sit here forwarded load() and save() verbatim and
+ * added nothing else, in seven files. It had to be edited every time the store's
+ * own API grew, and it hid update() and reload() from callers for no reason.
+ */
+export const layoutTemplatesStore = new DataStore<LayoutTemplate[]>("layout-templates.json", [], "config");
