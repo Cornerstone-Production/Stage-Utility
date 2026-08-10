@@ -132,3 +132,39 @@ describe("route dispatch", () => {
     assert.equal(r.body, "upstream down");
   });
 });
+
+// ── The real chain ─────────────────────────────────────────────────────────
+//
+// Everything above models the dispatcher. This checks the model still matches:
+// remote-server exports its ordered list, so a route module that exists but was
+// never added to it — and would therefore never be dispatched, its whole domain
+// answering 404 — fails here rather than in front of an operator.
+
+describe("the production route list", () => {
+  test("every route module in routes/ is dispatched", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const { ROUTE_MODULES } = await import("../remote-server.js");
+
+    const dir = path.dirname(fileURLToPath(import.meta.url));
+    const declared = new Set<string>();
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".ts") || f.endsWith(".test.ts")) continue;
+      for (const m of fs.readFileSync(path.join(dir, f), "utf8").matchAll(
+        /export async function (\w+Routes)\s*\(/g,
+      )) {
+        declared.add(m[1]!);
+      }
+    }
+
+    const dispatched = new Set(ROUTE_MODULES.map((fn) => fn.name));
+    const missing = [...declared].filter((n) => !dispatched.has(n));
+    assert.deepEqual(
+      missing,
+      [],
+      `these route modules exist but are never dispatched, so their paths 404:\n  ${missing.join("\n  ")}`,
+    );
+    assert.ok(declared.size >= 10, `only found ${declared.size} route modules — scan looks broken`);
+  });
+});

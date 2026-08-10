@@ -57,6 +57,34 @@ import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
 
+/**
+ * Route modules, in dispatch order. Order is load-bearing: a module that
+ * responds ends the request, and some paths are matched by prefix.
+ *
+ * A list plus one loop, rather than fifteen hand-written
+ * `await x(c); if (res.headersSent) return;` pairs. dispatch.test.ts was written
+ * BECAUSE a missed headersSent check once took the whole server down, and it
+ * models the dispatcher as exactly this loop — but the production code was not a
+ * loop, so the test pinned a contract it never actually exercised. Exported so it
+ * can run over the real list.
+ */
+export const ROUTE_MODULES: ((c: RouteCtx) => Promise<void>)[] = [
+  statusRoutes,
+  historyRoutes,
+  archiveRoutes,
+  proxyRoutes,
+  stateRoutes,
+  scriptviewRoutes,
+  viewRoutes,
+  integrationRoutes,
+  rosstalkRoutes,
+  automationRoutes,
+  displaySettingsRoutes,
+  systemRoutes,
+  brandingRoutes,
+  presetRoutes,
+];
+
 // ── Static renderer build path candidates ──────────────────────────────────────
 // Resolved against the install root, NOT the working directory. A packaged
 // install is launched from wherever the operator happens to be — `brew install`
@@ -867,34 +895,10 @@ export class RemoteServer {
     // matches nothing falls through. `res.headersSent` is the handled-signal,
     // which is why the route bodies moved out unchanged.
     const c: RouteCtx = { req, res, pathname, url: _url, method };
-    await statusRoutes(c);
-    if (res.headersSent) return;
-    await historyRoutes(c);
-    if (res.headersSent) return;
-    await archiveRoutes(c);
-    if (res.headersSent) return;
-    await proxyRoutes(c);
-    if (res.headersSent) return;
-    await stateRoutes(c);
-    if (res.headersSent) return;
-    await scriptviewRoutes(c);
-    if (res.headersSent) return;
-    await viewRoutes(c);
-    if (res.headersSent) return;
-    await integrationRoutes(c);
-    if (res.headersSent) return;
-    await rosstalkRoutes(c);
-    if (res.headersSent) return;
-    await automationRoutes(c);
-    if (res.headersSent) return;
-    await displaySettingsRoutes(c);
-    if (res.headersSent) return;
-    await systemRoutes(c);
-    if (res.headersSent) return;
-    await brandingRoutes(c);
-    if (res.headersSent) return;
-    await presetRoutes(c);
-    if (res.headersSent) return;
+    for (const routeModule of ROUTE_MODULES) {
+      await routeModule(c);
+      if (res.headersSent) return;
+    }
 
     // 404
     error(res, `Not found: ${method} ${pathname}`, 404);
