@@ -147,7 +147,25 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     attendanceStore.get(targetKey),
   ]);
   if (srcAt && tgtAt) {
-    tgtAt.samples = [...tgtAt.samples, ...srcAt.samples].sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+    // Each record's samples are stored as raw-minus-its-OWN-baseline, so the two
+    // series are in different frames: the tail record baselined at its own first
+    // reading and starts near zero while the target's end near its full count.
+    // Concatenating them raw put a cliff to zero at the seam and dragged the
+    // service average and lastAttendance down with it — the repair tool producing
+    // a worse record than the split it was invoked to fix.
+    //
+    // Shifting the source into the target's frame is exact: both baselines are the
+    // raw daily counter at their own start, so their difference is the offset.
+    // Read before recomputeAttendance, which rewrites attendanceBaseline.
+    const offset =
+      srcAt.attendanceBaseline != null && tgtAt.attendanceBaseline != null
+        ? srcAt.attendanceBaseline - tgtAt.attendanceBaseline
+        : 0;
+    const srcSamples =
+      offset === 0
+        ? srcAt.samples
+        : srcAt.samples.map((s) => ({ ...s, attendance: Math.max(0, s.attendance + offset) }));
+    tgtAt.samples = [...tgtAt.samples, ...srcSamples].sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
     if (srcAt.endedAt && (!tgtAt.endedAt || Date.parse(srcAt.endedAt) > Date.parse(tgtAt.endedAt))) {
       tgtAt.endedAt = srcAt.endedAt;
     }
