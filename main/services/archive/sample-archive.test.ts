@@ -8,7 +8,7 @@ const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "archive-svc-"));
 process.env.STAGE_UTILITY_DATA = dataDir;
 
 const { sampleArchive } = await import("./sample-archive.js");
-const { parseRows } = await import("./csv.js");
+const { parseRows } = await import("../csv.js");
 
 const CTX = { serviceKey: "st1:p1:t9", serviceDate: "2026-07-26" };
 

@@ -26,7 +26,7 @@ import { baptismStore } from "../baptism-store.js";
 import { serviceTimelineStore } from "../service-timeline-store.js";
 import { splHistoryStore } from "../spl-history-store.js";
 import { archiveRoot, isInside, serviceDirName } from "./archive-paths.js";
-import { encodeRow, parseRows } from "./csv.js";
+import { encodeRow, parseRows } from "../csv.js";
 import {
   mergeAttendanceRecord,
   mergeCsv,

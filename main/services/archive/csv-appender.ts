@@ -18,7 +18,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import { encodeRow, parseRows } from "./csv.js";
+import { encodeRow, parseRows } from "../csv.js";
 
 /** Guard against an unbounded scan if a directory somehow fills with rolled files. */
 export const MAX_ROLL = 1000;

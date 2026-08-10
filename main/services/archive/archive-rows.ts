@@ -10,7 +10,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { MAX_ROLL } from "./csv-appender.js";
-import { parseRows } from "./csv.js";
+import { parseRows } from "../csv.js";
 
 /** A parsed row keyed by its file's header. Key order is the header's order. */
 export type ArchiveRow = Record<string, string>;

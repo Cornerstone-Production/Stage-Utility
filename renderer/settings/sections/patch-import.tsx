@@ -3,36 +3,11 @@ import { UploadIcon, XIcon, DownloadIcon } from "lucide-react";
 
 import { Button } from "../../components/ui";
 import { invoke } from "../../lib/api";
-
-/** Minimal RFC-4180-ish CSV parser (handles quoted fields + embedded commas/newlines). */
-function parseCsv(text: string): { headers: string[]; rows: string[][] } {
-  const lines: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQ) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false;
-      } else field += c;
-    } else if (c === '"') inQ = true;
-    else if (c === ",") { row.push(field); field = ""; }
-    else if (c === "\n" || c === "\r") {
-      if (c === "\r" && text[i + 1] === "\n") i++;
-      row.push(field);
-      field = "";
-      if (row.some((x) => x.trim() !== "")) lines.push(row);
-      row = [];
-    } else field += c;
-  }
-  if (field !== "" || row.length) {
-    row.push(field);
-    if (row.some((x) => x.trim() !== "")) lines.push(row);
-  }
-  const headers = (lines.shift() ?? []).map((h) => h.trim());
-  return { headers, rows: lines };
-}
+// The CSV rules live once, in main/services/csv.ts — shared with the archive
+// writer and the patch exporter, which this file has to agree with byte for
+// byte. Its local copies quoted `/[",\n]/` and missed \r, so a value with a
+// bare carriage return came back as two rows.
+import { encodeRows, parseTable } from "@main/services/csv";
 
 type FieldKey = "index" | "label" | "mic" | "phantom" | "console" | "from";
 const FIELDS: { key: FieldKey; label: string; required?: boolean }[] = [
@@ -113,7 +88,7 @@ export function PatchImport({
         for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
         p = await invoke<{ headers: string[]; rows: string[][] }>("patch:parseXlsx", { xlsx: btoa(bin) });
       } else {
-        p = parseCsv(await file.text());
+        p = parseTable(await file.text());
       }
       if (!p.headers.length) { setErr("Couldn't read any columns from that file."); return; }
       setParsed(p);
@@ -133,8 +108,7 @@ export function PatchImport({
       dir === "in"
         ? [["1", "Kick In", "e901", "X", "1", `${sn} 1`], ["2", "Kick Out", "Beta 52", "", "2", `${sn} 2`], ["41", "Wireless 1", "", "", "41", ""]]
         : [["1", "Mains L", "1", `${sn} 1`], ["2", "IEM Vox 1", "2", ""]];
-    const esc = (c: string) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c);
-    const csv = [header, ...rows].map((r) => r.map(esc).join(",")).join("\r\n");
+    const csv = encodeRows([header, ...rows]);
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url;
