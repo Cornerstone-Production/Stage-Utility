@@ -5,6 +5,9 @@ The HTTP surface. Also what Bitfocus Companion and the automation engine call.
 All endpoints are under `/api`. State-changing routes return the updated
 `StageState`. Live updates arrive on the SSE stream rather than by polling.
 
+Request bodies are capped — 8 MB for JSON, 128 MB for an upload — and a body over
+the limit is refused with `413` rather than being read into memory.
+
 **Stage & plan**
 | Method | Path | Purpose |
 |--------|------|---------|

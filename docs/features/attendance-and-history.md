@@ -40,6 +40,12 @@ times, and per-person averages.
 Service windows are editable if a capture went wrong, individual items can be
 excluded from the timers, and a service report is exportable.
 
+Two recordings of the same service — a run that overran its planned end and
+rolled its tail into the next occurrence — can be merged back together, in either
+direction. Attendance is stored per-service, so the two curves are re-expressed
+against a common start before they are joined; the merged trend reads as one
+continuous service rather than restarting at the seam.
+
 ## Attendance metrics
 
 **Attendance** is people in the room. **Entries** is the cumulative door count,
