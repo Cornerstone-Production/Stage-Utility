@@ -665,20 +665,11 @@ class PcoService {
     serviceTypeId: string,
     planId: string,
   ): Promise<string[]> {
-    const cacheKey = `plan-times:${appId}:${planId}`;
-    const cached = this.cacheGet<string[]>(cacheKey);
-    if (cached) return cached;
-
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times?per_page=50`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const items = json && Array.isArray(json.data) ? json.data : [];
-    const times = items
-      .filter((t) => t.attributes.time_type === "service" && typeof t.attributes.starts_at === "string")
-      .map((t) => t.attributes.starts_at as string)
+    const times = await this.getPlanTimes(appId, secret, serviceTypeId, planId);
+    return times
+      .filter((t) => t.timeType === "service")
+      .map((t) => t.startsAt)
       .sort((a, b) => Date.parse(a) - Date.parse(b));
-
-    this.cacheSet(cacheKey, times, json ? TTL_LONG_MS : TTL_FAILED_MS);
-    return times;
   }
 
   /** All rehearsal + service times for a plan (ISO starts/ends). Drives the
@@ -689,23 +680,10 @@ class PcoService {
     serviceTypeId: string,
     planId: string,
   ): Promise<{ type: string; startsAt: string; endsAt: string | null }[]> {
-    const cacheKey = `plan-times-full:${appId}:${planId}`;
-    const cached = this.cacheGet<{ type: string; startsAt: string; endsAt: string | null }[]>(cacheKey);
-    if (cached) return cached;
-
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times?per_page=50`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const items = json && Array.isArray(json.data) ? json.data : [];
-    const times = items
-      .filter((t) => (t.attributes.time_type === "service" || t.attributes.time_type === "rehearsal") && typeof t.attributes.starts_at === "string")
-      .map((t) => ({
-        type: t.attributes.time_type as string,
-        startsAt: t.attributes.starts_at as string,
-        endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
-      }));
-
-    this.cacheSet(cacheKey, times, json ? TTL_LONG_MS : TTL_FAILED_MS);
-    return times;
+    const times = await this.getPlanTimes(appId, secret, serviceTypeId, planId);
+    return times
+      .filter((t) => t.timeType === "service" || t.timeType === "rehearsal")
+      .map((t) => ({ type: t.timeType, startsAt: t.startsAt, endsAt: t.endsAt }));
   }
 
   /** The organization's IANA time zone (e.g. "America/Chicago"), used to render
@@ -1031,13 +1009,22 @@ class PcoService {
   }
 
   /**
-   * Fetch + cache a plan's plan_times ONCE. The start countdown, the auto-rollover
-   * end and the derived item clock all read this one list, so it is fetched whole
-   * and filtered by callers rather than re-requested per use. Cached LONG — plan
-   * times are effectively static day-of.
+   * Fetch + cache a plan's plan_times ONCE, for everything that needs them.
    *
-   * per_page is explicit: a plan routinely carries rehearsal, call, review and
-   * several service times, and the default page would quietly clip the tail.
+   * The start countdown, the auto-rollover end, the derived item clock, the
+   * ScriptView projected clock and the reconnect scheduler all read this one
+   * list, fetched whole and filtered by the caller.
+   *
+   * "Once" was aspirational until this was the only fetch: three copies of the
+   * same request lived here, under three cache keys, so a plan's times were
+   * pulled three times over — and two of them asked for per_page=50 while the
+   * comment on this one explains why 50 is not enough. A plan routinely carries
+   * rehearsal, call, review and several service times, so the short page quietly
+   * clipped the tail of the two lists that fed the ScriptView clock and the
+   * reconnect scheduler.
+   *
+   * Cached LONG — plan times are effectively static day-of. The key carries the
+   * appId as well as the plan: two orgs' credentials must not share an entry.
    */
   private async getPlanTimes(
     appId: string,
@@ -1045,7 +1032,7 @@ class PcoService {
     serviceTypeId: string,
     planId: string,
   ): Promise<PlanTime[]> {
-    const cacheKey = `plan-times:${planId}`;
+    const cacheKey = `plan-times:${appId}:${planId}`;
     const cached = this.cacheGet<PlanTime[]>(cacheKey);
     if (cached) return cached;
 
