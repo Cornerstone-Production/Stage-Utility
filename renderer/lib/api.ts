@@ -310,7 +310,7 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/reconnect-schedule", p);
 
     case "settings:setBaptismAutoStart":
-      return post<T>("/api/settings/baptism-auto-start", {
+      return post<T>("/api/baptism-auto-start", {
         enabled: p.enabled,
         testimonyKeyword: p.testimonyKeyword,
       });
