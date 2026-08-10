@@ -22,17 +22,32 @@ const RECONNECT_MS = 4000;
  *  would otherwise grow it without bound over weeks of uptime. */
 const MAX_STREAM_BUFFER = 256_000;
 /**
- * Silence after which the transcript stream is presumed dead.
+ * How often TCP probes the peer once the stream goes quiet.
  *
- * The long-lived request set no timeout and had no heartbeat, though test() and
- * backfill() both pass timeout: 4000. A half-open socket — the box unplugged, its
- * switch port dropped — emits neither 'end' nor 'error', so scheduleReconnect was
- * unreachable: the panel kept saying "Streaming from host:port" and the captions
- * display kept showing the last line from before the drop, for the rest of the
- * service. Generous, because a genuinely quiet room produces no events either;
- * this is about a dead link, not an idle one.
+ * This — not an application-level timer — is what detects a dead link. A
+ * half-open socket (the box unplugged, its switch port dropped) emits neither
+ * 'end' nor 'error', so scheduleReconnect was unreachable and the panel kept
+ * reading "Streaming from host:port" while the captions display showed the last
+ * line from before the drop, for the rest of the service.
+ *
+ * Deliberately NOT a silence timer over transcript data. ProdCom's protocol is
+ * reverse-engineered here (the field names are not in its public docs), so
+ * whether it emits an SSE keepalive is unverified — and if it does not, a
+ * data-silence timer would fire on every quiet stretch: an instrumental set, a
+ * weeknight, any gap longer than the threshold. That is a reconnect every
+ * interval, all week, with the panel flapping green/red each time. TCP keepalive
+ * assumes nothing about the payload: a live peer's kernel answers the probe even
+ * when the application has nothing to say.
  */
-const STREAM_IDLE_MS = 90_000;
+const SOCKET_KEEPALIVE_MS = 30_000;
+
+/**
+ * Backstop for the case keepalive cannot see: a peer whose TCP stack still
+ * answers while the application has stopped producing. Set far beyond any
+ * plausible silence so it cannot flap through a service — this is a last resort,
+ * not the mechanism.
+ */
+const STREAM_IDLE_MS = 15 * 60_000;
 const MAX_LINES = 100;
 // Coalesce interim partials (which arrive many/sec while someone speaks) into at most
 // one full-buffer broadcast per this window; finals still push immediately.
@@ -181,6 +196,7 @@ class ProdComService extends ConnectionLifecycle {
   }
 
   protected async connect(): Promise<void> {
+    this.clearIdleWatchdog();
     if (!this.running || !this.host || !this.port) return;
     const host = this.host;
     const port = this.port;
@@ -210,8 +226,13 @@ class ProdComService extends ConnectionLifecycle {
           // re-split an ever-longer string on every chunk. The Spectera SSE parser
           // has carried this cap for a while; this one did not.
           if (buf.length > MAX_STREAM_BUFFER) {
-            console.warn(`[prodcom] transcript buffer exceeded ${MAX_STREAM_BUFFER} bytes — resetting`);
-            buf = "";
+            // Drop back to the last line boundary rather than to "". Clearing
+            // mid-event leaves a tail that the next "\n\n" terminates, and
+            // handleEvent treats an unparseable block as a finalised line — so a
+            // truncated fragment could reach the wall as a caption.
+            console.warn(`[prodcom] transcript buffer exceeded ${MAX_STREAM_BUFFER} bytes — resyncing`);
+            const lastBreak = buf.lastIndexOf("\n");
+            buf = lastBreak === -1 ? "" : buf.slice(lastBreak + 1);
           }
           let sep: number;
           while ((sep = buf.indexOf("\n\n")) !== -1) {
@@ -221,14 +242,23 @@ class ProdComService extends ConnectionLifecycle {
           }
         });
         res.on("end", () => {
+          this.clearIdleWatchdog();
           this.report("disconnected", null);
           this.scheduleReconnect();
         });
-        res.on("error", () => this.scheduleReconnect());
+        res.on("error", () => {
+          this.clearIdleWatchdog();
+          this.scheduleReconnect();
+        });
       },
     );
     this.req = req;
+    // The real liveness check — see SOCKET_KEEPALIVE_MS.
+    req.on("socket", (socket) => socket.setKeepAlive(true, SOCKET_KEEPALIVE_MS));
     req.on("error", (e) => {
+      // A watchdog armed by the dying stream must not outlive it, or it can
+      // destroy the NEXT request while it is still connecting.
+      this.clearIdleWatchdog();
       this.report("error", `Can't reach ${host}:${port} — ${e.message}`);
       this.scheduleReconnect();
     });

@@ -552,6 +552,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.cfg) return;
+    let ok = false;
     try {
       // The Vea /data/traffic endpoint has NO working location/zone filter param
       // (locationIds/entityIds are silently ignored — confirmed against the public
@@ -641,17 +642,32 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       if (this.history.length > HISTORY_CAP) this.history.splice(0, this.history.length - HISTORY_CAP);
       this.emit(dto);
       this.resetBackoff();
-      // Poll at the configured rate while something is watching, and slowly
-      // otherwise — the same shape REAPER and ProPresenter use.
-      const sec = Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
-      this.scheduleIn(this.hasSubscribers ? sec * 1000 : IDLE_POLL_MS);
+      ok = true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       // First failure only: an outage used to write one line per poll, forever.
       if (this.attempt === 0) console.error("[sensource] poll error:", msg);
       this.report("error", msg);
       this.goOffline();
-      this.scheduleReconnect();
+    } finally {
+      // In a finally, not at the end of each branch. connect() now IS the poller,
+      // so a throw inside the catch — report(), or goOffline() reaching the
+      // overridden emit() and a broadcast — would strand the integration with no
+      // timer pending, no log, and no way back short of a restart. The old
+      // setInterval was immune to that by construction; this restores it.
+      if (this.running) {
+        if (ok) {
+          // Poll at the configured rate while something is watching, and slowly
+          // otherwise — the same shape REAPER and ProPresenter use. Never FASTER
+          // than configured: pollSeconds has no upper bound, so an operator who
+          // set 300s to stay inside Vea's quota would have been polled every 60s
+          // all week by the idle path.
+          const sec = Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
+          this.scheduleIn(this.hasSubscribers ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS));
+        } else {
+          this.scheduleReconnect();
+        }
+      }
     }
   }
 
