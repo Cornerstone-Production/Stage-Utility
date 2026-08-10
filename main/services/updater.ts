@@ -445,6 +445,12 @@ class Updater {
    * exits after the HTTP response has flushed.
    */
   restart(): UpdateStatus {
+    // Refuse FIRST. This guard used to sit below the marker removal, so a restart
+    // requested while an update was running deleted the pending-restart marker and
+    // then threw — no restart happened, but isRestartPending() now answered false,
+    // so the UI stopped offering the restart the update was still waiting for. The
+    // operator's only remaining route was a shell.
+    if (this.status.phase === "updating") throw new Error("An update is already running.");
     // Taking the restart resolves the pending state; clear it before we exit so a
     // relaunch does not come up still claiming an update is waiting.
     try {
@@ -452,7 +458,6 @@ class Updater {
     } catch {
       /* best-effort */
     }
-    if (this.status.phase === "updating") throw new Error("An update is already running.");
     console.log("[updater] manual restart requested — exiting for the service manager to relaunch");
     this.status = { ...this.status, phase: "updating", step: "restarting" };
     this.broadcast();
