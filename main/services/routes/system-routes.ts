@@ -5,7 +5,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
+import { type RouteCtx, json, error, readBody, readBodyOrEmpty, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
 import { backupScheduler } from "../backup-scheduler.js";
@@ -144,7 +144,9 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     }
     // Restore an uploaded config bundle, then restart to apply.
     if (method === "POST" && pathname === "/api/config/import") {
-      const body = await readBody(req) as Record<string, unknown>;
+      // A snapshot carries every config file and every uploaded image, base64'd,
+      // so the ordinary JSON ceiling would refuse a bundle this app exported.
+      const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown>;
       const bundle = "bundle" in body ? body.bundle : body;
       try {
         const applied = await configSnapshot.apply(bundle);

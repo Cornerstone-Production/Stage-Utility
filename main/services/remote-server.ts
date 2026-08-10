@@ -41,7 +41,7 @@ import { stageController } from "./stage-controller.js";
 import { updater } from "./updater.js";
 import { SERVER_VERSION } from "./server-version.js";
 
-import { type RouteCtx, json, error, readBodyOrEmpty } from "./routes/context.js";
+import { type RouteCtx, json, error, readBodyOrEmpty, MAX_IMAGE_BODY_BYTES } from "./routes/context.js";
 import { statusRoutes } from "./routes/status-routes.js";
 import { historyRoutes } from "./routes/history-routes.js";
 import { archiveRoutes } from "./routes/archive-routes.js";
@@ -720,7 +720,9 @@ export class RemoteServer {
       }
     }
     if (method === "POST" && pathname === "/api/layout-images") {
-      const body = await readBodyOrEmpty(req);
+      // The body IS the image, base64'd — the plain-JSON cap sits below what the
+      // layout image store itself accepts.
+      const body = await readBodyOrEmpty(req, MAX_IMAGE_BODY_BYTES);
       if (typeof body.dataUrl !== "string") {
         error(res, "body.dataUrl (base64 data:image/… URL) required");
         return;

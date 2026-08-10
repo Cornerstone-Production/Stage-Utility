@@ -5,7 +5,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, readBody } from "./context.js";
+import { type RouteCtx, json, error, readBody, MAX_IMAGE_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
 
 export async function brandingRoutes(c: RouteCtx): Promise<void> {
@@ -19,7 +19,8 @@ export async function brandingRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/branding") {
-      const body = await readBody(req) as Record<string, unknown>;
+      // Carries data-URL logos, so it needs headroom over the plain-JSON cap.
+      const body = await readBody(req, MAX_IMAGE_BODY_BYTES) as Record<string, unknown>;
       const partial: Record<string, unknown> = {};
       if (typeof body.name === "string") partial.name = body.name;
       if (typeof body.monochrome === "boolean") partial.monochrome = body.monochrome;
