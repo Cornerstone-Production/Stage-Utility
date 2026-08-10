@@ -68,6 +68,10 @@ class SplRecorder {
   private busy = false;
   private dirty = false;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped by forget(). ensureRecord captures it before its awaits and abandons
+   *  the record if it changed, so a delete cannot be undone by a tick that was
+   *  already in flight when it landed. */
+  private generation = 0;
 
   /** Active in-progress record (for hydration), or null when nothing is recording. */
   getCurrent(): ServiceSplHistory | null {
@@ -131,6 +135,10 @@ class SplRecorder {
   }
 
   private async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<void> {
+    // Captured before any await below. forget() bumps it, so a delete that lands
+    // while this is waiting on the store abandons the work instead of re-assigning
+    // this.current and writing the deleted record straight back.
+    const gen = this.generation;
     const st = stageController.getState();
     if (!st.serviceTypeId || !st.planId) return; // can't key a record yet
     const date = serviceDateKey(live);
@@ -163,6 +171,7 @@ class SplRecorder {
 
     // Resume an existing record for this occurrence (e.g. after a restart), else create.
     const existing = await splHistoryStore.get(key);
+    if (gen !== this.generation) return; // forgotten while we waited
     if (existing) {
       // A restart loses everything since the last debounced write. The raw layer
       // has every sample that arrived, so rebuild the aggregates from it rather
@@ -290,6 +299,33 @@ class SplRecorder {
       .writeManifest(ctx)
       .then(() => sampleArchive.closeService(ctx.serviceKey))
       .catch((err) => console.error("[spl-recorder] archive close failed:", err));
+  }
+
+  /**
+   * Drop an in-memory record so a delete of it is not undone.
+   *
+   * Deleting a record removed the file and the store's cache entry, but this
+   * recorder still held `current`/`currentKey`; ensureRecord short-circuits on a
+   * matching key, kept appending, and the debounced persist recreated the file
+   * seconds later. The row reappeared on the next refresh and the delete button
+   * read as broken. Merging had the same shape: the source key was deleted while
+   * still being recorded, so it came back with its items now duplicated across
+   * both records.
+   *
+   * Cancels the pending write too — otherwise the timer that is already queued
+   * puts the record straight back.
+   */
+  forget(serviceKey: string): boolean {
+    if (this.currentKey !== serviceKey && this.current?.serviceKey !== serviceKey) return false;
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    this.dirty = false;
+    this.current = null;
+    this.currentKey = null;
+    this.generation += 1;
+    return true;
   }
 
   private schedulePersist(): void {

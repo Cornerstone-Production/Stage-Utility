@@ -96,6 +96,7 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
           return;
         }
         if (method === "DELETE") {
+          splRecorder.forget(key);
           json(res, { deleted: await splHistoryStore.delete(key) });
           return;
         }

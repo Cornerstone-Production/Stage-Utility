@@ -21,6 +21,7 @@ import { APP_ROOT } from "./app-root.js";
 import { getUserDataPath } from "./app-paths.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { listImages, readImage, restoreImage } from "./image-files.js";
+import { atomicWrite } from "./write-queue.js";
 
 // main/services/config-snapshot.ts → repo root is two levels up.
 const REPO_ROOT = APP_ROOT;
@@ -119,6 +120,28 @@ function pkgVersion(): string {
   }
 }
 
+/**
+ * Quiet the things that write config on a timer, before a restore lands.
+ *
+ * Imported lazily: config-snapshot is pulled in by the backup scheduler at boot,
+ * and a static import of the controller here would make that a cycle.
+ */
+function stopBackgroundWriters(): void {
+  // Logged, not swallowed: if either stop is ever renamed this would otherwise
+  // proceed with the writers running and still report the restore as clean.
+  const failed = (what: string) => (err: unknown) =>
+    console.error(`[config-snapshot] could not quiet ${what} before restoring:`, err);
+  void import("./live-poller.js")
+    .then((m) => m.livePoller.stop())
+    .catch(failed("the live poller"));
+  void import("./stage-controller.js")
+    .then((m) => {
+      m.stageController.stopAutoRefresh();
+      m.stageController.stopUpdateChecks();
+    })
+    .catch(failed("the stage controller"));
+}
+
 class ConfigSnapshotService {
   private snapshotsDir(): string {
     return path.join(getUserDataPath(), "snapshots");
@@ -180,12 +203,25 @@ class ConfigSnapshotService {
    */
   async apply(bundle: unknown): Promise<string[]> {
     this.validate(bundle);
+
+    // Nothing may write config while a restore is landing. The process exits
+    // ~1.2s after this returns, and inside that window the live poller ticks
+    // every 1–4s: an auto-advance calling settingsStore.patch() would read its
+    // still-warm cache and write it straight back over the file just restored,
+    // reporting success. Stopping the background writers first removes the race
+    // at its source rather than trying to win it.
+    stopBackgroundWriters();
+
     const applied: string[] = [];
     for (const [name, contents] of Object.entries(bundle.files)) {
       if (!(CONFIG_FILES as readonly string[]).includes(name)) continue; // allowlist only
       if (contents === undefined || contents === null) continue;
       const dest = path.join(getUserDataPath(), name);
-      await fs.writeFile(dest, JSON.stringify(contents, null, 2), "utf8");
+      // Atomic, for the reason data-store.ts spells out: a plain writeFile
+      // truncates in place, so a power cut here leaves a short settings.json that
+      // the next boot cannot parse, quarantines, and replaces with defaults —
+      // losing the settings the operator restored this bundle to recover.
+      await atomicWrite(dest, JSON.stringify(contents, null, 2));
       applied.push(name);
     }
     // Uploaded images, restored under their content-hashed names. The directory is

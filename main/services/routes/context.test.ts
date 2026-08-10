@@ -1,7 +1,14 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { error, json, readBody, readRawBody } from "./context.js";
+import {
+  MAX_JSON_BODY_BYTES,
+  MAX_UPLOAD_BODY_BYTES,
+  error,
+  json,
+  readBody,
+  readRawBody,
+} from "./context.js";
 import { callRoute } from "./route-harness.js";
 
 // ── The harness itself ─────────────────────────────────────────────────────
@@ -188,4 +195,60 @@ test("an encoded path segment is not decoded into a new path", async () => {
     "/api/integrations/a%2Fb/enabled",
   );
   assert.equal((out.json as { pathname: string }).pathname, "/api/integrations/a%2Fb/enabled");
+});
+
+// ── Body size limits ───────────────────────────────────────────────────────
+//
+// The app has no auth by design (LAN-trusted), and a curl POST sends no Origin
+// so the cross-origin write gate does not apply to it either. Neither reader had
+// a ceiling, so `curl -X POST --data-binary @big.bin` accumulated until the heap
+// died — taking every stage display with it and losing whatever the recorders
+// had not yet flushed.
+
+test("a JSON body over the limit is refused, not accumulated", async () => {
+  const out = await callRoute(
+    async ({ req, res }) => {
+      try {
+        await readBody(req, 64);
+        json(res, { ok: true });
+      } catch (err) {
+        json(res, { status: (err as { status?: number }).status ?? 500 }, 413);
+      }
+    },
+    "/x",
+    { method: "POST", raw: "x".repeat(4096) },
+  );
+  assert.equal(out.status, 413);
+  assert.deepEqual(out.json, { status: 413 });
+});
+
+test("a raw body over the limit is refused, not accumulated", async () => {
+  const out = await callRoute(
+    async ({ req, res }) => {
+      try {
+        await readRawBody(req, 64);
+        json(res, { ok: true });
+      } catch (err) {
+        json(res, { status: (err as { status?: number }).status ?? 500 }, 413);
+      }
+    },
+    "/x",
+    { method: "POST", raw: "y".repeat(4096) },
+  );
+  assert.equal(out.status, 413);
+});
+
+test("a body inside the limit is unaffected", async () => {
+  const out = await callRoute(
+    async ({ req, res }) => json(res, { length: (await readRawBody(req, 4096)).length }),
+    "/x",
+    { method: "POST", raw: "z".repeat(100) },
+  );
+  assert.deepEqual(out.json, { length: 100 });
+});
+
+test("the default limits are what the routes actually get", async () => {
+  // A regression here would silently restore the unbounded behaviour.
+  assert.ok(MAX_JSON_BODY_BYTES > 0 && MAX_JSON_BODY_BYTES <= 16 * 1024 * 1024);
+  assert.ok(MAX_UPLOAD_BODY_BYTES >= MAX_JSON_BODY_BYTES, "an upload may be larger than JSON");
 });

@@ -29,6 +29,10 @@ class ServiceTimelineRecorder {
   private busy = false;
   private dirty = false;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped by forget(). ensureRecord captures it before its awaits and abandons
+   *  the record if it changed, so a delete cannot be undone by a tick that was
+   *  already in flight when it landed. */
+  private generation = 0;
 
   /** Active in-progress record (for hydration), or null when nothing is recording. */
   getCurrent(): ServiceTimeline | null {
@@ -72,6 +76,10 @@ class ServiceTimelineRecorder {
   }
 
   private async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<void> {
+    // Captured before any await below. forget() bumps it, so a delete that lands
+    // while this is waiting on the store abandons the work instead of re-assigning
+    // this.current and writing the deleted record straight back.
+    const gen = this.generation;
     const st = stageController.getState();
     if (!st.serviceTypeId || !st.planId) return;
     const date = serviceDateKey(live);
@@ -101,6 +109,7 @@ class ServiceTimelineRecorder {
 
     // Resume an existing record for this occurrence (e.g. after a restart), else create.
     const existing = await serviceTimelineStore.get(key);
+    if (gen !== this.generation) return; // forgotten while we waited
     if (existing) {
       this.current = existing;
       this.current.endedAt = null; // reopened
@@ -182,6 +191,33 @@ class ServiceTimelineRecorder {
     // read as a 2-hour service in History and in every export. attendance-recorder
     // has carried this guard for a while; the lesson never reached here.
     if (!this.current.endedAt) this.current.endedAt = iso;
+  }
+
+  /**
+   * Drop an in-memory record so a delete of it is not undone.
+   *
+   * Deleting a record removed the file and the store's cache entry, but this
+   * recorder still held `current`/`currentKey`; ensureRecord short-circuits on a
+   * matching key, kept appending, and the debounced persist recreated the file
+   * seconds later. The row reappeared on the next refresh and the delete button
+   * read as broken. Merging had the same shape: the source key was deleted while
+   * still being recorded, so it came back with its items now duplicated across
+   * both records.
+   *
+   * Cancels the pending write too — otherwise the timer that is already queued
+   * puts the record straight back.
+   */
+  forget(serviceKey: string): boolean {
+    if (this.currentKey !== serviceKey && this.current?.serviceKey !== serviceKey) return false;
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    this.dirty = false;
+    this.current = null;
+    this.currentKey = null;
+    this.generation += 1;
+    return true;
   }
 
   private schedulePersist(): void {

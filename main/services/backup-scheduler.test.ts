@@ -7,7 +7,7 @@ import { test } from "node:test";
 const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "backup-"));
 process.env.STAGE_UTILITY_DATA = dataDir;
 
-const { DEFAULT_BACKUP_SCHEDULE, isDue, prune } = await import("./backup-scheduler.js");
+const { DEFAULT_BACKUP_SCHEDULE, isDue, ownBackupPattern, prune } = await import("./backup-scheduler.js");
 
 const DAY = 24 * 60 * 60 * 1000;
 const sched = (over: Partial<typeof DEFAULT_BACKUP_SCHEDULE> = {}) => ({
@@ -62,7 +62,7 @@ async function seed(dir: string, prefix: string, n: number): Promise<void> {
 test("keeps the newest N and deletes the rest", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "prune-"));
   await seed(dir, "config-", 15);
-  await prune(dir, "config-", 10);
+  await prune(dir, "config-", 10, ".json");
   const left = (await fs.readdir(dir)).sort();
   assert.equal(left.length, 10);
   assert.ok(left.at(-1)!.includes("2026-08-15"), "newest kept");
@@ -72,7 +72,7 @@ test("keeps the newest N and deletes the rest", async () => {
 test("fewer files than the limit deletes nothing", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "prune-"));
   await seed(dir, "config-", 3);
-  assert.deepEqual(await prune(dir, "config-", 10), []);
+  assert.deepEqual(await prune(dir, "config-", 10, ".json"), []);
   assert.equal((await fs.readdir(dir)).length, 3);
 });
 
@@ -80,7 +80,7 @@ test("pruning one kind leaves the other alone", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "prune-"));
   await seed(dir, "config-", 12);
   await seed(dir, "archive-", 4);
-  await prune(dir, "config-", 10);
+  await prune(dir, "config-", 10, ".json");
   const left = await fs.readdir(dir);
   assert.equal(left.filter((n) => n.startsWith("config-")).length, 10);
   assert.equal(left.filter((n) => n.startsWith("archive-")).length, 4, "archives untouched");
@@ -91,7 +91,7 @@ test("unrelated files in the destination are never deleted", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "prune-"));
   await seed(dir, "config-", 12);
   await fs.writeFile(path.join(dir, "someone-elses-file.txt"), "keep me");
-  await prune(dir, "config-", 1);
+  await prune(dir, "config-", 1, ".json");
   const left = await fs.readdir(dir);
   assert.ok(left.includes("someone-elses-file.txt"));
   assert.equal(left.filter((n) => n.startsWith("config-")).length, 1);
@@ -100,10 +100,39 @@ test("unrelated files in the destination are never deleted", async () => {
 test("a keep of zero still leaves one — never prune everything", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "prune-"));
   await seed(dir, "config-", 5);
-  await prune(dir, "config-", 0);
+  await prune(dir, "config-", 0, ".json");
   assert.equal((await fs.readdir(dir)).length, 1);
 });
 
 test("a missing destination is not an error", async () => {
-  assert.deepEqual(await prune(path.join(dataDir, "nope"), "config-", 10), []);
+  assert.deepEqual(await prune(path.join(dataDir, "nope"), "config-", 10, ".json"), []);
+});
+
+// The destination is a plain path so it can point at a mounted share. An operator
+// pointing it at an existing backups folder on the NAS — the obvious thing to do —
+// could already hold files from another tool whose names start the same way. A
+// bare startsWith(prefix) deleted those on the first successful run, silently.
+test("prune leaves files this scheduler did not write", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "stage-prune-foreign-"));
+  const foreign = ["config-2024.json", "config-old.json", "archive-old.zip", "config-notes.txt"];
+  for (const n of foreign) await fs.writeFile(path.join(dir, n), "someone else's");
+  // More of our own than `keep`, so prune definitely deletes something.
+  for (const t of ["2026-08-01T10-00-00-000", "2026-08-02T10-00-00-000", "2026-08-03T10-00-00-000"]) {
+    await fs.writeFile(path.join(dir, `config-${t}.json`), "{}");
+  }
+
+  const doomed = await prune(dir, "config-", 1, ".json");
+  assert.equal(doomed.length, 2, "should have pruned two of its own");
+
+  const left = await fs.readdir(dir);
+  for (const n of foreign) assert.ok(left.includes(n), `deleted a file it did not write: ${n}`);
+});
+
+test("the prune pattern matches the stamp its own writer produces", () => {
+  // Guards the pattern and the stamp format against drifting apart, which would
+  // make prune silently stop pruning and let backups grow without bound.
+  const at = new Date("2026-08-09T19:58:49.567Z").toISOString().replace(/[:.]/g, "-").replace("Z", "");
+  assert.ok(ownBackupPattern("config-", ".json").test(`config-${at}.json`), "does not match its own output");
+  assert.ok(!ownBackupPattern("config-", ".json").test("config-2024.json"));
+  assert.ok(!ownBackupPattern("config-", ".json").test(`config-${at}.zip`), "extension must matter");
 });

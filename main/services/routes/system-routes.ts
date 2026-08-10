@@ -5,7 +5,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, readBody } from "./context.js";
+import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
 import { backupScheduler } from "../backup-scheduler.js";
@@ -50,7 +50,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/update/apply") {
-      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const body = await readBodyOrEmpty(req);
       const lock = serviceActivity();
       if (lock.active && body.override !== true) {
         json(res, { error: "locked", locked: true, reasons: lock.reasons }, 409);

@@ -57,6 +57,13 @@ on a Linux install).
 A `*.json.migrated` file is an older store kept after its contents were split into
 per-service files. Safe to delete.
 
+### Backups only prune their own files
+
+Automatic backups delete old copies to honour "keep N", and match only the names
+they wrote themselves (`config-<stamp>.json`, `archive-<stamp>.zip`). Pointing
+the destination at a folder that already holds other files is safe — anything
+this app did not write is left alone.
+
 ### When credentials all read as "not configured"
 
 Usually the key, not the file. `secrets.bin` is only readable with the key that
