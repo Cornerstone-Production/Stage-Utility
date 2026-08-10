@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test, describe } from "node:test";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -51,13 +51,14 @@ const construction = (): RegExp => new RegExp(CONSTRUCTION_SOURCE, "g");
 function filesConstructingStores(): string[] {
   const out: string[] = [];
   const walk = (dir: string): void => {
-    for (const entry of readdirSync(dir)) {
-      const full = path.join(dir, entry);
-      if (statSync(full).isDirectory()) {
+    // withFileTypes, not a separate statSync: one syscall instead of two, and no
+    // check-then-use gap between asking what an entry is and reading it.
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
         walk(full);
-      } else if (entry.endsWith(".ts") && !entry.endsWith(".test.ts")) {
-        const src = readFileSync(full, "utf8");
-        if (construction().test(src)) out.push(full);
+      } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
+        if (construction().test(readFileSync(full, "utf8"))) out.push(full);
       }
     }
   };

@@ -153,11 +153,12 @@ describe("the production route list", () => {
     const dir = path.dirname(fileURLToPath(import.meta.url));
     const declared = new Set<string>();
     const walk = (d: string): void => {
-      for (const entry of fs.readdirSync(d)) {
-        const full = path.join(d, entry);
-        if (fs.statSync(full).isDirectory()) {
+      // withFileTypes, not a separate statSync — see config-snapshot.test.ts.
+      for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+        const full = path.join(d, entry.name);
+        if (entry.isDirectory()) {
           walk(full);
-        } else if (entry.endsWith(".ts") && !entry.endsWith(".test.ts")) {
+        } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
           const src = fs.readFileSync(full, "utf8");
           for (const re of [
             /export async function (\w+Routes)\s*\(/g,
