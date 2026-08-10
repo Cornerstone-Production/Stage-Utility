@@ -16,6 +16,7 @@ import { sensourceService } from "../sensource-service.js";
 import { smaartService } from "../smaart-service.js";
 import { splHistoryStore } from "../spl-history-store.js";
 import { splRecorder } from "../spl-recorder.js";
+import { deleteServiceRecords } from "../history-edit.js";
 import { propresenterService, propresenterManager } from "../propresenter-service.js";
 
 export async function statusRoutes(c: RouteCtx): Promise<void> {
@@ -96,8 +97,8 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
           return;
         }
         if (method === "DELETE") {
-          splRecorder.forget(key);
-          json(res, { deleted: await splHistoryStore.delete(key) });
+          // All three records, not just SPL — see deleteServiceRecords.
+          json(res, await deleteServiceRecords(key));
           return;
         }
       }

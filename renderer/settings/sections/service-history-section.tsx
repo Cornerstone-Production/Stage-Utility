@@ -548,13 +548,26 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   }, [list, attList, day, activeType, activeTypeName]);
 
   async function deleteService(key: string, title: string) {
-    if (!(await confirm({ title: "Delete recording?", message: `Delete the service-timing recording for "${title}"? This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
+    // Names all three, because it deletes all three. It always meant to: the
+    // timing, SPL and attendance records are one recording split across three
+    // stores, and a dialog that promised only the timings while the other two
+    // silently stayed behind was the more honest half of a real bug.
+    if (!(await confirm({
+      title: "Delete recording?",
+      message: `Delete the recording for "${title}" — service timings, SPL and attendance? This can't be undone. The raw samples in the data archive are kept.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    }))) return;
     setList((prev) => (prev ? prev.filter((s) => s.serviceKey !== key) : prev));
     if (selectedKey === key) setSelectedKey(null);
     try {
       await invoke("serviceTimeline:delete", { serviceKey: key });
-    } catch {
+    } catch (e) {
+      // Say why. The row reappearing on its own — which is all this used to do —
+      // reads as a glitch, and the most likely reason for a refusal is one the
+      // operator can act on: the service is still recording.
       reload();
+      toast.error(`Couldn't delete that recording: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 

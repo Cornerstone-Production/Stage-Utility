@@ -6,6 +6,7 @@
 // service window applies to each: the raw samples are kept, so aggregates re-derive.
 
 import type { ServiceAttendance } from "../types/stage.js";
+import { sampleArchive } from "./archive/sample-archive.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { attendanceStore } from "./attendance-store.js";
 import { splHistoryStore } from "./spl-history-store.js";
@@ -13,6 +14,76 @@ import { broadcast } from "./broadcaster.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { splRecorder } from "./spl-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
+
+/** Every recorder that holds a copy of a service record. Named once: each of the
+ *  three has to be released before any edit here, and doing it per-store was how
+ *  two of these paths ended up without a forget() at all. */
+const RECORDERS = [serviceTimelineRecorder, attendanceRecorder, splRecorder];
+
+/** Thrown past the route handlers so remote-server can answer 409. */
+export class ServiceIsLiveError extends Error {
+  readonly status = 409;
+  constructor(action: string) {
+    super(`That service is recording right now — it cannot be ${action} until it ends.`);
+    this.name = "ServiceIsLiveError";
+  }
+}
+
+/**
+ * Refuse to touch a record the recorders are still writing.
+ *
+ * Every function in this file rewrites a stored record, and a recorder holding
+ * the same record will persist its own copy over the result on its next
+ * debounce. forget() releases that copy, but for a LIVE service it only moves
+ * the problem: the next tick re-establishes the same key and starts a fresh,
+ * empty record seconds later — a delete that appeared to work and then came
+ * back, looking to the operator like a bad capture rather than their own click.
+ *
+ * There is no ordering that wins this. The operator's edit and the live tick are
+ * both correct about the record they hold. So the answer is not to race: while
+ * the service is running, its history is not editable. Correcting a recording
+ * is a post-hoc repair — that is what this whole file is for — and the service
+ * ending is minutes away.
+ */
+export function assertNotLive(serviceKey: string, action: string): void {
+  if (RECORDERS.some((r) => r.isRecording(serviceKey))) throw new ServiceIsLiveError(action);
+}
+
+/** Release every recorder's copy of these keys. Called BEFORE the first awaited
+ *  write, never after: a debounce that fires mid-await writes the pre-edit
+ *  record back over the one just saved. */
+function forgetAll(...serviceKeys: string[]): void {
+  for (const r of RECORDERS) for (const k of serviceKeys) r.forget(k);
+}
+
+/**
+ * Delete a service recording — all three records, in one place.
+ *
+ * The three stores were deleted by three separate routes, and the History panel
+ * called exactly one of them, so "Delete recording" removed the timeline and
+ * left the SPL and attendance records behind: invisible, undeletable through
+ * the UI, and counted by every aggregate that reads those stores. The two
+ * settings panels that called the other two routes were removed as unreachable
+ * dead code, which is what took the last callers with them.
+ *
+ * The raw archive is deliberately NOT removed. It is the source of truth the
+ * records are derived from, a delete of it cannot be undone, and nothing reads
+ * it for a service with no record. Removing an operator's raw samples is a
+ * bigger decision than "delete this recording" asks for.
+ */
+export async function deleteServiceRecords(
+  serviceKey: string,
+): Promise<{ deleted: boolean; records: string[] }> {
+  assertNotLive(serviceKey, "deleted");
+  forgetAll(serviceKey);
+  const gone = await Promise.all([
+    serviceTimelineStore.delete(serviceKey),
+    attendanceStore.delete(serviceKey),
+    splHistoryStore.delete(serviceKey),
+  ]);
+  const records = ["timeline", "attendance", "spl"].filter((_, i) => gone[i]);
+  return { deleted: records.length > 0, records };
+}
 
 /** Re-derive attendance aggregates from the (possibly trimmed) sample series. Note:
  *  totalAttendance is a raw daily counter we can't reconstruct from baselined
@@ -57,6 +128,13 @@ export async function editServiceWindow(
   serviceKey: string,
   opts: { startedAt?: string; endedAt?: string },
 ): Promise<void> {
+  assertNotLive(serviceKey, "re-windowed");
+  // The delete and merge paths were given this when a record was found
+  // resurrecting itself; the two edit paths were missed, so a trimmed window
+  // survived only until the recorder's next debounce wrote the untrimmed copy
+  // back over it.
+  forgetAll(serviceKey);
+
   const startMs = opts.startedAt ? Date.parse(opts.startedAt) : null;
   const endMs = opts.endedAt ? Date.parse(opts.endedAt) : null;
   const inWindow = (iso: string | null | undefined): boolean => {
@@ -109,6 +187,8 @@ export async function editServiceWindow(
 /** Set a per-item override for whether it counts toward the service timers (wins
  *  over the auto buffer/pre-service default). */
 export async function setItemCounted(serviceKey: string, itemId: string, counted: boolean): Promise<void> {
+  assertNotLive(serviceKey, "edited");
+  forgetAll(serviceKey); // see editServiceWindow
   const tl = await serviceTimelineStore.get(serviceKey);
   if (!tl) return;
   const it = tl.items.find((x) => x.itemId === itemId);
@@ -121,11 +201,56 @@ export async function setItemCounted(serviceKey: string, itemId: string, counted
 /** Re-derive attendance aggregates from the current samples (no window change) —
  *  for when the stored peak/min look stale but the samples are fine. */
 export async function recalcAttendance(serviceKey: string): Promise<void> {
+  assertNotLive(serviceKey, "recalculated");
+  forgetAll(serviceKey); // see editServiceWindow
   const att = await attendanceStore.get(serviceKey);
   if (!att) return;
   recomputeAttendance(att);
   await attendanceStore.upsert(att);
   broadcast("attendance:history", att);
+}
+
+/**
+ * A service's archive directory is named by key AND date, so moving its raw rows
+ * needs both. The date is not in the key — read it from whichever record still
+ * carries it, and skip the move entirely if no record names one, because a
+ * guessed date would point at a directory belonging to nothing.
+ */
+async function serviceDateOf(serviceKey: string): Promise<string | null> {
+  const [tl, att, spl] = await Promise.all([
+    serviceTimelineStore.get(serviceKey),
+    attendanceStore.get(serviceKey),
+    splHistoryStore.get(serviceKey),
+  ]);
+  return tl?.serviceDate ?? att?.serviceDate ?? spl?.serviceDate ?? null;
+}
+
+/** Move the source's raw rows into the target's archive, and say what moved.
+ *  Logged rather than silent: this rewrites the source of truth and deletes a
+ *  directory, and the operator's only other evidence is the merged record. */
+async function mergeArchives(sourceKey: string, targetKey: string): Promise<void> {
+  const [sourceDate, targetDate] = await Promise.all([
+    serviceDateOf(sourceKey),
+    serviceDateOf(targetKey),
+  ]);
+  if (!sourceDate || !targetDate) {
+    console.warn(
+      `[history-edit] merge ${sourceKey} -> ${targetKey}: no service date on one side, ` +
+        "leaving the raw archive alone. The merged record will not survive a rebuild.",
+    );
+    return;
+  }
+  const moved = await sampleArchive.mergeInto(
+    { serviceKey: sourceKey, serviceDate: sourceDate },
+    { serviceKey: targetKey, serviceDate: targetDate },
+  );
+  const summary = Object.entries(moved)
+    .map(([base, n]) => `${n} ${base}`)
+    .join(", ");
+  console.log(
+    `[history-edit] merge ${sourceKey} -> ${targetKey}: moved ${summary || "no rows"} ` +
+      `into ${targetDate}; removed the source archive.`,
+  );
 }
 
 /**
@@ -138,6 +263,21 @@ export async function recalcAttendance(serviceKey: string): Promise<void> {
  */
 export async function mergeServiceRecords(sourceKey: string, targetKey: string): Promise<void> {
   if (!sourceKey || !targetKey || sourceKey === targetKey) return;
+  assertNotLive(sourceKey, "merged");
+  assertNotLive(targetKey, "merged");
+
+  // Released up front, for both keys, before the first awaited write. This used
+  // to sit after each store's upsert, which left a window where the recorder's
+  // pending debounce could land on the merged record and revert it.
+  forgetAll(sourceKey, targetKey);
+
+  // ── Raw samples ──
+  // First, because the archive is what a rebuild reads: forget(targetKey) above
+  // is precisely what makes the next SPL resume rebuild from these rows, and a
+  // rebuild against the target's own directory discards everything merged in.
+  // Moving them first also means a failure here aborts before either record is
+  // touched, rather than leaving a merged record over an unmerged archive.
+  await mergeArchives(sourceKey, targetKey);
 
   // ── Timeline ──
   const [srcTl, tgtTl] = await Promise.all([
@@ -152,10 +292,6 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     const ends = tgtTl.items.map((i) => (i.endedAt ? Date.parse(i.endedAt) : NaN)).filter(Number.isFinite);
     if (ends.length) tgtTl.endedAt = new Date(Math.max(...ends)).toISOString();
     await serviceTimelineStore.upsert(tgtTl);
-    // Both sides: the recorder's in-memory copy of the TARGET would be written
-    // over the merged file by its debounced persist, silently reverting the merge.
-    serviceTimelineRecorder.forget(sourceKey);
-    serviceTimelineRecorder.forget(targetKey);
     await serviceTimelineStore.delete(sourceKey);
     broadcast("service-timeline:history", tgtTl);
   }
@@ -202,10 +338,6 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     tgtAt.totalAttendance = Math.max(tgtAt.totalAttendance, srcAt.totalAttendance);
     recomputeAttendance(tgtAt);
     await attendanceStore.upsert(tgtAt);
-    // Both sides: the recorder's in-memory copy of the TARGET would be written
-    // over the merged file by its debounced persist, silently reverting the merge.
-    attendanceRecorder.forget(sourceKey);
-    attendanceRecorder.forget(targetKey);
     await attendanceStore.delete(sourceKey);
     broadcast("attendance:history", tgtAt);
   }
@@ -223,10 +355,6 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
       tgtSpl.endedAt = srcSpl.endedAt;
     }
     await splHistoryStore.upsert(tgtSpl);
-    // Both sides: the recorder's in-memory copy of the TARGET would be written
-    // over the merged file by its debounced persist, silently reverting the merge.
-    splRecorder.forget(sourceKey);
-    splRecorder.forget(targetKey);
     await splHistoryStore.delete(sourceKey);
     broadcast("spl:history", tgtSpl);
   }

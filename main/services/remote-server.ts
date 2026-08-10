@@ -577,9 +577,14 @@ export class RemoteServer {
         await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        // An oversized body is the client's fault, not ours — answer 413 so the
-        // caller can tell "too big" from "the server broke".
-        const status = (err as { status?: number })?.status === 413 ? 413 : 500;
+        // Some failures are the caller's situation, not a broken server, and the
+        // difference matters to the UI: an oversized body is 413, and editing a
+        // service that is recording right now is 409. Anything a route did not
+        // deliberately label stays a 500 — a status is opt-in so a stray `status`
+        // field on some unrelated error cannot turn a real fault into a 2xx-ish
+        // answer the caller shrugs off.
+        const declared = (err as { status?: number })?.status;
+        const status = declared === 413 || declared === 409 ? declared : 500;
         console.error(`[remote-server] handler error ${scrub(pathname)}: ${scrub(msg)}`);
         // The reader paused an over-limit body rather than destroying the socket,
         // so the response reaches the client; closing after it releases the rest.

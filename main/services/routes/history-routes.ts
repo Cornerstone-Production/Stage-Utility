@@ -14,7 +14,13 @@ import { attendanceRecorder } from "../attendance-recorder.js";
 import { serviceTimelineStore } from "../service-timeline-store.js";
 import { serviceTimelineRecorder } from "../service-timeline-recorder.js";
 import { baptismTimerService } from "../baptism-timer-service.js";
-import { editServiceWindow, mergeServiceRecords, recalcAttendance, setItemCounted } from "../history-edit.js";
+import {
+  deleteServiceRecords,
+  editServiceWindow,
+  mergeServiceRecords,
+  recalcAttendance,
+  setItemCounted,
+} from "../history-edit.js";
 
 export async function historyRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -79,8 +85,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
           return;
         }
         if (method === "DELETE") {
-          attendanceRecorder.forget(key);
-          json(res, { deleted: await attendanceStore.delete(key) });
+          json(res, await deleteServiceRecords(key));
           return;
         }
       }
@@ -104,8 +109,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
           return;
         }
         if (method === "DELETE") {
-          serviceTimelineRecorder.forget(key);
-          json(res, { deleted: await serviceTimelineStore.delete(key) });
+          json(res, await deleteServiceRecords(key));
           return;
         }
       }
