@@ -42,6 +42,60 @@ For UI work, drive the real thing. A control that renders is not a control that
 does anything — a `+ row` button once shipped adding a row the same code filtered
 straight back out.
 
+Drive the real server for anything that holds state. Unit tests over the helpers
+are not enough: a wireless password that could not be cleared, and a baptism
+restore that the next append deleted, both had green tests over the pieces and a
+broken path through them. Kill a test server by **port**, never `pkill -f` on an
+env-var prefix — the prefix is not in the process command line, so the old server
+survives and the next run tests stale code.
+
+## Fixing a repeated pattern
+
+Before committing a fix to something that appears more than once, grep for every
+instance and fix them together. Say in the commit how many you found and how many
+you changed.
+
+This is the most expensive recurring mistake in this repo. The `endedAt` guard
+lived in one of three recorders; `.catch` in one of four; `safe()` was applied on
+write but not on read; the SSE buffer cap was in one of two identical parsers; a
+timeout was on `test()` but not the long-lived stream. Each was fixed once, alone,
+and the copies drifted on.
+
+If the same shape exists in three places, prefer removing the duplication over
+fixing it three times.
+
+## A guard must fail on the bug it guards
+
+Any test written to catch a class of bug ships with proof: delete the guard, or
+reintroduce the bug, and watch the test go red in this session. Say so in the
+commit.
+
+Guards written here have repeatedly passed on the exact defect they were added
+for:
+
+- a channel scan matched only literal `invoke("…")`, missing ~90 call sites that
+  go through a local `ipc()` wrapper — the panels where the bug lived
+- a route-coverage scan matched raw file text, so a **comment** naming the broken
+  path satisfied it; stripping comments then swallowed real code and hid a route
+  that exists
+- a telemetry-parity check matched source text, so an interface declaring the
+  field satisfied it, and deleting the line that assigns the value left it green
+- a store-classification scan used a regex that could not cross a `>`, so it found
+  22 of 23 stores and was green by luck
+
+Prefer a check the type system enforces, or one that runs the real code path, over
+one that reads source text. If it must read source, assert a floor on what it
+finds so a later change cannot quietly empty it.
+
+## Do not swallow a failure
+
+A new `catch` either rethrows or returns the failure to its caller. A `catch` that
+only logs is how an archive import reported success having written nothing, and
+how a failed save read as saved until the next restart lost the work.
+
+A function that can partially fail returns what failed; the caller decides what to
+tell the operator.
+
 ## When something breaks in production
 
 Get evidence before forming a theory. The server exposes read-only diagnostics —
