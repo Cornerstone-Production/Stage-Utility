@@ -31,14 +31,28 @@ const RECONNECT_MAX_MS = 3_600_000; // internal ceiling; the service-window sche
 // Resource branches we ask the base station to push.
 const SUBSCRIBE_PATHS = ["/api/mts/paired/all", "/api/rf/channels", "/api/audio/links"];
 
+/**
+ * Per-channel telemetry.
+ *
+ * Field-for-field with ChannelState in shure-base, deliberately. This was a third
+ * hand-copy that had quietly dropped rfLevelDbm, charging, cycles, health and
+ * tempC — every one hardcoded to null in emit() — so a Spectera pack reported no
+ * charge state and a Spectera charger no bay telemetry at all, while the same
+ * fields worked on Shure. Telemetry had been added to two of the three copies.
+ */
 interface SekState {
   channelId: string;
   name: string | null;
   online: boolean;
   battery: number | null;
   rfBars: number | null;
+  rfLevelDbm: number | null;
+  charging: boolean | null;
   frequencyLabel: string | null;
   audioLevel: number | null;
+  cycles: number | null;
+  health: number | null;
+  tempC: number | null;
 }
 
 export class SennheiserSpectera implements DeviceProvider {
@@ -304,7 +318,20 @@ export class SennheiserSpectera implements DeviceProvider {
     const v = value as Record<string, unknown>;
     let st = this.channels.get(uid);
     if (!st) {
-      st = { channelId: uid, name: uid, online: false, battery: null, rfBars: null, frequencyLabel: null, audioLevel: null };
+      st = {
+        channelId: uid,
+        name: uid,
+        online: false,
+        battery: null,
+        rfBars: null,
+        rfLevelDbm: null,
+        charging: null,
+        frequencyLabel: null,
+        audioLevel: null,
+        cycles: null,
+        health: null,
+        tempC: null,
+      };
       this.channels.set(uid, st);
     }
 
@@ -334,6 +361,36 @@ export class SennheiserSpectera implements DeviceProvider {
     const audio = firstNum(readDeep(v, ["audio", "level"]), v.audioLevel, v.level);
     if (audio != null) st.audioLevel = audio;
 
+    // The fields the copy had lost. Names are read defensively, the same way
+    // everything else here is: SSCv2 spells these differently across firmware and
+    // an absent one simply stays null rather than being reported as a zero.
+    // Range-checked, because the candidate keys are not all the same unit. Two
+    // lines up, `rsqi` is read as a 0-100 QUALITY figure, and its sibling `rssi`
+    // is a 0-100 or 0-255 scalar on plenty of Sennheiser gear — feeding that into
+    // a field named dBm renders "+72 dBm", which is physically impossible and
+    // strictly worse than the dash it replaced. RF level is always <= 0.
+    const rfDbm = firstNum(readDeep(v, ["rf", "level"]), v.rfLevel, v.rssi, v.rfLevelDbm);
+    if (rfDbm != null && rfDbm <= 0 && rfDbm > -200) st.rfLevelDbm = rfDbm;
+
+    const charging = firstBool(
+      readDeep(v, ["battery", "charging"]),
+      v.charging,
+      v.isCharging,
+      readDeep(v, ["battery", "isCharging"]),
+    );
+    if (charging != null) st.charging = charging;
+
+    const cycles = firstNum(readDeep(v, ["battery", "cycles"]), v.cycles, v.chargeCycles);
+    if (cycles != null) st.cycles = cycles;
+
+    const health = firstNum(readDeep(v, ["battery", "health"]), v.health, v.batteryHealth);
+    if (health != null && health >= 0 && health <= 100) st.health = health;
+
+    // Likewise: firmware that reports Kelvin or Fahrenheit would render under a
+    // degrees-C label with nothing to signal it is wrong.
+    const tempC = firstNum(readDeep(v, ["battery", "temperature"]), v.temperature, v.tempC);
+    if (tempC != null && tempC > -40 && tempC < 100) st.tempC = tempC;
+
     this.emit(st);
   }
 
@@ -344,14 +401,14 @@ export class SennheiserSpectera implements DeviceProvider {
       deviceType: "receiver",
       online: st.online,
       rfBars: st.rfBars,
-      rfLevelDbm: null,
+      rfLevelDbm: st.rfLevelDbm,
       battery: st.battery,
-      charging: null,
+      charging: st.charging,
       frequencyLabel: st.frequencyLabel,
       audioLevel: st.audioLevel,
-      cycles: null,
-      health: null,
-      tempC: null,
+      cycles: st.cycles,
+      health: st.health,
+      tempC: st.tempC,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -390,6 +447,19 @@ function readDeep(obj: unknown, path: string[]): unknown {
 
 function firstString(...vals: unknown[]): string | null {
   for (const v of vals) if (typeof v === "string" && v.trim()) return v;
+  return null;
+}
+
+/** First usable boolean, tolerating the string forms SSCv2 sometimes sends. */
+function firstBool(...vals: unknown[]): boolean | null {
+  for (const v of vals) {
+    if (typeof v === "boolean") return v;
+    if (typeof v === "string") {
+      const s = v.trim().toLowerCase();
+      if (s === "true" || s === "yes" || s === "charging") return true;
+      if (s === "false" || s === "no" || s === "idle") return false;
+    }
+  }
   return null;
 }
 
