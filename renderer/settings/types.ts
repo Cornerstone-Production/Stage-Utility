@@ -11,8 +11,6 @@ export type SectionId =
   | "integrations"
   | "connect"
   | "branding"
-  | "spl-history"
-  | "attendance"
   | "service-history"
   | "baptisms"
   | "patch"
@@ -46,7 +44,6 @@ export interface SectionHandlers {
   handleSetReconnectSchedule: (partial: { enabled?: boolean; leadMin?: number; tailMin?: number; dormantMin?: number }) => Promise<void>;
   handleSetTaperWindow: (partial: { preMin?: number; postMin?: number }) => Promise<void>;
   handleSetTimezone: (tz: string | null) => Promise<void>;
-  handleSetBaptismAutoStart: (partial: { enabled?: boolean; testimonyKeyword?: string }) => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {
     name?: string;
