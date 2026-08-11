@@ -54,6 +54,18 @@ export interface LayoutObjectSpec {
   /** Reads from one ProPresenter machine — offers the instance picker when
    *  more than one is configured. */
   propInstance?: boolean;
+  /**
+   * Superseded. Kept renderable, out of the palette, and offered a one-click
+   * conversion in the inspector.
+   *
+   * Not deleted: an object type lives in views.json, which is a CONFIG store and
+   * therefore what Backup & restore puts back. Removing the type outright means
+   * restoring any snapshot taken before the change hands the renderer an object
+   * it no longer understands, and the object silently vanishes from a layout the
+   * operator believes they just restored. Deletion waits until the conversions
+   * have happened and such a snapshot is no longer one anybody would restore.
+   */
+  retired?: { replacedBy: LayoutObjectType; why: string };
 }
 
 // ── Shared style fragments ────────────────────────────────────────────────────
@@ -159,8 +171,12 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     propInstance: true,
   },
   "service-order": {
-    label: "Service order",
-    group: "PCO / service",
+    label: "Service order (legacy)",
+    group: null,
+    retired: {
+      replacedBy: "view-embed",
+      why: "Embedded view renders the full ScriptView rundown — the same table as the ScriptView pages, with your saved column presets.",
+    },
     config: () => ({ type: "service-order", noteCategories: null, showLength: false, highlightLive: true, scroll: "auto", autoFit: true }),
     style: () => TEXT({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
   },

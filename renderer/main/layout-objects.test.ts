@@ -154,7 +154,19 @@ const ALL = Object.keys(TYPE_LABELS);
 const ADDED_SINCE: { type: string; label: string; group: string; after: string | null }[] = [
   { type: "rosstalk-button", label: "RossTalk button", group: "Control", after: "osc-button" },
   { type: "record-status", label: "Record status", group: "Status", after: null },
-  { type: "view-embed", label: "Embedded view", group: "PCO / service", after: "service-order" },
+  { type: "view-embed", label: "Embedded view", group: "PCO / service", after: "next-service-item" },
+];
+
+/**
+ * Types RETIRED since the consolidation: still rendered, still restorable from
+ * an old snapshot, but out of the palette so no new ones appear.
+ *
+ * Listed rather than quietly re-pinned. The originals above assert the label and
+ * group every type shipped with; a retirement changes both on purpose, and it
+ * should be a deliberate edit here — the same bar as adding one.
+ */
+const RETIRED: { type: string; label: string; replacedBy: string }[] = [
+  { type: "service-order", label: "Service order (legacy)", replacedBy: "view-embed" },
 ];
 
 // ── Assertions ────────────────────────────────────────────────────────────────
@@ -175,18 +187,37 @@ describe("layout-object registry vs. the structures it replaced", () => {
   });
 
   test("labels are unchanged", () => {
-    for (const t of ALL) assert.equal(typeLabel(t as never), TYPE_LABELS[t], `label for ${t}`);
+    const retired = new Map(RETIRED.map((r) => [r.type, r.label]));
+    for (const t of ALL) {
+      assert.equal(typeLabel(t as never), retired.get(t) ?? TYPE_LABELS[t], `label for ${t}`);
+    }
+  });
+
+  test("retired types leave the palette but stay renderable", () => {
+    for (const r of RETIRED) {
+      const spec = LAYOUT_OBJECTS[r.type as LayoutObjectType];
+      assert.equal(spec.group, null, `${r.type} must not be offered in the palette`);
+      assert.equal(spec.retired?.replacedBy, r.replacedBy, `${r.type} must name its replacement`);
+      // Still constructs — an old layout containing one has to keep working.
+      assert.equal(defaultConfig(r.type as never).type, r.type);
+    }
   });
 
   test("palette groups and their order are unchanged for the original types", () => {
-    // Filter out deliberate additions, then the palette must match the original
-    // exactly — same groups, same order within each group.
+    // Additions are filtered out of what the palette IS; retirements are filtered
+    // out of what it WAS. What remains — every original type still on offer — must
+    // match exactly: same groups, same order within each group.
     const added = new Set(ADDED_SINCE.map((a) => a.type));
+    const gone = new Set(RETIRED.map((r) => r.type));
     const actual = PALETTE_GROUPS.map((g) => ({
       label: g.label as string,
       types: (g.types as string[]).filter((t) => !added.has(t)),
     })).filter((g) => g.types.length > 0);
-    assert.deepEqual(actual, ORIGINAL_PALETTE);
+    const expected = ORIGINAL_PALETTE.map((g) => ({
+      label: g.label,
+      types: g.types.filter((t) => !gone.has(t)),
+    })).filter((g) => g.types.length > 0);
+    assert.deepEqual(actual, expected);
   });
 
   test("each addition sits directly after the type it claims to follow", () => {

@@ -96,6 +96,7 @@ import { usePropInstances } from "../../main/use-dashboard-state";
 import { useConfiguredIntegrations, useIntegrations } from "../../main/use-integration-states";
 import {
   CARD_PRESETS,
+  LAYOUT_OBJECTS,
   PALETTE_GROUPS,
   defaultConfig,
   defaultStyle,
@@ -2404,6 +2405,42 @@ function Inspector({
           )}
         </>
       )}
+      {(() => {
+        // A retired type: still rendered so an old layout keeps working, out of
+        // the palette so no new ones appear, with the conversion one click away.
+        // Deliberately NOT automatic — the replacement renders a different table,
+        // and silently changing what is on a stage monitor is not an upgrade.
+        const retired = LAYOUT_OBJECTS[c.type].retired;
+        if (!retired) return null;
+        const scriptViews = (embedViews ?? []).filter((v) => v.kind === "script");
+        return (
+          <div className="flex flex-col gap-2 rounded-lg border border-amber-a5 bg-amber-a2 p-3">
+            <span className="text-caption1 text-fg">This object has been replaced</span>
+            <span className="text-caption2 text-fg-muted">{retired.why}</span>
+            <Button
+              variant="filled"
+              size="small"
+              className="self-start"
+              onClick={() =>
+                onConfig({
+                  type: "view-embed",
+                  // Only auto-pick when there is no ambiguity; otherwise leave it
+                  // for the picker rather than guessing which view was meant.
+                  viewId: scriptViews.length === 1 ? scriptViews[0].id : null,
+                  showHeader: false,
+                } as LayoutObjectConfig)
+              }
+            >
+              Convert to Embedded view
+            </Button>
+            {scriptViews.length === 0 && (
+              <span className="text-caption2 text-fg-subtle">
+                Make a Script view first and this will have something to point at.
+              </span>
+            )}
+          </div>
+        );
+      })()}
       {c.type === "view-embed" && (() => {
         // Custom views are excluded on purpose: they are the only kind holding a
         // layout, so barring them is what makes an embed unable to reach another
