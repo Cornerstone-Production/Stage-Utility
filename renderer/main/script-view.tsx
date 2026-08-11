@@ -14,6 +14,9 @@ interface ScriptViewProps {
   showLiveControls: boolean;
   /** Which saved ScriptView column preset to render; null = all columns. */
   scriptViewLayoutId?: string | null;
+  /** The header bar (plan title, countdown, clock). On for a display of its own;
+   *  a layout embedding this usually has its own header and clock already. */
+  showHeader?: boolean;
 }
 
 /**
@@ -29,8 +32,12 @@ interface ScriptViewProps {
  * The Max-SPL column it used to carry is not lost: `spl-rundown` is a whole
  * View-kind for exactly that, and duplicating it here is what made this one drift
  * in the first place.
+ *
+ * Sizes to `h-full`, never to the viewport. The caller owns the box: a kiosk
+ * route wraps it in the full screen and the safe-area insets, a layout object
+ * wraps it in the object. That is the whole reason it can be embedded.
  */
-export function ScriptView({ showLiveControls, scriptViewLayoutId }: ScriptViewProps) {
+export function ScriptView({ showLiveControls, scriptViewLayoutId, showHeader = true }: ScriptViewProps) {
   const { state, isLoading, error: stateError, pcoLive } = useDashboardState();
   const [rundown, setRundown] = useState<ScriptViewRundownDTO | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
@@ -78,21 +85,22 @@ export function ScriptView({ showLiveControls, scriptViewLayoutId }: ScriptViewP
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-[100dvh] kiosk-surface">
+      <div className="flex items-center justify-center h-full kiosk-surface">
         <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
       </div>
     );
   }
   if (stateError || !state) {
     return (
-      <div className="flex items-center justify-center h-[100dvh] kiosk-surface text-fg-subtle">
+      <div className="flex items-center justify-center h-full kiosk-surface text-fg-subtle">
         Could not load script
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-full overflow-hidden kiosk-surface">
+      {showHeader && (
       <ScriptViewHeader
         rundown={rundown}
         render={render}
@@ -106,6 +114,7 @@ export function ScriptView({ showLiveControls, scriptViewLayoutId }: ScriptViewP
           ) : undefined
         }
       />
+      )}
 
       <ScriptViewBody
         rundown={rundown}

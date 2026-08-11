@@ -164,6 +164,12 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     config: () => ({ type: "service-order", noteCategories: null, showLength: false, highlightLive: true, scroll: "auto", autoFit: true }),
     style: () => TEXT({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
   },
+  "view-embed": {
+    label: "Embedded view",
+    group: "PCO / service",
+    config: () => ({ type: "view-embed", viewId: null }),
+    style: () => TEXT({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
+  },
   "service-pacing": {
     label: "Service pacing",
     group: "PCO / service",

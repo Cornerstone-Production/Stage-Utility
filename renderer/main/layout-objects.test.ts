@@ -154,6 +154,7 @@ const ALL = Object.keys(TYPE_LABELS);
 const ADDED_SINCE: { type: string; label: string; group: string; after: string | null }[] = [
   { type: "rosstalk-button", label: "RossTalk button", group: "Control", after: "osc-button" },
   { type: "record-status", label: "Record status", group: "Status", after: null },
+  { type: "view-embed", label: "Embedded view", group: "PCO / service", after: "service-order" },
 ];
 
 // ── Assertions ────────────────────────────────────────────────────────────────

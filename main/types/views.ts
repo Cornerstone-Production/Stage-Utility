@@ -425,6 +425,19 @@ export type LayoutObjectConfig =
   // of THIS container's box (not the canvas), so moving/resizing the container
   // moves/scales its contents as a unit. The box itself is drawn from `style`
   // (background/border/radius/padding) — same fields as any other object.
+  // Render another View's content inside this layout, natively — the same
+  // components the View renders on its own display, not an iframe of it. Built
+  // for the ScriptView rundown, which is a whole page's worth of table nobody
+  // wants to rebuild as objects; other kinds opt in as they stop assuming they
+  // own the screen. `viewId` null = nothing chosen yet.
+  | {
+      type: "view-embed";
+      viewId?: string | null;
+      /** Show the embedded view's own header bar (plan title, countdown, clock).
+       *  Off by default: a layout usually has its own, and two clocks a few
+       *  hundred pixels apart is worse than none. */
+      showHeader?: boolean;
+    }
   | { type: "container" };
 
 export type LayoutObjectType = LayoutObjectConfig["type"];

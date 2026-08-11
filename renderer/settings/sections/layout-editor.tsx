@@ -2299,7 +2299,8 @@ function Inspector({
   const propInstances = usePropInstances();
   const integrationsSnap = useIntegrations();
   const captionChannels = Object.keys(useStageState().state?.captionChannelColors ?? {});
-  const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
+  const embedViews = useStageState().state?.views ?? [];
+  const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid", "view-embed"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
   const pxOf = (frac: number | undefined, dflt: number) => Math.round((frac ?? dflt) * canvas.height * 10) / 10;
@@ -2402,6 +2403,33 @@ function Inspector({
             <RowSwitch label="Show 'slides' label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
           )}
         </>
+      )}
+      {c.type === "view-embed" && (() => {
+        // Custom views are excluded on purpose: they are the only kind holding a
+        // layout, so barring them is what makes an embed unable to reach another
+        // embed. Kinds beyond "script" still assume they own the screen, so they
+        // are listed but render a note rather than something broken.
+        const embeddable = (embedViews ?? []).filter((v) => v.kind !== "custom");
+        return embeddable.length === 0 ? (
+          <p className="text-caption2 text-fg-muted">
+            No embeddable views yet — make a Script view first, then point this at it.
+          </p>
+        ) : (
+          <RowSelect
+            label="View"
+            hint="Renders that view's content here, natively. Script views work today; other kinds are being converted."
+            value={c.viewId ?? ""}
+            options={[{ value: "", label: "None" }, ...embeddable.map((v) => ({ value: v.id, label: `${v.name} (${v.kind})` }))]}
+            onChange={(v) => onConfig({ ...c, viewId: v || null })}
+          />
+        );
+      })()}
+      {c.type === "view-embed" && c.viewId && (
+        <RowSwitch
+          label="Show the view's header"
+          checked={c.showHeader ?? false}
+          onChange={(v) => onConfig({ ...c, showHeader: v })}
+        />
       )}
       {c.type === "service-order" && (
         <>
