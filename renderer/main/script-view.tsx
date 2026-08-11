@@ -5,13 +5,11 @@ import { Loader2Icon } from "lucide-react";
 
 import { QrHint } from "../components/qr-hint";
 import { invoke } from "../lib/api";
-import { LiveControls } from "./live-controls";
 import { ScriptViewBody, ScriptViewHeader, useScriptViewRender } from "./scriptview-body";
 import { useDashboardState } from "./use-dashboard-state";
 import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 
 interface ScriptViewProps {
-  showLiveControls: boolean;
   /** Which saved ScriptView column preset to render; null = all columns. */
   scriptViewLayoutId?: string | null;
   /** The header bar (plan title, countdown, clock). On for a display of its own;
@@ -40,7 +38,7 @@ interface ScriptViewProps {
  * route wraps it in the full screen and the safe-area insets, a layout object
  * wraps it in the object. That is the whole reason it can be embedded.
  */
-export function ScriptView({ showLiveControls, scriptViewLayoutId, showHeader = true, textSizeClass }: ScriptViewProps) {
+export function ScriptView({ scriptViewLayoutId, showHeader = true, textSizeClass }: ScriptViewProps) {
   const { state, isLoading, error: stateError, pcoLive } = useDashboardState();
   const [rundown, setRundown] = useState<ScriptViewRundownDTO | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
@@ -142,12 +140,6 @@ export function ScriptView({ showLiveControls, scriptViewLayoutId, showHeader = 
         error={serviceTypeId ? error : "Planning Center not configured"}
         textSizeClass={textSizeClass}
       />
-
-      {showLiveControls && (
-        <div className="shrink-0 p-3 border-t border-line">
-          <LiveControls />
-        </div>
-      )}
     </div>
   );
 }

@@ -98,7 +98,12 @@ export interface View {
    * (the monitor's active width), so widths render at true physical inches.
    */
   slotsLayout?: SlotsLayout | null;
-  /** Show the PCO Live Prev/Next controls on a "script" View (default false). */
+  /**
+   * @deprecated No longer read or written — the PCO Live Prev/Next controls were
+   * removed from the script display. Kept only so an existing `views.json` still
+   * parses; nothing sets it, and nothing renders from it. Drop it once no
+   * supported install can still be carrying one.
+   */
   showLiveControls?: boolean;
   /**
    * Which saved ScriptView column preset a "script" View renders; null/absent =
