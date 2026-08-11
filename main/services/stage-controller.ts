@@ -551,9 +551,36 @@ export class StageController {
     return scriptViewLayoutsStore.load();
   }
 
-  /** Bulk replace — the settings UI manages the whole array and saves it. */
+  /**
+   * Bulk replace — the settings UI manages the whole array and saves it.
+   *
+   * Views referencing a preset that this save removes are cleared to "all
+   * columns" rather than left pointing at nothing. A dangling id degrades in the
+   * worst way available: `resolveScriptViewSpec` treats an unresolved preset the
+   * same as none and renders EVERY note category, so a display configured for
+   * one department quietly starts showing every other department's notes — and
+   * the settings picker shows a blank trigger, because the stored value matches
+   * no option, so there is nothing on screen to explain it.
+   */
   async saveScriptViewLayouts(layouts: ScriptViewLayout[]): Promise<ScriptViewLayout[]> {
     await scriptViewLayoutsStore.save(layouts);
+    const live = new Set(layouts.map((l) => l.id));
+    const orphaned = this.state.views.filter(
+      (v) => v.scriptViewLayoutId && !live.has(v.scriptViewLayoutId),
+    );
+    if (orphaned.length > 0) {
+      console.log(
+        `[stage-controller] ${orphaned.length} view(s) referenced a deleted ScriptView preset — ` +
+          `cleared to all columns: ${orphaned.map((v) => scrub(v.name)).join(", ")}`,
+      );
+      const views = this.state.views.map((v) =>
+        v.scriptViewLayoutId && !live.has(v.scriptViewLayoutId) ? { ...v, scriptViewLayoutId: null } : v,
+      );
+      this.state = { ...this.state, views };
+      await viewsStore.save(views);
+      this.recomputeResolved();
+      this.broadcast();
+    }
     return layouts;
   }
 
@@ -622,9 +649,27 @@ export class StageController {
 
     const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, serviceTypeId);
     const isActiveType = serviceTypeId === this.state.serviceTypeId;
+
+    /**
+     * Resolve a specific plan, looking BEYOND the upcoming list.
+     *
+     * `listUpcomingPlans` is `filter=future`, so a plan the operator selected by
+     * hand from the recent list is not in it. Falling through to `plans[0]` there
+     * silently swapped last Sunday's rundown for next week's — on the stage
+     * monitor, with the live highlight and countdown gone because the resolved
+     * plan was no longer the active one. Nobody would read that as "wrong plan";
+     * it just looks like the service has not started.
+     */
+    const resolve = async (id: string): Promise<PlanDTO | null> => {
+      const upcoming = plans.find((p) => p.id === id);
+      if (upcoming) return upcoming;
+      const recent = await pcoService.listRecentPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId);
+      return recent.find((p) => p.id === id) ?? null;
+    };
+
     let plan: PlanDTO | null;
-    if (planId) plan = plans.find((p) => p.id === planId) ?? null;
-    else if (isActiveType && this.state.planId) plan = plans.find((p) => p.id === this.state.planId) ?? plans[0] ?? null;
+    if (planId) plan = await resolve(planId);
+    else if (isActiveType && this.state.planId) plan = (await resolve(this.state.planId)) ?? plans[0] ?? null;
     else plan = plans[0] ?? null;
     if (!plan) return empty;
 
@@ -1557,6 +1602,15 @@ export class StageController {
   async setViewScriptViewLayout(id: string, scriptViewLayoutId: string | null): Promise<StageState> {
     if (!this.state.views.find((v) => v.id === id)) {
       throw new Error(`views:setScriptViewLayout — view ${id} not found`);
+    }
+    // Refused rather than stored: an unknown id renders as ALL columns, which
+    // looks like a working display showing the wrong thing. Failing the write is
+    // the only outcome the operator can act on.
+    if (scriptViewLayoutId) {
+      const known = await scriptViewLayoutsStore.load();
+      if (!known.some((l) => l.id === scriptViewLayoutId)) {
+        throw new Error(`views:setScriptViewLayout — no ScriptView layout ${scriptViewLayoutId}`);
+      }
     }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, scriptViewLayoutId } : v));
     console.log(`[stage-controller] setViewScriptViewLayout id=${scrub(id)} → ${scrub(scriptViewLayoutId)}`);

@@ -23,6 +23,7 @@ import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
+import { isEmbeddableViewKind } from "./layout-objects";
 import { ScriptView } from "./script-view";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
@@ -395,7 +396,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "service-order":
       return <ServiceOrderObject o={o} config={c} ctx={ctx} />;
     case "view-embed":
-      return <ViewEmbedObject config={c} ctx={ctx} />;
+      return <ViewEmbedObject o={o} config={c} ctx={ctx} />;
     case "current-slide-notes": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
       return span(pro?.currentNotes ?? "");
@@ -1649,9 +1650,11 @@ function PlanAttachment({
  * a box. `script` is converted; the rest say so rather than rendering broken.
  */
 function ViewEmbedObject({
+  o,
   config,
   ctx,
 }: {
+  o: LayoutObject;
   config: Extract<LayoutObjectConfig, { type: "view-embed" }>;
   ctx: LayoutRenderCtx;
 }) {
@@ -1664,20 +1667,31 @@ function ViewEmbedObject({
   if (!config.viewId) return notice("Pick a view to embed");
   if (!view) return notice("That view no longer exists");
 
-  if (view.kind === "script") {
+  if (isEmbeddableViewKind(view.kind)) {
     // w-full h-full, not the object's alignment: boxStyle turns every object into
     // a flex column aligned by textAlign, which shrink-wraps a child that has no
     // width of its own — a left-aligned box rendered the rundown at about half
     // the width it was given. An embed always fills its box; alignment is a text
     // idea and does not apply.
+    // The font size is set HERE, on the wrapper, and inherited by the whole
+    // rundown. Every other object applies it per text node through textStyle,
+    // which an embedded component never passes through — so without this the
+    // table fell back to the browser default 16px however large the object was,
+    // with no control that did anything.
     return (
-      <div className="w-full h-full">
+      <div className="w-full h-full" style={{ fontSize: `${(o.style?.fontSize ?? 0.03) * ctx.H}px` }}>
         {/* No live controls: an embed is a readout inside someone's layout, and a
             stray Prev/Next on a stage monitor drives the real PCO controller. */}
+        {/* textSizeClass="" drops the page's viewport-relative clamp so the rows
+            inherit the object's own font-size, which boxStyle sets from the
+            object's style. Without it the table capped at ~17px however large the
+            object was — unreadable on a 4K stage panel, with the font-size field
+            hidden as well, so there was no way to fix it. */}
         <ScriptView
           showLiveControls={false}
           scriptViewLayoutId={view.scriptViewLayoutId ?? null}
           showHeader={config.showHeader ?? false}
+          textSizeClass=""
         />
       </div>
     );

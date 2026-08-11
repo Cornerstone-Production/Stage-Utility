@@ -87,6 +87,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         rundown={rundown}
         render={render}
         appLogo={state?.appLogo}
+        appLogoMonochrome={state?.appLogoMonochrome}
         now={now}
         nav={
           <Tooltip label="All services">

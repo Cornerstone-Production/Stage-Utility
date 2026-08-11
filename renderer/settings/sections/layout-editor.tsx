@@ -97,6 +97,7 @@ import { useConfiguredIntegrations, useIntegrations } from "../../main/use-integ
 import {
   CARD_PRESETS,
   LAYOUT_OBJECTS,
+  isOfferableInEmbedPicker,
   PALETTE_GROUPS,
   defaultConfig,
   defaultStyle,
@@ -2301,7 +2302,7 @@ function Inspector({
   const integrationsSnap = useIntegrations();
   const captionChannels = Object.keys(useStageState().state?.captionChannelColors ?? {});
   const embedViews = useStageState().state?.views ?? [];
-  const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid", "view-embed"].includes(c.type);
+  const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
   const pxOf = (frac: number | undefined, dflt: number) => Math.round((frac ?? dflt) * canvas.height * 10) / 10;
@@ -2417,6 +2418,13 @@ function Inspector({
           <div className="flex flex-col gap-2 rounded-lg border border-amber-a5 bg-amber-a2 p-3">
             <span className="text-caption1 text-fg">This object has been replaced</span>
             <span className="text-caption2 text-fg-muted">{retired.why}</span>
+            <span className="text-caption2 text-fg-muted">
+              It is not a like-for-like swap, so read this first: the replacement
+              scrolls rather than shrinking to fit, and <strong>Fit to height</strong>,{" "}
+              <strong>Scroll</strong> and the note-category picker do not carry over.
+              Its columns come from the Script view's preset instead. Set the object's
+              font size afterwards — nothing auto-fits it now.
+            </span>
             <Button
               variant="filled"
               size="small"
@@ -2442,11 +2450,10 @@ function Inspector({
         );
       })()}
       {c.type === "view-embed" && (() => {
-        // Custom views are excluded on purpose: they are the only kind holding a
-        // layout, so barring them is what makes an embed unable to reach another
-        // embed. Kinds beyond "script" still assume they own the screen, so they
-        // are listed but render a note rather than something broken.
-        const embeddable = (embedViews ?? []).filter((v) => v.kind !== "custom");
+        // Both the picker and the renderer ask the same function — see
+        // isEmbeddableViewKind. Custom never appears, which IS the recursion
+        // guard; other kinds appear but say why they do not render yet.
+        const embeddable = (embedViews ?? []).filter((v) => isOfferableInEmbedPicker(v.kind));
         return embeddable.length === 0 ? (
           <p className="text-caption2 text-fg-muted">
             No embeddable views yet — make a Script view first, then point this at it.

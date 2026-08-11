@@ -23,6 +23,7 @@ import { useMemo, type ReactNode } from "react";
 import { BrandLogo } from "../components/brand-logo";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { RundownTable } from "./rundown-table";
+import { useSplHistory } from "./use-spl-state";
 import {
   buildScriptViewColumns,
   computeClocks,
@@ -55,7 +56,20 @@ export function useScriptViewRender(
   const items = useMemo(() => rundown?.items ?? [], [rundown?.items]);
   const spec = useMemo(() => resolveScriptViewSpec(layout, roles, rundown?.noteCategories ?? []), [layout, roles, rundown?.noteCategories]);
   const clocks = useMemo(() => computeClocks(items, rundown?.serviceTimes?.[0]), [items, rundown?.serviceTimes]);
-  const columns = useMemo(() => buildScriptViewColumns(spec, clocks, rundown?.timeZone), [spec, clocks, rundown?.timeZone]);
+  // Recorded peak SPL per item, for the optional Max SPL column. Subscribed here
+  // rather than by each caller so the column behaves the same on the page, on a
+  // display and inside a layout — the `script` View-kind used to be the only
+  // surface that had it, which is exactly how it became a second rundown.
+  const splHistory = useSplHistory();
+  const maxSplByItem = useMemo(() => {
+    const m = new Map<string, number | null>();
+    for (const it of splHistory?.items ?? []) m.set(it.itemId, it.maxSpl);
+    return m;
+  }, [splHistory?.items]);
+  const columns = useMemo(
+    () => buildScriptViewColumns(spec, clocks, rundown?.timeZone, maxSplByItem),
+    [spec, clocks, rundown?.timeZone, maxSplByItem],
+  );
 
   // Only the app's active plan gets the live feed; a service is actually LIVE
   // only when the PCO controller is on a plan item (preservice countdown ≠ live).
@@ -100,17 +114,29 @@ export function ScriptViewBody({
   layout,
   render,
   error,
+  textSizeClass,
 }: {
   rundown: ScriptViewRundownDTO | null;
   roles: CategoryRole[];
   layout: ScriptViewLayout | null;
   render: ScriptViewRender;
   error?: string | null;
+  /** Row text sizing. Default is the page's viewport-relative clamp; pass "" to
+   *  inherit the container's font-size instead, which is how a layout object
+   *  gets a size that tracks the box it was given rather than the screen. */
+  textSizeClass?: string;
 }) {
   const { items, spec, columns, currentItemId } = render;
+  // An error only wins when there is nothing else to show. A rundown refetches
+  // on a timer, so a single failed poll — a PCO 429, a Wi-Fi blip, the server
+  // restarting — used to replace a perfectly good rundown on a stage monitor
+  // with red text until the next success up to a minute later. The plan has not
+  // changed; the last one we read is still the right answer. Report the failure
+  // only when it leaves the operator with nothing.
+  const showError = error && !rundown;
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
-      {error ? (
+      {showError ? (
         <div className="flex items-center justify-center h-full text-red-10 text-body px-6 text-center">{error}</div>
       ) : !rundown ? (
         <div className="flex items-center justify-center h-full"><Loader2Icon className="size-8 text-gray-7 animate-spin" /></div>
@@ -127,6 +153,7 @@ export function ScriptViewBody({
           rowColor={layout?.rowColor}
           accentRole={layout?.accentRole ?? null}
           roles={roles}
+          {...(textSizeClass != null ? { textSizeClass } : {})}
           footer={spec.showTotalTime ? <span>{fmtTotal(totalLengthSec(items))} <span className="text-fg-subtle">· total time</span></span> : undefined}
         />
       )}
@@ -146,6 +173,7 @@ export function ScriptViewHeader({
   rundown,
   render,
   appLogo,
+  appLogoMonochrome,
   now,
   nav,
   trailing,
@@ -153,6 +181,10 @@ export function ScriptViewHeader({
   rundown: ScriptViewRundownDTO | null;
   render: ScriptViewRender;
   appLogo?: string | null;
+  /** Branding's monochrome toggle. Hardcoded true in the first draft, which
+   *  made the setting dead on this surface while every other screen honoured it.
+   *  Defaults true so a caller that does not know about it looks unchanged. */
+  appLogoMonochrome?: boolean;
   now: number;
   nav?: ReactNode;
   trailing?: ReactNode;
@@ -168,7 +200,7 @@ export function ScriptViewHeader({
     <div className="flex items-center gap-4 px-4 h-14 shrink-0 border-b border-line bg-black/40">
       {nav}
       <div className="flex items-center gap-2 min-w-0">
-        {appLogo && <BrandLogo logo={appLogo} monochrome className="size-6 rounded text-fg" />}
+        {appLogo && <BrandLogo logo={appLogo} monochrome={appLogoMonochrome ?? true} className="size-6 rounded text-fg" />}
         <div className="flex flex-col min-w-0 leading-tight">
           <span className="text-caption1 font-title text-fg truncate">{rundown?.planSeriesTitle ?? rundown?.planTitle ?? "ScriptView"}</span>
           <span className="text-caption2 text-fg-subtle truncate">

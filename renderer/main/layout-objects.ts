@@ -184,7 +184,10 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     label: "Embedded view",
     group: "PCO / service",
     config: () => ({ type: "view-embed", viewId: null }),
-    style: () => TEXT({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
+    // 0.03 of canvas height — about 32px on 1080p, readable from a stage. The
+    // rundown inherits this; there is no auto-fit, so the default has to be a
+    // size someone can actually read before they touch anything.
+    style: () => TEXT({ fontSize: 0.03, textAlign: "left", vAlign: "top" }),
   },
   "service-pacing": {
     label: "Service pacing",
@@ -390,6 +393,33 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     stylingOnly: true,
   },
 };
+
+/**
+ * Which View kinds a `view-embed` object may render.
+ *
+ * ONE function, used by both the picker and the renderer, because the two
+ * disagreeing is the whole hazard. Custom is excluded and that is the entire
+ * recursion guard: a custom View is the only kind holding a layout, so refusing
+ * it means an embed can never reach another embed — no depth counter to get
+ * wrong. Every other kind is listed explicitly, so adding a View kind does not
+ * silently make it embeddable before anyone has made it render in a box.
+ *
+ * A function rather than a comment or a filter written out at each call site:
+ * the guard test calls THIS, so it fails on the behaviour changing rather than
+ * on a string moving inside a 2,500-line file.
+ */
+export const EMBEDDABLE_VIEW_KINDS: readonly ViewKind[] = ["script"];
+
+export function isEmbeddableViewKind(kind: ViewKind): boolean {
+  return EMBEDDABLE_VIEW_KINDS.includes(kind);
+}
+
+/** Offered in the embed picker: everything except custom, so an operator can see
+ *  a kind exists and read why it is not renderable yet, rather than wondering
+ *  where it went. Custom never appears — see isEmbeddableViewKind. */
+export function isOfferableInEmbedPicker(kind: ViewKind): boolean {
+  return kind !== "custom";
+}
 
 // ── Derived views over the registry ───────────────────────────────────────────
 

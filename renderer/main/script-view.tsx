@@ -17,6 +17,9 @@ interface ScriptViewProps {
   /** The header bar (plan title, countdown, clock). On for a display of its own;
    *  a layout embedding this usually has its own header and clock already. */
   showHeader?: boolean;
+  /** Row text sizing — see ScriptViewBody. A layout object passes "" so the
+   *  rows scale with the object's own font size instead of the viewport. */
+  textSizeClass?: string;
 }
 
 /**
@@ -37,35 +40,49 @@ interface ScriptViewProps {
  * route wraps it in the full screen and the safe-area insets, a layout object
  * wraps it in the object. That is the whole reason it can be embedded.
  */
-export function ScriptView({ showLiveControls, scriptViewLayoutId, showHeader = true }: ScriptViewProps) {
+export function ScriptView({ showLiveControls, scriptViewLayoutId, showHeader = true, textSizeClass }: ScriptViewProps) {
   const { state, isLoading, error: stateError, pcoLive } = useDashboardState();
   const [rundown, setRundown] = useState<ScriptViewRundownDTO | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
   const [roles, setRoles] = useState<CategoryRole[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    invoke<ScriptViewLayout[]>("scriptview:listLayouts").then(setLayouts).catch(() => setLayouts([]));
-    invoke<CategoryRole[]>("scriptview:listRoles").then(setRoles).catch(() => setRoles([]));
-  }, []);
-
   // The ACTIVE service type — getScriptViewRundown resolves that to the active
   // plan, so this display follows whatever the app is set to without being told.
   const serviceTypeId = state?.serviceTypeId ?? null;
+  // Keyed on as well as the type: the operator can switch PLAN without changing
+  // service type (a manual pick, or the auto-rollover advancing to the next
+  // occurrence). Watching only the type left the monitor on the previous plan
+  // for up to a poll interval — during the pre-service window, which is exactly
+  // when a plan gets corrected.
+  const planId = state?.planId ?? null;
 
   // Items change rarely; refetch on a slow timer. The live position arrives
   // separately over SSE, so a stale rundown still highlights the right row.
+  //
+  // The presets and roles ride the same timer rather than being fetched once at
+  // mount. Fetched once, a transient failure at boot left `layouts` empty for
+  // the life of the page, and an empty list resolves to ALL columns — a display
+  // configured for one department silently showing every other department's
+  // notes, with nothing on screen to say so.
   useEffect(() => {
     if (!serviceTypeId) return;
     let cancelled = false;
-    const load = () =>
+    const load = () => {
+      invoke<ScriptViewLayout[]>("scriptview:listLayouts")
+        .then((l) => { if (!cancelled) setLayouts(l); })
+        .catch(() => { /* keep the last good list; the next tick retries */ });
+      invoke<CategoryRole[]>("scriptview:listRoles")
+        .then((r) => { if (!cancelled) setRoles(r); })
+        .catch(() => { /* as above */ });
       invoke<ScriptViewRundownDTO>("scriptview:rundown", { serviceTypeId })
         .then((r) => { if (!cancelled) { setRundown(r); setError(null); } })
         .catch((e) => { if (!cancelled) setError(errorMessage(e)); });
+    };
     load();
     const t = setInterval(load, 60_000);
     return () => { cancelled = true; clearInterval(t); };
-  }, [serviceTypeId]);
+  }, [serviceTypeId, planId]);
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -105,6 +122,7 @@ export function ScriptView({ showLiveControls, scriptViewLayoutId, showHeader = 
         rundown={rundown}
         render={render}
         appLogo={state.appLogo}
+        appLogoMonochrome={state.appLogoMonochrome}
         now={now}
         trailing={
           state.showQr && state.remoteUrl ? (
@@ -122,6 +140,7 @@ export function ScriptView({ showLiveControls, scriptViewLayoutId, showHeader = 
         layout={layout}
         render={render}
         error={serviceTypeId ? error : "Planning Center not configured"}
+        textSizeClass={textSizeClass}
       />
 
       {showLiveControls && (

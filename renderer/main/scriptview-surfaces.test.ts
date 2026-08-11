@@ -19,6 +19,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { EMBEDDABLE_VIEW_KINDS, isEmbeddableViewKind, isOfferableInEmbedPicker } from "./layout-objects.js";
+import type { ViewKind } from "../../main/types/stage.js";
+
+/** Every kind a View can be — so "exactly these are embeddable" is checked
+ *  against the real set rather than a list that can quietly fall behind. */
+const ALL_VIEW_KINDS: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "custom", "script", "spl-rundown"];
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const read = (f: string) => fs.readFileSync(path.join(HERE, f), "utf8");
 
@@ -106,23 +113,35 @@ describe("the rundown has one implementation", () => {
 });
 
 describe("embedding cannot recurse", () => {
-  it("custom views are refused by the embed", () => {
-    // The whole recursion guard: a custom View is the only kind holding a layout,
-    // so refusing it means an embed can never reach another embed. There is no
-    // depth counter to get wrong — but there is also nothing stopping someone
-    // adding `case "custom"` later, so it is pinned here.
-    const renderer = read(SURFACES.layoutObject);
-    const editor = fs.readFileSync(
-      path.join(HERE, "..", "settings", "sections", "layout-editor.tsx"),
-      "utf8",
-    );
-    assert.ok(
-      /kind !== "custom"/.test(editor),
-      "the embed picker must exclude custom views, or an embed can contain an embed",
-    );
-    assert.ok(
-      !/view\.kind === "custom"/.test(renderer),
-      "the embed renderer must not grow a custom-view branch",
-    );
+  // The first version of this asserted that the string `kind !== "custom"`
+  // appeared SOMEWHERE in a 2,500-line file, and that the renderer lacked one
+  // particular literal. Both halves were satisfiable while the behaviour broke:
+  // any unrelated expression keeps the positive half true, and a custom branch
+  // spelled differently slips past the negative one. A guard that can pass on
+  // the bug it guards is the recurring failure in this repo, so the decision was
+  // moved into a function and the function is what gets called here.
+
+  it("refuses custom views, which is what makes recursion impossible", () => {
+    assert.equal(isEmbeddableViewKind("custom"), false);
+    assert.equal(isOfferableInEmbedPicker("custom"), false);
+  });
+
+  it("offers exactly the kinds that render in a box", () => {
+    // EXACT, not a floor. A new View kind must not become embeddable by default
+    // — every renderer currently assumes it owns the screen, and finding out on
+    // a stage monitor is the wrong time.
+    assert.deepEqual([...EMBEDDABLE_VIEW_KINDS], ["script"]);
+  });
+
+  it("never offers a kind it cannot render", () => {
+    // The picker may list more than the renderer supports (so an operator can
+    // see the kind exists), but it must never offer one the recursion guard
+    // excludes — that pairing is the only combination that could recurse.
+    for (const kind of ALL_VIEW_KINDS) {
+      if (isEmbeddableViewKind(kind)) {
+        assert.ok(isOfferableInEmbedPicker(kind), `${kind} is embeddable but not offerable`);
+      }
+    }
+    assert.ok(!isOfferableInEmbedPicker("custom"), "custom must never be offerable");
   });
 });
