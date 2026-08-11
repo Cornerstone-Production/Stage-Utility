@@ -113,8 +113,11 @@ the body.
 - Feature work branches off `beta`, never off `main`.
 - **Never force-push `beta` or `main`.** Deployments track `beta` and a rewrite
   breaks their in-app updater.
-- **No PR is merged without explicit, per-PR approval** — `beta` included.
-  Approval of one PR is not approval of the next.
+- **PRs are merged by the maintainer, and only by the maintainer.** An agent
+  never runs `gh pr merge` — verbal approval in conversation is not
+  authorisation. Get CI green, report the PR ready, and stop. (This replaces an
+  earlier "explicit per-PR approval" wording, under which an agent once merged
+  two PRs on a casual "you can merge them".)
 - **Nothing is pushed directly to `beta` or `main`.** Every change — including a
   one-line fix — goes through a pull request off `beta`. Release automation is the
   exception: it commits the version bump and tag to those branches by design.
