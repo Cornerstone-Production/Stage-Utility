@@ -51,6 +51,12 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
 
   protected override onRecordEstablished(): void {
     this.lastSampleAt = 0; // sample immediately on the next tick
+    // ...and make sure there is something fresh TO sample. Until now this
+    // recorder became a demand source silently, so SenSource only sped up at
+    // the end of whatever idle poll was already pending — leaving the first
+    // points of the pre-service arrival ramp up to a minute old, which is the
+    // steepest part of the curve and the part an operator is watching.
+    sensourceService.pollNowIfIdle();
   }
 
   /** What (if anything) to sample this tick — see attendance-phase.ts. */
