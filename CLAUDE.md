@@ -28,8 +28,13 @@ In this workspace those are the `code-review`, `code-simplifier` and
 `pr-review-toolkit` plugins — **personally installed, not committed here**, so a
 fresh clone will not have them. Run the equivalent passes however you can.
 
-Act on what they find before asking for a human's time. If you disagree with a
-finding, say why; do not silently skip it.
+These pre-PR passes are yours to act on: fix what they find before opening the
+PR. If you disagree with a finding, say why; do not silently skip it.
+
+A review the maintainer requests is different. Report what it found and stop —
+which findings get fixed, and in which PR, is the maintainer's call. This file
+and that rule used to contradict each other, and the contradiction produced
+both behaviors at the wrong times.
 
 ## Verify before you claim
 
