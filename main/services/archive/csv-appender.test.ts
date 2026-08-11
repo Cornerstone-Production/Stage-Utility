@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 
 import { CsvAppender } from "./csv-appender.js";
-import { parseRows } from "./csv.js";
+import { parseRows } from "../csv.js";
 
 async function tmp(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "archive-test-"));

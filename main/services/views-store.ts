@@ -9,14 +9,11 @@
 import type { View } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<View[]>("views.json", [], "config");
-
-export const viewsStore = {
-  async load(): Promise<View[]> {
-    return store.load();
-  },
-
-  async save(views: View[]): Promise<void> {
-    return store.save(views);
-  },
-};
+/**
+ * This IS the DataStore — there is no wrapper.
+ *
+ * The object that used to sit here forwarded load() and save() verbatim and
+ * added nothing else, in seven files. It had to be edited every time the store's
+ * own API grew, and it hid update() and reload() from callers for no reason.
+ */
+export const viewsStore = new DataStore<View[]>("views.json", [], "config");

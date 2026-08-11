@@ -1,3 +1,4 @@
+import { clamp } from "@main/services/clamp";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { BrandLogo } from "../../components/brand-logo";
 import { Button } from "../../components/ui";
@@ -58,7 +59,7 @@ export function LogoCropper({ src, initial, monochrome = false, onCancel, onSave
       // `cover` is the minimum, so a saved (larger) scale lets the user zoom back out.
       const s = initial ? Math.max(cover, initial.scale) : cover;
       const o = initial
-        ? { x: Math.min(0, Math.max(VIEWPORT - w * s, initial.x)), y: Math.min(0, Math.max(VIEWPORT - h * s, initial.y)) }
+        ? { x: clamp(initial.x, VIEWPORT - w * s, 0), y: clamp(initial.y, VIEWPORT - h * s, 0) }
         : { x: (VIEWPORT - w * s) / 2, y: (VIEWPORT - h * s) / 2 };
       setScale(s);
       setOffset(o);
@@ -66,19 +67,22 @@ export function LogoCropper({ src, initial, monochrome = false, onCancel, onSave
     img.src = src;
   }, [src, initial]);
 
-  function clamp(o: { x: number; y: number }, s: number, dims: { w: number; h: number }) {
+  /** Hold a pan offset inside the image at this scale. Renamed off `clamp`,
+   *  which now means the numeric one — two different functions under one name in
+   *  one file is how a rename turns into a silent recursion. */
+  function clampOffset(o: { x: number; y: number }, s: number, dims: { w: number; h: number }) {
     return {
-      x: Math.min(0, Math.max(VIEWPORT - dims.w * s, o.x)),
-      y: Math.min(0, Math.max(VIEWPORT - dims.h * s, o.y)),
+      x: clamp(o.x, VIEWPORT - dims.w * s, 0),
+      y: clamp(o.y, VIEWPORT - dims.h * s, 0),
     };
   }
 
   function onZoom(next: number) {
     if (!nat) return;
-    const ns = Math.max(minScale, Math.min(minScale * MAX_ZOOM, next));
+    const ns = clamp(next, minScale, minScale * MAX_ZOOM);
     // Zoom about the viewport center so the focal point stays put.
     setOffset((prev) =>
-      clamp(
+      clampOffset(
         {
           x: VIEWPORT / 2 - (VIEWPORT / 2 - prev.x) * (ns / scale),
           y: VIEWPORT / 2 - (VIEWPORT / 2 - prev.y) * (ns / scale),
@@ -98,7 +102,7 @@ export function LogoCropper({ src, initial, monochrome = false, onCancel, onSave
   function onPointerMove(e: ReactPointerEvent) {
     if (!drag.current || !nat) return;
     setOffset(
-      clamp(
+      clampOffset(
         { x: drag.current.ox + (e.clientX - drag.current.x), y: drag.current.oy + (e.clientY - drag.current.y) },
         scale,
         nat,
@@ -117,7 +121,7 @@ export function LogoCropper({ src, initial, monochrome = false, onCancel, onSave
     // Export at that native resolution (no upscaling beyond the source), clamped
     // to [MIN_OUTPUT, MAX_OUTPUT], so high-res uploads stay sharp.
     const sSize = VIEWPORT / scale;
-    const output = Math.round(Math.min(MAX_OUTPUT, Math.max(MIN_OUTPUT, sSize)));
+    const output = Math.round(clamp(sSize, MIN_OUTPUT, MAX_OUTPUT));
     const canvas = document.createElement("canvas");
     canvas.width = output;
     canvas.height = output;

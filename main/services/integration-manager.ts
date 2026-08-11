@@ -2,6 +2,7 @@
 // Holds descriptors + config + state; persist non-secret via settingsStore,
 // secrets via secretsStore; broadcasts "integrations:state-changed".
 
+import { errorMessage } from "./errors.js";
 import type { IntegrationDescriptor, IntegrationState } from "../types/integrations.js";
 import { scrub } from "./scrub.js";
 import type { PeopleCountDTO } from "../types/stage.js";
@@ -792,7 +793,7 @@ class IntegrationManager {
 
       return { ok: false, message: `No test available for integration: ${id}` };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       this.setConnectionState(id, "error", msg);
       this.broadcastStates();
       return { ok: false, message: msg };
@@ -1145,7 +1146,7 @@ class IntegrationManager {
       this.broadcastStates();
       return true;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       console.warn(`[integration-manager] PCO credential check failed: ${msg}`);
       this.setConnectionState("planning-center", "error", msg);
       this.broadcastStates();

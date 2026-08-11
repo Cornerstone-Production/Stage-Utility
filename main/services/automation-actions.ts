@@ -5,6 +5,7 @@
 // failure is a returned result, so one bad device cannot stop the engine or block
 // the next rule.
 
+import { errorMessage } from "./errors.js";
 import type { ActionDef, ActionResult } from "../types/automation.js";
 import type { PcoLiveDTO } from "../types/stage.js";
 import { advanceGuard } from "./automation-pco-items.js";
@@ -126,7 +127,7 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
         });
         return ok(`${r.line}${r.simulated ? " (RossTalk simulate)" : ""}`);
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return fail(errorMessage(e));
       }
     },
   },
@@ -144,7 +145,7 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
         await oscManager.send(String(params.targetId), String(params.address), []);
         return ok(`sent ${String(params.address)}`);
       } catch (e) {
-        return fail(e instanceof Error ? e.message : String(e));
+        return fail(errorMessage(e));
       }
     },
   },
@@ -179,7 +180,7 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
       } catch (e) {
         // PCO's own wording (e.g. a 403 refusing an account that cannot control
         // Live) is the useful part — pass it through verbatim.
-        return fail(e instanceof Error ? e.message : String(e));
+        return fail(errorMessage(e));
       }
     },
   },

@@ -13,6 +13,8 @@
 // per missed interval. And a run that fails leaves the previous backups untouched:
 // pruning happens after a successful write, never before.
 
+import { clamp } from "./clamp.js";
+import { errorMessage } from "./errors.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -56,8 +58,8 @@ const ARCHIVE_PREFIX = "archive-";
 
 function clampSchedule(s: Partial<BackupSchedule>): Partial<BackupSchedule> {
   const out = { ...s };
-  if (out.intervalDays != null) out.intervalDays = Math.min(365, Math.max(1, Math.round(out.intervalDays)));
-  if (out.keep != null) out.keep = Math.min(100, Math.max(1, Math.round(out.keep)));
+  if (out.intervalDays != null) out.intervalDays = clamp(Math.round(out.intervalDays), 1, 365);
+  if (out.keep != null) out.keep = clamp(Math.round(out.keep), 1, 100);
   if (out.destination != null) out.destination = out.destination.trim();
   return out;
 }
@@ -140,7 +142,7 @@ class BackupScheduler {
       console.log(`[backup] wrote ${at} to ${dir}`);
       return this.persistResult(sched, { lastRunAt: new Date().toISOString(), lastError: null });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       console.error("[backup] failed:", msg);
       return this.persistResult(await this.getSchedule(), { lastError: msg });
     } finally {

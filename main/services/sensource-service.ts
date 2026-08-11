@@ -21,6 +21,7 @@
 // the documented client-credentials call and refresh it before expiry. A
 // directly-pasted long-lived token is also accepted (skips the exchange).
 
+import { errorMessage } from "./errors.js";
 import type { PeopleCountDTO, PeopleHistoryPoint, PeopleZoneCount } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { StatusIntegration } from "./integration-base.js";
@@ -361,7 +362,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
         this.tokenExpiresAt = 0;
       }
     } catch (err) {
-      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      return { ok: false, message: errorMessage(err) };
     }
   }
 
@@ -669,7 +670,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       this.resetBackoff();
       ok = true;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       // First failure only: an outage used to write one line per poll, forever.
       if (this.attempt === 0) console.error("[sensource] poll error:", msg);
       this.report("error", msg);

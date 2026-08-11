@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { useState } from "react";
 import { invoke } from "../lib/api";
 import { toast } from "../components/ui";
@@ -17,7 +18,7 @@ export function LiveControls({ className = "" }: { className?: string }) {
       await invoke(dir === "next" ? "pco:liveNext" : "pco:livePrevious");
     } catch (e) {
       toast.error(
-        `PCO ${dir} failed: ${e instanceof Error ? e.message : String(e)}`,
+        `PCO ${dir} failed: ${errorMessage(e)}`,
       );
     } finally {
       setBusy(null);

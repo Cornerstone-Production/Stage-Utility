@@ -1,6 +1,7 @@
 // Pure function: merges saved slots + PCO team members + device status.
 // No I/O — takes data already fetched and returns resolved Slot[].
 
+import { clamp } from "./clamp.js";
 import type { Slot, SlotDevice, SlotPositionMatch, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 
@@ -32,7 +33,7 @@ const EMPTY_DEVICE: SlotDevice = {
 export function normaliseAudioLevel(v: number | null | undefined): number | null {
   if (v == null || !Number.isFinite(v)) return null;
   if (v >= 0 && v <= 1) return v; // already normalised
-  if (v < 0) return Math.max(0, Math.min(1, (v + 60) / 60)); // dBFS-ish, −60..0
+  if (v < 0) return clamp((v + 60) / 60, 0, 1); // dBFS-ish, −60..0
   if (v <= 100) return v / 100; // percentage
   return null; // nothing sensible to make of it
 }

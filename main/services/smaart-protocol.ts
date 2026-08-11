@@ -22,6 +22,8 @@
 //
 // Node 24+ has a global WebSocket (used here) so there is no runtime dependency.
 
+import { clamp } from "./clamp.js";
+
 /** Flattened SPL metric values keyed exactly as Smaart names them. */
 export interface SplMetrics {
   [metricKey: string]: number;
@@ -348,7 +350,7 @@ export class ModernSmaartAdapter implements SmaartAdapter {
     };
     ws.addEventListener("open", () => {
       // Streams start at 8 fps (the max); throttle to the requested rate.
-      const fps = Math.max(1, Math.min(8, Math.floor(targetFPS)));
+      const fps = clamp(Math.floor(targetFPS), 1, 8);
       if (fps < 8) {
         try {
           ws?.send(JSON.stringify({ action: "set", properties: [{ targetFPS: fps }] }));

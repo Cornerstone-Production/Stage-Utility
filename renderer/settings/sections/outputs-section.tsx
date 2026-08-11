@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { useState, useEffect, type ChangeEvent, type CSSProperties } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
@@ -73,7 +74,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
       setSlugError(null);
       setEditSlug(next);
     } catch (err) {
-      setSlugError(err instanceof Error ? err.message : String(err));
+      setSlugError(errorMessage(err));
       setEditSlug(output.slug ?? "");
     }
   }

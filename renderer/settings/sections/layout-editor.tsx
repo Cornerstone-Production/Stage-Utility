@@ -2158,7 +2158,7 @@ function PlanAttachmentConfig({
 
   const crop = c.crop ?? { top: 0, right: 0, bottom: 0, left: 0 };
   const setCrop = (side: "top" | "right" | "bottom" | "left", pct: number) =>
-    onConfig({ ...c, crop: { ...crop, [side]: Math.max(0, Math.min(95, pct)) / 100 } });
+    onConfig({ ...c, crop: { ...crop, [side]: clamp(pct, 0, 95) / 100 } });
 
   // Resize the object box to match the rendered (cropped/trimmed) content aspect,
   // keeping the top-left anchor so there's no letterboxing.
@@ -2174,7 +2174,7 @@ function PlanAttachmentConfig({
       if (r && r !== "empty" && r.height > 0) {
         const aspect = r.width / r.height; // w:h of the image in px
         const newH = (o.w * canvas.width) / aspect / canvas.height;
-        onGeom({ h: Math.max(0.03, Math.min(1 - o.y, newH)) });
+        onGeom({ h: clamp(newH, 0.03, 1 - o.y) });
       }
     } finally {
       setFitting(false);

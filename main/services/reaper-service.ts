@@ -13,6 +13,7 @@
 // polls while running, steps to a slower cadence when nobody's watching the
 // channel, and backs off exponentially while REAPER is unreachable.
 
+import { errorMessage } from "./errors.js";
 import type { ReaperStatusDTO } from "../types/stage.js";
 import { StatusIntegration } from "./integration-base.js";
 
@@ -85,7 +86,7 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
       }
       return { ok: true, message: `Connected to REAPER at ${host}:${port}` };
     } catch (err) {
-      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      return { ok: false, message: errorMessage(err) };
     }
   }
 
@@ -114,7 +115,7 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
       // Poll fast while a display is watching; idle slowly otherwise.
       this.scheduleIn(this.hasSubscribers ? POLL_MS : IDLE_POLL_MS);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       if (this.attempt === 0) console.warn(`[reaper] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
       this.goOffline();

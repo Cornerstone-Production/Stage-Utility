@@ -10,6 +10,7 @@
 // request IS the check. These tests encode the state machine that follows from
 // that, using a stand-in for the credential check so they never touch the network.
 
+import { errorMessage } from "./errors.js";
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
@@ -40,7 +41,7 @@ async function pcoBadge(
     const n = await check(appId, secret);
     set("connected", `Connected — ${n} service type(s)`);
   } catch (err) {
-    set("error", err instanceof Error ? err.message : String(err));
+    set("error", errorMessage(err));
   }
   return { states, message };
 }

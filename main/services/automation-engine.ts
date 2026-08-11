@@ -8,6 +8,7 @@
 // restart mid-service would read the first snapshot as a transition and fire every
 // rule at once, unattended.
 
+import { errorMessage } from "./errors.js";
 import { randomUUID } from "node:crypto";
 
 import type { AutomationSettings, ConditionCtx, Rule } from "../types/automation.js";
@@ -197,7 +198,7 @@ class AutomationEngine {
     } catch (e) {
       // A provider is contractually not supposed to throw; if one does, it must not
       // stop the engine or the next rule.
-      result = { ok: false, detail: e instanceof Error ? e.message : String(e) };
+      result = { ok: false, detail: errorMessage(e) };
     }
     const outcome = !result.ok ? "failed" : this.settings.simulate ? "simulated" : "fired";
     this.log(rule, outcome, `${result.detail} (${why})`);

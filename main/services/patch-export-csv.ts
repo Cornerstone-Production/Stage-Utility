@@ -1,19 +1,16 @@
-// patch-export-csv.ts — RFC 4180 CSV for the patch export.
+// patch-export-csv.ts — the patch sheet as CSV.
 //
-// Hand-rolled rather than pulled in: the rules are three lines, and this is the
-// one place they live. A patch sheet's notes and label fields genuinely contain
-// commas and quotes, so the quoting is not theoretical.
+// The quoting rules live in csv.ts, shared with the archive writer and the patch
+// importer. They were hand-rolled here too until the three copies were found to
+// disagree; a patch sheet's notes and label fields genuinely contain commas,
+// quotes and the occasional pasted line break, so the quoting is not theoretical
+// and neither was the disagreement.
 
+import { encodeRows } from "./csv.js";
 import { EXPORT_HEADERS, rowCells, type ExportRow } from "./patch-export.js";
 
-/** Quote only when required, and double any embedded quote. */
-function cell(value: string): string {
-  return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-}
-
 export function toCsv(rows: ExportRow[]): string {
-  const lines = [EXPORT_HEADERS.map(cell).join(",")];
-  for (const r of rows) lines.push(rowCells(r).map(cell).join(","));
-  // Trailing newline: spreadsheet importers treat a missing one as a truncated file.
-  return `${lines.join("\n")}\n`;
+  // Every row terminated, including the last: spreadsheet importers treat a
+  // missing final newline as a truncated file.
+  return encodeRows([[...EXPORT_HEADERS], ...rows.map(rowCells)]);
 }

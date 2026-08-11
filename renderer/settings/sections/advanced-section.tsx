@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon } from "lucide-react";
@@ -149,7 +150,7 @@ function UpdatesPanel({
   async function onRestart() {
     const doRestart = () =>
       void invoke("update:restart").catch((e) =>
-        window.alert(`Restart failed: ${e instanceof Error ? e.message : String(e)}`),
+        window.alert(`Restart failed: ${errorMessage(e)}`),
       );
     // Locked during a live service / recording, same as self-update — a manual
     // restart interrupts displays too. Overridable for a genuine emergency.
@@ -191,7 +192,7 @@ function UpdatesPanel({
     );
     if (ok) {
       void invoke("update:setTrack", { branch, override: locked }).catch((e) =>
-        window.alert(`Track switch failed: ${e instanceof Error ? e.message : String(e)}`),
+        window.alert(`Track switch failed: ${errorMessage(e)}`),
       );
     }
   }
@@ -513,7 +514,7 @@ function AutoBackupPanel() {
       const next = await invoke<BackupSchedule>("backup:setSchedule", partial);
       queryClient.setQueryData(["backup:schedule"], next);
     } catch (e) {
-      toast.error(`Couldn't save: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Couldn't save: ${errorMessage(e)}`);
     }
   }
 
@@ -525,7 +526,7 @@ function AutoBackupPanel() {
       if (next.lastError) toast.error(`Backup failed: ${next.lastError}`);
       else toast.success("Backup written.");
     } catch (e) {
-      toast.error(`Backup failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Backup failed: ${errorMessage(e)}`);
     } finally {
       setBusy(false);
     }
@@ -654,7 +655,7 @@ function ConfigSnapshotPanel() {
       await refresh();
       toast.success("Snapshot saved.");
     } catch (e) {
-      toast.error(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Save failed: ${errorMessage(e)}`);
     } finally {
       setBusy(false);
     }
@@ -666,7 +667,7 @@ function ConfigSnapshotPanel() {
       await invoke("config:recallSnapshot", { id });
       toast.success("Restoring… the server is restarting.");
     } catch (e) {
-      toast.error(`Recall failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Recall failed: ${errorMessage(e)}`);
     }
   }
 
@@ -676,7 +677,7 @@ function ConfigSnapshotPanel() {
       await invoke("config:deleteSnapshot", { id });
       await refresh();
     } catch (e) {
-      toast.error(`Delete failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Delete failed: ${errorMessage(e)}`);
     }
   }
 
@@ -690,7 +691,7 @@ function ConfigSnapshotPanel() {
         toast.success("Restoring… the server is restarting.");
       }
     } catch (err) {
-      toast.error(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Import failed: ${errorMessage(err)}`);
     } finally {
       if (fileRef.current) fileRef.current.value = "";
     }

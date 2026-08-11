@@ -19,7 +19,7 @@ import { atomicWrite } from "../write-queue.js";
 import { serviceDirPath } from "./archive-paths.js";
 import { readArchiveRows, rolledFiles, type ArchiveRow } from "./archive-rows.js";
 import { CsvAppender } from "./csv-appender.js";
-import { encodeRow } from "./csv.js";
+import { encodeRow } from "../csv.js";
 
 export interface ServiceCtx {
   serviceKey: string;

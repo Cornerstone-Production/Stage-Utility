@@ -5,6 +5,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
+import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, readBodyOrEmpty, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
@@ -125,7 +126,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await stageController.setTimezone(tz));
       } catch (err) {
-        json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+        json(res, { error: errorMessage(err) }, 400);
       }
       return;
     }

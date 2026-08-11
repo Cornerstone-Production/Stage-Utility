@@ -2,6 +2,7 @@
 //
 // Every route must finish responding before it returns (see RouteCtx).
 
+import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
 import { ROSSTALK_COMMANDS, commandsForFamily } from "../rosstalk-commands.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
@@ -79,7 +80,7 @@ export async function rosstalkRoutes(c: RouteCtx): Promise<void> {
       );
     } catch (err) {
       // A rejected command is operator error, not a server fault.
-      error(res, err instanceof Error ? err.message : String(err), 400);
+      error(res, errorMessage(err), 400);
     }
     return;
   }

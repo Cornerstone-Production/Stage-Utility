@@ -11,6 +11,8 @@
 // the same on a 1080p stage screen and a 4K one.
 
 import { composeRect, localizeRect, type FracRect } from "../../main/layout-tree";
+// Re-exported below, not redefined — see main/services/clamp.ts.
+import { clamp } from "@main/services/clamp";
 
 /** Snap steps across the canvas. A finer grid means roughly half-size cells. */
 export const GRID = 96;
@@ -22,7 +24,9 @@ export type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
 export const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
-export const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+/** Re-exported so everything already importing clamp from this module is
+ *  untouched; the implementation is shared with the backend. */
+export { clamp };
 
 /**
  * Grid step per axis.

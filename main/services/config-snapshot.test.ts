@@ -25,15 +25,24 @@ import { allStores } from "./stores.js";
 
 const SERVICES_DIR = path.dirname(fileURLToPath(import.meta.url));
 
+const STORE_BASE = "(?:DataStore|KeyedRecordStore)";
 /**
- * A store CONSTRUCTION: an assignment, which is what every real one is.
+ * A store DECLARATION. Two forms, and both have to count.
  *
- * Requiring the `=` is what separates code from prose. Matching the bare
- * constructor counted three mentions inside comments — including the one in this
- * refactor's own store-registry.ts explaining the bug — and reported 26 stores
- * against 23. That is the third guard in this codebase a comment has satisfied.
+ * `= new DataStore(…)` is the ordinary one. `class X extends KeyedRecordStore`
+ * is the other: the subclass constructs one through super(), registering it
+ * exactly the same way, but there is no `new` for the first form to find. The
+ * moment the SPL history store stopped wrapping and started extending, this
+ * counted 22 against 23 registered — the guard working, so it is taught rather
+ * than loosened.
+ *
+ * Both remain shapes prose cannot take: an `=` before the constructor, or the
+ * literal `class NAME extends`. Matching a bare constructor name counted three
+ * mentions inside comments — including store-registry.ts's own comment
+ * explaining the bug — and reported 26 against 23. That is the third guard in
+ * this codebase a comment has satisfied.
  */
-const CONSTRUCTION_SOURCE = "=\\s*new (?:DataStore|KeyedRecordStore)\\b";
+const CONSTRUCTION_SOURCE = `=\\s*new ${STORE_BASE}\\b|\\bclass\\s+\\w+\\s+extends\\s+${STORE_BASE}\\b`;
 /** Fresh each call: a shared /g/ regex carries lastIndex between .test() calls
  *  and silently starts mid-string, which under-counted by two. */
 const construction = (): RegExp => new RegExp(CONSTRUCTION_SOURCE, "g");

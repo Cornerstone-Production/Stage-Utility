@@ -6,6 +6,16 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
+import {
+  listLayoutTemplates,
+  saveLayoutTemplate,
+  updateLayoutTemplate,
+  deleteLayoutTemplate,
+  listLayoutGroups,
+  saveLayoutGroup,
+  deleteLayoutGroup,
+} from "../layout-library.js";
+import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind } from "./context.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
 import { LayoutConflictError, stageController } from "../stage-controller.js";
@@ -196,7 +206,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
 
     // ── Layout templates (reusable custom layouts) ────────────────────────
     if (method === "GET" && pathname === "/api/layout-templates") {
-      json(res, await stageController.listLayoutTemplates());
+      json(res, await listLayoutTemplates());
       return;
     }
 
@@ -208,7 +218,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       }
       // A template is instantiated into a view later, so a malformed one crashes
       // a display just as surely — validated at the same door.
-      const list = await stageController.saveLayoutTemplate(body.name, body.layout);
+      const list = await saveLayoutTemplate(body.name, body.layout);
       json(res, list, 201);
       return;
     }
@@ -229,21 +239,21 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.name (string) or body.layout (object) required");
         return;
       }
-      const list = await stageController.updateLayoutTemplate(tplPatchMatch[1], patch);
+      const list = await updateLayoutTemplate(tplPatchMatch[1], patch);
       json(res, list);
       return;
     }
 
     const tplDeleteMatch = pathname.match(/^\/api\/layout-templates\/([^/]+)$/);
     if (method === "DELETE" && tplDeleteMatch) {
-      const list = await stageController.deleteLayoutTemplate(tplDeleteMatch[1]);
+      const list = await deleteLayoutTemplate(tplDeleteMatch[1]);
       json(res, list);
       return;
     }
 
     // ── Layout groups (reusable object/container library) ─────────────────
     if (method === "GET" && pathname === "/api/layout-groups") {
-      json(res, await stageController.listLayoutGroups());
+      json(res, await listLayoutGroups());
       return;
     }
 
@@ -253,14 +263,14 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.name (string) and body.object (object) required");
         return;
       }
-      const list = await stageController.saveLayoutGroup(body.name, body.object as LayoutObject);
+      const list = await saveLayoutGroup(body.name, body.object as LayoutObject);
       json(res, list, 201);
       return;
     }
 
     const grpDeleteMatch = pathname.match(/^\/api\/layout-groups\/([^/]+)$/);
     if (method === "DELETE" && grpDeleteMatch) {
-      const list = await stageController.deleteLayoutGroup(grpDeleteMatch[1]);
+      const list = await deleteLayoutGroup(grpDeleteMatch[1]);
       json(res, list);
       return;
     }
@@ -320,7 +330,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         try {
           state = await stageController.setOutputSlug(id, body.slug as string);
         } catch (err) {
-          error(res, err instanceof Error ? err.message : String(err));
+          error(res, errorMessage(err));
           return;
         }
       }

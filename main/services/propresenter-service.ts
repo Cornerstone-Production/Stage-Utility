@@ -11,6 +11,8 @@
 // blanks rather than crashing. Tune in buildStatus()/sectionsFor() if anything
 // reads blank (device shows exact shapes at Settings → Network → API Documentation).
 
+import { clamp } from "./clamp.js";
+import { errorMessage } from "./errors.js";
 import * as http from "http";
 
 import type { ProPresenterStatusDTO, ProSection, ProTimer, PropInstancesDTO, PropInstanceMeta, PropInstanceConn } from "../types/stage.js";
@@ -100,7 +102,7 @@ function asNumber(v: unknown): number | null {
 
 // ProPresenter group color is rgba with 0–1 channels → "#rrggbb".
 function colorToHex(color: unknown): string {
-  const c = (n: unknown) => Math.max(0, Math.min(255, Math.round((asNumber(n) ?? 0) * 255)));
+  const c = (n: unknown) => clamp(Math.round((asNumber(n) ?? 0) * 255), 0, 255);
   const r = c(pick(color, "red"));
   const g = c(pick(color, "green"));
   const b = c(pick(color, "blue"));
@@ -288,7 +290,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       const desc = asString(pick(version, "host_description")) ?? asString(pick(version, "name"));
       return { ok: true, message: `Connected to ${desc ?? "ProPresenter"}` };
     } catch (err) {
-      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      return { ok: false, message: errorMessage(err) };
     }
   }
 
@@ -317,7 +319,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       // Fast poll only while a display/panel renders this instance; else keepalive.
       this.scheduleIn(this.hasSubscribers ? this.pollMs : IDLE_INTERVAL_MS);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       // Log only the first failure of an outage, then stay quiet until it recovers —
       // a machine off all week shouldn't spam the log every retry.
       if (this.attempt === 0) console.warn(`[propresenter] ${host}:${port} unreachable (${msg}) — backing off, will keep retrying quietly`);
@@ -392,7 +394,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       idxZeroRaw == null
         ? null
         : total > 0
-          ? Math.min(Math.max(idxZeroRaw, 0), total - 1)
+          ? clamp(idxZeroRaw, 0, total - 1)
           : Math.max(idxZeroRaw, 0);
 
     let currentSection: ProSection | null = null;

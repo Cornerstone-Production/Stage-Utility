@@ -3,6 +3,7 @@
 // Permissive CORS on /api/*. Tracks sockets for clean shutdown.
 
 
+import { errorMessage } from "./errors.js";
 import * as fs from "fs/promises";
 import { scrub } from "./scrub.js";
 import * as http from "http";
@@ -576,7 +577,7 @@ export class RemoteServer {
       try {
         await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         // Some failures are the caller's situation, not a broken server, and the
         // difference matters to the UI: an oversized body is 413, and editing a
         // service that is recording right now is 409. Anything a route did not

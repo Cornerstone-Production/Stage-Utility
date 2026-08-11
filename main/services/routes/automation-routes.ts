@@ -2,6 +2,7 @@
 //
 // Every route must finish responding before it returns (see RouteCtx).
 
+import { errorMessage } from "../errors.js";
 import { type RouteCtx, error, json, readBody } from "./context.js";
 import { AUTOMATION_ACTIONS } from "../automation-actions.js";
 import { AUTOMATION_CONDITIONS } from "../automation-conditions.js";
@@ -70,7 +71,7 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     try {
       json(res, await automationEngine.testFire(testMatch[1]));
     } catch (err) {
-      error(res, err instanceof Error ? err.message : String(err), 400);
+      error(res, errorMessage(err), 400);
     }
     return;
   }

@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useState } from "react";
 import { PlusIcon, Trash2Icon, ChevronUpIcon, ChevronDownIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 
@@ -55,7 +56,7 @@ export function ScriptViewSection() {
         // Preview against the first enabled type, else the first service type.
         setTypeId((cur) => cur ?? (c.serviceTypeIds ?? [])[0] ?? t[0]?.id ?? null);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e) => setError(errorMessage(e)));
   }, []);
 
   async function setShown(ids: string[]) {
@@ -64,7 +65,7 @@ export function ScriptViewSection() {
     const next = types.filter((t) => wanted.has(t.id)).map((t) => t.id);
     setShownIds(next);
     try { await invoke("scriptview:setConfig", { serviceTypeIds: next }); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setError(errorMessage(e)); }
   }
 
   // Drop the previous type's rundown in the same render the type changes, so the
@@ -90,7 +91,7 @@ export function ScriptViewSection() {
   async function persist(next: ScriptViewLayout[]) {
     setLayouts(next);
     try { await invoke("scriptview:saveLayouts", { layouts: next }); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setError(errorMessage(e)); }
   }
 
   const update = (id: string, patch: Partial<ScriptViewLayout>) =>
@@ -133,7 +134,7 @@ export function ScriptViewSection() {
     try {
       await invoke("scriptview:saveRoles", { roles: next });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }
 
