@@ -101,6 +101,13 @@ export interface View {
   /** Show the PCO Live Prev/Next controls on a "script" View (default false). */
   showLiveControls?: boolean;
   /**
+   * Which saved ScriptView column preset a "script" View renders; null/absent =
+   * all columns. The same presets the /scriptview pages use, so a department's
+   * column set is defined once and a display and a browser tab cannot disagree
+   * about it.
+   */
+  scriptViewLayoutId?: string | null;
+  /**
    * Bumped on every layout save. An editor sends back the revision it opened, so
    * a save built on a layout someone else has since replaced can be detected
    * instead of silently overwriting their work. Absent on views saved before

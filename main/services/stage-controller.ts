@@ -1553,6 +1553,20 @@ export class StageController {
     return this.state;
   }
 
+  /** Pick which saved ScriptView column preset a "script" View renders. */
+  async setViewScriptViewLayout(id: string, scriptViewLayoutId: string | null): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:setScriptViewLayout — view ${id} not found`);
+    }
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, scriptViewLayoutId } : v));
+    console.log(`[stage-controller] setViewScriptViewLayout id=${scrub(id)} → ${scrub(scriptViewLayoutId)}`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
   /**
    * Replace a custom View's layout (visual editor save).
    *

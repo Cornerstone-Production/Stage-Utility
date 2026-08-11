@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type CSSProperties } from "react";
+import { useEffect, useState, type ChangeEvent, type CSSProperties } from "react";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -116,6 +116,10 @@ function SortableViewItem({
 
 // ---- detail editor for one View ---------------------------------------------
 
+/** Radix Select cannot carry an empty string as a value, so "no preset chosen"
+ *  needs a sentinel. It never reaches the server — it maps back to null. */
+const ALL_COLUMNS = "__all__";
+
 function ViewDetail({
   view,
   stageState,
@@ -145,6 +149,16 @@ function ViewDetail({
   // Preview aspect ratio — shapes the thumbnail to match the target monitor
   // (default 16:9, e.g. a 37″ 4K panel). Editor-only; doesn't affect the kiosk.
   const [previewAspect, setPreviewAspect] = useState<number>(16 / 9);
+  // The ScriptView column presets, for a "script" View's Columns picker. Fetched
+  // here rather than threaded through SectionProps: only this branch needs them,
+  // and they change when someone edits a preset in the ScriptView section.
+  const [scriptViewLayouts, setScriptViewLayouts] = useState<ScriptViewLayout[]>([]);
+  useEffect(() => {
+    if (view.kind !== "script") return;
+    invoke<ScriptViewLayout[]>("scriptview:listLayouts")
+      .then((l) => setScriptViewLayouts([...l].sort((a, b) => a.order - b.order)))
+      .catch(() => setScriptViewLayouts([]));
+  }, [view.kind]);
 
   function handleNameBlur() {
     const trimmed = editName.trim();
@@ -318,9 +332,37 @@ function ViewDetail({
               onCheckedChange={(v) => void invoke("views:setShowLiveControls", { id: view.id, showLiveControls: v })}
             />
           </div>
+          <Separator />
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col">
+              <span className="text-caption1 text-fg">Columns</span>
+              <span className="text-caption2 text-fg-muted">
+                The same saved column sets the ScriptView pages use, so a department's columns are
+                defined once and a display and a browser tab cannot disagree about them.
+              </span>
+            </div>
+            <Select
+              value={view.scriptViewLayoutId ?? ALL_COLUMNS}
+              onValueChange={(v: string) =>
+                void invoke("views:setScriptViewLayout", {
+                  id: view.id,
+                  scriptViewLayoutId: v === ALL_COLUMNS ? null : v,
+                })
+              }
+            >
+              <SelectTrigger className="w-full sm:w-64" aria-label="Columns"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_COLUMNS}>All columns</SelectItem>
+                {scriptViewLayouts.map((l) => (
+                  <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <p className="text-caption2 text-fg-muted">
-            The Script view renders the live plan rundown (items + note columns) with the clock,
-            the PCO countdown, and a max-SPL column per item.
+            The Script view renders the active plan's rundown — the same table as the ScriptView
+            pages, following whichever plan the app is set to. Max SPL per item lives on the
+            SPL rundown view.
           </p>
         </>
       ) : (

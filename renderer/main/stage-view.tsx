@@ -512,8 +512,8 @@ export function StageView() {
     return (
       <StageErrorBoundary>
         <ScriptView
-          displayId={displayId}
           showLiveControls={(activeView?.showLiveControls ?? false) && !previewViewId}
+          scriptViewLayoutId={activeView?.scriptViewLayoutId ?? null}
         />
       </StageErrorBoundary>
     );
