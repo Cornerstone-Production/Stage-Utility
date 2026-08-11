@@ -19,7 +19,10 @@ function uid(): string {
 /** ScriptView layouts editor: per-service-type named column presets, with a live
  *  preview against that type's live/next plan. */
 /** The per-layout element toggles, as one list so the picker and the patch stay in
- *  step. `show*` is opt-OUT: undefined means shown, only `false` hides. */
+ *  step. `show*` is opt-OUT by default: undefined means shown, only `false` hides.
+ *  `optIn` inverts that for elements that should NOT appear on a preset saved
+ *  before they existed — Max SPL is only meaningful with Smaart connected, and
+ *  turning it on for every existing layout would add a column of dashes. */
 const ELEMENTS = [
   { key: "showClock", label: "Clock" },
   { key: "showLength", label: "Time" },
@@ -28,7 +31,12 @@ const ELEMENTS = [
   { key: "showArrangement", label: "Arrangement" },
   { key: "showItemNotes", label: "Item notes" },
   { key: "showTotalTime", label: "Total time" },
-] as const satisfies readonly { key: keyof ScriptViewLayout; label: string }[];
+  { key: "showMaxSpl", label: "Max SPL", optIn: true },
+] as const satisfies readonly { key: keyof ScriptViewLayout; label: string; optIn?: boolean }[];
+
+/** Is this element currently on for `l`? Opt-in elements need an explicit true. */
+const elementOn = (e: (typeof ELEMENTS)[number], l: ScriptViewLayout): boolean =>
+  "optIn" in e && e.optIn ? l[e.key] === true : l[e.key] !== false;
 
 export function ScriptViewSection() {
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
@@ -271,7 +279,7 @@ export function ScriptViewSection() {
                         <MultiSelect
                           className="w-64"
                           options={ELEMENTS.map((e) => ({ value: e.key, label: e.label }))}
-                          selected={ELEMENTS.filter((e) => l[e.key] !== false).map((e) => e.key)}
+                          selected={ELEMENTS.filter((e) => elementOn(e, l)).map((e) => e.key)}
                           onChange={(next) => {
                             const on = new Set(next);
                             update(l.id, Object.fromEntries(

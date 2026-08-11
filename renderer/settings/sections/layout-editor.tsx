@@ -96,6 +96,8 @@ import { usePropInstances } from "../../main/use-dashboard-state";
 import { useConfiguredIntegrations, useIntegrations } from "../../main/use-integration-states";
 import {
   CARD_PRESETS,
+  LAYOUT_OBJECTS,
+  isOfferableInEmbedPicker,
   PALETTE_GROUPS,
   defaultConfig,
   defaultStyle,
@@ -2299,6 +2301,7 @@ function Inspector({
   const propInstances = usePropInstances();
   const integrationsSnap = useIntegrations();
   const captionChannels = Object.keys(useStageState().state?.captionChannelColors ?? {});
+  const embedViews = useStageState().state?.views ?? [];
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
@@ -2402,6 +2405,75 @@ function Inspector({
             <RowSwitch label="Show 'slides' label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
           )}
         </>
+      )}
+      {(() => {
+        // A retired type: still rendered so an old layout keeps working, out of
+        // the palette so no new ones appear, with the conversion one click away.
+        // Deliberately NOT automatic — the replacement renders a different table,
+        // and silently changing what is on a stage monitor is not an upgrade.
+        const retired = LAYOUT_OBJECTS[c.type].retired;
+        if (!retired) return null;
+        const scriptViews = (embedViews ?? []).filter((v) => v.kind === "script");
+        return (
+          <div className="flex flex-col gap-2 rounded-lg border border-amber-a5 bg-amber-a2 p-3">
+            <span className="text-caption1 text-fg">This object has been replaced</span>
+            <span className="text-caption2 text-fg-muted">{retired.why}</span>
+            <span className="text-caption2 text-fg-muted">
+              It is not a like-for-like swap, so read this first: the replacement
+              scrolls rather than shrinking to fit, and <strong>Fit to height</strong>,{" "}
+              <strong>Scroll</strong> and the note-category picker do not carry over.
+              Its columns come from the Script view's preset instead. Set the object's
+              font size afterwards — nothing auto-fits it now.
+            </span>
+            <Button
+              variant="filled"
+              size="small"
+              className="self-start"
+              onClick={() =>
+                onConfig({
+                  type: "view-embed",
+                  // Only auto-pick when there is no ambiguity; otherwise leave it
+                  // for the picker rather than guessing which view was meant.
+                  viewId: scriptViews.length === 1 ? scriptViews[0].id : null,
+                  showHeader: false,
+                } as LayoutObjectConfig)
+              }
+            >
+              Convert to Embedded view
+            </Button>
+            {scriptViews.length === 0 && (
+              <span className="text-caption2 text-fg-subtle">
+                Make a Script view first and this will have something to point at.
+              </span>
+            )}
+          </div>
+        );
+      })()}
+      {c.type === "view-embed" && (() => {
+        // Both the picker and the renderer ask the same function — see
+        // isEmbeddableViewKind. Custom never appears, which IS the recursion
+        // guard; other kinds appear but say why they do not render yet.
+        const embeddable = (embedViews ?? []).filter((v) => isOfferableInEmbedPicker(v.kind));
+        return embeddable.length === 0 ? (
+          <p className="text-caption2 text-fg-muted">
+            No embeddable views yet — make a Script view first, then point this at it.
+          </p>
+        ) : (
+          <RowSelect
+            label="View"
+            hint="Renders that view's content here, natively. Script views work today; other kinds are being converted."
+            value={c.viewId ?? ""}
+            options={[{ value: "", label: "None" }, ...embeddable.map((v) => ({ value: v.id, label: `${v.name} (${v.kind})` }))]}
+            onChange={(v) => onConfig({ ...c, viewId: v || null })}
+          />
+        );
+      })()}
+      {c.type === "view-embed" && c.viewId && (
+        <RowSwitch
+          label="Show the view's header"
+          checked={c.showHeader ?? false}
+          onChange={(v) => onConfig({ ...c, showHeader: v })}
+        />
       )}
       {c.type === "service-order" && (
         <>

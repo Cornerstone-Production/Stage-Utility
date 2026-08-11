@@ -101,6 +101,13 @@ export interface View {
   /** Show the PCO Live Prev/Next controls on a "script" View (default false). */
   showLiveControls?: boolean;
   /**
+   * Which saved ScriptView column preset a "script" View renders; null/absent =
+   * all columns. The same presets the /scriptview pages use, so a department's
+   * column set is defined once and a display and a browser tab cannot disagree
+   * about it.
+   */
+  scriptViewLayoutId?: string | null;
+  /**
    * Bumped on every layout save. An editor sends back the revision it opened, so
    * a save built on a layout someone else has since replaced can be detected
    * instead of silently overwriting their work. Absent on views saved before
@@ -418,6 +425,19 @@ export type LayoutObjectConfig =
   // of THIS container's box (not the canvas), so moving/resizing the container
   // moves/scales its contents as a unit. The box itself is drawn from `style`
   // (background/border/radius/padding) — same fields as any other object.
+  // Render another View's content inside this layout, natively — the same
+  // components the View renders on its own display, not an iframe of it. Built
+  // for the ScriptView rundown, which is a whole page's worth of table nobody
+  // wants to rebuild as objects; other kinds opt in as they stop assuming they
+  // own the screen. `viewId` null = nothing chosen yet.
+  | {
+      type: "view-embed";
+      viewId?: string | null;
+      /** Show the embedded view's own header bar (plan title, countdown, clock).
+       *  Off by default: a layout usually has its own, and two clocks a few
+       *  hundred pixels apart is worse than none. */
+      showHeader?: boolean;
+    }
   | { type: "container" };
 
 export type LayoutObjectType = LayoutObjectConfig["type"];

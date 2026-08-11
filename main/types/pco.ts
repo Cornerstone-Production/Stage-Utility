@@ -86,6 +86,11 @@ export interface ScriptViewLayout {
   showArrangement?: boolean;  // arrangement name in the title meta line
   showItemNotes?: boolean;    // description line (leader / cues) under the title
   showTotalTime?: boolean;    // total-time footer
+  /** Per-item peak SPL column. OFF by default — it is only meaningful with Smaart
+   *  connected, and an always-on "—" column wastes width on most layouts. This is
+   *  what the `script` View-kind used to render unconditionally; making it a
+   *  preset toggle is what let that View-kind stop being a second rundown. */
+  showMaxSpl?: boolean;
   /** What colors this layout's rows. Absent = "pco", so a layout saved before this
    *  existed keeps the behavior it had. */
   rowColor?: "pco" | "category" | "none";

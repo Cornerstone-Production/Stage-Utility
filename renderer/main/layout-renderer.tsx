@@ -23,6 +23,8 @@ import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
+import { isEmbeddableViewKind } from "./layout-objects";
+import { ScriptView } from "./script-view";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
 import { LiveControls } from "./live-controls";
@@ -393,6 +395,8 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     }
     case "service-order":
       return <ServiceOrderObject o={o} config={c} ctx={ctx} />;
+    case "view-embed":
+      return <ViewEmbedObject o={o} config={c} ctx={ctx} />;
     case "current-slide-notes": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
       return span(pro?.currentNotes ?? "");
@@ -1624,6 +1628,76 @@ function PlanAttachment({
       {note}
     </span>
   );
+}
+
+/**
+ * Another View's content, rendered natively inside this layout.
+ *
+ * The native answer to stacking two browser tabs: the same components the View
+ * uses on its own display, sharing this page's React tree and its single SSE
+ * connection. An <iframe> would have been a few lines, and would have booted a
+ * second copy of the whole app per object — another EventSource, another poll
+ * loop — while ignoring the object's style and scaling a full-screen design down
+ * instead of reflowing into the box.
+ *
+ * CUSTOM Views are deliberately not embeddable, and that is the entire recursion
+ * guard: a custom View is the only kind that holds a layout, so refusing it means
+ * an embed can never reach another embed. No depth counter, nothing to get wrong
+ * later. Containers already cover composing objects within one layout.
+ *
+ * Kinds are added as they stop assuming they own the screen — every View renderer
+ * currently hardcodes a viewport height, which is right on a display and wrong in
+ * a box. `script` is converted; the rest say so rather than rendering broken.
+ */
+function ViewEmbedObject({
+  o,
+  config,
+  ctx,
+}: {
+  o: LayoutObject;
+  config: Extract<LayoutObjectConfig, { type: "view-embed" }>;
+  ctx: LayoutRenderCtx;
+}) {
+  const view = config.viewId ? ctx.state.views?.find((v) => v.id === config.viewId) ?? null : null;
+
+  const notice = (text: string) => (
+    <div className="flex items-center justify-center h-full text-fg-subtle text-caption1 text-center px-3">{text}</div>
+  );
+
+  if (!config.viewId) return notice("Pick a view to embed");
+  if (!view) return notice("That view no longer exists");
+
+  if (isEmbeddableViewKind(view.kind)) {
+    // w-full h-full, not the object's alignment: boxStyle turns every object into
+    // a flex column aligned by textAlign, which shrink-wraps a child that has no
+    // width of its own — a left-aligned box rendered the rundown at about half
+    // the width it was given. An embed always fills its box; alignment is a text
+    // idea and does not apply.
+    // The font size is set HERE, on the wrapper, and inherited by the whole
+    // rundown. Every other object applies it per text node through textStyle,
+    // which an embedded component never passes through — so without this the
+    // table fell back to the browser default 16px however large the object was,
+    // with no control that did anything.
+    return (
+      <div className="w-full h-full" style={{ fontSize: `${(o.style?.fontSize ?? 0.03) * ctx.H}px` }}>
+        {/* No live controls: an embed is a readout inside someone's layout, and a
+            stray Prev/Next on a stage monitor drives the real PCO controller. */}
+        {/* textSizeClass="" drops the page's viewport-relative clamp so the rows
+            inherit the object's own font-size, which boxStyle sets from the
+            object's style. Without it the table capped at ~17px however large the
+            object was — unreadable on a 4K stage panel, with the font-size field
+            hidden as well, so there was no way to fix it. */}
+        <ScriptView
+          showLiveControls={false}
+          scriptViewLayoutId={view.scriptViewLayoutId ?? null}
+          showHeader={config.showHeader ?? false}
+          textSizeClass=""
+        />
+      </div>
+    );
+  }
+
+  return notice(`"${view.name}" is a ${view.kind} view — not embeddable yet`);
 }
 
 /** The PCO service order as a scrolling list — highlights the live item and shows
