@@ -2,21 +2,13 @@ import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { Loader2Icon, ArrowLeftIcon } from "lucide-react";
+import { ArrowLeftIcon } from "lucide-react";
 
-import { BrandLogo } from "../components/brand-logo";
-import { computePcoTimer, fmtDuration } from "./pco-timer";
-import { RundownTable } from "./rundown-table";
-import { resolveScriptViewSpec, computeClocks, buildScriptViewColumns, totalLengthSec, fmtTotal } from "./scriptview-columns";
+import { ScriptViewBody, ScriptViewHeader, useScriptViewRender } from "./scriptview-body";
 import { useDashboardState } from "./use-dashboard-state";
 import { invoke } from "../lib/api";
 import { ALL_COLUMNS_LAYOUT_ID, ALL_COLUMNS_SLUG, slugify, scriptViewUrl } from "./scriptview-index-view";
 import type { CategoryRole } from "../../main/types/scriptview-roles.js";
-
-function fmtSvcTime(iso: string, timeZone?: string | null): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", ...(timeZone ? { timeZone } : {}) });
-}
 
 // A standalone ScriptView rundown page: /scriptview/{type}/{layout}. Both path
 // parts are name slugs (e.g. /scriptview/weekend/audio) resolved to ids here, with
@@ -83,62 +75,27 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     document.title = `${t} · ${layoutName}`;
   }, [rundown?.planTitle, rundown?.planSeriesTitle, layoutName]);
 
-  const items = useMemo(() => rundown?.items ?? [], [rundown?.items]);
-  const spec = useMemo(() => resolveScriptViewSpec(layout, roles, rundown?.noteCategories ?? []), [layout, roles, rundown?.noteCategories]);
-  const clocks = useMemo(() => computeClocks(items, rundown?.serviceTimes?.[0]), [items, rundown?.serviceTimes]);
-  const columns = useMemo(() => buildScriptViewColumns(spec, clocks, rundown?.timeZone), [spec, clocks, rundown?.timeZone]);
-
-  // Only the app's active plan gets the live feed; a service is actually LIVE only
-  // when the PCO controller is on a plan item (preservice countdown ≠ live).
-  const isActivePlan = !!rundown?.isActivePlan;
-  const liveNow = isActivePlan && pcoLive?.mode === "item";
-  const timer = isActivePlan ? computePcoTimer(pcoLive, now, skewMs) : null;
-  const over = !!timer?.over;
-  const currentItemId = liveNow ? pcoLive?.currentItemId : null;
-
-  const clock = new Date(now);
-  const h12 = String(((clock.getHours() + 11) % 12) + 1).padStart(2, "0");
-  const mm = String(clock.getMinutes()).padStart(2, "0");
-  const ss = String(clock.getSeconds()).padStart(2, "0");
-  const ampm = clock.getHours() < 12 ? "AM" : "PM";
-
-  const svcTimes = (rundown?.serviceTimes ?? []).map((t) => fmtSvcTime(t, rundown?.timeZone)).filter(Boolean).join("  ·  ");
+  // Every derived value comes from the shared hook, so this page and the layout
+  // object cannot compute one of them differently — see scriptview-body.tsx.
+  const render = useScriptViewRender(rundown, layout, roles, pcoLive, now, skewMs);
 
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      {/* Header: back + brand + plan · layout switcher · countdown · clock */}
-      <div className="flex items-center gap-4 px-4 h-14 shrink-0 border-b border-line bg-black/40">
-        <Tooltip label="All services">
-          <a href="/scriptview" className="flex items-center justify-center rounded-lg size-8 shrink-0 transition-colors hover:bg-white/10" aria-label="All services">
-            <ArrowLeftIcon className="size-4 text-fg-muted" />
-          </a>
-        </Tooltip>
-        <div className="flex items-center gap-2 min-w-0">
-          {state?.appLogo && <BrandLogo logo={state.appLogo} monochrome className="size-6 rounded text-fg" />}
-          <div className="flex flex-col min-w-0 leading-tight">
-            <span className="text-caption1 font-title text-fg truncate">{rundown?.planSeriesTitle ?? rundown?.planTitle ?? "ScriptView"}</span>
-            <span className="text-caption2 text-fg-subtle truncate">
-              {[rundown?.planSeriesTitle ? rundown?.planTitle : null, rundown?.planDates, svcTimes || null].filter(Boolean).join("  ·  ")}
-            </span>
-          </div>
-        </div>
-        <div className="ml-auto flex items-center gap-4 tabular-nums">
-          {liveNow && (
-            <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-live-11">
-              <span className="size-2 rounded-full bg-live-9" /> Live
-            </span>
-          )}
-          {timer && (
-            <div className="flex flex-col items-end leading-none">
-              <span className="text-caption2 uppercase tracking-wider text-fg-subtle">{over ? "Over" : timer.mode === "preservice" ? "Starts in" : "Remaining"}</span>
-              <span className={`text-title3 font-medium ${over ? "text-red-10" : "text-live-11"}`}>{fmtDuration(timer.seconds)}</span>
-            </div>
-          )}
-          <div className="flex flex-col items-end leading-none">
-            <span className="text-caption2 uppercase tracking-wider text-fg-subtle">Clock</span>
-            <span className="text-title3 font-medium text-fg">{h12}:{mm}<span className="text-fg-subtle text-[0.7em]">:{ss} {ampm}</span></span>
-          </div>
-          {/* Layout switcher */}
+      {/* The bar and the rundown are shared with the script View-kind and the
+          layout object; only the two navigation slots are this page's own. */}
+      <ScriptViewHeader
+        rundown={rundown}
+        render={render}
+        appLogo={state?.appLogo}
+        now={now}
+        nav={
+          <Tooltip label="All services">
+            <a href="/scriptview" className="flex items-center justify-center rounded-lg size-8 shrink-0 transition-colors hover:bg-white/10" aria-label="All services">
+              <ArrowLeftIcon className="size-4 text-fg-muted" />
+            </a>
+          </Tooltip>
+        }
+        trailing={
           <Tooltip label="Layout">
             <select
               value={currentLayoutKey}
@@ -151,31 +108,10 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
               <option value={ALL_COLUMNS_LAYOUT_ID} className="bg-[var(--kiosk-surface-1)]">All columns</option>
             </select>
           </Tooltip>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        {error ? (
-          <div className="flex items-center justify-center h-full text-red-10 text-body px-6 text-center">{error}</div>
-        ) : !rundown ? (
-          <div className="flex items-center justify-center h-full"><Loader2Icon className="size-8 text-gray-7 animate-spin" /></div>
-        ) : items.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-fg-faint text-body">
-            {rundown.planId ? "No items in this plan" : "No upcoming plan for this service type"}
-          </div>
-        ) : (
-          <RundownTable
-            items={items}
-            columns={columns}
-            currentItemId={currentItemId}
-            itemTypeColors={rundown?.itemTypeColors}
-            rowColor={layout?.rowColor}
-            accentRole={layout?.accentRole ?? null}
-            roles={roles}
-            footer={spec.showTotalTime ? <span>{fmtTotal(totalLengthSec(items))} <span className="text-fg-subtle">· total time</span></span> : undefined}
-          />
-        )}
-      </div>
+      <ScriptViewBody rundown={rundown} roles={roles} layout={layout} render={render} error={error} />
     </div>
   );
 }
