@@ -97,6 +97,17 @@ const PILL = (over: LayoutStyle = {}): LayoutStyle => TEXT({ fontSize: 0.05, fon
 /** Media that paints its own content — no type styling at all. */
 const BARE = (): LayoutStyle => ({});
 
+/**
+ * The font size an embedded View starts at, as a fraction of layout height.
+ *
+ * Derived from the ScriptView page rather than picked: the page sets
+ * `clamp(0.8rem, 1.6vmin, 1.1rem)`, which on a 1080-tall 16:9 screen resolves to
+ * 1.6vmin = 17.28px, and 17.28 / 1080 = 0.016. Exported so the layout editor can
+ * show the same number as the default instead of a second guess — the inspector
+ * used to fall back to 0.05, so a fresh embed reported a size it was not using.
+ */
+export const EMBED_FONT_FRACTION = 0.016;
+
 // ── The registry ──────────────────────────────────────────────────────────────
 
 export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
@@ -184,10 +195,18 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     label: "Embedded view",
     group: "PCO / service",
     config: () => ({ type: "view-embed", viewId: null }),
-    // 0.03 of canvas height — about 32px on 1080p, readable from a stage. The
-    // rundown inherits this; there is no auto-fit, so the default has to be a
-    // size someone can actually read before they touch anything.
-    style: () => TEXT({ fontSize: 0.03, textAlign: "left", vAlign: "top" }),
+    // The size the ScriptView PAGE actually renders at, expressed as a fraction
+    // of height: the page's `clamp(0.8rem, 1.6vmin, 1.1rem)` resolves to ~17.3px
+    // on a 1080-tall 16:9 screen, and 17.3/1080 ≈ 0.016.
+    //
+    // It was 0.03 — nearly double — chosen on the reasoning that an embed should
+    // be "readable from a stage" without touching anything. That was the wrong
+    // frame: the requirement for this object is that nothing looks different
+    // between the embed and the page it came out of, and a default that renders
+    // at 1.85× the page breaks exactly that, showing about half the rundown.
+    // Someone who does want it bigger has the font-size field; someone who wants
+    // it to match the page had no way to get there by eye.
+    style: () => TEXT({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
   },
   "service-pacing": {
     label: "Service pacing",
@@ -432,9 +451,38 @@ export const PALETTE_GROUPS: { label: PaletteGroup; types: LayoutObjectType[] }[
     types: ALL_TYPES.filter((t) => LAYOUT_OBJECTS[t].group === label),
   })).filter((g) => g.types.length > 0);
 
-export const typeLabel = (t: LayoutObjectType): string => LAYOUT_OBJECTS[t].label;
-export const defaultConfig = (t: LayoutObjectType): LayoutObjectConfig => LAYOUT_OBJECTS[t].config();
-export const defaultStyle = (t: LayoutObjectType): LayoutStyle => LAYOUT_OBJECTS[t].style();
-export const objectIntegration = (t: LayoutObjectType) => LAYOUT_OBJECTS[t].integration;
-export const isStylingOnly = (t: LayoutObjectType): boolean => LAYOUT_OBJECTS[t].stylingOnly === true;
-export const usesPropInstance = (t: LayoutObjectType): boolean => LAYOUT_OBJECTS[t].propInstance === true;
+/**
+ * The registry entry for a type, or null when this build has never heard of it.
+ *
+ * The type system says every `LayoutObjectType` is a key of `LAYOUT_OBJECTS`, and
+ * within one build that is true. It stops being true the moment a layout arrives
+ * from somewhere else — and layouts do: `views.json` is a CONFIG store, so it is
+ * carried across versions by export/import and by every restore. Feed a config
+ * containing an object this build does not have (restore a newer snapshot onto an
+ * older server — exactly what a config upload does) and the lookup returns
+ * undefined against a type that claims it cannot.
+ *
+ * Every accessor below goes through this. They used to read `.label`, `.retired`
+ * and friends straight off the lookup, so opening the layout editor on such a
+ * view threw `can't access property "label", undefined` and white-screened the
+ * whole Views page — no way back except editing config by hand.
+ */
+export function findLayoutObjectSpec(t: LayoutObjectType): LayoutObjectSpec | null {
+  return (LAYOUT_OBJECTS as Partial<Record<LayoutObjectType, LayoutObjectSpec>>)[t] ?? null;
+}
+
+/** True when this build can actually render/edit the type at all. */
+export function isKnownObjectType(t: LayoutObjectType): boolean {
+  return findLayoutObjectSpec(t) !== null;
+}
+
+// Fallbacks are chosen so an unknown object is INERT rather than plausible: it
+// keeps its place in the layout and names itself, and every capability query
+// answers "no" so nothing tries to configure something it cannot describe.
+export const typeLabel = (t: LayoutObjectType): string => findLayoutObjectSpec(t)?.label ?? `Unsupported object (${t})`;
+export const defaultConfig = (t: LayoutObjectType): LayoutObjectConfig => findLayoutObjectSpec(t)?.config() ?? ({ type: t } as LayoutObjectConfig);
+export const defaultStyle = (t: LayoutObjectType): LayoutStyle => findLayoutObjectSpec(t)?.style() ?? {};
+export const objectIntegration = (t: LayoutObjectType) => findLayoutObjectSpec(t)?.integration;
+export const isStylingOnly = (t: LayoutObjectType): boolean => findLayoutObjectSpec(t)?.stylingOnly === true;
+export const usesPropInstance = (t: LayoutObjectType): boolean => findLayoutObjectSpec(t)?.propInstance === true;
+export const objectRetired = (t: LayoutObjectType) => findLayoutObjectSpec(t)?.retired;

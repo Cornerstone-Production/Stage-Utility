@@ -96,8 +96,9 @@ import { usePropInstances } from "../../main/use-dashboard-state";
 import { useConfiguredIntegrations, useIntegrations } from "../../main/use-integration-states";
 import {
   CARD_PRESETS,
-  LAYOUT_OBJECTS,
+  isKnownObjectType,
   isOfferableInEmbedPicker,
+  objectRetired,
   PALETTE_GROUPS,
   defaultConfig,
   defaultStyle,
@@ -555,12 +556,24 @@ function EditorCanvas({
     };
   }, [wrap]);
 
-  // "fill" mode: the canvas fills the whole editor pane (objects reflow, just like
-  // on a display set to fill) instead of letterboxing the design aspect.
+  // "fill" mode: objects reflow to the window rather than letterboxing the design
+  // aspect. The PREVIEW still keeps the design aspect, and that is deliberate.
+  //
+  // It used to take the editor pane's own shape, which made it a model of a
+  // display nobody owns: fonts are a fraction of HEIGHT, so a pane that is
+  // relatively narrower than the design renders the same text larger relative to
+  // the width it has to fit in. Status pills wrapped in the preview and not on the
+  // display, and a rundown hid 633px of columns in the preview against 256px on
+  // the page — the preview was not just imprecise, it disagreed about what fits.
+  //
+  // A preview cannot know the shape of the screen this will end up on, so it
+  // models the one shape it does know: the design canvas. Same box as letterbox
+  // mode; what still differs is `H`, which tracks the live box so the preview is a
+  // true scale model rather than a fixed design-space render.
   const fill = canvas.fit === "fill";
   const scale = avail.w > 0 && avail.h > 0 ? Math.min(avail.w / canvas.width, avail.h / canvas.height) : 0;
-  const boxW = fill ? avail.w : canvas.width * scale;
-  const boxH = fill ? avail.h : canvas.height * scale;
+  const boxW = canvas.width * scale;
+  const boxH = canvas.height * scale;
   // Report the box size up so parent snap actions use the same grid aspect.
   useEffect(() => {
     if (boxW > 0 && boxH > 0) onBoxSize?.(boxW, boxH);
@@ -1189,8 +1202,6 @@ export function LayoutEditor({
     const el = canvasCellRef.current;
     if (!el) return;
     const aspect = canvas.width / canvas.height;
-    // In fill mode the canvas fills the available height (no design aspect).
-    const fillMode = canvas.fit === "fill";
     const measure = () => {
       const width = el.clientWidth;
       const top = el.getBoundingClientRect().top;
@@ -1200,7 +1211,11 @@ export function LayoutEditor({
       // must sit right below the canvas. When just viewing, fill the width like
       // the read-only ViewPreview so a custom preview isn't shrunk vs other kinds.
       const cap = isEditing ? maxH : Infinity;
-      setCanvasH(Math.round(fillMode ? maxH : Math.min(fit, cap)));
+      // Aspect-derived in BOTH fit modes. Fill mode used to take the full
+      // available height, which gave the preview a shape the design never has —
+      // see the box sizing above for why that made the preview disagree with the
+      // display about what fits on screen.
+      setCanvasH(Math.round(Math.min(fit, cap)));
       // A touch shorter than the raw available height so the section's own bottom
       // padding doesn't tip the page into a few px of scroll.
       setAvailH(Math.max(240, Math.round(maxH) - 12));
@@ -2411,7 +2426,7 @@ function Inspector({
         // the palette so no new ones appear, with the conversion one click away.
         // Deliberately NOT automatic — the replacement renders a different table,
         // and silently changing what is on a stage monitor is not an upgrade.
-        const retired = LAYOUT_OBJECTS[c.type].retired;
+        const retired = objectRetired(c.type);
         if (!retired) return null;
         const scriptViews = (embedViews ?? []).filter((v) => v.kind === "script");
         return (
@@ -3076,6 +3091,24 @@ function Inspector({
       {isStylingOnly(c.type) && (
         <p className="text-caption2 text-fg-muted leading-snug">Updates automatically — no options. Use the styling controls below.</p>
       )}
+      {/* An object this build cannot render — almost always a layout restored from
+          a NEWER version. Say so plainly and leave it alone: it renders as nothing
+          on the display, and deleting it here would throw away work that the
+          version it came from can still use. */}
+      {!isKnownObjectType(c.type) && (
+        <div className="flex flex-col gap-2 rounded-lg border border-amber-a5 bg-amber-a2 p-3">
+          <span className="text-caption1 text-fg">This version can&apos;t show this object</span>
+          <span className="text-caption2 text-fg-muted">
+            The layout asks for <code>{c.type}</code>, which this build does not have — usually
+            because the layout was saved by a newer version and restored here. It stays in the
+            layout and renders as nothing; update this server and it will come back.
+          </span>
+          <span className="text-caption2 text-fg-muted">
+            Leave it in place unless you are sure: deleting it here removes it for the newer
+            version too.
+          </span>
+        </div>
+      )}
 
       <Separator />
 
@@ -3094,7 +3127,11 @@ function Inspector({
       {isText && (
         <>
           <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Type</span>
-          <Row label="Font size"><NumberField value={pxOf(s.fontSize, 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
+          {/* Fall back to THIS type's own default, not a blanket 0.05. An object
+              whose default differs (an embedded view starts at 0.016) otherwise
+              reported a size it was not rendering at, so the first nudge of the
+              stepper jumped it to a number it had never been. */}
+          <Row label="Font size"><NumberField value={pxOf(s.fontSize, defaultStyle(c.type).fontSize ?? 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
           <Row label="Weight">
             <Select value={String(s.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
