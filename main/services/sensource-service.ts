@@ -309,6 +309,32 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     return this.hasSubscribers || this.demandSources.some((wants) => wants());
   }
 
+  /** True while the pending poll was scheduled at the slow idle cadence. */
+  private polledIdle = false;
+
+  /**
+   * Something started needing counts — poll now rather than finishing the wait.
+   *
+   * The idle gate decides the cadence at the END of each poll, so a consumer
+   * appearing just after one was scheduled waits out the full idle minute. That
+   * is exactly what happens at the start of a service: the recorder opens its
+   * record on a live tick, and the first sample of the pre-service arrival ramp
+   * — the steepest part of the curve, and the part an operator watches — could
+   * be up to a minute stale, with the graph drawing a flat lead-in that never
+   * happened.
+   *
+   * Only pre-empts an IDLE wait. A poll already scheduled at the service
+   * cadence is close enough, and cancelling it would let a flapping consumer
+   * poll faster than the operator's configured rate — the thing the gate's
+   * `Math.max` exists to prevent.
+   */
+  pollNowIfIdle(): void {
+    if (!this.running || !this.polledIdle || !this.inDemand) return;
+    this.polledIdle = false;
+    console.log("[sensource] a consumer arrived — polling now rather than waiting out the idle interval");
+    this.scheduleIn(0);
+  }
+
   constructor() {
     super("sensource", "people:count", OFFLINE);
   }
@@ -689,7 +715,11 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
           // set 300s to stay inside Vea's quota would have been polled every 60s
           // all week by the idle path.
           const sec = Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
-          this.scheduleIn(this.inDemand ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS));
+          const demand = this.inDemand;
+          // Remembered, so a consumer arriving during the wait can pre-empt it
+          // rather than sitting out the full idle interval. See pollNowIfIdle.
+          this.polledIdle = !demand && IDLE_POLL_MS > sec * 1000;
+          this.scheduleIn(demand ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS));
         } else {
           this.scheduleReconnect();
         }

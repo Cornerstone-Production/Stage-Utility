@@ -100,3 +100,69 @@ describe("SenSource poll demand", () => {
     assert.equal(gate.inDemand, false);
   });
 });
+
+// Demand appearing mid-wait must not sit out the idle interval.
+//
+// The gate picks the cadence at the END of each poll, so a consumer arriving
+// just after one was scheduled waits the full minute. That is precisely what
+// happens at the start of a service: the recorder opens its record on a live
+// tick, and the first sample of the pre-service arrival ramp — the steepest part
+// of the curve — could be up to a minute stale, drawing a flat lead-in that
+// never happened.
+//
+// Left as a known residual when the demand sources landed; this closes it.
+
+type Poller = {
+  running: boolean;
+  polledIdle: boolean;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  pollNowIfIdle: () => void;
+};
+const poller = sensourceService as unknown as Poller;
+
+describe("waking SenSource when a consumer arrives", () => {
+  beforeEach(() => {
+    browsersWatching = false;
+    recorder.current = null;
+    recorder.postMs = 60 * 60_000;
+    tsl.connected = false;
+    tsl.feeds = [];
+    if (poller.reconnectTimer) clearTimeout(poller.reconnectTimer);
+    poller.reconnectTimer = null;
+    poller.running = true;
+    poller.polledIdle = true; // a slow poll is pending
+  });
+
+  it("re-schedules when the RECORDER opens a record", () => {
+    // Driven through the recorder's own hook, not by calling pollNowIfIdle()
+    // directly. Calling it directly proves the wake works and says nothing about
+    // whether anything ever calls it — delete the call site and a test like that
+    // stays green, which is the whole failure mode this repo keeps hitting.
+    recorder.current = { endedAt: null };
+    (attendanceRecorder as unknown as { onRecordEstablished: () => void }).onRecordEstablished();
+    assert.equal(poller.polledIdle, false, "the idle wait was not pre-empted");
+    assert.notEqual(poller.reconnectTimer, null, "no poll was scheduled");
+  });
+
+  it("does nothing when nothing is consuming", () => {
+    poller.pollNowIfIdle();
+    assert.equal(poller.polledIdle, true, "woke up with no consumer");
+    assert.equal(poller.reconnectTimer, null);
+  });
+
+  it("does not pre-empt a poll already at the service cadence", () => {
+    // Cancelling a fast poll would let a flapping consumer poll faster than the
+    // operator's configured rate — what the gate's Math.max exists to prevent.
+    poller.polledIdle = false;
+    recorder.current = { endedAt: null };
+    poller.pollNowIfIdle();
+    assert.equal(poller.reconnectTimer, null, "a service-cadence poll was cancelled");
+  });
+
+  it("does nothing while the integration is stopped", () => {
+    poller.running = false;
+    recorder.current = { endedAt: null };
+    poller.pollNowIfIdle();
+    assert.equal(poller.reconnectTimer, null, "a stopped integration scheduled a poll");
+  });
+});
