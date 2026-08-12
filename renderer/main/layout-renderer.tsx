@@ -1689,6 +1689,7 @@ function ViewEmbedObject({
           scriptViewLayoutId={view.scriptViewLayoutId ?? null}
           showHeader={config.showHeader ?? false}
           textSizeClass=""
+          autoScroll={config.autoScroll ?? true}
         />
       </div>
     );

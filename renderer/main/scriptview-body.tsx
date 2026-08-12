@@ -115,6 +115,7 @@ export function ScriptViewBody({
   render,
   error,
   textSizeClass,
+  autoScroll,
 }: {
   rundown: ScriptViewRundownDTO | null;
   roles: CategoryRole[];
@@ -125,6 +126,9 @@ export function ScriptViewBody({
    *  inherit the container's font-size instead, which is how a layout object
    *  gets a size that tracks the box it was given rather than the screen. */
   textSizeClass?: string;
+  /** Keep the live PCO item scrolled into view. Absent = on, which is what the
+   *  standalone page has always done. */
+  autoScroll?: boolean;
 }) {
   const { items, spec, columns, currentItemId } = render;
   // An error only wins when there is nothing else to show. A rundown refetches
@@ -154,6 +158,7 @@ export function ScriptViewBody({
           accentRole={layout?.accentRole ?? null}
           roles={roles}
           {...(textSizeClass != null ? { textSizeClass } : {})}
+          {...(autoScroll != null ? { autoScroll } : {})}
           footer={spec.showTotalTime ? <span>{fmtTotal(totalLengthSec(items))} <span className="text-fg-subtle">· total time</span></span> : undefined}
         />
       )}

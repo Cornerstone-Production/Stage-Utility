@@ -124,6 +124,40 @@ function useFitWidth(wrapRef: React.RefObject<HTMLDivElement | null>, width: num
   return scale;
 }
 
+/** The nearest ancestor that actually scrolls vertically, or null. */
+export function nearestScroller(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (p.scrollHeight <= p.clientHeight) continue;
+    const oy = getComputedStyle(p).overflowY;
+    if (oy === "auto" || oy === "scroll" || oy === "overlay") return p;
+  }
+  return null;
+}
+
+/**
+ * Centre a row in its own scroll container, and move nothing else.
+ *
+ * `Element.scrollIntoView` adjusts EVERY scrollable ancestor, which is fine on a
+ * page that owns the screen and wrong inside a layout object: an embedded rundown
+ * scrolling itself would also scroll the page around it. Computing the offset
+ * against one container keeps the effect where it belongs.
+ *
+ * Exported for the guard — the arithmetic is the part worth pinning.
+ */
+export function rowScrollTop(rowTop: number, rowHeight: number, scrollerTop: number, scrollerScrollTop: number, scrollerHeight: number): number {
+  const offsetWithin = rowTop - scrollerTop + scrollerScrollTop;
+  return Math.max(0, offsetWithin - (scrollerHeight - rowHeight) / 2);
+}
+
+function scrollRowIntoView(row: HTMLElement): void {
+  const scroller = nearestScroller(row);
+  if (!scroller) return;
+  const r = row.getBoundingClientRect();
+  const s = scroller.getBoundingClientRect();
+  const top = rowScrollTop(r.top, r.height, s.top, scroller.scrollTop, scroller.clientHeight);
+  scroller.scrollTo({ top, behavior: "smooth" });
+}
+
 export interface RundownColumn {
   key: string;
   header: string;
@@ -202,9 +236,26 @@ export function RundownTable({
     const pco = resolveItemColor(it, itemTypeColors);
     return pco ? mapPcoColor(pco) : null;
   };
+  // Keep the live item in view. Two things here are deliberate.
+  //
+  // `items` is in the deps, not just `currentItemId`. The rundown arrives from
+  // the server after mount, so opening a display DURING a service had the live id
+  // already set and unchanged by the time the rows existed — the effect had
+  // already run against an empty table, found no row, and never fired again. The
+  // display then sat on the top of the plan for the whole service, which is
+  // exactly the case auto-scroll exists for.
+  //
+  // And it scrolls the rundown's OWN scroller rather than calling
+  // scrollIntoView, which walks every scrollable ancestor. On the standalone page
+  // nothing above it scrolls so the difference never showed; embedded in a
+  // layout it can drag the whole page, moving objects that have nothing to do
+  // with the rundown.
   useEffect(() => {
-    if (autoScroll) currentRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [currentItemId, autoScroll]);
+    if (!autoScroll) return;
+    const row = currentRef.current;
+    if (!row) return;
+    scrollRowIntoView(row);
+  }, [currentItemId, autoScroll, items]);
 
   if (shape === "stacked") {
     return (

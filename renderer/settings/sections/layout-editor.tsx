@@ -2490,6 +2490,14 @@ function Inspector({
           onChange={(v) => onConfig({ ...c, showHeader: v })}
         />
       )}
+      {c.type === "view-embed" && c.viewId && (
+        <RowSwitch
+          label="Follow the live item"
+          hint="Scrolls the rundown to keep Planning Center's live item on screen, so a service that runs past the bottom of the box does not need anyone to touch the display. Only ever scrolls this object, never the rest of the layout. Turn off for a box parked on the top of the plan."
+          checked={c.autoScroll ?? true}
+          onChange={(v) => onConfig({ ...c, autoScroll: v })}
+        />
+      )}
       {c.type === "service-order" && (
         <>
           <RowToggle
