@@ -28,6 +28,66 @@ import type { CategoryRole } from "../types/scriptview-roles.js";
 const PRIMARY_DISPLAY_ID = "display-1";
 
 /**
+ * The embedded-view font size that shipped as the palette default, and the one
+ * that replaced it.
+ *
+ * `OLD` rendered at ~32px on a 1080-tall screen where the ScriptView page renders
+ * at ~17px, so an embed came out at nearly double the page and showed a third of
+ * the rundown. Changing the palette default fixed new objects and did nothing for
+ * existing ones: the value is written into the object when it is placed, so
+ * `style.fontSize ?? DEFAULT` never falls through for anything already saved.
+ *
+ * Kept as literals rather than imported from the renderer's registry: this is a
+ * migration, and it must keep meaning "whatever the bad default WAS" even after
+ * the registry moves on again.
+ */
+const EMBED_FONT_OLD_DEFAULT = 0.03;
+const EMBED_FONT_NEW_DEFAULT = 0.016;
+
+/**
+ * Retune embedded-view objects still carrying the old default font size.
+ *
+ * Only an EXACT match is touched. Anything else is a size somebody chose, and
+ * this must not overwrite an operator's work — if a display has been deliberately
+ * set large for a room, it stays large. An exact 0.03 is the value the palette
+ * wrote, not a decision: the field renders identically at 0.0299 or 0.0301, so
+ * nobody arrives at exactly the default by taste.
+ *
+ * Idempotent, because it runs on every load: once rewritten the value no longer
+ * matches, so the second pass changes nothing and saves nothing.
+ */
+export function retuneEmbedFontSize(views: View[]): { views: View[]; changed: number } {
+  let changed = 0;
+  const next = views.map((v) => {
+    if (!v.layout?.objects?.length) return v;
+    let touched = false;
+    const objects = v.layout.objects.map(function retune(o): LayoutObject {
+      // Containers nest, and an embed inside one is just as wrong as a top-level
+      // one — the recursion is the whole reason this is not a flat filter.
+      const children = o.children?.map(retune);
+      const isStaleEmbed =
+        o.config.type === "view-embed" && o.style?.fontSize === EMBED_FONT_OLD_DEFAULT;
+      if (!isStaleEmbed && !children) return o;
+      if (isStaleEmbed) { changed++; touched = true; }
+      return {
+        ...o,
+        ...(children ? { children } : {}),
+        ...(isStaleEmbed ? { style: { ...o.style, fontSize: EMBED_FONT_NEW_DEFAULT } } : {}),
+      };
+    });
+    // A child-only change still has to be written back up through the parent.
+    if (!touched && objects.every((o, i) => o === v.layout!.objects[i])) return v;
+    return { ...v, layout: { ...v.layout, objects } };
+  });
+  if (changed > 0) {
+    console.log(
+      `[stage-controller] retuned ${changed} embedded view(s) from the old ${EMBED_FONT_OLD_DEFAULT} font size to ${EMBED_FONT_NEW_DEFAULT}`,
+    );
+  }
+  return { views: next, changed };
+}
+
+/**
  * Read the persisted auto-update settings, migrating the pre-mode boolean.
  * `enabled: true` meant "apply and restart in the window", which is auto-full;
  * `false`/absent meant nothing automatic at all, which is manual.
@@ -261,7 +321,9 @@ export class StageController {
     const storedOutputs = settings.outputs;
 
     if (storedOutputs && storedOutputs.length > 0 && storedViews.length > 0) {
-      return { views: storedViews, outputs: storedOutputs };
+      const { views, changed } = retuneEmbedFontSize(storedViews);
+      if (changed > 0) await viewsStore.save(views);
+      return { views, outputs: storedOutputs };
     }
 
     // First run: migrate from the legacy `displays` array (or the default).
