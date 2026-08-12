@@ -14,7 +14,6 @@ import {
   SelectItem,
   SelectValue,
   Separator,
-  Switch,
   Dialog,
   EmptyState,
   UnsavedBanner,
@@ -319,19 +318,6 @@ function ViewDetail({
         </>
       ) : view.kind === "custom" ? null : view.kind === "script" ? (
         <>
-          <Separator />
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex flex-col">
-              <span className="text-caption1 text-fg">Show PCO Prev/Next controls</span>
-              <span className="text-caption2 text-fg-muted">
-                Adds the Planning Center Live Prev/Next buttons to this script display.
-              </span>
-            </div>
-            <Switch
-              checked={view.showLiveControls ?? false}
-              onCheckedChange={(v) => void invoke("views:setShowLiveControls", { id: view.id, showLiveControls: v })}
-            />
-          </div>
           <Separator />
           <div className="flex flex-col gap-2">
             <div className="flex flex-col">

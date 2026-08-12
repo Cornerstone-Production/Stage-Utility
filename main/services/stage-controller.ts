@@ -1584,20 +1584,6 @@ export class StageController {
     return this.state;
   }
 
-  /** Toggle the PCO Live Prev/Next controls on a "script" View. */
-  async setViewShowLiveControls(id: string, showLiveControls: boolean): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
-      throw new Error(`views:setShowLiveControls — view ${id} not found`);
-    }
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, showLiveControls } : v));
-    console.log(`[stage-controller] setViewShowLiveControls id=${scrub(id)} → ${scrub(showLiveControls)}`);
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
-  }
-
   /** Pick which saved ScriptView column preset a "script" View renders. */
   async setViewScriptViewLayout(id: string, scriptViewLayoutId: string | null): Promise<StageState> {
     if (!this.state.views.find((v) => v.id === id)) {

@@ -23,7 +23,7 @@ import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
-import { isEmbeddableViewKind } from "./layout-objects";
+import { EMBED_FONT_FRACTION, isEmbeddableViewKind } from "./layout-objects";
 import { ScriptView } from "./script-view";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
@@ -1679,16 +1679,13 @@ function ViewEmbedObject({
     // table fell back to the browser default 16px however large the object was,
     // with no control that did anything.
     return (
-      <div className="w-full h-full" style={{ fontSize: `${(o.style?.fontSize ?? 0.03) * ctx.H}px` }}>
-        {/* No live controls: an embed is a readout inside someone's layout, and a
-            stray Prev/Next on a stage monitor drives the real PCO controller. */}
+      <div className="w-full h-full" style={{ fontSize: `${(o.style?.fontSize ?? EMBED_FONT_FRACTION) * ctx.H}px` }}>
         {/* textSizeClass="" drops the page's viewport-relative clamp so the rows
             inherit the object's own font-size, which boxStyle sets from the
             object's style. Without it the table capped at ~17px however large the
             object was — unreadable on a 4K stage panel, with the font-size field
             hidden as well, so there was no way to fix it. */}
         <ScriptView
-          showLiveControls={false}
           scriptViewLayoutId={view.scriptViewLayoutId ?? null}
           showHeader={config.showHeader ?? false}
           textSizeClass=""

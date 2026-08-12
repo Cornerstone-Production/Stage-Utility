@@ -165,11 +165,10 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       }
       const hasSlotsLayout = "slotsLayout" in body
         && (body.slotsLayout === null || typeof body.slotsLayout === "object");
-      const hasShowLiveControls = typeof body.showLiveControls === "boolean";
       const hasScriptViewLayout = "scriptViewLayoutId" in body
         && (body.scriptViewLayoutId === null || typeof body.scriptViewLayoutId === "string");
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasShowLiveControls && !hasScriptViewLayout) {
-        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.showLiveControls (boolean), or body.scriptViewLayoutId (string|null) required");
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), or body.scriptViewLayoutId (string|null) required");
         return;
       }
       let state = stageController.getState();
@@ -193,7 +192,6 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         }
       }
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
-      if (hasShowLiveControls) state = await stageController.setViewShowLiveControls(id, body.showLiveControls as boolean);
       if (hasScriptViewLayout) state = await stageController.setViewScriptViewLayout(id, body.scriptViewLayoutId as string | null);
       json(res, state);
       return;

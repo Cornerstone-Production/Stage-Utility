@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { clamp } from "@main/services/clamp";
+import { useResyncOn } from "../lib/use-resync-on";
 import type { PcoItemTypeColor } from "../../main/types/stage.js";
 import { resolveItemColor, mapPcoColor, washFor, stripeFor } from "./item-color";
 import { categoryColor } from "./category-color";
@@ -29,6 +31,98 @@ export function rundownHeaderKind(title: string): "start" | "end" | null {
 // per-category accent — PCO has no color for a note category (item_note_categories
 // carries only name/sequence/frequently_used), so any category color would have been
 // invented here rather than read from the plan.
+
+/** Below this the rows stop being readable, and a scrollbar is the lesser evil. */
+const MIN_FIT_SCALE = 0.55;
+/**
+ * Aim a half-percent inside the box rather than exactly at its edge.
+ *
+ * Cell padding is `px-3` — rem-based, so it does NOT shrink with the type, and
+ * the natural width back-derived from the scroll width therefore overstates how
+ * much scaling actually buys. Landing exactly on the edge left ~9px of a 1920px
+ * table outside the box, which is a horizontal scrollbar for nine pixels: the
+ * whole defect, in miniature. Undershooting costs nothing visible.
+ */
+const FIT_UNDERSHOOT = 0.995;
+
+/**
+ * One step of the width fit: the scale to render at next, given what the last
+ * render measured. Returns `scale` unchanged when there is nothing to do.
+ *
+ * Pure, and separated from the hook, because the subtle part is not the DOM work
+ * — it is that the step must STRICTLY DECREASE or stop. A draft that applied the
+ * undershoot unconditionally made a table that already fit measure 0.995 of
+ * itself every pass, so it ratcheted down for ever and the no-op case quietly
+ * became a shrink. That is invisible in a screenshot and obvious in a test.
+ */
+export function nextFitScale(
+  { availW, scrollW, scale }: { availW: number; scrollW: number; scale: number },
+): number {
+  if (availW <= 1) return scale;
+  // Fits (within a pixel of rounding): the only exit, and the reason the
+  // standalone page with a handful of columns is untouched by any of this.
+  if (scrollW <= availW + 1) return scale;
+  const natural = scrollW / scale;
+  if (natural <= 0) return scale;
+  const desired = clamp((availW / natural) * FIT_UNDERSHOOT, MIN_FIT_SCALE, 1);
+  return desired < scale - 0.002 ? desired : scale;
+}
+
+/**
+ * Shrink the rundown's type until the columns fit the box left-to-right.
+ *
+ * A `w-full` table still lays out `table-layout: auto`, which cannot go narrower
+ * than its columns' min-content width — so past a certain column count it
+ * overflows however wide the box is. Tailwind's `overflow-y-auto` leaves
+ * `overflow-x: visible`, which CSS then COMPUTES to `auto`, so the overflow
+ * showed up as a horizontal scrollbar on a stage display: the last department
+ * columns simply were not on screen, and nobody scrolls a wall monitor.
+ *
+ * Fitting the type rather than the columns is deliberate. `table-layout: fixed`
+ * would also guarantee the fit, but it hands every column an equal share of the
+ * leftover, so the Item column — titles, key/BPM, and the description — would get
+ * the same width as "Video". Auto layout's content-proportional sizing is what
+ * makes the rundown readable; this keeps it and scales the whole thing down.
+ *
+ * The base size is MEASURED, never assumed, because the two surfaces set it
+ * differently: the page through a viewport clamp on the table, an embedded view
+ * through an inherited font-size on its wrapper. Measuring means this is a no-op
+ * — no inline size at all — whenever the table already fits, so the standalone
+ * page with a handful of columns renders exactly as it did before.
+ *
+ * Back-derives the natural width from the live scroll width, the same approach as
+ * FitText and ServiceOrderObject's auto-fit.
+ */
+function useFitWidth(wrapRef: React.RefObject<HTMLDivElement | null>, width: number, deps: unknown[]): number {
+  const [scale, setScale] = useState(1);
+
+  // Start every fit from unscaled. A `w-full` table always fills its box, so once
+  // it fits there is NO slack left to measure — nothing would ever tell the fit it
+  // could grow back, and a scale chosen for a narrow settings preview would stick
+  // for ever after the box got wider. Resetting on change is what makes it
+  // reversible without needing to detect slack that does not exist.
+  //
+  // During render, not in an effect: an effect would paint one frame at the old
+  // scale before correcting, which on a stage display is the rundown visibly
+  // jumping size on every resize.
+  useResyncOn([width, ...deps], () => setScale(1));
+
+  // Shrink one step per render, and only ever DOWNWARD. An earlier draft let the
+  // scale move either way and applied the undershoot unconditionally — so a table
+  // that already fit still measured 0.995 of itself every pass and ratcheted down
+  // for ever, quietly turning the no-op case into a 4% shrink. Monotone descent
+  // from a known start cannot oscillate: it stops when the table fits, or at the
+  // floor.
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const next = nextFitScale({ availW: wrap.clientWidth, scrollW: wrap.scrollWidth, scale });
+    if (next !== scale) setScale(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wrapRef, scale, width, ...deps]);
+
+  return scale;
+}
 
 export interface RundownColumn {
   key: string;
@@ -87,6 +181,9 @@ export function RundownTable({
   // No page max-width anywhere: a centerd column leaves dead margins on a stage panel
   // and shrinks the text relative to the viewport. The SHAPE changes instead.
   const shape = width < 640 ? "stacked" : width < 1024 ? "compact" : "full";
+  // Re-fit whenever the column set or the row content changes: both move the
+  // natural width, and neither is a resize the observer would see.
+  const fitScale = useFitWidth(wrapRef, width, [shape, columns.length, items.length, textSizeClass]);
   // Compact drops the clock (a projected time, the least load-bearing column) before
   // it touches anything an operator reads off the page.
   const shownColumns = shape === "full" ? columns : columns.filter((c) => c.key !== "clock");
@@ -158,8 +255,13 @@ export function RundownTable({
   }
 
   return (
-    <div ref={wrapRef}>
-    <table className={`w-full border-collapse ${textSizeClass}`}>
+    // The size lives on the WRAPPER so the table can express its fit as a plain
+    // percentage of it. Setting an inline px size on the table instead would mean
+    // measuring the class's computed size first and re-deriving it on every
+    // resize; a percentage resolves against the inherited size by itself, and is
+    // exactly a no-op at scale 1.
+    <div ref={wrapRef} className={textSizeClass}>
+    <table className="w-full border-collapse" style={{ fontSize: `${fitScale * 100}%` }}>
       <thead className="sticky top-0 z-10 bg-[var(--kiosk-surface-1)] text-fg-subtle">
         <tr className="text-left">
           {shownColumns.map((c) => (

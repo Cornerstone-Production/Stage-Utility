@@ -435,11 +435,6 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { slotsLayout: p.slotsLayout });
     }
 
-    case "views:setShowLiveControls": {
-      const id = p.id as string;
-      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { showLiveControls: p.showLiveControls });
-    }
-
     case "views:setScriptViewLayout": {
       const id = p.id as string;
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { scriptViewLayoutId: p.scriptViewLayoutId });

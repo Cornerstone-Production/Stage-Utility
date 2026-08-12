@@ -514,10 +514,7 @@ export function StageView() {
         {/* ScriptView sizes to h-full so it can also live inside a layout object;
             the screen height and the safe-area insets belong to this route. */}
         <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-          <ScriptView
-            showLiveControls={(activeView?.showLiveControls ?? false) && !previewViewId}
-            scriptViewLayoutId={activeView?.scriptViewLayoutId ?? null}
-          />
+          <ScriptView scriptViewLayoutId={activeView?.scriptViewLayoutId ?? null} />
         </div>
       </StageErrorBoundary>
     );
