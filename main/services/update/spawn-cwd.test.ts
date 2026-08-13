@@ -91,8 +91,11 @@ describe("why a deleted cwd is fatal (the mechanism, reproduced)", () => {
     const gone = await doomedRun;
     const safe = await safeRun;
 
-    assert.notEqual(gone.code, 0, "getcwd in a deleted cwd must fail — this is the bug");
-    assert.match(gone.err, /No such file|not exist|cannot access/i, "and must say why");
+    // Exit status only. The WORDING is platform-specific — BSD/macOS says "No
+    // such file or directory", GNU/Linux says "couldn't find directory entry in
+    // '..' with matching i-node" — and asserting on it failed CI on the first
+    // attempt. What matters, and what is portable, is that the call fails.
+    assert.notEqual(gone.code, 0, `getcwd in a deleted cwd must fail — this is the bug (stderr: ${gone.err.trim()})`);
     assert.equal(safe.code, 0, "the same call from a filesystem root must succeed — this is the fix");
     fs.rmSync(dir, { recursive: true, force: true });
   });
