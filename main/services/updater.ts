@@ -30,6 +30,7 @@ import type { UpdateStatus } from "../types/stage.js";
 import { getUserDataPath } from "./app-paths.js";
 import { detectInstallKind } from "./update/install-kind.js";
 import { detectTrack } from "./update/detect-track.js";
+import { fetchReleases, packagedUpdateStatus } from "./update/release-check.js";
 import { selectStrategy } from "./update/select-strategy.js";
 import { broadcast } from "./broadcaster.js";
 import { latestOnTrack, newerThan } from "./release-tags.js";
@@ -70,26 +71,46 @@ function pkgVersion(): string {
   return "0.0.0";
 }
 
-class Updater {
-  private status: UpdateStatus = {
-    isGitRepo: false,
-    branch: null,
-    tracks: TRACKS,
-    version: pkgVersion(),
-    currentSha: null,
-    currentDate: null,
-    behind: 0,
-    behindUserFacing: 0,
-    latestSha: null,
-    latestDate: null,
-    changelog: [],
-    lastCheckedAt: null,
-    phase: "idle",
-    step: null,
-    restartPending: false,
-    lastResult: null,
-    error: null,
-  };
+/** Seams for tests: a fake git and a canned releases response let a test drive
+ *  the REAL checkForUpdate path as a packaged install, on a machine that is a
+ *  checkout. The app itself constructs the singleton below with no deps. */
+interface UpdaterDeps {
+  git?: (args: string[], timeoutMs?: number) => Promise<string>;
+  fetchReleases?: typeof fetchReleases;
+  version?: () => string;
+}
+
+export class Updater {
+  private status: UpdateStatus;
+
+  // Assigned in the constructor, not as field initializers: class fields run
+  // BEFORE parameter properties are set, so an initializer that read
+  // `this.deps` would crash on every construction.
+  constructor(private readonly deps: UpdaterDeps = {}) {
+    this.status = {
+      isGitRepo: false,
+      branch: null,
+      tracks: TRACKS,
+      version: this.version(),
+      currentSha: null,
+      currentDate: null,
+      behind: 0,
+      behindUserFacing: 0,
+      latestSha: null,
+      latestDate: null,
+      changelog: [],
+      lastCheckedAt: null,
+      phase: "idle",
+      step: null,
+      restartPending: false,
+      lastResult: null,
+      error: null,
+    };
+  }
+
+  private version(): string {
+    return this.deps.version ? this.deps.version() : pkgVersion();
+  }
 
   // While an apply runs, poll the progress/result files the detached script
   // writes so we can broadcast sub-phase progress (the server stays alive through
@@ -145,15 +166,20 @@ class Updater {
     const { track, source } = detectTrack({
       kind,
       appRoot: REPO_ROOT,
-      version: pkgVersion(),
+      version: this.version(),
       gitBranch: null,
     });
     return { branch: track, trackSource: source, currentSha: null, currentDate: null };
   }
 
   private async git(args: string[], timeoutMs = 60_000): Promise<string> {
+    if (this.deps.git) return this.deps.git(args, timeoutMs);
     const { stdout } = await execFileAsync("git", args, { cwd: REPO_ROOT, timeout: timeoutMs });
     return stdout.trim();
+  }
+
+  private fetchReleases(): ReturnType<typeof fetchReleases> {
+    return (this.deps.fetchReleases ?? fetchReleases)();
   }
 
   /** Read the detached updater's last result file (written by scripts/update.*). */
@@ -199,7 +225,7 @@ class Updater {
     return {
       ...this.status,
       ...this.updatability(),
-      version: pkgVersion(),
+      version: this.version(),
       step: this.status.phase === "updating" ? this.status.step : null,
       restartPending: this.isRestartPending(),
       lastResult: this.readResult(),
@@ -231,15 +257,47 @@ class Updater {
       const top = await this.git(["rev-parse", "--show-toplevel"]).catch(() => "");
       const isCheckout = top !== "" && path.resolve(top) === path.resolve(REPO_ROOT);
       if (!isCheckout) {
+        // Derived from the install itself — the formula for Homebrew, the
+        // version for a tarball. Never defaulted: a confidently wrong track is
+        // the bug this replaces.
+        const packaged = this.packagedTrack();
+
+        // A packaged install has no repository to fetch, so what is newest comes
+        // from the releases API — the same source install.sh resolves against.
+        // Without this the check set the track and stopped: `behind` stayed 0
+        // forever, so the UI said "Up to date" with the Update button disabled
+        // and the scheduled auto-apply never fired, on every install that was
+        // not a checkout. The strategies could apply an update; nothing ever
+        // detected one.
+        let availability: Partial<UpdateStatus> = {};
+        let error: string | null = null;
+        if (packaged.branch) {
+          try {
+            availability = packagedUpdateStatus(
+              await this.fetchReleases(),
+              packaged.branch,
+              this.version(),
+            );
+          } catch (err) {
+            // Same contract as a failed `git fetch` on the git path: report it,
+            // keep the last known numbers, stay idle.
+            error = String(err instanceof Error ? err.message : err);
+          }
+        } else {
+          error =
+            "Could not tell which update track this install follows, so there is " +
+            "nothing to compare against. Reinstall with the documented installer.";
+        }
+
         this.status = {
           ...this.status,
           isGitRepo: false,
-          // Derived from the install itself — the formula for Homebrew, the
-          // version for a tarball. Never defaulted: a confidently wrong track is
-          // the bug this replaces.
-          ...this.packagedTrack(),
+          ...packaged,
+          ...availability,
+          version: this.version(),
           phase: "idle",
           lastCheckedAt: new Date().toISOString(),
+          error,
         };
         this.broadcast();
         return this.getStatus();
@@ -321,7 +379,7 @@ class Updater {
         isGitRepo: true,
         branch,
         trackSource: "git" as const,
-        version: pkgVersion(),
+        version: this.version(),
         currentSha,
         currentDate,
         behind,
@@ -402,6 +460,18 @@ class Updater {
    * script should follow its tip.
    */
   private async targetTagFor(branch: string): Promise<string | null> {
+    // A packaged install has no repository to fetch tags from; the releases API
+    // is its source of truth, exactly as in checkForUpdate. Decided by install
+    // kind rather than status.isGitRepo, which is false on a checkout that has
+    // never run a check.
+    if (detectInstallKind(process.env, REPO_ROOT, fs.existsSync) !== "git") {
+      try {
+        const tags = (await this.fetchReleases()).map((r) => r.tag);
+        return latestOnTrack(tags, branch)?.tag ?? null;
+      } catch {
+        return null; // offline — the installer resolves the newest itself
+      }
+    }
     try {
       await this.git(["fetch", "--quiet", "--tags", "--force", "origin", branch], 90_000);
       const tags = (await this.git(["tag", "--list", "v[0-9]*", "--merged", `origin/${branch}`]))
