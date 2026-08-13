@@ -6,14 +6,9 @@
 import { execFileSync } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
 import { APP_ROOT } from "./app-root.js";
-
-// Against the install root, not cwd — a packaged install runs from wherever the
-// operator launched it, and a cwd-relative path silently resolves to nothing.
-const REPO_ROOT = APP_ROOT;
 
 /**
  * A stable id for the currently-running code, advertised to kiosks on every SSE
@@ -22,8 +17,12 @@ const REPO_ROOT = APP_ROOT;
  * automatically. Git short SHA when available (changes only on a real update,
  * not a plain crash-restart); else a hash of the built index.html (changes when
  * the frontend bundle changes). "unknown" disables the auto-reload (never false).
+ *
+ * Resolved against the install root, not cwd — a packaged install runs from
+ * wherever the operator launched it, and a cwd-relative path silently resolves
+ * to nothing. The parameter exists so tests can point it at a fixture.
  */
-export function computeServerVersion(root: string = REPO_ROOT): string {
+export function computeServerVersion(root: string = APP_ROOT): string {
   try {
     // Is THIS DIRECTORY a checkout — not merely inside somebody's? `git
     // rev-parse` walks UP the tree, and a Homebrew keg lives inside
@@ -46,7 +45,7 @@ export function computeServerVersion(root: string = REPO_ROOT): string {
     // not a git checkout — fall through
   }
   try {
-    const html = readFileSync(path.join(root, "build", "renderer", "index.html"));
+    const html = fs.readFileSync(path.join(root, "build", "renderer", "index.html"));
     return "b" + crypto.createHash("sha1").update(html).digest("hex").slice(0, 8);
   } catch {
     // no build present

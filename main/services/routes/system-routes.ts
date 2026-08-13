@@ -9,7 +9,7 @@ import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, readBodyOrEmpty, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
-import { scheduleRelaunch } from "../update/relaunch.js";
+import { exitForRestart } from "../update/relaunch.js";
 import { backupScheduler } from "../backup-scheduler.js";
 import { configSnapshot } from "../config-snapshot.js";
 import { splRecorder } from "../spl-recorder.js";
@@ -36,8 +36,7 @@ function serviceActivity(): { active: boolean; reasons: string[] } {
  *  nondemand spawn = inefficient") — so a detached kickstart rides along. A
  *  config restore once left a Homebrew box dark exactly this way. */
 function scheduleRestart(): void {
-  scheduleRelaunch();
-  setTimeout(() => process.exit(0), 1200);
+  exitForRestart(1200);
 }
 
 export async function systemRoutes(c: RouteCtx): Promise<void> {

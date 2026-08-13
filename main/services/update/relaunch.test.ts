@@ -16,9 +16,11 @@ describe("relaunchPlan", () => {
   it("kickstarts the beta formula's label on a Homebrew beta install", () => {
     const p = relaunchPlan("homebrew", BETA_KEG, "darwin");
     assert.ok(p, "must plan a relaunch on launchd");
-    const s = p.args.join(" ");
-    assert.ok(s.includes(`homebrew.mxcl.${FORMULA.beta}`));
-    assert.ok(!s.includes(`homebrew.mxcl.${FORMULA.main}"`), "must not kick the other formula");
+    // Every kick target, extracted — not substring absence, which "-beta"
+    // containing "stage-utility" would satisfy under any quoting change.
+    const targets = [...p.args.join(" ").matchAll(/-p "[^"]*\/([^"]+)"/g)].map((m) => m[1]);
+    assert.ok(targets.length >= 2, "must try both domains");
+    for (const t of targets) assert.equal(t, `homebrew.mxcl.${FORMULA.beta}`);
   });
 
   it("matches the formula on a path segment, so main cannot win inside the beta keg's name", () => {
@@ -31,10 +33,14 @@ describe("relaunchPlan", () => {
     assert.ok(p!.args.join(" ").includes(TARBALL_DAEMON_LABEL));
   });
 
-  it("demands the spawn and kills a survivor: -k -p, both domains, never fatal", () => {
+  it("demands the spawn WITHOUT killing: -p only, both domains, never fatal", () => {
+    // -p is "start if not running": if KeepAlive already relaunched the server
+    // (a box where launchd did not park it), the healthy successor is left
+    // alone. -k here would kill it mid-boot and start a third instance.
     const s = relaunchPlan("homebrew", BETA_KEG, "darwin")!.args.join(" ");
-    assert.match(s, /kickstart -k -p "gui\/\$\(id -u\)\//, "gui domain for brew services as a user");
-    assert.match(s, /kickstart -k -p "system\//, "system domain for a root daemon");
+    assert.match(s, /kickstart -p "gui\/\$\(id -u\)\//, "gui domain for brew services as a user");
+    assert.match(s, /kickstart -p "system\//, "system domain for a root daemon");
+    assert.ok(!s.includes("-k"), "must not kill a successor KeepAlive already started");
     assert.ok(s.trimEnd().endsWith("|| true"), "a failed kickstart must not become a crash");
   });
 

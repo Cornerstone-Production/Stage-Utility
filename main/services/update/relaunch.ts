@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 
 import { APP_ROOT } from "../app-root.js";
 import { detectInstallKind, type InstallKind } from "./install-kind.js";
-import { FORMULA } from "./homebrew-strategy.js";
+import { FORMULA, kickstartLabel, serviceLabel } from "./homebrew-strategy.js";
 import type { SpawnPlan } from "./strategy.js";
 
 /** The label install.sh registers for a macOS tarball install. */
@@ -29,58 +29,59 @@ export const TARBALL_DAEMON_LABEL = "com.cornerstone.stage-utility";
  * What to spawn so this server comes back after it exits — or null where the
  * service manager already does that reliably (everything that is not launchd).
  *
- * `-k -p` on purpose: -p demands the spawn (immune to parking), -k first kills
- * an instance that somehow did not exit, so the helper can never leave two
- * servers racing for the port. The sleep puts the kickstart safely after our
+ * The command itself is kickstartLabel — the same one the Homebrew update path
+ * uses, for the same reasons (see its doc for why `-k -p`, and why it tries gui
+ * before system and never fails). The sleep puts the kickstart safely after our
  * own exit; if we are already gone, -k is a no-op.
  */
-export function relaunchPlan(
-  kind: InstallKind,
-  appRoot: string,
-  platform: NodeJS.Platform,
-): SpawnPlan | null {
+export function relaunchPlan(kind: InstallKind, appRoot: string, platform: NodeJS.Platform): SpawnPlan | null {
   if (platform !== "darwin") return null;
 
-  let label: string | null = null;
-  if (kind === "homebrew") {
-    // The keg path names the formula, and the formula names the label. Matched
-    // on a path segment so "stage-utility" inside "stage-utility-beta" cannot
-    // win by being checked first.
-    const segments = appRoot.split(/[\\/]+/);
-    if (segments.includes(FORMULA.beta)) label = `homebrew.mxcl.${FORMULA.beta}`;
-    else if (segments.includes(FORMULA.main)) label = `homebrew.mxcl.${FORMULA.main}`;
-  } else if (kind === "tarball") {
-    label = TARBALL_DAEMON_LABEL;
-  }
+  const label = launchdLabel(kind, appRoot);
   if (!label) return null;
 
-  const kick = (domain: string) => `launchctl kickstart -k -p "${domain}/${label}" 2>/dev/null`;
-  return {
-    command: "bash",
-    // gui first (brew services as a user), then system (the installer's root
-    // daemon, and `sudo brew services`). Never fails: if both domains refuse,
-    // we are no worse off than exit-and-pray was.
-    args: ["-c", `sleep 2; ${kick(`gui/$(id -u)`)} || ${kick("system")} || true`],
-    env: {},
-  };
+  // kill:false — the old instance is exiting on its own. On a box where
+  // KeepAlive is NOT parked, launchd may have already relaunched us by the
+  // time this fires; -p leaves that healthy successor alone, where -k would
+  // kill it mid-boot and start a third.
+  return { command: "bash", args: ["-c", `sleep 2; ${kickstartLabel(label, { kill: false })}`], env: {} };
+}
+
+/** Our own launchd label, or null when nothing here recognises the install. */
+function launchdLabel(kind: InstallKind, appRoot: string): string | null {
+  if (kind === "tarball") return TARBALL_DAEMON_LABEL;
+  if (kind !== "homebrew") return null;
+  // The keg path names the formula, and the formula names the label. Matched on
+  // a path segment so "stage-utility" inside "stage-utility-beta" cannot win by
+  // being checked first.
+  const segments = appRoot.split(/[\\/]+/);
+  if (segments.includes(FORMULA.beta)) return serviceLabel(FORMULA.beta);
+  if (segments.includes(FORMULA.main)) return serviceLabel(FORMULA.main);
+  return null;
 }
 
 /**
- * Call IMMEDIATELY BEFORE scheduling a deliberate process.exit(0). Detached, so
- * it survives our exit; a no-op off macOS and on unrecognised installs.
+ * The one way to exit for a deliberate restart. Pairing the kickstart with the
+ * exit structurally — rather than by remembering to call two functions at every
+ * exit site — is what stops a future restart path from wiring only half and
+ * reintroducing the parked-respawn blackout. The delay lets the HTTP response
+ * that requested the restart flush first.
  */
-export function scheduleRelaunch(): void {
-  const plan = relaunchPlan(
-    detectInstallKind(process.env, APP_ROOT, fs.existsSync),
-    APP_ROOT,
-    process.platform,
-  );
+export function exitForRestart(delayMs: number): void {
+  scheduleRelaunch();
+  setTimeout(() => process.exit(0), delayMs);
+}
+
+/** Spawn the detached kickstart helper (survives our exit); a no-op off macOS
+ *  and on unrecognised installs. */
+function scheduleRelaunch(): void {
+  const plan = relaunchPlan(detectInstallKind(process.env, APP_ROOT, fs.existsSync), APP_ROOT, process.platform);
   if (!plan) return;
-  console.log(`[relaunch] launchd parks KeepAlive respawns — scheduling a kickstart of this label`);
+  console.log(`[relaunch] launchd parks KeepAlive respawns — scheduling: ${plan.args.at(-1)}`);
   const child = spawn(plan.command, plan.args, {
     detached: true,
     stdio: "ignore",
-    env: { ...process.env },
+    env: { ...process.env, ...plan.env },
   });
   child.unref();
 }

@@ -27,7 +27,7 @@ export const BREW_PATHS = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"];
 export const FORMULA = { main: "stage-utility", beta: "stage-utility-beta" } as const;
 
 /** launchd's label for a formula's service. */
-const label = (formula: string): string => `homebrew.mxcl.${formula}`;
+export const serviceLabel = (formula: string): string => `homebrew.mxcl.${formula}`;
 
 /**
  * Clear a leftover registration for a label before brew tries to load it.
@@ -39,8 +39,8 @@ const label = (formula: string): string => `homebrew.mxcl.${formula}`;
  * that error. Expected to fail when nothing is registered, hence `|| true`.
  */
 const bootout = (formula: string): string =>
-  `(launchctl bootout "gui/$(id -u)/${label(formula)}" 2>/dev/null || ` +
-  `launchctl bootout "system/${label(formula)}" 2>/dev/null || true; ` +
+  `(launchctl bootout "gui/$(id -u)/${serviceLabel(formula)}" 2>/dev/null || ` +
+  `launchctl bootout "system/${serviceLabel(formula)}" 2>/dev/null || true; ` +
   // Then confirm the label has actually gone before anyone bootstraps it.
   //
   // Honest about what this is: a cheap guard, not a proven fix. launchd documents
@@ -50,7 +50,7 @@ const bootout = (formula: string): string =>
   // gone, which is the normal case, so it costs nothing and removes one variable
   // from a failure that is otherwise miserable to diagnose.
   `for _ in $(seq 1 40); do ` +
-  `launchctl print "gui/$(id -u)/${label(formula)}" >/dev/null 2>&1 || break; ` +
+  `launchctl print "gui/$(id -u)/${serviceLabel(formula)}" >/dev/null 2>&1 || break; ` +
   `sleep 0.25; done)`;
 
 /**
@@ -75,10 +75,29 @@ const bootout = (formula: string): string =>
  *
  * Best-effort across both domains, and never fatal: an install whose service is
  * already running must not report failure because the label sits elsewhere.
+ *
+ * Shared with relaunch.ts, which demands the same spawn for the same reason:
+ * one copy, so the flags cannot drift apart.
  */
-const kickstart = (formula: string): string =>
-  `(launchctl kickstart -k -p "gui/$(id -u)/${label(formula)}" 2>/dev/null || ` +
-  `launchctl kickstart -k -p "system/${label(formula)}" 2>/dev/null || true)`;
+export const kickstartLabel = (label: string, opts: { kill: boolean }): string => {
+  // -k only where a survivor MUST die (it would be serving a deleted keg).
+  // relaunch.ts passes kill:false: there the old process is exiting on its own,
+  // and on a box where KeepAlive is NOT parked, a -k two seconds later would
+  // murder the freshly-relaunched successor mid-boot and start a third.
+  const flags = opts.kill ? "-k -p" : "-p";
+  return (
+    `launchctl kickstart ${flags} "gui/$(id -u)/${label}" 2>/dev/null || ` +
+    `launchctl kickstart ${flags} "system/${label}" 2>/dev/null || true`
+  );
+};
+
+/** True while the formula's service has a running process, in either domain. */
+const isRunning = (formula: string): string =>
+  `{ launchctl print "gui/$(id -u)/${serviceLabel(formula)}" 2>/dev/null || ` +
+  `launchctl print "system/${serviceLabel(formula)}" 2>/dev/null; } | grep -q "state = running"`;
+
+/** The same, in a subshell so it can sit inside an `&&` chain. */
+const kickstart = (formula: string): string => `(${kickstartLabel(serviceLabel(formula), { kill: true })})`;
 
 /**
  * Report the run's outcome through the same result-file protocol install.sh and
@@ -149,18 +168,19 @@ export class HomebrewStrategy implements UpdateStrategy {
     // writeResult(true) comes BEFORE the restart, same as install.sh's swap
     // mode: the restart kills the server, and the result file must already
     // say "done" when the reconnecting page asks.
+    // The restart chain deliberately does NOT `&&` the kickstart onto brew's
+    // restart: a `brew services restart` that bootstraps the job and then exits
+    // non-zero would skip the one command that demands the spawn launchd parked.
+    // The final verdict is corrected only when the service is genuinely not
+    // running afterwards — kickstart may well have rescued a failed restart.
     const restart = [
-      // Clear the target's OWN registration before starting it again. The
-      // update path had no bootout at all, and that is the bug behind "it
-      // never comes back after an update": a stale registration makes every
-      // `brew services start` fail with "Bootstrap failed: 5", and kickstart
-      // cannot rescue a job that was never bootstrapped. The registration
-      // outlives `brew uninstall` — which does NOT unregister a service — so
-      // one orphan breaks every future install and upgrade until booted out.
+      // Clear the target's OWN registration first (why: see bootout). This path
+      // had none at all, and that is the bug behind "it never comes back after
+      // an update" — kickstart cannot rescue a job that was never bootstrapped.
       bootout(target),
-      `${brew} services restart ${target}`,
+      `${brew} services restart ${target}; services_rc=$?`,
       kickstart(target),
-    ].join(" && ");
+    ].join("; ");
     const script = o.checkout
       ? [
           logCapture + "; ",
@@ -184,17 +204,31 @@ export class HomebrewStrategy implements UpdateStrategy {
         ].join("")
       : [
           logCapture,
+          // A failed `brew update` never touched the service: report and stop.
+          // Restarting here would bounce a healthy server once per scheduled
+          // window for as long as the tap is unreachable — the same pointless
+          // blanking the no-op guard below exists to prevent, offline edition.
+          `${brew} update || { ` +
+            writeResult(
+              false,
+              "brew update failed - could not refresh the tap. Nothing was changed or restarted.",
+            ) +
+            `; exit 0; }`,
           `before=$(${brew} list --versions ${target})`,
-          `${brew} update && ${brew} upgrade ${target}; brew_rc=$?`,
+          `${brew} upgrade ${target}; brew_rc=$?`,
           `after=$(${brew} list --versions ${target})`,
-          // Failed brew: the service may already be stopped (brew stops it
-          // before it fails), so bring it back on whatever keg is current.
-          `if [ "$brew_rc" -ne 0 ]; then ` +
+          // Failed upgrade: brew stops the service BEFORE it can fail, so the box
+          // may be dark on a perfectly good keg. Restart only when it actually
+          // is — a failure that never stopped anything must not restart anything
+          // — and report what really happened, AFTER it happened.
+          `if [ "$brew_rc" -ne 0 ]; then if ${isRunning(target)}; then ` +
+            writeResult(false, "brew upgrade failed - see update.log. The service was not interrupted.") +
+            `; else ${restart}; sleep 3; ` +
             writeResult(
               false,
               "brew upgrade failed - see update.log. The service was restarted on the version already installed.",
             ) +
-            `; ${restart}; exit 0; fi`,
+            `; fi; exit 0; fi`,
           // No-op: nothing changed, so nothing was stopped and nothing restarts.
           `if [ "$before" = "$after" ]; then ` +
             writeResult(
@@ -202,9 +236,14 @@ export class HomebrewStrategy implements UpdateStrategy {
               "brew has no newer build yet - the tap usually catches up within minutes of a release. Nothing was restarted.",
             ) +
             `; exit 0; fi`,
+          // The real upgrade. Ok is written BEFORE the restart (which kills this
+          // server), same as install.sh swap mode — then corrected afterwards
+          // only if the service truly failed to come back.
           writeResult(true, ""),
-          `${restart} || ` +
-            writeResult(false, "brew upgraded but the service did not restart - see update.log"),
+          restart,
+          `sleep 3; if [ "$services_rc" -ne 0 ] && ! ${isRunning(target)}; then ` +
+            writeResult(false, "brew upgraded but the service did not restart - see update.log") +
+            `; fi`,
         ].join("; ");
 
     return { command: "bash", args: ["-c", script], env: { ...o.env } };

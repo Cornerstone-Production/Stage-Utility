@@ -16,14 +16,20 @@ function tmpdir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "sv-test-"));
 }
 
+/** A throwaway checkout with one commit, so HEAD resolves. */
+function tmpRepo(): string {
+  const dir = tmpdir();
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"], {
+    cwd: dir,
+  });
+  return dir;
+}
+
 describe("computeServerVersion", () => {
   it("never reports the sha of a repository the install merely sits inside", () => {
     // parent/ is a git repo (like /opt/homebrew); parent/keg/ is the install.
-    const parent = tmpdir();
-    execFileSync("git", ["init", "-q"], { cwd: parent });
-    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"], {
-      cwd: parent,
-    });
+    const parent = tmpRepo();
     const keg = path.join(parent, "keg");
     fs.mkdirSync(path.join(keg, "build", "renderer"), { recursive: true });
     fs.writeFileSync(path.join(keg, "build", "renderer", "index.html"), "<html>bundle</html>");
@@ -34,11 +40,7 @@ describe("computeServerVersion", () => {
   });
 
   it("still reports the sha when the install root IS the checkout", () => {
-    const repo = tmpdir();
-    execFileSync("git", ["init", "-q"], { cwd: repo });
-    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"], {
-      cwd: repo,
-    });
+    const repo = tmpRepo();
     const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: repo }).toString().trim();
     assert.equal(computeServerVersion(repo), sha);
     fs.rmSync(repo, { recursive: true, force: true });
