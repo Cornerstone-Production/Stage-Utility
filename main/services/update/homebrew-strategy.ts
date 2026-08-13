@@ -246,6 +246,7 @@ export class HomebrewStrategy implements UpdateStrategy {
             `; fi`,
         ].join("; ");
 
-    return { command: "bash", args: ["-c", script], env: { ...o.env } };
+    // "/" and not the keg: brew deletes the old keg mid-run (see SpawnPlan.cwd).
+    return { command: "bash", args: ["-c", script], env: { ...o.env }, cwd: "/" };
   }
 }

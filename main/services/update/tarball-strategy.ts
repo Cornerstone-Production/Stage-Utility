@@ -50,8 +50,11 @@ export class TarballStrategy implements UpdateStrategy {
         command: "powershell.exe",
         args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `irm ${INSTALLER_PS1} | iex`],
         env,
+        // Not the install root: the installer replaces it under this process.
+        cwd: "C:\\",
       };
     }
-    return { command: "bash", args: ["-c", `curl -fsSL ${INSTALLER_SH} | bash`], env };
+    // Not the install root: the installer replaces it under this process.
+    return { command: "bash", args: ["-c", `curl -fsSL ${INSTALLER_SH} | bash`], env, cwd: "/" };
   }
 }

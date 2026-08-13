@@ -683,9 +683,12 @@ export class Updater {
     this.logEvent(
       `install kind=${kind} strategy=${strategy.kind} platform=${process.platform} root=${REPO_ROOT}`,
     );
-    this.logEvent(`spawning: ${plan.command} ${plan.args.join(" ")}`);
+    this.logEvent(`spawning (cwd=${plan.cwd ?? REPO_ROOT}): ${plan.command} ${plan.args.join(" ")}`);
     const child = spawn(plan.command, plan.args, {
-      cwd: REPO_ROOT,
+      // The strategy's, when it has one. A packaged install must NOT run from
+      // the install root: that directory is what the update replaces, and the
+      // script dies the moment it is deleted underneath it.
+      cwd: plan.cwd ?? REPO_ROOT,
       detached: true,
       stdio: "ignore",
       env: plan.env,
