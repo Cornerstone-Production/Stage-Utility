@@ -1157,6 +1157,13 @@ class IntegrationManager {
       const types = await pcoService.listServiceTypes(appId, secret);
       this.setConnectionState("planning-center", "connected", `Connected — ${types.length} service type(s)`);
       this.broadcastStates();
+      // The poller stands down on an auth failure, and start() is otherwise
+      // called only at boot — so without this, fixing the credentials would
+      // leave the countdown dead until someone restarted the server.
+      // Idempotent: start() is a no-op when it is already running.
+      void import("./live-poller.js")
+        .then((m) => m.livePoller.start())
+        .catch((err) => console.error("[integration-manager] could not restart the live poller:", err));
       return true;
     } catch (err) {
       const msg = errorMessage(err);
