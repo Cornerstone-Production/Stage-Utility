@@ -442,6 +442,16 @@ export type LayoutObjectConfig =
        *  Off by default: a layout usually has its own, and two clocks a few
        *  hundred pixels apart is worse than none. */
       showHeader?: boolean;
+      /**
+       * Keep the live PCO item scrolled into view. Absent = on.
+       *
+       * On by default because the alternative is an operator walking to the
+       * screen mid-service. It is a toggle rather than always-on because an
+       * embed is often deliberately parked on the top of the plan — a pre-service
+       * checklist, or a box only tall enough for a couple of rows, where the view
+       * jumping to the middle of the plan is the wrong answer.
+       */
+      autoScroll?: boolean;
     }
   | { type: "container" };
 

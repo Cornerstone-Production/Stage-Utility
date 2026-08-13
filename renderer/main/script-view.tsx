@@ -15,6 +15,8 @@ interface ScriptViewProps {
   /** The header bar (plan title, countdown, clock). On for a display of its own;
    *  a layout embedding this usually has its own header and clock already. */
   showHeader?: boolean;
+  /** Keep the live PCO item scrolled into view. Default on. */
+  autoScroll?: boolean;
   /** Row text sizing — see ScriptViewBody. A layout object passes "" so the
    *  rows scale with the object's own font size instead of the viewport. */
   textSizeClass?: string;
@@ -38,7 +40,7 @@ interface ScriptViewProps {
  * route wraps it in the full screen and the safe-area insets, a layout object
  * wraps it in the object. That is the whole reason it can be embedded.
  */
-export function ScriptView({ scriptViewLayoutId, showHeader = true, textSizeClass }: ScriptViewProps) {
+export function ScriptView({ scriptViewLayoutId, showHeader = true, textSizeClass, autoScroll }: ScriptViewProps) {
   const { state, isLoading, error: stateError, pcoLive } = useDashboardState();
   const [rundown, setRundown] = useState<ScriptViewRundownDTO | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
@@ -139,6 +141,7 @@ export function ScriptView({ scriptViewLayoutId, showHeader = true, textSizeClas
         render={render}
         error={serviceTypeId ? error : "Planning Center not configured"}
         textSizeClass={textSizeClass}
+        autoScroll={autoScroll}
       />
     </div>
   );
