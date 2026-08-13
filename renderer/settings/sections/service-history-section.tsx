@@ -961,7 +961,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             const sum = summarize(s, live ? nowTick : undefined);
             const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
             return (
-              <div key={s.serviceKey} className="flex items-center gap-1 rounded-lg border border-gray-5 bg-gray-2 pr-1.5 hover:bg-gray-3 transition-colors">
+              // su-card, like every other top-level box on this page (Export, the
+              // Overview, the calendar, the selected-day summary). These rows had
+              // their own `bg-gray-2` + `rounded-lg` treatment, so the one column
+              // an operator actually reads down was the one thing that did not
+              // match the surface around it. The recessed grey is still right for
+              // the Stat tiles and the time editor — those sit INSIDE a card, and
+              // giving them the parent's surface would flatten the nesting.
+              <div key={s.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
                 <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(s.serviceKey)}>
                   <div className="flex flex-col min-w-0">
                     <span className="text-body font-medium text-gray-12 truncate">{s.planTitle ?? s.serviceKey}</span>
