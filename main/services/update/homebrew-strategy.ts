@@ -80,6 +80,16 @@ const kickstart = (formula: string): string =>
   `(launchctl kickstart -k -p "gui/$(id -u)/${label(formula)}" 2>/dev/null || ` +
   `launchctl kickstart -k -p "system/${label(formula)}" 2>/dev/null || true)`;
 
+/**
+ * Report the run's outcome through the same result-file protocol install.sh and
+ * update.sh use — it is what lets the UI leave the "updating" phase. A brew run
+ * that failed without writing one left the page waiting forever on a run that
+ * was already dead. No-op when the env var is absent (a human at a terminal).
+ */
+const writeResult = (ok: boolean, error: string): string =>
+  `if [ -n "$STAGE_UPDATE_RESULT" ]; then ` +
+  `printf '{"ok":%s,"error":"%s","at":"%s"}' ${ok} "${error}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STAGE_UPDATE_RESULT"; fi`;
+
 export class HomebrewStrategy implements UpdateStrategy {
   readonly kind: InstallKind = "homebrew";
 
@@ -108,36 +118,68 @@ export class HomebrewStrategy implements UpdateStrategy {
     // not exist fails while the current one is still installed. Uninstalling
     // stops the agent, so the new formula's service is started explicitly -
     // otherwise the switch completes with nothing running.
+    //
+    // The update path only restarts when the keg actually changed. The check
+    // reads GitHub releases while brew installs from the tap, so during the
+    // window where a release exists but the formula has not been regenerated
+    // yet, `brew upgrade` is a no-op — and restarting after one kills the
+    // server (blanking every display) to deliver nothing, once per scheduled
+    // window until the tap catches up. Reported as a failed run so the UI
+    // says why nothing changed instead of pretending an update landed.
+    //
+    // writeResult(true) comes BEFORE the restart, same as install.sh's swap
+    // mode: the restart kills the server, and the result file must already
+    // say "done" when the reconnecting page asks.
     const script = o.checkout
       ? [
-          `${brew} update`,
-          `${brew} info ${target} >/dev/null`,
-          bootout(other),
-          `${brew} uninstall ${other} || true`,
-          `${brew} install ${target}`,
-          // The incoming formula needs its own label cleared too: switching back
-          // and forth leaves a registration behind each time, and the second
-          // switch to a track would otherwise fail to bootstrap.
-          bootout(target),
-          `${brew} services start ${target}`,
-          kickstart(target),
-        ].join(" && ")
+          [
+            `${brew} update`,
+            `${brew} info ${target} >/dev/null`,
+            bootout(other),
+            `${brew} uninstall ${other} || true`,
+            `${brew} install ${target}`,
+            // The incoming formula needs its own label cleared too: switching back
+            // and forth leaves a registration behind each time, and the second
+            // switch to a track would otherwise fail to bootstrap.
+            bootout(target),
+            writeResult(true, ""),
+            `${brew} services start ${target}`,
+            kickstart(target),
+          ].join(" && "),
+          " || { ",
+          writeResult(false, "brew track switch failed - see update.log"),
+          "; }",
+        ].join("")
       : [
-          `${brew} update`,
-          `${brew} upgrade ${target}`,
-          // Clear the target's OWN registration before starting it again.
-          //
-          // This path had no bootout at all, and that is the bug behind "it never
-          // comes back after an update". A stale registration for this label makes
-          // every `brew services start` fail with "Bootstrap failed: 5", and the
-          // kickstart below cannot rescue a job that was never bootstrapped. The
-          // registration outlives `brew uninstall` — which does NOT unregister a
-          // service — so once one is orphaned it breaks every future install and
-          // upgrade, permanently, until something boots it out.
-          bootout(target),
-          `${brew} services restart ${target}`,
-          kickstart(target),
-        ].join(" && ");
+          [
+            `${brew} update`,
+            `before=$(${brew} list --versions ${target})`,
+            `${brew} upgrade ${target}`,
+            `after=$(${brew} list --versions ${target})`,
+            `if [ "$before" = "$after" ]; then ` +
+              writeResult(
+                false,
+                "brew has no newer build yet - the tap usually catches up within minutes of a release. Nothing was restarted.",
+              ) +
+              `; exit 0; fi`,
+            // Clear the target's OWN registration before starting it again.
+            //
+            // This path had no bootout at all, and that is the bug behind "it never
+            // comes back after an update". A stale registration for this label makes
+            // every `brew services start` fail with "Bootstrap failed: 5", and the
+            // kickstart below cannot rescue a job that was never bootstrapped. The
+            // registration outlives `brew uninstall` — which does NOT unregister a
+            // service — so once one is orphaned it breaks every future install and
+            // upgrade, permanently, until something boots it out.
+            bootout(target),
+            writeResult(true, ""),
+            `${brew} services restart ${target}`,
+            kickstart(target),
+          ].join(" && "),
+          " || { ",
+          writeResult(false, "brew upgrade failed - see update.log"),
+          "; }",
+        ].join("");
 
     return { command: "bash", args: ["-c", script], env: { ...o.env } };
   }

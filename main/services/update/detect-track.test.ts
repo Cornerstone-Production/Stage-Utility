@@ -86,3 +86,49 @@ describe("detectTrack", () => {
     });
   });
 });
+
+describe("detectTrack — the recorded track", () => {
+  it("a recorded track beats the version inference, so taking an offered stable does not flip a beta box to main", () => {
+    // The flip: a beta box is deliberately offered the stable that outranks its
+    // betas; after applying it the VERSION has no hyphen, so inference says
+    // "main" and the box never sees another beta — silently, forever.
+    assert.deepEqual(
+      detectTrack({ ...base, kind: "tarball", version: "1.10.0", recorded: "beta" }),
+      { track: "beta", source: "recorded" },
+    );
+  });
+
+  it("the formula still beats the record on Homebrew — the keg is a hard fact", () => {
+    assert.deepEqual(
+      detectTrack({
+        ...base,
+        kind: "homebrew",
+        appRoot: "/opt/homebrew/Cellar/stage-utility/1.10.0/libexec",
+        recorded: "beta",
+      }),
+      { track: "main", source: "formula" },
+    );
+  });
+
+  it("garbage in the record falls through to the version inference", () => {
+    assert.deepEqual(detectTrack({ ...base, kind: "tarball", version: "1.9.5", recorded: "nightly" }), {
+      track: "main",
+      source: "version",
+    });
+    assert.deepEqual(detectTrack({ ...base, kind: "tarball", version: "1.9.5", recorded: "" }), {
+      track: "main",
+      source: "version",
+    });
+  });
+
+  it("a recorded track also rescues an unreadable version, so the repair path is reachable for tarballs", () => {
+    // Without the record, a corrupt VERSION (0.0.0) meant track unknown, which
+    // meant no release check, which meant the documented "an update repairs an
+    // unreadable version" path could never run for the one install kind whose
+    // track comes from the version.
+    assert.deepEqual(detectTrack({ ...base, kind: "tarball", version: "0.0.0", recorded: "beta" }), {
+      track: "beta",
+      source: "recorded",
+    });
+  });
+});
