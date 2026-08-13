@@ -14,6 +14,18 @@ export interface SpawnPlan {
   command: string;
   args: string[];
   env: Record<string, string>;
+  /**
+   * Where to run it. Omitted means the install root — right for a git checkout,
+   * whose commands need the repository.
+   *
+   * A PACKAGED strategy must set this, because the install root is exactly what
+   * the update replaces. `brew cleanup` deletes the old keg, which was the
+   * script's own working directory, and from that moment every `brew` command
+   * fails with "The current working directory must exist to run brew" — after
+   * `bootout` has already unregistered the service. Observed on a real box
+   * (v1.10.0-beta.29 -> .30): keg upgraded, label gone, nothing serving.
+   */
+  cwd?: string;
 }
 
 export interface ApplyOptions {
