@@ -11,12 +11,13 @@
 // (release-tags.ts) — so a packaged box and a checkout agree on what "newest on
 // this track" means, prereleases included.
 
-import { latestOnTrack, newerThan, parseTag } from "../release-tags.js";
+import type { UpdateStatus } from "../../types/stage.js";
+import { latestOnTrack, newerThan, parseTag, type ParsedTag } from "../release-tags.js";
 
 const REPO = "Cornerstone-Production/Stage-Utility";
 // One page covers both tracks: main wants the newest stable, beta the newest of
 // anything, and 30 releases of history is months of either.
-export const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
+const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
 
 export interface ReleaseInfo {
   tag: string;
@@ -46,23 +47,34 @@ export function parseReleases(json: unknown): ReleaseInfo[] {
   return out;
 }
 
-export interface PackagedAvailability {
-  tagBased: true;
-  currentTag: string | null;
-  targetTag: string | null;
-  releasesBehind: number;
-  /** Mirrors releasesBehind — a packaged install has no commit distance to
-   *  report, and these are what the auto-apply schedule and the pre-tag UI read.
-   *  Zero and non-zero at exactly the same times as releasesBehind. */
-  behind: number;
-  behindUserFacing: number;
-  unreleasedCommits: number;
-  latestSha: null;
-  latestDate: string | null;
-  changelog: string[];
-}
+/**
+ * Derived from UpdateStatus rather than restated, so renaming a status field
+ * breaks this type instead of silently unhooking the value from the UI (the
+ * call site spreads this into a Partial, where a stray name type-checks fine).
+ *
+ * `behind`/`behindUserFacing` mirror releasesBehind — a packaged install has no
+ * commit distance to report, and those two are what the auto-apply schedule and
+ * the pre-tag UI read. Zero and non-zero at exactly the same times.
+ */
+export type PackagedAvailability = Required<
+  Pick<
+    UpdateStatus,
+  | "tagBased"
+  | "currentTag"
+  | "targetTag"
+  | "releasesBehind"
+  | "behind"
+  | "behindUserFacing"
+  | "unreleasedCommits"
+  | "latestSha"
+    | "latestDate"
+    | "changelog"
+  >
+>;
 
-const CHANGELOG_CAP = 20;
+/** One cap for every "What's new" list — updater.ts imports this, so the git
+ *  and packaged paths cannot drift apart. */
+export const CHANGELOG_CAP = 20;
 
 /** Availability for a packaged install: current version vs the published releases. */
 export function packagedUpdateStatus(
@@ -80,11 +92,11 @@ export function packagedUpdateStatus(
   // update then repairs.
   const v = currentVersion.trim();
   const currentTag = v !== "0.0.0" && parseTag(`v${v}`) ? `v${v}` : null;
-  const newer = currentTag
-    ? newerThan(tags, track, currentTag)
-    : target
-      ? [parseTag(target.tag)!]
-      : [];
+
+  let newer: ParsedTag[];
+  if (currentTag) newer = newerThan(tags, track, currentTag);
+  else if (target) newer = [target];
+  else newer = [];
 
   const byTag = new Map(releases.map((r) => [r.tag, r]));
   const changelog = newer.slice(0, CHANGELOG_CAP).map((t) => {

@@ -30,7 +30,7 @@ import type { UpdateStatus } from "../types/stage.js";
 import { getUserDataPath } from "./app-paths.js";
 import { detectInstallKind } from "./update/install-kind.js";
 import { detectTrack } from "./update/detect-track.js";
-import { fetchReleases, packagedUpdateStatus } from "./update/release-check.js";
+import { CHANGELOG_CAP, fetchReleases, packagedUpdateStatus, type ReleaseInfo } from "./update/release-check.js";
 import { selectStrategy } from "./update/select-strategy.js";
 import { broadcast } from "./broadcaster.js";
 import { latestOnTrack, newerThan } from "./release-tags.js";
@@ -40,8 +40,6 @@ const execFileAsync = promisify(execFile);
 
 // main/services/updater.ts → repo root is two levels up.
 const REPO_ROOT = APP_ROOT;
-
-const CHANGELOG_CAP = 20;
 
 // Update tracks the operator may switch between in-app (git branches on origin).
 // "main" = stable/production, "beta" = pre-release test track.
@@ -81,32 +79,31 @@ interface UpdaterDeps {
 }
 
 export class Updater {
-  private status: UpdateStatus;
+  constructor(private readonly deps: UpdaterDeps = {}) {}
 
-  // Assigned in the constructor, not as field initializers: class fields run
-  // BEFORE parameter properties are set, so an initializer that read
-  // `this.deps` would crash on every construction.
-  constructor(private readonly deps: UpdaterDeps = {}) {
-    this.status = {
-      isGitRepo: false,
-      branch: null,
-      tracks: TRACKS,
-      version: this.version(),
-      currentSha: null,
-      currentDate: null,
-      behind: 0,
-      behindUserFacing: 0,
-      latestSha: null,
-      latestDate: null,
-      changelog: [],
-      lastCheckedAt: null,
-      phase: "idle",
-      step: null,
-      restartPending: false,
-      lastResult: null,
-      error: null,
-    };
-  }
+  // pkgVersion() directly, NOT this.version(): field initializers run before
+  // parameter properties are assigned, so reading `this.deps` here crashes.
+  // Harmless to skip the seam — this initial value is never observed, because
+  // getStatus() overwrites `version` on every read.
+  private status: UpdateStatus = {
+    isGitRepo: false,
+    branch: null,
+    tracks: TRACKS,
+    version: pkgVersion(),
+    currentSha: null,
+    currentDate: null,
+    behind: 0,
+    behindUserFacing: 0,
+    latestSha: null,
+    latestDate: null,
+    changelog: [],
+    lastCheckedAt: null,
+    phase: "idle",
+    step: null,
+    restartPending: false,
+    lastResult: null,
+    error: null,
+  };
 
   private version(): string {
     return this.deps.version ? this.deps.version() : pkgVersion();
@@ -178,7 +175,7 @@ export class Updater {
     return stdout.trim();
   }
 
-  private fetchReleases(): ReturnType<typeof fetchReleases> {
+  private fetchReleases(): Promise<ReleaseInfo[]> {
     return (this.deps.fetchReleases ?? fetchReleases)();
   }
 
@@ -256,52 +253,7 @@ export class Updater {
       // being asked. A checkout matches; a keg inside Homebrew's repo does not.
       const top = await this.git(["rev-parse", "--show-toplevel"]).catch(() => "");
       const isCheckout = top !== "" && path.resolve(top) === path.resolve(REPO_ROOT);
-      if (!isCheckout) {
-        // Derived from the install itself — the formula for Homebrew, the
-        // version for a tarball. Never defaulted: a confidently wrong track is
-        // the bug this replaces.
-        const packaged = this.packagedTrack();
-
-        // A packaged install has no repository to fetch, so what is newest comes
-        // from the releases API — the same source install.sh resolves against.
-        // Without this the check set the track and stopped: `behind` stayed 0
-        // forever, so the UI said "Up to date" with the Update button disabled
-        // and the scheduled auto-apply never fired, on every install that was
-        // not a checkout. The strategies could apply an update; nothing ever
-        // detected one.
-        let availability: Partial<UpdateStatus> = {};
-        let error: string | null = null;
-        if (packaged.branch) {
-          try {
-            availability = packagedUpdateStatus(
-              await this.fetchReleases(),
-              packaged.branch,
-              this.version(),
-            );
-          } catch (err) {
-            // Same contract as a failed `git fetch` on the git path: report it,
-            // keep the last known numbers, stay idle.
-            error = String(err instanceof Error ? err.message : err);
-          }
-        } else {
-          error =
-            "Could not tell which update track this install follows, so there is " +
-            "nothing to compare against. Reinstall with the documented installer.";
-        }
-
-        this.status = {
-          ...this.status,
-          isGitRepo: false,
-          ...packaged,
-          ...availability,
-          version: this.version(),
-          phase: "idle",
-          lastCheckedAt: new Date().toISOString(),
-          error,
-        };
-        this.broadcast();
-        return this.getStatus();
-      }
+      if (!isCheckout) return await this.checkPackaged();
 
       const branch = await this.git(["rev-parse", "--abbrev-ref", "HEAD"]);
       // --tags so a box that has never seen them gets the full set; --force so a
@@ -408,6 +360,56 @@ export class Updater {
     return this.getStatus();
   }
 
+  /**
+   * The packaged half of a check: no repository to fetch, so the track comes
+   * from the install itself and what is newest comes from the releases API —
+   * the same source install.sh resolves against.
+   *
+   * Without the release check this set the track and stopped: `behind` stayed 0
+   * forever, so the UI said "Up to date" with the Update button disabled and the
+   * scheduled auto-apply never fired, on every install that was not a checkout.
+   * The strategies could apply an update; nothing ever detected one.
+   */
+  private async checkPackaged(): Promise<UpdateStatus> {
+    // Derived from the install itself — the formula for Homebrew, the version
+    // for a tarball. Never defaulted: a confidently wrong track is the bug this
+    // replaces.
+    const packaged = this.packagedTrack();
+
+    let availability: Partial<UpdateStatus> = {};
+    let error: string | null = null;
+    if (packaged.branch) {
+      try {
+        availability = packagedUpdateStatus(
+          await this.fetchReleases(),
+          packaged.branch,
+          this.version(),
+        );
+      } catch (err) {
+        // Same contract as a failed `git fetch` on the git path: report it, keep
+        // the last known numbers, stay idle.
+        error = String(err instanceof Error ? err.message : err);
+      }
+    } else {
+      error =
+        "Could not tell which update track this install follows, so there is " +
+        "nothing to compare against. Reinstall with the documented installer.";
+    }
+
+    this.status = {
+      ...this.status,
+      isGitRepo: false,
+      ...packaged,
+      ...availability,
+      version: this.version(),
+      phase: "idle",
+      lastCheckedAt: new Date().toISOString(),
+      error,
+    };
+    this.broadcast();
+    return this.getStatus();
+  }
+
   get behind(): number {
     return this.status.behind;
   }
@@ -460,28 +462,32 @@ export class Updater {
    * script should follow its tip.
    */
   private async targetTagFor(branch: string): Promise<string | null> {
-    // A packaged install has no repository to fetch tags from; the releases API
-    // is its source of truth, exactly as in checkForUpdate. Decided by install
-    // kind rather than status.isGitRepo, which is false on a checkout that has
-    // never run a check.
-    if (detectInstallKind(process.env, REPO_ROOT, fs.existsSync) !== "git") {
-      try {
-        const tags = (await this.fetchReleases()).map((r) => r.tag);
-        return latestOnTrack(tags, branch)?.tag ?? null;
-      } catch {
-        return null; // offline — the installer resolves the newest itself
-      }
-    }
     try {
-      await this.git(["fetch", "--quiet", "--tags", "--force", "origin", branch], 90_000);
-      const tags = (await this.git(["tag", "--list", "v[0-9]*", "--merged", `origin/${branch}`]))
-        .split("\n")
-        .map((t) => t.trim())
-        .filter(Boolean);
-      return latestOnTrack(tags, branch)?.tag ?? null;
+      return latestOnTrack(await this.candidateTags(branch), branch)?.tag ?? null;
     } catch {
-      return null; // offline or no such branch — the script surfaces the failure
+      // Offline, or no such branch — the installer/script resolves the newest
+      // itself and surfaces any failure.
+      return null;
     }
+  }
+
+  /**
+   * The release tags a track has to choose from.
+   *
+   * A packaged install has no repository to fetch them from, so the releases API
+   * is its source of truth, exactly as in checkForUpdate. Decided by install
+   * kind rather than status.isGitRepo, which is false on a checkout that has
+   * never run a check.
+   */
+  private async candidateTags(branch: string): Promise<string[]> {
+    if (detectInstallKind(process.env, REPO_ROOT, fs.existsSync) !== "git") {
+      return (await this.fetchReleases()).map((r) => r.tag);
+    }
+    await this.git(["fetch", "--quiet", "--tags", "--force", "origin", branch], 90_000);
+    return (await this.git(["tag", "--list", "v[0-9]*", "--merged", `origin/${branch}`]))
+      .split("\n")
+      .map((t) => t.trim())
+      .filter(Boolean);
   }
 
   /**

@@ -4,13 +4,17 @@ import { describe, it } from "node:test";
 import { packagedUpdateStatus, parseReleases } from "./release-check.js";
 
 // Shaped like the GitHub releases API: newest first, one object per release.
-const gh = (tag: string, opts: { prerelease?: boolean; draft?: boolean; name?: string } = {}) => ({
-  tag_name: tag,
-  name: opts.name ?? tag,
-  prerelease: opts.prerelease ?? tag.includes("-"),
-  draft: opts.draft ?? false,
-  published_at: `2026-08-0${tag.length % 9}T00:00:00Z`,
-});
+// `prerelease` is here because GitHub sends it, not because it is read — the
+// comparator decides that from the tag itself.
+function gh(tag: string, opts: { draft?: boolean } = {}) {
+  return {
+    tag_name: tag,
+    name: tag,
+    prerelease: tag.includes("-"),
+    draft: opts.draft ?? false,
+    published_at: "2026-08-06T00:00:00Z",
+  };
+}
 
 const RELEASES = parseReleases([
   gh("v1.10.0-beta.27"),
@@ -33,6 +37,7 @@ describe("parseReleases", () => {
       parsed.map((r) => r.tag),
       ["v1.9.5"],
     );
+    assert.equal(parsed[0].name, "v1.9.5");
     assert.equal(parsed[0].publishedAt, gh("v1.9.5").published_at);
   });
 
@@ -69,7 +74,7 @@ describe("packagedUpdateStatus", () => {
   });
 
   it("a stable release outranks the betas that led to it, so a beta box is offered it", () => {
-    const releases = parseReleases([gh("v1.10.0", { prerelease: false }), gh("v1.10.0-beta.27")]);
+    const releases = parseReleases([gh("v1.10.0"), gh("v1.10.0-beta.27")]);
     const s = packagedUpdateStatus(releases, "beta", "1.10.0-beta.27");
     assert.equal(s.targetTag, "v1.10.0");
     assert.equal(s.releasesBehind, 1);
@@ -89,9 +94,7 @@ describe("packagedUpdateStatus", () => {
   });
 
   it("changelog lists the newer releases, newest first, capped", () => {
-    const many = parseReleases(
-      Array.from({ length: 30 }, (_, i) => gh(`v1.10.${29 - i}`, { prerelease: false })),
-    );
+    const many = parseReleases(Array.from({ length: 30 }, (_, i) => gh(`v1.10.${29 - i}`)));
     const s = packagedUpdateStatus(many, "main", "1.10.0");
     assert.equal(s.changelog.length, 20);
     assert.ok(s.changelog[0].includes("v1.10.29"));

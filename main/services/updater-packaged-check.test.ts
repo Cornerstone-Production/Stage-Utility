@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { Updater } from "./updater.js";
-import { parseReleases } from "./update/release-check.js";
+import { parseReleases, type ReleaseInfo } from "./update/release-check.js";
 
 // The regression this file guards: `checkForUpdate` on a packaged install used
 // to set the track and stop. `behind` stayed 0 forever, the UI said "Up to
@@ -23,12 +23,20 @@ const RELEASES = parseReleases([
 ]);
 
 /** git as a packaged install sees it: not a checkout, and nothing else works. */
-const noRepoGit = async (args: string[]): Promise<string> => {
+async function noRepoGit(args: string[]): Promise<string> {
   if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {
     throw new Error("fatal: not a git repository");
   }
   throw new Error(`unexpected git call on a packaged install: git ${args.join(" ")}`);
-};
+}
+
+/** An updater wired as a packaged install running `version`. */
+function packagedUpdater(
+  version: string,
+  fetchReleases: () => Promise<ReleaseInfo[]> = async () => RELEASES,
+): Updater {
+  return new Updater({ git: noRepoGit, fetchReleases, version: () => version });
+}
 
 describe("checkForUpdate on a packaged install", () => {
   let savedKind: string | undefined;
@@ -42,12 +50,7 @@ describe("checkForUpdate on a packaged install", () => {
   });
 
   it("learns what is newest from the releases API — the bug was learning nothing", async () => {
-    const u = new Updater({
-      git: noRepoGit,
-      fetchReleases: async () => RELEASES,
-      version: () => "1.10.0-beta.26",
-    });
-    const s = await u.checkForUpdate();
+    const s = await packagedUpdater("1.10.0-beta.26").checkForUpdate();
 
     assert.equal(s.isGitRepo, false);
     assert.equal(s.branch, "beta", "track inferred from the prerelease version");
@@ -60,38 +63,23 @@ describe("checkForUpdate on a packaged install", () => {
   });
 
   it("a main-track box compares against stable releases only", async () => {
-    const u = new Updater({
-      git: noRepoGit,
-      fetchReleases: async () => RELEASES,
-      version: () => "1.9.4",
-    });
-    const s = await u.checkForUpdate();
+    const s = await packagedUpdater("1.9.4").checkForUpdate();
     assert.equal(s.branch, "main");
     assert.equal(s.targetTag, "v1.9.5");
     assert.equal(s.releasesBehind, 1);
   });
 
   it("up to date reads as zero, so the banner stays quiet", async () => {
-    const u = new Updater({
-      git: noRepoGit,
-      fetchReleases: async () => RELEASES,
-      version: () => "1.10.0-beta.27",
-    });
-    const s = await u.checkForUpdate();
+    const s = await packagedUpdater("1.10.0-beta.27").checkForUpdate();
     assert.equal(s.releasesBehind, 0);
     assert.equal(s.behind, 0);
     assert.equal(s.error, null);
   });
 
   it("a failed release check reports the error and stays idle — never silently 'up to date'", async () => {
-    const u = new Updater({
-      git: noRepoGit,
-      fetchReleases: async () => {
-        throw new Error("Release check failed: GitHub answered 403");
-      },
-      version: () => "1.9.4",
-    });
-    const s = await u.checkForUpdate();
+    const s = await packagedUpdater("1.9.4", async () => {
+      throw new Error("Release check failed: GitHub answered 403");
+    }).checkForUpdate();
     assert.equal(s.phase, "idle");
     assert.match(s.error ?? "", /403/);
     assert.equal(s.lastCheckedAt === null, false);
