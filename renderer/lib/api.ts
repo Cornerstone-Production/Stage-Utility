@@ -6,6 +6,8 @@
 // The renderer is always served from the same origin as the HTTP server
 // (port 8788), so all paths here are relative.
 
+import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
+
 type Params = Record<string, unknown> | undefined;
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
@@ -707,27 +709,13 @@ const sseListeners: SseListener[] = [];
  * `hydrated-channels.test.ts` reads remote-server.ts and fails if the two lists
  * drift, so a new hydrated channel cannot silently reintroduce the bug.
  */
-export const HYDRATED_CHANNELS = [
-  "server:hello",
-  "stage:state-changed",
-  "pco:live",
-  "propresenter:status",
-  "propresenter:instances",
-  "spl:metrics",
-  "spl:history",
-  "attendance:history",
-  "service-timeline:history",
-  "baptism:state",
-  "obs:status",
-  "reaper:status",
-  "update:status",
-  "osc:feedback",
-  "companion:signals",
-  "people:count",
-  "displays:presence",
-] as const;
+// The canonical list moved to sse-channels.ts so the shared SSE worker can share
+// it — that module imports nothing, which is what makes it safe in a worker.
+// Re-exported here because this is the import path everything already uses,
+// including hydrated-channels.test.ts, which pins the list against the server.
+export { HYDRATED_CHANNELS };
 
-const hydratedSet = new Set<string>(HYDRATED_CHANNELS);
+const hydratedSet = HYDRATED_SET;
 /** Last payload seen per hydrated channel, for replay to late subscribers. */
 const lastPayload = new Map<string, unknown>();
 
@@ -758,10 +746,26 @@ function reportChannels(): void {
   }, 200);
 }
 
-// ── Optional shared-worker SSE relay ────────────────────────────────────────
-// One EventSource shared across all this machine's tabs (fixes the ~6-connection
-// HTTP/1.1 limit on multi-window machines). Opt-in and off by default so untested
-// concurrency can't regress live displays; the direct path below stays the default.
+// ── Shared-worker SSE relay ─────────────────────────────────────────────────
+// One EventSource shared across all this machine's tabs. Browsers cap concurrent
+// connections at ~6 per origin over HTTP/1.1, and every tab holds one permanently
+// for its event stream — so the sixth tab could not load AT ALL: nothing was left
+// for its /api/state, which then died at REQUEST_TIMEOUT_MS. Measured: three tabs
+// hold three connections direct and one through the worker.
+//
+// STILL OPT-IN, deliberately, even though the worker now carries reconnect with
+// backoff, hydrate replay and a wake nudge. Those close the worker-to-SERVER gap.
+// Testing an 8-tab machine through a server restart found the remaining hole is
+// tab-to-WORKER: when the shared stream breaks, every already-open tab is
+// orphaned silently. `ensureWorker` builds the worker once and nothing watches
+// the port afterwards, so a tab has no way to notice it has stopped receiving —
+// observed as three tabs sitting on a title three state-changes stale, while a
+// reloaded tab picked up the next change immediately.
+//
+// That is worse than the per-tab path it would replace: there a dead stream costs
+// one tab and self-heals, here it costs every tab on the machine and does not.
+// Defaulting this on needs a port heartbeat (tab pings, worker pongs, tab
+// re-creates the worker or falls back to a direct EventSource when the pong stops).
 //   Enable:  localStorage.setItem("stage:sharedSse", "1")  (then reload)
 let sharedSse = (() => {
   try {
@@ -874,6 +878,12 @@ function scheduleSseReconnect(): void {
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
+    // Shared path: the worker owns the stream, so ask IT to check. A machine that
+    // slept may have had the stream closed underneath every tab at once.
+    if (sharedSse && sseWorker) {
+      try { sseWorker.port.postMessage({ type: "wake" }); } catch { /* ignore */ }
+      return;
+    }
     if (eventSource && eventSource.readyState === EventSource.CLOSED) {
       sseReconnectDelayMs = SSE_RECONNECT_MIN_MS;
       ensureEventSource();
