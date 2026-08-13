@@ -157,35 +157,75 @@ describe("HomebrewStrategy — no-op upgrades and failure reporting", () => {
   it("skips the restart when brew had nothing newer, and says so through the result file", () => {
     // The check reads GitHub releases; brew installs from the tap. In the window
     // where the tap lags a release, `brew upgrade` is a no-op — and restarting
-    // after one kills the server (blanking every display) to deliver nothing,
-    // once per scheduled window until the tap catches up.
+    // after one kills the server (blanking every display) to deliver nothing.
     const l = line();
     assert.match(l, /before=\$\(.*list --versions/, "must capture the version before upgrading");
     assert.match(l, /after=\$\(.*list --versions/, "must capture the version after upgrading");
-    assert.match(
-      l,
-      /if \[ "\$before" = "\$after" \]; then .*"ok":%s.* false .*exit 0; fi/,
-      "an unchanged keg must report and stop before any restart",
-    );
-    const noop = l.indexOf('[ "$before" = "$after" ]');
-    assert.ok(noop >= 0 && noop < l.indexOf("services restart"), "the no-op exit must precede the restart");
+    const noopAt = l.indexOf('[ "$before" = "$after" ]');
+    const noop = l.slice(noopAt);
+    const noopBody = noop.slice(0, noop.indexOf("exit 0"));
+    assert.ok(noopBody.includes("no newer build yet"), "the no-op must report why");
+    assert.ok(!noopBody.includes("services restart"), "an unchanged keg must not restart anything");
+    // Positional: the no-op check must gate the real restart, not follow it.
+    assert.ok(noopAt < l.lastIndexOf("services restart"), "the no-op exit must precede the restart");
   });
 
-  it("writes the ok result BEFORE the restart that kills the server, like install.sh swap mode", () => {
+  it("a failed `brew update` reports and stops — it never touched the service", () => {
+    // Offline box, DNS hiccup, rate limit: restarting here would bounce a
+    // healthy server once per scheduled window for as long as the tap is
+    // unreachable — the no-op bug, offline edition.
+    const l = line();
+    const at = l.indexOf("brew update || {");
+    assert.ok(at >= 0, "brew update failure must be its own branch");
+    const body = l.slice(at, l.indexOf("exit 0; }", at));
+    assert.ok(body.includes("could not refresh the tap"), "must say what failed");
+    assert.ok(!body.includes("services restart"), "must not bounce a server brew never stopped");
+  });
+
+  it("a failed upgrade restarts ONLY a service brew actually stopped, and reports afterwards", () => {
+    // The real beta.20→28 upgrade: brew swapped the keg, stopped the service,
+    // exited non-zero, and the old && chain skipped the restart it still owed.
+    const l = line();
+    const failed = l.slice(l.indexOf('[ "$brew_rc" -ne 0 ]'));
+    const failedBody = failed.slice(0, failed.indexOf("exit 0"));
+    assert.match(failedBody, /grep -q "state = running"/, "must check whether brew stopped it");
+    assert.ok(failedBody.includes("The service was not interrupted."), "a running service reports untouched");
+    assert.ok(failedBody.includes("services restart"), "a stopped service still gets the restart it is owed");
+    // The "was restarted" claim must come AFTER the restart attempt, not before.
+    assert.ok(
+      failedBody.indexOf("services restart") < failedBody.indexOf("restarted on the version already installed"),
+      "must not claim a restart that has not happened yet",
+    );
+  });
+
+  it("kickstart is not chained on brew's restart exit code", () => {
+    // `brew services restart` can bootstrap the job and still exit non-zero —
+    // an && would then skip the one command that demands the parked spawn.
+    const l = line();
+    assert.match(l, /services restart \S+; services_rc=\$\?; \(launchctl kickstart/, "kickstart must run regardless");
+  });
+
+  it("writes the ok result BEFORE the restart that kills the server, then corrects it only if the service is truly down", () => {
     const l = line();
     const ok = l.indexOf('printf \'{"ok":%s,"error":"%s","at":"%s"}\' true');
-    assert.ok(ok >= 0, "an upgrade that restarts must report ok");
-    assert.ok(ok < l.indexOf("services restart"), "the result must exist when the page reconnects");
+    const finalRestart = l.lastIndexOf("services restart");
+    assert.ok(ok >= 0 && ok < finalRestart, "the result must exist when the page reconnects");
+    const tail = l.slice(finalRestart);
+    assert.match(tail, /if \[ "\$services_rc" -ne 0 \] && ! .*state = running/, "correction requires BOTH a failed restart and a dead service");
+    assert.ok(tail.includes("did not restart"), "a dead service must not read as a success");
   });
 
-  it("a failed brew run reports through the result file instead of leaving the UI waiting forever", () => {
-    // The result file is what lets the UI leave the "updating" phase; a chain
-    // that died without writing one hung the page on a run that was over.
-    for (const [l, what] of [
-      [line(), "upgrade"],
-      [line({ track: "beta", checkout: true }), "track switch"],
-    ] as const) {
-      assert.match(l, /\|\| \{ if \[ -n "\$STAGE_UPDATE_RESULT" \]; then printf .*false/, `${what} must report failure`);
+  it("a failed track switch reports through the result file instead of leaving the UI waiting forever", () => {
+    const l = line({ track: "beta", checkout: true });
+    assert.match(l, /\|\| \{ if \[ -n "\$STAGE_UPDATE_RESULT" \]; then printf .*false.*track switch failed/, "switch must report failure");
+  });
+
+  it("captures brew's output into update.log, so a failed run is diagnosable", () => {
+    // The script runs detached with stdio ignored; without this a failure
+    // leaves NOTHING — the real beta.20→28 failure had to be diagnosed from
+    // filesystem archaeology.
+    for (const l of [line(), line({ track: "beta", checkout: true })]) {
+      assert.match(l, /exec >> "\$STAGE_UPDATE_LOG" 2>&1/, "all output must land in update.log");
     }
   });
 });

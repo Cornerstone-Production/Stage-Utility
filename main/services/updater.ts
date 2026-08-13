@@ -32,6 +32,8 @@ import { detectInstallKind } from "./update/install-kind.js";
 import { detectTrack } from "./update/detect-track.js";
 import { CHANGELOG_CAP, fetchReleases, packagedUpdateStatus, type ReleaseInfo } from "./update/release-check.js";
 import { selectStrategy } from "./update/select-strategy.js";
+import { exitForRestart } from "./update/relaunch.js";
+
 import { broadcast } from "./broadcaster.js";
 import { latestOnTrack, newerThan } from "./release-tags.js";
 import { appendUpdateLog, updateLogPath } from "./update-log.js";
@@ -191,7 +193,15 @@ export class Updater {
    */
   private async isCheckout(): Promise<boolean> {
     const top = await this.git(["rev-parse", "--show-toplevel"]).catch(() => "");
-    return top !== "" && path.resolve(top) === path.resolve(REPO_ROOT);
+    if (top === "") return false;
+    // realpath, not resolve: --show-toplevel dereferences symlinks (macOS's
+    // /var IS one), so a literal comparison calls a real checkout packaged.
+    // Same comparison as server-version.ts — 2 sites, both fixed together.
+    try {
+      return fs.realpathSync(top) === fs.realpathSync(REPO_ROOT);
+    } catch {
+      return false; // a path that cannot be resolved is not this checkout
+    }
   }
 
   private async git(args: string[], timeoutMs = 60_000): Promise<string> {
@@ -569,7 +579,10 @@ export class Updater {
     console.log("[updater] manual restart requested — exiting for the service manager to relaunch");
     this.status = { ...this.status, phase: "updating", step: "restarting" };
     this.broadcast();
-    setTimeout(() => process.exit(0), 600);
+    // launchd parks KeepAlive respawns, so exit alone leaves a Homebrew (or
+    // macOS tarball) box dark; exitForRestart pairs the exit with the detached
+    // kickstart that brings it back.
+    exitForRestart(600);
     return this.getStatus();
   }
 
