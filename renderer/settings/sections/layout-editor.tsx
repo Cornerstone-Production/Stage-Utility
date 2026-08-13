@@ -365,6 +365,42 @@ function EditorObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   );
 }
 
+/**
+ * Reorder one sibling scope by dropping `id` above or below `targetId`.
+ *
+ * Works in the order the Layers panel SHOWS — z descending, topmost first — and
+ * only converts back to z at the end. Reordering in z-ascending order and calling
+ * it "insert before the target" is what made the top of the list unreachable:
+ * there is no row above the first one to drop before, so the only way to promote
+ * something to the top was to drop it under the current top and then drag that
+ * one down past it. An explicit edge has a slot at both ends by construction.
+ *
+ * z is reassigned across the whole scope so it stays a dense 1..n with no ties —
+ * a tie makes paint order depend on array order, which is exactly the kind of
+ * "it moved on its own" that is impossible to reproduce later.
+ *
+ * Exported for the guard; the index arithmetic is the part worth pinning.
+ */
+export function reorderLayerScope(
+  list: LayoutObject[],
+  id: string,
+  targetId: string,
+  edge: "above" | "below",
+): LayoutObject[] {
+  // Display order: topmost (highest z) first, matching flattenLayers.
+  const display = [...list].sort((a, b) => b.z - a.z);
+  const from = display.findIndex((o) => o.id === id);
+  if (from === -1 || !display.some((o) => o.id === targetId)) return list;
+  const [moved] = display.splice(from, 1);
+  // Index AFTER removal, so dragging downward does not land one slot short.
+  const at = display.findIndex((o) => o.id === targetId);
+  if (at === -1) return list;
+  display.splice(edge === "above" ? at : at + 1, 0, moved);
+  // First in display order is the topmost, so it takes the highest z.
+  const n = display.length;
+  return display.map((o, i) => ({ ...o, z: n - i }));
+}
+
 // Flatten the tree (parents before children, each scope by z desc) into rows with
 // a depth, for the indented Layers panel.
 function flattenLayers(nodes: LayoutObject[], depth = 0): { o: LayoutObject; depth: number }[] {
@@ -475,7 +511,20 @@ function OverlayNode({
       </span>
       {sel && !locked &&
         HANDLES.map((h) => {
-          const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2 };
+          // Above every sibling overlay node. Nodes render in z order with no
+          // z-index of their own, so an object stacked higher than the selected
+          // one covered its handles — and since those nodes carry the pointerdown
+          // that starts a MOVE, grabbing a corner dragged the wrong object
+          // instead of resizing. An object behind anything simply could not be
+          // resized, however clearly it was selected.
+          //
+          // Only the 9px handles are raised, deliberately. Lifting the whole node
+          // would also hand it every click over its area, so selecting the object
+          // visually on top of it would stop working — trading one unreachable
+          // object for another. This node creates no stacking context of its own
+          // (opacity 1, no transform), so the handles compete directly with the
+          // sibling nodes and win.
+          const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2, zIndex: 10 };
           if (h.includes("n")) pos.top = -5;
           if (h.includes("s")) pos.bottom = -5;
           if (h.includes("w")) pos.left = -5;
@@ -1143,8 +1192,12 @@ export function LayoutEditor({
   // the clipboard, which is a ref, and a menu should describe the moment it was
   // summoned rather than quietly re-deciding underneath the cursor.
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
-  // Layers-panel drag-to-reorder: the row currently being hovered as a drop target.
-  const [dragLayerOver, setDragLayerOver] = useState<string | null>(null);
+  // Layers-panel drag-to-reorder: where the dragged row would land — a row and
+  // which SIDE of it, not just which row. Highlighting the row itself could not
+  // say whether the drop lands above or below it, and the old "always insert
+  // before the target" rule left the top of the list unreachable: you had to drop
+  // below the second row and then drag the former top one down past it.
+  const [dragLayerOver, setDragLayerOver] = useState<{ id: string; edge: "above" | "below" } | null>(null);
   const [history, setHistory] = useState<LayoutObject[][]>([]);
   const [dirty, setDirty] = useState(false);
   const [gridOn, setGridOn] = useState(true);
@@ -1612,29 +1665,19 @@ export function LayoutEditor({
     });
   }
 
-  // Drag-to-reorder in the Layers panel: move `id` to `targetId`'s slot, but only
+  // Drag-to-reorder in the Layers panel: drop `id` above or below `targetId`,
   // within the same sibling scope (a cross-parent drop is ignored, keeping z sane).
-  function moveLayer(id: string, targetId: string) {
+  function moveLayer(id: string, targetId: string, edge: "above" | "below") {
     if (id === targetId) return;
     const pa = getParentOf(objects, id);
     const pb = getParentOf(objects, targetId);
     if ((pa?.id ?? null) !== (pb?.id ?? null)) return; // different scopes — no-op
     pushHistory();
-    const reindex = (list: LayoutObject[]): LayoutObject[] => {
-      const sorted = [...list].sort((a, b) => a.z - b.z);
-      const from = sorted.findIndex((o) => o.id === id);
-      const to = sorted.findIndex((o) => o.id === targetId);
-      if (from === -1 || to === -1) return list;
-      const [moved] = sorted.splice(from, 1);
-      const insertAt = sorted.findIndex((o) => o.id === targetId);
-      sorted.splice(insertAt, 0, moved);
-      return sorted.map((o, i) => ({ ...o, z: i + 1 }));
-    };
     setObjects((prev) => {
       const parent = getParentOf(prev, id);
       return parent
-        ? mapById(prev, parent.id, (p) => ({ ...p, children: reindex(p.children ?? []) }))
-        : reindex(prev);
+        ? mapById(prev, parent.id, (p) => ({ ...p, children: reorderLayerScope(p.children ?? [], id, targetId, edge) }))
+        : reorderLayerScope(prev, id, targetId, edge);
     });
   }
   function undo() {
@@ -1915,12 +1958,38 @@ export function LayoutEditor({
                 draggable
                 onClick={(e) => selectObject(o.id, e.shiftKey || e.metaKey || e.ctrlKey)}
                 onDragStart={(e) => { e.dataTransfer.setData("text/plain", o.id); e.dataTransfer.effectAllowed = "move"; }}
-                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragLayerOver !== o.id) setDragLayerOver(o.id); }}
-                onDragLeave={() => setDragLayerOver((cur) => (cur === o.id ? null : cur))}
-                onDrop={(e) => { e.preventDefault(); const src = e.dataTransfer.getData("text/plain"); setDragLayerOver(null); if (src) moveLayer(src, o.id); }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  // Which half of the row the pointer is in decides the side. The
+                  // line then sits exactly where the row will land, so the gap you
+                  // aim at is the gap you get.
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const edge = e.clientY < r.top + r.height / 2 ? "above" : "below";
+                  if (dragLayerOver?.id !== o.id || dragLayerOver.edge !== edge) setDragLayerOver({ id: o.id, edge });
+                }}
+                onDragLeave={() => setDragLayerOver((cur) => (cur?.id === o.id ? null : cur))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const src = e.dataTransfer.getData("text/plain");
+                  const edge = dragLayerOver?.id === o.id ? dragLayerOver.edge : "above";
+                  setDragLayerOver(null);
+                  if (src) moveLayer(src, o.id, edge);
+                }}
                 style={{ paddingLeft: 8 + depth * 14 }}
-                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${selectedIds.has(o.id) ? "bg-fill-active" : "hover:bg-fill"} ${dragLayerOver === o.id ? "ring-1 ring-focus" : ""}`}
+                className={`relative flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${selectedIds.has(o.id) ? "bg-fill-active" : "hover:bg-fill"}`}
               >
+                {/* The insertion line. Drawn on the row's own edge rather than in
+                    the gap between rows: the gap is not a drop target of its own,
+                    so a line living there would flicker as the pointer crossed it.
+                    `pointer-events: none` so it cannot swallow the drop it marks. */}
+                {dragLayerOver?.id === o.id && (
+                  <span
+                    aria-hidden
+                    className="absolute left-0 right-0 h-0.5 rounded-full bg-focus"
+                    style={{ [dragLayerOver.edge === "above" ? "top" : "bottom"]: -1, pointerEvents: "none" }}
+                  />
+                )}
                 <span className="text-caption1 text-fg flex-1 min-w-0 truncate">
                   {o.config.type === "container" ? `${typeLabel(o.config.type)} (${o.children?.length ?? 0})` : typeLabel(o.config.type)}
                 </span>
