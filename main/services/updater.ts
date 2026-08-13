@@ -158,6 +158,20 @@ export class Updater {
    * whichever repository happened to be up the tree, which was worse than
    * showing nothing.
    */
+  /** Where the updater records the track it last launched an update on. In the
+   *  data dir because that outlives every release — the point of the record. */
+  private trackRecordFile(): string {
+    return path.join(getUserDataPath(), "update-track");
+  }
+
+  private recordedTrack(): string | null {
+    try {
+      return fs.readFileSync(this.trackRecordFile(), "utf8").trim() || null;
+    } catch {
+      return null; // never written — older install, or a fresh one
+    }
+  }
+
   private packagedTrack(): Pick<UpdateStatus, "branch" | "trackSource" | "currentSha" | "currentDate"> {
     const kind = detectInstallKind(process.env, REPO_ROOT, fs.existsSync);
     const { track, source } = detectTrack({
@@ -165,8 +179,19 @@ export class Updater {
       appRoot: REPO_ROOT,
       version: this.version(),
       gitBranch: null,
+      recorded: this.recordedTrack(),
     });
     return { branch: track, trackSource: source, currentSha: null, currentDate: null };
+  }
+
+  /**
+   * Is THIS DIRECTORY a checkout — not merely inside somebody's? The single
+   * predicate for "packaged or not", shared by the check and the track-switch
+   * pin so the two can never disagree about what kind of install this is.
+   */
+  private async isCheckout(): Promise<boolean> {
+    const top = await this.git(["rev-parse", "--show-toplevel"]).catch(() => "");
+    return top !== "" && path.resolve(top) === path.resolve(REPO_ROOT);
   }
 
   private async git(args: string[], timeoutMs = 60_000): Promise<string> {
@@ -251,9 +276,7 @@ export class Updater {
       //
       // Comparing the toplevel to the app root answers the question actually
       // being asked. A checkout matches; a keg inside Homebrew's repo does not.
-      const top = await this.git(["rev-parse", "--show-toplevel"]).catch(() => "");
-      const isCheckout = top !== "" && path.resolve(top) === path.resolve(REPO_ROOT);
-      if (!isCheckout) return await this.checkPackaged();
+      if (!(await this.isCheckout())) return await this.checkPackaged();
 
       const branch = await this.git(["rev-parse", "--abbrev-ref", "HEAD"]);
       // --tags so a box that has never seen them gets the full set; --force so a
@@ -464,9 +487,14 @@ export class Updater {
   private async targetTagFor(branch: string): Promise<string | null> {
     try {
       return latestOnTrack(await this.candidateTags(branch), branch)?.tag ?? null;
-    } catch {
-      // Offline, or no such branch — the installer/script resolves the newest
-      // itself and surfaces any failure.
+    } catch (err) {
+      // Null is a real answer ("no pin — resolve the newest at apply time"),
+      // but the failure that produced it must not vanish: unpinned, the
+      // installer lands on whatever is newest when IT runs, which may not be
+      // what the operator was shown.
+      this.logEvent(
+        `could not resolve the newest release on ${branch}; applying unpinned — ${String(err instanceof Error ? err.message : err)}`,
+      );
       return null;
     }
   }
@@ -480,7 +508,11 @@ export class Updater {
    * never run a check.
    */
   private async candidateTags(branch: string): Promise<string[]> {
-    if (detectInstallKind(process.env, REPO_ROOT, fs.existsSync) !== "git") {
+    // The same predicate checkForUpdate uses, so the check and the pin cannot
+    // disagree about what kind of install this is (an install-kind test here
+    // called a checkout with a declared kind "packaged" while the check called
+    // it git).
+    if (!(await this.isCheckout())) {
       return (await this.fetchReleases()).map((r) => r.tag);
     }
     await this.git(["fetch", "--quiet", "--tags", "--force", "origin", branch], 90_000);
@@ -559,6 +591,19 @@ export class Updater {
     }
     const ready = strategy.canApply();
     if (!ready.ok) throw new Error(`Cannot update: ${ready.reason}`);
+
+    // Remember which track this box is on, in the data dir so it outlives the
+    // release. Without this a packaged install's track is INFERRED from its
+    // version, and the inference flips silently: a beta box that takes the
+    // stable it is deliberately offered has a hyphen-less VERSION afterwards,
+    // reads as "main" from then on, and never sees another beta.
+    try {
+      fs.writeFileSync(this.trackRecordFile(), branch);
+    } catch (err) {
+      // Not fatal to the update itself, but say so: the next check may report
+      // the wrong track.
+      this.logEvent(`could not record the update track: ${String(err)}`);
+    }
 
     // Clear stale progress/result so the poller only reacts to this run.
     this.applyStartedAt = Date.now();
@@ -694,7 +739,17 @@ export class Updater {
       if (result && Date.parse(result.finishedAt || "") >= this.applyStartedAt) {
         this.drainLiveLog();
         if (result.ok) {
-          if (this.status.step !== "restarting") {
+          if (this.isRestartPending()) {
+            // Deferred apply: the new build is installed and NOTHING is going
+            // to kill this process. Waiting for a death that never comes left
+            // the phase stuck on "updating" — which restart() refuses to act
+            // during, so the operator could not even take the restart the
+            // update was waiting for.
+            this.logEvent("build applied — restart deferred until the operator takes it");
+            this.status = { ...this.status, phase: "idle", step: null };
+            this.stopProgressPolling();
+            this.broadcast();
+          } else if (this.status.step !== "restarting") {
             this.logEvent("build succeeded — restarting into the new version");
             this.status = { ...this.status, step: "restarting" };
             this.broadcast();

@@ -12,7 +12,7 @@ import type { InstallKind } from "./install-kind.js";
 import { FORMULA } from "./homebrew-strategy.js";
 
 /** Where a reported track came from, so the UI need not pretend they are equal. */
-export type TrackSource = "git" | "formula" | "version" | "unknown";
+export type TrackSource = "git" | "formula" | "recorded" | "version" | "unknown";
 
 export type DetectedTrack = { track: string | null; source: TrackSource };
 
@@ -43,28 +43,51 @@ function fromVersion(version: string): DetectedTrack {
 }
 
 /**
+ * The track the updater last launched an update or track-switch on, persisted
+ * in the data directory (which outlives every release). Beats the version
+ * inference because the inference silently FLIPS: a beta box that takes the
+ * stable release it is deliberately offered (a stable outranks the betas that
+ * led to it) ends up with a hyphen-less VERSION, reads as "main" from then on,
+ * and never sees another beta — with no operator action and no notice.
+ */
+function fromRecord(recorded: string | null): DetectedTrack {
+  const r = recorded?.trim();
+  return r === "main" || r === "beta" ? { track: r, source: "recorded" } : UNKNOWN;
+}
+
+/**
  * The track this install follows.
  *
  * `gitBranch` is only trusted for a git install — see the toplevel check in
  * updater.ts. A packaged install sitting inside someone else's repository (every
  * Homebrew install is: the prefix is a git repo) would otherwise report that
  * repository's branch as its own.
+ *
+ * Precedence for packaged installs: the Homebrew formula (a hard fact of what
+ * is installed, and still right after an operator switches with plain brew),
+ * then the recorded track, then the version inference.
  */
 export function detectTrack(o: {
   kind: InstallKind;
   appRoot: string;
   version: string;
   gitBranch: string | null;
+  /** Contents of the updater's track record in the data dir, or null. */
+  recorded?: string | null;
 }): DetectedTrack {
   if (o.kind === "git") {
     return o.gitBranch ? { track: o.gitBranch, source: "git" } : UNKNOWN;
   }
   if (o.kind === "homebrew") {
-    // Fall through to the version when the keg is somewhere unexpected: an
-    // inference beats defaulting, and both beat claiming main.
+    // Fall through when the keg is somewhere unexpected: an inference beats
+    // defaulting, and both beat claiming main.
     const byFormula = fromFormula(o.appRoot);
-    return byFormula.track ? byFormula : fromVersion(o.version);
+    return byFormula.track ? byFormula : orVersion(fromRecord(o.recorded ?? null), o.version);
   }
-  if (o.kind === "tarball") return fromVersion(o.version);
+  if (o.kind === "tarball") return orVersion(fromRecord(o.recorded ?? null), o.version);
   return UNKNOWN;
+}
+
+function orVersion(first: DetectedTrack, version: string): DetectedTrack {
+  return first.track ? first : fromVersion(version);
 }

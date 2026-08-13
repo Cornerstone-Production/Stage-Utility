@@ -15,9 +15,15 @@ import type { UpdateStatus } from "../../types/stage.js";
 import { latestOnTrack, newerThan, parseTag, type ParsedTag } from "../release-tags.js";
 
 const REPO = "Cornerstone-Production/Stage-Utility";
-// One page covers both tracks: main wants the newest stable, beta the newest of
-// anything, and 30 releases of history is months of either.
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
+// The list endpoint is newest-first regardless of prerelease flag, so when many
+// betas ship between stables the whole first page is prereleases and the newest
+// STABLE falls off it — true of this repo at the time of writing (30 betas since
+// v1.9.5). A main-track box reading only the page would compute "up to date"
+// forever: the exact silent no-op this module exists to fix. /releases/latest is
+// GitHub's own "newest stable, no prereleases, no drafts" and cannot be crowded
+// out, so it is always merged in.
+const LATEST_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 
 export interface ReleaseInfo {
   tag: string;
@@ -26,10 +32,14 @@ export interface ReleaseInfo {
 }
 
 /**
- * The GitHub response, reduced to what the comparator needs. Tolerant of junk —
- * a rate-limit body is `{message}` not an array, and must read as "no releases"
- * rather than throw. Drafts are skipped: they have no downloadable assets, so
- * offering one would produce an update that cannot install.
+ * The GitHub response, reduced to what the comparator needs. Tolerant of junk
+ * PER ITEM — a malformed entry is dropped, not fatal. A body that is not an
+ * array at all is the caller's problem: fetchReleases treats it as a failed
+ * check, because mapping it to "no releases" would overwrite a known
+ * "update available" with a silent "up to date" (a rate-limit body is
+ * `{message}`, and an intercepting proxy can 200 anything). Drafts are skipped:
+ * they have no downloadable assets, so offering one would produce an update
+ * that cannot install.
  */
 export function parseReleases(json: unknown): ReleaseInfo[] {
   if (!Array.isArray(json)) return [];
@@ -119,18 +129,56 @@ export function packagedUpdateStatus(
   };
 }
 
-/**
- * The published releases, newest first. Throws on network failure or a non-OK
- * response — the caller surfaces that in `status.error`, exactly as the git
- * path surfaces a failed fetch. An unauthenticated GitHub API allows 60
- * requests/hour per address; the hourly auto-check plus a human clicking
- * "Check" stays far inside that.
- */
-export async function fetchReleases(): Promise<ReleaseInfo[]> {
-  const res = await fetch(RELEASES_URL, {
+/** The fetch signature this module needs — injectable so tests can serve
+ *  canned responses without touching the network. */
+export type FetchLike = (
+  url: string,
+  init: { headers: Record<string, string>; signal: AbortSignal },
+) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
+
+function getJson(url: string, doFetch: FetchLike): Promise<{ ok: boolean; status: number; json(): Promise<unknown> }> {
+  return doFetch(url, {
     headers: { Accept: "application/vnd.github+json", "User-Agent": "stage-utility-updater" },
     signal: AbortSignal.timeout(15_000),
   });
-  if (!res.ok) throw new Error(`Release check failed: GitHub answered ${res.status}`);
-  return parseReleases(await res.json());
+}
+
+/**
+ * The published releases (newest first), with the newest stable guaranteed
+ * present even when the first page is all prereleases — see LATEST_URL.
+ *
+ * Throws on network failure, a non-OK response, or a 200 whose body is not the
+ * releases array — the caller surfaces that in `status.error`, exactly as the
+ * git path surfaces a failed fetch. Anything else would let a bad answer
+ * overwrite the last known numbers with a silent "up to date". The one
+ * tolerated failure is 404 from /releases/latest, which is GitHub's answer for
+ * "no stable release exists" (a fork that has only ever shipped prereleases).
+ *
+ * Two requests per check; an unauthenticated GitHub API allows 60/hour per
+ * address, so the hourly auto-check plus a human clicking "Check" stays far
+ * inside that.
+ */
+export async function fetchReleases(doFetch: FetchLike = fetch): Promise<ReleaseInfo[]> {
+  const page = await getJson(RELEASES_URL, doFetch);
+  if (!page.ok) throw new Error(`Release check failed: GitHub answered ${page.status}`);
+  const body = await page.json();
+  if (!Array.isArray(body)) {
+    const msg = (body as { message?: unknown } | null)?.message;
+    throw new Error(
+      `Release check failed: unexpected response${typeof msg === "string" ? ` — ${msg}` : ""}`,
+    );
+  }
+  const releases = parseReleases(body);
+
+  const latest = await getJson(LATEST_URL, doFetch);
+  if (latest.ok) {
+    for (const r of parseReleases([await latest.json()])) {
+      if (!releases.some((have) => have.tag === r.tag)) releases.push(r);
+    }
+  } else if (latest.status !== 404) {
+    // A main-track box answers from exactly this endpoint; failing silently
+    // here would be the same invisible no-op the page-only bug produced.
+    throw new Error(`Release check failed: GitHub answered ${latest.status} for the newest stable`);
+  }
+  return releases;
 }

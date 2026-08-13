@@ -230,6 +230,19 @@ log "swap complete"
 # display for the length of the download, and on systemd it would tear down the
 # cgroup this script runs in, killing the update midway through the swap.
 if [ "${STAGE_UPDATE_MODE:-}" = "swap" ]; then
+  # auto-install mode: the new release is staged and swapped, but the operator
+  # chooses when the displays go dark. Leave the restart-pending marker the app
+  # reports (same contract as scripts/update.sh) and stop here — the running
+  # server keeps serving the OLD build from its open inodes until restarted.
+  if [ -n "${STAGE_UPDATE_DEFER_RESTART:-}" ]; then
+    say "Swap complete. Restart deferred (auto-install mode)."
+    if [ -n "${STAGE_UPDATE_RESTART_PENDING:-}" ]; then
+      date -u +%Y-%m-%dT%H:%M:%SZ > "$STAGE_UPDATE_RESTART_PENDING" 2>/dev/null || true
+    fi
+    write_result true ""
+    log "update staged; restart deferred"
+    exit 0
+  fi
   say "Swap complete. Restarting the running server."
   write_progress restarting
   write_result true ""

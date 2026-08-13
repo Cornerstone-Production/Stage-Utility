@@ -176,7 +176,7 @@ export interface UpdateStatus {
    * answer as though it were read from a checkout, and so a wrong one is
    * visible rather than silent.
    */
-  trackSource?: "git" | "formula" | "version" | "unknown";
+  trackSource?: "git" | "formula" | "recorded" | "version" | "unknown";
   /** Selectable update tracks (git branches) the operator can switch between. */
   tracks: string[];
   /** App version from package.json. */

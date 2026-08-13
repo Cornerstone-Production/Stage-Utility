@@ -94,9 +94,11 @@ describe("HomebrewStrategy", () => {
       .args.join(" ");
     // The property that matters is that the group cannot fail the chain, not the
     // exact text: bootout now ends with a wait loop rather than `|| true`, and a
-    // for-loop exits 0 regardless of what happened inside it.
+    // for-loop exits 0 regardless of what happened inside it. The chain's own
+    // trailing `|| { …failure report… }` is not part of any group — strip it
+    // before asserting.
     for (const frag of line.split(" && ").filter((s) => /kickstart|bootout/.test(s))) {
-      const t = frag.trimEnd();
+      const t = frag.replace(/ \|\| \{ .*$/, "").trimEnd();
       assert.ok(
         t.endsWith("|| true)") || t.endsWith("done)"),
         `must not be able to fail the update: ${frag}`,
@@ -145,5 +147,45 @@ describe("HomebrewStrategy — the stale-registration failures", () => {
     const l = line({ track: "beta", checkout: true });
     assert.ok(l.includes(`bootout "gui/$(id -u)/homebrew.mxcl.${FORMULA.main}"`));
     assert.ok(l.includes(`bootout "gui/$(id -u)/homebrew.mxcl.${FORMULA.beta}"`));
+  });
+});
+
+describe("HomebrewStrategy — no-op upgrades and failure reporting", () => {
+  const line = (over = {}) =>
+    new HomebrewStrategy(brewAt(BREW_PATHS[0])).plan({ ...base, ...over }).args.join(" ");
+
+  it("skips the restart when brew had nothing newer, and says so through the result file", () => {
+    // The check reads GitHub releases; brew installs from the tap. In the window
+    // where the tap lags a release, `brew upgrade` is a no-op — and restarting
+    // after one kills the server (blanking every display) to deliver nothing,
+    // once per scheduled window until the tap catches up.
+    const l = line();
+    assert.match(l, /before=\$\(.*list --versions/, "must capture the version before upgrading");
+    assert.match(l, /after=\$\(.*list --versions/, "must capture the version after upgrading");
+    assert.match(
+      l,
+      /if \[ "\$before" = "\$after" \]; then .*"ok":%s.* false .*exit 0; fi/,
+      "an unchanged keg must report and stop before any restart",
+    );
+    const noop = l.indexOf('[ "$before" = "$after" ]');
+    assert.ok(noop >= 0 && noop < l.indexOf("services restart"), "the no-op exit must precede the restart");
+  });
+
+  it("writes the ok result BEFORE the restart that kills the server, like install.sh swap mode", () => {
+    const l = line();
+    const ok = l.indexOf('printf \'{"ok":%s,"error":"%s","at":"%s"}\' true');
+    assert.ok(ok >= 0, "an upgrade that restarts must report ok");
+    assert.ok(ok < l.indexOf("services restart"), "the result must exist when the page reconnects");
+  });
+
+  it("a failed brew run reports through the result file instead of leaving the UI waiting forever", () => {
+    // The result file is what lets the UI leave the "updating" phase; a chain
+    // that died without writing one hung the page on a run that was over.
+    for (const [l, what] of [
+      [line(), "upgrade"],
+      [line({ track: "beta", checkout: true }), "track switch"],
+    ] as const) {
+      assert.match(l, /\|\| \{ if \[ -n "\$STAGE_UPDATE_RESULT" \]; then printf .*false/, `${what} must report failure`);
+    }
   });
 });

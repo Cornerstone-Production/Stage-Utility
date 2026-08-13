@@ -182,6 +182,19 @@ try {
   #
   # Stopping first would blank every display for the length of the download.
   if ($env:STAGE_UPDATE_MODE -eq "swap") {
+    # auto-install mode: staged and swapped, but the operator chooses when the
+    # displays go dark. Leave the restart-pending marker (same contract as
+    # scripts/update.ps1) and stop - the running server keeps serving the OLD
+    # build until restarted.
+    if ($env:STAGE_UPDATE_DEFER_RESTART) {
+      Say "Swap complete. Restart deferred (auto-install mode)."
+      if ($env:STAGE_UPDATE_RESTART_PENDING) {
+        try { (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") | Set-Content $env:STAGE_UPDATE_RESTART_PENDING } catch {}
+      }
+      Write-UpdateResult $true ""
+      Log "update staged; restart deferred"
+      exit 0
+    }
     Say "Swap complete. Restarting the running server."
     Write-UpdateProgress "restarting"
     Write-UpdateResult $true ""
