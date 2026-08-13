@@ -306,7 +306,14 @@ function UpdatesPanel({
             ) : null}
 
             {/* Last apply result */}
-            {!updating && s?.lastResult && !s.lastResult.ok ? (
+            {/* Never beside the success banner. The version handshake is ground
+                truth — the server demonstrably came back on a new version — while
+                the result file is a claim written by the run that restarted it,
+                and a strategy can write "failed" for a step that happened after
+                the new build was already live. Showing both left the operator
+                reading "Update installed successfully" directly above "Last
+                update failed" for the same run. */}
+            {!justUpdated && !updating && s?.lastResult && !s.lastResult.ok ? (
               <p className="mt-1 flex items-start gap-1.5 text-caption2 text-red-10">
                 <AlertTriangleIcon className="size-3.5 shrink-0 mt-0.5" />
                 Last update failed{s.lastResult.finishedAt ? ` (${new Date(s.lastResult.finishedAt).toLocaleString()})` : ""}.

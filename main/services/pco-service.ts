@@ -5,6 +5,21 @@ import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemD
 import { scheduleItems } from "./automation-item-schedule.js";
 import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
 import { pickServiceTime } from "./pick-service-time.js";
+
+/**
+ * PCO rejected the credentials (401).
+ *
+ * Its own type because it is a CONFIGURATION fault, not a transient one:
+ * retrying cannot fix it, so callers on a timer must stand down rather than
+ * ask again every tick. Matching on the message text instead would break the
+ * moment the wording changed — and the wording is operator-facing copy.
+ */
+export class PcoAuthError extends Error {
+  constructor() {
+    super("PCO auth failed — check App ID/Secret in Integrations settings");
+    this.name = "PcoAuthError";
+  }
+}
 import { scrub } from "./scrub.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
@@ -259,7 +274,7 @@ class PcoService {
       }
 
       if (response.status === 401) {
-        throw new Error("PCO auth failed — check App ID/Secret in Integrations settings");
+        throw new PcoAuthError();
       }
       if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
         const wait = this.backoffMs(attempt, response.headers.get("Retry-After"));
@@ -290,7 +305,7 @@ class PcoService {
       },
     });
     if (response.status === 401) {
-      throw new Error("PCO auth failed — check App ID/Secret in Integrations settings");
+      throw new PcoAuthError();
     }
     if (response.status === 403) {
       // Almost always: no Live session is actually running for this plan, or the
@@ -357,7 +372,7 @@ class PcoService {
       },
     });
     if (response.status === 401) {
-      throw new Error("PCO auth failed — check App ID/Secret in Integrations settings");
+      throw new PcoAuthError();
     }
     if (!response.ok) {
       const body = await response.text().catch(() => "");

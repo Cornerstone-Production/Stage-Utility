@@ -12,6 +12,8 @@ import { broadcast } from "./broadcaster.js";
 import { splRecorder } from "./spl-recorder.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
+import { PcoAuthError } from "./pco-service.js";
+import { RepeatLog } from "./repeat-log.js";
 import { serviceWindow } from "./service-window.js";
 import { stageController } from "./stage-controller.js";
 
@@ -60,6 +62,8 @@ class LivePoller {
   private running = false;
   private lastSig: string | null = null;
   private lastBroadcastAt = 0;
+  /** Collapses a repeating failure so one outage cannot evict the whole log. */
+  private readonly errors = new RepeatLog("[live-poller] fetch error:");
 
   start(): void {
     if (this.running) return;
@@ -103,11 +107,25 @@ class LivePoller {
     try {
       live = await stageController.fetchLive();
     } catch (err) {
+      // Bad credentials are a CONFIGURATION fault: every retry fails the same
+      // way, forever, and asking again every 4s achieves nothing but writing
+      // one line per tick until the log holds nothing else. Stand down and wait
+      // to be told the credentials changed — integration-manager restarts this
+      // poller the moment a credential check passes.
+      if (err instanceof PcoAuthError) {
+        console.error(`[live-poller] ${err.message} — polling stopped until the credentials are saved`);
+        this.stop();
+        return;
+      }
       // Transient (e.g. 429 / network) — keep last client state, slow down.
-      console.error("[live-poller] fetch error:", err instanceof Error ? err.message : err);
+      const decision = this.errors.fail(err instanceof Error ? err.message : String(err), Date.now());
+      if (decision.line) console.error(decision.line);
       this.schedule(serviceWindow.pollDelayMs(IDLE_INTERVAL_MS, DORMANT_INTERVAL_MS));
       return;
     }
+
+    const recovered = this.errors.ok(Date.now());
+    if (recovered.line) console.log(recovered.line);
 
     // fetchLive is an HTTP call that can take seconds. stop() may have landed
     // while it was in flight, and `running` was only checked on entry — so a
