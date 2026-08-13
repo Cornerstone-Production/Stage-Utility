@@ -5,6 +5,7 @@
 
 import { execFileSync } from "node:child_process";
 import * as crypto from "node:crypto";
+import * as fs from "node:fs";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
@@ -12,7 +13,6 @@ import { APP_ROOT } from "./app-root.js";
 
 // Against the install root, not cwd — a packaged install runs from wherever the
 // operator launched it, and a cwd-relative path silently resolves to nothing.
-const RENDERER_BUILD_DIR = path.join(APP_ROOT, "build", "renderer");
 const REPO_ROOT = APP_ROOT;
 
 /**
@@ -23,20 +23,30 @@ const REPO_ROOT = APP_ROOT;
  * not a plain crash-restart); else a hash of the built index.html (changes when
  * the frontend bundle changes). "unknown" disables the auto-reload (never false).
  */
-export function computeServerVersion(): string {
+export function computeServerVersion(root: string = REPO_ROOT): string {
   try {
-    const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
-      cwd: REPO_ROOT,
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .toString()
-      .trim();
-    if (sha) return sha;
+    // Is THIS DIRECTORY a checkout — not merely inside somebody's? `git
+    // rev-parse` walks UP the tree, and a Homebrew keg lives inside
+    // /opt/homebrew, which is a git repository. Without the toplevel check a
+    // brew install advertised HOMEBREW'S commit as its version — and since
+    // displays reload when this id changes, every `brew update` (of anything)
+    // reloaded every screen in the building. Same trap, same fix as updater.ts.
+    const git = (args: string[]) =>
+      execFileSync("git", args, { cwd: root, stdio: ["ignore", "pipe", "ignore"] })
+        .toString()
+        .trim();
+    // realpath, not resolve: --show-toplevel dereferences symlinks (macOS's
+    // /var IS one), so a literal comparison calls a real checkout foreign.
+    const top = git(["rev-parse", "--show-toplevel"]);
+    if (top && fs.realpathSync(top) === fs.realpathSync(root)) {
+      const sha = git(["rev-parse", "--short", "HEAD"]);
+      if (sha) return sha;
+    }
   } catch {
     // not a git checkout — fall through
   }
   try {
-    const html = readFileSync(path.join(RENDERER_BUILD_DIR, "index.html"));
+    const html = readFileSync(path.join(root, "build", "renderer", "index.html"));
     return "b" + crypto.createHash("sha1").update(html).digest("hex").slice(0, 8);
   } catch {
     // no build present

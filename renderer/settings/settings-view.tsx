@@ -710,8 +710,13 @@ export function SettingsView() {
     try {
       const status = await ipc<UpdateStatus>("update:check");
       queryClient.setQueryData(["update:status"], status);
-      if (!status.isGitRepo) toast.error("Not a git install — update from the command line.");
-      else if (status.error) toast.error(`Update check failed: ${status.error}`);
+      // canUpdate, NOT isGitRepo: a Homebrew or tarball install is not a git
+      // checkout and checks fine. Keying this toast off isGitRepo told every
+      // packaged install "update from the command line" over a check that had
+      // just succeeded — the same bug the backend gate had, one layer up.
+      if (status.canUpdate === false) {
+        toast.error(status.updateBlockedReason ?? "In-app updates are not available for this install.");
+      } else if (status.error) toast.error(`Update check failed: ${status.error}`);
       else if (status.behind > 0) toast.success(`${status.behind} update${status.behind === 1 ? "" : "s"} available.`);
       else toast.success("You're up to date.");
     } catch (err) {

@@ -90,6 +90,16 @@ const writeResult = (ok: boolean, error: string): string =>
   `if [ -n "$STAGE_UPDATE_RESULT" ]; then ` +
   `printf '{"ok":%s,"error":"%s","at":"%s"}' ${ok} "${error}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STAGE_UPDATE_RESULT"; fi`;
 
+/**
+ * Everything brew and launchctl print lands in update.log. The script runs
+ * detached with stdio ignored, so without this a failed run leaves NOTHING —
+ * the real beta.20→28 failure was diagnosed from filesystem archaeology
+ * because brew's complaint went to a closed descriptor.
+ */
+const logCapture =
+  `[ -n "$STAGE_UPDATE_LOG" ] && exec >> "$STAGE_UPDATE_LOG" 2>&1; ` +
+  `echo "[brew] run starting $(date -u +%Y-%m-%dT%H:%M:%SZ)"`;
+
 export class HomebrewStrategy implements UpdateStrategy {
   readonly kind: InstallKind = "homebrew";
 
@@ -127,11 +137,33 @@ export class HomebrewStrategy implements UpdateStrategy {
     // window until the tap catches up. Reported as a failed run so the UI
     // says why nothing changed instead of pretending an update landed.
     //
+    // The restart is NOT chained on brew's exit code. `brew upgrade` stops the
+    // service BEFORE it finishes, so a brew that swaps the keg and then exits
+    // non-zero (a cleanup complaint is enough) has already darkened the box —
+    // and an `&&` chain then skips the restart it still owes. That is exactly
+    // how a real upgrade landed beta.28 on disk with nothing serving it: keg
+    // current, label unregistered, and the operator's only route back a shell.
+    // Whatever brew's verdict, if the version moved or brew failed midway, the
+    // service gets restarted; only the verdict reported changes.
+    //
     // writeResult(true) comes BEFORE the restart, same as install.sh's swap
     // mode: the restart kills the server, and the result file must already
     // say "done" when the reconnecting page asks.
+    const restart = [
+      // Clear the target's OWN registration before starting it again. The
+      // update path had no bootout at all, and that is the bug behind "it
+      // never comes back after an update": a stale registration makes every
+      // `brew services start` fail with "Bootstrap failed: 5", and kickstart
+      // cannot rescue a job that was never bootstrapped. The registration
+      // outlives `brew uninstall` — which does NOT unregister a service — so
+      // one orphan breaks every future install and upgrade until booted out.
+      bootout(target),
+      `${brew} services restart ${target}`,
+      kickstart(target),
+    ].join(" && ");
     const script = o.checkout
       ? [
+          logCapture + "; ",
           [
             `${brew} update`,
             `${brew} info ${target} >/dev/null`,
@@ -151,35 +183,29 @@ export class HomebrewStrategy implements UpdateStrategy {
           "; }",
         ].join("")
       : [
-          [
-            `${brew} update`,
-            `before=$(${brew} list --versions ${target})`,
-            `${brew} upgrade ${target}`,
-            `after=$(${brew} list --versions ${target})`,
-            `if [ "$before" = "$after" ]; then ` +
-              writeResult(
-                false,
-                "brew has no newer build yet - the tap usually catches up within minutes of a release. Nothing was restarted.",
-              ) +
-              `; exit 0; fi`,
-            // Clear the target's OWN registration before starting it again.
-            //
-            // This path had no bootout at all, and that is the bug behind "it never
-            // comes back after an update". A stale registration for this label makes
-            // every `brew services start` fail with "Bootstrap failed: 5", and the
-            // kickstart below cannot rescue a job that was never bootstrapped. The
-            // registration outlives `brew uninstall` — which does NOT unregister a
-            // service — so once one is orphaned it breaks every future install and
-            // upgrade, permanently, until something boots it out.
-            bootout(target),
-            writeResult(true, ""),
-            `${brew} services restart ${target}`,
-            kickstart(target),
-          ].join(" && "),
-          " || { ",
-          writeResult(false, "brew upgrade failed - see update.log"),
-          "; }",
-        ].join("");
+          logCapture,
+          `before=$(${brew} list --versions ${target})`,
+          `${brew} update && ${brew} upgrade ${target}; brew_rc=$?`,
+          `after=$(${brew} list --versions ${target})`,
+          // Failed brew: the service may already be stopped (brew stops it
+          // before it fails), so bring it back on whatever keg is current.
+          `if [ "$brew_rc" -ne 0 ]; then ` +
+            writeResult(
+              false,
+              "brew upgrade failed - see update.log. The service was restarted on the version already installed.",
+            ) +
+            `; ${restart}; exit 0; fi`,
+          // No-op: nothing changed, so nothing was stopped and nothing restarts.
+          `if [ "$before" = "$after" ]; then ` +
+            writeResult(
+              false,
+              "brew has no newer build yet - the tap usually catches up within minutes of a release. Nothing was restarted.",
+            ) +
+            `; exit 0; fi`,
+          writeResult(true, ""),
+          `${restart} || ` +
+            writeResult(false, "brew upgraded but the service did not restart - see update.log"),
+        ].join("; ");
 
     return { command: "bash", args: ["-c", script], env: { ...o.env } };
   }

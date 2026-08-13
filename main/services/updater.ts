@@ -32,6 +32,8 @@ import { detectInstallKind } from "./update/install-kind.js";
 import { detectTrack } from "./update/detect-track.js";
 import { CHANGELOG_CAP, fetchReleases, packagedUpdateStatus, type ReleaseInfo } from "./update/release-check.js";
 import { selectStrategy } from "./update/select-strategy.js";
+import { scheduleRelaunch } from "./update/relaunch.js";
+
 import { broadcast } from "./broadcaster.js";
 import { latestOnTrack, newerThan } from "./release-tags.js";
 import { appendUpdateLog, updateLogPath } from "./update-log.js";
@@ -569,6 +571,9 @@ export class Updater {
     console.log("[updater] manual restart requested — exiting for the service manager to relaunch");
     this.status = { ...this.status, phase: "updating", step: "restarting" };
     this.broadcast();
+    // launchd parks KeepAlive respawns, so exit alone leaves a Homebrew (or
+    // macOS tarball) box dark; the detached kickstart is what brings it back.
+    scheduleRelaunch();
     setTimeout(() => process.exit(0), 600);
     return this.getStatus();
   }
