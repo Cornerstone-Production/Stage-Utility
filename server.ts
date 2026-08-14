@@ -24,6 +24,7 @@ import { initLogPersistence } from "./main/services/log-persist.js";
 initLogPersistence();
 
 import { initUpdateLog } from "./main/services/update-log.js";
+import { exitForRestart } from "./main/services/update/relaunch.js";
 // Replay the last update's persisted activity into the /log buffer (and trim the
 // on-disk log) so an update that just restarted us is still visible at /log.
 initUpdateLog();
@@ -52,7 +53,11 @@ process.on("unhandledRejection", (reason) => {
 });
 process.on("uncaughtException", (err) => {
   console.error("[server] uncaught exception — exiting so the supervisor restarts us:", err);
-  process.exit(1);
+  // Through exitForRestart, not a bare exit: "the supervisor restarts us" is not
+  // true on launchd, which parks the respawn of a background job that exits
+  // ("pended nondemand spawn = inefficient") and leaves the box dark until a
+  // human runs kickstart. Same pairing the update and restart paths use.
+  exitForRestart(100, 1);
 });
 
 import { getUserDataPath } from "./main/services/app-paths.js";
