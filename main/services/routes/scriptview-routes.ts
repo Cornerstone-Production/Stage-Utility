@@ -76,8 +76,19 @@ export async function scriptviewRoutes(c: RouteCtx): Promise<void> {
         return;
       }
 
-      const rows = exportRows(sheet, variantId, { includeUnused });
-      const filename = exportFilename(sheet.name, variant?.name ?? null, format);
+      // "This week" is a resolution, not a variant: default -> standing variant
+      // -> per-plan variant -> that plan's tweaks. Without planId the tab had
+      // nothing to send and silently exported the default patch.
+      const planId = url.searchParams.get("planId") || null;
+      const serviceTypeId = url.searchParams.get("serviceTypeId") || null;
+      const plan = planId ? { planId, serviceTypeId } : undefined;
+
+      const rows = exportRows(sheet, variantId, { includeUnused, plan });
+      // Name it for what it is. A week export merges tweaks that belong to one
+      // plan, so labelling it with the underlying variant would put a file on
+      // the rack claiming to be the standing patch.
+      const label = plan ? "this-week" : (variant?.name ?? null);
+      const filename = exportFilename(sheet.name, label, format);
       if (format === "xlsx") {
         res.writeHead(200, {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

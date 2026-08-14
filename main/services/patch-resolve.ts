@@ -13,7 +13,17 @@ export function endpointKey(e: { rackId: string; dir: "in" | "out"; index: numbe
 }
 
 // Content fields an override/tweak may change (identity — rackId/dir/index — excluded).
-const CONTENT_FIELDS = ["label", "mic", "phantom", "feedType", "consoleChannel", "path", "unused", "notes", "micSlotRef", "pcoPosition"] as const;
+// Every content field an operator can edit. A field missing here is not a
+// cosmetic gap: diffEndpoints builds a variant's overrides from exactly this
+// list, so an edit to a field it omits diffs to {} and is discarded on save.
+// `owner` was missing — an ownership band typed into a variant or a week's
+// tweaks vanished on the next render, with no error — and endpointsEqual reads
+// the same list, so the /patch "what changed" highlight missed it too.
+//
+// If you add a field to PatchEndpoint that an operator can type into, add it
+// here in the same change. patch-resolve.test.ts asserts this list covers every
+// content field on the type, so the type checker and the test will tell you.
+export const CONTENT_FIELDS = ["label", "mic", "phantom", "feedType", "consoleChannel", "path", "unused", "notes", "micSlotRef", "pcoPosition", "owner"] as const;
 
 /** Empty-ish (null/undefined/"") values compare equal so "" vs undefined isn't a diff. */
 function eq(a: unknown, b: unknown): boolean {

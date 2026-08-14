@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { UploadIcon, XIcon, DownloadIcon } from "lucide-react";
 
-import { Button } from "../../components/ui";
+import { Button, toast } from "../../components/ui";
 import { invoke } from "../../lib/api";
 // The CSV rules live once, in main/services/csv.ts — shared with the archive
 // writer and the patch exporter, which this file has to agree with byte for
@@ -143,7 +143,22 @@ export function PatchImport({
       });
       added++;
     }
+
+    // Say what happened. `added` was counted and thrown away, so an import that
+    // matched nothing was indistinguishable from one that worked: the panel just
+    // closed. Rows whose channel cell holds no digits are skipped by the
+    // `continue` above, and the preview cannot warn about it because it prints
+    // the raw cell rather than the parsed number — map a column like "Input A"
+    // to Channel # and every row is dropped while the preview still looks full.
+    if (added === 0) {
+      setErr(
+        `None of the ${parsed.rows.length} rows had a usable channel number in "${parsed.headers[map.index] || `Col ${map.index + 1}`}". Nothing was imported — check the Channel # column.`,
+      );
+      return; // stay open, on the mapping the operator needs to correct
+    }
+
     onChange(Array.from(next.values()));
+    toast.success(`Imported ${added} ${added === 1 ? "channel" : "channels"}`);
     onClose();
   }
 
@@ -181,7 +196,10 @@ export function PatchImport({
                 {f.label}{f.required ? " *" : ""}
                 <select
                   value={map[f.key]}
-                  onChange={(e) => setMap((m) => ({ ...m, [f.key]: Number(e.target.value) }))}
+                  onChange={(e) => {
+                    setErr(null); // the mapping just changed; the old complaint is stale
+                    setMap((m) => ({ ...m, [f.key]: Number(e.target.value) }));
+                  }}
                   className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote text-fg"
                 >
                   <option value={-1}>— none —</option>
@@ -207,6 +225,7 @@ export function PatchImport({
             <Button variant="transparent" size="small" onClick={() => setParsed(null)}>Choose a different file</Button>
           </div>
           {map.index < 0 && <p className="text-caption2 text-warn-11">Map the Channel # column to continue.</p>}
+          {err && <p className="text-caption2 text-warn-11">{err}</p>}
         </div>
       )}
     </div>

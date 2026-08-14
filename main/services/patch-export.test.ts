@@ -155,3 +155,49 @@ describe("exportFilename", () => {
     }
   });
 });
+
+describe("exporting what the This week tab shows", () => {
+  // The divergence this file's header says the shared resolver exists to
+  // prevent. The tab passed variantId=null (its "variant" is the sentinel
+  // "__week", not a real one) and the route took no planId, so the download was
+  // the untouched DEFAULT patch while the screen showed variant + tweaks. An
+  // engineer who swapped a mic for the week taped a sheet to the rack showing
+  // the old patch, with nothing in the file or its name to say so.
+  const weekly = () =>
+    sheet({
+      variants: [{ id: "v1", name: "Christmas", overrides: { "r1:in:1": { rackId: "r1", dir: "in", index: 1, label: "Kick (sub)" } } }],
+      assignments: {
+        byServiceType: {},
+        byPlan: { p1: { variantId: "v1", tweaks: { "r1:in:2": { rackId: "r1", dir: "in", index: 2, mic: "e935" } } } },
+      },
+    } as Partial<PatchSheet>);
+
+  it("applies the plan's variant AND its week tweaks", () => {
+    const rows = exportRows(weekly(), null, { plan: { planId: "p1", serviceTypeId: null } });
+    const kick = rows.find((r) => r.console === "01");
+    const vox = rows.find((r) => r.console === "02");
+    assert.equal(kick?.label, "Kick (sub)", "the plan's variant must be applied");
+    assert.equal(vox?.source, "e935", "this week's tweak must be applied");
+  });
+
+  it("without the plan context it is still the plain default — the bug, pinned", () => {
+    const rows = exportRows(weekly(), null);
+    assert.equal(rows.find((r) => r.console === "01")?.label, "Kick", "no context, no resolution");
+  });
+
+  it("falls back to the service type's standing variant when the plan names none", () => {
+    const s = sheet({
+      variants: [{ id: "v1", name: "Christmas", overrides: { "r1:in:1": { rackId: "r1", dir: "in", index: 1, label: "Kick (sub)" } } }],
+      assignments: { byServiceType: { st1: "v1" }, byPlan: {} },
+    } as Partial<PatchSheet>);
+    const rows = exportRows(s, null, { plan: { planId: "p-unknown", serviceTypeId: "st1" } });
+    assert.equal(rows.find((r) => r.console === "01")?.label, "Kick (sub)");
+  });
+
+  it("names a week export for the week, not for the variant underneath it", () => {
+    // Labelling it "christmas" would put a file on the rack claiming to be the
+    // standing patch when it carries one Sunday's tweaks.
+    const name = exportFilename("FOH", "this-week", "csv", Date.parse("2026-08-09T12:00:00Z"));
+    assert.match(name, /^foh-this-week-/);
+  });
+});
