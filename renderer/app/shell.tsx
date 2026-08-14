@@ -26,6 +26,12 @@ function PageHeader() {
 
 export function Shell() {
   return (
+    // The rail carries `bg-rail` (grayer than the content in light, seamless in
+    // dark) and the content sits on `bg-bg` — the relationship the token layer
+    // already describes. The first pass had these the other way round.
+    //
+    // No divider rules between the rail, the context bar and the content: the
+    // surfaces already separate them, and 1px lines everywhere read as seams.
     <div className="flex h-[100dvh] overflow-hidden bg-bg">
       <Rail />
       <div className="flex flex-col flex-1 min-w-0">

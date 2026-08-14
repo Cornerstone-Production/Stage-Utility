@@ -74,7 +74,9 @@ export function ContextBar() {
   const bar = contextBarState(pcoLive, now, skewMs);
 
   return (
-    <header className="flex items-center gap-3 h-11 shrink-0 px-4 border-b border-line bg-surface">
+    // No bottom rule and no separate surface: it sits on the content background,
+    // so the page reads as one plane rather than a stack of bordered strips.
+    <header className="flex items-center gap-3 h-11 shrink-0 px-5 max-sm:px-3">
       <span className="text-footnote text-fg-muted truncate shrink-0">
         {state?.serviceTypeName ?? "No service type"}
       </span>

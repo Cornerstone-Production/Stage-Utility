@@ -1,27 +1,43 @@
-// Persistent navigation. Brand header (identity - always shown, never
-// configurable), the destinations, then the footer chrome carried over from the
-// settings shell: version + build identity, the three-way theme toggle, and the
-// persisted collapse control.
+// Persistent navigation.
+//
+// Built on the same Sidebar primitives the settings panel uses, rather than a
+// lookalike: SidebarListItem already carries the type scale, the accent-tinted
+// active row and icon, the row spacing and the collapsed-rail tooltip. A
+// hand-rolled copy drifted from all four on the first attempt.
+//
+// The one difference is what a row DOES. Settings selects a tab; here it
+// navigates, so onSelectedItemChange routes instead of setting state.
 
 import { useEffect, useState } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { useRouter, useRouterState } from "@tanstack/react-router";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon, SettingsIcon } from "lucide-react";
+import {
+  Sidebar,
+  SidebarChromeProvider,
+  SidebarList,
+  SidebarListItem,
+} from "../components/ui/sidebar";
+import { BrandHeader } from "../settings/brand-header";
 import { BrandLogo } from "../components/brand-logo";
 import { Tooltip } from "../components/ui/tooltip";
 import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
 import { useTheme } from "../lib/use-theme";
 import { useSidebarCollapsed } from "../lib/use-sidebar-collapsed";
+import { useIsMobile } from "../lib/use-media-query";
 import { buildLabel } from "../lib/build-label";
 import { useStageState } from "../main/use-stage-state";
 import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
-import { DESTINATIONS } from "./destinations";
+import { DESTINATIONS, type Destination } from "./destinations";
 import { cn } from "../lib/cn";
 
 export function Rail() {
   const { state } = useStageState();
   const theme = useTheme();
   const { collapsed, toggle } = useSidebarCollapsed();
+  const isMobile = useIsMobile();
+  const railed = collapsed && !isMobile;
+  const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   // The footer's version readout. A failure here must not blank the navigation,
@@ -38,117 +54,104 @@ export function Rail() {
     return () => { cancelled = true; };
   }, []);
 
+  const active =
+    DESTINATIONS.find((d) => pathname === d.path || pathname.startsWith(`${d.path}/`)) ?? null;
+
   return (
-    <nav
-      className={cn(
-        "flex flex-col shrink-0 border-r border-line bg-surface",
-        collapsed ? "w-14" : "w-56",
-      )}
-    >
-      <div className={cn("flex items-center h-12 shrink-0", collapsed ? "justify-center px-2" : "gap-2 px-3")}>
-        {state?.appLogo && (
-          <BrandLogo
-            logo={state.appLogo}
-            monochrome={state.appLogoMonochrome}
-            className="size-5 rounded select-none shrink-0"
+    <SidebarChromeProvider value={{ collapsed: railed, isMobile }}>
+      <Sidebar className={cn("shrink-0 border-r border-line", railed ? "w-14" : "w-56")}>
+        {railed ? (
+          state?.appLogo ? (
+            <div className="flex flex-col items-center pt-2">
+              <BrandLogo
+                logo={state.appLogo}
+                monochrome={state.appLogoMonochrome}
+                className="size-8 rounded-md text-fg"
+              />
+            </div>
+          ) : null
+        ) : (
+          <BrandHeader
+            name={state?.appName ?? "Stage Utility"}
+            logo={state?.appLogo ?? null}
+            monochrome={state?.appLogoMonochrome ?? false}
           />
         )}
-        {!collapsed && (
-          <span className="text-caption1 font-title text-fg truncate select-none">
-            {state?.appName ?? "Stage Utility"}
-          </span>
-        )}
-      </div>
 
-      <div className={cn("flex flex-col gap-0.5 py-2 min-h-0 overflow-y-auto", collapsed ? "px-2" : "px-2")}>
-        {DESTINATIONS.map((d) => {
-          const active = pathname === d.path || pathname.startsWith(`${d.path}/`);
-          const link = (
-            <Link
-              key={d.path}
-              to={d.path}
-              className={cn(
-                "flex items-center rounded-lg py-2 text-body transition-colors",
-                collapsed ? "justify-center px-0" : "gap-2.5 px-2.5",
-                active ? "bg-fill text-fg" : "text-fg-muted hover:bg-fill-hover hover:text-fg",
-              )}
-            >
-              {d.icon}
-              {!collapsed && <span className="truncate">{d.label}</span>}
-            </Link>
-          );
-          // Collapsed to icons, the label is the only thing naming the
-          // destination, so it has to survive as a tooltip.
-          return collapsed ? (
-            <Tooltip key={d.path} label={d.label} side="right">
-              {link}
-            </Tooltip>
-          ) : (
-            link
-          );
-        })}
-      </div>
+        <SidebarList
+          items={[...DESTINATIONS]}
+          selectedItem={active ?? undefined}
+          onSelectedItemChange={(d: Destination) => router.navigate({ to: d.path })}
+          getItemKey={(d: Destination) => d.path}
+        >
+          {DESTINATIONS.map((d) => (
+            <SidebarListItem key={d.path} item={d} icon={d.icon} title={d.label} />
+          ))}
+        </SidebarList>
 
-      <div className="mt-auto">
-        <div className={cn("border-t border-line py-2", collapsed ? "px-2" : "px-2")}>
+        <div className="mt-auto">
           {/* Settings is still its own document in Phase 1a; it becomes routes in
-              Phase 1b. A full navigation is correct here, not a router Link. */}
+              Phase 1b, at which point it joins the list above. Quieter and
+              smaller than a destination because it is not one. */}
           <a
             href="/settings"
             className={cn(
-              "flex items-center rounded-lg py-2 text-body text-fg-muted hover:bg-fill-hover hover:text-fg transition-colors",
-              collapsed ? "justify-center px-0" : "gap-2.5 px-2.5",
+              "flex items-center gap-2.5 mx-2 rounded-lg px-2.5 py-1.5",
+              "text-caption1 font-medium text-fg-subtle transition-colors",
+              "hover:bg-fill hover:text-fg",
+              railed && "justify-center px-0",
             )}
+            aria-label={railed ? "Settings" : undefined}
           >
-            <SettingsIcon className="size-4 shrink-0" />
-            {!collapsed && <span>Settings</span>}
+            <SettingsIcon className="size-3.5 shrink-0" />
+            {!railed && <span>Settings</span>}
           </a>
-        </div>
 
-        {/* Carried from the settings shell. Rail-aware: collapsed stacks a
-            compact toggle over the expand button so the wide pill and the
-            version never clip the narrow rail. */}
-        {collapsed ? (
-          <div className="flex flex-col items-center gap-1.5 border-t border-line px-2 py-2.5">
-            <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} vertical />
-            <button
-              type="button"
-              aria-label="Expand sidebar"
-              onClick={toggle}
-              className="rounded-lg p-1.5 text-fg-subtle hover:bg-fill-hover hover:text-fg transition-colors"
-            >
-              <PanelLeftOpenIcon className="size-4" />
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-2 border-t border-line px-3 py-2.5">
-            {/* The label truncates in the rail, so the hover carries the whole
-                build identity — version, track, commit and date. That is what
-                gets asked for when something needs diagnosing. */}
-            <Tooltip
-              label={versionError ? `Could not read the build version — ${versionError}` : buildLabel(updateStatus)}
-              side="top"
-            >
-              <span className="min-w-0 text-[11.5px] leading-none text-fg-subtle tabular-nums truncate">
-                {versionError
-                  ? "version unavailable"
-                  : `${updateStatus?.version ? `v${updateStatus.version}` : ""}${updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}`}
-              </span>
-            </Tooltip>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} />
+          {/* Version, theme and collapse. Rail-aware: collapsed stacks a compact
+              toggle over the expand button so the wide pill and the version
+              never clip the narrow rail. */}
+          {railed ? (
+            <div className="flex flex-col items-center gap-1.5 px-2 py-2.5">
+              <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} vertical />
               <button
                 type="button"
-                aria-label="Collapse sidebar"
+                aria-label="Expand sidebar"
                 onClick={toggle}
-                className="rounded-lg p-1.5 text-fg-subtle hover:bg-fill-hover hover:text-fg transition-colors max-sm:hidden"
+                className="rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors"
               >
-                <PanelLeftCloseIcon className="size-4" />
+                <PanelLeftOpenIcon className="size-4" />
               </button>
             </div>
-          </div>
-        )}
-      </div>
-    </nav>
+          ) : (
+            <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+              {/* The label truncates in the rail, so the hover carries the whole
+                  build identity — version, track, commit and date. That is what
+                  gets asked for when something needs diagnosing. */}
+              <Tooltip
+                label={versionError ? `Could not read the build version — ${versionError}` : buildLabel(updateStatus)}
+                side="top"
+              >
+                <span className="min-w-0 text-[11.5px] leading-none text-fg-subtle tabular-nums truncate">
+                  {versionError
+                    ? "version unavailable"
+                    : `${updateStatus?.version ? `v${updateStatus.version}` : ""}${updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}`}
+                </span>
+              </Tooltip>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} />
+                <button
+                  type="button"
+                  aria-label="Collapse sidebar"
+                  onClick={toggle}
+                  className="rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors max-sm:hidden"
+                >
+                  <PanelLeftCloseIcon className="size-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Sidebar>
+    </SidebarChromeProvider>
   );
 }
