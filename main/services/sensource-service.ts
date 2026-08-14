@@ -283,31 +283,17 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
   private zonesCache: { at: number; zones: VeaZone[] } | null = null;
   /** Cached /space listing for the authoritative building occupancy. */
   private spacesCache: { at: number; spaces: VeaSpace[] } | null = null;
-  /** Consumers that read getLatest() in-process. See addDemandSource. */
-  private demandSources: (() => boolean)[] = [];
-
-  /**
-   * Register something that consumes people counts without an SSE subscription.
-   *
-   * The idle gate below slows polling to once a minute when nobody is watching,
-   * and asked only `channelHasSubscribers` — a browser question. Two consumers
-   * live inside this process and are invisible to it: the attendance recorder
-   * pulls getLatest() on every live tick, and tslService pushes it to the
-   * scoreboard. On a Sunday with no people-count display open, the recorder was
-   * therefore sampling counts up to a minute stale for the whole service, and
-   * the graph it drew was the shape of the poll gate rather than of the room.
-   *
-   * A callback rather than an import: this service knowing about its consumers
-   * directly would be a cycle, since both of them import it.
-   */
-  addDemandSource(wantsFreshCounts: () => boolean): void {
-    this.demandSources.push(wantsFreshCounts);
-  }
-
-  /** Is anything — a browser or an in-process consumer — actually using this? */
-  private get inDemand(): boolean {
-    return this.hasSubscribers || this.demandSources.some((wants) => wants());
-  }
+  // addDemandSource / inDemand now live on StatusIntegration.
+  //
+  // They were written here first, for the same failure the SPL channel then hit
+  // independently: the idle gate below asked only `channelHasSubscribers`, a
+  // browser question, while the attendance recorder and tslService consume counts
+  // in-process and are invisible to it. On a Sunday with no people-count display
+  // open the recorder sampled counts up to a minute stale for the whole service,
+  // and the graph it drew was the shape of the poll gate rather than of the room.
+  //
+  // Second instance, so the shape moved to the base class rather than being
+  // copied — see integration-base.ts.
 
   /** True while the pending poll was scheduled at the slow idle cadence. */
   private polledIdle = false;

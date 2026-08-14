@@ -108,6 +108,32 @@ export abstract class ConnectionLifecycle {
     return channelHasSubscribers(this.channel);
   }
 
+  /** In-process consumers that read this channel without an SSE subscription. */
+  private readonly demandSources: (() => boolean)[] = [];
+
+  /**
+   * Register a consumer that needs this channel broadcast even with no browser
+   * attached.
+   *
+   * An SSE subscriber check can only see browsers, and the automation engine is
+   * not one: it listens on the broadcast bus in-process, so gating a broadcast on
+   * `hasSubscribers` silently disabled every rule that reads it. An SPL threshold
+   * rule fired only while someone happened to have a meter open — which on an
+   * unattended appliance is never — and the operator saw an enabled rule that had
+   * simply never run, with no error anywhere.
+   *
+   * Same shape as sensourceService.addDemandSource, and a callback rather than an
+   * import because the consumer imports the service.
+   */
+  addDemandSource(wantsBroadcast: () => boolean): void {
+    this.demandSources.push(wantsBroadcast);
+  }
+
+  /** Is anything — a browser or an in-process consumer — actually using this? */
+  protected get inDemand(): boolean {
+    return this.hasSubscribers || this.demandSources.some((wants) => wants());
+  }
+
   /**
    * Queue the next attempt with exponential back-off, clamped by serviceWindow
    * (≤2 min inside a service window or while a client is watching; out to the

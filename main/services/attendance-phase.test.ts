@@ -40,9 +40,9 @@ function item(over: Partial<PcoLiveDTO> = {}): PcoLiveDTO {
 const ctx = (over: Partial<PhaseContext> = {}): PhaseContext => ({
   hasOpenRecord: false,
   endedAt: null,
-  // Default: the held record is a PREVIOUS occurrence, which is what the taper
-  // is for. Cases about the current occurrence set this explicitly.
-  heldServiceTimeId: "st-previous",
+  // Default: the held record covered a service that actually ran, which is what
+  // the taper is for. Cases about a ramp-only record set this to null.
+  heldServiceStartedAt: new Date(SERVICE_START).toISOString(),
   preMs: 60 * 60_000,
   postMs: 60 * 60_000,
   ...over,
@@ -118,26 +118,42 @@ describe("a service that starts late", () => {
   // ramp grace because the service has not gone live yet; the recorder closes the
   // fresh record, and the taper then reopened it — recording the room FILLING for
   // that service as its own post-service taper, before it had begun.
-  // "st-1" is the occurrence the preservice() fixture reports, so holding it
-  // means the held record IS the service we are waiting on.
-  const HELD_IS_THIS_SERVICE = "st-1";
+  // A ramp-only record: opened while the room filled, closed by the fall-through,
+  // never having classified as "service" — so it has no serviceStartedAt.
+  const RAMP_ONLY = null;
 
-  it("never tapers the occurrence PCO is currently reporting", () => {
+  it("never tapers a record that only ever held an arrival ramp", () => {
     const c = ctx({
       endedAt: new Date(SERVICE_START + 5 * 60_000).toISOString(),
-      heldServiceTimeId: HELD_IS_THIS_SERVICE,
+      heldServiceStartedAt: RAMP_ONLY,
     });
     const phase = classifyPhase(preservice(), c, SERVICE_START + 12 * 60_000);
     assert.notEqual(phase, "post", "the arrival crowd must not be recorded as taper");
   });
 
-  it("still tapers a genuinely previous occurrence", () => {
+  it("tapers the LAST service of the day, whose occurrence PCO still reports", () => {
+    // The regression that made the whole taper unreachable on a normal Sunday.
+    // Once everything is over, pick-service-time deliberately keeps reporting the
+    // service that just happened — "the last one is the service that just
+    // happened, which the taper and the history record still belong to" — so the
+    // held record's occurrence and the live one are the SAME. The old guard
+    // compared those ids for inequality and returned null here, meaning a
+    // single-service Sunday recorded nothing after the benediction.
+    const c = ctx({
+      endedAt: new Date(SERVICE_START + 70 * 60_000).toISOString(),
+      heldServiceStartedAt: new Date(SERVICE_START).toISOString(),
+    });
+    // preservice() reports occurrence "st-1"; the held record is that same one.
+    assert.equal(classifyPhase(preservice(), c, SERVICE_START + 90 * 60_000), "post");
+  });
+
+  it("still tapers after a service that actually ran", () => {
     // The case the taper exists for must keep working. Placed BEFORE the ramp
     // window opens, since the ramp deliberately outranks the taper where the two
     // overlap — covered separately above.
     const c = ctx({
       endedAt: new Date(SERVICE_START - 100 * 60_000).toISOString(),
-      heldServiceTimeId: "st-9",
+      heldServiceStartedAt: new Date(SERVICE_START - 160 * 60_000).toISOString(),
     });
     assert.equal(classifyPhase(preservice(), c, SERVICE_START - 90 * 60_000), "post");
   });

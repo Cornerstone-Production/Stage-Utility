@@ -64,7 +64,7 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
     return classifyPhase(live, {
       hasOpenRecord: this.current != null && this.current.endedAt == null,
       endedAt: this.current?.endedAt ?? null,
-      heldServiceTimeId: this.current?.serviceTimeId ?? null,
+      heldServiceStartedAt: this.current?.serviceStartedAt ?? null,
       preMs: this.preMs,
       postMs: this.postMs,
     });
