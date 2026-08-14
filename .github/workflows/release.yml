@@ -37,6 +37,9 @@ concurrency:
 
 permissions:
   contents: write
+  # Only to dispatch ci.yml against the version-bump commit, which a
+  # GITHUB_TOKEN push cannot trigger on its own.
+  actions: write
 
 jobs:
   release:
@@ -207,6 +210,8 @@ jobs:
         if: steps.version.outputs.skip == 'false'
         env:
           V: ${{ steps.version.outputs.version }}
+          # For the `gh workflow run` dispatch below.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
@@ -228,6 +233,13 @@ jobs:
           if git push origin "HEAD:${GITHUB_REF_NAME}"; then
             git push origin "v$V"
             echo "pushed=true" >> "$GITHUB_OUTPUT"
+            # Run CI against the bump commit. A GITHUB_TOKEN push triggers no
+            # workflows, so without this the commit — which is the head of the
+            # open release PR — never gets the suite run against it, and the PR
+            # shows only CodeQL. Not fatal: the tree differs from its parent by a
+            # version string, and the parent was verified above.
+            gh workflow run ci.yml --ref "${GITHUB_REF_NAME}" \
+              || echo "::warning::could not dispatch CI for v$V; run it by hand on ${GITHUB_REF_NAME}"
           else
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "::notice::${GITHUB_REF_NAME} advanced during this run — skipping v$V. The run for the newer commit will release it."

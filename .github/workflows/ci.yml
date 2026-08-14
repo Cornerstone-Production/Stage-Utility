@@ -4,6 +4,16 @@ on:
   push:
     branches: [main, beta]
   pull_request:
+  # Lets a specific commit be verified on demand — and lets release.yml verify
+  # the version-bump commit it just pushed.
+  #
+  # A push made with GITHUB_TOKEN triggers no workflows at all, so the release
+  # bump landed on `beta` with nothing running against it. The release PR's head
+  # IS that commit, so its check list showed only default-setup CodeQL: "all
+  # checks green" on the release PR meant the test suite had not run on the tree
+  # being released. (`[skip ci]` in the bump message was not the cause and
+  # removing it would not have helped.)
+  workflow_dispatch:
 
 # Least privilege, stated rather than inherited: the repository default is
 # read today, but a settings change should not silently widen every workflow.
