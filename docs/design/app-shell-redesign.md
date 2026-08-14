@@ -61,6 +61,19 @@ URL" feeling:
 
 ## Constraints
 
+- **No feature is dropped without a stated reason or a named replacement.**
+  Every phase ships a **feature parity inventory**: a table of what the surfaces
+  being replaced can do, each row marked carried, replaced (naming the
+  replacement) or dropped (with the reason). A row may not be blank, and the
+  inventory is a review gate, not a note. This exists because the first draft of
+  the Phase 1a plan silently lost nine controls — the three-way theme toggle, the
+  version readout and build-identity tooltip, the persisted rail collapse and its
+  collapsed layout, the mobile drawer, per-section headers, per-section error
+  boundaries, and History's reset-on-reselect — none of which are settings
+  behaviour. They are *shell* behaviour that happened to live in the settings
+  shell, and a migration that quietly loses one is a regression found on a Sunday.
+  Where a carried behaviour exists in code, it is **extracted and shared**, not
+  reimplemented, so the old and new surfaces cannot drift.
 - **Wall displays are inert by default.** A screen bolted to a wall shows output;
   whoever walks past must not be able to change it or trigger anything. A screen
   becomes interactive only through an explicit, deliberate opt-in (Section 4).
