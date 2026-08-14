@@ -93,6 +93,11 @@ Nothing to clone and no Node to install: the download carries its own runtime.
 The installers verify the download, register an auto-starting service, and print
 the address to open. After that it updates itself from **Settings -> Advanced**.
 
+Testing a prerelease on a spare machine? See
+[Installing a beta](docs/ops/install-and-config.md#installing-a-beta) — in a
+`curl | sudo bash` pipeline, `STAGE_TRACK=beta` does not go where you would
+expect.
+
 To work on the code instead:
 
 ```bash

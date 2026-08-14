@@ -35,16 +35,69 @@ they stop before writing anything.
 
 A 32-bit Raspberry Pi OS is not published; the arm64 build runs on a 64-bit one.
 
-Options for the one-line installers, set as environment variables before the
-command:
+Options for the one-line installers:
 
 | | |
 |---|---|
-| `STAGE_TRACK=beta` | follow prereleases instead of stable |
+| `STAGE_TRACK=beta` | install a prerelease instead of stable |
 | `STAGE_VERSION=v1.9.2` | pin an exact release |
 | `STAGE_PORT=8080` | serve on a different port |
 | `STAGE_DATA=/srv/stage` | put config and history somewhere else |
 | `STAGE_NO_SERVICE=1` | install the files, register nothing |
+
+**Where they go matters.** In a `curl … | sudo bash` pipeline, a variable placed
+at the front is set for `curl`, not for the shell that runs the script — the
+installer never sees it and quietly installs the defaults. Put it on the `bash`
+side, via `env`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.sh \
+  | sudo env STAGE_PORT=8080 bash
+```
+
+`sudo env VAR=…` rather than `sudo VAR=…`: sudo may refuse to set a variable it
+was not configured to allow (see `setenv` in `sudoers(5)`), and it refuses
+silently. `env` applies the assignment itself, so it works on any machine.
+
+On Windows the script runs in the current PowerShell session, so a plain
+assignment on the line before is enough:
+
+```powershell
+$env:STAGE_PORT = "8080"; irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.ps1 | iex
+```
+
+### Installing a beta
+
+Betas are cut from the `beta` branch on every merge and carry the same
+verification as a stable release — CI has to pass before the tag exists. They
+are the right choice for a spare machine you are testing on, and the wrong one
+for the machine running Sunday.
+
+**Linux and macOS**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.sh \
+  | sudo env STAGE_TRACK=beta bash
+```
+
+**Windows** — in an Administrator PowerShell:
+
+```powershell
+$env:STAGE_TRACK = "beta"; irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.ps1 | iex
+```
+
+To pin one exact version instead of "newest on the track", add
+`STAGE_VERSION=v1.10.0-beta.30` the same way. The installer always fetches the
+installer script from `main`, whichever track it installs.
+
+An install already running does **not** need reinstalling to change track:
+**Settings → Advanced → Update track** switches between main and beta in place,
+in either direction, and keeps your configuration. Use that unless the box is
+too old to update itself.
+
+A beta box follows prereleases *and* stable releases, so it is never held back
+from the release its own prereleases produced. See
+[Releases and distribution](distribution.md#tracks).
 
 After that, update from **Settings → Advanced → Updates** — see
 [Releases and distribution](distribution.md).
