@@ -4,6 +4,11 @@
 #
 #     sudo ./scripts/uninstall.sh
 #
+# SCOPE: the systemd unit only — Linux, and the service registration alone. It
+# does NOT remove an installed tree under /opt/stage-utility, the service
+# account, a macOS launchd daemon, a Windows scheduled task, or a Homebrew
+# install. Those are in docs/ops/install-and-config.md#uninstalling.
+#
 # Leaves the data directory untouched (it holds your encryption key + config).
 # Its path is printed so you can back it up or remove it deliberately.
 #

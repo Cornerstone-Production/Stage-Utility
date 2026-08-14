@@ -116,6 +116,81 @@ npm start          # → http://localhost:8788/
 from source and requiring Node ≥ 24 on the machine. `sudo ./scripts/uninstall.sh`
 removes it. Step-by-step per platform is in [INSTALL.md](../../INSTALL.md).
 
+## Uninstalling
+
+Every method leaves two things behind: the **service registration** that starts
+it at boot, and the **data directory** holding your configuration, history and
+encryption key. Removing the service is safe and reversible; the data directory
+is deliberately never removed for you.
+
+Remove the service first. A registration left behind keeps starting a server
+that fights the new one for port 8788 — including after you have switched to a
+different install method, where it looks like the new method is broken.
+
+**Linux** (one-line installer or a checkout)
+
+```bash
+sudo systemctl disable --now stage-utility
+sudo rm /etc/systemd/system/stage-utility.service
+sudo systemctl daemon-reload
+sudo rm -rf /opt/stage-utility            # the install; data lives elsewhere
+sudo userdel stage-utility                # the service account, if unused
+```
+
+`sudo ./scripts/uninstall.sh` does the first three from a checkout. It does not
+remove `/opt/stage-utility` or the account.
+
+**macOS** (one-line installer)
+
+```bash
+sudo launchctl bootout system/com.cornerstone.stage-utility   # stop it now
+sudo rm /Library/LaunchDaemons/com.cornerstone.stage-utility.plist
+sudo rm -rf /usr/local/stage-utility
+```
+
+The `bootout` matters on its own: deleting the plist stops it coming back at
+boot, but leaves the running process serving until the machine restarts.
+
+**Windows** — Administrator PowerShell
+
+```powershell
+Stop-ScheduledTask -TaskName StageUtility -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName StageUtility -Confirm:$false
+Remove-Item "$env:ProgramFiles\Stage Utility" -Recurse -Force
+```
+
+**Homebrew**
+
+```bash
+brew services stop stage-utility          # or stage-utility-beta
+brew uninstall stage-utility
+launchctl bootout "gui/$(id -u)/homebrew.mxcl.stage-utility" 2>/dev/null || true
+brew untap Cornerstone-Production/stage-utility   # optional
+```
+
+The `bootout` is not redundant: `brew uninstall` does not always unregister the
+launchd job, and an orphaned label makes every future `brew services start`
+fail with `Bootstrap failed: 5: Input/output error` — permanently, across
+reinstalls, until something boots it out.
+
+### The data directory
+
+Left intact by every command above, because it holds config, history, and the
+encryption key that makes stored secrets readable. Remove it only when you mean
+to, and take a backup first if the machine may be rebuilt
+(**Settings → Advanced → Backup & restore**, or copy the directory).
+
+| Install | Data directory |
+|---|---|
+| Linux (one-line) | `/var/lib/stage-utility` |
+| macOS (one-line) | `/usr/local/var/stage-utility` |
+| Windows | `%ProgramData%\stage-utility` |
+| Homebrew | `$(brew --prefix)/var/stage-utility` |
+| Checkout / dev | `~/.stage-utility` |
+
+A custom `STAGE_DATA` at install time overrides these; the running server prints
+its own path in **Settings → Advanced**.
+
 ## Updates
 
 **Advanced → Updates** works however the server was installed, and so does
