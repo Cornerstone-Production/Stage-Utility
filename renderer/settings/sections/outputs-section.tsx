@@ -2,11 +2,16 @@ import { errorMessage } from "@main/services/errors";
 import { useState, useEffect, type ChangeEvent, type CSSProperties } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
+import { SortableContext, useSortable, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, GripVerticalIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, PencilIcon } from "lucide-react";
-import { ViewPreview } from "./view-preview";
+import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, GripVerticalIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon } from "lucide-react";
+import { LazyPreview } from "./lazy-preview";
+import { cn } from "../../lib/cn";
+
+/** Shared menu-item styling, so the six actions cannot drift apart. */
+const MENU_ITEM =
+  "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill";
 import {
   Button,
   Input,
@@ -17,7 +22,6 @@ import {
   SelectValue,
   toast,
 } from "../../components/ui";
-import { cn } from "../../lib/cn";
 import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
 import { invoke, onNotification } from "../../lib/api";
@@ -110,18 +114,24 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
 
   const outputUrl = `${baseUrl}/${encodeURIComponent(output.id)}`;
 
+  // The friendly-URL editor is revealed from the overflow menu rather than
+  // always shown. It is set once per screen and then never touched, and two
+  // permanent rows of mono URL per card buried the thing the card is FOR — what
+  // that screen is showing.
+  const [showSlug, setShowSlug] = useState(false);
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className="overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]"
+      className="flex flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]"
     >
-      {/* Header: drag handle + display icon + editable name + overflow menu */}
-      <div className="flex items-center gap-2.5 px-3 pt-2">
+      {/* Header: drag handle + tinted icon + editable name + status + overflow */}
+      <div className="flex items-center gap-2 px-3 pt-2.5">
         <button
           {...attributes}
           {...listeners}
-          className="cursor-grab active:cursor-grabbing touch-pan-y shrink-0 text-gray-7 hover:text-gray-9 transition-colors"
+          className="cursor-grab active:cursor-grabbing touch-pan-y shrink-0 text-fg-faint hover:text-fg-muted transition-colors"
           aria-label="Drag to reorder"
           tabIndex={-1}
         >
@@ -136,12 +146,15 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           aria-label="Display name"
         />
         <Tooltip label={online ? "A screen is connected to this display" : "No screen is currently connected"}>
-          <span
-            className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted" aria-label={online ? "A screen is connected to this display" : "No screen is currently connected"}>
+          <span className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted">
             <span className={`size-2 rounded-full ${online ? "bg-ok-9" : "bg-fg-faint"}`} />
-            {online ? "Connected" : "Offline"}
+            {online ? "Online" : "Offline"}
           </span>
         </Tooltip>
+
+        {/* Everything set-once lives here: opening, locking, the URLs, refresh
+            and remove. The card face keeps only what an operator changes while
+            working — what it shows, and the way into its layout. */}
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
             <button
@@ -155,12 +168,38 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
             <DropdownMenu.Content
               align="end"
               sideOffset={4}
-              className="z-50 min-w-max rounded-md border border-line-strong bg-popover p-1 shadow-md backdrop-blur-xl"
+              className="z-50 min-w-48 rounded-md border border-line-strong bg-popover p-1 shadow-md backdrop-blur-xl"
             >
+              <DropdownMenu.Item onSelect={onOpenWindow} className={MENU_ITEM}>
+                <ExternalLinkIcon className="size-3.5 text-fg-subtle" />
+                Open display
+              </DropdownMenu.Item>
               <DropdownMenu.Item
-                onSelect={onRefresh}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill"
+                onSelect={() => onSetLocked(!(output.locked ?? false))}
+                className={MENU_ITEM}
               >
+                {output.locked ? <LockIcon className="size-3.5 text-accent" /> : <LockOpenIcon className="size-3.5 text-fg-subtle" />}
+                {output.locked ? "Unlock display" : "Lock display"}
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                onSelect={async () => {
+                  if (await copyText(outputUrl)) toast.success("URL copied");
+                  else toast.error("Couldn't copy — open the menu again and use Friendly URL to see it");
+                }}
+                className={MENU_ITEM}
+              >
+                <CopyIcon className="size-3.5 text-fg-subtle" />
+                Copy URL
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                onSelect={(e) => { e.preventDefault(); setShowSlug((v) => !v); }}
+                className={MENU_ITEM}
+              >
+                <LinkIcon className="size-3.5 text-fg-subtle" />
+                {showSlug ? "Hide URLs" : "URLs & friendly link"}
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator className="my-1 h-px bg-line" />
+              <DropdownMenu.Item onSelect={onRefresh} className={MENU_ITEM}>
                 <RefreshCwIcon className="size-3.5 text-fg-subtle" />
                 Refresh display
               </DropdownMenu.Item>
@@ -177,33 +216,33 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
         </DropdownMenu.Root>
       </div>
 
-      {/* A LIVE preview: the real kiosk renderers in an iframe, scaled — the same
-          component the layout editor uses. A static placeholder here answered
-          "what view is assigned" but not "what is actually on that wall", which
-          is the question the card exists for. */}
-      {output.viewId ? (
-        <div className="px-3 pt-2">
-          <ViewPreview viewId={output.viewId} />
-        </div>
-      ) : (
-        <div className="px-3 pt-2">
+      {/* A LIVE preview: the real kiosk renderers in an iframe, scaled. It only
+          mounts once the card is on screen — eight iframes booting at once each
+          fetch state and open a stream, which timed out the server on a real
+          install with eight displays. */}
+      <div className="px-3 pt-2">
+        {output.viewId ? (
+          <LazyPreview viewId={output.viewId} />
+        ) : (
           <div className="grid aspect-video place-items-center rounded-lg border border-dashed border-line text-caption1 text-fg-subtle">
             Nothing assigned
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Shows → View. Sized like every other select in the app: an oversized
-          trigger here (17px in a 36px control, against 13px/28px elsewhere) made
-          the whole tab read as a different scale. The card layout and the "Shows"
-          label already identify it as the primary control. */}
-      <div className="flex items-center gap-3 px-3 py-2">
-        <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-subtle">
-          Shows
-        </span>
+      {/* What it shows, and the way into its layout. The two controls an
+          operator actually reaches for. */}
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+        {/* A pill, not a full-width field. The card is a thing you glance at;
+            a form control spanning it made every card read as a form. */}
         <Select value={output.viewId ?? UNROUTED} onValueChange={(v: string) => onSetView(v === UNROUTED ? null : v)}>
-          <SelectTrigger className="flex-1">
-            <SelectValue placeholder="Pick a view…" />
+          <SelectTrigger
+            className={cn(
+              "h-7 w-auto min-w-0 max-w-[62%] rounded-lg border-transparent px-2.5 text-footnote font-medium",
+              output.viewId ? "bg-fill text-fg" : "bg-warn-3 text-warn-11",
+            )}
+          >
+            <SelectValue placeholder="Pick a view" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={UNROUTED}>— Unrouted —</SelectItem>
@@ -214,74 +253,46 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
             ))}
           </SelectContent>
         </Select>
-      </div>
-
-      {/* Primary action + lock */}
-      <div className="flex items-center gap-3 px-3 pb-2">
-        <Button variant="filled" size="small" onClick={onOpenWindow} aria-label={`Open window for ${output.name}`}>
-          <ExternalLinkIcon className="size-3.5 text-gray-9" />
-          Open
-        </Button>
-        {onEditLayout && (
-          <Button variant="transparent" size="small" onClick={onEditLayout} aria-label={`Edit layout for ${output.name}`}>
-            <PencilIcon className="size-3.5" />
-            Edit layout
-          </Button>
-        )}
-        {/* The padlock is the state, so a separate switch beside it said the same
-            thing twice. Closed and accented = locked, open and muted = not. */}
-        <Tooltip label="Hide the settings/QR link and home logo on this display so a handed-out link can't navigate away">
+        <Tooltip label={onEditLayout ? "Edit this view's layout" : "Only a custom view has a layout to edit"}>
           <button
             type="button"
-            onClick={() => onSetLocked(!(output.locked ?? false))}
-            aria-pressed={output.locked ?? false}
-            aria-label={`${output.locked ? "Unlock" : "Lock"} display ${output.name}`}
-            className={cn(
-              "ml-auto flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-caption1 transition-colors",
-              output.locked
-                ? "border-accent/40 bg-accent/15 text-accent"
-                : "border-line text-fg-muted hover:bg-fill hover:text-fg",
-            )}
+            onClick={onEditLayout}
+            disabled={!onEditLayout}
+            className="shrink-0 text-footnote text-accent transition-opacity hover:underline disabled:text-fg-faint disabled:no-underline disabled:opacity-60"
           >
-            {output.locked ? <LockIcon className="size-3.5" /> : <LockOpenIcon className="size-3.5" />}
-            <span>{output.locked ? "Locked" : "Unlocked"}</span>
+            Edit layout
           </button>
         </Tooltip>
       </div>
 
-      {/* Footer: the permanent URL, quiet — click to copy */}
-      <Tooltip label="Copy URL">
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 border-t border-line px-3 py-2 text-left transition-colors hover:bg-fill"
-          onClick={async () => { if (await copyText(outputUrl)) toast.success("URL copied"); else toast.error("Couldn't copy — select the URL manually"); }} aria-label="Copy URL">
-          <span className="min-w-0 flex-1 truncate font-mono text-caption2 text-fg-subtle">{outputUrl}</span>
-          <CopyIcon className="size-3.5 shrink-0 text-fg-subtle" />
-        </button>
-      </Tooltip>
-
-      {/* Optional friendly URL. The address above never changes, so anything
-          already pointed at it — a Pi, a bookmark, a printed QR — keeps working
-          whatever is typed here. */}
-      <div className="flex items-center gap-2 border-t border-line px-3 py-2">
-        {/* Mono throughout: the label butting against a mono URL in the UI face
-            read as two different things stuck together, and the row above this one
-            is all mono. */}
-        <span className="shrink-0 font-mono text-caption2 text-fg-faint">Also at</span>
-        <span className="shrink-0 font-mono text-caption2 text-fg-subtle">{baseUrl}/</span>
-        <Input
-          value={editSlug}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setEditSlug(e.target.value)}
-          onBlur={handleSlugBlur}
-          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-          placeholder="optional"
-          aria-label={`Custom URL for ${output.name}`}
-          className="h-7 min-w-0 flex-1 font-mono text-caption2"
-        />
-        {slugError && (
-          <span className="shrink-0 text-caption2 text-red-10" role="alert">{slugError}</span>
-        )}
-      </div>
+      {/* Revealed from the menu. The permanent address never changes, so a Pi, a
+          bookmark or a printed QR keeps working whatever is typed here. */}
+      {showSlug && (
+        <div className="border-t border-line px-3 py-2 flex flex-col gap-1.5">
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 text-left"
+            onClick={async () => { if (await copyText(outputUrl)) toast.success("URL copied"); }}
+            aria-label="Copy URL"
+          >
+            <span className="min-w-0 flex-1 truncate font-mono text-caption2 text-fg-subtle">{outputUrl}</span>
+            <CopyIcon className="size-3.5 shrink-0 text-fg-subtle" />
+          </button>
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 font-mono text-caption2 text-fg-faint">Also at {baseUrl}/</span>
+            <Input
+              value={editSlug}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setEditSlug(e.target.value)}
+              onBlur={handleSlugBlur}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              placeholder="optional"
+              aria-label={`Custom URL for ${output.name}`}
+              className="h-7 min-w-0 flex-1 font-mono text-caption2"
+            />
+          </div>
+          {slugError && <span className="text-caption2 text-red-10" role="alert">{slugError}</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -331,8 +342,13 @@ export function OutputsSection({
       </p>
 
       <DndContext sensors={handlers.sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={outputs.map((o) => o.id)} strategy={verticalListSortingStrategy}>
-          <div className="flex flex-col gap-3">
+        {/* A GRID, not a column. Full-width rows made each card a page of its
+            own and buried the thing the page is for - comparing screens at a
+            glance. rectSortingStrategy is the grid-aware counterpart to the
+            vertical strategy; the vertical one assumes a single column and
+            computes the wrong drop target as soon as there are two. */}
+        <SortableContext items={outputs.map((o) => o.id)} strategy={rectSortingStrategy}>
+          <div className="grid gap-3 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
             {outputs.map((output) => (
               <OutputRow
                 key={output.id}
@@ -359,15 +375,29 @@ export function OutputsSection({
                 }
               />
             ))}
+            {/* The add tile sits IN the grid. As a button under eight cards it
+                was below the fold on the page where you would want it. */}
+            <button
+              type="button"
+              onClick={handlers.handleAddOutput}
+              className="flex flex-col rounded-xl border border-dashed border-line bg-transparent p-3 text-left transition-colors hover:border-line-strong hover:bg-fill"
+            >
+              <span className="flex items-center gap-2 px-0.5 pb-2 pt-0.5">
+                <PlusIcon className="size-4 text-fg-subtle" />
+                <span className="text-callout font-semibold text-fg">Add a screen</span>
+              </span>
+              <span className="grid aspect-video w-full place-items-center rounded-lg border border-dashed border-line px-3 text-center text-caption1 text-fg-subtle">
+                Point a monitor at {baseUrl}
+              </span>
+              <span className="px-0.5 pt-2.5 text-caption1 text-fg-subtle">
+                then pick which display it is
+              </span>
+            </button>
           </div>
         </SortableContext>
       </DndContext>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="filled" size="small" onClick={handlers.handleAddOutput}>
-          <PlusIcon className="size-3.5 text-gray-9" />
-          Add display
-        </Button>
         {outputs.length > 0 && (
           <Button
             variant="transparent"

@@ -769,11 +769,25 @@ function reportChannels(): void {
 //   Enable:  localStorage.setItem("stage:sharedSse", "1")  (then reload)
 let sharedSse = (() => {
   try {
-    return typeof SharedWorker !== "undefined" && localStorage.getItem("stage:sharedSse") === "1";
+    // ON by default now that the heartbeat below exists. One SSE per MACHINE
+    // instead of one per tab and per iframe is not a micro-optimisation here: a
+    // browser allows ~6 concurrent connections per origin over HTTP/1.1, and the
+    // Screens page renders a live preview iframe per display. With eight
+    // displays the seventh onward never loaded and the page's own /api/state
+    // request queued behind them until it timed out.
+    //   Opt out: localStorage.setItem("stage:sharedSse", "0")  (then reload)
+    return typeof SharedWorker !== "undefined" && localStorage.getItem("stage:sharedSse") !== "0";
   } catch {
     return false;
   }
 })();
+
+/** How often a tab checks the worker is still delivering. */
+const WORKER_PING_MS = 15_000;
+/** How long a missed pong is tolerated before abandoning the worker. */
+const WORKER_PONG_TIMEOUT_MS = 5_000;
+let workerPingTimer: ReturnType<typeof setInterval> | null = null;
+let workerPongTimer: ReturnType<typeof setTimeout> | null = null;
 const workerHandlers = new Map<string, Set<(payload: unknown) => void>>();
 let sseWorker: SharedWorker | null = null;
 
@@ -782,13 +796,23 @@ function ensureWorker(): boolean {
   try {
     sseWorker = new SharedWorker(new URL("./sse-shared-worker.ts", import.meta.url), { type: "module" });
     sseWorker.port.onmessage = (ev: MessageEvent) => {
-      const { channel, data } = ev.data as { channel: string; data: unknown };
+      const msg = ev.data as { type?: string; streamOpen?: boolean; channel?: string; data?: unknown };
+      if (msg.type === "pong") {
+        // Answered: the worker is alive. Whether its STREAM is alive is a
+        // separate question, and a worker with a dead stream is the failure
+        // that kept this off by default - so that counts as no answer.
+        if (workerPongTimer) { clearTimeout(workerPongTimer); workerPongTimer = null; }
+        if (msg.streamOpen === false) abandonWorker("its event stream is closed");
+        return;
+      }
+      const { channel, data } = msg as { channel: string; data: unknown };
       const set = workerHandlers.get(channel);
       if (set) for (const cb of set) {
         try { cb(data); } catch (err) { console.error(`[api] SSE handler error for "${channel}":`, err); }
       }
     };
     sseWorker.port.start();
+    startWorkerHeartbeat();
     addEventListener("pagehide", () => {
       try { sseWorker?.port.postMessage({ type: "bye" }); } catch { /* ignore */ }
     });
@@ -799,6 +823,68 @@ function ensureWorker(): boolean {
     sharedSse = false; // permanent fallback for this session
     return false;
   }
+}
+
+/**
+ * Stop trusting the worker and reconnect this tab directly.
+ *
+ * The whole reason the shared worker was off by default: a worker can be
+ * orphaned, or keep running with a dead stream, and a tab had no way to notice.
+ * Three tabs sat three state-changes stale with nothing reporting it. This is
+ * the escape hatch - noisy in the console on purpose, because a machine falling
+ * back to per-tab streams is worth knowing about.
+ */
+function abandonWorker(why: string): void {
+  if (!sharedSse && !sseWorker) return;
+  console.warn(`[api] shared SSE worker abandoned (${why}) — falling back to a direct stream`);
+  stopWorkerHeartbeat();
+  try { sseWorker?.port.postMessage({ type: "bye" }); } catch { /* it may already be gone */ }
+  sseWorker = null;
+  sharedSse = false; // permanent for this tab's session
+  // Re-establish everything the worker was carrying, directly. sseListeners is
+  // a flat list of {channel, handler}, and handlers there take a MessageEvent
+  // while the worker delivered already-parsed payloads - so each is wrapped
+  // rather than moved across as-is.
+  for (const [channel, callbacks] of workerHandlers) {
+    for (const cb of callbacks) {
+      const handler = (e: MessageEvent) => {
+        try {
+          cb(JSON.parse(e.data));
+        } catch (err) {
+          console.error(`[api] SSE handler error for "${channel}":`, err);
+        }
+      };
+      sseListeners.push({ channel, handler });
+      eventSource?.addEventListener(channel, handler);
+    }
+  }
+  workerHandlers.clear();
+  ensureEventSource();
+  reportChannels();
+}
+
+function startWorkerHeartbeat(): void {
+  stopWorkerHeartbeat();
+  workerPingTimer = setInterval(() => {
+    if (!sseWorker) return;
+    // A missed pong means the worker is gone or wedged. Only one timer is armed
+    // at a time, so a slow answer does not stack up abandonments.
+    if (workerPongTimer) return;
+    workerPongTimer = setTimeout(() => {
+      workerPongTimer = null;
+      abandonWorker("no pong");
+    }, WORKER_PONG_TIMEOUT_MS);
+    try {
+      sseWorker.port.postMessage({ type: "ping" });
+    } catch {
+      abandonWorker("port is dead");
+    }
+  }, WORKER_PING_MS);
+}
+
+function stopWorkerHeartbeat(): void {
+  if (workerPingTimer) { clearInterval(workerPingTimer); workerPingTimer = null; }
+  if (workerPongTimer) { clearTimeout(workerPongTimer); workerPongTimer = null; }
 }
 
 function workerReport(): void {
