@@ -90,6 +90,24 @@ To pin one exact version instead of "newest on the track", add
 `STAGE_VERSION=v1.10.0-beta.30` the same way. The installer always fetches the
 installer script from `main`, whichever track it installs.
 
+**Re-running the installer upgrades in place — do not uninstall first.** It
+unpacks the new release beside the current one, flips the `current` pointer,
+rewrites the service definition and restarts it, then waits for the server to
+answer before reporting success. Your data directory is untouched, and the
+previous release stays under `releases/` to go back to:
+
+```
+/usr/local/stage-utility/
+  releases/1.9.5/
+  releases/1.10.0-beta.33/
+  current -> releases/1.10.0-beta.33
+```
+
+The one thing it does not remember is your **options**. They are read from the
+command, not from the existing install, so re-pass any `STAGE_PORT`,
+`STAGE_DATA` or `STAGE_PREFIX` you used originally — otherwise the new service
+is registered with the defaults and will not find data written somewhere else.
+
 An install already running does **not** need reinstalling to change track:
 **Settings → Advanced → Update track** switches between main and beta in place,
 in either direction, and keeps your configuration. Use that unless the box is
