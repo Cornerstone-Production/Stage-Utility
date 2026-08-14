@@ -54,7 +54,21 @@ function release(token: symbol): void {
   }
 }
 
-export function LazyPreview({ viewId, aspect }: { viewId: string; aspect?: number }) {
+export function LazyPreview({
+  viewId,
+  aspect,
+  href,
+  hrefTitle,
+}: {
+  viewId: string;
+  aspect?: number;
+  /** When set, a STREAMING preview becomes a link opening this in a new tab.
+   *  Only the streaming branch: the paused placeholder is a button whose job is
+   *  to load the preview, and a button inside an anchor would both navigate and
+   *  never load it. */
+  href?: string;
+  hrefTitle?: string;
+}) {
   const boxRef = useRef<HTMLDivElement>(null);
   const tokenRef = useRef<symbol>(Symbol("preview"));
   const [visible, setVisible] = useState(false);
@@ -112,7 +126,19 @@ export function LazyPreview({ viewId, aspect }: { viewId: string; aspect?: numbe
   return (
     <div ref={boxRef}>
       {streaming ? (
-        <ViewPreview viewId={viewId} aspect={aspect} />
+        href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            title={hrefTitle}
+            className="block rounded-xl transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <ViewPreview viewId={viewId} aspect={aspect} />
+          </a>
+        ) : (
+          <ViewPreview viewId={viewId} aspect={aspect} />
+        )
       ) : (
         <button
           type="button"

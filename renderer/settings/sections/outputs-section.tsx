@@ -123,23 +123,24 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
     <div
       ref={setNodeRef}
       style={style}
-      // The whole card is the drag handle - a grip icon said "you can rearrange
-      // these" about a grid that already implies it. The sensors need real
-      // travel (mouse) or a short hold (touch) before a drag starts, so an
-      // ordinary click still reaches the controls; the ones that own their own
-      // pointer gestures stop propagation below.
-      // listeners only, and attributes MINUS role/tabIndex: dnd-kit's attributes
-      // set role="button", which on a grip was right but on a card containing a
-      // name field and a view picker announces a button wrapping textboxes and
-      // comboboxes. The drag-description attributes are still useful, so they
-      // are kept.
-      {...dragA11y}
-      {...listeners}
-      className="flex cursor-grab flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)] active:cursor-grabbing"
+      className="flex flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]"
     >
-      {/* Header: drag handle + tinted icon + editable name + status + overflow */}
-      <div className="flex items-center gap-2 px-3 pt-2.5">
-        <IconTint itemKey={output.id} icon={MonitorIcon} color={iconColor} label={output.name} />
+      {/* Header: the drag handle + tinted icon + editable name + status + overflow.
+          Only the HEADER drags. The card as a whole cannot, because the preview
+          below it is now a link to the live display - one gesture per region, so
+          neither has to guess which the operator meant.
+          listeners plus attributes MINUS role/tabIndex: dnd-kit's attributes set
+          role="button", which would announce a button wrapping this row's
+          textbox. The drag-description attributes are kept. */}
+      <div
+        {...dragA11y}
+        {...listeners}
+        className="flex cursor-grab items-center gap-2 px-3 pt-2.5 active:cursor-grabbing"
+      >
+        {/* Also inside the drag handle: the swatch opens a colour picker. */}
+        <span onPointerDown={(e) => e.stopPropagation()} className="flex shrink-0">
+          <IconTint itemKey={output.id} icon={MonitorIcon} color={iconColor} label={output.name} />
+        </span>
         <Input
           value={editName}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
@@ -161,6 +162,9 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
         <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenu.Trigger asChild>
             <button
+              // Inside the drag handle, so it must claim its own pointer or
+              // opening the menu reads as the start of a drag.
+              onPointerDown={(e) => e.stopPropagation()}
               className="flex size-7 shrink-0 items-center justify-center rounded-md text-fg-subtle hover:bg-fill hover:text-fg transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-focus"
               aria-label={`More actions for ${output.name}`}
             >
@@ -235,7 +239,16 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           install with eight displays. */}
       <div className="px-3 pt-2">
         {output.viewId ? (
-          <LazyPreview viewId={output.viewId} />
+          // The preview IS the display, so clicking it opens the real thing in a
+          // new tab - the same place the menu's "Open display" goes. An anchor
+          // rather than an onClick so it behaves like a link: middle-click and
+          // cmd-click open a tab, and the URL shows in the status bar on hover.
+          // The preview iframe sets pointer-events:none, so the click lands here.
+          <LazyPreview
+            viewId={output.viewId}
+            href={outputUrl}
+            hrefTitle={`Open ${output.name} in a new tab`}
+          />
         ) : (
           <div className="grid aspect-video place-items-center rounded-lg border border-dashed border-line text-caption1 text-fg-subtle">
             Nothing assigned
