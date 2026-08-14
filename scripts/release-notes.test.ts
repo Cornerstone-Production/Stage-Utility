@@ -30,6 +30,10 @@ describe("release notes", () => {
       assert.match(out, /Read this first/, "the notice must appear");
       // Above the generated sections, or a reader scrolling past bullets misses it.
       assert.ok(out.indexOf("Read this first") < out.indexOf("## Install"), "notice must come first");
+      // And separated from them. The notice is trimmed on read, so without a
+      // restored trailing newline the next heading butts onto its last line —
+      // every other section is joined with a blank line between.
+      assert.doesNotMatch(out, /\S\n## /, "a generated heading must not follow prose without a blank line");
     } finally {
       fs.rmSync(file, { force: true });
     }
