@@ -5,8 +5,9 @@
 // All three records (timeline, attendance, SPL) share a serviceKey, so editing the
 // service window applies to each: the raw samples are kept, so aggregates re-derive.
 
-import type { ServiceAttendance } from "../types/stage.js";
+import type { ServiceAttendance, ServiceTimeline } from "../types/stage.js";
 import { sampleArchive } from "./archive/sample-archive.js";
+import { scrub } from "./scrub.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { attendanceStore } from "./attendance-store.js";
 import { splHistoryStore } from "./spl-history-store.js";
@@ -226,20 +227,89 @@ async function serviceDateOf(serviceKey: string): Promise<string | null> {
   return tl?.serviceDate ?? att?.serviceDate ?? spl?.serviceDate ?? null;
 }
 
+/**
+ * The fields every recorder writes to say WHICH occurrence a record describes.
+ * Identical across all three record types, so one shape re-keys any of them.
+ */
+type OccurrenceIdentity = Pick<
+  ServiceTimeline,
+  | "serviceKey"
+  | "serviceTypeId"
+  | "serviceTypeName"
+  | "planId"
+  | "planTitle"
+  | "seriesTitle"
+  | "serviceDate"
+  | "serviceTimeId"
+  | "serviceTimeStartsAt"
+>;
+
+/** Read an occurrence's identity from whichever store still holds a record. */
+async function identityOf(serviceKey: string): Promise<OccurrenceIdentity | null> {
+  const [tl, att, spl] = await Promise.all([
+    serviceTimelineStore.get(serviceKey),
+    attendanceStore.get(serviceKey),
+    splHistoryStore.get(serviceKey),
+  ]);
+  const r = tl ?? att ?? spl;
+  if (!r) return null;
+  return {
+    serviceKey: r.serviceKey,
+    serviceTypeId: r.serviceTypeId,
+    serviceTypeName: r.serviceTypeName,
+    planId: r.planId,
+    planTitle: r.planTitle,
+    seriesTitle: r.seriesTitle,
+    serviceDate: r.serviceDate,
+    serviceTimeId: r.serviceTimeId,
+    serviceTimeStartsAt: r.serviceTimeStartsAt,
+  };
+}
+
+/**
+ * Re-key a source-only record onto the target occurrence.
+ *
+ * The merge blocks below all required BOTH sides to exist. When only the source
+ * had a record in a store — the attendance sensor was offline for the main
+ * service but the fragment caught samples, or SPL was recorded on one side only
+ * — that store was left untouched while the raw rows underneath it had already
+ * been moved to the target's archive directory. The operator was told the merge
+ * succeeded, the fragment stayed in the History list, and a rebuild of either
+ * record produced wrong numbers.
+ *
+ * Adopting the target's identity is what "merge INTO" means when there is
+ * nothing on the other side to merge with: the source's data, under the target's
+ * name — which is also what the already-moved archive now describes.
+ */
+function adoptIdentity<T extends OccurrenceIdentity>(record: T, identity: OccurrenceIdentity): T {
+  return { ...record, ...identity };
+}
+
+/** What a merge actually did, per store. Reported rather than assumed: this
+ *  rewrites the source of truth, and "it worked" is not evidence. */
+export interface MergeOutcome {
+  /** Stores where both sides existed and were combined. */
+  merged: string[];
+  /** Stores where only the source had a record, re-keyed onto the target. */
+  moved: string[];
+  /** True when the raw sample archive was moved (false = no date on one side). */
+  archivesMoved: boolean;
+}
+
 /** Move the source's raw rows into the target's archive, and say what moved.
  *  Logged rather than silent: this rewrites the source of truth and deletes a
  *  directory, and the operator's only other evidence is the merged record. */
-async function mergeArchives(sourceKey: string, targetKey: string): Promise<void> {
+async function mergeArchives(sourceKey: string, targetKey: string): Promise<boolean> {
   const [sourceDate, targetDate] = await Promise.all([
     serviceDateOf(sourceKey),
     serviceDateOf(targetKey),
   ]);
   if (!sourceDate || !targetDate) {
     console.warn(
-      `[history-edit] merge ${sourceKey} -> ${targetKey}: no service date on one side, ` +
+      `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: no service date on one side, ` +
         "leaving the raw archive alone. The merged record will not survive a rebuild.",
     );
-    return;
+    return false;
   }
   const moved = await sampleArchive.mergeInto(
     { serviceKey: sourceKey, serviceDate: sourceDate },
@@ -249,9 +319,10 @@ async function mergeArchives(sourceKey: string, targetKey: string): Promise<void
     .map(([base, n]) => `${n} ${base}`)
     .join(", ");
   console.log(
-    `[history-edit] merge ${sourceKey} -> ${targetKey}: moved ${summary || "no rows"} ` +
-      `into ${targetDate}; removed the source archive.`,
+    `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: moved ${summary || "no rows"} ` +
+      `into ${scrub(targetDate)}; removed the source archive.`,
   );
+  return true;
 }
 
 /**
@@ -262,10 +333,20 @@ async function mergeArchives(sourceKey: string, targetKey: string): Promise<void
  * duplicated boundary item isn't doubled; attendance samples are concatenated and
  * aggregates re-derived; the target window extends to cover both.
  */
-export async function mergeServiceRecords(sourceKey: string, targetKey: string): Promise<void> {
-  if (!sourceKey || !targetKey || sourceKey === targetKey) return;
+export async function mergeServiceRecords(sourceKey: string, targetKey: string): Promise<MergeOutcome> {
+  const outcome: MergeOutcome = { merged: [], moved: [], archivesMoved: false };
+  if (!sourceKey || !targetKey || sourceKey === targetKey) return outcome;
   assertNotLive(sourceKey, "merged");
   assertNotLive(targetKey, "merged");
+
+  // Read the target's identity BEFORE anything moves. A store that holds a
+  // source record but no target record needs it to re-key onto, and finding
+  // that out after the archive had already been moved is how a record ended up
+  // sitting over raw rows that no longer belonged to it.
+  const targetIdentity = await identityOf(targetKey);
+  if (!targetIdentity) {
+    throw new Error(`Nothing to merge into: no record found for "${targetKey}".`);
+  }
 
   // Released up front, for both keys, before the first awaited write. This used
   // to sit after each store's upsert, which left a window where the recorder's
@@ -278,7 +359,7 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
   // rebuild against the target's own directory discards everything merged in.
   // Moving them first also means a failure here aborts before either record is
   // touched, rather than leaving a merged record over an unmerged archive.
-  await mergeArchives(sourceKey, targetKey);
+  outcome.archivesMoved = await mergeArchives(sourceKey, targetKey);
 
   // ── Timeline ──
   const [srcTl, tgtTl] = await Promise.all([
@@ -295,6 +376,14 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     await serviceTimelineStore.upsert(tgtTl);
     await serviceTimelineStore.delete(sourceKey);
     broadcast("service-timeline:history", tgtTl);
+    outcome.merged.push("timeline");
+  } else if (srcTl) {
+    // Source-only: re-key rather than leave it behind over a moved archive.
+    const moved = adoptIdentity(srcTl, targetIdentity);
+    await serviceTimelineStore.upsert(moved);
+    await serviceTimelineStore.delete(sourceKey);
+    broadcast("service-timeline:history", moved);
+    outcome.moved.push("timeline");
   }
 
   // ── Attendance ──
@@ -341,6 +430,13 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     await attendanceStore.upsert(tgtAt);
     await attendanceStore.delete(sourceKey);
     broadcast("attendance:history", tgtAt);
+    outcome.merged.push("attendance");
+  } else if (srcAt) {
+    const moved = adoptIdentity(srcAt, targetIdentity);
+    await attendanceStore.upsert(moved);
+    await attendanceStore.delete(sourceKey);
+    broadcast("attendance:history", moved);
+    outcome.moved.push("attendance");
   }
 
   // ── SPL ──
@@ -358,5 +454,19 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     await splHistoryStore.upsert(tgtSpl);
     await splHistoryStore.delete(sourceKey);
     broadcast("spl:history", tgtSpl);
+    outcome.merged.push("spl");
+  } else if (srcSpl) {
+    const moved = adoptIdentity(srcSpl, targetIdentity);
+    await splHistoryStore.upsert(moved);
+    await splHistoryStore.delete(sourceKey);
+    broadcast("spl:history", moved);
+    outcome.moved.push("spl");
   }
+
+  console.log(
+    `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: ` +
+      `merged [${outcome.merged.join(", ") || "none"}], re-keyed [${outcome.moved.join(", ") || "none"}], ` +
+      `archive ${outcome.archivesMoved ? "moved" : "left in place"}.`,
+  );
+  return outcome;
 }

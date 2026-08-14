@@ -344,3 +344,66 @@ describe("mergeServiceRecords, live", () => {
     idle();
   });
 });
+
+describe("merging when only one side has a record in a store", () => {
+  // The archive is moved FIRST and unconditionally, but each store used to merge
+  // only `if (src && tgt)`. When the target had no record in a store — the
+  // attendance sensor was offline for the main service but the fragment caught
+  // samples, or SPL was recorded on one side only — that source record was
+  // neither merged nor deleted, and its raw rows had already been moved out from
+  // under it. The operator was told the merge succeeded, the fragment stayed in
+  // the History list, and a rebuild of either record produced wrong numbers.
+  beforeEach(async () => {
+    for (const k of ["src", "tgt"]) {
+      await attendanceStore.delete(k);
+      await splHistoryStore.delete(k);
+      await serviceTimelineStore.delete(k);
+    }
+  });
+
+  it("re-keys a source-only record onto the target instead of orphaning it", async () => {
+    // Target exists in attendance only; source exists in attendance AND spl.
+    await attendanceStore.upsert(record("tgt", 100, [100, 110], 0));
+    await attendanceStore.upsert(record("src", 200, [200, 210], 30));
+    await splHistoryStore.upsert({
+      serviceKey: "src",
+      serviceTypeId: "st1", serviceTypeName: null, planId: "p1", planTitle: "Sunday",
+      seriesTitle: null, serviceDate: "2026-08-09", serviceTimeId: "src",
+      serviceTimeStartsAt: new Date(T0).toISOString(),
+      startedAt: new Date(T0).toISOString(), endedAt: null,
+      meterId: null, metricKey: null, items: [],
+    } as never);
+
+    const outcome = await mergeServiceRecords("src", "tgt");
+
+    assert.deepEqual(outcome.merged, ["attendance"], "attendance had both sides");
+    assert.deepEqual(outcome.moved, ["spl"], "spl had only the source and must be re-keyed");
+
+    assert.equal(await splHistoryStore.get("src"), null, "the orphan must not be left behind");
+    const spl = await splHistoryStore.get("tgt");
+    assert.ok(spl, "the source's SPL data must survive under the target key");
+    assert.equal(spl.serviceKey, "tgt", "and must be re-keyed, not just copied");
+  });
+
+  it("reports which stores it touched rather than a bare ok", async () => {
+    await attendanceStore.upsert(record("tgt", 100, [100], 0));
+    await attendanceStore.upsert(record("src", 200, [200], 30));
+
+    const outcome = await mergeServiceRecords("src", "tgt");
+
+    // Partial success used to be indistinguishable from complete success.
+    assert.deepEqual(outcome.merged, ["attendance"]);
+    assert.deepEqual(outcome.moved, []);
+    assert.equal(typeof outcome.archivesMoved, "boolean");
+  });
+
+  it("refuses when the target has no record at all, before anything moves", async () => {
+    await attendanceStore.upsert(record("src", 200, [200], 30));
+    await assert.rejects(
+      () => mergeServiceRecords("src", "tgt"),
+      /Nothing to merge into/,
+      "merging into nothing must fail loudly, not move an archive under a record that is not there",
+    );
+    assert.ok(await attendanceStore.get("src"), "the source must be untouched");
+  });
+});
