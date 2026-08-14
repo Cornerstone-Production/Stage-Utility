@@ -197,10 +197,24 @@ say "Verifying"
 # first few KB — so the writer was still pushing 275 KB into a closed pipe.
 # Observed as `printf: write error: Broken pipe` on a real beta install, with
 # the script dying before it verified anything.
+# No interval expression (`{64}`) anywhere below. mawk — the DEFAULT awk on
+# Debian and Ubuntu, i.e. most Linux servers — does not support them and offers
+# no flag to enable them, so `match($0, /[0-9a-f]{64}/)` simply never matched
+# there. The extraction returned empty, and the install died on the line under
+# this one with "publishes no checksum … refusing to install unverified": the
+# one-line installer could not install on a stock Debian or Ubuntu box at all.
+# It failed safe, which is why it stayed quiet; GitHub's runners and any machine
+# with gawk installed take the same path and pass.
+#
+# So: strip the prefix, strip anything from the first non-hex character, and
+# check the length. Plain POSIX awk, identical result under mawk and gawk.
 WANT=$(awk -v want="\"name\": \"${ARCHIVE}\"" '
   index($0, want) { found = 1; next }
   found && /"digest": "sha256:/ {
-    if (match($0, /[0-9a-f]{64}/)) { print substr($0, RSTART, RLENGTH); exit }
+    line = $0
+    sub(/.*sha256:/, "", line)
+    sub(/[^0-9a-f].*$/, "", line)
+    if (length(line) == 64) { print line; exit }
   }
 ' <<<"$RELEASE_JSON")
 

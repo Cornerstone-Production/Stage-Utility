@@ -182,6 +182,12 @@ describe("the installer records which track it was asked for", () => {
         STAGE_PREFIX: prefix,
         STAGE_DATA: data,
         STAGE_VERSION: "v9.9.9",
+        // An account that already exists, so the Linux branch skips `useradd`.
+        // Without it this passed on macOS — whose LaunchDaemon runs as root, so
+        // that branch never executes — and failed on Linux CI with "useradd:
+        // Permission denied". Same platform trap as the getcwd assertion that
+        // failed here once already.
+        STAGE_USER: os.userInfo().username,
       },
       stdio: "pipe",
     });
@@ -189,5 +195,41 @@ describe("the installer records which track it was asked for", () => {
     const record = path.join(data, "update-track");
     assert.ok(fs.existsSync(record), "the installer must record the track it was given");
     assert.equal(fs.readFileSync(record, "utf8").trim(), "beta");
+  });
+});
+
+describe("installer portability", () => {
+  // mawk is the DEFAULT awk on Debian and Ubuntu — most Linux servers — and it
+  // does not support interval expressions (`{64}`), with no flag to enable
+  // them. install.sh used `match($0, /[0-9a-f]{64}/)` to pull the published
+  // checksum out of the release JSON; under mawk that never matched, the
+  // extraction returned empty, and the install died with "publishes no checksum
+  // … refusing to install unverified". The one-line installer could not install
+  // on a stock Debian or Ubuntu box at all.
+  //
+  // It failed safe, which is why it stayed quiet, and every machine with gawk —
+  // including GitHub's runners, which is why CI and the survival job were both
+  // green — took the same path and passed.
+  //
+  // Matched on the construct rather than on a comment: a regex literal
+  // containing `{n}` or `{n,m}`. Prose cannot satisfy it.
+  it("uses no regex interval expressions, which mawk cannot parse", () => {
+    const src = fs.readFileSync(path.join(REPO, "install.sh"), "utf8");
+    const offenders = src
+      .split("\n")
+      .map((line, i) => ({ line: line.trim(), n: i + 1 }))
+      // Whole-line comments only. The comment above this fix quotes the very
+      // pattern it removed, and would otherwise flag itself. Deliberately NOT
+      // stripping trailing comments from code lines: doing that to a scan in
+      // this repo once swallowed real code and hid a route that existed.
+      .filter(({ line }) => !line.startsWith("#"))
+      .filter(({ line }) => /\/[^/\n]*\{[0-9]+(,[0-9]*)?\}[^/\n]*\//.test(line));
+
+    assert.deepEqual(
+      offenders,
+      [],
+      "these lines use a regex interval expression; mawk silently never matches it — " +
+        "expand it, or check length() instead",
+    );
   });
 });
