@@ -61,15 +61,21 @@ function launchdLabel(kind: InstallKind, appRoot: string): string | null {
 }
 
 /**
- * The one way to exit for a deliberate restart. Pairing the kickstart with the
- * exit structurally — rather than by remembering to call two functions at every
- * exit site — is what stops a future restart path from wiring only half and
- * reintroducing the parked-respawn blackout. The delay lets the HTTP response
- * that requested the restart flush first.
+ * The one way to exit when something else is expected to bring us back. Pairing
+ * the kickstart with the exit structurally — rather than by remembering to call
+ * two functions at every exit site — is what stops a future restart path from
+ * wiring only half and reintroducing the parked-respawn blackout. The delay lets
+ * the HTTP response that requested the restart flush first.
+ *
+ * `code` exists so a crash can use this too. server.ts's uncaughtException
+ * handler exited 1 on its own, which is the blackout in full: on launchd the
+ * exit is exactly what gets parked, so a synchronous throw took every display
+ * dark with no route back but a shell. A crash still exits non-zero — the
+ * supervisor should see a failure — it just no longer exits alone.
  */
-export function exitForRestart(delayMs: number): void {
+export function exitForRestart(delayMs: number, code = 0): void {
   scheduleRelaunch();
-  setTimeout(() => process.exit(0), delayMs);
+  setTimeout(() => process.exit(code), delayMs);
 }
 
 /** Spawn the detached kickstart helper (survives our exit); a no-op off macOS

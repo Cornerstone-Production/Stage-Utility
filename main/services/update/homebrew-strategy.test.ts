@@ -207,7 +207,7 @@ describe("HomebrewStrategy — no-op upgrades and failure reporting", () => {
 
   it("writes the ok result BEFORE the restart that kills the server, then corrects it only if the service is truly down", () => {
     const l = line();
-    const ok = l.indexOf('printf \'{"ok":%s,"error":"%s","at":"%s"}\' true');
+    const ok = l.indexOf('printf \'{"ok":%s,"finishedAt":"%s","log":"%s"}\' true');
     const finalRestart = l.lastIndexOf("services restart");
     assert.ok(ok >= 0 && ok < finalRestart, "the result must exist when the page reconnects");
     const tail = l.slice(finalRestart);

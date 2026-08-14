@@ -517,7 +517,21 @@ export class Updater {
       if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before updating.");
     }
 
-    const branch = this.status.branch ?? "main";
+    // Resolve the track rather than assuming one. This was `this.status.branch ?? "main"`,
+    // and the fallback is not harmless: launch() RECORDS the track it used, so a
+    // box whose track could not be detected — a tarball install with no
+    // update-track record and an unreadable VERSION — was moved onto the stable
+    // line and stayed there, silently, having been put on beta deliberately.
+    if (!this.status.branch) await this.checkForUpdate();
+    const branch = this.status.branch;
+    if (!branch) {
+      // Refusing beats guessing: an unpinned apply on the wrong track is not
+      // something the operator can see happening, or easily undo.
+      throw new Error(
+        "Cannot tell which release track this install follows, so there is nothing safe to update to. " +
+          "Pick a track in Settings → Advanced, or re-run the installer with STAGE_TRACK set.",
+      );
+    }
     return this.launch(branch, false, opts.deferRestart === true, this.status.targetTag ?? null);
   }
 

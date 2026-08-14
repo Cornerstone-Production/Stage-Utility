@@ -43,12 +43,17 @@ function ConvertTo-JsonString ($Text) {
   if (-not $Text) { return "" }
   ($Text -replace '\\', '\\\\' -replace '"', '\"') -replace '[\r\n\t]', ' '
 }
+# Field names are a contract with updater.ts readResult(), which reads
+# {ok,finishedAt,log}. This wrote {ok,error,at}; the poller compares
+# Date.parse(finishedAt) against the apply start, NaN fails that test, and every
+# result written here was discarded — a failure that had already named its cause
+# surfaced as the watchdog's 10-minute "stopped responding".
 function Write-UpdateResult ($Ok, $ErrorText) {
   if (-not $env:STAGE_UPDATE_RESULT) { return }
-  $at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+  $finishedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
   $b = if ($Ok) { "true" } else { "false" }
   $e = ConvertTo-JsonString $ErrorText
-  "{`"ok`":$b,`"error`":`"$e`",`"at`":`"$at`"}" | Set-Content -Path $env:STAGE_UPDATE_RESULT -Encoding utf8
+  "{`"ok`":$b,`"finishedAt`":`"$finishedAt`",`"log`":`"$e`"}" | Set-Content -Path $env:STAGE_UPDATE_RESULT -Encoding utf8
 }
 
 # ── Where this script's output goes ───────────────────────────────────────────

@@ -38,6 +38,13 @@ die()  { printf '%serror%s %s\n' "$C_ERR" "$C_OFF" "$*" >&2; write_result false 
 # both helpers become no-ops. The format matches scripts/update.sh exactly,
 # because the app's poller already knows how to read it — which is why driving
 # the installer from the app needs no UI change at all.
+#
+# "Matches exactly" is load-bearing and was once merely claimed: this wrote
+# {ok,error,at} while updater.ts reads {ok,finishedAt,log}. The poller compares
+# `Date.parse(finishedAt) >= applyStartedAt`, and Date.parse(undefined) is NaN,
+# so every result written here was silently discarded — a clean failure that had
+# already explained itself surfaced as the watchdog's 10-minute "stopped
+# responding". The field names below are a contract with readResult().
 _now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 write_progress() {
   [ -n "${STAGE_UPDATE_PROGRESS:-}" ] || return 0
@@ -54,7 +61,7 @@ _json_escape() {
 }
 write_result() {
   [ -n "${STAGE_UPDATE_RESULT:-}" ] || return 0
-  printf '{"ok":%s,"error":"%s","at":"%s"}' "$1" "$(_json_escape "${2:-}")" "$(_now)" \
+  printf '{"ok":%s,"finishedAt":"%s","log":"%s"}' "$1" "$(_now)" "$(_json_escape "${2:-}")" \
     >"$STAGE_UPDATE_RESULT" 2>/dev/null || true
 }
 # Any unexpected failure reports too, so the UI can never wait forever on a run
@@ -97,9 +104,24 @@ esac
 PLATFORM="${OS}-${ARCH}"
 
 # ── Preconditions, checked before anything is written ─────────────────────────
-[ "$(id -u)" -eq 0 ] || die "Run with sudo — this installs a system service.
+# Root is needed to REGISTER a service — write a unit, create the account, grant
+# the port-80 capability. It is NOT needed to swap in a new release: the service
+# account owns $PREFIX and $DATA (see the chown below), which is the whole point
+# of installing under a dedicated account.
+#
+# This gate used to be unconditional, and it ran before the swap branch. On
+# Linux the server runs as `stage-utility`, so the in-app updater spawned this
+# script unprivileged and it died here every time — in-app updates, including
+# the scheduled auto-apply, could never work on a Linux one-line install. macOS
+# hid it: that LaunchDaemon has no UserName key, so it runs as root and passed.
+if [ "${STAGE_UPDATE_MODE:-}" = "swap" ]; then
+  # Fail before the download rather than half-way through the swap.
+  [ -w "$PREFIX" ] || die "Cannot write to ${PREFIX} as $(id -un). A swap-mode update must run as the account that owns the install."
+else
+  [ "$(id -u)" -eq 0 ] || die "Run with sudo — this installs a system service.
 
   curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sudo bash"
+fi
 
 for tool in curl tar; do
   command -v "$tool" >/dev/null || die "'$tool' is required but not installed."
@@ -239,6 +261,22 @@ log "swap complete"
 # display for the length of the download, and on systemd it would tear down the
 # cgroup this script runs in, killing the update midway through the swap.
 if [ "${STAGE_UPDATE_MODE:-}" = "swap" ]; then
+  # Port 80 across a swap. New installs carry AmbientCapabilities on the unit and
+  # need nothing here. A box installed before that still has the old unit, and its
+  # port-80 binding lived on the PREVIOUS release's node binary — so say what
+  # happened rather than letting :80 quietly stop answering after an update.
+  if [ "$OS" = linux ] && [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ] \
+     && ! grep -q "AmbientCapabilities" "/etc/systemd/system/${SERVICE_NAME}.service"; then
+    if [ "$(id -u)" -eq 0 ] && command -v setcap >/dev/null 2>&1; then
+      setcap 'cap_net_bind_service=+ep' "${RELEASE_DIR}/node" 2>/dev/null \
+        && log "granted port-80 binding to the new release" \
+        || warn "Could not grant port-80 binding to the new release; the app still serves on ${PORT}."
+    else
+      warn "This install predates the port-80 service capability, so :80 will stop answering after this update. Re-run the installer once with sudo to restore it; ${PORT} is unaffected."
+      log "port-80 capability not carried across the swap (old unit, unprivileged swap)"
+    fi
+  fi
+
   # auto-install mode: the new release is staged and swapped, but the operator
   # chooses when the displays go dark. Leave the restart-pending marker the app
   # reports (same contract as scripts/update.sh) and stop here — the running
@@ -295,14 +333,21 @@ Environment=STAGE_UTILITY_ROOT=${PREFIX}/current
 Environment=STAGE_UTILITY_INSTALL_KIND=tarball
 WorkingDirectory=${PREFIX}/current
 ExecStart=${PREFIX}/current/node ${PREFIX}/current/server.mjs
+# Port 80 for a non-root service. Declared on the UNIT, not stamped onto a
+# binary: setcap applies to one release directory, so it was silently lost the
+# first time an in-app update swapped in a new one. An ambient capability is a
+# property of how the service is launched and survives every swap.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always
 RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-  # Serving on 80 as well as ${PORT} needs the capability, since the service is
-  # not root. Granted to the runtime in this release directory only.
+  # Belt and braces behind AmbientCapabilities on the unit above, which is what
+  # actually carries port 80 across an update. Kept for systemd older than 229,
+  # where ambient capabilities are not honoured; it binds to this release
+  # directory only, so it cannot be the durable mechanism.
   setcap 'cap_net_bind_service=+ep' "${RELEASE_DIR}/node" 2>/dev/null \
     || warn "Could not grant port-80 binding; the app will still serve on ${PORT}."
   systemctl daemon-reload
