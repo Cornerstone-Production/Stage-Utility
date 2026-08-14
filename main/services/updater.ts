@@ -31,6 +31,8 @@ import { getUserDataPath } from "./app-paths.js";
 import { detectInstallKind } from "./update/install-kind.js";
 import { detectTrack } from "./update/detect-track.js";
 import { CHANGELOG_CAP, fetchReleases, packagedUpdateStatus, type ReleaseInfo } from "./update/release-check.js";
+import { fetchTapVersion, homebrewInstallable, tarballInstallable } from "./update/package-availability.js";
+import { FORMULA } from "./update/homebrew-strategy.js";
 import { selectStrategy } from "./update/select-strategy.js";
 import { exitForRestart } from "./update/relaunch.js";
 
@@ -403,6 +405,30 @@ export class Updater {
    * scheduled auto-apply never fired, on every install that was not a checkout.
    * The strategies could apply an update; nothing ever detected one.
    */
+  /**
+   * Whether THIS box can install a given release right now.
+   *
+   * A release is published before its per-platform archives finish uploading
+   * and before the Homebrew tap is regenerated. Offering one inside that window
+   * produces an installer that 404s, or a `brew upgrade` that does nothing and
+   * restarts the displays for it. The predicate lets the check report the gap
+   * instead of pretending the box is current.
+   */
+  private async installableHere(track: string): Promise<(r: ReleaseInfo) => boolean> {
+    const kind = detectInstallKind(process.env, REPO_ROOT, fs.existsSync);
+    if (kind === "homebrew") {
+      const formula = track === "beta" ? FORMULA.beta : FORMULA.main;
+      // Null when the tap cannot be read — homebrewInstallable then allows
+      // everything, so an unreachable tap never invents a "still building".
+      const tapVersion = await fetchTapVersion(formula, (url) => fetch(url, { signal: AbortSignal.timeout(10_000) }));
+      return (r) => homebrewInstallable(r, tapVersion);
+    }
+    if (kind === "tarball") {
+      return (r) => tarballInstallable(r, process.platform, process.arch);
+    }
+    return () => true;
+  }
+
   private async checkPackaged(): Promise<UpdateStatus> {
     // Derived from the install itself — the formula for Homebrew, the version
     // for a tarball. Never defaulted: a confidently wrong track is the bug this
@@ -417,6 +443,7 @@ export class Updater {
           await this.fetchReleases(),
           packaged.branch,
           this.version(),
+          await this.installableHere(packaged.branch),
         );
       } catch (err) {
         // Same contract as a failed `git fetch` on the git path: report it, keep

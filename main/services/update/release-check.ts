@@ -12,7 +12,7 @@
 // this track" means, prereleases included.
 
 import type { UpdateStatus } from "../../types/stage.js";
-import { latestOnTrack, newerThan, parseTag, type ParsedTag } from "../release-tags.js";
+import { compareTags, latestOnTrack, newerThan, parseTag, type ParsedTag } from "../release-tags.js";
 
 const REPO = "Cornerstone-Production/Stage-Utility";
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
@@ -29,6 +29,10 @@ export interface ReleaseInfo {
   tag: string;
   name: string | null;
   publishedAt: string | null;
+  /** Asset filenames attached to the release. A release is published BEFORE its
+   *  archives finish uploading, so this is how a tarball install tells "there is
+   *  a new version" from "there is a new version I can actually install". */
+  assets: string[];
 }
 
 /**
@@ -52,6 +56,11 @@ export function parseReleases(json: unknown): ReleaseInfo[] {
       tag: rec.tag_name,
       name: typeof rec.name === "string" ? rec.name : null,
       publishedAt: typeof rec.published_at === "string" ? rec.published_at : null,
+      assets: Array.isArray((rec as { assets?: unknown }).assets)
+        ? ((rec as { assets: unknown[] }).assets
+            .map((a) => (a && typeof a === "object" ? (a as { name?: unknown }).name : null))
+            .filter((n): n is string => typeof n === "string"))
+        : [],
     });
   }
   return out;
@@ -79,6 +88,7 @@ export type PackagedAvailability = Required<
   | "latestSha"
     | "latestDate"
     | "changelog"
+    | "awaitingPackage"
   >
 >;
 
@@ -91,9 +101,24 @@ export function packagedUpdateStatus(
   releases: ReleaseInfo[],
   track: string,
   currentVersion: string,
+  /**
+   * Whether the package channel can install a given release RIGHT NOW. A
+   * release is published before its archives finish uploading and before the
+   * Homebrew tap is regenerated; offering one during that window produces an
+   * update that 404s or a `brew upgrade` that silently does nothing. Default:
+   * everything is installable, which is what a caller that cannot tell should
+   * assume.
+   */
+  installable: (r: ReleaseInfo) => boolean = () => true,
 ): PackagedAvailability {
   const tags = releases.map((r) => r.tag);
-  const target = latestOnTrack(tags, track);
+  // What an update would actually land on, and what merely EXISTS. When they
+  // differ the newer one is still building — reported, not silently ignored,
+  // because "cannot install it yet" and "up to date" look identical otherwise.
+  const target = latestOnTrack(releases.filter(installable).map((r) => r.tag), track);
+  const newest = latestOnTrack(tags, track);
+  const awaitingPackage =
+    newest && (!target || compareTags(newest, target) > 0) ? newest.tag : null;
 
   // `v` + the VERSION file. When that isn't a release version (a corrupt file,
   // or updater.ts's "0.0.0" nothing-found fallback — a version no release ever
@@ -103,8 +128,9 @@ export function packagedUpdateStatus(
   const v = currentVersion.trim();
   const currentTag = v !== "0.0.0" && parseTag(`v${v}`) ? `v${v}` : null;
 
+  const installableTags = releases.filter(installable).map((r) => r.tag);
   let newer: ParsedTag[];
-  if (currentTag) newer = newerThan(tags, track, currentTag);
+  if (currentTag) newer = newerThan(installableTags, track, currentTag);
   else if (target) newer = [target];
   else newer = [];
 
@@ -123,6 +149,7 @@ export function packagedUpdateStatus(
     behind: newer.length,
     behindUserFacing: newer.length,
     unreleasedCommits: 0,
+    awaitingPackage,
     latestSha: null,
     latestDate: (target && byTag.get(target.tag)?.publishedAt) ?? null,
     changelog,
