@@ -21,6 +21,26 @@ updates:
       # because those are the ones worth reading before merging.
       minor-and-patch:
         update-types: ["minor", "patch"]
+    # Two majors that must not be taken on dependabot's schedule. Recorded here
+    # with the reason, because both were proposed, evaluated, and rejected on
+    # the merits — and without this they come back every week looking like
+    # neglected upkeep.
+    ignore:
+      # This app SHIPS Node 24: `engines` is ^24.0.0, the release archives bundle
+      # 24.18.1 (scripts/build-artifacts.sh), and every workflow pins
+      # node-version 24. Types for a newer Node describe a runtime nothing here
+      # runs on, so a Node 25/26-only API would type-check clean and then fail on
+      # every box in the field. Raise this WITH the bundled runtime, never ahead
+      # of it.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # typescript-eslint refuses to load against TS >= 7.0 — it throws
+      # "typescript-eslint does not support TS 7.0" rather than merely warning —
+      # so taking TS 7 means losing typed linting entirely or running a second
+      # TypeScript alongside it. Revisit when this is closed:
+      # https://github.com/typescript-eslint/typescript-eslint/issues/10940
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   # 2. GitHub Actions Dependencies
   - package-ecosystem: "github-actions"
