@@ -27,6 +27,9 @@ export interface Destination {
   /** Route path. Nested routes use the top-level segment for rail grouping. */
   path: string;
   label: string;
+  /** Subtitle under the page title. Mirrors SECTION_DESC in settings, so the same
+   *  surface is described the same way wherever it is reached from. */
+  description: string;
   icon: ReactNode;
   /** TanStack routes take function components; ComponentType would admit classes. */
   Component: FunctionComponent;
@@ -36,6 +39,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     path: "/patch",
     label: "Patch",
+    description: "Stage input & output patch — record it, and surface each week's to volunteers.",
     icon: <CableIcon className="size-4" />,
     // The volunteer-facing read view, NOT the settings editor. These are
     // different surfaces; the editor is reached from within this one.
@@ -44,12 +48,14 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     path: "/scriptview",
     label: "ScriptView",
+    description: "Named rundown column presets for the ScriptView dashboard.",
     icon: <ListChecksIcon className="size-4" />,
     Component: ScriptViewIndex,
   },
   {
     path: "/history",
     label: "History",
+    description: "Every service you've run — timing and attendance.",
     icon: <ClockIcon className="size-4" />,
     // The same component the settings tab renders. history-view.tsx was a
     // 38-line wrapper around it and is deleted once this route exists.
@@ -58,18 +64,21 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     path: "/baptism",
     label: "Baptisms",
+    description: "Time testimonies and baptisms live.",
     icon: <DropletIcon className="size-4" />,
     Component: BaptismOperator,
   },
   {
     path: "/automation",
     label: "Automation",
+    description: "When something happens in Stage, do something to a device.",
     icon: <ZapIcon className="size-4" />,
     Component: AutomationSection,
   },
   {
     path: "/integrations",
     label: "Integrations",
+    description: "Connect the gear and services that run your service.",
     icon: <PlugIcon className="size-4" />,
     Component: IntegrationsSection,
   },

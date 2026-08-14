@@ -20,12 +20,25 @@ const rootRoute = createRootRoute({
   ),
 });
 
+// errorComponent per route, not only on the root: a render error inside History
+// must not blank the rail and strand the operator with no way out. The settings
+// panel keys its ErrorBoundary by section for the same reason.
 const routes = [
   ...DESTINATIONS.map((d) =>
-    createRoute({ getParentRoute: () => rootRoute, path: d.path, component: d.Component }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: d.path,
+      component: d.Component,
+      errorComponent: ErrorBoundaryView,
+    }),
   ),
   ...NESTED_ROUTES.map((r) =>
-    createRoute({ getParentRoute: () => rootRoute, path: r.path, component: r.Component }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: r.path,
+      component: r.Component,
+      errorComponent: ErrorBoundaryView,
+    }),
   ),
 ];
 

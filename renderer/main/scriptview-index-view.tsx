@@ -91,7 +91,7 @@ export function ScriptViewIndex() {
         )}
         <div className="flex flex-col gap-2 w-full max-w-md">
           <span className="text-caption2 font-medium uppercase tracking-wider text-fg-subtle text-center select-none mb-1" style={{ letterSpacing: "0.08em" }}>
-            ScriptView · pick a service
+            Pick a service
           </span>
 
           {error ? (

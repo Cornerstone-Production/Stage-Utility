@@ -121,8 +121,6 @@ export function PatchView() {
         <div className="flex items-center">
           <span className="ml-auto rounded-full border border-line px-2 py-0.5 text-caption2 text-fg-subtle">Read-only</span>
         </div>
-        <h1 className="mt-2 text-title2 font-semibold tracking-tight">Patch</h1>
-        <p className="mt-1 text-footnote text-fg-muted">This week's inputs &amp; outputs — what's set, and what changed.</p>
 
         {/* Context */}
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-line bg-surface px-4 py-3">
