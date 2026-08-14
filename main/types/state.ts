@@ -198,6 +198,15 @@ export interface UpdateStatus {
   unreleasedCommits?: number;
   /** False when the track has no tags and the updater is following the tip. */
   tagBased?: boolean;
+  /**
+   * A release that exists but cannot be installed here YET — the archives are
+   * still uploading, or the Homebrew tap has not been regenerated.
+   *
+   * The packaged counterpart of `unreleasedCommits`. Without it that window
+   * reads as "up to date", which is indistinguishable from a release build that
+   * failed and is never coming.
+   */
+  awaitingPackage?: string | null;
   /** How many of those an operator would notice — see summarizeChangelog. The
    *  release workflow's own version bump trails every merge, so this is 0 far more
    *  often than `behind` is, and it is what the "update available" banner reads. */

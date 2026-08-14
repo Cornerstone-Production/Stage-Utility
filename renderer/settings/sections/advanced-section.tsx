@@ -107,6 +107,10 @@ function UpdatesPanel({
   // Merged but not yet released — CI still running, or red. Only worth saying when
   // there is nothing to install, otherwise it competes with the update itself.
   const unreleased = s?.tagBased ? (s.unreleasedCommits ?? 0) : 0;
+  // A release that exists but cannot be installed here yet — archives still
+  // uploading, or the Homebrew tap not regenerated. Same idea as `unreleased`,
+  // one step further along the pipeline.
+  const awaiting = s?.awaitingPackage ?? null;
   const [trackSel, setTrackSel] = useState<string | null>(null);
   // Update lock — a live service / active recording blocks self-updates (which
   // restart the process) unless overridden. Re-checked whenever a service goes
@@ -320,7 +324,7 @@ function UpdatesPanel({
                 {s.lastResult.log ? ` ${s.lastResult.log.split("\n").filter(Boolean).slice(-1)[0]}` : ""}
               </p>
             ) : null}
-            {!justUpdated && s && available === 0 && !updating && (!s.lastResult || s.lastResult.ok) ? (
+            {!justUpdated && s && available === 0 && !awaiting && !updating && (!s.lastResult || s.lastResult.ok) ? (
               <p className="mt-1 flex items-center gap-1.5 text-caption2 text-green-10">
                 <CheckCircle2Icon className="size-3.5" /> You're on the latest release.
               </p>
@@ -328,7 +332,16 @@ function UpdatesPanel({
             {/* Work is merged but not released. Normal for a few minutes while the
                 release build runs; if it persists, that build failed and the track
                 is stalled — which should read as "waiting", not "up to date". */}
-            {!updating && available === 0 && unreleased > 0 ? (
+            {/* The package for a published release is still being built. Normal for
+                a few minutes after a release; if it persists, that build failed —
+                which must read as "waiting", not "up to date". */}
+            {!updating && available === 0 && awaiting ? (
+              <p className="mt-1 text-caption2 text-gray-9">
+                {awaiting} has been released, but the {s?.trackSource === "formula" ? "Homebrew package" : "download"} for
+                it isn't ready yet. It usually appears within a few minutes.
+              </p>
+            ) : null}
+            {!updating && available === 0 && !awaiting && unreleased > 0 ? (
               <p className="mt-1 text-caption2 text-gray-9">
                 {unreleased} commit{unreleased === 1 ? "" : "s"} merged since {s?.targetTag} and not yet
                 released. Updates arrive once the release build passes.
