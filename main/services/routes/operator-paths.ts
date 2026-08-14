@@ -29,6 +29,10 @@ export const OPERATOR_PATHS = [
  */
 export function isOperatorPath(pathname: string): boolean {
   const clean = pathname.split("?")[0].split("#")[0];
+  // The root is Home now. Matched exactly and never by prefix: "/" is a prefix
+  // of every path, so folding it into the loop below would claim /display-1 and
+  // black out every wall screen.
+  if (clean === "" || clean === "/") return true;
   return OPERATOR_PATHS.some(
     (p) => clean === p || clean === `${p}/` || clean.startsWith(`${p}/`),
   );

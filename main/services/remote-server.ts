@@ -325,7 +325,7 @@ export class RemoteServer {
     //   /settings, /history, … → operator app (app.html); see operator-paths.ts
     //   /display-1, /foo, …   → fall through to the SPA fallback (kiosk)
     let urlPath: string;
-    if (pathname === "/" || pathname === "/index.html") {
+    if (pathname === "/index.html") {
       urlPath = "/index.html";
     } else if (isOperatorPath(pathname)) {
       // Checked before the generic fall-through so a nested route like

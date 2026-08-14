@@ -36,6 +36,7 @@ import {
   DESTINATIONS,
   NAV_GROUPS,
   SETTINGS_DESTINATIONS,
+  UNGROUPED_PATHS,
   type Destination,
 } from "./destinations";
 import { cn } from "../lib/cn";
@@ -108,6 +109,11 @@ export function Rail({
         onSelectedItemChange={(d: Destination) => router.navigate({ to: d.path })}
         getItemKey={(d: Destination) => d.path}
       >
+        {/* Home first, above the group labels — it is the front door, not a
+            member of a category. */}
+        {DESTINATIONS.filter((d) => UNGROUPED_PATHS.includes(d.path)).map((d) => (
+          <SidebarListItem key={d.path} item={d} icon={d.icon} title={d.label} />
+        ))}
         {NAV_GROUPS.map((g) => {
           const items = DESTINATIONS.filter((d) => g.paths.includes(d.path));
           if (items.length === 0) return null;

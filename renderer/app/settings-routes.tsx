@@ -9,53 +9,19 @@
 
 import { useState } from "react";
 import { Loader2Icon } from "lucide-react";
-import { useRouter } from "@tanstack/react-router";
-import { PlanSection } from "../settings/sections/plan-section";
 import { ViewsSection } from "../settings/sections/views-section";
 import { OutputsSection } from "../settings/sections/outputs-section";
 import { ConnectSection } from "../settings/sections/connect-section";
 import { BrandingSection } from "../settings/sections/branding-section";
 import { AdvancedSection } from "../settings/sections/advanced-section";
-import { GettingStarted } from "../settings/getting-started";
 import { useStageSettings } from "./use-stage-settings";
 import { takeJustUpdated } from "./update-lifecycle";
-import { flashTarget } from "./flash";
 
 /** The spinner settings-view showed before stage state arrived. */
 function Loading() {
   return (
     <div className="flex items-center justify-center h-full py-16">
       <Loader2Icon className="size-5 text-fg-subtle animate-spin" />
-    </div>
-  );
-}
-
-export function PlanRoute() {
-  const s = useStageSettings();
-  const router = useRouter();
-  if (s.stageLoading || !s.stageState) return <Loading />;
-  return (
-    <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
-      {!s.stageState.onboardingDismissed && (
-        <GettingStarted
-          stageState={s.stageState}
-          // Was navigateToSection(id, flash) - a tab switch plus a highlight.
-          // Now a route change plus the same highlight, which has to wait for
-          // the destination to render before it can find its target.
-          onNavigate={(path: string, flash?: string) => {
-            router.navigate({ to: path });
-            if (flash) flashTarget(flash);
-          }}
-          onDismiss={s.handleDismissOnboarding}
-        />
-      )}
-      <PlanSection
-        stageState={s.stageState}
-        serviceTypes={s.serviceTypes}
-        plans={s.plans}
-        isRefreshing={s.isRefreshing}
-        handlers={s.handlers}
-      />
     </div>
   );
 }

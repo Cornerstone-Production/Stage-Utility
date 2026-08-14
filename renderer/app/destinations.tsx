@@ -13,7 +13,7 @@ import type { FunctionComponent, ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
 import {
   CableIcon,
-  CalendarIcon,
+  HouseIcon,
   ClockIcon,
   DropletIcon,
   LayoutTemplateIcon,
@@ -34,13 +34,13 @@ import { ServiceHistorySection } from "../settings/sections/service-history-sect
 import { AutomationSection } from "../settings/sections/automation-section";
 import { IntegrationsSection } from "../settings/sections/integrations-section";
 import { PatchSection } from "../settings/sections/patch-section";
+import { HomeRoute } from "./home/home-route";
 import { ScriptViewSection } from "../settings/sections/scriptview-section";
 import {
   AdvancedRoute,
   BrandingRoute,
   ConnectRoute,
   DisplaysRoute,
-  PlanRoute,
   ViewsRoute,
 } from "./settings-routes";
 
@@ -59,11 +59,11 @@ export interface Destination {
 /** Work surfaces — the rail proper. */
 export const DESTINATIONS: readonly Destination[] = [
   {
-    path: "/plan",
-    label: "Plan",
-    description: "Choose which Planning Center plan the displays follow.",
-    icon: <CalendarIcon className="size-4" />,
-    Component: PlanRoute,
+    path: "/",
+    label: "Home",
+    description: "This week's service, and what still needs setting up.",
+    icon: <HouseIcon className="size-4" />,
+    Component: HomeRoute,
   },
   {
     path: "/views",
@@ -172,10 +172,13 @@ export const ALL_DESTINATIONS: readonly Destination[] = [
  * Deferred in Phase 1a because six destinations needed no grouping. The rail
  * now carries twelve.
  */
+/** Home sits above the groups rather than inside one — it is the front door. */
+export const UNGROUPED_PATHS = ["/"];
+
 export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // What is shown. Patch belongs here because volunteers READ it at /patch; the
   // "output" in its description is XLR, not a display.
-  { label: "Content", paths: ["/plan", "/views", "/scriptview", "/patch"] },
+  { label: "Content", paths: ["/views", "/scriptview", "/patch"] },
   // Where it shows.
   { label: "Screens", paths: ["/displays"] },
   // What it talks to. Automation rules act ON integrations.

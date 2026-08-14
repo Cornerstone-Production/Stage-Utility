@@ -25,7 +25,8 @@ export const LEGACY_SECTION_IDS = [
 ] as const;
 
 const ROUTES: Record<(typeof LEGACY_SECTION_IDS)[number], string> = {
-  plan: "/plan",
+  // Plan folded into Home in Phase 2; the tab's content is the front page now.
+  plan: "/",
   views: "/views",
   scriptview: "/scriptview",
   displays: "/displays",
