@@ -36,11 +36,23 @@ URL" feeling:
    `overflow: hidden`, and no chrome. `/history` cannot honor the light/dark
    toggle; the History settings tab can.
 
-3. **Four features have two front doors.** `SECTION_PAGE` in
-   `renderer/settings/settings-view.tsx` maps ScriptView, Patch, History and
-   Baptisms to standalone twins. Only one door — the settings tab — sits inside
-   a shell with navigation, so that is the one that gets used. The standalone
-   pages are dead ends.
+3. **Two features have two front doors, and two more only appear to.**
+   `SECTION_PAGE` in `renderer/settings/settings-view.tsx` maps ScriptView,
+   Patch, History and Baptisms to standalone pages, but only two are duplicates:
+
+   - **History** — `history-view.tsx` (38 lines) renders `ServiceHistorySection`,
+     the same component the settings tab renders. A true duplicate.
+   - **Baptisms** — `baptism-operator-view.tsx` (35 lines) and
+     `baptisms-section.tsx` (15 lines) both render `BaptismOperator`. A true
+     duplicate.
+   - **Patch** — `patch-view.tsx` (272 lines) is a volunteer-facing read view
+     built on `resolvePatch`. The settings tab is the editor. Different surfaces.
+   - **ScriptView** — `scriptview-index-view.tsx` (158 lines) is the rundown
+     viewer. The settings tab is the column-preset editor. Different surfaces.
+
+   Whichever door has navigation is the one that gets used, and today that is
+   always the settings tab — so the standalone viewers are reached only
+   deliberately, and the duplicates are pure maintenance cost.
 
 4. **Editing exists only inside settings.** `layout-editor.tsx` (3,327 lines)
    lives in the settings bundle, so a layout can only be changed from a settings
@@ -180,7 +192,8 @@ declared surface, rather than remaining a third presentation.
   `root-view.tsx`'s path-switch is deleted.
 - Twelve settings sections become routes. `settings-view.tsx` (1,506 lines)
   sheds its tab-state machinery.
-- The four duplicate front doors collapse to one each.
+- History and Baptisms collapse to one route each; Patch and ScriptView keep both
+  surfaces, with the editor reached from the viewer.
 - Object rendering is already shared between the editor and the kiosk renderer
   (Section 5), so this phase inherits WYSIWYG rather than having to build it.
 
@@ -224,8 +237,14 @@ one click from anywhere.
 
 **Settings shrinks to four genuinely set-up-once surfaces:** Integrations,
 Connect, Branding, Advanced. Everything else in today's settings panel is work
-and moves to the rail. The four duplicate front doors in `SECTION_PAGE`
-(`renderer/settings/settings-view.tsx`) collapse to one each.
+and moves to the rail.
+
+**Front doors resolve by kind, not uniformly.** History and Baptisms are true
+duplicates and collapse to one route each. Patch and ScriptView are not: the
+standalone page is the surface people use (the volunteer patch view, the rundown
+viewer) and the settings tab is its editor. For those two the rail item is the
+**viewer**, with the editor reachable from it — configuration hanging off the
+thing it configures, rather than living in a separate panel.
 
 ### Screens: merging the Views and Outputs surfaces
 
@@ -519,10 +538,28 @@ test or it does not ship verified.
 
 Each phase ships on its own and leaves the app working.
 
-**Phase 1 — The shell.** Browser-history routing; delete the `root-view.tsx`
-path-switch; one operator app with rail and context bar; settings sections become
-routes; `settings-window.html` retires; the four duplicate front doors collapse.
-Fixes the daily complaint (`/history` versus the History tab) on its own.
+**Phase 1 splits in two.** Doing it as one change would mean adding a router,
+adding a shell, extracting roughly forty handlers out of a 1,506-line file and
+moving twelve sections, in a single reviewable unit — while Settings is the
+app's entire control surface, so a regression leaves the operator unable to
+configure anything.
+
+**Phase 1a — The operator shell (additive).** A third entry point with
+browser-history routing, the rail and the context bar. It takes over `/patch`,
+`/history`, `/baptism` and `/scriptview` from the kiosk bundle and adds
+`/automation` and `/integrations`. The existing settings panel keeps working,
+untouched, at `/settings`. Nothing is removed, so a fault is recoverable by not
+using the new URLs. Six of the twelve sections (`scriptview`, `integrations`,
+`service-history`, `baptisms`, `patch`, `automation`) already take no props and
+move as-is.
+
+**Phase 1b — Dissolving Settings.** Extract the shared `stageState` and
+`SectionHandlers` into a provider, move the remaining stateful sections
+(`plan`, `views`, `displays`, `connect`, `branding`, `advanced`) onto routes,
+retire `settings-window.html`, and redirect its hash-based deep links
+(`/settings#integrations`) to the new routes.
+
+Together these fix the daily complaint (`/history` versus the History tab).
 
 **Phase 2 — Home and Screens.** Home at the root URL with live and idle states,
 readiness, and drill-down into History; "Use this screen as a display" preserves
