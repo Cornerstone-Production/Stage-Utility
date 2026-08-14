@@ -134,6 +134,21 @@ Remove the service first. A registration left behind keeps starting a server
 that fights the new one for port 8788 — including after you have switched to a
 different install method, where it looks like the new method is broken.
 
+**From a checkout, the script does all of this for you:**
+
+```bash
+sudo ./scripts/uninstall.sh --dry-run   # say what it would do, change nothing
+sudo ./scripts/uninstall.sh             # systemd + launchd + the install tree
+./scripts/uninstall.sh --brew           # Homebrew — WITHOUT sudo
+```
+
+It removes only what is actually present, never touches the data directory, and
+prints where that directory is. Homebrew is separate and unsudoed on purpose:
+brew refuses to run as root, and its agent lives in your own `gui/<uid>` domain,
+which root cannot reach.
+
+Without a checkout, the per-method commands below are the same thing by hand.
+
 **Linux** (one-line installer or a checkout)
 
 ```bash
@@ -143,9 +158,6 @@ sudo systemctl daemon-reload
 sudo rm -rf /opt/stage-utility            # the install; data lives elsewhere
 sudo userdel stage-utility                # the service account, if unused
 ```
-
-`sudo ./scripts/uninstall.sh` does the first three from a checkout. It does not
-remove `/opt/stage-utility` or the account.
 
 **macOS** (one-line installer)
 
@@ -166,18 +178,24 @@ Unregister-ScheduledTask -TaskName StageUtility -Confirm:$false
 Remove-Item "$env:ProgramFiles\Stage Utility" -Recurse -Force
 ```
 
-**Homebrew**
+**Homebrew** (no `sudo` — brew refuses to run as root)
 
 ```bash
 brew services stop stage-utility          # or stage-utility-beta
 brew uninstall stage-utility
 launchctl bootout "gui/$(id -u)/homebrew.mxcl.stage-utility" 2>/dev/null || true
+rm -f ~/Library/LaunchAgents/homebrew.mxcl.stage-utility.plist
 brew untap Cornerstone-Production/stage-utility   # optional
 ```
 
-The `bootout` is not redundant: `brew uninstall` does not always unregister the
-launchd job, and an orphaned label makes every future `brew services start`
-fail with `Bootstrap failed: 5: Input/output error` — permanently, across
+**The last two lines are the ones people skip, and they are the ones that
+matter.** `brew uninstall` does not stop or unregister the service, so the keg
+can be deleted while its agent keeps running — the process then serves from
+files that no longer exist (version `0.0.0`, no settings page) and holds port
+8788 against whatever you install next. Uninstalling Homebrew to try the
+one-line installer, and finding the new install "broken", is this and nothing
+else. The stale label is also what makes every future `brew services start`
+fail with `Bootstrap failed: 5: Input/output error`, permanently, across
 reinstalls, until something boots it out.
 
 ### The data directory
