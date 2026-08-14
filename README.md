@@ -96,6 +96,12 @@ the address to open. After that it updates itself from **Settings -> Advanced**.
 On a Mac or Linux workstation you can use [Homebrew](docs/ops/homebrew.md)
 instead — a user agent that starts at login rather than a system service.
 
+Testing a prerelease on a spare machine? See
+[Installing a beta](docs/ops/install-and-config.md#installing-a-beta) — in a
+`curl | sudo bash` pipeline, `STAGE_TRACK=beta` does not go where you would
+expect. [Uninstalling](docs/ops/install-and-config.md#uninstalling) covers every
+method.
+
 To work on the code instead:
 
 ```bash
