@@ -141,7 +141,16 @@ const SECTION_DESC: Record<string, string> = {
 // labels did not: "Output" had collected anything screen-adjacent (Patch is a
 // document, Integrations are devices), and "Identity" had become the bucket for the
 // two sections that fit nowhere — including Baptisms, which is a live stopwatch.
-/** Tabs whose content also lives at a standalone URL, and what to call the link. */
+/**
+ * Tabs whose content is also reachable in the operator app, and what to call the
+ * link.
+ *
+ * Two kinds, despite looking alike. History and Baptisms render the SAME
+ * component in both places, so these links go to the route that replaced a
+ * deleted standalone wrapper. Patch and ScriptView are different surfaces — the
+ * volunteer patch view and the rundown viewer — so those links lead to a
+ * genuinely separate page whose editor is the tab you are standing in.
+ */
 const SECTION_PAGE: Record<string, { path: string; label: string } | undefined> = {
   scriptview: { path: "/scriptview", label: "Open ScriptView" },
   patch: { path: "/patch", label: "Open patch sheet" },

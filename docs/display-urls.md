@@ -25,9 +25,29 @@ display slugged `history` would render the History page rather than the display.
 Where both exist, the id wins, so a display is always reachable at its permanent
 address.
 
+## Operator surfaces
+
+These render in the operator app: one page with navigation and a live service
+context bar, rather than the separate chrome-free pages they used to be. They
+follow the light/dark theme, unlike the always-dark display URLs above.
+
+| URL | What it is |
+| --- | --- |
+| `/history` | Service history, timing and attendance |
+| `/patch` | This week's stage patch, for volunteers |
+| `/scriptview` | Rundown viewer |
+| `/baptism` | Baptism operator |
+| `/automation` | Automation rules |
+| `/integrations` | Connected devices and services |
+
+Moving between them does not reload the page, so the event stream and cached
+plan data survive a navigation.
+
+`/settings` remains its own page for now.
+
 ## Tool links
 
-The standalone pages — `/baptism`, `/patch`, `/scriptview`, `/history`, `/log` — are
+The tool pages — `/baptism`, `/patch`, `/scriptview`, `/history`, `/log` — are
 listed under **Settings → Connect → Tools**, with the same copy-to-clipboard
 treatment display links get.
 
