@@ -22,6 +22,7 @@ import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
 import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
 import { getLogLines } from "./log-buffer.js";
+import { isOperatorPath } from "./routes/operator-paths.js";
 
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
@@ -322,12 +323,18 @@ export class RemoteServer {
     // Clean-URL entry points → built HTML files:
     //   /                     → kiosk (index.html)
     //   /settings             → settings panel (settings-window.html)
+    //   /history, /patch, …   → operator app (app.html); see operator-paths.ts
     //   /display-1, /foo, …   → fall through to the SPA fallback (kiosk)
     let urlPath: string;
     if (pathname === "/" || pathname === "/index.html") {
       urlPath = "/index.html";
     } else if (pathname === "/settings" || pathname === "/settings/") {
       urlPath = "/settings-window.html";
+    } else if (isOperatorPath(pathname)) {
+      // Checked before the generic fall-through so a nested route like
+      // /scriptview/sunday/full reaches app.html rather than the kiosk SPA
+      // fallback. The dev server applies the same test (vite.config.ts).
+      urlPath = "/app.html";
     } else {
       urlPath = pathname;
     }

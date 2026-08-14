@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" type="image/png" href="/app-icon.png" />
+    <title>Stage Utility</title>
+    <script>
+      // Apply the saved theme before paint (no flash). Mirrors THEME_STORAGE_KEY
+      // in renderer/lib/use-theme.ts. The operator app follows the toggle; the
+      // kiosk (index.html) is deliberately always dark and does NOT share this.
+      (function () {
+        var saved = null;
+        try { saved = localStorage.getItem("stage-utility-theme"); } catch (e) {}
+        var dark =
+          saved === "dark" || saved === "light"
+            ? saved === "dark"
+            : window.matchMedia("(prefers-color-scheme: dark)").matches;
+        if (dark) document.documentElement.classList.add("dark");
+      })();
+    </script>
+    <style>
+      /* Opaque backgrounds: a normal browser page with no window vibrancy
+         behind it, so a translucent bg washes out text contrast. */
+      :root {
+        --background: #f7f8fa;
+      }
+      .dark {
+        --background: #0e0e0e; /* pure neutral — R=G=B, no cool/purple cast */
+      }
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+      body {
+        background: var(--background);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./renderer/app/index.tsx"></script>
+  </body>
+</html>
