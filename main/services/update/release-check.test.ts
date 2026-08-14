@@ -158,3 +158,82 @@ describe("fetchReleases", () => {
     await assert.rejects(fetchReleases(serving(resp(500, {}), resp(200, gh("v1.9.5")))), /500/);
   });
 });
+
+describe("what a packaged install shows under \"What's new\"", () => {
+  // A git checkout reads commit subjects out of its own history. A packaged
+  // install has no history and used to list bare tags — "v1.10.0,
+  // v1.10.0-beta.38, v1.10.0-beta.37" — which tells an operator nothing they
+  // can act on, while the same box's git sibling showed the real subjects.
+  // The release notes carry those lines; read them from there.
+  const NOTES = [
+    "> **Upgrading?** One manual step, once. Re-run the installer.",
+    "",
+    "## Highlights",
+    "",
+    "In-app updates now work on every install method.",
+    "",
+    "## New",
+    "",
+    "- **automation** — trigger a set time before a rehearsal or service",
+    "- **patch** — ownership bands on the sheet",
+    "- …and 22 more",
+    "",
+    "## Fixed",
+    "",
+    "- **pco** — check the Live action URL's origin",
+    "- `history` — stop a merge orphaning a record",
+    "",
+    "## Install",
+    "",
+    "- this bullet is in Install and must not be listed as a change",
+  ].join("\n");
+
+  const withNotes = (tag: string, body: string | null) => ({
+    tag,
+    name: tag,
+    publishedAt: "2026-08-14T00:00:00Z",
+    assets: ["stage-utility-x-linux-x64.tar.gz"],
+    body,
+  });
+
+  it("lists the actual changes, not the tags they shipped under", () => {
+    const s = packagedUpdateStatus([withNotes("v1.10.0", NOTES)], "beta", "1.10.0-beta.38");
+    assert.deepEqual(s.changelog, [
+      "automation — trigger a set time before a rehearsal or service",
+      "patch — ownership bands on the sheet",
+      "pco — check the Live action URL's origin",
+      "history — stop a merge orphaning a record",
+    ]);
+  });
+
+  it("ignores prose, the upgrade notice, Install, and the truncation marker", () => {
+    const s = packagedUpdateStatus([withNotes("v1.10.0", NOTES)], "beta", "1.10.0-beta.38");
+    const joined = s.changelog.join("\n");
+    assert.doesNotMatch(joined, /Upgrading/, "the notice is prose, not a change");
+    assert.doesNotMatch(joined, /In-app updates now work/, "Highlights is prose");
+    assert.doesNotMatch(joined, /must not be listed/, "Install bullets are not changes");
+    assert.doesNotMatch(joined, /and 22 more/, "the generator's own marker is not a change");
+  });
+
+  it("strips markdown so the panel shows plain text", () => {
+    const s = packagedUpdateStatus([withNotes("v1.10.0", NOTES)], "beta", "1.10.0-beta.38");
+    assert.doesNotMatch(s.changelog.join("\n"), /[*`]/, "no emphasis or code ticks reach the UI");
+  });
+
+  it("falls back to the tag when a release has no notes at all", () => {
+    const s = packagedUpdateStatus([withNotes("v1.10.0", null)], "beta", "1.10.0-beta.38");
+    assert.deepEqual(s.changelog, ["v1.10.0"]);
+  });
+
+  it("spans several releases, newest first", () => {
+    const s = packagedUpdateStatus(
+      [
+        withNotes("v1.10.0", "## Fixed\n\n- **a** — newest\n"),
+        withNotes("v1.10.0-beta.38", "## Fixed\n\n- **b** — older\n"),
+      ],
+      "beta",
+      "1.10.0-beta.37",
+    );
+    assert.deepEqual(s.changelog, ["a — newest", "b — older"]);
+  });
+});

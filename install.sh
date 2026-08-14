@@ -197,10 +197,24 @@ say "Verifying"
 # first few KB — so the writer was still pushing 275 KB into a closed pipe.
 # Observed as `printf: write error: Broken pipe` on a real beta install, with
 # the script dying before it verified anything.
+# No interval expression (`{64}`) anywhere below. mawk — the DEFAULT awk on
+# Debian and Ubuntu, i.e. most Linux servers — does not support them and offers
+# no flag to enable them, so `match($0, /[0-9a-f]{64}/)` simply never matched
+# there. The extraction returned empty, and the install died on the line under
+# this one with "publishes no checksum … refusing to install unverified": the
+# one-line installer could not install on a stock Debian or Ubuntu box at all.
+# It failed safe, which is why it stayed quiet; GitHub's runners and any machine
+# with gawk installed take the same path and pass.
+#
+# So: strip the prefix, strip anything from the first non-hex character, and
+# check the length. Plain POSIX awk, identical result under mawk and gawk.
 WANT=$(awk -v want="\"name\": \"${ARCHIVE}\"" '
   index($0, want) { found = 1; next }
   found && /"digest": "sha256:/ {
-    if (match($0, /[0-9a-f]{64}/)) { print substr($0, RSTART, RLENGTH); exit }
+    line = $0
+    sub(/.*sha256:/, "", line)
+    sub(/[^0-9a-f].*$/, "", line)
+    if (length(line) == 64) { print line; exit }
   }
 ' <<<"$RELEASE_JSON")
 
@@ -227,6 +241,18 @@ log "unpacked $(ls -1 "$RELEASE_DIR" | wc -l | tr -d " ") entries"
 [ -x "${RELEASE_DIR}/node" ] || die "Archive is missing its runtime — refusing to switch to it."
 
 mkdir -p "$DATA"
+
+# Record the track this install follows, in the same file the in-app updater
+# writes (data dir, so it outlives every release).
+#
+# Without this the track is INFERRED from the version string — a hyphen means
+# beta — and that inference flips silently the moment a beta box is on a stable
+# version. That is not hypothetical: `beta` deliberately takes stable releases
+# too (a release outranks the prereleases that led to it), so `STAGE_TRACK=beta`
+# today installs v1.10.0 and the next check would read "main" and never offer
+# another beta. The operator asked for beta and would quietly be on stable.
+printf '%s' "$TRACK" > "$DATA/update-track" 2>/dev/null \
+  || warn "Could not record the update track in ${DATA}; the app may infer it from the version instead."
 
 # ── Service user ──────────────────────────────────────────────────────────────
 # A dedicated account owns the data and the install, so an update needs no

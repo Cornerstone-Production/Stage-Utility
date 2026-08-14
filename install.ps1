@@ -170,6 +170,16 @@ try {
 
   New-Item -ItemType Directory -Path $data -Force | Out-Null
 
+  # Record the track, in the same file the in-app updater writes. Mirrors
+  # install.sh: without it the track is inferred from the version string, and
+  # that inference flips silently once a beta box is on a stable version —
+  # which happens by design, since `beta` takes stable releases too.
+  try {
+    [IO.File]::WriteAllText((Join-Path $data "update-track"), $track)
+  } catch {
+    Write-Host "warn: could not record the update track in $data; the app may infer it from the version instead."
+  }
+
   # A junction rather than a symlink: it needs no developer mode and no extra
   # privilege, and points at a directory just the same.
   Write-UpdateProgress "build"
