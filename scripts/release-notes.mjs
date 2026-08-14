@@ -39,7 +39,11 @@ if (!version) {
 function upgradeNotice(v) {
   const here = path.dirname(new URL(import.meta.url).pathname);
   try {
-    return readFileSync(path.join(here, "..", "docs", "release-notes", `${v}.md`), "utf8").trim();
+    // Trailing newline restored after the trim: the generated sections each end
+    // in one and are joined with another, which is what puts a blank line
+    // between them. A fully-trimmed notice left the next heading butted
+    // straight onto its last line of prose.
+    return readFileSync(path.join(here, "..", "docs", "release-notes", `${v}.md`), "utf8").trim() + "\n";
   } catch {
     return ""; // the ordinary case: nothing special about this release
   }

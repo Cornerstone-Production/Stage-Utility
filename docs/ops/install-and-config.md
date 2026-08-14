@@ -256,7 +256,15 @@ What actually happens depends on the install:
 | Installed by | How it updates |
 |---|---|
 | the one-line installer | re-runs the current installer, which downloads, verifies the checksum, swaps, and restarts |
+| Homebrew | `brew update` and `brew upgrade` on its own formula, then restarts the service. See [Homebrew](homebrew.md) |
 | a git checkout | fetch, reinstall if the lockfile moved, rebuild if the UI changed, restart |
+
+On Linux the update runs as the service account rather than root — it only has
+to write the install directory, which that account owns. One consequence for a
+box installed before 1.10.0: port 80 used to be granted to a specific release's
+runtime, so the first in-app update moves off it and `:80` stops answering.
+`8788` is unaffected, and re-running the installer once with `sudo` restores it
+permanently. The update log says so when it happens.
 
 There is no extra tooling requirement on any platform. If the app cannot work out
 how it was installed, it refuses and says so rather than starting something it
