@@ -1,5 +1,5 @@
 // Which URLs belong to the operator app (app.html) rather than the kiosk
-// (index.html) or the settings panel (settings-window.html).
+// (index.html).
 //
 // Routing is implemented twice — the `cleanUrls` Vite plugin for dev and
 // `remote-server.ts` for prod — and the two have drifted before. Both import

@@ -322,14 +322,11 @@ export class RemoteServer {
   private async tryServeStatic(pathname: string, res: http.ServerResponse, acceptEncoding?: string): Promise<boolean> {
     // Clean-URL entry points → built HTML files:
     //   /                     → kiosk (index.html)
-    //   /settings             → settings panel (settings-window.html)
-    //   /history, /patch, …   → operator app (app.html); see operator-paths.ts
+    //   /settings, /history, … → operator app (app.html); see operator-paths.ts
     //   /display-1, /foo, …   → fall through to the SPA fallback (kiosk)
     let urlPath: string;
     if (pathname === "/" || pathname === "/index.html") {
       urlPath = "/index.html";
-    } else if (pathname === "/settings" || pathname === "/settings/") {
-      urlPath = "/settings-window.html";
     } else if (isOperatorPath(pathname)) {
       // Checked before the generic fall-through so a nested route like
       // /scriptview/sunday/full reaches app.html rather than the kiosk SPA

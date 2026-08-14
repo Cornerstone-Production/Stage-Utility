@@ -597,7 +597,7 @@ export function AutomationSection() {
     // vertical padding at all, so its cards ran to the pane edges while every
     // neighbouring tab inset them.
     <div className="px-5 max-sm:px-3 flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
-      {/* No title here — settings-view renders the page heading and its blurb from
+      {/* No title here — the shell renders the page heading and its blurb from
           SECTION_DESC, same as every other section. A local h1 duplicated it. */}
 
       {/* Safety first: these are the controls that decide whether anything real happens. */}

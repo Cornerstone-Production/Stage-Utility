@@ -173,7 +173,8 @@ export function ScriptViewSection() {
 
   return (
     <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
-      {/* "Open ScriptView" lives inline in the section header (settings-view). */}
+      {/* ScriptView is its own rail destination now, so there is no "open it"
+          link here: the viewer is one click away in the sidebar. */}
       {error && <p className="text-caption1 text-red-11 mb-3">{error}</p>}
 
       {/* Which service types appear on the landing page (curated per church). */}

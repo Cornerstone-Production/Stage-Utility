@@ -8,8 +8,7 @@ import { isOperatorPath } from "./main/services/routes/operator-paths";
 
 // Dev-only: map clean URLs to their entry HTML so the dev server matches what
 // the production Node server serves (see remote-server.ts tryServeStatic).
-//   /settings        → settings-window.html
-//   /history, /patch → app.html (operator app; see operator-paths.ts)
+//   /settings, /history, /patch → app.html (operator app; see operator-paths.ts)
 //   /display-1, …    → index.html (kiosk; the slug is read client-side)
 //   /preview-<view>  → index.html (settings live preview of a View)
 //
@@ -21,9 +20,7 @@ function cleanUrls(): PluginOption {
     configureServer(server) {
       server.middlewares.use((req, _res, next) => {
         const pathname = (req.url ?? "").split("?")[0];
-        if (pathname === "/settings" || pathname === "/settings/") {
-          req.url = "/settings-window.html";
-        } else if (isOperatorPath(pathname)) {
+        if (isOperatorPath(pathname)) {
           req.url = "/app.html";
         } else if (/^\/(display|preview)-[^/]+\/?$/.test(pathname)) {
           req.url = "/index.html";
@@ -70,7 +67,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        settings: resolve(__dirname, "settings-window.html"),
         app: resolve(__dirname, "app.html"),
       },
     },
