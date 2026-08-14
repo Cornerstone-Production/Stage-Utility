@@ -29,6 +29,19 @@ export function SidebarChromeProvider({
   return <SidebarChromeContext value={value}>{children}</SidebarChromeContext>;
 }
 
+/**
+ * The chrome state SplitView decided on: whether this is the collapsed icon rail
+ * and whether we are on mobile.
+ *
+ * Sidebar content needs it to render its own footer — a collapse control and a
+ * width handle only make sense inline, never in the mobile drawer. Recomputing
+ * it from a media query instead would let the two disagree, which is how a
+ * drawer ends up rendering as an icon rail.
+ */
+export function useSidebarChrome(): SidebarChromeValue {
+  return React.use(SidebarChromeContext);
+}
+
 // ── Context ───────────────────────────────────────────────────────────────────
 
 interface SidebarListContextValue {
