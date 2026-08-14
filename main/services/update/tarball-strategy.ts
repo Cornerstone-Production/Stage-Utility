@@ -15,8 +15,30 @@ import type { InstallKind } from "./install-kind.js";
 import type { ApplyOptions, SpawnPlan, UpdateStrategy } from "./strategy.js";
 
 const REPO = "Cornerstone-Production/Stage-Utility";
-export const INSTALLER_SH = `https://raw.githubusercontent.com/${REPO}/main/install.sh`;
-export const INSTALLER_PS1 = `https://raw.githubusercontent.com/${REPO}/main/install.ps1`;
+
+/**
+ * The installer for a track comes from that track's branch.
+ *
+ * It used to always come from `main`, on the reasoning that the newest
+ * installer should perform every upgrade. That is right for a stable box and
+ * wrong for a beta one: `main` only moves when a release is cut, so an
+ * installer fix that has shipped to beta does not reach a beta install for
+ * days or weeks — and the fix it is missing may be the one that lets it
+ * install at all.
+ *
+ * That is not hypothetical. A SIGPIPE on the (much larger) beta release JSON
+ * broke `STAGE_TRACK=beta` installs entirely; the fix went to beta, beta
+ * released it, and the next attempt failed identically — because the script
+ * doing the installing was still main's.
+ *
+ * A beta box running beta's installer is also just what "beta" means: it is
+ * where installer changes get exercised before a stable box ever sees them.
+ */
+export function installerUrl(track: string, platform: NodeJS.Platform): string {
+  const branch = track === "beta" ? "beta" : "main";
+  const file = platform === "win32" ? "install.ps1" : "install.sh";
+  return `https://raw.githubusercontent.com/${REPO}/${branch}/${file}`;
+}
 
 export class TarballStrategy implements UpdateStrategy {
   readonly kind: InstallKind = "tarball";
@@ -48,13 +70,24 @@ export class TarballStrategy implements UpdateStrategy {
     if (this.platform === "win32") {
       return {
         command: "powershell.exe",
-        args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `irm ${INSTALLER_PS1} | iex`],
+        args: [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          `irm ${installerUrl(o.track, "win32")} | iex`,
+        ],
         env,
         // Not the install root: the installer replaces it under this process.
         cwd: "C:\\",
       };
     }
     // Not the install root: the installer replaces it under this process.
-    return { command: "bash", args: ["-c", `curl -fsSL ${INSTALLER_SH} | bash`], env, cwd: "/" };
+    return {
+      command: "bash",
+      args: ["-c", `curl -fsSL ${installerUrl(o.track, this.platform)} | bash`],
+      env,
+      cwd: "/",
+    };
   }
 }
