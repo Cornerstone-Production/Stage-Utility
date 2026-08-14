@@ -228,6 +228,18 @@ log "unpacked $(ls -1 "$RELEASE_DIR" | wc -l | tr -d " ") entries"
 
 mkdir -p "$DATA"
 
+# Record the track this install follows, in the same file the in-app updater
+# writes (data dir, so it outlives every release).
+#
+# Without this the track is INFERRED from the version string — a hyphen means
+# beta — and that inference flips silently the moment a beta box is on a stable
+# version. That is not hypothetical: `beta` deliberately takes stable releases
+# too (a release outranks the prereleases that led to it), so `STAGE_TRACK=beta`
+# today installs v1.10.0 and the next check would read "main" and never offer
+# another beta. The operator asked for beta and would quietly be on stable.
+printf '%s' "$TRACK" > "$DATA/update-track" 2>/dev/null \
+  || warn "Could not record the update track in ${DATA}; the app may infer it from the version instead."
+
 # ── Service user ──────────────────────────────────────────────────────────────
 # A dedicated account owns the data and the install, so an update needs no
 # elevation and a compromise of the server is not a compromise of root.
