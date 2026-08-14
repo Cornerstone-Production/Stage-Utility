@@ -64,8 +64,11 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.sourceKey + body.targetKey (strings) required");
         return;
       }
-      await mergeServiceRecords(body.sourceKey, body.targetKey);
-      json(res, { ok: true });
+      // Return WHAT happened, not just that it happened. A merge can legitimately
+      // touch only some of the three stores, and "ok: true" made a partial result
+      // indistinguishable from a complete one.
+      const outcome = await mergeServiceRecords(body.sourceKey, body.targetKey);
+      json(res, { ok: true, ...outcome });
       return;
     }
     if (method === "GET" && pathname === "/api/attendance/history/current") {
