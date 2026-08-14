@@ -5,6 +5,7 @@ import { useStageState } from "../main/use-stage-state";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useState, useEffect, useCallback, type ChangeEvent, type ReactNode } from "react";
+import { REVEAL_EVENT, pendingFlashTarget, type RevealDetail } from "../app/flash";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { OscTargetsPanel } from "./osc-targets-panel";
@@ -267,7 +268,7 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
     // Getting-started sends "Connect Planning Center" straight at this card's form.
     <div
       className="flex flex-col gap-3"
-      data-flash-id={descriptor.id === "planning-center" ? "pco-credentials" : undefined}
+      data-flash-id={FLASH_IDS[descriptor.id]}
     >
       {/* Schema-driven form */}
       <FieldSet flat>
@@ -899,6 +900,17 @@ function ProPresenterInstancesPanel({
 // ---- collapsible row + categories -------------------------------------------
 
 // Groups the growing integration list by purpose so the page stays scannable.
+/**
+ * Cards that Getting Started can point at, by integration id.
+ *
+ * Named here rather than inline so the reveal listener below and the attribute
+ * that emits it cannot drift — a flash id with no card, or a card whose id
+ * changed, would silently stop highlighting.
+ */
+const FLASH_IDS: Record<string, string | undefined> = {
+  "planning-center": "pco-credentials",
+};
+
 const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
   { title: "Service & plan", ids: ["planning-center", "prodcom"] },
   { title: "Presentation", ids: ["propresenter"] },
@@ -1044,6 +1056,29 @@ interface IntegrationsPanelProps {
 }
 
 export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
+  // Getting Started points at a specific card, and an unconfigured integration
+  // lives inside the collapsed "Not set up" group — which is exactly where a
+  // first-run operator's PCO card is, so the highlight had nothing to land on.
+  //
+  // A nonce rather than a boolean: it remounts the group with defaultOpen, so
+  // the operator can still close it afterwards, and there is no setState in an
+  // effect to cascade renders. Declared here, above every early return, because
+  // hooks must run in the same order on every render.
+  const isOurs = (flashId: string | null | undefined) =>
+    !!flashId && Object.values(FLASH_IDS).includes(flashId);
+  // Seeded from the pending target: flashTarget runs on the page being LEFT, so
+  // its event fires before this panel exists. The listener below covers the
+  // other order, when the panel is already mounted.
+  const [revealNonce, setRevealNonce] = useState(() => (isOurs(pendingFlashTarget()) ? 1 : 0));
+  useEffect(() => {
+    const onReveal = (e: Event) => {
+      const flashId = (e as CustomEvent<RevealDetail>).detail?.flashId;
+      if (isOurs(flashId)) setRevealNonce((n) => n + 1);
+    };
+    window.addEventListener(REVEAL_EVENT, onReveal);
+    return () => window.removeEventListener(REVEAL_EVENT, onReveal);
+  }, []);
+
   const queryClient = useQueryClient();
   const { state: stageState } = useStageState();
 
@@ -1215,7 +1250,12 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
       ))}
 
       {dormant.length > 0 && (
-        <Collapsible label={`Not set up (${dormant.length})`} summary="integrations you are not using">
+        <Collapsible
+          key={revealNonce}
+          defaultOpen={revealNonce > 0}
+          label={`Not set up (${dormant.length})`}
+          summary="integrations you are not using"
+        >
           <div className="flex flex-col gap-2 pt-2">
             {dormant.map((descriptor) => {
               const state = stateMap.get(descriptor.id);
