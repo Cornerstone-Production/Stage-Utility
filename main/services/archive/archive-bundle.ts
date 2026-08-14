@@ -11,6 +11,7 @@
 // reported. See `importArchive` for the ordering that keeps a corrupt file from
 // leaving half a year behind.
 
+import { errorMessage } from "../errors.js";
 import { readFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
@@ -25,8 +26,8 @@ import { attendanceStore } from "../attendance-store.js";
 import { baptismStore } from "../baptism-store.js";
 import { serviceTimelineStore } from "../service-timeline-store.js";
 import { splHistoryStore } from "../spl-history-store.js";
-import { archiveRoot, serviceDirName } from "./archive-paths.js";
-import { encodeRow, parseRows } from "./csv.js";
+import { archiveRoot, isInside, serviceDirName } from "./archive-paths.js";
+import { encodeRow, parseRows } from "../csv.js";
 import {
   mergeAttendanceRecord,
   mergeCsv,
@@ -86,6 +87,16 @@ export interface ImportResult {
   merged: string[];
   replaced: string[];
   baptismSessionsAdded: number;
+  /**
+   * Raw archive files this import could not write, with the reason.
+   *
+   * A per-file failure must not abort an import whose summary records are
+   * already applied — but it must not be invisible either. On a full card every
+   * write throws and the operator would otherwise be told the import succeeded,
+   * with the raw sample layer silently absent and the bundle possibly deleted by
+   * the time anyone notices. Empty on a clean import.
+   */
+  rawFilesFailed: { file: string; reason: string }[];
 }
 
 function pkgVersion(): string {
@@ -395,32 +406,72 @@ export async function importArchive(
 
   // Raw files. A null dir means the service predates the archive and has none.
   // Merging unions rows by timestamp; replacing overwrites the file outright.
+  const rawFilesFailed: { file: string; reason: string }[] = [];
   for (const s of touched) {
     if (!s.dir) continue;
+    // `s.dir` is the uploaded manifest's claim about where its files go — it is
+    // attacker-controlled and never used as a path. The export side always writes
+    // serviceDirName(serviceKey, serviceDate), so recomputing it here is identical
+    // for any real bundle and immune to a crafted one; `..` in the manifest can no
+    // longer walk out of the archive root and drop a file anywhere the service user
+    // can write. It stays a plain string match against the zip's entry names.
     const prefix = `archive/${s.dir}/`;
+    const dirName = serviceDirName(s.serviceKey, s.serviceDate);
     for (const [name, bytes] of Object.entries(files)) {
       if (!name.startsWith(prefix)) continue;
-      const dest = path.join(archiveRoot(), s.dir, path.basename(name));
-      await fs.mkdir(path.dirname(dest), { recursive: true });
-      let out = new TextDecoder().decode(bytes);
-      if (merge.has(s.serviceKey) && name.endsWith(".csv")) {
-        let existing = "";
-        try {
-          existing = await fs.readFile(dest, "utf8");
-        } catch {
-          /* nothing here yet — take theirs whole */
-        }
-        // A null merge means the column sets disagree, so the rows cannot be
-        // interleaved. Keep what is here rather than produce a ragged file.
-        if (existing) out = mergeCsv(existing, out, parseRows, encodeRow) ?? existing;
+      // basename() alone is not a safe filename. An entry ending in `/..` yields
+      // "..", whose join is the archive ROOT — which isInside accepts, and writing
+      // to it throws EISDIR partway through an import that has already upserted
+      // records, breaking this function's own "validate everything, then write"
+      // contract. An entry ending in `/.` yields ".", which writes a FILE where the
+      // service's directory belongs, so every later recording for that key fails
+      // at mkdir with ENOTDIR. A NUL byte throws outright. None of these need to
+      // traverse anywhere to do damage.
+      const leaf = path.basename(name);
+      if (leaf === "" || leaf === "." || leaf === ".." || leaf.includes("\0")) {
+        console.warn(`[archive] skipped a bundle entry with an unusable name: ${JSON.stringify(name)}`);
+        continue;
       }
-      await fs.writeFile(dest, name.endsWith(".csv") ? out : bytes);
+      const dest = path.join(archiveRoot(), dirName, leaf);
+      // Belt and braces: whatever the pieces above did, the result is under root —
+      // and strictly under it, never the root itself.
+      if (!isInside(archiveRoot(), dest) || path.resolve(dest) === path.resolve(archiveRoot())) continue;
+      try {
+        await fs.mkdir(path.dirname(dest), { recursive: true });
+        let out = new TextDecoder().decode(bytes);
+        if (merge.has(s.serviceKey) && name.endsWith(".csv")) {
+          let existing = "";
+          try {
+            existing = await fs.readFile(dest, "utf8");
+          } catch {
+            /* nothing here yet — take theirs whole */
+          }
+          // A null merge means the column sets disagree, so the rows cannot be
+          // interleaved. Keep what is here rather than produce a ragged file.
+          if (existing) out = mergeCsv(existing, out, parseRows, encodeRow) ?? existing;
+        }
+        await fs.writeFile(dest, name.endsWith(".csv") ? out : bytes);
+      } catch (err) {
+        // One unwritable member must not abort an import whose records are already
+        // applied — but swallowing it reported success for work that did not
+        // happen. On a full card every write here throws, and the operator was
+        // told the import succeeded while the raw sample layer was absent. Record
+        // it and let the caller decide what to say.
+        const reason = errorMessage(err);
+        console.error(`[archive] could not write ${dest} from the bundle:`, err);
+        rawFilesFailed.push({ file: path.relative(archiveRoot(), dest), reason });
+      }
     }
   }
 
   // Baptism sessions dedupe on id, not serviceKey: the id is a UUID and one service
   // can hold several sessions.
-  for (const s of freshSessions) await baptismStore.addSession(s as never);
+  //
+  // One call, not one per session. addSession re-applies its live cap on every
+  // call, so looping here silently deleted the operator's OWN oldest sessions —
+  // importing 45 into a box holding 80 destroyed 25 of them, while the result
+  // reported only what had been added.
+  const baptismSessionsAdded = await baptismStore.addSessions(freshSessions as never);
 
-  return { added, skipped, merged, replaced, baptismSessionsAdded: freshSessions.length };
+  return { added, skipped, merged, replaced, baptismSessionsAdded, rawFilesFailed };
 }

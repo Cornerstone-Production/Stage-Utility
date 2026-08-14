@@ -1,6 +1,7 @@
 // Pure function: merges saved slots + PCO team members + device status.
 // No I/O — takes data already fetched and returns resolved Slot[].
 
+import { clamp } from "./clamp.js";
 import type { Slot, SlotDevice, SlotPositionMatch, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 
@@ -32,7 +33,7 @@ const EMPTY_DEVICE: SlotDevice = {
 export function normaliseAudioLevel(v: number | null | undefined): number | null {
   if (v == null || !Number.isFinite(v)) return null;
   if (v >= 0 && v <= 1) return v; // already normalised
-  if (v < 0) return Math.max(0, Math.min(1, (v + 60) / 60)); // dBFS-ish, −60..0
+  if (v < 0) return clamp((v + 60) / 60, 0, 1); // dBFS-ish, −60..0
   if (v <= 100) return v / 100; // percentage
   return null; // nothing sensible to make of it
 }
@@ -93,13 +94,43 @@ function normalizePosition(name: string | null | undefined): string {
   return (name ?? "").replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase();
 }
 
+/** True when a name ends in a "(…)" sub-variant, e.g. "Audio (MON)". */
+const hasVariant = (name: string): boolean => /\([^)]*\)$/.test(name);
+
+/**
+ * What a CONFIGURED slot position matches on.
+ *
+ * A base name ("Vocals") is deliberately broad: it matches every sub-variant, so
+ * one slot can cover a range and the note picks the person. A name that already
+ * NAMES a variant ("Audio (MON)") is not broad — it means that variant.
+ *
+ * Both used to collapse to the base, so "Audio (MON)" and "Audio (FOH)" were the
+ * same query and a MON slot took whichever audio engineer PCO listed first.
+ * Adding the FOH slot appeared to fix it only because the two then competed for
+ * distinct people and happened to land the right way round.
+ */
+function positionKey(name: string | null | undefined): string {
+  const t = (name ?? "").trim().toLowerCase();
+  return hasVariant(t) ? t : normalizePosition(t);
+}
+
+/** Does `memberPosition` satisfy a slot configured for `configured`? */
+function positionMatches(configured: string | null | undefined, memberPosition: string | null | undefined): boolean {
+  const key = positionKey(configured);
+  if (!key) return false;
+  // An explicitly-named variant is exact; a base name covers its sub-variants.
+  return hasVariant(key)
+    ? key === (memberPosition ?? "").trim().toLowerCase()
+    : normalizePosition(memberPosition) === key;
+}
+
 /** Canonical identity of a positions range. Two slots compete for people only when
  *  these are equal — same (position, note) pairs, order-insensitive. Notes are part
  *  of the identity, so "Vocals note 1" and "Vocals note 2" never compete. */
 function positionSignature(positions: SlotPositionMatch[]): string {
   return JSON.stringify(
     positions
-      .map((p) => [normalizePosition(p.name), (p.notesStartsWith ?? "").trim().toLowerCase()] as const)
+      .map((p) => [positionKey(p.name), (p.notesStartsWith ?? "").trim().toLowerCase()] as const)
       .sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0]))),
   );
 }
@@ -129,12 +160,12 @@ function heldPositions(
   members: TeamMemberDTO[],
 ): string[] {
   const key = claimKey(member);
-  const held = new Set(
-    members.filter((m) => claimKey(m) === key).map((m) => normalizePosition(m.teamPositionName)),
-  );
+  const held = members.filter((m) => claimKey(m) === key).map((m) => m.teamPositionName);
   const named = positions.filter((p) => p.name && p.name.trim());
   // An entry with no position name matches on notes alone, so it names nothing.
-  const shown = named.filter((p) => held.has(normalizePosition(p.name)));
+  // Uses the same rule as matching, so a label is only shown when the person
+  // really holds that position — a "(MON)" label never appears for the FOH tech.
+  const shown = named.filter((p) => held.some((h) => positionMatches(p.name, h)));
   if (shown.length > 0) return shown.map((p) => p.name as string);
   // Matched on a note rather than a position, or PCO calls it something the slot
   // does not list. Name what PCO actually says over a configured label the person
@@ -148,17 +179,17 @@ function matchByPositions(
   taken: Set<string>,
 ): TeamMemberDTO | null {
   for (const entry of positions) {
-    const wantPos = entry.name && entry.name.trim() ? normalizePosition(entry.name) : null;
+    const wantPos = entry.name && entry.name.trim() ? entry.name : null;
     const prefix = entry.notesStartsWith?.trim().toLowerCase() || null;
 
     // Neither constraint = a misconfigured entry. Skip it rather than claim the
     // first person on the team.
     if (wantPos === null && prefix === null) continue;
 
-    // Match on the normalized position so sub-variants group with their base
-    // (e.g. "Vocals (BGVs)" → "Vocals"), disambiguated by notes.
+    // A base name groups sub-variants under it ("Vocals" takes "Vocals (BGVs)"),
+    // disambiguated by notes; a name that already states a variant means that one.
     const pool = (
-      wantPos === null ? members : members.filter((m) => normalizePosition(m.teamPositionName) === wantPos)
+      wantPos === null ? members : members.filter((m) => positionMatches(wantPos, m.teamPositionName))
     ).filter((m) => !taken.has(claimKey(m)));
 
     if (prefix) {
@@ -202,11 +233,34 @@ const AVATAR_MAX_PX = 1000;
  *  2.2 rounds that up so a column is never under-served. */
 const COLUMN_ASPECT_BUDGET = 2.2;
 
+/** Roughly how much of a slot's height the name/RF card takes. It is sized by the
+ *  card's width, so it is a fixed cost per slot — which is why a stacked slot keeps
+ *  less than its 1/depth share of the photo. ~110px of a ~1027px card, measured. */
+const INFO_CARD_FRACTION = 0.12;
+
 /** Columns a view renders: stacked slots share one, so they do not each get a
  *  column's width. Mirrors the grouping the kiosk does with `stackWithPrevious`. */
 function columnCount(slots: Slot[]): number {
   const n = slots.filter((s) => !s.stackWithPrevious).length;
   return Math.max(1, n);
+}
+
+/**
+ * How many slots share each slot's column, by slot index.
+ *
+ * A stacked column splits its height between its slots, so each one is drawn
+ * roughly `depth` times shorter than a full-height slot — and needs a crop that
+ * short. Grouping mirrors what the kiosk does with `stackWithPrevious`.
+ */
+function stackDepths(slots: Slot[]): number[] {
+  const columns: number[][] = [];
+  slots.forEach((slot, i) => {
+    if (slot.stackWithPrevious && columns.length > 0) columns[columns.length - 1].push(i);
+    else columns.push([i]);
+  });
+  const depths = new Array<number>(slots.length).fill(1);
+  for (const col of columns) for (const i of col) depths[i] = col.length;
+  return depths;
 }
 
 /**
@@ -218,14 +272,35 @@ function columnCount(slots: Slot[]): number {
  * away, and the fixed 1000px request was itself an upscale of a 960px original.
  * Matching the geometry to the column keeps exactly the pixels that get drawn:
  * ~183 KB per photo instead of ~1093 KB, with nothing visibly different.
+ *
+ * HEIGHT MATTERS TOO. This asked for a full-height crop for every slot, including
+ * the ones in a stacked column that are drawn half as tall. `object-fit: cover`
+ * then scaled the too-tall image to the slot's WIDTH and cropped away the excess
+ * height — with `object-position: top`, that left a stacked slot showing the top
+ * 45% of the photo. Foreheads. Dividing the height by the stack depth asks for the
+ * shape that will actually be drawn, and downloads less of it.
  */
-export function fitAvatarToColumn(url: string | null, columns: number): string | null {
+export function fitAvatarToColumn(
+  url: string | null,
+  columns: number,
+  stackDepth = 1,
+): string | null {
   if (!url) return null;
   const width = Math.min(
     AVATAR_MAX_PX,
     Math.max(120, Math.ceil((AVATAR_MAX_PX * COLUMN_ASPECT_BUDGET) / columns)),
   );
-  const geometry = `${width}x${AVATAR_MAX_PX}%23`;
+  // Not simply height/depth: the info card under the photo is sized by the card's
+  // WIDTH, so it costs the same pixels in a half-height slot as a full one. A slot
+  // in a 2-stack therefore keeps well under half the photo height, not half.
+  // Measured on a real display: full photo 915px, stacked 396px — 0.433, where a
+  // naive 1/depth would say 0.5. Modelling the card as a fixed fraction of the slot
+  // reproduces that: (1/depth - card) / (1 - card).
+  const depth = Math.max(1, stackDepth);
+  const share = (1 / depth - INFO_CARD_FRACTION) / (1 - INFO_CARD_FRACTION);
+  // A floor keeps a deep stack from asking for a letterbox sliver.
+  const height = Math.max(240, Math.round(AVATAR_MAX_PX * Math.max(0, share)));
+  const geometry = `${width}x${height}%23`;
   return /[?&]g=\d+x\d+(%23|#)?/.test(url)
     ? url.replace(/([?&]g=)\d+x\d+(%23|#)?/, `$1${geometry}`)
     : url + (url.includes("?") ? "&" : "?") + `g=${geometry}`;
@@ -238,6 +313,8 @@ export function resolveSlots(
 ): Slot[] {
   // How wide each column will be drawn, which sets the avatar crop below.
   const columns = columnCount(slots);
+  // Per-slot, because a stacked slot is drawn shorter and needs a shorter crop.
+  const depths = stackDepths(slots);
 
   // Claimed people, keyed by positions-signature. Slots with the same signature
   // compete for distinct people; slots with different signatures are independent,
@@ -245,7 +322,7 @@ export function resolveSlots(
   // is the array order the caller passes.
   const claimed = new Map<string, Set<string>>();
 
-  return slots.map((slot): Slot => {
+  return slots.map((slot, slotIndex): Slot => {
     // Spacers + empty slots: no display name, no photo, no PCO lookup.
     if (slot.link.kind === "spacer" || slot.link.kind === "empty") {
       return { ...slot, displayName: null, photoUrl: null, device: EMPTY_DEVICE };
@@ -308,7 +385,7 @@ export function resolveSlots(
     return {
       ...slot,
       displayName: member?.name ?? null,
-      photoUrl: fitAvatarToColumn(member?.photoUrl ?? null, columns),
+      photoUrl: fitAvatarToColumn(member?.photoUrl ?? null, columns, depths[slotIndex] ?? 1),
       shownPositions,
       device,
     };

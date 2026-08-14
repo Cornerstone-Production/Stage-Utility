@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { useState, type CSSProperties } from "react";
 import { invoke } from "../lib/api";
 import { toast } from "../components/ui";
@@ -49,7 +50,7 @@ export function OscButton({
         args: config.args ?? [],
       });
     } catch (e) {
-      toast.error(`OSC failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`OSC failed: ${errorMessage(e)}`);
     } finally {
       setBusy(false);
     }

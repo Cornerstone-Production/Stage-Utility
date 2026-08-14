@@ -11,8 +11,6 @@ export type SectionId =
   | "integrations"
   | "connect"
   | "branding"
-  | "spl-history"
-  | "attendance"
   | "service-history"
   | "baptisms"
   | "patch"
@@ -45,7 +43,7 @@ export interface SectionHandlers {
   handleSetAutoUpdate: (partial: { mode?: "manual" | "auto-install" | "auto-full"; enabled?: boolean; dayOfWeek?: number | null; hour?: number }) => Promise<void>;
   handleSetReconnectSchedule: (partial: { enabled?: boolean; leadMin?: number; tailMin?: number; dormantMin?: number }) => Promise<void>;
   handleSetTaperWindow: (partial: { preMin?: number; postMin?: number }) => Promise<void>;
-  handleSetBaptismAutoStart: (partial: { enabled?: boolean; testimonyKeyword?: string }) => Promise<void>;
+  handleSetTimezone: (tz: string | null) => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {
     name?: string;
@@ -76,7 +74,17 @@ export interface SectionHandlers {
   handleDuplicateView: (id: string) => Promise<void>;
   handleRemoveView: (id: string) => Promise<void>;
   handleSetViewKind: (id: string, kind: ViewKind) => Promise<void>;
-  handleSetViewLayout: (id: string, layout: LayoutDTO) => Promise<void>;
+  /**
+   * `layoutRev` is the revision the editor opened; omit to overwrite regardless.
+   * Resolves with the view's authoritative revision afterwards, and `discarded`
+   * when a conflict was resolved by keeping the other version — the editor must
+   * then restart on the layout that was just pulled.
+   */
+  handleSetViewLayout: (
+    id: string,
+    layout: LayoutDTO,
+    layoutRev?: number,
+  ) => Promise<{ rev: number; discarded: boolean }>;
   handleSaveLayoutTemplate: (name: string, layout: LayoutDTO) => Promise<void>;
   handleUpdateLayoutTemplate: (id: string, patch: { name?: string; layout?: LayoutDTO }) => Promise<void>;
   handleDeleteLayoutTemplate: (id: string) => Promise<void>;

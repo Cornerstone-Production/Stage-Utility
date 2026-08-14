@@ -149,7 +149,7 @@ export class ShureCharger extends ShureBaseProvider {
         break;
     }
 
-    this.emitStatus(channel);
+    this.emitChannel(channel);
   }
 
   // Chargers don't send SAMPLE metering frames.

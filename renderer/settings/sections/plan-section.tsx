@@ -45,8 +45,8 @@ export function PlanSection({
   }
 
   return (
-    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
-      <FieldSet>
+    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
+      <FieldSet data-flash-id="plan-selection">
         <FieldGroup>
           <Field orientation="horizontal">
             <FieldContent>

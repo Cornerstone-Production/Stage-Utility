@@ -120,7 +120,7 @@ export class ShureUlxd extends ShureBaseProvider {
         break;
     }
 
-    this.emitStatus(channel);
+    this.emitChannel(channel);
   }
 
   // ── SAMPLE messages ───────────────────────────────────────────────────────
@@ -151,6 +151,6 @@ export class ShureUlxd extends ShureBaseProvider {
       `[shure:${this.id}] ch${channel} SAMPLE rfDbm=${state.rfLevelDbm} rfBars=${state.rfBars} audio=${state.audioLevel?.toFixed(2)}`,
     );
 
-    this.emitStatus(channel);
+    this.emitChannel(channel);
   }
 }

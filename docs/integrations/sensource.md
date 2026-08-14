@@ -56,3 +56,13 @@ weekend total is a partial that keeps climbing. Every computed stat (average, pe
 trend direction) is taken over finished services only; folding a partial peak into a
 cross-service mean would understate it all morning and "recover" by noon. The two
 scopes live in `renderer/settings/sections/overview-scope.ts`.
+
+## Polling
+
+The poll interval you set is the rate while a display is showing the count. With
+nothing watching, it polls more slowly — never faster than the interval you set,
+so raising it to stay inside an API quota does what you expect.
+
+A failing endpoint backs off instead of retrying at full rate, and logs the first
+failure rather than one line per attempt. Outside the service window it goes
+dormant with the other integrations.

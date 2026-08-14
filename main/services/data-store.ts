@@ -4,6 +4,8 @@ import * as fs from "fs/promises";
 import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
+import { registerStore, type StoreClass } from "./store-registry.js";
+import { WriteQueue, atomicWrite } from "./write-queue.js";
 
 export class DataStore<T> {
   private cache: T | null = null;
@@ -12,36 +14,57 @@ export class DataStore<T> {
   // write isn't atomic) or clobber each other's read-modify-write. Critical
   // because `settings.json` is patched both by user actions and by background
   // tasks (the live poller advancing the plan), which would otherwise race.
-  private writeChain: Promise<unknown> = Promise.resolve();
+  //
+  // Shared with secrets.ts rather than duplicated: this store had the guard and
+  // that one did not, which is how two concurrent saves there could splice a
+  // secrets blob that no longer decrypted.
+  private writes = new WriteQueue();
 
+  /**
+   * @param classification Whether a config snapshot carries this store. Required
+   *   on purpose: it used to be a separate hand-maintained list, and a store
+   *   omitted from it was silently missing from every backup until an operator
+   *   restored one and found their work gone. Now it cannot be forgotten.
+   */
   constructor(
     private readonly filename: string,
     private readonly defaultValue: T,
-  ) {}
+    classification: StoreClass,
+  ) {
+    registerStore({ filename, classification, kind: "file" });
+  }
 
   /** Run `fn` after all prior queued writes settle (success or failure). */
   private enqueue<R>(fn: () => Promise<R>): Promise<R> {
-    const result = this.writeChain.then(fn, fn);
-    // Keep the chain alive even if a write rejects.
-    this.writeChain = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+    return this.writes.enqueue(fn);
   }
 
   private async writeRaw(data: T): Promise<void> {
+    // The cache is set BEFORE the write, and that ordering is load-bearing:
+    // load() is not enqueued, so a concurrent first read of a store that has
+    // never been read would otherwise see cache === null, go to disk, and install
+    // the pre-write contents over the fresh value once its readFile resolved —
+    // losing the save. Assigning first keeps that read returning early.
+    //
+    // What was actually wrong was leaving the cache populated when the write
+    // FAILED: on ENOSPC when the card fills, the UI, the API and every SSE
+    // snapshot went on reporting the edit as saved, and after the next restart
+    // everything since the disk filled was gone with no error ever shown. So the
+    // cache is dropped on failure and the error propagates — the next read
+    // re-reads from disk and the caller sees the failure.
+    const previous = this.cache;
     this.cache = data;
-    const filePath = await this.getFilePath();
-    // Atomic write: serialize to a sibling temp file, then rename over the target.
-    // rename(2) is atomic on a single filesystem, so a reader never observes a
-    // partial file and an interrupted write (crash / shutdown / in-app update)
-    // leaves the previous file fully intact. A plain writeFile truncates in place
-    // first, which could corrupt the store mid-write and, on the next load, look
-    // like an empty file — silently destroying history.
-    const tmp = `${filePath}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf-8");
-    await fs.rename(tmp, filePath);
+    try {
+      // Atomic: a plain writeFile truncates in place first, which could corrupt
+      // the store mid-write and, on the next load, look like an empty file.
+      // See write-queue.ts for why the temp name is unique.
+      await atomicWrite(await this.getFilePath(), JSON.stringify(data, null, 2));
+    } catch (err) {
+      // Only roll back if nothing else has since written — a later save that did
+      // land must not be undone by an earlier one failing.
+      if (this.cache === data) this.cache = previous;
+      throw err;
+    }
   }
 
   private async getFilePath(): Promise<string> {

@@ -14,6 +14,40 @@ the plan's timezone.
 
 Configure it under **Settings → ScriptView**, with a live preview.
 
+## Where the rundown can appear
+
+The same table renders in three places, from one implementation — so a column set
+you define once looks identical wherever it shows up:
+
+| | Follows | Columns from |
+|---|---|---|
+| **The `/scriptview` pages** | the service type in the URL | the layout in the URL |
+| **A Script view** on a display | the app's active plan | its **Columns** setting |
+| **An Embedded view object** inside a custom layout | the app's active plan | the Script view it points at |
+
+The third is how you put the rundown under your own objects on one screen instead
+of stacking two browser tabs. Add an **Embedded view** object to a custom layout
+and point it at a Script view.
+
+The embed shows the rundown only — no back arrow and no layout switcher. Its
+header (plan title, countdown, clock) is off by default, since a layout usually
+has its own; turn it on per object.
+
+**Follow the live item** (on by default) scrolls the rundown to keep Planning
+Center's live item on screen, so a plan longer than the box does not need anyone
+to walk over and touch the display. It only ever scrolls the embed itself, never
+the layout around it. Turn it off for a box deliberately parked on the top of the
+plan — a pre-service checklist, or one only tall enough for a row or two.
+
+**Font size** is the object's own, and starts at the size the ScriptView page
+renders at so the two match. Reach for it when a dense column set needs more rows
+on screen: row height is driven mostly by how many columns are shown, because
+notes wrap inside narrow ones. Choosing a **Columns** preset on the Script view
+gains far more rows than shrinking the type does.
+
+Custom views cannot be embedded. That is what stops an embed containing an embed;
+use a container to compose objects within one layout.
+
 ## Layouts
 
 A layout is a set of columns — Audio, Video, Lighting, and so on. Layouts are

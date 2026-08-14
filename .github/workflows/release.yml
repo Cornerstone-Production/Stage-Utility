@@ -37,6 +37,9 @@ concurrency:
 
 permissions:
   contents: write
+  # Only to dispatch ci.yml against the version-bump commit, which a
+  # GITHUB_TOKEN push cannot trigger on its own.
+  actions: write
 
 jobs:
   release:
@@ -108,9 +111,40 @@ jobs:
           else
             NEWS=$(level_of "${LAST:+$LAST..HEAD}")
           fi
+          TOTAL=$(git log --no-merges --oneline ${LAST:+$LAST..HEAD} | wc -l | tr -d ' ')
+
           if [ "$NEWS" = none ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "Nothing user-visible since ${LAST:-the beginning} — no release."
+            # Standing down is a normal outcome, but it used to be an invisible
+            # one: the run went green, the artifacts job read "skipped", and the
+            # only clue was a line buried in this step's log. Six merged commits
+            # sat unreleased for a day before anyone thought to look. Say it on
+            # the run page instead, and list what was actually considered — the
+            # answer is nearly always "all of these were refactor/chore".
+            {
+              echo "## No release — nothing user-visible"
+              echo
+              echo "No version was minted and no artifacts were built."
+              echo
+              echo "Only \`feat\`, \`fix\`, \`perf\` or a breaking change trigger a release."
+              echo "\`refactor\`, \`docs\`, \`test\`, \`build\`, \`ci\` and \`chore\` do not —"
+              echo "they ride along with the next one that does. See docs/contributing.md."
+              echo
+              echo "**Since \`${LAST:-the beginning of history}\`** ($TOTAL commit(s)):"
+              echo
+              echo '```'
+              # -n, not `| head`: under `pipefail` a reader that exits early
+              # SIGPIPEs git and fails the step.
+              git log --no-merges --format='%s' -n 40 ${LAST:+$LAST..HEAD}
+              # An `if`, not `[ … ] && echo`. The `&&` form leaves a non-zero
+              # status behind when the test is false, which `set -e` acts on only
+              # where it lands last in a function or script — so it is harmless
+              # here and fatal one edit later, depending on nothing but position.
+              if [ "$TOTAL" -gt 40 ]; then echo "… and $((TOTAL - 40)) more"; fi
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice title=No release::Nothing user-visible since ${LAST:-the beginning} — $TOTAL commit(s), none of them feat/fix/perf. They will ship with the next release."
             exit 0
           fi
 
@@ -147,6 +181,20 @@ jobs:
           fi
 
           echo "next: $NEXT"
+          # The other half of the same idea: say what IS being released, so a
+          # glance at the run answers "did my change ship, and as what version"
+          # without opening a log.
+          {
+            echo "## Releasing v$NEXT"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Level | \`$LEVEL\` (accumulated since \`${STABLE:-the beginning}\`) |"
+            echo "| New since \`${LAST:-the beginning}\` | \`$NEWS\`, $TOTAL commit(s) |"
+            echo "| Branch | \`$BRANCH\` |"
+            echo
+            echo "Artifacts are built once the tag lands."
+          } >> "$GITHUB_STEP_SUMMARY"
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "level=$LEVEL" >> "$GITHUB_OUTPUT"
@@ -162,6 +210,8 @@ jobs:
         if: steps.version.outputs.skip == 'false'
         env:
           V: ${{ steps.version.outputs.version }}
+          # For the `gh workflow run` dispatch below.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
@@ -183,9 +233,28 @@ jobs:
           if git push origin "HEAD:${GITHUB_REF_NAME}"; then
             git push origin "v$V"
             echo "pushed=true" >> "$GITHUB_OUTPUT"
+            # Run CI against the bump commit. A GITHUB_TOKEN push triggers no
+            # workflows, so without this the commit — which is the head of the
+            # open release PR — never gets the suite run against it, and the PR
+            # shows only CodeQL. Not fatal: the tree differs from its parent by a
+            # version string, and the parent was verified above.
+            gh workflow run ci.yml --ref "${GITHUB_REF_NAME}" \
+              || echo "::warning::could not dispatch CI for v$V; run it by hand on ${GITHUB_REF_NAME}"
           else
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "::notice::${GITHUB_REF_NAME} advanced during this run — skipping v$V. The run for the newer commit will release it."
+            # Overwrites the "Releasing v$NEXT" summary written a step ago, which
+            # would otherwise be the last word on the page and simply untrue.
+            {
+              echo "## No release — \`${GITHUB_REF_NAME}\` moved first"
+              echo
+              echo "v$V was computed against a HEAD that is now stale: something merged"
+              echo "during the several minutes of verification. Nothing was tagged and no"
+              echo "artifacts were built."
+              echo
+              echo "The run for the newer commit releases this work at the correct level"
+              echo "for the combined set. Nothing to do."
+            } > "$GITHUB_STEP_SUMMARY"
           fi
 
       # The release itself is created by the artifacts job, once the archives
@@ -292,7 +361,16 @@ jobs:
           git clone --depth 1 \
             "https://x-access-token:${TAP_TOKEN}@github.com/Cornerstone-Production/homebrew-stage-utility.git" tap
           mkdir -p tap/Formula
-          cp packaging/homebrew/stage-utility.rb tap/Formula/stage-utility.rb
+          # Copy whichever formula the script actually wrote: a prerelease updates
+          # the BETA formula and leaves the stable one untouched. Copying the
+          # stable one unconditionally published its unedited template — that is
+          # how v1.10.0-beta.1 downgraded the tap from 1.9.6-beta.3 to the
+          # placeholder 1.9.2-beta.5, for everyone on the stable track.
+          if [[ "$V" == *-* ]]; then
+            cp packaging/homebrew/stage-utility-beta.rb tap/Formula/stage-utility-beta.rb
+          else
+            cp packaging/homebrew/stage-utility.rb tap/Formula/stage-utility.rb
+          fi
           cd tap
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

@@ -8,6 +8,7 @@
 // GetVirtualCamStatus, then stays live on events. While recording, a 1 Hz poll
 // refreshes the record timecode.
 
+import { errorMessage } from "./errors.js";
 import type { ObsStatusDTO } from "../types/stage.js";
 import { StatusIntegration } from "./integration-base.js";
 import { ObsWebSocketAdapter, type ObsEvent } from "./obs-protocol.js";
@@ -109,7 +110,7 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
       const wsVer = typeof ver.obsWebSocketVersion === "string" ? ver.obsWebSocketVersion : "?";
       return { ok: true, message: `Connected to OBS ${obsVer} (obs-websocket ${wsVer})` };
     } catch (err) {
-      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      return { ok: false, message: errorMessage(err) };
     } finally {
       adapter.close();
     }
@@ -155,7 +156,7 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
       this.emit(snap);
       this.startPoll();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       if (this.attempt === 0) console.warn(`[obs] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
       adapter.close();

@@ -3,6 +3,7 @@
 // Permissive CORS on /api/*. Tracks sockets for clean shutdown.
 
 
+import { errorMessage } from "./errors.js";
 import * as fs from "fs/promises";
 import { scrub } from "./scrub.js";
 import * as http from "http";
@@ -15,6 +16,8 @@ import { fileURLToPath } from "url";
 
 
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
+import { execFileSync } from "node:child_process";
+
 import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
 import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
@@ -27,6 +30,7 @@ import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
+import { signalStore } from "./signal-store.js";
 import { propresenterService, propresenterManager } from "./propresenter-service.js";
 import { sensourceService } from "./sensource-service.js";
 import { smaartService } from "./smaart-service.js";
@@ -38,7 +42,7 @@ import { stageController } from "./stage-controller.js";
 import { updater } from "./updater.js";
 import { SERVER_VERSION } from "./server-version.js";
 
-import { type RouteCtx, json, error, readBody } from "./routes/context.js";
+import { type RouteCtx, json, error, readBodyOrEmpty, MAX_IMAGE_BODY_BYTES } from "./routes/context.js";
 import { statusRoutes } from "./routes/status-routes.js";
 import { historyRoutes } from "./routes/history-routes.js";
 import { archiveRoutes } from "./routes/archive-routes.js";
@@ -53,6 +57,34 @@ import { displaySettingsRoutes } from "./routes/display-settings-routes.js";
 import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
+
+/**
+ * Route modules, in dispatch order. Order is load-bearing: a module that
+ * responds ends the request, and some paths are matched by prefix.
+ *
+ * A list plus one loop, rather than fifteen hand-written
+ * `await x(c); if (res.headersSent) return;` pairs. dispatch.test.ts was written
+ * BECAUSE a missed headersSent check once took the whole server down, and it
+ * models the dispatcher as exactly this loop — but the production code was not a
+ * loop, so the test pinned a contract it never actually exercised. Exported so it
+ * can run over the real list.
+ */
+export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
+  statusRoutes,
+  historyRoutes,
+  archiveRoutes,
+  proxyRoutes,
+  stateRoutes,
+  scriptviewRoutes,
+  viewRoutes,
+  integrationRoutes,
+  rosstalkRoutes,
+  automationRoutes,
+  displaySettingsRoutes,
+  systemRoutes,
+  brandingRoutes,
+  presetRoutes,
+] as const;
 
 // ── Static renderer build path candidates ──────────────────────────────────────
 // Resolved against the install root, NOT the working directory. A packaged
@@ -154,10 +186,17 @@ input,button{font:inherit;background:#1a1d22;color:#d6d9de;border:1px solid #2a2
 var token=new URLSearchParams(location.search).get('token');var q=token?('?token='+encodeURIComponent(token)):'';
 var logEl=document.getElementById('log'),filterEl=document.getElementById('filter'),autoEl=document.getElementById('auto'),countEl=document.getElementById('count');var lines=[];
 function esc(s){return String(s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
+/* Lines are stamped as UTC ISO. Slicing characters 11-19 out of that string
+   printed UTC verbatim, so an operator west of Greenwich read timestamps hours
+   adrift from the wall clock they were comparing against. Parse and format
+   instead, which renders in the VIEWER's zone - this page is served to whoever
+   opens it, so the browser's zone is the right one, not the server's. */
+function fmtT(iso){var d=new Date(iso);if(isNaN(d.getTime()))return esc(iso).slice(11,19);
+return d.toLocaleTimeString(undefined,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}
 function render(){var f=filterEl.value.toLowerCase();var atBottom=(window.innerHeight+window.scrollY)>=(document.body.scrollHeight-40);
 var shown=lines.filter(function(l){return !f||l.msg.toLowerCase().indexOf(f)>=0||l.level.indexOf(f)>=0});
 countEl.textContent=shown.length+' / '+lines.length+' lines';
-logEl.innerHTML=shown.map(function(l){return '<div class="ln '+l.level+'"><span class="t">'+esc(l.t).slice(11,19)+'</span> '+esc(l.msg)+'</div>'}).join('');
+logEl.innerHTML=shown.map(function(l){return '<div class="ln '+l.level+'"><span class="t">'+fmtT(l.t)+'</span> '+esc(l.msg)+'</div>'}).join('');
 if(autoEl.checked&&atBottom)window.scrollTo(0,document.body.scrollHeight)}
 function load(){fetch('/api/log'+q).then(function(r){return r.json()}).then(function(d){lines=d.lines||[];render()}).catch(function(){})}
 filterEl.oninput=render;document.getElementById('refresh').onclick=load;load();setInterval(function(){if(autoEl.checked)load()},2000);
@@ -365,6 +404,94 @@ export class RemoteServer {
     return `http://${getLanIp()}:${PORT}`;
   }
 
+  /**
+   * Best-effort "who is holding this port", for the log only.
+   *
+   * Fixed argument vectors, no shell, no interpolation of anything a request can
+   * reach — the port is a number this process chose. Any failure is silent: this
+   * runs while something has already gone wrong, and it must not become a second
+   * problem.
+   */
+  private portHolder(): string {
+    const probes: [string, string[]][] =
+      process.platform === "win32"
+        ? [["netstat", ["-ano", "-p", "TCP"]]]
+        : [
+            ["lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]],
+            ["ss", ["-lptn", `sport = :${PORT}`]],
+          ];
+    for (const [cmd, args] of probes) {
+      try {
+        const out = execFileSync(cmd, args, { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] });
+        const line = out.split("\n").find((l: string) => l.includes(String(PORT)));
+        if (line?.trim()) return line.trim();
+      } catch {
+        // Tool missing or nothing listening — try the next one.
+      }
+    }
+    return "could not determine which process holds it";
+  }
+
+  /**
+   * Bind the main port, tolerating a previous instance that has not let go yet.
+   *
+   * This used to reject straight into an unhandled rejection, which exited with a
+   * bare EADDRINUSE stack trace. Under `Restart=always` that becomes an
+   * unrecoverable loop: systemd relaunches, the port is still held, it dies
+   * again, forever — and the log shows a stack trace rather than the one fact
+   * that resolves it, which is WHICH process holds the port.
+   *
+   * The friendly port (80) has always retried for exactly this reason. The main
+   * port now does too, and says what is in the way.
+   */
+  private async listenWithRetry(): Promise<void> {
+    const RETRY_MS = 2000;
+    const GIVE_UP_AFTER_MS = 60_000;
+    const started = Date.now();
+
+    for (;;) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          // Both handlers are removed on either outcome. Passing the success
+          // callback to listen() instead left one registered per failed attempt,
+          // and every one of them fired once the port finally freed - three
+          // retries produced three "listening" lines for a single bind.
+          const onListening = () => {
+            this.server!.removeListener("error", onError);
+            console.log(`[remote-server] listening on 0.0.0.0:${PORT} (LAN: ${this.getLanUrl()})`);
+            resolve();
+          };
+          const onError = (err: NodeJS.ErrnoException) => {
+            this.server!.removeListener("listening", onListening);
+            reject(err);
+          };
+          this.server!.once("listening", onListening);
+          this.server!.once("error", onError);
+          this.server!.listen(PORT, "0.0.0.0");
+        });
+        return;
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        if (e.code !== "EADDRINUSE") throw err;
+
+        const waited = Date.now() - started;
+        if (waited >= GIVE_UP_AFTER_MS) {
+          console.error(
+            `[remote-server] port ${PORT} is still held after ${Math.round(waited / 1000)}s. ` +
+              `Holder: ${this.portHolder()}. ` +
+              `Stop that process (kill its pid, or: sudo fuser -k ${PORT}/tcp) and start the service again.`,
+          );
+          throw err;
+        }
+        console.warn(
+          `[remote-server] port ${PORT} in use, retrying in ${RETRY_MS / 1000}s ` +
+            `(${Math.round(waited / 1000)}s so far). Holder: ${this.portHolder()}`,
+        );
+        await new Promise((r) => setTimeout(r, RETRY_MS));
+      }
+    }
+  }
+
   async start(): Promise<void> {
     if (this.server) return;
 
@@ -450,9 +577,20 @@ export class RemoteServer {
       try {
         await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
+        // Some failures are the caller's situation, not a broken server, and the
+        // difference matters to the UI: an oversized body is 413, and editing a
+        // service that is recording right now is 409. Anything a route did not
+        // deliberately label stays a 500 — a status is opt-in so a stray `status`
+        // field on some unrelated error cannot turn a real fault into a 2xx-ish
+        // answer the caller shrugs off.
+        const declared = (err as { status?: number })?.status;
+        const status = declared === 413 || declared === 409 ? declared : 500;
         console.error(`[remote-server] handler error ${scrub(pathname)}: ${scrub(msg)}`);
-        error(res, msg, 500);
+        // The reader paused an over-limit body rather than destroying the socket,
+        // so the response reaches the client; closing after it releases the rest.
+        if (status === 413) res.setHeader("Connection", "close");
+        error(res, msg, status);
       }
     };
 
@@ -464,13 +602,7 @@ export class RemoteServer {
     this.server = http.createServer(handler);
     this.server.on("connection", trackConn);
 
-    await new Promise<void>((resolve, reject) => {
-      this.server!.listen(PORT, "0.0.0.0", () => {
-        console.log(`[remote-server] listening on 0.0.0.0:${PORT} (LAN: ${this.getLanUrl()})`);
-        resolve();
-      });
-      this.server!.on("error", reject);
-    });
+    await this.listenWithRetry();
 
     // Friendly port (e.g. 80) so the LAN URL needs no port. Bound in addition to
     // PORT and self-healing: if it can't bind right now (e.g. the previous process
@@ -589,7 +721,9 @@ export class RemoteServer {
       }
     }
     if (method === "POST" && pathname === "/api/layout-images") {
-      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      // The body IS the image, base64'd — the plain-JSON cap sits below what the
+      // layout image store itself accepts.
+      const body = await readBodyOrEmpty(req, MAX_IMAGE_BODY_BYTES);
       if (typeof body.dataUrl !== "string") {
         error(res, "body.dataUrl (base64 data:image/… URL) required");
         return;
@@ -688,6 +822,9 @@ export class RemoteServer {
       // Updates panel never learns the post-restart state and stays stuck on its
       // last-seen step ("Downloading…") until a manual refresh.
       sseWrite(res, "update:status", updater.getStatus());
+      // Without this a reconnecting Companion module has blank signal variables
+      // until the next evaluation — potentially days.
+      sseWrite(res, "companion:signals", signalStore.all());
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
       sseWrite(res, "displays:presence", presenceSnapshot());
@@ -717,7 +854,7 @@ export class RemoteServer {
       return;
     }
     if (method === "POST" && pathname === "/api/events/subscribe") {
-      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const body = await readBodyOrEmpty(req);
       const cid = typeof body.cid === "string" ? body.cid : null;
       const channels = Array.isArray(body.channels)
         ? body.channels.filter((c): c is string => typeof c === "string")
@@ -729,7 +866,7 @@ export class RemoteServer {
     // Display presence heartbeat — a kiosk page reports it's alive (or leaving).
     // Powers the Connected/Offline dot on Settings → Displays.
     if (method === "POST" && pathname === "/api/displays/presence") {
-      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const body = await readBodyOrEmpty(req);
       const outputId = typeof body.outputId === "string" ? body.outputId : null;
       if (outputId) {
         if (body.leaving === true) displayLeaving(outputId);
@@ -766,34 +903,10 @@ export class RemoteServer {
     // matches nothing falls through. `res.headersSent` is the handled-signal,
     // which is why the route bodies moved out unchanged.
     const c: RouteCtx = { req, res, pathname, url: _url, method };
-    await statusRoutes(c);
-    if (res.headersSent) return;
-    await historyRoutes(c);
-    if (res.headersSent) return;
-    await archiveRoutes(c);
-    if (res.headersSent) return;
-    await proxyRoutes(c);
-    if (res.headersSent) return;
-    await stateRoutes(c);
-    if (res.headersSent) return;
-    await scriptviewRoutes(c);
-    if (res.headersSent) return;
-    await viewRoutes(c);
-    if (res.headersSent) return;
-    await integrationRoutes(c);
-    if (res.headersSent) return;
-    await rosstalkRoutes(c);
-    if (res.headersSent) return;
-    await automationRoutes(c);
-    if (res.headersSent) return;
-    await displaySettingsRoutes(c);
-    if (res.headersSent) return;
-    await systemRoutes(c);
-    if (res.headersSent) return;
-    await brandingRoutes(c);
-    if (res.headersSent) return;
-    await presetRoutes(c);
-    if (res.headersSent) return;
+    for (const routeModule of ROUTE_MODULES) {
+      await routeModule(c);
+      if (res.headersSent) return;
+    }
 
     // 404
     error(res, `Not found: ${method} ${pathname}`, 404);

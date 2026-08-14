@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "../components/ui/tooltip";
 import { Loader2Icon, ListChecksIcon, ArrowRightIcon, ChevronDownIcon } from "lucide-react";
@@ -43,7 +44,7 @@ export function ScriptViewIndex() {
       invoke<ScriptViewConfig>("scriptview:getConfig"),
     ])
       .then(([t, l, c]) => { setTypes(t); setLayouts(l); setShownIds(c.serviceTypeIds ?? []); })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e) => setError(errorMessage(e)));
   }, []);
 
   // Layouts are global — every service type offers the same set.

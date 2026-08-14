@@ -151,7 +151,7 @@ export function BrandingSection({
   }
 
   return (
-    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
+    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       {/* Shared hidden file input (target chosen by whichever Upload was clicked). */}
       <input
         ref={fileRef}
@@ -393,6 +393,9 @@ export function BrandingSection({
             <LogoCropper
               src={cropSrc}
               initial={cropInitial}
+              // The empty-slot image and the avatar are always drawn recoloured;
+              // only the app logo follows the toggle.
+              monochrome={cropTarget === "app" ? stageState.appLogoMonochrome : true}
               onCancel={() => setCropSrc(null)}
               onSave={onCropSave}
             />

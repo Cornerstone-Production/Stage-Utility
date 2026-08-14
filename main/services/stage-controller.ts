@@ -1,11 +1,13 @@
 // Single source of truth for all stage state.
 // Every mutating method ends with broadcast("stage:state-changed").
 
+import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
+import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub } from "./scrub.js";
+import { hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, LayoutGroup, LayoutObject, LayoutTemplate, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart,
-  TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -15,17 +17,75 @@ import { migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
-import { layoutGroupsStore } from "./layout-groups-store.js";
 import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
 import { scriptViewConfigStore } from "./scriptview-config-store.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
-import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { updater } from "./updater.js";
 import { validateSlug } from "./reserved-slugs.js";
 import { scriptViewRolesStore, seedRoles } from "./scriptview-roles-store.js";
 import type { CategoryRole } from "../types/scriptview-roles.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
+
+/**
+ * The embedded-view font size that shipped as the palette default, and the one
+ * that replaced it.
+ *
+ * `OLD` rendered at ~32px on a 1080-tall screen where the ScriptView page renders
+ * at ~17px, so an embed came out at nearly double the page and showed a third of
+ * the rundown. Changing the palette default fixed new objects and did nothing for
+ * existing ones: the value is written into the object when it is placed, so
+ * `style.fontSize ?? DEFAULT` never falls through for anything already saved.
+ *
+ * Kept as literals rather than imported from the renderer's registry: this is a
+ * migration, and it must keep meaning "whatever the bad default WAS" even after
+ * the registry moves on again.
+ */
+const EMBED_FONT_OLD_DEFAULT = 0.03;
+const EMBED_FONT_NEW_DEFAULT = 0.016;
+
+/**
+ * Retune embedded-view objects still carrying the old default font size.
+ *
+ * Only an EXACT match is touched. Anything else is a size somebody chose, and
+ * this must not overwrite an operator's work — if a display has been deliberately
+ * set large for a room, it stays large. An exact 0.03 is the value the palette
+ * wrote, not a decision: the field renders identically at 0.0299 or 0.0301, so
+ * nobody arrives at exactly the default by taste.
+ *
+ * Idempotent, because it runs on every load: once rewritten the value no longer
+ * matches, so the second pass changes nothing and saves nothing.
+ */
+export function retuneEmbedFontSize(views: View[]): { views: View[]; changed: number } {
+  let changed = 0;
+  const next = views.map((v) => {
+    if (!v.layout?.objects?.length) return v;
+    let touched = false;
+    const objects = v.layout.objects.map(function retune(o): LayoutObject {
+      // Containers nest, and an embed inside one is just as wrong as a top-level
+      // one — the recursion is the whole reason this is not a flat filter.
+      const children = o.children?.map(retune);
+      const isStaleEmbed =
+        o.config.type === "view-embed" && o.style?.fontSize === EMBED_FONT_OLD_DEFAULT;
+      if (!isStaleEmbed && !children) return o;
+      if (isStaleEmbed) { changed++; touched = true; }
+      return {
+        ...o,
+        ...(children ? { children } : {}),
+        ...(isStaleEmbed ? { style: { ...o.style, fontSize: EMBED_FONT_NEW_DEFAULT } } : {}),
+      };
+    });
+    // A child-only change still has to be written back up through the parent.
+    if (!touched && objects.every((o, i) => o === v.layout!.objects[i])) return v;
+    return { ...v, layout: { ...v.layout, objects } };
+  });
+  if (changed > 0) {
+    console.log(
+      `[stage-controller] retuned ${changed} embedded view(s) from the old ${EMBED_FONT_OLD_DEFAULT} font size to ${EMBED_FONT_NEW_DEFAULT}`,
+    );
+  }
+  return { views: next, changed };
+}
 
 /**
  * Read the persisted auto-update settings, migrating the pre-mode boolean.
@@ -63,80 +123,26 @@ function normalizeBaseUrl(url: string | null): string | null {
   return s.replace(/\/+$/, "");
 }
 
-// Deep-clone an object and its whole subtree, minting a fresh id at every depth.
-// Nested children must be cloned too, or duplicated Views/templates would share
-// child object references and collide on child ids.
-function cloneLayoutObject(o: LayoutObject): LayoutObject {
-  return {
-    ...o,
-    id: randomUUID(),
-    style: o.style ? { ...o.style } : undefined,
-    config: { ...o.config },
-    children: o.children?.map(cloneLayoutObject),
-  };
-}
-
-function cloneLayout(l: LayoutDTO): LayoutDTO {
-  return {
-    version: 1,
-    canvas: { ...l.canvas },
-    objects: l.objects.map(cloneLayoutObject),
-  };
-}
-
-// Like cloneLayoutObject, but records each old→new id so callers can carry
-// per-object side data (e.g. inline mic-slots stored by object id) to the copy.
-function cloneLayoutObjectMapped(o: LayoutObject, idMap: Map<string, string>): LayoutObject {
-  const id = randomUUID();
-  idMap.set(o.id, id);
-  return {
-    ...o,
-    id,
-    style: o.style ? { ...o.style } : undefined,
-    config: { ...o.config },
-    children: o.children?.map((c) => cloneLayoutObjectMapped(c, idMap)),
-  };
-}
-
-function cloneLayoutWithMap(l: LayoutDTO): { layout: LayoutDTO; idMap: Map<string, string> } {
-  const idMap = new Map<string, string>();
-  const layout: LayoutDTO = { version: 1, canvas: { ...l.canvas }, objects: l.objects.map((o) => cloneLayoutObjectMapped(o, idMap)) };
-  return { layout, idMap };
-}
-
-// Visit every inline mic-slots object id across all custom views' layouts (a
-// `slots-grid` with source "inline"); recurses into container children.
-function forEachInlineSlotsGrid(views: View[], cb: (objectId: string) => void): void {
-  const walk = (objs: LayoutObject[]): void => {
-    for (const o of objs) {
-      if (o.config.type === "slots-grid" && o.config.source === "inline") cb(o.id);
-      if (o.children?.length) walk(o.children);
-    }
-  };
-  for (const v of views) if (v.kind === "custom" && v.layout) walk(v.layout.objects);
-}
-
-function defaultViewName(kind: ViewKind): string {
-  switch (kind) {
-    case "dashboard": return "Dashboard";
-    case "stage": return "Stage";
-    case "transcription": return "Transcription";
-    case "custom": return "Custom";
-    default: return "Slots";
+/**
+ * A layout save was built on a revision someone else has already replaced.
+ *
+ * Its own type so the route can answer 409 rather than a generic 500: this is not
+ * a failure, it is two people editing the same view, and the caller has a real
+ * choice to make between reloading and overwriting.
+ */
+export class LayoutConflictError extends Error {
+  readonly code = "layout-conflict";
+  constructor(
+    readonly viewId: string,
+    readonly expectedRev: number,
+    readonly currentRev: number,
+  ) {
+    super(
+      `This view was changed by someone else while you were editing it ` +
+        `(you started from revision ${expectedRev}, it is now ${currentRev}).`,
+    );
+    this.name = "LayoutConflictError";
   }
-}
-
-/** A sensible starting layout for a new custom View — proves the schema and
- *  gives the editor something to manipulate (clock, countdown, slide text). */
-// A new custom view starts BLANK — the operator builds from scratch, or picks a
-// starter template in the create dialog / editor. (It used to seed 5 objects,
-// which meant every new custom layout had to be cleared by hand first.)
-function defaultCustomLayout(): LayoutDTO {
-  return {
-    version: 1,
-    canvas: { width: 1920, height: 1080, background: null },
-    objects: [],
-  };
 }
 
 export class StageController {
@@ -172,6 +178,8 @@ export class StageController {
     autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
     reconnectSchedule: { ...DEFAULT_RECONNECT_SCHEDULE },
     taperWindow: { ...DEFAULT_TAPER_WINDOW },
+    timezone: null,
+    hostTimezone: hostTimeZone(),
     baptismAutoStart: { enabled: false, testimonyKeyword: "baptism stories" },
     onboardingDismissed: false,
   };
@@ -187,11 +195,26 @@ export class StageController {
   private deviceStatusDirty = false; // device status changed while no client watched
   // Cached team members for the active plan.
   private teamMembers: TeamMemberDTO[] = [];
+  /** `serviceTypeId:planId` the roster above belongs to, so a failed refresh can
+   *  tell "the same plan, momentarily unreachable" from "a different plan". */
+  private teamMembersKey: string | null = null;
+
+  /** The plan's scheduled team, for the roster-driven automation action. A copy,
+   *  so a caller cannot mutate the controller's own list. */
+  getTeamMembers(): TeamMemberDTO[] {
+    // Defensive: an action provider must never throw, and this is the seam it
+    // reads the roster through.
+    return Array.isArray(this.teamMembers) ? this.teamMembers.map((m) => ({ ...m })) : [];
+  }
   // Raw (un-resolved) slot configs per VIEW id for the ACTIVE service type.
   private rawSlotsByView = new Map<string, Slot[]>();
   // Raw (unresolved) slots for inline mic-slots objects, keyed by layout object id,
   // for the active service type. Resolved into state.slotsByLayoutObject.
   private rawSlotsByObject = new Map<string, Slot[]>();
+  // In-flight background plan re-selection, and whether the selection changed
+  // again while it was running. See scheduleGlobalReselect.
+  private reselectInFlight: Promise<void> | null = null;
+  private reselectAgain = false;
 
   // PCO credentials (set by IntegrationManager after config saves).
   private pcoAppId: string | null = null;
@@ -205,6 +228,8 @@ export class StageController {
 
   // Hourly auto-refresh of the active plan.
   private autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  /** Remembered so pauseBackgroundWork can restart at the same cadence. */
+  private autoRefreshIntervalMs = 60 * 60 * 1000;
   private isRefreshing = false;
 
   // ── Init ─────────────────────────────────────────────────────────────
@@ -256,6 +281,8 @@ export class StageController {
       autoUpdate: migrateAutoUpdate(settings.autoUpdate),
       reconnectSchedule: settings.reconnectSchedule ?? { ...DEFAULT_RECONNECT_SCHEDULE },
       taperWindow: settings.taperWindow ?? { ...DEFAULT_TAPER_WINDOW },
+      timezone: settings.timezone ?? null,
+      hostTimezone: hostTimeZone(),
       baptismAutoStart: settings.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" },
       onboardingDismissed: settings.onboardingDismissed ?? false,
     };
@@ -294,7 +321,9 @@ export class StageController {
     const storedOutputs = settings.outputs;
 
     if (storedOutputs && storedOutputs.length > 0 && storedViews.length > 0) {
-      return { views: storedViews, outputs: storedOutputs };
+      const { views, changed } = retuneEmbedFontSize(storedViews);
+      if (changed > 0) await viewsStore.save(views);
+      return { views, outputs: storedOutputs };
     }
 
     // First run: migrate from the legacy `displays` array (or the default).
@@ -584,9 +613,36 @@ export class StageController {
     return scriptViewLayoutsStore.load();
   }
 
-  /** Bulk replace — the settings UI manages the whole array and saves it. */
+  /**
+   * Bulk replace — the settings UI manages the whole array and saves it.
+   *
+   * Views referencing a preset that this save removes are cleared to "all
+   * columns" rather than left pointing at nothing. A dangling id degrades in the
+   * worst way available: `resolveScriptViewSpec` treats an unresolved preset the
+   * same as none and renders EVERY note category, so a display configured for
+   * one department quietly starts showing every other department's notes — and
+   * the settings picker shows a blank trigger, because the stored value matches
+   * no option, so there is nothing on screen to explain it.
+   */
   async saveScriptViewLayouts(layouts: ScriptViewLayout[]): Promise<ScriptViewLayout[]> {
     await scriptViewLayoutsStore.save(layouts);
+    const live = new Set(layouts.map((l) => l.id));
+    const orphaned = this.state.views.filter(
+      (v) => v.scriptViewLayoutId && !live.has(v.scriptViewLayoutId),
+    );
+    if (orphaned.length > 0) {
+      console.log(
+        `[stage-controller] ${orphaned.length} view(s) referenced a deleted ScriptView preset — ` +
+          `cleared to all columns: ${orphaned.map((v) => scrub(v.name)).join(", ")}`,
+      );
+      const views = this.state.views.map((v) =>
+        v.scriptViewLayoutId && !live.has(v.scriptViewLayoutId) ? { ...v, scriptViewLayoutId: null } : v,
+      );
+      this.state = { ...this.state, views };
+      await viewsStore.save(views);
+      this.recomputeResolved();
+      this.broadcast();
+    }
     return layouts;
   }
 
@@ -655,9 +711,27 @@ export class StageController {
 
     const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, serviceTypeId);
     const isActiveType = serviceTypeId === this.state.serviceTypeId;
+
+    /**
+     * Resolve a specific plan, looking BEYOND the upcoming list.
+     *
+     * `listUpcomingPlans` is `filter=future`, so a plan the operator selected by
+     * hand from the recent list is not in it. Falling through to `plans[0]` there
+     * silently swapped last Sunday's rundown for next week's — on the stage
+     * monitor, with the live highlight and countdown gone because the resolved
+     * plan was no longer the active one. Nobody would read that as "wrong plan";
+     * it just looks like the service has not started.
+     */
+    const resolve = async (id: string): Promise<PlanDTO | null> => {
+      const upcoming = plans.find((p) => p.id === id);
+      if (upcoming) return upcoming;
+      const recent = await pcoService.listRecentPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId);
+      return recent.find((p) => p.id === id) ?? null;
+    };
+
     let plan: PlanDTO | null;
-    if (planId) plan = plans.find((p) => p.id === planId) ?? null;
-    else if (isActiveType && this.state.planId) plan = plans.find((p) => p.id === this.state.planId) ?? plans[0] ?? null;
+    if (planId) plan = await resolve(planId);
+    else if (isActiveType && this.state.planId) plan = (await resolve(this.state.planId)) ?? plans[0] ?? null;
     else plan = plans[0] ?? null;
     if (!plan) return empty;
 
@@ -938,27 +1012,57 @@ export class StageController {
     this.state = { ...this.state, allowedServiceTypeIds: ids };
     await settingsStore.patch({ allowedServiceTypeIds: ids });
     broadcast("settings:allowedServiceTypeIds-changed", { value: ids });
-
-    if (this.state.planMode === "auto") {
-      await this.selectGlobalNextPlan();
-      return this.state;
-    }
-
     this.broadcast();
+
+    // Returns NOW. The re-selection sweep used to be awaited here, which froze the
+    // settings checkbox for as long as it took — measured at 12.7s over 43
+    // sequential PCO requests on a 20-service-type account. Nothing about the
+    // answer is needed to acknowledge the toggle: the new list is already
+    // persisted and broadcast above, and the chosen plan arrives as its own
+    // broadcast when the sweep lands.
+    if (this.state.planMode === "auto") this.scheduleGlobalReselect();
     return this.state;
+  }
+
+  /**
+   * Re-pick the globally-next plan in the background, at most one sweep at a time.
+   *
+   * Ticking several service types in a row must not launch a sweep each: they
+   * would race to set the plan, and the last one to FINISH would win rather than
+   * the last one requested. Instead a sweep already running is asked to repeat
+   * once when it finishes, so the final run always reflects the final selection.
+   */
+  private scheduleGlobalReselect(): void {
+    if (this.reselectInFlight) {
+      this.reselectAgain = true;
+      return;
+    }
+    this.reselectInFlight = (async () => {
+      try {
+        do {
+          this.reselectAgain = false;
+          await this.selectGlobalNextPlan();
+        } while (this.reselectAgain);
+      } catch (err) {
+        // Never throws to a caller — there isn't one. A failed sweep leaves the
+        // previous plan in place, which is the safe outcome mid-service.
+        console.error("[stage-controller] background plan re-selection failed:", err);
+      } finally {
+        this.reselectInFlight = null;
+      }
+    })();
   }
 
   async setPlanMode(mode: "auto" | "manual"): Promise<StageState> {
     console.log(`[stage-controller] setPlanMode → ${scrub(mode)}`);
     this.state = { ...this.state, planMode: mode };
     await settingsStore.patch({ planMode: mode });
-
-    if (mode === "auto") {
-      await this.selectGlobalNextPlan();
-      return this.state;
-    }
-
     this.broadcast();
+
+    // Backgrounded for the same reason as setAllowedServiceTypes: the mode change
+    // itself is instant, and waiting on the PCO sweep made the Auto button appear
+    // frozen for seconds.
+    if (mode === "auto") this.scheduleGlobalReselect();
     return this.state;
   }
 
@@ -1053,9 +1157,9 @@ export class StageController {
   async setAutoUpdate(partial: Partial<AutoUpdateSettings>): Promise<StageState> {
     const next: AutoUpdateSettings = { ...this.state.autoUpdate, ...partial };
     // Clamp hour to 0–23; dayOfWeek to 0–6 or null.
-    next.hour = Math.min(23, Math.max(0, Math.round(next.hour)));
+    next.hour = clamp(Math.round(next.hour), 0, 23);
     next.dayOfWeek =
-      next.dayOfWeek == null ? null : Math.min(6, Math.max(0, Math.round(next.dayOfWeek)));
+      next.dayOfWeek == null ? null : clamp(Math.round(next.dayOfWeek), 0, 6);
     console.log(`[stage-controller] setAutoUpdate →`, next);
     this.state = { ...this.state, autoUpdate: next };
     await settingsStore.patch({ autoUpdate: next });
@@ -1067,9 +1171,9 @@ export class StageController {
 
   async setReconnectSchedule(partial: Partial<ReconnectSchedule>): Promise<StageState> {
     const next: ReconnectSchedule = { ...this.state.reconnectSchedule, ...partial };
-    next.leadMin = Math.min(1440, Math.max(0, Math.round(next.leadMin)));
-    next.tailMin = Math.min(1440, Math.max(0, Math.round(next.tailMin)));
-    next.dormantMin = Math.min(1440, Math.max(1, Math.round(next.dormantMin)));
+    next.leadMin = clamp(Math.round(next.leadMin), 0, 1440);
+    next.tailMin = clamp(Math.round(next.tailMin), 0, 1440);
+    next.dormantMin = clamp(Math.round(next.dormantMin), 1, 1440);
     console.log(`[stage-controller] setReconnectSchedule → ${scrub(next)}`);
     this.state = { ...this.state, reconnectSchedule: next };
     await settingsStore.patch({ reconnectSchedule: next });
@@ -1091,11 +1195,28 @@ export class StageController {
 
   async setTaperWindow(partial: Partial<TaperWindow>): Promise<StageState> {
     const next: TaperWindow = { ...this.state.taperWindow, ...partial };
-    next.preMin = Math.min(240, Math.max(0, Math.round(next.preMin)));
-    next.postMin = Math.min(240, Math.max(0, Math.round(next.postMin)));
+    next.preMin = clamp(Math.round(next.preMin), 0, 240);
+    next.postMin = clamp(Math.round(next.postMin), 0, 240);
     console.log(`[stage-controller] setTaperWindow → ${scrub(next)}`);
     this.state = { ...this.state, taperWindow: next };
     await settingsStore.patch({ taperWindow: next });
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * Set the zone every wall-clock decision is made in, or null to follow the host.
+   *
+   * Rejects an unknown zone rather than storing it: a typo here would silently
+   * move every schedule and day-of-week condition back to the host clock.
+   */
+  async setTimezone(tz: string | null): Promise<StageState> {
+    const next = tz && tz.trim() ? tz.trim() : null;
+    if (next !== null && !isValidTimeZone(next)) throw new Error(`Unknown time zone: ${next}`);
+    console.log(`[stage-controller] setTimezone -> ${next ?? "follow host"} (host is ${hostTimeZone()})`);
+    setAppTimeZone(next);
+    this.state = { ...this.state, timezone: next, hostTimezone: hostTimeZone() };
+    await settingsStore.patch({ timezone: next });
     this.broadcast();
     return this.state;
   }
@@ -1165,8 +1286,11 @@ export class StageController {
     if (cfg.mode === "manual" || behind <= 0) return false;
     if (updater.phase === "updating") return false;
     if (this.isServiceLive()) return false;
-    if (cfg.dayOfWeek != null && now.getDay() !== cfg.dayOfWeek) return false;
-    return now.getHours() === cfg.hour;
+    // The APP's zone. On a UTC host "Monday 03:00" fires at 22:00 Sunday in
+    // Chicago — i.e. an unattended restart in the middle of an evening service.
+    const p = zonedParts(now.getTime());
+    if (cfg.dayOfWeek != null && p.weekday !== cfg.dayOfWeek) return false;
+    return p.hour === cfg.hour;
   }
 
   // ── Branding (app name + logo) ────────────────────────────────────────
@@ -1277,11 +1401,43 @@ export class StageController {
     return presetsStore.load();
   }
 
+  /**
+   * The slots an arrangement should capture for a view.
+   *
+   * A slots-kind View keeps its slots under its own id. A CUSTOM view does not:
+   * its slots belong to inline `slots-grid` layout objects and are keyed by object
+   * id, so looking it up by view id finds nothing. Resolved here only when the
+   * view has exactly one such grid — with several, "the view's slots" has no one
+   * meaning and the caller should be saving from the grid's own editor, which
+   * sends its slots directly.
+   */
+  private slotsForPresetTarget(viewId: string): Slot[] {
+    const own = this.rawSlotsByView.get(viewId);
+    if (own?.length) return own;
+
+    const view = this.state.views.find((v) => v.id === viewId);
+    if (view?.kind === "custom" && view.layout) {
+      const gridIds: string[] = [];
+      forEachInlineSlotsGrid([view], (oid) => gridIds.push(oid));
+      if (gridIds.length === 1) return this.rawSlotsByObject.get(gridIds[0]) ?? [];
+    }
+    return [];
+  }
+
   async savePreset(target: string, name: string): Promise<SlotPreset[]> {
     const viewId = this.viewIdForTarget(target);
     console.log(`[stage-controller] savePreset "${scrub(name)}" for view=${scrub(viewId)}`);
     const presets = await presetsStore.load();
-    const rawSlots = this.rawSlotsByView.get(viewId) ?? [];
+    const rawSlots = this.slotsForPresetTarget(viewId);
+    // REFUSE rather than save nothing. This used to be `?? []`, so a target with
+    // no entry in rawSlotsByView — every custom view, whose slots live per layout
+    // object — silently produced an empty arrangement, saved and toasted as a
+    // success. An arrangement that captures nothing is never what was meant.
+    if (rawSlots.length === 0) {
+      throw new Error(
+        `Nothing to save: view ${viewId} has no slots. An arrangement captures a view's current slots.`,
+      );
+    }
     const newPreset: SlotPreset = {
       id: randomUUID(),
       name,
@@ -1294,17 +1450,37 @@ export class StageController {
     return updated;
   }
 
-  async applyPreset(target: string, id: string): Promise<StageState> {
+  /**
+   * Apply a saved arrangement to a view.
+   *
+   * Returns the view it actually wrote to, not just the new state. The caller
+   * reads the applied slots back by that id: assuming it matched the id passed in
+   * is what let a misdirected apply look like a success — nine slots written to
+   * another view, and a toast saying "Arrangement applied".
+   */
+  async applyPreset(target: string, id: string): Promise<{ state: StageState; viewId: string }> {
     const viewId = this.viewIdForTarget(target);
     const presets = await presetsStore.load();
     const preset = presets.find((p) => p.id === id);
     if (!preset) throw new Error(`Preset ${id} not found`);
 
+    // Refuse rather than write somewhere nothing reads. A custom view's slots live
+    // per layout object, and a view that owns no slots at all (one embedding
+    // another view's grid) can never show what we would write here.
+    const view = this.state.views.find((v) => v.id === viewId);
+    if (view && view.kind !== "slots") {
+      throw new Error(
+        `"${view.name}" is a ${view.kind} view and has no slots of its own. ` +
+          "Recall the arrangement on the Mic Slots view it shows instead.",
+      );
+    }
+
     console.log(`[stage-controller] applyPreset "${scrub(preset.name)}" (${scrub(id)}) for view=${scrub(viewId)}`);
 
     // Deep-clone with fresh slot ids so applied slots are independent of the preset.
     const slots: Slot[] = preset.slots.map((s) => ({ ...s, id: randomUUID() }));
-    return this.setViewSlots(viewId, slots);
+    const state = await this.setViewSlots(viewId, slots);
+    return { state, viewId };
   }
 
   async deletePreset(id: string): Promise<SlotPreset[]> {
@@ -1373,82 +1549,6 @@ export class StageController {
       p.id === id ? { ...p, slots: rawSlots.map((s) => ({ ...s, id: randomUUID() })) } : p,
     );
     await presetsStore.save(updated);
-    return updated;
-  }
-
-  // ── Layout templates (reusable custom layouts) ───────────────────────
-
-  async listLayoutTemplates(): Promise<LayoutTemplate[]> {
-    return layoutTemplatesStore.load();
-  }
-
-  async saveLayoutTemplate(name: string, layout: LayoutDTO): Promise<LayoutTemplate[]> {
-    const list = await layoutTemplatesStore.load();
-    const tpl: LayoutTemplate = {
-      id: randomUUID(),
-      name: name.trim() || "Layout",
-      layout: cloneLayout(layout),
-      createdAt: new Date().toISOString(),
-    };
-    console.log(`[stage-controller] saveLayoutTemplate "${scrub(tpl.name)}" (${tpl.layout.objects.length} objects)`);
-    const updated = [...list, tpl];
-    await layoutTemplatesStore.save(updated);
-    return updated;
-  }
-
-  async updateLayoutTemplate(id: string, patch: { name?: string; layout?: LayoutDTO }): Promise<LayoutTemplate[]> {
-    const list = await layoutTemplatesStore.load();
-    if (!list.find((t) => t.id === id)) throw new Error(`layout template ${id} not found`);
-    const updated = list.map((t) =>
-      t.id === id
-        ? {
-            ...t,
-            name: patch.name !== undefined ? (patch.name.trim() || t.name) : t.name,
-            layout: patch.layout ? cloneLayout(patch.layout) : t.layout,
-          }
-        : t,
-    );
-    console.log(`[stage-controller] updateLayoutTemplate ${id}`);
-    await layoutTemplatesStore.save(updated);
-    return updated;
-  }
-
-  async deleteLayoutTemplate(id: string): Promise<LayoutTemplate[]> {
-    console.log(`[stage-controller] deleteLayoutTemplate ${id}`);
-    const list = await layoutTemplatesStore.load();
-    const updated = list.filter((t) => t.id !== id);
-    await layoutTemplatesStore.save(updated);
-    return updated;
-  }
-
-  // ── Layout groups (reusable object/container library) ───────────────────
-  // Like templates, but a single object subtree the operator inserts into a view
-  // rather than a whole-layout replace. (Inline mic-slot data is per-object/
-  // per-service-type and is NOT carried — same as templates; re-pick slots after.)
-
-  async listLayoutGroups(): Promise<LayoutGroup[]> {
-    return layoutGroupsStore.load();
-  }
-
-  async saveLayoutGroup(name: string, object: LayoutObject): Promise<LayoutGroup[]> {
-    const list = await layoutGroupsStore.load();
-    const group: LayoutGroup = {
-      id: randomUUID(),
-      name: name.trim() || "Group",
-      object: cloneLayoutObject(object), // fresh ids so the library copy is isolated
-      createdAt: new Date().toISOString(),
-    };
-    console.log(`[stage-controller] saveLayoutGroup "${scrub(group.name)}" (${scrub((group.object.children?.length ?? 0))} children)`);
-    const updated = [...list, group];
-    await layoutGroupsStore.save(updated);
-    return updated;
-  }
-
-  async deleteLayoutGroup(id: string): Promise<LayoutGroup[]> {
-    console.log(`[stage-controller] deleteLayoutGroup ${id}`);
-    const list = await layoutGroupsStore.load();
-    const updated = list.filter((g) => g.id !== id);
-    await layoutGroupsStore.save(updated);
     return updated;
   }
 
@@ -1546,13 +1646,22 @@ export class StageController {
     return this.state;
   }
 
-  /** Toggle the PCO Live Prev/Next controls on a "script" View. */
-  async setViewShowLiveControls(id: string, showLiveControls: boolean): Promise<StageState> {
+  /** Pick which saved ScriptView column preset a "script" View renders. */
+  async setViewScriptViewLayout(id: string, scriptViewLayoutId: string | null): Promise<StageState> {
     if (!this.state.views.find((v) => v.id === id)) {
-      throw new Error(`views:setShowLiveControls — view ${id} not found`);
+      throw new Error(`views:setScriptViewLayout — view ${id} not found`);
     }
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, showLiveControls } : v));
-    console.log(`[stage-controller] setViewShowLiveControls id=${scrub(id)} → ${scrub(showLiveControls)}`);
+    // Refused rather than stored: an unknown id renders as ALL columns, which
+    // looks like a working display showing the wrong thing. Failing the write is
+    // the only outcome the operator can act on.
+    if (scriptViewLayoutId) {
+      const known = await scriptViewLayoutsStore.load();
+      if (!known.some((l) => l.id === scriptViewLayoutId)) {
+        throw new Error(`views:setScriptViewLayout — no ScriptView layout ${scriptViewLayoutId}`);
+      }
+    }
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, scriptViewLayoutId } : v));
+    console.log(`[stage-controller] setViewScriptViewLayout id=${scrub(id)} → ${scrub(scriptViewLayoutId)}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();
@@ -1560,13 +1669,26 @@ export class StageController {
     return this.state;
   }
 
-  /** Replace a custom View's layout (visual editor save). */
-  async setViewLayout(id: string, layout: LayoutDTO): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
+  /**
+   * Replace a custom View's layout (visual editor save).
+   *
+   * `expectedRev` is the revision the editor opened. When it no longer matches,
+   * someone else has saved this view in the meantime and this save would erase
+   * their work, so it is REFUSED and the caller decides. Omitting it forces the
+   * save through — that is the deliberate "overwrite anyway" path.
+   */
+  async setViewLayout(id: string, layout: LayoutDTO, expectedRev?: number): Promise<StageState> {
+    const current = this.state.views.find((v) => v.id === id);
+    if (!current) {
       throw new Error(`views:setLayout — view ${id} not found`);
     }
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, layout } : v));
-    console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${layout.objects.length} objects)`);
+    const rev = current.layoutRev ?? 0;
+    if (expectedRev !== undefined && expectedRev !== rev) {
+      throw new LayoutConflictError(id, expectedRev, rev);
+    }
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, layout, layoutRev: rev + 1 } : v));
+    const objectCount = Array.isArray(layout.objects) ? layout.objects.length : 0;
+    console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${scrub(objectCount)} objects) rev=${rev + 1}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     // Load raw slots for any newly-added inline mic-slots objects, and drop the
@@ -1893,9 +2015,35 @@ export class StageController {
   startAutoRefresh(intervalMs = 60 * 60 * 1000): void {
     this.stopAutoRefresh();
     console.log(`[stage-controller] auto-refresh every ${Math.round(intervalMs / 60000)} min`);
+    this.autoRefreshIntervalMs = intervalMs;
     this.autoRefreshTimer = setInterval(() => {
       void this.autoRefreshTick();
     }, intervalMs);
+  }
+
+  /**
+   * Quiet this controller's periodic writers, and hand back the undo.
+   *
+   * A config restore has to stop everything that writes config before it lays
+   * the snapshot down, or the live poller's next tick reads a still-warm cache
+   * and writes it back over the file just restored. Stopping was the easy half;
+   * a restore that then FAILED left the box serving with nothing polling PCO —
+   * displays frozen, recorders never ticking again, and no way back but a
+   * restart. On success nothing calls the undo, because the process exits.
+   *
+   * Restores exactly what was running: the interval is whatever
+   * integration-manager last chose, not the default, and neither timer is
+   * started if it was not going in the first place.
+   */
+  pauseBackgroundWork(): () => void {
+    const refreshMs = this.autoRefreshTimer ? this.autoRefreshIntervalMs : null;
+    const hadUpdateChecks = this.updateCheckTimer !== null;
+    this.stopAutoRefresh();
+    this.stopUpdateChecks();
+    return () => {
+      if (refreshMs != null) this.startAutoRefresh(refreshMs);
+      if (hadUpdateChecks) this.startUpdateChecks();
+    };
   }
 
   stopAutoRefresh(): void {
@@ -1984,11 +2132,35 @@ export class StageController {
 
   /** Resolve a legacy target (output id, empty for primary, or a raw view id)
    *  to a View id for slot writes. */
+  /**
+   * Resolve a caller's target to a view id.
+   *
+   * VIEWS WIN. Output ids and view ids live in one namespace and can collide —
+   * an install with an output `display-2` routed to view `view-2`, plus a view
+   * also called `display-2`, is not hypothetical: it is what shipped. Resolving
+   * outputs first meant the Views page asking for view `display-2` silently got
+   * `view-2`, so recalling an arrangement wrote nine slots into a different view
+   * and reported success. Nineteen times, in one log.
+   *
+   * Every modern caller passes a view id. Output resolution stays for the legacy
+   * output-shaped callers, but only when nothing owns that id as a view.
+   */
   private viewIdForTarget(target: string): string {
     if (!target) return this.primaryViewId();
+    const view = this.state.views.find((v) => v.id === target);
     const output = this.state.outputs.find((o) => o.id === target);
+    if (view) {
+      // Ambiguity is never silent: it is exactly the condition that hid this bug.
+      if (output && output.viewId && output.viewId !== target) {
+        console.warn(
+          `[stage-controller] target "${scrub(target)}" names both a view and an output ` +
+            `routed to "${scrub(output.viewId)}" — using the VIEW. Pass viewId to be explicit.`,
+        );
+      }
+      return view.id;
+    }
     if (output) return output.viewId ?? this.primaryViewId();
-    return target; // already a view id
+    return target; // already a view id, or an id we do not know
   }
 
   private nextViewId(): string {
@@ -2041,6 +2213,7 @@ export class StageController {
   }
 
   private async fetchTeamMembers(serviceTypeId: string, planId: string): Promise<void> {
+    const key = `${serviceTypeId}:${planId}`;
     try {
       this.teamMembers = await pcoService.listTeamMembers(
         this.pcoAppId!,
@@ -2048,10 +2221,25 @@ export class StageController {
         serviceTypeId,
         planId,
       );
+      this.teamMembersKey = key;
       console.log(`[stage-controller] fetched ${this.teamMembers.length} team members`);
     } catch (err) {
+      // Offline is not "nobody is scheduled". This used to clear the roster, and
+      // the caller re-resolves every slot straight afterwards — so a 30-second
+      // network blip during the hourly refresh blanked every name and photo on
+      // every stage display at once, and left them blank until the next refresh
+      // an hour later. Keep the last-known roster when it belongs to this same
+      // plan; only a roster for some OTHER plan is worse than nothing.
+      if (this.teamMembersKey === key && this.teamMembers.length > 0) {
+        console.error(
+          `[stage-controller] fetchTeamMembers failed — keeping ${this.teamMembers.length} known member(s):`,
+          err,
+        );
+        return;
+      }
       console.error("[stage-controller] fetchTeamMembers error:", err);
       this.teamMembers = [];
+      this.teamMembersKey = null;
     }
   }
 

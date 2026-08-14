@@ -10,6 +10,13 @@ service time so a 9am and an 11am stay separate. They finalise at the plan's
 service-end marker and are reconciled on startup, so a restart mid-service does
 not lose the record.
 
+While Planning Center reports a service live, **nothing time-based can stop it
+being recorded** — no clock, calendar or time zone. A recording ends only when the
+plan leaves item mode or reaches its service-end marker. Wall-clock checks apply
+only to *starting* a record: a plan more than 12 hours from now is treated as
+rehearsal and is not recorded, so stepping through next Sunday's plan during the
+week creates nothing.
+
 | | |
 |---|---|
 | **Attendance** | building occupancy, sampled every 30s |
@@ -33,6 +40,12 @@ times, and per-person averages.
 Service windows are editable if a capture went wrong, individual items can be
 excluded from the timers, and a service report is exportable.
 
+Two recordings of the same service — a run that overran its planned end and
+rolled its tail into the next occurrence — can be merged back together, in either
+direction. Attendance is stored per-service, so the two curves are re-expressed
+against a common start before they are joined; the merged trend reads as one
+continuous service rather than restarting at the seam.
+
 ## Attendance metrics
 
 **Attendance** is people in the room. **Entries** is the cumulative door count,
@@ -46,6 +59,18 @@ people graph that shows either a live rolling window or a recorded service.
 A gap of more than three minutes in the samples renders as a break in the curve
 rather than a straight line, since missing samples mean the counter was
 unreachable, not that the room emptied.
+
+### Ramp and taper
+
+Recording covers more than the service proper. Sampling starts during the arrival
+ramp — the lead window before the service time, default 60 minutes — and continues
+through a taper after the last item, also 60 minutes by default, so the curve shows
+the room emptying. Both windows are set in Advanced.
+
+Only the service proper feeds peak, low and last; the ramp and taper would
+otherwise drag those figures toward an empty room. Where two services are close
+enough that one's taper overlaps the next one's ramp, the ramp wins — the room is
+filling for the next service, not emptying from the last.
 
 ## Sound levels
 

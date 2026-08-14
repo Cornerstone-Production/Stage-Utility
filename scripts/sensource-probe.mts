@@ -19,6 +19,7 @@
 // (It contains location/zone/space NAMES + counts — no secrets. Skim it first if
 //  you like; redact any name you'd rather not share.)
 
+import { errorMessage } from "@main/services/errors";
 import { writeFileSync } from "node:fs";
 
 const AUTH_URL = "https://auth.sensourceinc.com/oauth/token";
@@ -104,7 +105,7 @@ async function main() {
       const keys = r[0] ? Object.keys(r[0]) : [];
       console.log(`ok — ${r.length} row(s)${keys.length ? `, fields: ${keys.join(", ")}` : ""}`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       capture[ep.label] = { error: msg };
       console.log(`FAILED — ${msg}`);
     }

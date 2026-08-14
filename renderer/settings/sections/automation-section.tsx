@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { errorMessage } from "@main/services/errors";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { OctagonXIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
@@ -20,13 +21,15 @@ import {
 interface ParamSpec {
   key: string;
   label: string;
-  type: "number" | "string" | "enum" | "multi-enum";
+  type: "number" | "string" | "enum" | "multi-enum" | "key-value";
   min?: number;
   max?: number;
   options?: { value: string; label: string }[];
   optionsFrom?: string;
   optional?: boolean;
   help?: string;
+  keyLabel?: string;
+  valueLabel?: string;
 }
 interface Spec {
   id: string;
@@ -77,6 +80,104 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
 const selectCls =
   "h-7 w-full rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus";
 
+/** The saved JSON object as editable rows. Malformed config yields no rows rather
+ *  than throwing — the operator can then just add them. */
+function parseRows(value: string | number | undefined): [string, string][] {
+  try {
+    const parsed: unknown = JSON.parse(String(value ?? "") || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+    return Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [k, String(v ?? "")] as [string, string]);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * A two-column table stored as a JSON object string.
+ *
+ * Exists for values that must be typed EXACTLY as some other system spells them —
+ * a Dante channel name may carry a numeric prefix or be renamed at will, so nothing
+ * can generate it and nothing here validates it. The operator reads it off the
+ * other system and types it; the point is that they can see what they typed.
+ */
+function KeyValueField({
+  spec,
+  value,
+  onChange,
+}: {
+  spec: ParamSpec;
+  value: string | number | undefined;
+  onChange: (v: string) => void;
+}) {
+  // The rows being edited live here rather than being derived from the saved
+  // value, because a half-typed row cannot be represented in what gets saved: the
+  // param is a JSON OBJECT, and an object has no key for a row whose key is still
+  // blank. Deriving them meant "add row" created a row that was filtered out
+  // before it could render, so the button appeared to do nothing.
+  const [rows, setRows] = useState<[string, string][]>(() => parseRows(value));
+  // What we last sent up, so an echo of our own write does not clobber a blank row
+  // the operator is still filling in.
+  const lastWritten = useRef<string | null>(null);
+
+  useEffect(() => {
+    const incoming = String(value ?? "");
+    if (incoming === lastWritten.current) return;
+    setRows(parseRows(value));
+  }, [value]);
+
+  const write = (next: [string, string][]) => {
+    setRows(next);
+    // Blank keys are dropped on the way out only — they stay visible while typing.
+    const json = JSON.stringify(Object.fromEntries(next.filter(([k]) => k.trim() !== "")));
+    lastWritten.current = json;
+    onChange(json);
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5 py-1">
+      <span className="text-caption1 text-fg-muted">
+        {spec.label}
+        {spec.help ? <InfoHint>{spec.help}</InfoHint> : null}
+      </span>
+      <div className="flex flex-col gap-1">
+        {rows.map(([k, v], i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <Input
+              value={k}
+              onChange={(e) => write(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))}
+              className="h-7 w-20 text-footnote"
+              aria-label={spec.keyLabel ?? "Key"}
+              placeholder={spec.keyLabel ?? "Key"}
+            />
+            <Input
+              value={v}
+              onChange={(e) => write(rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))}
+              className="h-7 flex-1 text-footnote"
+              aria-label={spec.valueLabel ?? "Value"}
+              placeholder={spec.valueLabel ?? "Value"}
+            />
+            <button
+              type="button"
+              onClick={() => write(rows.filter((_, j) => j !== i))}
+              className="rounded p-0.5 text-fg-subtle hover:text-warn-11"
+              aria-label="Remove row"
+            >
+              <Trash2Icon className="size-3.5" />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => write([...rows, ["", ""]])}
+          className="inline-flex w-fit items-center gap-1 rounded px-1 py-0.5 text-caption2 text-fg-subtle hover:text-fg"
+        >
+          <PlusIcon className="size-3" /> row
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Renders one param from its spec — the reason a new provider needs no UI work. */
 function ParamField({
   spec,
@@ -90,6 +191,10 @@ function ParamField({
   dynamicOptions: Record<string, { value: string; label: string }[]>;
 }) {
   const options = spec.optionsFrom ? (dynamicOptions[spec.optionsFrom] ?? []) : (spec.options ?? []);
+
+  if (spec.type === "key-value") {
+    return <KeyValueField spec={spec} value={value} onChange={onChange} />;
+  }
 
   if (spec.type === "number") {
     return (
@@ -116,6 +221,30 @@ function ParamField({
       </Row>
     );
   }
+  // A string param can still name a runtime source. It stays typeable on purpose:
+  // the list only knows the plan that is loaded right now, and a rule is written
+  // for every week — so picking is a convenience, not a constraint.
+  if (spec.optionsFrom && options.length > 0) {
+    const listId = `opts-${spec.optionsFrom}`;
+    return (
+      <Row label={spec.label} hint={spec.help}>
+        <>
+          <Input
+            value={String(value ?? "")}
+            list={listId}
+            onChange={(e) => onChange(e.target.value)}
+            className="h-7 text-footnote"
+          />
+          <datalist id={listId}>
+            {options.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </datalist>
+        </>
+      </Row>
+    );
+  }
+
   return (
     <Row label={spec.label} hint={spec.help}>
       <Input
@@ -231,7 +360,7 @@ function RuleCard({
       if (r.ok) toast.success(`Test fire: ${r.detail}`);
       else toast.error(`Test fire failed: ${r.detail}`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(errorMessage(e));
     }
   }
 
@@ -442,12 +571,17 @@ export function AutomationSection() {
     queryKey: ["rosstalk:commands"],
     queryFn: () => invoke<{ id: string; label: string }[]>("rosstalk:commands"),
   });
+  const { data: planItems } = useQuery({
+    queryKey: ["automation:plan-items"],
+    queryFn: () => invoke<{ items: { value: string; label: string }[] }>("automation:plan-items"),
+  });
   const dynamicOptions = useMemo(
     () => ({
       "rosstalk-targets": (rt?.targets ?? []).map((t) => ({ value: t.id, label: t.name })),
       "rosstalk-commands": (rtCmds ?? []).map((c) => ({ value: c.id, label: c.label })),
+      "plan-items": planItems?.items ?? [],
     }),
-    [rt, rtCmds],
+    [rt, rtCmds, planItems],
   );
 
   const rules = data?.rules ?? [];
@@ -459,7 +593,10 @@ export function AutomationSection() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    // The same wrapper every other section uses. This one had no horizontal or
+    // vertical padding at all, so its cards ran to the pane edges while every
+    // neighbouring tab inset them.
+    <div className="px-5 max-sm:px-3 flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       {/* No title here — settings-view renders the page heading and its blurb from
           SECTION_DESC, same as every other section. A local h1 duplicated it. */}
 

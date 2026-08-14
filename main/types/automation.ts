@@ -4,14 +4,21 @@
 export interface ParamDef {
   key: string;
   label: string;
-  type: "number" | "string" | "enum" | "multi-enum";
+  /** "key-value" renders a small two-column table and stores a JSON object string,
+   *  so the param shape stays Record<string, string | number>. Used where an
+   *  operator must type exact external names (Dante channels) that no template can
+   *  safely generate. */
+  type: "number" | "string" | "enum" | "multi-enum" | "key-value";
   min?: number;
   max?: number;
   options?: { value: string; label: string }[];
   /** Options that can only be known at runtime (targets, service types, commands). */
-  optionsFrom?: "rosstalk-targets" | "rosstalk-commands" | "osc-targets" | "service-types" | "displays";
+  optionsFrom?: "rosstalk-targets" | "rosstalk-commands" | "osc-targets" | "service-types" | "displays" | "plan-items";
   optional?: boolean;
   help?: string;
+  /** Column headings for a "key-value" param. */
+  keyLabel?: string;
+  valueLabel?: string;
 }
 
 export interface TriggerDef {
@@ -40,6 +47,13 @@ export interface ConditionDef {
 export interface ConditionCtx {
   pcoLive: { mode: string; serviceTimeId: string | null } | null;
   serviceTypeId: string | null;
+  /** Connection state per integration id, for the `<id>.is-connected` conditions. */
+  integrations: Record<string, string>;
+  /** Whether each recorder is rolling right now, for the `is-recording` conditions. */
+  obsRecording: boolean;
+  reaperRecording: boolean;
+  /** Current baptism-timer phase, or null when the timer has never run. */
+  baptismPhase: string | null;
 }
 
 export interface ActionResult {

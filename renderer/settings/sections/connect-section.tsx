@@ -31,7 +31,7 @@ import type { SectionProps } from "../types";
 
 export function ConnectSection({ stageState, handlers }: Pick<SectionProps, "stageState" | "handlers">) {
   return (
-    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
+    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       <FieldSet>
         <FieldGroup>
           <Field orientation="horizontal">
@@ -85,7 +85,7 @@ const TOOLS: { path: string; label: string; description: string; icon: LucideIco
   { path: "/scriptview", label: "ScriptView", description: "Rundown dashboard, per service type.", icon: ListChecksIcon },
   { path: "/baptism", label: "Baptisms", description: "Time testimonies and baptisms live.", icon: DropletIcon },
   { path: "/patch", label: "Patch", description: "This week's stage input and output patch.", icon: CableIcon },
-  { path: "/history", label: "Service history", description: "Timing, attendance and audio for past services.", icon: ClockIcon },
+  { path: "/history", label: "Service History", description: "Timing, attendance and audio for past services.", icon: ClockIcon },
   { path: "/log", label: "Log", description: "Raw server log — for diagnosing a problem, not for volunteers.", icon: ScrollTextIcon },
 ];
 

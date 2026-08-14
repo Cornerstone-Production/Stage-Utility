@@ -4,10 +4,14 @@
 // it apply across triggers? "Which PCO item" only means something to the plan
 // trigger (a param). "Only on Sundays" applies to every trigger (a condition).
 //
-// Four is the whole list on purpose. If a rule needs more, the answer is a better
-// trigger, not a query language.
+// The list stays short on purpose. If a rule needs something narrower, the answer
+// is a better trigger, not a query language. The one bulk exception is the
+// per-integration "is connected" set, which is generated from one list rather than
+// hand-written twelve times — see INTEGRATIONS in automation-triggers.ts.
 
 import type { ConditionCtx, ConditionDef } from "../types/automation.js";
+import { zonedMinuteOfDay, zonedParts } from "./app-timezone.js";
+import { INTEGRATIONS } from "./automation-triggers.js";
 
 /** "HH:MM" -> minutes since midnight, or null. */
 function hhmm(v: unknown): number | null {
@@ -19,7 +23,52 @@ function hhmm(v: unknown): number | null {
   return h * 60 + min;
 }
 
+/** "<id> is connected" for one integration. Reads the same INTEGRATIONS list the
+ *  triggers do, so a new integration cannot get triggers but no condition. */
+function isConnectedCondition(id: string, label: string): ConditionDef {
+  return {
+    id: `${id}.is-connected`,
+    label: `${label} is connected`,
+    params: [],
+    holds: (ctx) => ctx.integrations?.[id] === "connected",
+  };
+}
+
 export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
+  ...Object.fromEntries(
+    INTEGRATIONS.map((i) => [`${i.id}.is-connected`, isConnectedCondition(i.id, i.label)]),
+  ),
+
+  "obs.is-recording": {
+    id: "obs.is-recording",
+    label: "OBS is recording",
+    params: [],
+    holds: (ctx) => ctx.obsRecording === true,
+  },
+
+  "reaper.is-recording": {
+    id: "reaper.is-recording",
+    label: "REAPER is recording",
+    params: [],
+    holds: (ctx) => ctx.reaperRecording === true,
+  },
+
+  "baptism.phase-is": {
+    id: "baptism.phase-is",
+    label: "Baptism phase is",
+    params: [{
+      key: "phase", label: "Phase", type: "enum",
+      options: [
+        { value: "idle", label: "Idle" },
+        { value: "testimony", label: "Testimony" },
+        { value: "baptism", label: "Baptism" },
+      ],
+    }],
+    // A null phase means the timer has never run this session — no phase holds,
+    // including "idle", because we do not know that it is idle.
+    holds: (ctx, params) => ctx.baptismPhase !== null && ctx.baptismPhase === String(params.phase ?? ""),
+  },
+
   "service.is-live": {
     id: "service.is-live",
     label: "A service is live",
@@ -51,7 +100,9 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
       // Unconfigured must not silently block every rule that carries it.
       if (!raw) return true;
       const days = raw.split(",").map((d) => Number(d.trim()));
-      return days.includes(new Date(now).getDay());
+      // The APP's zone, not the host's: on a UTC server "Sunday" ends at 19:00
+      // local, so an evening rule would read the wrong day for its last five hours.
+      return days.includes(zonedParts(now).weekday);
     },
   },
 
@@ -66,8 +117,9 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
       const from = hhmm(params.from);
       const to = hhmm(params.to);
       if (from === null || to === null) return true; // unconfigured -> no opinion
-      const d = new Date(now);
-      const cur = d.getHours() * 60 + d.getMinutes();
+      // Wall-clock in the APP's zone. An operator typing "18:30" means half six
+      // where they are, never half six UTC.
+      const cur = zonedMinuteOfDay(now);
       // A window may cross midnight (22:00 -> 02:00).
       return from <= to ? cur >= from && cur <= to : cur >= from || cur <= to;
     },

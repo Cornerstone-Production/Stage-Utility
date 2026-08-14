@@ -6,7 +6,7 @@
 // `secrets.bin`/`encryption.key` never leave the box, so a downloaded/saved
 // snapshot is safe to store; on recall the operator re-enters API keys/passwords.
 // Recorded history (SPL/attendance/timeline, the automation log, baptism sessions) is
-// runtime data rather than config, so it is excluded — see RUNTIME_FILES.
+// runtime data rather than config, so it is excluded — see runtimeFiles().
 //
 // Applying a snapshot writes the files then the server restarts (handled by the
 // route) so every integration cleanly re-initializes from the restored config.
@@ -21,56 +21,35 @@ import { APP_ROOT } from "./app-root.js";
 import { getUserDataPath } from "./app-paths.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { listImages, readImage, restoreImage } from "./image-files.js";
+import { configFilenames, storesOfClass } from "./stores.js";
+import { atomicWrite } from "./write-queue.js";
 
 // main/services/config-snapshot.ts → repo root is two levels up.
 const REPO_ROOT = APP_ROOT;
 
-/** Config stores included in a snapshot (allowlist — anything else is ignored on
- *  apply, which also blocks path traversal). NB: secrets.bin / encryption.key are
- *  intentionally NOT here.
+/**
+ * Config stores a snapshot carries — derived from the store registry, not
+ * hand-maintained.
  *
- *  A store missing from this list is silently excluded from export AND import, so
- *  the omission stays invisible until someone restores a backup and finds their
- *  work gone. `config-snapshot.test.ts` scans main/services for every DataStore and
- *  fails unless it appears here or in RUNTIME_FILES — adding a store without
- *  classifying it breaks CI. */
-export const CONFIG_FILES = [
-  "settings.json",
-  "views.json",
-  "slots.json",
-  "layout-templates.json",
-  "layout-groups.json",
-  "presets.json",
-  "wireless-connections.json",
-  "osc-targets.json",
-  "rosstalk-targets.json",
-  "rosstalk-settings.json",
-  "automation-rules.json",
-  "automation-settings.json",
-  "scriptview-layouts.json",
-  "scriptview-config.json",
-  "scriptview-roles.json",
-  "baptism-triggers.json",
-  "patch.json",
-] as const;
+ * This was a literal array, guarded by a test that scanned the source for
+ * `new DataStore<…>(`. The regex could not cross a `>`, so signal-store's nested
+ * generic was invisible and the scan found 22 of 23 stores; CI was green only
+ * because someone had independently classified that one. The read was also not
+ * recursive, so a store under archive/ or routes/ could never be seen.
+ *
+ * Classification is now a constructor argument, so a store cannot exist without
+ * declaring which half it belongs to. See store-registry.ts.
+ */
+export function configFiles(): string[] {
+  return configFilenames();
+}
 
-/** Stores deliberately excluded: recorded history and logs, which are observations
- *  of what happened rather than configuration. Restoring them onto another install
- *  would fabricate services that machine never ran. Listed explicitly so the drift
- *  test can tell "considered and excluded" from "forgotten". */
-export const RUNTIME_FILES = [
-  // These three are now directories of per-service files (spl-history/, …); the
-  // legacy single-document names are kept here because that is what the drift scan
-  // matches on, and because an install that has not booted since the split still
-  // has them on disk.
-  "spl-history.json",
-  "attendance-history.json",
-  "service-timeline.json",
-  "automation-log.json",
-  // { current, sessions } — an in-progress session plus finished records.
-  // Restoring it onto another install would fabricate baptisms that never happened.
-  "baptism.json",
-] as const;
+/** Stores deliberately excluded: recorded history and logs — observations of what
+ *  happened rather than configuration. Restoring them onto another install would
+ *  fabricate services that machine never ran. */
+export function runtimeFiles(): string[] {
+  return storesOfClass("runtime").map((s) => s.filename);
+}
 
 /** Image directories carried in a snapshot. Allowlisted for the same reason
  *  CONFIG_FILES is: it bounds what an applied bundle can write. */
@@ -116,6 +95,36 @@ function pkgVersion(): string {
   }
 }
 
+/**
+ * Quiet the things that write config on a timer, before a restore lands.
+ *
+ * Imported lazily: config-snapshot is pulled in by the backup scheduler at boot,
+ * and a static import of the controller here would make that a cycle.
+ */
+async function pauseBackgroundWriters(): Promise<() => void> {
+  // Logged, not swallowed: if either stop is ever renamed this would otherwise
+  // proceed with the writers running and still report the restore as clean.
+  const failed = (what: string) => (err: unknown) => {
+    console.error(`[config-snapshot] could not quiet ${what} before restoring:`, err);
+    return null;
+  };
+  // Awaited, where these used to be fire-and-forget. The imports are lazy to
+  // break a cycle, not because the timing is unimportant: not waiting meant the
+  // writes below could begin before the poller had actually stopped, which is
+  // the race the stop exists to remove.
+  const undos = await Promise.all([
+    import("./live-poller.js")
+      .then((m) => m.livePoller.pause())
+      .catch(failed("the live poller")),
+    import("./stage-controller.js")
+      .then((m) => m.stageController.pauseBackgroundWork())
+      .catch(failed("the stage controller")),
+  ]);
+  return () => {
+    for (const undo of undos) undo?.();
+  };
+}
+
 class ConfigSnapshotService {
   private snapshotsDir(): string {
     return path.join(getUserDataPath(), "snapshots");
@@ -145,8 +154,17 @@ class ConfigSnapshotService {
 
   /** Build a snapshot of the live config (secrets excluded). */
   async build(name?: string): Promise<ConfigSnapshot> {
+    // A keyed store classified "config" would be read by its legacy filename and
+    // capture the stale pre-split document instead of the per-service files —
+    // a backup that succeeds and is mostly empty. Refuse rather than write it.
+    const keyed = storesOfClass("config").filter((s) => s.kind === "directory");
+    if (keyed.length > 0) {
+      throw new Error(
+        `[config-snapshot] cannot back up keyed store(s) by filename: ${keyed.map((s) => s.filename).join(", ")}`,
+      );
+    }
     const files: Record<string, unknown> = {};
-    for (const f of CONFIG_FILES) {
+    for (const f of configFiles()) {
       const v = await this.readFile(f);
       if (v !== undefined) files[f] = v;
     }
@@ -177,12 +195,38 @@ class ConfigSnapshotService {
    */
   async apply(bundle: unknown): Promise<string[]> {
     this.validate(bundle);
+
+    // Nothing may write config while a restore is landing. The process exits
+    // ~1.2s after this returns, and inside that window the live poller ticks
+    // every 1–4s: an auto-advance calling settingsStore.patch() would read its
+    // still-warm cache and write it straight back over the file just restored,
+    // reporting success. Stopping the background writers first removes the race
+    // at its source rather than trying to win it.
+    const resumeBackgroundWriters = await pauseBackgroundWriters();
+    try {
+      return await this.writeSnapshot(bundle);
+    } catch (err) {
+      // Only on the failure path. A successful restore does not resume anything
+      // because the process exits ~1.2s later — but a failed one returns to a
+      // box that keeps serving, and leaving it with no poller froze every
+      // display and stopped the recorders for good.
+      resumeBackgroundWriters();
+      throw err;
+    }
+  }
+
+  /** The write half of `apply`, split out so the resume can wrap all of it. */
+  private async writeSnapshot(bundle: ConfigSnapshot): Promise<string[]> {
     const applied: string[] = [];
     for (const [name, contents] of Object.entries(bundle.files)) {
-      if (!(CONFIG_FILES as readonly string[]).includes(name)) continue; // allowlist only
+      if (!configFiles().includes(name)) continue; // allowlist only
       if (contents === undefined || contents === null) continue;
       const dest = path.join(getUserDataPath(), name);
-      await fs.writeFile(dest, JSON.stringify(contents, null, 2), "utf8");
+      // Atomic, for the reason data-store.ts spells out: a plain writeFile
+      // truncates in place, so a power cut here leaves a short settings.json that
+      // the next boot cannot parse, quarantines, and replaces with defaults —
+      // losing the settings the operator restored this bundle to recover.
+      await atomicWrite(dest, JSON.stringify(contents, null, 2));
       applied.push(name);
     }
     // Uploaded images, restored under their content-hashed names. The directory is

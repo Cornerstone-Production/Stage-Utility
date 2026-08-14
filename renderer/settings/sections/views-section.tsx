@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type CSSProperties } from "react";
+import { useEffect, useState, type ChangeEvent, type CSSProperties } from "react";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -14,10 +14,10 @@ import {
   SelectItem,
   SelectValue,
   Separator,
-  Switch,
   Dialog,
   EmptyState,
   UnsavedBanner,
+  confirm,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import type { SectionProps } from "../types";
@@ -104,7 +104,7 @@ function SortableViewItem({
         onClick={onSelect}
         {...attributes}
         {...listeners}
-        className="flex w-full min-w-0 cursor-grab touch-none flex-col items-start gap-0.5 px-3 py-2 text-left active:cursor-grabbing"
+        className="flex w-full min-w-0 cursor-grab touch-pan-y flex-col items-start gap-0.5 px-3 py-2 text-left active:cursor-grabbing"
       >
         <span className="w-full truncate text-body text-fg">{view.name}</span>
         <span className="text-caption2 text-fg-subtle">{KIND_LABELS[view.kind]}</span>
@@ -114,6 +114,10 @@ function SortableViewItem({
 }
 
 // ---- detail editor for one View ---------------------------------------------
+
+/** Radix Select cannot carry an empty string as a value, so "no preset chosen"
+ *  needs a sentinel. It never reaches the server — it maps back to null. */
+const ALL_COLUMNS = "__all__";
 
 function ViewDetail({
   view,
@@ -135,9 +139,25 @@ function ViewDetail({
   // Parent remounts this component on view change (key={view.id}), so local
   // field state initializes fresh per view.
   const [editName, setEditName] = useState(view.name);
+  // The layout revision THIS editing session started from. Deliberately not read
+  // off the live `view` prop at save time: that updates the moment anyone else
+  // saves, so every save would look up to date and the conflict check would
+  // never fire. Advanced only by our own saves.
+  const [sessionRev, setSessionRev] = useState(view.layoutRev ?? 0);
+  const [editorEpoch, setEditorEpoch] = useState(0);
   // Preview aspect ratio — shapes the thumbnail to match the target monitor
   // (default 16:9, e.g. a 37″ 4K panel). Editor-only; doesn't affect the kiosk.
   const [previewAspect, setPreviewAspect] = useState<number>(16 / 9);
+  // The ScriptView column presets, for a "script" View's Columns picker. Fetched
+  // here rather than threaded through SectionProps: only this branch needs them,
+  // and they change when someone edits a preset in the ScriptView section.
+  const [scriptViewLayouts, setScriptViewLayouts] = useState<ScriptViewLayout[]>([]);
+  useEffect(() => {
+    if (view.kind !== "script") return;
+    invoke<ScriptViewLayout[]>("scriptview:listLayouts")
+      .then((l) => setScriptViewLayouts([...l].sort((a, b) => a.order - b.order)))
+      .catch(() => setScriptViewLayouts([]));
+  }, [view.kind]);
 
   function handleNameBlur() {
     const trimmed = editName.trim();
@@ -191,7 +211,24 @@ function ViewDetail({
           variant="transparent"
           size="small"
           iconOnly
-          onClick={() => handlers.handleRemoveView(view.id)}
+          onClick={async () => {
+            // Name the outputs that would lose their content. Deleting a view is
+            // not recoverable, and a custom view can be a lot of layout work.
+            const usedBy = (stageState.outputs ?? [])
+              .filter((o) => o.viewId === view.id)
+              .map((o) => o.name || o.id);
+            const inUse =
+              usedBy.length > 0
+                ? ` It is currently shown on ${usedBy.join(", ")}, which will have no view assigned.`
+                : "";
+            const ok = await confirm({
+              title: `Delete "${view.name}"?`,
+              message: `This cannot be undone.${inUse}`,
+              confirmLabel: "Delete view",
+              destructive: true,
+            });
+            if (ok) await handlers.handleRemoveView(view.id);
+          }}
           disabled={!canDelete}
           aria-label="Delete view"
         >
@@ -204,11 +241,18 @@ function ViewDetail({
       {view.kind === "custom" ? (
         <div className="flex-1 min-h-0">
           <LayoutEditor
-            key={view.id}
+            // Remounting on `editorEpoch` restarts the editor on whatever layout
+            // is in state — used when a conflict is resolved by keeping the other
+            // version, so the canvas stops showing edits that were thrown away.
+            key={`${view.id}:${editorEpoch}`}
             view={view}
             slotsViews={(stageState.views ?? []).filter((v) => v.kind === "slots")}
             templates={layoutTemplates}
-            onSave={(layout) => handlers.handleSetViewLayout(view.id, layout)}
+            onSave={async (layout) => {
+              const r = await handlers.handleSetViewLayout(view.id, layout, sessionRev);
+              setSessionRev(r.rev);
+              if (r.discarded) setEditorEpoch((e) => e + 1);
+            }}
             onSaveTemplate={handlers.handleSaveLayoutTemplate}
             onUpdateTemplate={handlers.handleUpdateLayoutTemplate}
             onDeleteTemplate={handlers.handleDeleteLayoutTemplate}
@@ -275,21 +319,36 @@ function ViewDetail({
       ) : view.kind === "custom" ? null : view.kind === "script" ? (
         <>
           <Separator />
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-2">
             <div className="flex flex-col">
-              <span className="text-caption1 text-fg">Show PCO Prev/Next controls</span>
+              <span className="text-caption1 text-fg">Columns</span>
               <span className="text-caption2 text-fg-muted">
-                Adds the Planning Center Live Prev/Next buttons to this script display.
+                The same saved column sets the ScriptView pages use, so a department's columns are
+                defined once and a display and a browser tab cannot disagree about them.
               </span>
             </div>
-            <Switch
-              checked={view.showLiveControls ?? false}
-              onCheckedChange={(v) => void invoke("views:setShowLiveControls", { id: view.id, showLiveControls: v })}
-            />
+            <Select
+              value={view.scriptViewLayoutId ?? ALL_COLUMNS}
+              onValueChange={(v: string) =>
+                void invoke("views:setScriptViewLayout", {
+                  id: view.id,
+                  scriptViewLayoutId: v === ALL_COLUMNS ? null : v,
+                })
+              }
+            >
+              <SelectTrigger className="w-full sm:w-64" aria-label="Columns"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_COLUMNS}>All columns</SelectItem>
+                {scriptViewLayouts.map((l) => (
+                  <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <p className="text-caption2 text-fg-muted">
-            The Script view renders the live plan rundown (items + note columns) with the clock,
-            the PCO countdown, and a max-SPL column per item.
+            The Script view renders the active plan's rundown — the same table as the ScriptView
+            pages, following whichever plan the app is set to. Max SPL per item lives on the
+            SPL rundown view.
           </p>
         </>
       ) : (
@@ -363,6 +422,7 @@ export function ViewsSection({
 
   return (
     <div
+      data-flash-id="views-list"
       className={cn(
         "px-5 max-sm:px-3 flex gap-5 max-sm:gap-0 pt-5 max-sm:pt-4",
         // Custom views fill the viewport (editor fits, no page scroll); other kinds

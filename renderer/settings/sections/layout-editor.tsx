@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
+import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import {
   UndoIcon,
   Trash2Icon,
@@ -95,6 +96,9 @@ import { usePropInstances } from "../../main/use-dashboard-state";
 import { useConfiguredIntegrations, useIntegrations } from "../../main/use-integration-states";
 import {
   CARD_PRESETS,
+  isKnownObjectType,
+  isOfferableInEmbedPicker,
+  objectRetired,
   PALETTE_GROUPS,
   defaultConfig,
   defaultStyle,
@@ -361,6 +365,42 @@ function EditorObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   );
 }
 
+/**
+ * Reorder one sibling scope by dropping `id` above or below `targetId`.
+ *
+ * Works in the order the Layers panel SHOWS — z descending, topmost first — and
+ * only converts back to z at the end. Reordering in z-ascending order and calling
+ * it "insert before the target" is what made the top of the list unreachable:
+ * there is no row above the first one to drop before, so the only way to promote
+ * something to the top was to drop it under the current top and then drag that
+ * one down past it. An explicit edge has a slot at both ends by construction.
+ *
+ * z is reassigned across the whole scope so it stays a dense 1..n with no ties —
+ * a tie makes paint order depend on array order, which is exactly the kind of
+ * "it moved on its own" that is impossible to reproduce later.
+ *
+ * Exported for the guard; the index arithmetic is the part worth pinning.
+ */
+export function reorderLayerScope(
+  list: LayoutObject[],
+  id: string,
+  targetId: string,
+  edge: "above" | "below",
+): LayoutObject[] {
+  // Display order: topmost (highest z) first, matching flattenLayers.
+  const display = [...list].sort((a, b) => b.z - a.z);
+  const from = display.findIndex((o) => o.id === id);
+  if (from === -1 || !display.some((o) => o.id === targetId)) return list;
+  const [moved] = display.splice(from, 1);
+  // Index AFTER removal, so dragging downward does not land one slot short.
+  const at = display.findIndex((o) => o.id === targetId);
+  if (at === -1) return list;
+  display.splice(edge === "above" ? at : at + 1, 0, moved);
+  // First in display order is the topmost, so it takes the highest z.
+  const n = display.length;
+  return display.map((o, i) => ({ ...o, z: n - i }));
+}
+
 // Flatten the tree (parents before children, each scope by z desc) into rows with
 // a depth, for the indented Layers panel.
 function flattenLayers(nodes: LayoutObject[], depth = 0): { o: LayoutObject; depth: number }[] {
@@ -443,6 +483,7 @@ function OverlayNode({
   const kids = o.children?.length ? [...o.children].sort((a, b) => a.z - b.z) : null;
   return (
     <div
+      data-obj-id={o.id}
       onPointerDown={(e) => onStart(e, o, "move", parentAbs, depth)}
       className="absolute"
       style={{
@@ -470,7 +511,20 @@ function OverlayNode({
       </span>
       {sel && !locked &&
         HANDLES.map((h) => {
-          const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2 };
+          // Above every sibling overlay node. Nodes render in z order with no
+          // z-index of their own, so an object stacked higher than the selected
+          // one covered its handles — and since those nodes carry the pointerdown
+          // that starts a MOVE, grabbing a corner dragged the wrong object
+          // instead of resizing. An object behind anything simply could not be
+          // resized, however clearly it was selected.
+          //
+          // Only the 9px handles are raised, deliberately. Lifting the whole node
+          // would also hand it every click over its area, so selecting the object
+          // visually on top of it would stop working — trading one unreachable
+          // object for another. This node creates no stacking context of its own
+          // (opacity 1, no transform), so the handles compete directly with the
+          // sibling nodes and win.
+          const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2, zIndex: 10 };
           if (h.includes("n")) pos.top = -5;
           if (h.includes("s")) pos.bottom = -5;
           if (h.includes("w")) pos.left = -5;
@@ -489,6 +543,7 @@ function OverlayNode({
 function EditorCanvas({
   canvas, objects, selectedId, selectedIds, gridOn, ctx, ndiSource, interactive,
   onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
+  onContextMenu,
 }: {
   canvas: LayoutCanvas;
   objects: LayoutObject[];
@@ -513,6 +568,9 @@ function EditorCanvas({
    *  `objAbs` is the object's final absolute canvas rect; `containerAbs` the
    *  container's absolute rect — together they give the new parent-local geom. */
   onReparent: (id: string, containerId: string, objAbs: FracRect, containerAbs: FracRect) => void;
+  /** Right-click anywhere on the canvas. The handler works out which object (if
+   *  any) was under the cursor from `data-obj-id` on the event target. */
+  onContextMenu?: (e: ReactMouseEvent) => void;
 }) {
   // Measure the available area (this wrapper), then letterbox the design canvas to
   // fit BOTH axes so it never overflows on ultrawide/portrait/short screens.
@@ -547,12 +605,24 @@ function EditorCanvas({
     };
   }, [wrap]);
 
-  // "fill" mode: the canvas fills the whole editor pane (objects reflow, just like
-  // on a display set to fill) instead of letterboxing the design aspect.
+  // "fill" mode: objects reflow to the window rather than letterboxing the design
+  // aspect. The PREVIEW still keeps the design aspect, and that is deliberate.
+  //
+  // It used to take the editor pane's own shape, which made it a model of a
+  // display nobody owns: fonts are a fraction of HEIGHT, so a pane that is
+  // relatively narrower than the design renders the same text larger relative to
+  // the width it has to fit in. Status pills wrapped in the preview and not on the
+  // display, and a rundown hid 633px of columns in the preview against 256px on
+  // the page — the preview was not just imprecise, it disagreed about what fits.
+  //
+  // A preview cannot know the shape of the screen this will end up on, so it
+  // models the one shape it does know: the design canvas. Same box as letterbox
+  // mode; what still differs is `H`, which tracks the live box so the preview is a
+  // true scale model rather than a fixed design-space render.
   const fill = canvas.fit === "fill";
   const scale = avail.w > 0 && avail.h > 0 ? Math.min(avail.w / canvas.width, avail.h / canvas.height) : 0;
-  const boxW = fill ? avail.w : canvas.width * scale;
-  const boxH = fill ? avail.h : canvas.height * scale;
+  const boxW = canvas.width * scale;
+  const boxH = canvas.height * scale;
   // Report the box size up so parent snap actions use the same grid aspect.
   useEffect(() => {
     if (boxW > 0 && boxH > 0) onBoxSize?.(boxW, boxH);
@@ -673,6 +743,11 @@ function EditorCanvas({
   // only the background reaches here) drags a rectangle; on release, select every
   // top-level object it intersects. A plain click (no drag) clears the selection.
   function startMarquee(e: ReactPointerEvent) {
+    // PRIMARY BUTTON ONLY. A right-click also fires pointerdown, and the context
+    // menu that follows swallows the matching pointerup — so the move/up listeners
+    // below stayed bound to the window and the next mouse movement drew a marquee
+    // out of nowhere. Same for middle-click and stylus barrel taps.
+    if (e.button !== 0 || !e.isPrimary) return;
     const box = boxRef.current;
     if (!box) { onSelect(null); return; }
     const rect = box.getBoundingClientRect();
@@ -758,6 +833,7 @@ function EditorCanvas({
                 : canvas.background,
           }}
           onPointerDown={interactive ? startMarquee : undefined}
+          onContextMenu={interactive && onContextMenu ? onContextMenu : undefined}
         >
           {/* Content layer (visual only). Letterbox: design dims scaled. Fill: the
               layer IS the box (objects positioned by % of the live box). The grid
@@ -1111,8 +1187,17 @@ export function LayoutEditor({
   }
   // In-editor clipboard for Cmd/Ctrl-C / -V (stores fresh-id clones).
   const clipboard = useRef<LayoutObject[]>([]);
-  // Layers-panel drag-to-reorder: the row currently being hovered as a drop target.
-  const [dragLayerOver, setDragLayerOver] = useState<string | null>(null);
+  // Right-click menu: where it opened, and which object was under the cursor.
+  // Items are captured when the menu OPENS, not rebuilt on render: they depend on
+  // the clipboard, which is a ref, and a menu should describe the moment it was
+  // summoned rather than quietly re-deciding underneath the cursor.
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  // Layers-panel drag-to-reorder: where the dragged row would land — a row and
+  // which SIDE of it, not just which row. Highlighting the row itself could not
+  // say whether the drop lands above or below it, and the old "always insert
+  // before the target" rule left the top of the list unreachable: you had to drop
+  // below the second row and then drag the former top one down past it.
+  const [dragLayerOver, setDragLayerOver] = useState<{ id: string; edge: "above" | "below" } | null>(null);
   const [history, setHistory] = useState<LayoutObject[][]>([]);
   const [dirty, setDirty] = useState(false);
   const [gridOn, setGridOn] = useState(true);
@@ -1170,8 +1255,6 @@ export function LayoutEditor({
     const el = canvasCellRef.current;
     if (!el) return;
     const aspect = canvas.width / canvas.height;
-    // In fill mode the canvas fills the available height (no design aspect).
-    const fillMode = canvas.fit === "fill";
     const measure = () => {
       const width = el.clientWidth;
       const top = el.getBoundingClientRect().top;
@@ -1181,7 +1264,11 @@ export function LayoutEditor({
       // must sit right below the canvas. When just viewing, fill the width like
       // the read-only ViewPreview so a custom preview isn't shrunk vs other kinds.
       const cap = isEditing ? maxH : Infinity;
-      setCanvasH(Math.round(fillMode ? maxH : Math.min(fit, cap)));
+      // Aspect-derived in BOTH fit modes. Fill mode used to take the full
+      // available height, which gave the preview a shape the design never has —
+      // see the box sizing above for why that made the preview disagree with the
+      // display about what fits on screen.
+      setCanvasH(Math.round(Math.min(fit, cap)));
       // A touch shorter than the raw available height so the section's own bottom
       // padding doesn't tip the page into a few px of scroll.
       setAvailH(Math.max(240, Math.round(maxH) - 12));
@@ -1419,9 +1506,14 @@ export function LayoutEditor({
     }
     return { tree: out, ids };
   }
-  // Bulk actions over the whole selection (Delete key / Cmd-D / toolbar).
+  // Bulk actions. The *Ids forms take the selection explicitly, because the
+  // right-click menu decides what it is acting on BEFORE setSelectedIds has
+  // landed — reading state there would act on the previous selection.
   function removeSelected() {
-    const ids = [...selectedIds].filter((id) => !isLockedInTree(objects, id));
+    removeIds(selectedIds);
+  }
+  function removeIds(selection: Set<string>) {
+    const ids = [...selection].filter((id) => !isLockedInTree(objects, id));
     if (ids.length === 0) return;
     pushHistory();
     setObjects((prev) => ids.reduce((tree, id) => removeById(tree, id).tree, prev));
@@ -1429,7 +1521,10 @@ export function LayoutEditor({
     setDirty(true);
   }
   function duplicateSelected() {
-    const srcs = [...selectedIds].map((id) => findById(objects, id)).filter((o): o is LayoutObject => !!o);
+    duplicateIds(selectedIds);
+  }
+  function duplicateIds(selection: Set<string>) {
+    const srcs = [...selection].map((id) => findById(objects, id)).filter((o): o is LayoutObject => !!o);
     if (srcs.length === 0) return;
     pushHistory();
     const { tree, ids } = cloneInto(objects, srcs, true);
@@ -1440,7 +1535,10 @@ export function LayoutEditor({
   // Cmd/Ctrl-C / -V. Copy snapshots the selection; paste drops fresh clones at the
   // top level (offset) and selects them.
   function copySelected() {
-    const srcs = [...selectedIds].map((id) => findById(objects, id)).filter((o): o is LayoutObject => !!o);
+    copyIds(selectedIds);
+  }
+  function copyIds(selection: Set<string>) {
+    const srcs = [...selection].map((id) => findById(objects, id)).filter((o): o is LayoutObject => !!o);
     if (srcs.length) clipboard.current = srcs.map((o) => deepCloneFreshIds(o, uid));
   }
   function pasteClipboard() {
@@ -1451,6 +1549,51 @@ export function LayoutEditor({
     setSelectedIds(ids);
     setDirty(true);
   }
+  /** Right-click on the canvas: select what is under the cursor, then open the menu. */
+  function openContextMenu(e: ReactMouseEvent) {
+    e.preventDefault();
+    const el = (e.target as HTMLElement | null)?.closest?.("[data-obj-id]") as HTMLElement | null;
+    const objectId = el?.dataset.objId ?? null;
+    // Right-clicking an object that is not in the selection selects it first, so
+    // the menu always acts on what was actually clicked. Right-clicking one that
+    // IS selected keeps the whole selection, so "Delete" can act on all of it.
+    // The selection the menu will act on. Computed here rather than read back
+    // from state, which has not updated yet inside this handler.
+    let selection = selectedIds;
+    if (objectId && !selectedIds.has(objectId)) selection = new Set([objectId]);
+    else if (!objectId) selection = new Set();
+    if (selection !== selectedIds) setSelectedIds(selection);
+    setMenu({ x: e.clientX, y: e.clientY, items: contextMenuItems(selection) });
+  }
+
+  /** Items for the current right-click, built fresh so counts and enablement are
+   *  right at the moment it opens. */
+  function contextMenuItems(selection: Set<string>): ContextMenuItem[] {
+    const count = selection.size;
+    const many = count > 1 ? ` (${count})` : "";
+    const addSub: ContextMenuItem[] = PALETTE_GROUPS.flatMap((g) => {
+      const types = g.types.filter((t) => {
+        const need = objectIntegration(t);
+        return !(hideUnconfigured && need && !configuredIntegrations.has(need.id));
+      });
+      if (types.length === 0) return [];
+      return [
+        { separator: true } as ContextMenuItem,
+        ...types.map((t) => ({ label: typeLabel(t), onSelect: () => addObject(t) })),
+      ];
+    }).slice(1); // drop the leading separator
+
+    return [
+      { label: "Add object", items: addSub },
+      { separator: true },
+      { label: `Copy${many}`, shortcut: "⌘C", disabled: count === 0, onSelect: () => copyIds(selection) },
+      { label: "Paste", shortcut: "⌘V", disabled: clipboard.current.length === 0, onSelect: pasteClipboard },
+      { label: `Duplicate${many}`, shortcut: "⌘D", disabled: count === 0, onSelect: () => duplicateIds(selection) },
+      { separator: true },
+      { label: `Delete${many}`, shortcut: "⌫", danger: true, disabled: count === 0, onSelect: () => removeIds(selection) },
+    ];
+  }
+
   // Keyboard: Delete/Backspace removes the selection; Cmd/Ctrl-D duplicates,
   // -C copies, -V pastes. Ignored while typing in a form field.
   useEffect(() => {
@@ -1522,29 +1665,19 @@ export function LayoutEditor({
     });
   }
 
-  // Drag-to-reorder in the Layers panel: move `id` to `targetId`'s slot, but only
+  // Drag-to-reorder in the Layers panel: drop `id` above or below `targetId`,
   // within the same sibling scope (a cross-parent drop is ignored, keeping z sane).
-  function moveLayer(id: string, targetId: string) {
+  function moveLayer(id: string, targetId: string, edge: "above" | "below") {
     if (id === targetId) return;
     const pa = getParentOf(objects, id);
     const pb = getParentOf(objects, targetId);
     if ((pa?.id ?? null) !== (pb?.id ?? null)) return; // different scopes — no-op
     pushHistory();
-    const reindex = (list: LayoutObject[]): LayoutObject[] => {
-      const sorted = [...list].sort((a, b) => a.z - b.z);
-      const from = sorted.findIndex((o) => o.id === id);
-      const to = sorted.findIndex((o) => o.id === targetId);
-      if (from === -1 || to === -1) return list;
-      const [moved] = sorted.splice(from, 1);
-      const insertAt = sorted.findIndex((o) => o.id === targetId);
-      sorted.splice(insertAt, 0, moved);
-      return sorted.map((o, i) => ({ ...o, z: i + 1 }));
-    };
     setObjects((prev) => {
       const parent = getParentOf(prev, id);
       return parent
-        ? mapById(prev, parent.id, (p) => ({ ...p, children: reindex(p.children ?? []) }))
-        : reindex(prev);
+        ? mapById(prev, parent.id, (p) => ({ ...p, children: reorderLayerScope(p.children ?? [], id, targetId, edge) }))
+        : reorderLayerScope(prev, id, targetId, edge);
     });
   }
   function undo() {
@@ -1779,7 +1912,7 @@ export function LayoutEditor({
               selectedIds={selectedIds}
               gridOn={gridOn && isEditing}
               interactive={isEditing}
-              ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels }}
+              ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}
@@ -1788,6 +1921,7 @@ export function LayoutEditor({
               onCommitStart={pushHistory}
               onReparent={reparentIntoContainer}
               onBoxSize={handleBoxSize}
+              onContextMenu={isEditing ? openContextMenu : undefined}
             />
           ) : (
             <div className="w-full h-full rounded-xl border border-line flex items-center justify-center text-fg-subtle">
@@ -1795,6 +1929,17 @@ export function LayoutEditor({
             </div>
           )}
         </div>
+
+        {/* Right-click menu. Positioned fixed to the viewport, so it lives outside
+            the canvas box rather than inside its ternary. */}
+        {menu && (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            items={menu.items}
+            onClose={() => setMenu(null)}
+          />
+        )}
 
         {/* Side panel: layers + inspector (edit mode only). Capped to the canvas
             height (which is measured to reach the viewport bottom) and scrolls
@@ -1813,12 +1958,38 @@ export function LayoutEditor({
                 draggable
                 onClick={(e) => selectObject(o.id, e.shiftKey || e.metaKey || e.ctrlKey)}
                 onDragStart={(e) => { e.dataTransfer.setData("text/plain", o.id); e.dataTransfer.effectAllowed = "move"; }}
-                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragLayerOver !== o.id) setDragLayerOver(o.id); }}
-                onDragLeave={() => setDragLayerOver((cur) => (cur === o.id ? null : cur))}
-                onDrop={(e) => { e.preventDefault(); const src = e.dataTransfer.getData("text/plain"); setDragLayerOver(null); if (src) moveLayer(src, o.id); }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  // Which half of the row the pointer is in decides the side. The
+                  // line then sits exactly where the row will land, so the gap you
+                  // aim at is the gap you get.
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const edge = e.clientY < r.top + r.height / 2 ? "above" : "below";
+                  if (dragLayerOver?.id !== o.id || dragLayerOver.edge !== edge) setDragLayerOver({ id: o.id, edge });
+                }}
+                onDragLeave={() => setDragLayerOver((cur) => (cur?.id === o.id ? null : cur))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const src = e.dataTransfer.getData("text/plain");
+                  const edge = dragLayerOver?.id === o.id ? dragLayerOver.edge : "above";
+                  setDragLayerOver(null);
+                  if (src) moveLayer(src, o.id, edge);
+                }}
                 style={{ paddingLeft: 8 + depth * 14 }}
-                className={`flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${selectedIds.has(o.id) ? "bg-fill-active" : "hover:bg-fill"} ${dragLayerOver === o.id ? "ring-1 ring-focus" : ""}`}
+                className={`relative flex items-center gap-1.5 rounded-md pr-2 py-1 text-left cursor-grab active:cursor-grabbing ${selectedIds.has(o.id) ? "bg-fill-active" : "hover:bg-fill"}`}
               >
+                {/* The insertion line. Drawn on the row's own edge rather than in
+                    the gap between rows: the gap is not a drop target of its own,
+                    so a line living there would flicker as the pointer crossed it.
+                    `pointer-events: none` so it cannot swallow the drop it marks. */}
+                {dragLayerOver?.id === o.id && (
+                  <span
+                    aria-hidden
+                    className="absolute left-0 right-0 h-0.5 rounded-full bg-focus"
+                    style={{ [dragLayerOver.edge === "above" ? "top" : "bottom"]: -1, pointerEvents: "none" }}
+                  />
+                )}
                 <span className="text-caption1 text-fg flex-1 min-w-0 truncate">
                   {o.config.type === "container" ? `${typeLabel(o.config.type)} (${o.children?.length ?? 0})` : typeLabel(o.config.type)}
                 </span>
@@ -2073,7 +2244,7 @@ function PlanAttachmentConfig({
 
   const crop = c.crop ?? { top: 0, right: 0, bottom: 0, left: 0 };
   const setCrop = (side: "top" | "right" | "bottom" | "left", pct: number) =>
-    onConfig({ ...c, crop: { ...crop, [side]: Math.max(0, Math.min(95, pct)) / 100 } });
+    onConfig({ ...c, crop: { ...crop, [side]: clamp(pct, 0, 95) / 100 } });
 
   // Resize the object box to match the rendered (cropped/trimmed) content aspect,
   // keeping the top-left anchor so there's no letterboxing.
@@ -2089,7 +2260,7 @@ function PlanAttachmentConfig({
       if (r && r !== "empty" && r.height > 0) {
         const aspect = r.width / r.height; // w:h of the image in px
         const newH = (o.w * canvas.width) / aspect / canvas.height;
-        onGeom({ h: Math.max(0.03, Math.min(1 - o.y, newH)) });
+        onGeom({ h: clamp(newH, 0.03, 1 - o.y) });
       }
     } finally {
       setFitting(false);
@@ -2214,6 +2385,7 @@ function Inspector({
   const propInstances = usePropInstances();
   const integrationsSnap = useIntegrations();
   const captionChannels = Object.keys(useStageState().state?.captionChannelColors ?? {});
+  const embedViews = useStageState().state?.views ?? [];
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
@@ -2317,6 +2489,83 @@ function Inspector({
             <RowSwitch label="Show 'slides' label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
           )}
         </>
+      )}
+      {(() => {
+        // A retired type: still rendered so an old layout keeps working, out of
+        // the palette so no new ones appear, with the conversion one click away.
+        // Deliberately NOT automatic — the replacement renders a different table,
+        // and silently changing what is on a stage monitor is not an upgrade.
+        const retired = objectRetired(c.type);
+        if (!retired) return null;
+        const scriptViews = (embedViews ?? []).filter((v) => v.kind === "script");
+        return (
+          <div className="flex flex-col gap-2 rounded-lg border border-amber-a5 bg-amber-a2 p-3">
+            <span className="text-caption1 text-fg">This object has been replaced</span>
+            <span className="text-caption2 text-fg-muted">{retired.why}</span>
+            <span className="text-caption2 text-fg-muted">
+              It is not a like-for-like swap, so read this first: the replacement
+              scrolls rather than shrinking to fit, and <strong>Fit to height</strong>,{" "}
+              <strong>Scroll</strong> and the note-category picker do not carry over.
+              Its columns come from the Script view's preset instead. Set the object's
+              font size afterwards — nothing auto-fits it now.
+            </span>
+            <Button
+              variant="filled"
+              size="small"
+              className="self-start"
+              onClick={() =>
+                onConfig({
+                  type: "view-embed",
+                  // Only auto-pick when there is no ambiguity; otherwise leave it
+                  // for the picker rather than guessing which view was meant.
+                  viewId: scriptViews.length === 1 ? scriptViews[0].id : null,
+                  showHeader: false,
+                } as LayoutObjectConfig)
+              }
+            >
+              Convert to Embedded view
+            </Button>
+            {scriptViews.length === 0 && (
+              <span className="text-caption2 text-fg-subtle">
+                Make a Script view first and this will have something to point at.
+              </span>
+            )}
+          </div>
+        );
+      })()}
+      {c.type === "view-embed" && (() => {
+        // Both the picker and the renderer ask the same function — see
+        // isEmbeddableViewKind. Custom never appears, which IS the recursion
+        // guard; other kinds appear but say why they do not render yet.
+        const embeddable = (embedViews ?? []).filter((v) => isOfferableInEmbedPicker(v.kind));
+        return embeddable.length === 0 ? (
+          <p className="text-caption2 text-fg-muted">
+            No embeddable views yet — make a Script view first, then point this at it.
+          </p>
+        ) : (
+          <RowSelect
+            label="View"
+            hint="Renders that view's content here, natively. Script views work today; other kinds are being converted."
+            value={c.viewId ?? ""}
+            options={[{ value: "", label: "None" }, ...embeddable.map((v) => ({ value: v.id, label: `${v.name} (${v.kind})` }))]}
+            onChange={(v) => onConfig({ ...c, viewId: v || null })}
+          />
+        );
+      })()}
+      {c.type === "view-embed" && c.viewId && (
+        <RowSwitch
+          label="Show the view's header"
+          checked={c.showHeader ?? false}
+          onChange={(v) => onConfig({ ...c, showHeader: v })}
+        />
+      )}
+      {c.type === "view-embed" && c.viewId && (
+        <RowSwitch
+          label="Follow the live item"
+          hint="Scrolls the rundown to keep Planning Center's live item on screen, so a service that runs past the bottom of the box does not need anyone to touch the display. Only ever scrolls this object, never the rest of the layout. Turn off for a box parked on the top of the plan."
+          checked={c.autoScroll ?? true}
+          onChange={(v) => onConfig({ ...c, autoScroll: v })}
+        />
       )}
       {c.type === "service-order" && (
         <>
@@ -2811,6 +3060,8 @@ function Inspector({
                   <SelectItem value="peak">Peak attendance (today)</SelectItem>
                   <SelectItem value="min">Lowest attendance (today)</SelectItem>
                   <SelectItem value="avg">Avg attendance (today)</SelectItem>
+                  <SelectItem value="servicePeak">Peak in room (this service)</SelectItem>
+                  <SelectItem value="servicePeakAttendance">Peak attendance (this service)</SelectItem>
                   <SelectItem value="serviceAttendance">Total entries (this service)</SelectItem>
                   <SelectItem value="attendance">Total entries (day)</SelectItem>
                 </SelectContent>
@@ -2838,11 +3089,13 @@ function Inspector({
       })()}
       {c.type === "people-graph" && <PeopleGraphInspector c={c} onConfig={onConfig} />}
       {c.type === "people-panel" && (() => {
-        const ORDER = ["occupancy", "peak", "serviceAttendance", "attendance", "capacity", "avg", "avgService", "vsAverage", "min"] as const;
-        const LABEL: Record<string, string> = { occupancy: "In room", peak: "Peak att.", serviceAttendance: "Entries (svc)", attendance: "Entries (day)", capacity: "% capacity", avg: "Avg att.", avgService: "Avg / service", vsAverage: "vs average", min: "Lowest att." };
+        const ORDER = ["occupancy", "servicePeak", "peak", "servicePeakAttendance", "serviceAttendance", "attendance", "capacity", "avg", "avgService", "vsAverage", "min"] as const;
+        const LABEL: Record<string, string> = { occupancy: "In room", peak: "Peak att.", servicePeak: "Peak in room (svc)", servicePeakAttendance: "Peak att. (svc)", serviceAttendance: "Entries (svc)", attendance: "Entries (day)", capacity: "% capacity", avg: "Avg att.", avgService: "Avg / service", vsAverage: "vs average", min: "Lowest att." };
         const HINT: Record<string, string> = {
           occupancy: "People currently in the room right now (entries minus exits).",
           peak: "Peak attendance — the highest number of people in the room today.",
+          servicePeak: "Highest number in the room during THIS service — resets each service, unlike the day-wide peak.",
+          servicePeakAttendance: "Highest cumulative entries during THIS service — resets each service.",
           serviceAttendance: "Total entries THIS service — cumulative door count (double-counts re-entries), reset per service.",
           attendance: "Total entries today across ALL services — cumulative door count, double-counts re-entries.",
           capacity: "In-room now as a percentage of the configured building capacity.",
@@ -2915,6 +3168,24 @@ function Inspector({
       {isStylingOnly(c.type) && (
         <p className="text-caption2 text-fg-muted leading-snug">Updates automatically — no options. Use the styling controls below.</p>
       )}
+      {/* An object this build cannot render — almost always a layout restored from
+          a NEWER version. Say so plainly and leave it alone: it renders as nothing
+          on the display, and deleting it here would throw away work that the
+          version it came from can still use. */}
+      {!isKnownObjectType(c.type) && (
+        <div className="flex flex-col gap-2 rounded-lg border border-amber-a5 bg-amber-a2 p-3">
+          <span className="text-caption1 text-fg">This version can&apos;t show this object</span>
+          <span className="text-caption2 text-fg-muted">
+            The layout asks for <code>{c.type}</code>, which this build does not have — usually
+            because the layout was saved by a newer version and restored here. It stays in the
+            layout and renders as nothing; update this server and it will come back.
+          </span>
+          <span className="text-caption2 text-fg-muted">
+            Leave it in place unless you are sure: deleting it here removes it for the newer
+            version too.
+          </span>
+        </div>
+      )}
 
       <Separator />
 
@@ -2933,7 +3204,11 @@ function Inspector({
       {isText && (
         <>
           <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Type</span>
-          <Row label="Font size"><NumberField value={pxOf(s.fontSize, 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
+          {/* Fall back to THIS type's own default, not a blanket 0.05. An object
+              whose default differs (an embedded view starts at 0.016) otherwise
+              reported a size it was not rendering at, so the first nudge of the
+              stepper jumped it to a number it had never been. */}
+          <Row label="Font size"><NumberField value={pxOf(s.fontSize, defaultStyle(c.type).fontSize ?? 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
           <Row label="Weight">
             <Select value={String(s.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
               <SelectTrigger><SelectValue /></SelectTrigger>

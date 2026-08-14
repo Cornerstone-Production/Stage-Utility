@@ -6,11 +6,15 @@
 import type { AutomationSettings, Rule } from "../types/automation.js";
 import { DataStore } from "./data-store.js";
 
-const rules = new DataStore<Rule[]>("automation-rules.json", []);
-const settings = new DataStore<AutomationSettings>("automation-settings.json", {
-  simulate: true,
-  disarmed: false,
-});
+const rules = new DataStore<Rule[]>("automation-rules.json", [], "config");
+const settings = new DataStore<AutomationSettings>(
+  "automation-settings.json",
+  {
+    simulate: true,
+    disarmed: false,
+  },
+  "config",
+);
 
 export const automationStore = {
   async loadRules(): Promise<Rule[]> {

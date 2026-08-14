@@ -12,6 +12,7 @@
 //   control = bits0-3 tally, bits4-5 brightness (11 = full = 0x30), bits6-7 = 0
 //   data    = exactly 16 chars in 0x20..0x7E, space-padded
 
+import { clamp } from "./clamp.js";
 import * as net from "node:net";
 
 import type { PeopleCountDTO } from "../types/stage.js";
@@ -46,7 +47,7 @@ export interface TslConfig {
 /** Build a TSL UMD 3.1 display packet (18 bytes). Exported for unit tests.
  *  `label` is clamped to printable ASCII, truncated/space-padded to 16 chars. */
 export function buildTsl31Packet(address: number, label: string): Buffer {
-  const addr = Math.max(0, Math.min(126, Math.floor(address)));
+  const addr = clamp(Math.floor(address), 0, 126);
   const buf = Buffer.alloc(2 + TSL_DATA_LEN, 0x20); // pre-fill data with spaces
   buf[0] = 0x80 | addr;
   buf[1] = TSL_FULL_BRIGHTNESS; // full brightness, no tally
@@ -90,6 +91,12 @@ class TslService extends ConnectionLifecycle {
 
   protected get configured(): boolean {
     return !!this.host && !!this.port;
+  }
+
+  /** Is a scoreboard connected and being fed people counts right now? Read by
+   *  SenSource's poll gate, which otherwise counts only browsers. */
+  isSending(): boolean {
+    return this.connected && this.feeds.length > 0;
   }
 
   configure(host: string, port: number, feeds: TslFeed[]): void {
@@ -203,3 +210,7 @@ class TslService extends ConnectionLifecycle {
 }
 
 export const tslService = new TslService();
+
+// A connected scoreboard is watching the counts just as much as a browser is,
+// and the SSE subscriber check cannot see it. See addDemandSource.
+sensourceService.addDemandSource(() => tslService.isSending());

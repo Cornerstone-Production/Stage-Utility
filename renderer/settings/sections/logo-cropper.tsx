@@ -1,4 +1,6 @@
+import { clamp } from "@main/services/clamp";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { BrandLogo } from "../../components/brand-logo";
 import { Button } from "../../components/ui";
 
 // On-screen crop square. The exported PNG matches the cropped region's native
@@ -14,6 +16,11 @@ interface LogoCropperProps {
   src: string;
   /** Saved transform to restore when re-editing (retains zoom/position). */
   initial?: { scale: number; x: number; y: number } | null;
+  /**
+   * Preview the image recoloured to the theme, matching how it will actually be
+   * drawn. Off shows the artwork exactly as uploaded.
+   */
+  monochrome?: boolean;
   onCancel: () => void;
   /** Returns the rendered crop plus the source + transform to persist. */
   onSave: (result: {
@@ -31,7 +38,7 @@ interface LogoCropperProps {
  * displayed-pixels per source-pixel. Both are clamped so the image always
  * covers the viewport (no empty corners).
  */
-export function LogoCropper({ src, initial, onCancel, onSave }: LogoCropperProps) {
+export function LogoCropper({ src, initial, monochrome = false, onCancel, onSave }: LogoCropperProps) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
   const [minScale, setMinScale] = useState(1);
@@ -52,7 +59,7 @@ export function LogoCropper({ src, initial, onCancel, onSave }: LogoCropperProps
       // `cover` is the minimum, so a saved (larger) scale lets the user zoom back out.
       const s = initial ? Math.max(cover, initial.scale) : cover;
       const o = initial
-        ? { x: Math.min(0, Math.max(VIEWPORT - w * s, initial.x)), y: Math.min(0, Math.max(VIEWPORT - h * s, initial.y)) }
+        ? { x: clamp(initial.x, VIEWPORT - w * s, 0), y: clamp(initial.y, VIEWPORT - h * s, 0) }
         : { x: (VIEWPORT - w * s) / 2, y: (VIEWPORT - h * s) / 2 };
       setScale(s);
       setOffset(o);
@@ -60,19 +67,22 @@ export function LogoCropper({ src, initial, onCancel, onSave }: LogoCropperProps
     img.src = src;
   }, [src, initial]);
 
-  function clamp(o: { x: number; y: number }, s: number, dims: { w: number; h: number }) {
+  /** Hold a pan offset inside the image at this scale. Renamed off `clamp`,
+   *  which now means the numeric one — two different functions under one name in
+   *  one file is how a rename turns into a silent recursion. */
+  function clampOffset(o: { x: number; y: number }, s: number, dims: { w: number; h: number }) {
     return {
-      x: Math.min(0, Math.max(VIEWPORT - dims.w * s, o.x)),
-      y: Math.min(0, Math.max(VIEWPORT - dims.h * s, o.y)),
+      x: clamp(o.x, VIEWPORT - dims.w * s, 0),
+      y: clamp(o.y, VIEWPORT - dims.h * s, 0),
     };
   }
 
   function onZoom(next: number) {
     if (!nat) return;
-    const ns = Math.max(minScale, Math.min(minScale * MAX_ZOOM, next));
+    const ns = clamp(next, minScale, minScale * MAX_ZOOM);
     // Zoom about the viewport center so the focal point stays put.
     setOffset((prev) =>
-      clamp(
+      clampOffset(
         {
           x: VIEWPORT / 2 - (VIEWPORT / 2 - prev.x) * (ns / scale),
           y: VIEWPORT / 2 - (VIEWPORT / 2 - prev.y) * (ns / scale),
@@ -92,7 +102,7 @@ export function LogoCropper({ src, initial, onCancel, onSave }: LogoCropperProps
   function onPointerMove(e: ReactPointerEvent) {
     if (!drag.current || !nat) return;
     setOffset(
-      clamp(
+      clampOffset(
         { x: drag.current.ox + (e.clientX - drag.current.x), y: drag.current.oy + (e.clientY - drag.current.y) },
         scale,
         nat,
@@ -111,7 +121,7 @@ export function LogoCropper({ src, initial, onCancel, onSave }: LogoCropperProps
     // Export at that native resolution (no upscaling beyond the source), clamped
     // to [MIN_OUTPUT, MAX_OUTPUT], so high-res uploads stay sharp.
     const sSize = VIEWPORT / scale;
-    const output = Math.round(Math.min(MAX_OUTPUT, Math.max(MIN_OUTPUT, sSize)));
+    const output = Math.round(clamp(sSize, MIN_OUTPUT, MAX_OUTPUT));
     const canvas = document.createElement("canvas");
     canvas.width = output;
     canvas.height = output;
@@ -132,22 +142,37 @@ export function LogoCropper({ src, initial, onCancel, onSave }: LogoCropperProps
       <span className="text-caption1 text-gray-11 font-medium">Position &amp; zoom your logo</span>
       <div className="flex items-start gap-4 flex-wrap">
         <div
-          className="relative rounded-md overflow-hidden bg-gray-3 touch-none cursor-grab active:cursor-grabbing shrink-0"
+          // text-fg is explicit rather than inherited: the recoloured preview fills
+          // from currentColor, so the viewport must state the colour it is previewing
+          // against, exactly as the thumbnail tiles do.
+          className="relative rounded-md overflow-hidden bg-gray-3 text-fg touch-none cursor-grab active:cursor-grabbing shrink-0"
           style={{ width: VIEWPORT, height: VIEWPORT }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         >
-          {nat && (
-            <img
-              src={src}
-              alt=""
-              draggable={false}
-              className="absolute select-none max-w-none"
-              style={{ width: nat.w * scale, height: nat.h * scale, left: offset.x, top: offset.y }}
-            />
-          )}
+          {nat &&
+            (monochrome ? (
+              // Recoloured exactly as the app will draw it. A single-colour logo is
+              // usually white artwork meant for a dark kiosk, so showing the raw file
+              // here rendered it invisible against the light viewport — you were
+              // positioning something you could not see.
+              <BrandLogo
+                logo={src}
+                monochrome
+                className="absolute select-none max-w-none"
+                style={{ width: nat.w * scale, height: nat.h * scale, left: offset.x, top: offset.y }}
+              />
+            ) : (
+              <img
+                src={src}
+                alt=""
+                draggable={false}
+                className="absolute select-none max-w-none"
+                style={{ width: nat.w * scale, height: nat.h * scale, left: offset.x, top: offset.y }}
+              />
+            ))}
           <div className="absolute inset-0 ring-1 ring-inset ring-white/10 rounded-md pointer-events-none" />
         </div>
 

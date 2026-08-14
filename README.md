@@ -34,7 +34,6 @@ screens, the settings UI and a phone remote from one port.
 | [Network traffic](docs/ops/network-traffic.md) | what it puts on your LAN |
 | [Updates and logs](docs/ops/updates-and-logs.md) | the in-app updater |
 | [Releases and distribution](docs/ops/distribution.md) | how versions are cut, and how a server gets one |
-| [Homebrew](docs/ops/homebrew.md) | installing and running it with brew |
 | [API reference](docs/reference/api.md) | the HTTP surface |
 | [Contributing](docs/contributing.md) | commit convention, branching, releases |
 | [Project structure](docs/contributing-appendix.md) | orientation in the codebase |
@@ -76,6 +75,8 @@ enabled independently.
 
 ## Install it
 
+Two supported ways in — pick whichever suits the machine.
+
 **Linux and macOS**
 
 ```bash
@@ -89,8 +90,17 @@ irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/
 ```
 
 Nothing to clone and no Node to install: the download carries its own runtime.
-It verifies the download, registers an auto-starting service, and prints the
-address to open. After that it updates itself from Settings.
+The installers verify the download, register an auto-starting service, and print
+the address to open. After that it updates itself from **Settings -> Advanced**.
+
+On a Mac or Linux workstation you can use [Homebrew](docs/ops/homebrew.md)
+instead — a user agent that starts at login rather than a system service.
+
+Testing a prerelease on a spare machine? See
+[Installing a beta](docs/ops/install-and-config.md#installing-a-beta) — in a
+`curl | sudo bash` pipeline, `STAGE_TRACK=beta` does not go where you would
+expect. [Uninstalling](docs/ops/install-and-config.md#uninstalling) covers every
+method.
 
 To work on the code instead:
 

@@ -48,7 +48,7 @@ function migrate(raw: PatchFile): PatchFile {
 }
 
 class PatchStore {
-  private store = new DataStore<PatchFile>("patch.json", EMPTY);
+  private store = new DataStore<PatchFile>("patch.json", EMPTY, "config");
 
   /** The full patch file (all sheets), migrated to the current shape. */
   async load(): Promise<PatchFile> {

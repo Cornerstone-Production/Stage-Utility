@@ -11,7 +11,7 @@ process.env.STAGE_UTILITY_DATA = dataDir;
 
 const { ARCHIVE_KIND, buildArchive, importArchive, inspectArchive } = await import("./archive-bundle.js");
 const { splHistoryStore } = await import("../spl-history-store.js");
-const { parseRows: parseRowsForTest } = await import("./csv.js");
+const { parseRows: parseRowsForTest } = await import("../csv.js");
 
 function record(serviceKey: string, serviceDate: string, planTitle = "Plan") {
   return {

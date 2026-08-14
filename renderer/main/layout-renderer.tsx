@@ -1,3 +1,4 @@
+import { clamp } from "@main/services/clamp";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
@@ -12,7 +13,7 @@ import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
 import { useReaperState } from "./use-reaper-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
-import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance } from "./use-people-count-state";
+import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessChannels } from "./use-wireless-channels";
@@ -22,6 +23,8 @@ import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
+import { EMBED_FONT_FRACTION, isEmbeddableViewKind } from "./layout-objects";
+import { ScriptView } from "./script-view";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
 import { LiveControls } from "./live-controls";
@@ -53,6 +56,9 @@ export interface LayoutRenderCtx {
   /** Per-service attendance for the current live service (baselined) — the
    *  "Attendance (this service)" metric, vs the day-total `peopleCount.attendance`. */
   serviceAttendance: number | null;
+  /** This service's peaks, from the attendance record (not today's building peak). */
+  servicePeak: number | null;
+  servicePeakAttendance: number | null;
   /** Live baptism-timer state — for the baptism-timer object. */
   baptism: BaptismState | null;
   /** In-progress service timeline (planned vs actual item timing) — for the
@@ -173,6 +179,39 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
   );
 }
 
+/**
+ * The "recording" fill state — a solid red block covering the whole object.
+ *
+ * ABSOLUTE, not width/height 100%. A normal child sized to 100% resolves against
+ * the CONTENT box, so on an object with padding the red stopped short of its own
+ * edges: the object's background and border went on drawing a ring around it, and
+ * `borderRadius: inherit` gave the inner block the same absolute radius at a
+ * smaller size, so the corners were not concentric either. How wrong it looked
+ * therefore depended on the object's style, which is why a flat one looked right
+ * and a padded one did not. Positioned this way it covers the padding too, and
+ * the fill is the same shape as the object at any style.
+ */
+function RecordingFill({ label, ts }: { label: string; ts: CSSProperties }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: "var(--red-9)",
+        borderRadius: "inherit",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        // A long label (a record timecode pushes it wider) clips rather than
+        // spilling past the object.
+        overflow: "hidden",
+      }}
+    >
+      <span style={{ ...ts, color: "#ffffff" }}>{label}</span>
+    </div>
+  );
+}
+
 /** Render one object's inner content (the positioned box wraps this). */
 // Format a signed pacing delta — over plan reads "+M:SS", under reads "−M:SS".
 function fmtSignedDuration(sec: number): string {
@@ -183,8 +222,48 @@ function fmtSignedDuration(sec: number): string {
 
 // 0–5 RF bars as filled/empty blocks, for the wireless-channel tile.
 function rfBarsGlyph(bars: number): string {
-  const n = Math.max(0, Math.min(5, Math.round(bars)));
+  const n = clamp(Math.round(bars), 0, 5);
   return "▮".repeat(n) + "▯".repeat(5 - n);
+}
+
+/** The neutral dot: an integration that is not connected, a recorder that is idle. */
+const DOT_IDLE = "rgba(255,255,255,0.35)";
+
+/**
+ * A status dot with its label, sized in em so it tracks the object's font.
+ *
+ * Shared so the connection objects and the recording objects cannot drift into
+ * looking like two different conventions — a dot on a stage display means one
+ * thing, and it should be the same shape and size wherever it appears.
+ */
+function StatusDot({
+  color,
+  label,
+  ts,
+  dimmed = false,
+}: {
+  color: string;
+  label?: string | null;
+  ts: CSSProperties;
+  dimmed?: boolean;
+}) {
+  return (
+    <span
+      style={{
+        ...ts,
+        width: "auto",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "0.4em",
+        opacity: dimmed ? 0.4 : 1,
+      }}
+    >
+      <span
+        style={{ width: "0.6em", height: "0.6em", borderRadius: "50%", background: color, flexShrink: 0 }}
+      />
+      {label ? <span>{label}</span> : null}
+    </span>
+  );
 }
 
 // Shrinks the font so `text` fits its box (width + height) instead of clipping —
@@ -211,7 +290,7 @@ function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign
       const natW = el.scrollWidth / cur;
       const natH = el.scrollHeight / cur;
       if (natW <= 0 || natH <= 0) return;
-      const desired = Math.max(0.3, Math.min(1, Math.min(availW / natW, availH / natH)));
+      const desired = clamp(Math.min(availW / natW, availH / natH), 0.3, 1);
       if (Math.abs(desired - cur) > 0.01) setScale(desired);
     };
     measure();
@@ -316,6 +395,8 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     }
     case "service-order":
       return <ServiceOrderObject o={o} config={c} ctx={ctx} />;
+    case "view-embed":
+      return <ViewEmbedObject o={o} config={c} ctx={ctx} />;
     case "current-slide-notes": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
       return span(pro?.currentNotes ?? "");
@@ -529,10 +610,12 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       const value =
         metric === "min" ? ctx.serviceLow
         : metric === "serviceAttendance" ? ctx.serviceAttendance
+        : metric === "servicePeak" ? ctx.servicePeak
+        : metric === "servicePeakAttendance" ? ctx.servicePeakAttendance
         : resolvePeopleValue(ctx.peopleCount, metric, c.zoneId);
       if (value == null) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
       const fallbackLabel =
-        metric === "occupancy" ? "in room" : metric === "peak" ? "peak att." : metric === "min" ? "low" : metric === "avg" ? "avg att." : metric === "serviceAttendance" ? "svc entries" : "entries";
+        metric === "occupancy" ? "in room" : metric === "peak" ? "peak att." : metric === "min" ? "low" : metric === "avg" ? "avg att." : metric === "serviceAttendance" ? "svc entries" : metric === "servicePeak" ? "svc peak" : metric === "servicePeakAttendance" ? "svc peak att." : "entries";
       return (
         <span style={ts}>
           {value.toLocaleString()}
@@ -547,7 +630,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "people-graph":
       return <PeopleGraphObject ctx={ctx} config={c} ts={ts} />;
     case "people-panel":
-      return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} ts={ts} H={ctx.H} />;
+      return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} servicePeak={ctx.servicePeak} servicePeakAttendance={ctx.servicePeakAttendance} ts={ts} H={ctx.H} />;
     case "baptism-timer":
       return <BaptismTimer state={ctx.baptism} config={c} ts={ts} now={ctx.now} />;
     case "record-status": {
@@ -567,19 +650,23 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
 
       if (active) {
         const label = c.recordingText ?? "RECORDING";
-        if (c.fillWhenRecording ?? true) {
-          return (
-            <div style={{ ...ts, color: "#ffffff", background: "var(--red-9)", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "inherit" }}>
-              {label}
-            </div>
-          );
-        }
-        return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
+        // Same fill as the OBS and REAPER objects — a child sized 100% resolves
+        // against the content box, so on a padded object the red stopped short of
+        // its own edges.
+        if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
+        // Not filling the box: same dot convention as the connection objects, so
+        // a red dot always means the same thing wherever it appears on a display.
+        return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
       }
+      // Idle: dim when offline so a neutral badge is never mistaken for "not
+      // recording" when no recorder is reachable at all.
       return (
-        <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
-          {connected ? (c.idleText ?? "STANDBY") : (c.offlineText ?? "NO RECORDER")}
-        </span>
+        <StatusDot
+          color={DOT_IDLE}
+          label={connected ? (c.idleText ?? "STANDBY") : (c.offlineText ?? "NO RECORDER")}
+          ts={ts}
+          dimmed={!connected}
+        />
       );
     }
     case "obs-status": {
@@ -600,21 +687,20 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         const tc = mode === "recording" && c.showTimecode && obs?.recordTimecode ? ` ${obs.recordTimecode}` : "";
         const label = `${c.recordingText ?? activeDefault}${tc}`;
         // Fill the whole box red (a strong room cue) or just color the text.
-        if (c.fillWhenRecording ?? true) {
-          return (
-            <div style={{ ...ts, color: "#ffffff", background: "var(--red-9)", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "inherit" }}>
-              {label}
-            </div>
-          );
-        }
-        return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
+        if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
+        // Not filling the box: same dot convention as the connection objects, so
+        // a red dot always means the same thing wherever it appears on a display.
+        return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
       }
       // Idle: dim when offline so a neutral badge is never mistaken for "not
       // active" when OBS is merely unreachable.
       return (
-        <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
-          {connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? "OBS: Offline")}
-        </span>
+        <StatusDot
+          color={DOT_IDLE}
+          label={connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? "OBS: Offline")}
+          ts={ts}
+          dimmed={!connected}
+        />
       );
     }
     case "reaper-status": {
@@ -630,21 +716,20 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         const pos = c.showPosition && posRaw ? ` ${dot === -1 ? posRaw : posRaw.slice(0, dot)}` : "";
         const label = `${c.recordingText ?? "REAPER: Recording"}${pos}`;
         // Fill the whole box red (a strong room cue) or just color the text.
-        if (c.fillWhenRecording ?? true) {
-          return (
-            <div style={{ ...ts, color: "#ffffff", background: "var(--red-9)", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "inherit" }}>
-              {label}
-            </div>
-          );
-        }
-        return <span style={{ ...ts, color: "var(--red-10)" }}>{label}</span>;
+        if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
+        // Not filling the box: same dot convention as the connection objects, so
+        // a red dot always means the same thing wherever it appears on a display.
+        return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
       }
       // Idle: dim when offline so a neutral badge is never mistaken for "not
       // recording" when REAPER is merely unreachable.
       return (
-        <span style={{ ...ts, opacity: connected ? 1 : 0.4 }}>
-          {connected ? (c.idleText ?? "REAPER: Standby") : (c.offlineText ?? "REAPER: Offline")}
-        </span>
+        <StatusDot
+          color={DOT_IDLE}
+          label={connected ? (c.idleText ?? "REAPER: Standby") : (c.offlineText ?? "REAPER: Offline")}
+          ts={ts}
+          dimmed={!connected}
+        />
       );
     }
     case "rosstalk-button":
@@ -672,14 +757,9 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         conn === "connected" ? "var(--green-10)"
         : conn === "error" ? "var(--red-10)"
         : conn === "connecting" ? "var(--yellow-10)"
-        : "rgba(255,255,255,0.35)";
+        : DOT_IDLE;
       const name = c.label ?? (st ? (ctx.integrationLabels[st.id] ?? st.id) : "—");
-      return (
-        <span style={{ ...ts, width: "auto", display: "inline-flex", alignItems: "center", gap: "0.4em" }}>
-          <span style={{ width: "0.6em", height: "0.6em", borderRadius: "50%", background: dot, flexShrink: 0 }} />
-          {(c.showLabel ?? true) && <span>{name}</span>}
-        </span>
-      );
+      return <StatusDot color={dot} label={(c.showLabel ?? true) ? name : null} ts={ts} />;
     }
     case "wireless-summary": {
       const ch = ctx.wireless;
@@ -953,7 +1033,7 @@ function PeopleGraph({
     if (r.width <= 0) return;
     const vbX = ((e.clientX - r.left) / r.width) * 100;
     const frac = (vbX - PADL) / (100 - PADL - PADR);
-    setHover(Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1)))));
+    setHover(clamp(Math.round(frac * (n - 1)), 0, n - 1));
   }
   // Guard the hover index against the current series: switching live↔recorded swaps
   // the data under a stale index, so clamp it out rather than indexing undefined.
@@ -1105,6 +1185,8 @@ const PEOPLE_PANEL_LABELS: Record<string, string> = {
   peak: "Peak att.",
   attendance: "Entries (day)",
   serviceAttendance: "Entries (svc)",
+  servicePeak: "Peak in room (svc)",
+  servicePeakAttendance: "Peak att. (svc)",
   min: "Low",
   avg: "Avg att.",
   avgService: "Avg / service",
@@ -1116,6 +1198,8 @@ function PeoplePanel({
   people,
   serviceLow,
   serviceAttendance,
+  servicePeak,
+  servicePeakAttendance,
   ts,
   H,
 }: {
@@ -1123,6 +1207,8 @@ function PeoplePanel({
   people: PeopleCountDTO | null;
   serviceLow: number | null;
   serviceAttendance: number | null;
+  servicePeak: number | null;
+  servicePeakAttendance: number | null;
   ts: CSSProperties;
   H: number;
 }) {
@@ -1151,7 +1237,12 @@ function PeoplePanel({
     // "min" = lowest in-room during the live service (the service "floor"), from
     // the attendance record — not the whole-day minimum (which is ~always 0).
     const v =
-      k === "avgService" ? serviceAvg : k === "min" ? serviceLow : k === "serviceAttendance" ? serviceAttendance : ((t as Record<string, number | null> | undefined)?.[k] ?? null);
+      k === "avgService" ? serviceAvg
+      : k === "min" ? serviceLow
+      : k === "serviceAttendance" ? serviceAttendance
+      : k === "servicePeak" ? servicePeak
+      : k === "servicePeakAttendance" ? servicePeakAttendance
+      : ((t as Record<string, number | null> | undefined)?.[k] ?? null);
     return { text: v == null ? "—" : v.toLocaleString(), color: base };
   };
   return (
@@ -1346,7 +1437,7 @@ async function rasterizePdf(data: ArrayBuffer, pageNum: number): Promise<HTMLCan
   const loadingTask = pdfjs.getDocument({ data });
   const doc = await loadingTask.promise;
   try {
-    const n = Math.min(Math.max(Math.round(pageNum) || 1, 1), doc.numPages);
+    const n = clamp(Math.round(pageNum) || 1, 1, doc.numPages);
     const page = await doc.getPage(n);
     const base = page.getViewport({ scale: 1 });
     const scale = Math.min(3, 1600 / base.width);
@@ -1385,10 +1476,10 @@ async function rasterizeImage(buf: ArrayBuffer, contentType: string): Promise<HT
 }
 
 function cropCanvas(src: HTMLCanvasElement, crop: { top: number; right: number; bottom: number; left: number }): HTMLCanvasElement {
-  const left = Math.max(0, Math.min(0.95, crop.left || 0));
-  const right = Math.max(0, Math.min(0.95, crop.right || 0));
-  const top = Math.max(0, Math.min(0.95, crop.top || 0));
-  const bottom = Math.max(0, Math.min(0.95, crop.bottom || 0));
+  const left = clamp(crop.left || 0, 0, 0.95);
+  const right = clamp(crop.right || 0, 0, 0.95);
+  const top = clamp(crop.top || 0, 0, 0.95);
+  const bottom = clamp(crop.bottom || 0, 0, 0.95);
   const x = Math.round(left * src.width);
   const y = Math.round(top * src.height);
   const w = Math.max(1, Math.round((1 - left - right) * src.width));
@@ -1539,6 +1630,74 @@ function PlanAttachment({
   );
 }
 
+/**
+ * Another View's content, rendered natively inside this layout.
+ *
+ * The native answer to stacking two browser tabs: the same components the View
+ * uses on its own display, sharing this page's React tree and its single SSE
+ * connection. An <iframe> would have been a few lines, and would have booted a
+ * second copy of the whole app per object — another EventSource, another poll
+ * loop — while ignoring the object's style and scaling a full-screen design down
+ * instead of reflowing into the box.
+ *
+ * CUSTOM Views are deliberately not embeddable, and that is the entire recursion
+ * guard: a custom View is the only kind that holds a layout, so refusing it means
+ * an embed can never reach another embed. No depth counter, nothing to get wrong
+ * later. Containers already cover composing objects within one layout.
+ *
+ * Kinds are added as they stop assuming they own the screen — every View renderer
+ * currently hardcodes a viewport height, which is right on a display and wrong in
+ * a box. `script` is converted; the rest say so rather than rendering broken.
+ */
+function ViewEmbedObject({
+  o,
+  config,
+  ctx,
+}: {
+  o: LayoutObject;
+  config: Extract<LayoutObjectConfig, { type: "view-embed" }>;
+  ctx: LayoutRenderCtx;
+}) {
+  const view = config.viewId ? ctx.state.views?.find((v) => v.id === config.viewId) ?? null : null;
+
+  const notice = (text: string) => (
+    <div className="flex items-center justify-center h-full text-fg-subtle text-caption1 text-center px-3">{text}</div>
+  );
+
+  if (!config.viewId) return notice("Pick a view to embed");
+  if (!view) return notice("That view no longer exists");
+
+  if (isEmbeddableViewKind(view.kind)) {
+    // w-full h-full, not the object's alignment: boxStyle turns every object into
+    // a flex column aligned by textAlign, which shrink-wraps a child that has no
+    // width of its own — a left-aligned box rendered the rundown at about half
+    // the width it was given. An embed always fills its box; alignment is a text
+    // idea and does not apply.
+    // The font size is set HERE, on the wrapper, and inherited by the whole
+    // rundown. Every other object applies it per text node through textStyle,
+    // which an embedded component never passes through — so without this the
+    // table fell back to the browser default 16px however large the object was,
+    // with no control that did anything.
+    return (
+      <div className="w-full h-full" style={{ fontSize: `${(o.style?.fontSize ?? EMBED_FONT_FRACTION) * ctx.H}px` }}>
+        {/* textSizeClass="" drops the page's viewport-relative clamp so the rows
+            inherit the object's own font-size, which boxStyle sets from the
+            object's style. Without it the table capped at ~17px however large the
+            object was — unreadable on a 4K stage panel, with the font-size field
+            hidden as well, so there was no way to fix it. */}
+        <ScriptView
+          scriptViewLayoutId={view.scriptViewLayoutId ?? null}
+          showHeader={config.showHeader ?? false}
+          textSizeClass=""
+          autoScroll={config.autoScroll ?? true}
+        />
+      </div>
+    );
+  }
+
+  return notice(`"${view.name}" is a ${view.kind} view — not embeddable yet`);
+}
+
 /** The PCO service order as a scrolling list — highlights the live item and shows
  *  the chosen note categories (e.g. vocal parts) under each item. Reuses the cached
  *  plan-items pipeline (no new PCO request). */
@@ -1586,7 +1745,7 @@ function ServiceOrderObject({
       if (ch <= 0 || sh <= 0) return;
       const cur = fitRef.current;
       const natural = sh / cur; // content height at scale 1
-      const desired = Math.max(MIN_FIT, Math.min(1, ch / natural));
+      const desired = clamp(ch / natural, MIN_FIT, 1);
       if (Math.abs(desired - cur) > 0.005) setFitScale(desired);
     };
     measure();
@@ -1730,6 +1889,7 @@ export function useLayoutData(layout?: LayoutDTO) {
   const peopleCount = usePeopleCountState(peopleWanted);
   const serviceLow = useLiveServiceLow(peopleWanted);
   const serviceAttendance = useLiveServiceAttendance(peopleWanted);
+  const servicePeaks = useLiveServicePeaks(peopleWanted);
   const wireless = useWirelessChannels(want(["wireless-summary", "wireless-channel"]));
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
@@ -1747,7 +1907,7 @@ export function useLayoutData(layout?: LayoutDTO) {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   });
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -1755,7 +1915,7 @@ export function useLayoutData(layout?: LayoutDTO) {
  * with absolutely-positioned, live-data-bound objects.
  */
 export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -1799,7 +1959,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // with the window instead of the design canvas.
   const fill = canvas.fit === "fill";
   const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
+  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom

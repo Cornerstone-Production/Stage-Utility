@@ -6,7 +6,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, readBody } from "./context.js";
+import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
 import { baptismTriggersStore } from "../baptism-triggers-store.js";
 import { stageController } from "../stage-controller.js";
 import { attendanceStore } from "../attendance-store.js";
@@ -14,13 +14,19 @@ import { attendanceRecorder } from "../attendance-recorder.js";
 import { serviceTimelineStore } from "../service-timeline-store.js";
 import { serviceTimelineRecorder } from "../service-timeline-recorder.js";
 import { baptismTimerService } from "../baptism-timer-service.js";
-import { editServiceWindow, mergeServiceRecords, recalcAttendance, setItemCounted } from "../history-edit.js";
+import {
+  deleteServiceRecords,
+  editServiceWindow,
+  mergeServiceRecords,
+  recalcAttendance,
+  setItemCounted,
+} from "../history-edit.js";
 
 export async function historyRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
     // ── Attendance history (mirrors the SPL history routes) ─────────────────
     if (method === "POST" && pathname === "/api/history/window") {
-      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const body = await readBodyOrEmpty(req);
       if (typeof body.serviceKey !== "string") {
         error(res, "body.serviceKey (string) required");
         return;
@@ -33,7 +39,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/history/recalc") {
-      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const body = await readBodyOrEmpty(req);
       if (typeof body.serviceKey !== "string") {
         error(res, "body.serviceKey (string) required");
         return;
@@ -43,7 +49,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/history/item-counted") {
-      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const body = await readBodyOrEmpty(req);
       if (typeof body.serviceKey !== "string" || typeof body.itemId !== "string" || typeof body.counted !== "boolean") {
         error(res, "body.serviceKey, body.itemId (strings) + body.counted (boolean) required");
         return;
@@ -53,13 +59,16 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/history/merge") {
-      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const body = await readBodyOrEmpty(req);
       if (typeof body.sourceKey !== "string" || typeof body.targetKey !== "string") {
         error(res, "body.sourceKey + body.targetKey (strings) required");
         return;
       }
-      await mergeServiceRecords(body.sourceKey, body.targetKey);
-      json(res, { ok: true });
+      // Return WHAT happened, not just that it happened. A merge can legitimately
+      // touch only some of the three stores, and "ok: true" made a partial result
+      // indistinguishable from a complete one.
+      const outcome = await mergeServiceRecords(body.sourceKey, body.targetKey);
+      json(res, { ok: true, ...outcome });
       return;
     }
     if (method === "GET" && pathname === "/api/attendance/history/current") {
@@ -79,7 +88,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
           return;
         }
         if (method === "DELETE") {
-          json(res, { deleted: await attendanceStore.delete(key) });
+          json(res, await deleteServiceRecords(key));
           return;
         }
       }
@@ -103,7 +112,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
           return;
         }
         if (method === "DELETE") {
-          json(res, { deleted: await serviceTimelineStore.delete(key) });
+          json(res, await deleteServiceRecords(key));
           return;
         }
       }

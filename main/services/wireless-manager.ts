@@ -11,7 +11,9 @@ import type { ConnectionState, IntegrationDescriptor } from "../types/integratio
 import { providerRegistry } from "../providers/registry.js";
 import { broadcast } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
+import { secretsStore } from "./secrets.js";
 import { settingsStore } from "./settings-store.js";
+import { allCredentialKeys, mergeSecrets, publicConfig, splitConfig, withSecrets } from "./wireless-credentials.js";
 import { wirelessStore } from "./wireless-store.js";
 
 /** The fastest metering interval worth allowing. Below this the polling costs
@@ -34,12 +36,35 @@ class WirelessManager {
 
     const configs = await wirelessStore.load();
 
-    // Hydrate with default runtime fields.
-    this.connections = configs.map((cfg) => ({
-      ...cfg,
-      connection: "disconnected" as const,
-      message: null,
-    }));
+    // Hydrate with default runtime fields, and fold each connection's credentials
+    // back in from the encrypted store — the drivers need the real password, only
+    // the persisted file and the API surface go without it.
+    this.connections = await Promise.all(
+      configs.map(async (cfg) => ({
+        ...cfg,
+        config: withSecrets(cfg.config, await secretsStore.getSecrets(WirelessManager.secretId(cfg.id))),
+        connection: "disconnected" as const,
+        message: null,
+      })),
+    );
+
+    // One-time migration for a box upgrading from when passwords lived in
+    // wireless-connections.json. Without this the cleartext stays in that file —
+    // and therefore in every config snapshot — until someone happens to edit the
+    // connection. persist() moves it into the encrypted store and rewrites the
+    // file without it.
+    //
+    // Filtered on the UNION of every provider's credential keys, not this
+    // connection's provider. Only Spectera declares a password, so keying off the
+    // current provider skipped exactly the rows the provider-switch leak created:
+    // a configured Spectera switched to another provider left cleartext under a
+    // providerId with no password field. Those would have stayed in the file
+    // permanently, with the API masking them so nothing ever revealed it.
+    const legacy = configs.filter((cfg) => allCredentialKeys().some((k) => cfg.config[k]));
+    if (legacy.length > 0) {
+      console.log(`[wireless] migrating ${legacy.length} stored credential(s) out of wireless-connections.json`);
+      await this.persist();
+    }
 
     // Apply all connections (connects enabled real-driver ones, sets stub messages).
     await deviceManager.applyConnections(this.connections);
@@ -87,8 +112,16 @@ class WirelessManager {
     return providerRegistry.getDescriptors();
   }
 
+  /**
+   * The connections as a client may see them — credentials masked.
+   *
+   * This is the API and SSE surface (GET /api/wireless/connections and every
+   * wireless:connections-changed broadcast), so the real password must not be in
+   * it. The UI used to mask on arrival, which meant the cleartext had already
+   * crossed the LAN to get there.
+   */
   listConnections(): WirelessConnection[] {
-    return this.connections.map((c) => ({ ...c }));
+    return this.connections.map((c) => ({ ...c, config: publicConfig(c.providerId, c.config) }));
   }
 
   async addConnection(params: { name?: string; providerId?: string }): Promise<WirelessConnection[]> {
@@ -124,7 +157,26 @@ class WirelessManager {
     if (patch.name !== undefined) conn.name = patch.name.trim() || conn.name;
     if (patch.providerId !== undefined) conn.providerId = patch.providerId;
     if (patch.enabled !== undefined) conn.enabled = patch.enabled;
-    if (patch.config !== undefined) conn.config = { ...conn.config, ...patch.config };
+    if (patch.config !== undefined) {
+      // The form posts back the mask it was shown, so a patch that only changes
+      // the IP still carries "••••" in the password field. Merging that verbatim
+      // would hand the driver the mask as its password. mergeSecrets resolves it
+      // against what is stored: mask keeps, "" clears, anything else replaces.
+      const stored = await secretsStore.getSecrets(WirelessManager.secretId(conn.id));
+      const merged = mergeSecrets(conn.providerId, patch.config, stored);
+      // Rebuild from the credential-free parts of BOTH, then add back only what
+      // mergeSecrets kept. Spreading the patch over conn.config cannot clear a
+      // credential — an object that merely lacks the key does not delete it — so
+      // clearing a password left the old one live in memory: the API kept
+      // reporting it as set and the driver kept authenticating with it.
+      conn.config = withSecrets(
+        {
+          ...splitConfig(conn.config).safe,
+          ...splitConfig(patch.config).safe,
+        },
+        merged,
+      );
+    }
 
     console.log(`[wireless] updateConnection — ${conn.id} patch keys: ${Object.keys(patch).join(", ")}`);
     await this.persist();
@@ -139,6 +191,10 @@ class WirelessManager {
 
     console.log(`[wireless] removeConnection — ${params.id}`);
     this.connections.splice(idx, 1);
+    // persist() only walks surviving connections, so without this the encrypted
+    // credential outlives the connection the operator just deleted — a password
+    // they believe is gone, accumulating in secrets.bin.
+    await secretsStore.clearSecrets(WirelessManager.secretId(params.id));
     await this.persist();
     // applyConnections reconciles — the removed entry will be disconnected.
     await deviceManager.applyConnections(this.connections);
@@ -180,16 +236,33 @@ class WirelessManager {
     if (state === "connected" || state === "disconnected") conn.message = null;
   }
 
+  /** The secrets slot for one connection. Per-connection: two Spectera base
+   *  stations are two different passwords. */
+  private static secretId(connId: string): string {
+    return `wireless:${connId}`;
+  }
+
   private async persist(): Promise<void> {
-    await wirelessStore.save(
-      this.connections.map(({ id, name, providerId, enabled, config }) => ({
-        id,
-        name,
-        providerId,
-        enabled,
-        config,
-      })),
-    );
+    // Credentials never reach wireless-connections.json — that file is in
+    // CONFIG_FILES, so anything left in it lands in every config snapshot the
+    // operator downloads, which the snapshot promises does not happen.
+    // Write exactly what is in memory — do NOT merge against what is stored.
+    // Merging is the patch boundary's job (updateConnection), where "absent"
+    // correctly means "unchanged". Here absent means the operator cleared it, and
+    // merging resurrected the old password from the store on every save.
+    //
+    // Collected and written ONCE. Calling setSecrets per connection re-encrypted
+    // and rewrote the entire secrets blob — which also holds every integration
+    // credential — once per connection, on the request path and on boot.
+    const rows = [];
+    const secrets: Record<string, Record<string, string>> = {};
+    for (const { id, name, providerId, enabled, config } of this.connections) {
+      const split = splitConfig(config);
+      secrets[WirelessManager.secretId(id)] = split.secret;
+      rows.push({ id, name, providerId, enabled, config: split.safe });
+    }
+    await secretsStore.setManySecrets(secrets);
+    await wirelessStore.save(rows);
   }
 
   private broadcast(): void {

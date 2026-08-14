@@ -54,6 +54,18 @@ export interface LayoutObjectSpec {
   /** Reads from one ProPresenter machine — offers the instance picker when
    *  more than one is configured. */
   propInstance?: boolean;
+  /**
+   * Superseded. Kept renderable, out of the palette, and offered a one-click
+   * conversion in the inspector.
+   *
+   * Not deleted: an object type lives in views.json, which is a CONFIG store and
+   * therefore what Backup & restore puts back. Removing the type outright means
+   * restoring any snapshot taken before the change hands the renderer an object
+   * it no longer understands, and the object silently vanishes from a layout the
+   * operator believes they just restored. Deletion waits until the conversions
+   * have happened and such a snapshot is no longer one anybody would restore.
+   */
+  retired?: { replacedBy: LayoutObjectType; why: string };
 }
 
 // ── Shared style fragments ────────────────────────────────────────────────────
@@ -84,6 +96,17 @@ const READOUT = (fontSize: number): LayoutStyle => TEXT({ fontSize, fontWeight: 
 const PILL = (over: LayoutStyle = {}): LayoutStyle => TEXT({ fontSize: 0.05, fontWeight: 600, ...CARD_PRESETS.neutral, ...over });
 /** Media that paints its own content — no type styling at all. */
 const BARE = (): LayoutStyle => ({});
+
+/**
+ * The font size an embedded View starts at, as a fraction of layout height.
+ *
+ * Derived from the ScriptView page rather than picked: the page sets
+ * `clamp(0.8rem, 1.6vmin, 1.1rem)`, which on a 1080-tall 16:9 screen resolves to
+ * 1.6vmin = 17.28px, and 17.28 / 1080 = 0.016. Exported so the layout editor can
+ * show the same number as the default instead of a second guess — the inspector
+ * used to fall back to 0.05, so a fresh embed reported a size it was not using.
+ */
+export const EMBED_FONT_FRACTION = 0.016;
 
 // ── The registry ──────────────────────────────────────────────────────────────
 
@@ -159,10 +182,31 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     propInstance: true,
   },
   "service-order": {
-    label: "Service order",
-    group: "PCO / service",
+    label: "Service order (legacy)",
+    group: null,
+    retired: {
+      replacedBy: "view-embed",
+      why: "Embedded view renders the full ScriptView rundown — the same table as the ScriptView pages, with your saved column presets.",
+    },
     config: () => ({ type: "service-order", noteCategories: null, showLength: false, highlightLive: true, scroll: "auto", autoFit: true }),
     style: () => TEXT({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
+  },
+  "view-embed": {
+    label: "Embedded view",
+    group: "PCO / service",
+    config: () => ({ type: "view-embed", viewId: null }),
+    // The size the ScriptView PAGE actually renders at, expressed as a fraction
+    // of height: the page's `clamp(0.8rem, 1.6vmin, 1.1rem)` resolves to ~17.3px
+    // on a 1080-tall 16:9 screen, and 17.3/1080 ≈ 0.016.
+    //
+    // It was 0.03 — nearly double — chosen on the reasoning that an embed should
+    // be "readable from a stage" without touching anything. That was the wrong
+    // frame: the requirement for this object is that nothing looks different
+    // between the embed and the page it came out of, and a default that renders
+    // at 1.85× the page breaks exactly that, showing about half the rundown.
+    // Someone who does want it bigger has the font-size field; someone who wants
+    // it to match the page had no way to get there by eye.
+    style: () => TEXT({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
   },
   "service-pacing": {
     label: "Service pacing",
@@ -369,6 +413,33 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
 };
 
+/**
+ * Which View kinds a `view-embed` object may render.
+ *
+ * ONE function, used by both the picker and the renderer, because the two
+ * disagreeing is the whole hazard. Custom is excluded and that is the entire
+ * recursion guard: a custom View is the only kind holding a layout, so refusing
+ * it means an embed can never reach another embed — no depth counter to get
+ * wrong. Every other kind is listed explicitly, so adding a View kind does not
+ * silently make it embeddable before anyone has made it render in a box.
+ *
+ * A function rather than a comment or a filter written out at each call site:
+ * the guard test calls THIS, so it fails on the behaviour changing rather than
+ * on a string moving inside a 2,500-line file.
+ */
+export const EMBEDDABLE_VIEW_KINDS: readonly ViewKind[] = ["script"];
+
+export function isEmbeddableViewKind(kind: ViewKind): boolean {
+  return EMBEDDABLE_VIEW_KINDS.includes(kind);
+}
+
+/** Offered in the embed picker: everything except custom, so an operator can see
+ *  a kind exists and read why it is not renderable yet, rather than wondering
+ *  where it went. Custom never appears — see isEmbeddableViewKind. */
+export function isOfferableInEmbedPicker(kind: ViewKind): boolean {
+  return kind !== "custom";
+}
+
 // ── Derived views over the registry ───────────────────────────────────────────
 
 const ALL_TYPES = Object.keys(LAYOUT_OBJECTS) as LayoutObjectType[];
@@ -380,9 +451,38 @@ export const PALETTE_GROUPS: { label: PaletteGroup; types: LayoutObjectType[] }[
     types: ALL_TYPES.filter((t) => LAYOUT_OBJECTS[t].group === label),
   })).filter((g) => g.types.length > 0);
 
-export const typeLabel = (t: LayoutObjectType): string => LAYOUT_OBJECTS[t].label;
-export const defaultConfig = (t: LayoutObjectType): LayoutObjectConfig => LAYOUT_OBJECTS[t].config();
-export const defaultStyle = (t: LayoutObjectType): LayoutStyle => LAYOUT_OBJECTS[t].style();
-export const objectIntegration = (t: LayoutObjectType) => LAYOUT_OBJECTS[t].integration;
-export const isStylingOnly = (t: LayoutObjectType): boolean => LAYOUT_OBJECTS[t].stylingOnly === true;
-export const usesPropInstance = (t: LayoutObjectType): boolean => LAYOUT_OBJECTS[t].propInstance === true;
+/**
+ * The registry entry for a type, or null when this build has never heard of it.
+ *
+ * The type system says every `LayoutObjectType` is a key of `LAYOUT_OBJECTS`, and
+ * within one build that is true. It stops being true the moment a layout arrives
+ * from somewhere else — and layouts do: `views.json` is a CONFIG store, so it is
+ * carried across versions by export/import and by every restore. Feed a config
+ * containing an object this build does not have (restore a newer snapshot onto an
+ * older server — exactly what a config upload does) and the lookup returns
+ * undefined against a type that claims it cannot.
+ *
+ * Every accessor below goes through this. They used to read `.label`, `.retired`
+ * and friends straight off the lookup, so opening the layout editor on such a
+ * view threw `can't access property "label", undefined` and white-screened the
+ * whole Views page — no way back except editing config by hand.
+ */
+export function findLayoutObjectSpec(t: LayoutObjectType): LayoutObjectSpec | null {
+  return (LAYOUT_OBJECTS as Partial<Record<LayoutObjectType, LayoutObjectSpec>>)[t] ?? null;
+}
+
+/** True when this build can actually render/edit the type at all. */
+export function isKnownObjectType(t: LayoutObjectType): boolean {
+  return findLayoutObjectSpec(t) !== null;
+}
+
+// Fallbacks are chosen so an unknown object is INERT rather than plausible: it
+// keeps its place in the layout and names itself, and every capability query
+// answers "no" so nothing tries to configure something it cannot describe.
+export const typeLabel = (t: LayoutObjectType): string => findLayoutObjectSpec(t)?.label ?? `Unsupported object (${t})`;
+export const defaultConfig = (t: LayoutObjectType): LayoutObjectConfig => findLayoutObjectSpec(t)?.config() ?? ({ type: t } as LayoutObjectConfig);
+export const defaultStyle = (t: LayoutObjectType): LayoutStyle => findLayoutObjectSpec(t)?.style() ?? {};
+export const objectIntegration = (t: LayoutObjectType) => findLayoutObjectSpec(t)?.integration;
+export const isStylingOnly = (t: LayoutObjectType): boolean => findLayoutObjectSpec(t)?.stylingOnly === true;
+export const usesPropInstance = (t: LayoutObjectType): boolean => findLayoutObjectSpec(t)?.propInstance === true;
+export const objectRetired = (t: LayoutObjectType) => findLayoutObjectSpec(t)?.retired;

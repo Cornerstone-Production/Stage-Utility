@@ -5,11 +5,87 @@
 // All three records (timeline, attendance, SPL) share a serviceKey, so editing the
 // service window applies to each: the raw samples are kept, so aggregates re-derive.
 
-import type { ServiceAttendance } from "../types/stage.js";
+import type { ServiceAttendance, ServiceTimeline } from "../types/stage.js";
+import { sampleArchive } from "./archive/sample-archive.js";
+import { scrub } from "./scrub.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { attendanceStore } from "./attendance-store.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { broadcast } from "./broadcaster.js";
+import { attendanceRecorder } from "./attendance-recorder.js";
+import { splRecorder } from "./spl-recorder.js";
+import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
+
+/** Every recorder that holds a copy of a service record. Named once: each of the
+ *  three has to be released before any edit here, and doing it per-store was how
+ *  two of these paths ended up without a forget() at all. */
+const RECORDERS = [serviceTimelineRecorder, attendanceRecorder, splRecorder];
+
+/** Thrown past the route handlers so remote-server can answer 409. */
+export class ServiceIsLiveError extends Error {
+  readonly status = 409;
+  constructor(action: string) {
+    super(`That service is recording right now — it cannot be ${action} until it ends.`);
+    this.name = "ServiceIsLiveError";
+  }
+}
+
+/**
+ * Refuse to touch a record the recorders are still writing.
+ *
+ * Every function in this file rewrites a stored record, and a recorder holding
+ * the same record will persist its own copy over the result on its next
+ * debounce. forget() releases that copy, but for a LIVE service it only moves
+ * the problem: the next tick re-establishes the same key and starts a fresh,
+ * empty record seconds later — a delete that appeared to work and then came
+ * back, looking to the operator like a bad capture rather than their own click.
+ *
+ * There is no ordering that wins this. The operator's edit and the live tick are
+ * both correct about the record they hold. So the answer is not to race: while
+ * the service is running, its history is not editable. Correcting a recording
+ * is a post-hoc repair — that is what this whole file is for — and the service
+ * ending is minutes away.
+ */
+export function assertNotLive(serviceKey: string, action: string): void {
+  if (RECORDERS.some((r) => r.isRecording(serviceKey))) throw new ServiceIsLiveError(action);
+}
+
+/** Release every recorder's copy of these keys. Called BEFORE the first awaited
+ *  write, never after: a debounce that fires mid-await writes the pre-edit
+ *  record back over the one just saved. */
+function forgetAll(...serviceKeys: string[]): void {
+  for (const r of RECORDERS) for (const k of serviceKeys) r.forget(k);
+}
+
+/**
+ * Delete a service recording — all three records, in one place.
+ *
+ * The three stores were deleted by three separate routes, and the History panel
+ * called exactly one of them, so "Delete recording" removed the timeline and
+ * left the SPL and attendance records behind: invisible, undeletable through
+ * the UI, and counted by every aggregate that reads those stores. The two
+ * settings panels that called the other two routes were removed as unreachable
+ * dead code, which is what took the last callers with them.
+ *
+ * The raw archive is deliberately NOT removed. It is the source of truth the
+ * records are derived from, a delete of it cannot be undone, and nothing reads
+ * it for a service with no record. Removing an operator's raw samples is a
+ * bigger decision than "delete this recording" asks for.
+ */
+export async function deleteServiceRecords(
+  serviceKey: string,
+): Promise<{ deleted: boolean; records: string[] }> {
+  assertNotLive(serviceKey, "deleted");
+  forgetAll(serviceKey);
+  const stores = [
+    ["timeline", serviceTimelineStore],
+    ["attendance", attendanceStore],
+    ["spl", splHistoryStore],
+  ] as const;
+  const gone = await Promise.all(stores.map(([, store]) => store.delete(serviceKey)));
+  const records = stores.filter((_, i) => gone[i]).map(([name]) => name as string);
+  return { deleted: records.length > 0, records };
+}
 
 /** Re-derive attendance aggregates from the (possibly trimmed) sample series. Note:
  *  totalAttendance is a raw daily counter we can't reconstruct from baselined
@@ -20,8 +96,20 @@ function recomputeAttendance(att: ServiceAttendance): void {
   // so a service not reset off the prior one reads its own count; on a trim, the new
   // first in-window sample re-baselines automatically.
   const base = s.length ? s[0].attendance : 0;
-  const perSvc = (v: number) => Math.max(0, v - base);
-  att.attendanceBaseline = base;
+  // attendanceBaseline is the RAW daily counter at this record's start — that is
+  // what the recorder writes and what a merge needs to convert between two
+  // records' frames. This used to assign `base`, an already-baselined value
+  // (normally 0), without touching the samples: after any Recalculate, window
+  // edit or earlier merge the field no longer meant what its writer meant, and a
+  // later merge reading it as raw shifted the other record by a hundred people.
+  // Advancing it by the same amount the samples are about to be re-based by keeps
+  // raw = sample + baseline true.
+  att.attendanceBaseline = (att.attendanceBaseline ?? 0) + base;
+  if (base !== 0) for (const x of s) x.attendance -= base;
+  // Samples are now expressed against this record's own start, so the aggregates
+  // read them directly. (Clamped only against a negative left by a hand-edited
+  // window.)
+  const perSvc = (v: number) => Math.max(0, v);
   // Peak/Lowest/Last reflect the SERVICE, not the pre-service arrival ramp or the
   // post-service emptying room — those tagged samples still draw the curve but must
   // not drag the "floor" or "last" toward an empty room. Fall back to all samples if
@@ -42,6 +130,13 @@ export async function editServiceWindow(
   serviceKey: string,
   opts: { startedAt?: string; endedAt?: string },
 ): Promise<void> {
+  assertNotLive(serviceKey, "re-windowed");
+  // The delete and merge paths were given this when a record was found
+  // resurrecting itself; the two edit paths were missed, so a trimmed window
+  // survived only until the recorder's next debounce wrote the untrimmed copy
+  // back over it.
+  forgetAll(serviceKey);
+
   const startMs = opts.startedAt ? Date.parse(opts.startedAt) : null;
   const endMs = opts.endedAt ? Date.parse(opts.endedAt) : null;
   const inWindow = (iso: string | null | undefined): boolean => {
@@ -94,6 +189,8 @@ export async function editServiceWindow(
 /** Set a per-item override for whether it counts toward the service timers (wins
  *  over the auto buffer/pre-service default). */
 export async function setItemCounted(serviceKey: string, itemId: string, counted: boolean): Promise<void> {
+  assertNotLive(serviceKey, "edited");
+  forgetAll(serviceKey); // see editServiceWindow
   const tl = await serviceTimelineStore.get(serviceKey);
   if (!tl) return;
   const it = tl.items.find((x) => x.itemId === itemId);
@@ -106,11 +203,126 @@ export async function setItemCounted(serviceKey: string, itemId: string, counted
 /** Re-derive attendance aggregates from the current samples (no window change) —
  *  for when the stored peak/min look stale but the samples are fine. */
 export async function recalcAttendance(serviceKey: string): Promise<void> {
+  assertNotLive(serviceKey, "recalculated");
+  forgetAll(serviceKey); // see editServiceWindow
   const att = await attendanceStore.get(serviceKey);
   if (!att) return;
   recomputeAttendance(att);
   await attendanceStore.upsert(att);
   broadcast("attendance:history", att);
+}
+
+/**
+ * A service's archive directory is named by key AND date, so moving its raw rows
+ * needs both. The date is not in the key — read it from whichever record still
+ * carries it, and skip the move entirely if no record names one, because a
+ * guessed date would point at a directory belonging to nothing.
+ */
+async function serviceDateOf(serviceKey: string): Promise<string | null> {
+  const [tl, att, spl] = await Promise.all([
+    serviceTimelineStore.get(serviceKey),
+    attendanceStore.get(serviceKey),
+    splHistoryStore.get(serviceKey),
+  ]);
+  return tl?.serviceDate ?? att?.serviceDate ?? spl?.serviceDate ?? null;
+}
+
+/**
+ * The fields every recorder writes to say WHICH occurrence a record describes.
+ * Identical across all three record types, so one shape re-keys any of them.
+ */
+type OccurrenceIdentity = Pick<
+  ServiceTimeline,
+  | "serviceKey"
+  | "serviceTypeId"
+  | "serviceTypeName"
+  | "planId"
+  | "planTitle"
+  | "seriesTitle"
+  | "serviceDate"
+  | "serviceTimeId"
+  | "serviceTimeStartsAt"
+>;
+
+/** Read an occurrence's identity from whichever store still holds a record. */
+async function identityOf(serviceKey: string): Promise<OccurrenceIdentity | null> {
+  const [tl, att, spl] = await Promise.all([
+    serviceTimelineStore.get(serviceKey),
+    attendanceStore.get(serviceKey),
+    splHistoryStore.get(serviceKey),
+  ]);
+  const r = tl ?? att ?? spl;
+  if (!r) return null;
+  return {
+    serviceKey: r.serviceKey,
+    serviceTypeId: r.serviceTypeId,
+    serviceTypeName: r.serviceTypeName,
+    planId: r.planId,
+    planTitle: r.planTitle,
+    seriesTitle: r.seriesTitle,
+    serviceDate: r.serviceDate,
+    serviceTimeId: r.serviceTimeId,
+    serviceTimeStartsAt: r.serviceTimeStartsAt,
+  };
+}
+
+/**
+ * Re-key a source-only record onto the target occurrence.
+ *
+ * The merge blocks below all required BOTH sides to exist. When only the source
+ * had a record in a store — the attendance sensor was offline for the main
+ * service but the fragment caught samples, or SPL was recorded on one side only
+ * — that store was left untouched while the raw rows underneath it had already
+ * been moved to the target's archive directory. The operator was told the merge
+ * succeeded, the fragment stayed in the History list, and a rebuild of either
+ * record produced wrong numbers.
+ *
+ * Adopting the target's identity is what "merge INTO" means when there is
+ * nothing on the other side to merge with: the source's data, under the target's
+ * name — which is also what the already-moved archive now describes.
+ */
+function adoptIdentity<T extends OccurrenceIdentity>(record: T, identity: OccurrenceIdentity): T {
+  return { ...record, ...identity };
+}
+
+/** What a merge actually did, per store. Reported rather than assumed: this
+ *  rewrites the source of truth, and "it worked" is not evidence. */
+export interface MergeOutcome {
+  /** Stores where both sides existed and were combined. */
+  merged: string[];
+  /** Stores where only the source had a record, re-keyed onto the target. */
+  moved: string[];
+  /** True when the raw sample archive was moved (false = no date on one side). */
+  archivesMoved: boolean;
+}
+
+/** Move the source's raw rows into the target's archive, and say what moved.
+ *  Logged rather than silent: this rewrites the source of truth and deletes a
+ *  directory, and the operator's only other evidence is the merged record. */
+async function mergeArchives(sourceKey: string, targetKey: string): Promise<boolean> {
+  const [sourceDate, targetDate] = await Promise.all([
+    serviceDateOf(sourceKey),
+    serviceDateOf(targetKey),
+  ]);
+  if (!sourceDate || !targetDate) {
+    console.warn(
+      `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: no service date on one side, ` +
+        "leaving the raw archive alone. The merged record will not survive a rebuild.",
+    );
+    return false;
+  }
+  const moved = await sampleArchive.mergeInto(
+    { serviceKey: sourceKey, serviceDate: sourceDate },
+    { serviceKey: targetKey, serviceDate: targetDate },
+  );
+  const summary = Object.entries(moved)
+    .map(([base, n]) => `${n} ${base}`)
+    .join(", ");
+  console.log(
+    `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: moved ${summary || "no rows"} ` +
+      `into ${scrub(targetDate)}; removed the source archive.`,
+  );
+  return true;
 }
 
 /**
@@ -121,8 +333,33 @@ export async function recalcAttendance(serviceKey: string): Promise<void> {
  * duplicated boundary item isn't doubled; attendance samples are concatenated and
  * aggregates re-derived; the target window extends to cover both.
  */
-export async function mergeServiceRecords(sourceKey: string, targetKey: string): Promise<void> {
-  if (!sourceKey || !targetKey || sourceKey === targetKey) return;
+export async function mergeServiceRecords(sourceKey: string, targetKey: string): Promise<MergeOutcome> {
+  const outcome: MergeOutcome = { merged: [], moved: [], archivesMoved: false };
+  if (!sourceKey || !targetKey || sourceKey === targetKey) return outcome;
+  assertNotLive(sourceKey, "merged");
+  assertNotLive(targetKey, "merged");
+
+  // Read the target's identity BEFORE anything moves. A store that holds a
+  // source record but no target record needs it to re-key onto, and finding
+  // that out after the archive had already been moved is how a record ended up
+  // sitting over raw rows that no longer belonged to it.
+  const targetIdentity = await identityOf(targetKey);
+  if (!targetIdentity) {
+    throw new Error(`Nothing to merge into: no record found for "${targetKey}".`);
+  }
+
+  // Released up front, for both keys, before the first awaited write. This used
+  // to sit after each store's upsert, which left a window where the recorder's
+  // pending debounce could land on the merged record and revert it.
+  forgetAll(sourceKey, targetKey);
+
+  // ── Raw samples ──
+  // First, because the archive is what a rebuild reads: forget(targetKey) above
+  // is precisely what makes the next SPL resume rebuild from these rows, and a
+  // rebuild against the target's own directory discards everything merged in.
+  // Moving them first also means a failure here aborts before either record is
+  // touched, rather than leaving a merged record over an unmerged archive.
+  outcome.archivesMoved = await mergeArchives(sourceKey, targetKey);
 
   // ── Timeline ──
   const [srcTl, tgtTl] = await Promise.all([
@@ -139,6 +376,14 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     await serviceTimelineStore.upsert(tgtTl);
     await serviceTimelineStore.delete(sourceKey);
     broadcast("service-timeline:history", tgtTl);
+    outcome.merged.push("timeline");
+  } else if (srcTl) {
+    // Source-only: re-key rather than leave it behind over a moved archive.
+    const moved = adoptIdentity(srcTl, targetIdentity);
+    await serviceTimelineStore.upsert(moved);
+    await serviceTimelineStore.delete(sourceKey);
+    broadcast("service-timeline:history", moved);
+    outcome.moved.push("timeline");
   }
 
   // ── Attendance ──
@@ -147,7 +392,36 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     attendanceStore.get(targetKey),
   ]);
   if (srcAt && tgtAt) {
-    tgtAt.samples = [...tgtAt.samples, ...srcAt.samples].sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+    // Each record's samples are stored as raw-minus-its-OWN-baseline, so the two
+    // series are in different frames: the tail record baselined at its own first
+    // reading and starts near zero while the target's end near its full count.
+    // Concatenating them raw put a cliff to zero at the seam and dragged the
+    // service average and lastAttendance down with it — the repair tool producing
+    // a worse record than the split it was invoked to fix.
+    //
+    // Shifting the source into the target's frame is exact: both baselines are the
+    // raw daily counter at their own start, so their difference is the offset.
+    // Read before recomputeAttendance, which rewrites attendanceBaseline.
+    // Shift BOTH into the earlier of the two baselines rather than into the
+    // target's. The merge target is not necessarily the later record — the panel
+    // offers every same-day recording, and merging a spurious leading fragment
+    // INTO the main record is the natural repair — so shifting the source into
+    // the target's frame produced a negative offset, and clamping that at zero
+    // silently flattened the fragment's attendees to nothing. A common floor
+    // makes both shifts non-negative, so no clamp is needed and a bad offset
+    // would surface as a wrong number rather than as deleted data.
+    const srcBase = srcAt.attendanceBaseline;
+    const tgtBase = tgtAt.attendanceBaseline;
+    const shift =
+      srcBase != null && tgtBase != null
+        ? { base: Math.min(srcBase, tgtBase), src: srcBase - Math.min(srcBase, tgtBase), tgt: tgtBase - Math.min(srcBase, tgtBase) }
+        : { base: tgtBase ?? srcBase ?? 0, src: 0, tgt: 0 };
+    const bump = (list: typeof srcAt.samples, by: number) =>
+      by === 0 ? list : list.map((s) => ({ ...s, attendance: s.attendance + by }));
+    tgtAt.attendanceBaseline = shift.base;
+    tgtAt.samples = [...bump(tgtAt.samples, shift.tgt), ...bump(srcAt.samples, shift.src)].sort(
+      (a, b) => Date.parse(a.t) - Date.parse(b.t),
+    );
     if (srcAt.endedAt && (!tgtAt.endedAt || Date.parse(srcAt.endedAt) > Date.parse(tgtAt.endedAt))) {
       tgtAt.endedAt = srcAt.endedAt;
     }
@@ -156,6 +430,13 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     await attendanceStore.upsert(tgtAt);
     await attendanceStore.delete(sourceKey);
     broadcast("attendance:history", tgtAt);
+    outcome.merged.push("attendance");
+  } else if (srcAt) {
+    const moved = adoptIdentity(srcAt, targetIdentity);
+    await attendanceStore.upsert(moved);
+    await attendanceStore.delete(sourceKey);
+    broadcast("attendance:history", moved);
+    outcome.moved.push("attendance");
   }
 
   // ── SPL ──
@@ -173,5 +454,19 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     await splHistoryStore.upsert(tgtSpl);
     await splHistoryStore.delete(sourceKey);
     broadcast("spl:history", tgtSpl);
+    outcome.merged.push("spl");
+  } else if (srcSpl) {
+    const moved = adoptIdentity(srcSpl, targetIdentity);
+    await splHistoryStore.upsert(moved);
+    await splHistoryStore.delete(sourceKey);
+    broadcast("spl:history", moved);
+    outcome.moved.push("spl");
   }
+
+  console.log(
+    `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: ` +
+      `merged [${outcome.merged.join(", ") || "none"}], re-keyed [${outcome.moved.join(", ") || "none"}], ` +
+      `archive ${outcome.archivesMoved ? "moved" : "left in place"}.`,
+  );
+  return outcome;
 }

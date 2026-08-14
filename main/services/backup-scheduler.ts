@@ -13,6 +13,8 @@
 // per missed interval. And a run that fails leaves the previous backups untouched:
 // pruning happens after a successful write, never before.
 
+import { clamp } from "./clamp.js";
+import { errorMessage } from "./errors.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -56,8 +58,8 @@ const ARCHIVE_PREFIX = "archive-";
 
 function clampSchedule(s: Partial<BackupSchedule>): Partial<BackupSchedule> {
   const out = { ...s };
-  if (out.intervalDays != null) out.intervalDays = Math.min(365, Math.max(1, Math.round(out.intervalDays)));
-  if (out.keep != null) out.keep = Math.min(100, Math.max(1, Math.round(out.keep)));
+  if (out.intervalDays != null) out.intervalDays = clamp(Math.round(out.intervalDays), 1, 365);
+  if (out.keep != null) out.keep = clamp(Math.round(out.keep), 1, 100);
   if (out.destination != null) out.destination = out.destination.trim();
   return out;
 }
@@ -134,13 +136,13 @@ class BackupScheduler {
 
       // Only after a successful write — a failed run must not delete the copies
       // that are still good.
-      await prune(dir, CONFIG_PREFIX, sched.keep);
-      if (sched.includeArchive) await prune(dir, ARCHIVE_PREFIX, sched.keep);
+      await prune(dir, CONFIG_PREFIX, sched.keep, ".json");
+      if (sched.includeArchive) await prune(dir, ARCHIVE_PREFIX, sched.keep, ".zip");
 
       console.log(`[backup] wrote ${at} to ${dir}`);
       return this.persistResult(sched, { lastRunAt: new Date().toISOString(), lastError: null });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       console.error("[backup] failed:", msg);
       return this.persistResult(await this.getSchedule(), { lastError: msg });
     } finally {
@@ -163,16 +165,32 @@ export function isDue(sched: BackupSchedule, now: number): boolean {
   return now - last >= sched.intervalDays * 24 * 60 * 60 * 1000;
 }
 
-/** Delete all but the newest `keep` files carrying `prefix`. */
-export async function prune(dir: string, prefix: string, keep: number): Promise<string[]> {
+/**
+ * Files this scheduler itself wrote: prefix + the exact stamp + extension.
+ *
+ * A bare `startsWith(prefix)` was not good enough to delete by. The destination
+ * is a plain path so it can point at a share, and an operator pointing it at an
+ * existing backups folder on the NAS — which is the obvious thing to do — could
+ * already hold `config-2024.json` or `archive-old.zip` from another tool. prune
+ * would delete those on its first successful run, silently. The project's rule is
+ * that an operator's data is never deleted to tidy something up, and a file this
+ * app did not write is by definition theirs.
+ */
+export function ownBackupPattern(prefix: string, ext: string): RegExp {
+  return new RegExp(`^${prefix}\\d{4}-\\d{2}-\\d{2}T[\\d-]+\\${ext}$`);
+}
+
+/** Delete all but the newest `keep` files this scheduler wrote with `prefix`. */
+export async function prune(dir: string, prefix: string, keep: number, ext: string): Promise<string[]> {
   let names: string[];
   try {
     names = await fs.readdir(dir);
   } catch {
     return [];
   }
+  const pattern = ownBackupPattern(prefix, ext);
   // The stamp is lexicographically ordered, so a plain sort is newest-last.
-  const mine = names.filter((n) => n.startsWith(prefix)).sort();
+  const mine = names.filter((n) => pattern.test(n)).sort();
   const doomed = mine.slice(0, Math.max(0, mine.length - Math.max(1, keep)));
   for (const n of doomed) await fs.rm(path.join(dir, n), { force: true });
   return doomed;

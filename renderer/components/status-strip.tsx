@@ -1,3 +1,4 @@
+import { clamp } from "@main/services/clamp";
 import { cn } from "../lib/cn";
 import { BatteryFullIcon, BatteryLowIcon, BatteryMediumIcon, MicIcon, HeadphonesIcon } from "lucide-react";
 
@@ -51,7 +52,7 @@ function ChargeBar({ level }: { level: number | null }) {
       {level !== null && (
         <span
           className={cn("block h-full rounded-full transition-all", chargeColor(level))}
-          style={{ width: `${Math.max(0, Math.min(100, level))}%` }}
+          style={{ width: `${clamp(level, 0, 100)}%` }}
         />
       )}
     </span>
@@ -146,7 +147,7 @@ export function StatusStrip({ device, hideRf, className }: StatusStripProps) {
           second bar for a bound IEM/PSM pack. With RF hidden or no mic bound, the
           charge bar(s) stand on their own. ── */}
       <div className="flex flex-col items-center justify-center shrink-0" style={{ gap: "calc(var(--rf) * 0.18)" }}>
-        {showRf && <RfBars bars={device.rf === null ? 0 : Math.max(0, Math.min(5, Math.round(device.rf)))} />}
+        {showRf && <RfBars bars={device.rf === null ? 0 : clamp(Math.round(device.rf), 0, 5)} />}
         {(showRf || charge !== null) && <ChargeBar level={charge} />}
         {hasIem && <ChargeBar level={iemCharge} />}
       </div>

@@ -51,11 +51,31 @@ on a Linux install).
 | `baptism.json` | baptism sessions |
 | `cache/photos/`, `cache/attachments/` | cached Planning Center photos and plan files |
 | `server.log`, `update.log` | log history, replayed into `/log` on boot |
-| `secrets.bin` | integration credentials, AES-256-GCM encrypted |
+| `secrets.bin` | integration and wireless credentials, AES-256-GCM encrypted |
 | `encryption.key` | 32-byte key, generated on first run, mode `600` |
 
 A `*.json.migrated` file is an older store kept after its contents were split into
 per-service files. Safe to delete.
+
+### Backups only prune their own files
+
+Automatic backups delete old copies to honour "keep N", and match only the names
+they wrote themselves (`config-<stamp>.json`, `archive-<stamp>.zip`). Pointing
+the destination at a folder that already holds other files is safe — anything
+this app did not write is left alone.
+
+### When credentials all read as "not configured"
+
+Usually the key, not the file. `secrets.bin` is only readable with the key that
+wrote it, so a wrong or missing one makes every integration look disconnected at
+once — most often `$STAGE_UTILITY_KEY` set on a box that already has an
+`encryption.key`, or a key file on a mount that was not up at boot.
+
+The file is left untouched when it cannot be read, so **restore the original key
+and restart** and everything comes back in place. Re-entering credentials instead
+writes a new file and sets the old one aside as `secrets.bin.unreadable-*` — still
+recoverable with the right key, but only from that copy. Check `/log` first: the
+reason is logged at startup.
 
 ## Backups
 

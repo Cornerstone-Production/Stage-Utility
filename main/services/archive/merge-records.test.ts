@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { encodeRow, parseRows } from "./csv.js";
+import { encodeRow, parseRows } from "../csv.js";
 import {
   fillMissingFields,
   mergeAttendanceRecord,

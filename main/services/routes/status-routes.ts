@@ -6,6 +6,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
+import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, readBody } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { integrationManager } from "../integration-manager.js";
@@ -16,6 +17,7 @@ import { sensourceService } from "../sensource-service.js";
 import { smaartService } from "../smaart-service.js";
 import { splHistoryStore } from "../spl-history-store.js";
 import { splRecorder } from "../spl-recorder.js";
+import { deleteServiceRecords } from "../history-edit.js";
 import { propresenterService, propresenterManager } from "../propresenter-service.js";
 
 export async function statusRoutes(c: RouteCtx): Promise<void> {
@@ -57,7 +59,7 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await integrationManager.getSensourceLocations());
       } catch (err) {
-        json(res, { error: err instanceof Error ? err.message : String(err) }, 502);
+        json(res, { error: errorMessage(err) }, 502);
       }
       return;
     }
@@ -65,7 +67,7 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await integrationManager.getSensourceZones());
       } catch (err) {
-        json(res, { error: err instanceof Error ? err.message : String(err) }, 502);
+        json(res, { error: errorMessage(err) }, 502);
       }
       return;
     }
@@ -96,7 +98,8 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
           return;
         }
         if (method === "DELETE") {
-          json(res, { deleted: await splHistoryStore.delete(key) });
+          // All three records, not just SPL — see deleteServiceRecords.
+          json(res, await deleteServiceRecords(key));
           return;
         }
       }

@@ -14,75 +14,75 @@ import { sampleArchive } from "./archive/sample-archive.js";
 import { attendanceStore } from "./attendance-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { sensourceService } from "./sensource-service.js";
-import { isLiveServiceToday } from "./spl-recorder.js";
-import { stageController } from "./stage-controller.js";
+import { classifyPhase, type Phase } from "./attendance-phase.js";
+import { ServiceRecorder, type NewRecordContext, type RecorderStore } from "./service-recorder.js";
 
-const PERSIST_DEBOUNCE_MS = 4000;
 /** Minimum gap between recorded trend points (attendance changes slowly). */
 const SAMPLE_INTERVAL_MS = 30_000;
 /** Max cadence for pushing the (O(n)) live record to trend viewers between samples. */
 const LIVE_BROADCAST_MS = 5_000;
-type Phase = "pre" | "service" | "post";
-/** A gap between live-item ticks shorter than this = still the SAME service, so a
- *  serviceTimeId change (a service running past its planned end rolls pickServiceTime
- *  to the next occurrence) must NOT split the recording. A longer gap = a genuinely
- *  new service occurrence → new record. Services are far enough apart that 10 min
- *  cleanly separates them while bridging any within-service lull. */
-const SERVICE_GAP_MS = 10 * 60_000;
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-function todayLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
+class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
+  protected readonly label = "attendance-recorder";
+  protected readonly store: RecorderStore<ServiceAttendance> = attendanceStore;
+  protected readonly persistDebounceMs = 4000;
 
-class AttendanceRecorder {
-  private current: ServiceAttendance | null = null;
-  private currentKey: string | null = null;
-  private lastLiveAt = 0; // last live-item tick (to detect the gap between services)
   private lastSampleAt = 0;
   // Ramp/taper windows (ms), refreshed from settings each tick — see the Advanced tab.
   private preMs = DEFAULT_TAPER_WINDOW.preMin * 60_000;
   private postMs = DEFAULT_TAPER_WINDOW.postMin * 60_000;
   private lastBroadcastAt = 0;
-  private busy = false;
-  private dirty = false;
-  private persistTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** Active in-progress record (for hydration), or null when nothing is recording. */
-  getCurrent(): ServiceAttendance | null {
-    return this.current;
+  protected createRecord(ctx: NewRecordContext): ServiceAttendance {
+    return {
+      ...ctx,
+      serviceStartedAt: null,
+      endedAt: null,
+      samples: [],
+      attendanceBaseline: null,
+      totalAttendance: 0,
+      peakAttendance: 0,
+      peakOccupancy: 0,
+      minOccupancy: null,
+      lastAttendance: 0,
+      lastOccupancy: 0,
+    };
   }
 
-  /** Classify what (if anything) to sample this tick:
-   *  - "service": a live plan item is running (the service proper) → feeds the stats.
-   *  - "pre": the arrival ramp — the preservice countdown (within the lead window) or a
-   *    pre-roll item positioned above the plan's SERVICE START header.
-   *  - "post": the emptying room — parked past SERVICE END, or within the cooldown
-   *    window after the service ended.
-   *  - null: nothing to record. */
+  protected override onRecordEstablished(): void {
+    this.lastSampleAt = 0; // sample immediately on the next tick
+    // ...and make sure there is something fresh TO sample. Until now this
+    // recorder became a demand source silently, so SenSource only sped up at
+    // the end of whatever idle poll was already pending — leaving the first
+    // points of the pre-service arrival ramp up to a minute old, which is the
+    // steepest part of the curve and the part an operator is watching.
+    sensourceService.pollNowIfIdle();
+  }
+
+  /** What (if anything) to sample this tick — see attendance-phase.ts. */
   private classify(live: PcoLiveDTO): Phase | null {
-    if (live.mode === "item" && live.currentItemId && isLiveServiceToday(live)) {
-      if (live.serviceEnded) return "post"; // still parked on an item past SERVICE END
-      if (live.beforeServiceStart) return "pre"; // pre-roll item above SERVICE START
-      return "service";
-    }
-    if (live.mode === "preservice" && this.preMs > 0 && isLiveServiceToday(live)) {
-      // Only once the countdown is within the arrival window (and not absurdly early).
-      const start = live.serviceTimeStartsAt ? Date.parse(live.serviceTimeStartsAt) : NaN;
-      if (Number.isFinite(start) && start - Date.now() <= this.preMs && Date.now() <= start + 5 * 60_000) {
-        return "pre";
-      }
-      return null;
-    }
-    // No live item (mode "none"): keep sampling the taper if a service ended recently.
-    if (this.postMs > 0 && this.current?.endedAt) {
-      const ended = Date.parse(this.current.endedAt);
-      if (Number.isFinite(ended) && Date.now() - ended <= this.postMs) return "post";
-    }
-    return null;
+    return classifyPhase(live, {
+      hasOpenRecord: this.current != null && this.current.endedAt == null,
+      endedAt: this.current?.endedAt ?? null,
+      heldServiceStartedAt: this.current?.serviceStartedAt ?? null,
+      preMs: this.preMs,
+      postMs: this.postMs,
+    });
+  }
+
+  /**
+   * Does this recorder still want fresh people counts?
+   *
+   * Exactly the window in which onLiveTick calls sensourceService.getLatest()
+   * and keeps the answer: while a record is open, and on through the
+   * post-service taper, which is a record that HAS an end but is still being
+   * sampled as the room empties.
+   */
+  isSampling(): boolean {
+    if (!this.current) return false;
+    if (!this.current.endedAt) return true;
+    const ended = Date.parse(this.current.endedAt);
+    return Number.isFinite(ended) && Date.now() - ended <= this.postMs;
   }
 
   /** Called by the live-poller after each pco:live broadcast. */
@@ -178,87 +178,12 @@ class AttendanceRecorder {
     }
   }
 
-  private async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<void> {
-    const st = stageController.getState();
-    if (!st.serviceTypeId || !st.planId) return;
-    const date = todayLocal();
-    const serviceTimeId = live.serviceTimeId;
-    const key = `${st.serviceTypeId}:${st.planId}:${serviceTimeId ?? date}`;
-    if (this.currentKey === key && this.current) return;
-
-    // Hold the open record through a serviceTimeId change WITHIN the same live
-    // service: a service running past its planned end rolls pickServiceTime to the
-    // next occurrence (a null cache-miss does the same). If we were recording moments
-    // ago (short gap), it's the same service — keep appending, don't split. Only a
-    // long gap since the last live tick means a genuinely new service occurrence.
-    if (
-      this.current &&
-      this.current.serviceTypeId === st.serviceTypeId &&
-      this.current.planId === st.planId &&
-      this.current.serviceDate === date &&
-      (serviceTimeId == null || gapSinceLive < SERVICE_GAP_MS)
-    ) {
-      return;
-    }
-
-    // Key changed → finalize + persist the outgoing record.
-    if (this.current) {
-      this.finalizeRecord();
-      await attendanceStore.upsert(this.current);
-    }
-
-    // Resume an existing record for this occurrence (e.g. after a restart), else create.
-    const existing = await attendanceStore.get(key);
-    if (existing) {
-      this.current = existing;
-      this.current.endedAt = null;
-    } else {
-      this.current = {
-        serviceKey: key,
-        serviceTypeId: st.serviceTypeId,
-        serviceTypeName: st.serviceTypeName ?? null,
-        planId: st.planId,
-        planTitle: st.planTitle,
-        seriesTitle: st.planSeriesTitle ?? null,
-        serviceDate: date,
-        serviceTimeId: serviceTimeId ?? null,
-        serviceTimeStartsAt: live.serviceTimeStartsAt,
-        startedAt: new Date().toISOString(),
-        serviceStartedAt: null,
-        endedAt: null,
-        samples: [],
-        attendanceBaseline: null,
-        totalAttendance: 0,
-        peakAttendance: 0,
-        peakOccupancy: 0,
-        minOccupancy: null,
-        lastAttendance: 0,
-        lastOccupancy: 0,
-      };
-    }
-    this.currentKey = key;
-    this.lastSampleAt = 0; // sample immediately on the next tick
-  }
-
-  private finalizeRecord(): void {
-    if (!this.current) return;
-    // Stamp the service-end boundary only once — re-finalizing (e.g. as the next
-    // service's preservice starts, or each cooldown tick) must not push endedAt
-    // later and swallow the taper into the service window.
-    if (!this.current.endedAt) this.current.endedAt = new Date().toISOString();
-  }
-
-  private schedulePersist(): void {
-    this.dirty = true;
-    if (this.persistTimer) return;
-    this.persistTimer = setTimeout(() => {
-      this.persistTimer = null;
-      if (this.dirty && this.current) {
-        this.dirty = false;
-        void attendanceStore.upsert(this.current);
-      }
-    }, PERSIST_DEBOUNCE_MS);
-  }
 }
 
 export const attendanceRecorder = new AttendanceRecorder();
+
+// Tell SenSource this recorder is a consumer. Without it the idle gate counts
+// only browsers, so a service with no people-count display open was recorded
+// from counts up to a minute stale — the trend graph drew the poll gate rather
+// than the room.
+sensourceService.addDemandSource(() => attendanceRecorder.isSampling());

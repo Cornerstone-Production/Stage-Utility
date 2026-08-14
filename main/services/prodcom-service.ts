@@ -18,6 +18,36 @@ import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { ConnectionLifecycle } from "./integration-base.js";
 
 const RECONNECT_MS = 4000;
+/** Cap on the SSE accumulation buffer — a stream that never terminates an event
+ *  would otherwise grow it without bound over weeks of uptime. */
+const MAX_STREAM_BUFFER = 256_000;
+/**
+ * How often TCP probes the peer once the stream goes quiet.
+ *
+ * This — not an application-level timer — is what detects a dead link. A
+ * half-open socket (the box unplugged, its switch port dropped) emits neither
+ * 'end' nor 'error', so scheduleReconnect was unreachable and the panel kept
+ * reading "Streaming from host:port" while the captions display showed the last
+ * line from before the drop, for the rest of the service.
+ *
+ * Deliberately NOT a silence timer over transcript data. ProdCom's protocol is
+ * reverse-engineered here (the field names are not in its public docs), so
+ * whether it emits an SSE keepalive is unverified — and if it does not, a
+ * data-silence timer would fire on every quiet stretch: an instrumental set, a
+ * weeknight, any gap longer than the threshold. That is a reconnect every
+ * interval, all week, with the panel flapping green/red each time. TCP keepalive
+ * assumes nothing about the payload: a live peer's kernel answers the probe even
+ * when the application has nothing to say.
+ */
+const SOCKET_KEEPALIVE_MS = 30_000;
+
+/**
+ * Backstop for the case keepalive cannot see: a peer whose TCP stack still
+ * answers while the application has stopped producing. Set far beyond any
+ * plausible silence so it cannot flap through a service — this is a last resort,
+ * not the mechanism.
+ */
+const STREAM_IDLE_MS = 15 * 60_000;
 const MAX_LINES = 100;
 // Coalesce interim partials (which arrive many/sec while someone speaks) into at most
 // one full-buffer broadcast per this window; finals still push immediately.
@@ -65,6 +95,7 @@ class ProdComService extends ConnectionLifecycle {
   private port: number | null = null;
   private apiKey: string | null = null;
   private req: http.ClientRequest | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   private seq = 0;
   private transcriptTimer: ReturnType<typeof setTimeout> | null = null;
@@ -97,8 +128,27 @@ class ProdComService extends ConnectionLifecycle {
   }
 
   protected override teardown(): void {
+    this.clearIdleWatchdog();
     this.req?.destroy();
     this.req = null;
+  }
+
+  /** Restart the silence timer. Called on connect and on every chunk. */
+  private armIdleWatchdog(): void {
+    this.clearIdleWatchdog();
+    this.idleTimer = setTimeout(() => {
+      console.warn(`[prodcom] no transcript data for ${STREAM_IDLE_MS / 1000}s — treating the stream as dead`);
+      this.report("error", "Transcript stream went silent — reconnecting");
+      this.req?.destroy();
+      this.req = null;
+      this.scheduleReconnect();
+    }, STREAM_IDLE_MS);
+    this.idleTimer.unref?.();
+  }
+
+  private clearIdleWatchdog(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
   }
 
 
@@ -146,6 +196,7 @@ class ProdComService extends ConnectionLifecycle {
   }
 
   protected async connect(): Promise<void> {
+    this.clearIdleWatchdog();
     if (!this.running || !this.host || !this.port) return;
     const host = this.host;
     const port = this.port;
@@ -163,11 +214,26 @@ class ProdComService extends ConnectionLifecycle {
         this.report("connected", `Streaming from ${host}:${port}`);
         this.backfill(host, port);
         res.setEncoding("utf8");
+        this.armIdleWatchdog();
 
         // Parse text/event-stream: accumulate until a blank line ends an event.
         let buf = "";
         res.on("data", (chunk: string) => {
+          this.armIdleWatchdog();
           buf += chunk;
+          // A stream that never sends the blank-line terminator would otherwise
+          // grow this without bound in a process that stays up for weeks, and
+          // re-split an ever-longer string on every chunk. The Spectera SSE parser
+          // has carried this cap for a while; this one did not.
+          if (buf.length > MAX_STREAM_BUFFER) {
+            // Drop back to the last line boundary rather than to "". Clearing
+            // mid-event leaves a tail that the next "\n\n" terminates, and
+            // handleEvent treats an unparseable block as a finalised line — so a
+            // truncated fragment could reach the wall as a caption.
+            console.warn(`[prodcom] transcript buffer exceeded ${MAX_STREAM_BUFFER} bytes — resyncing`);
+            const lastBreak = buf.lastIndexOf("\n");
+            buf = lastBreak === -1 ? "" : buf.slice(lastBreak + 1);
+          }
           let sep: number;
           while ((sep = buf.indexOf("\n\n")) !== -1) {
             const raw = buf.slice(0, sep);
@@ -176,14 +242,23 @@ class ProdComService extends ConnectionLifecycle {
           }
         });
         res.on("end", () => {
+          this.clearIdleWatchdog();
           this.report("disconnected", null);
           this.scheduleReconnect();
         });
-        res.on("error", () => this.scheduleReconnect());
+        res.on("error", () => {
+          this.clearIdleWatchdog();
+          this.scheduleReconnect();
+        });
       },
     );
     this.req = req;
+    // The real liveness check — see SOCKET_KEEPALIVE_MS.
+    req.on("socket", (socket) => socket.setKeepAlive(true, SOCKET_KEEPALIVE_MS));
     req.on("error", (e) => {
+      // A watchdog armed by the dying stream must not outlive it, or it can
+      // destroy the NEXT request while it is still connecting.
+      this.clearIdleWatchdog();
       this.report("error", `Can't reach ${host}:${port} — ${e.message}`);
       this.scheduleReconnect();
     });

@@ -21,6 +21,7 @@
 // the documented client-credentials call and refresh it before expiry. A
 // directly-pasted long-lived token is also accepted (skips the exchange).
 
+import { errorMessage } from "./errors.js";
 import type { PeopleCountDTO, PeopleHistoryPoint, PeopleZoneCount } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { StatusIntegration } from "./integration-base.js";
@@ -35,6 +36,9 @@ const DEFAULT_POLL_SECONDS = 45;
 const MIN_POLL_SECONDS = 10;
 /** Rolling trend buffer size (e.g. ~3h at the 45s default cadence). */
 const HISTORY_CAP = 240;
+/** Poll rate when no display is watching the people count. The configured rate
+ *  is for a live service; between them nobody is reading it. */
+const IDLE_POLL_MS = 60_000;
 
 const OFFLINE: PeopleCountDTO = {
   connected: false,
@@ -268,7 +272,6 @@ function buildDto(reduced: ReducedTraffic, updatedAt: string): PeopleCountDTO {
 
 class SenSourceService extends StatusIntegration<PeopleCountDTO> {
   private cfg: SenSourceConfig | null = null;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   private token: string | null = null;
   private tokenExpiresAt = 0;
@@ -280,6 +283,43 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
   private zonesCache: { at: number; zones: VeaZone[] } | null = null;
   /** Cached /space listing for the authoritative building occupancy. */
   private spacesCache: { at: number; spaces: VeaSpace[] } | null = null;
+  // addDemandSource / inDemand now live on StatusIntegration.
+  //
+  // They were written here first, for the same failure the SPL channel then hit
+  // independently: the idle gate below asked only `channelHasSubscribers`, a
+  // browser question, while the attendance recorder and tslService consume counts
+  // in-process and are invisible to it. On a Sunday with no people-count display
+  // open the recorder sampled counts up to a minute stale for the whole service,
+  // and the graph it drew was the shape of the poll gate rather than of the room.
+  //
+  // Second instance, so the shape moved to the base class rather than being
+  // copied — see integration-base.ts.
+
+  /** True while the pending poll was scheduled at the slow idle cadence. */
+  private polledIdle = false;
+
+  /**
+   * Something started needing counts — poll now rather than finishing the wait.
+   *
+   * The idle gate decides the cadence at the END of each poll, so a consumer
+   * appearing just after one was scheduled waits out the full idle minute. That
+   * is exactly what happens at the start of a service: the recorder opens its
+   * record on a live tick, and the first sample of the pre-service arrival ramp
+   * — the steepest part of the curve, and the part an operator watches — could
+   * be up to a minute stale, with the graph drawing a flat lead-in that never
+   * happened.
+   *
+   * Only pre-empts an IDLE wait. A poll already scheduled at the service
+   * cadence is close enough, and cancelling it would let a flapping consumer
+   * poll faster than the operator's configured rate — the thing the gate's
+   * `Math.max` exists to prevent.
+   */
+  pollNowIfIdle(): void {
+    if (!this.running || !this.polledIdle || !this.inDemand) return;
+    this.polledIdle = false;
+    console.log("[sensource] a consumer arrived — polling now rather than waiting out the idle interval");
+    this.scheduleIn(0);
+  }
 
   constructor() {
     super("sensource", "people:count", OFFLINE);
@@ -305,15 +345,17 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     if (this.running || !this.configured) return;
     const sec = Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
     console.log(`[sensource] polling every ${sec}s`);
-    super.start(); // runs the first poll
-    this.pollTimer = setInterval(() => void this.connect(), sec * 1000);
+    // The cadence rides the base class's single timer — connect() re-arms it. A
+    // second setInterval here was exactly what integration-base warns against
+    // ("two timers would double the poll rate after a reconnect"), and it also
+    // meant this integration had NO back-off at all: a dead Vea API was re-hit at
+    // full rate forever, it polled at service rate all week instead of going
+    // dormant, and it logged every single failure.
+    super.start(); // runs the first poll, which schedules the next
   }
 
   protected override teardown(): void {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
+    /* nothing to tear down: the base class owns the only timer */
   }
 
   /** One-shot reachability check for the Integrations "Test connection" button. */
@@ -332,7 +374,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
         this.tokenExpiresAt = 0;
       }
     } catch (err) {
-      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      return { ok: false, message: errorMessage(err) };
     }
   }
 
@@ -548,6 +590,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.cfg) return;
+    let ok = false;
     try {
       // The Vea /data/traffic endpoint has NO working location/zone filter param
       // (locationIds/entityIds are silently ignored — confirmed against the public
@@ -636,11 +679,37 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       });
       if (this.history.length > HISTORY_CAP) this.history.splice(0, this.history.length - HISTORY_CAP);
       this.emit(dto);
+      this.resetBackoff();
+      ok = true;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[sensource] poll error:", msg);
+      const msg = errorMessage(err);
+      // First failure only: an outage used to write one line per poll, forever.
+      if (this.attempt === 0) console.error("[sensource] poll error:", msg);
       this.report("error", msg);
       this.goOffline();
+    } finally {
+      // In a finally, not at the end of each branch. connect() now IS the poller,
+      // so a throw inside the catch — report(), or goOffline() reaching the
+      // overridden emit() and a broadcast — would strand the integration with no
+      // timer pending, no log, and no way back short of a restart. The old
+      // setInterval was immune to that by construction; this restores it.
+      if (this.running) {
+        if (ok) {
+          // Poll at the configured rate while something is watching, and slowly
+          // otherwise — the same shape REAPER and ProPresenter use. Never FASTER
+          // than configured: pollSeconds has no upper bound, so an operator who
+          // set 300s to stay inside Vea's quota would have been polled every 60s
+          // all week by the idle path.
+          const sec = Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
+          const demand = this.inDemand;
+          // Remembered, so a consumer arriving during the wait can pre-empt it
+          // rather than sitting out the full idle interval. See pollNowIfIdle.
+          this.polledIdle = !demand && IDLE_POLL_MS > sec * 1000;
+          this.scheduleIn(demand ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS));
+        } else {
+          this.scheduleReconnect();
+        }
+      }
     }
   }
 

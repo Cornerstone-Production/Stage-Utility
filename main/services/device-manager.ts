@@ -2,6 +2,7 @@
 // connection. Channels from all connected providers are namespaced as
 // `${connectionId}::${providerChannelId}` before reaching StageController.
 
+import { errorMessage } from "./errors.js";
 import type { DeviceProvider } from "../types/devices.js";
 import type { WirelessConnection } from "../types/devices.js";
 import type { ConnectionState } from "../types/integrations.js";
@@ -148,7 +149,7 @@ export class DeviceManager {
         conn.message = null;
         console.log(`[device-manager] connected: ${connectionId} (${conn.name})`);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         console.error(`[device-manager] connect error for ${connectionId}:`, msg);
         conn.connection = "error";
         conn.message = `Connection failed: ${msg}`;

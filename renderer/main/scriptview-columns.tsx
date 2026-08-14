@@ -16,6 +16,8 @@ export interface ScriptViewSpec {
   showArrangement: boolean;
   showItemNotes: boolean;
   showTotalTime: boolean;
+  /** Opt-IN, unlike the others: absent means off, not on. */
+  showMaxSpl: boolean;
 }
 
 /** Resolve a layout (or the implicit "All columns" default when null) into a spec.
@@ -43,6 +45,7 @@ export function resolveScriptViewSpec(
     showArrangement: layout ? on(layout.showArrangement) : true,
     showItemNotes: layout ? on(layout.showItemNotes) : true,
     showTotalTime: layout ? on(layout.showTotalTime) : true,
+    showMaxSpl: layout?.showMaxSpl === true,
   };
 }
 
@@ -98,7 +101,15 @@ export function totalLengthSec(items: PlanItemDTO[]): number {
 /** Build the RundownTable columns for a spec. `clocks` (from computeClocks) drives
  *  the Clock column; omit/null to hide it even when showClock is on. `timeZone`
  *  renders the clock in the plan's local time. */
-export function buildScriptViewColumns(spec: ScriptViewSpec, clocks: Map<string, number> | null, timeZone?: string | null): RundownColumn[] {
+export function buildScriptViewColumns(
+  spec: ScriptViewSpec,
+  clocks: Map<string, number> | null,
+  timeZone?: string | null,
+  /** itemId → recorded peak SPL. Absent = the column renders "—" rather than
+   *  disappearing, so a layout that asks for it does not silently reflow when
+   *  Smaart drops. */
+  maxSplByItem?: Map<string, number | null>,
+): RundownColumn[] {
   const cols: RundownColumn[] = [];
 
   if (spec.showClock && clocks) {
@@ -139,6 +150,18 @@ export function buildScriptViewColumns(spec: ScriptViewSpec, clocks: Map<string,
       header: role.name,
       cellClassName: "text-fg-muted whitespace-pre-line",
       render: (it) => resolveRole(role, it.notesByCategory),
+    });
+  }
+
+  // Last, like every other rundown put it: it is a measurement of the item, read
+  // after the fact, not something you follow along the row.
+  if (spec.showMaxSpl) {
+    cols.push({
+      key: "spl", header: "Max SPL", align: "right", width: "6rem", cellClassName: "text-fg tabular-nums",
+      render: (it) => {
+        const max = maxSplByItem?.get(it.id);
+        return max != null ? `${Math.round(max)} dB` : "—";
+      },
     });
   }
 

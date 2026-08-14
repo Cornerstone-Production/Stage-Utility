@@ -6,8 +6,10 @@ interface Step {
   label: string;
   hint: string;
   done: boolean;
-  /** Settings section to jump to when "Set up" is clicked. */
+  /** Settings section to jump to when the step is clicked. */
   section: string;
+  /** `data-flash-id` of the control in that section to outline on arrival. */
+  flash?: string;
 }
 
 /**
@@ -21,28 +23,43 @@ export function GettingStarted({
   onDismiss,
 }: {
   stageState: StageState;
-  onNavigate: (sectionId: string) => void;
+  onNavigate: (sectionId: string, flash?: string) => void;
   onDismiss: () => void;
 }) {
-  const routedDisplay = stageState.outputs.some((o) => o.viewId);
+  // A fresh install already ships one View and one routed Output, so "is anything
+  // routed?" was true before the operator had done anything — the step arrived
+  // pre-ticked and taught nothing. Both view steps therefore measure going BEYOND
+  // that default: a View you made, and a screen pointed at it.
+  const madeOwnView = stageState.views.length > 1;
+  const routedOwnView = madeOwnView && stageState.outputs.some((o) => o.viewId);
   const steps: Step[] = [
     {
       label: "Connect Planning Center",
       hint: "Enter your PCO app credentials so plans, items, and the live countdown flow in.",
       done: stageState.pcoConfigured,
       section: "integrations",
+      flash: "pco-credentials",
     },
     {
       label: "Select a service & plan",
       hint: "Pick the service type and the plan this machine should follow.",
       done: !!stageState.planId,
       section: "plan",
+      flash: "plan-selection",
+    },
+    {
+      label: "Create a view",
+      hint: "Build what a screen shows — mic slots, a dashboard, transcription, or a custom layout.",
+      done: madeOwnView,
+      section: "views",
+      flash: "views-list",
     },
     {
       label: "Route a display",
-      hint: "Point a screen at a View (mic slots, dashboard, transcription, or a custom layout).",
-      done: routedDisplay,
+      hint: "Point a screen at the View you built.",
+      done: routedOwnView,
       section: "displays",
+      flash: "displays-list",
     },
   ];
 
@@ -64,8 +81,16 @@ export function GettingStarted({
         </div>
 
         <div className="mt-3 flex flex-col gap-1.5">
+          {/* The whole row is the target, not just the button — the label reads as the
+              thing to act on, so clicking it should do what clicking "Set up" does.
+              A done step stays clickable so you can go back and look at it. */}
           {steps.map((step) => (
-            <div key={step.label} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
+            <button
+              key={step.label}
+              type="button"
+              onClick={() => onNavigate(step.section, step.flash)}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-gray-a3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
               {step.done ? (
                 <CheckCircle2Icon className="size-4 shrink-0 text-green-10" />
               ) : (
@@ -75,12 +100,15 @@ export function GettingStarted({
                 <div className={`text-body ${step.done ? "text-gray-10 line-through" : "text-gray-12"}`}>{step.label}</div>
                 {!step.done && <div className="text-caption2 text-gray-9 leading-snug">{step.hint}</div>}
               </div>
+              {/* Styled as the filled Button rather than being one: the row itself is
+                  already a button, and nesting one inside another is invalid HTML
+                  (the inner control becomes unreachable for keyboard users). */}
               {!step.done && (
-                <Button variant="filled" size="small" onClick={() => onNavigate(step.section)}>
+                <span className="shrink-0 inline-flex items-center justify-center rounded-md h-6 px-2 text-caption1 font-medium bg-fill text-fg">
                   Set up
-                </Button>
+                </span>
               )}
-            </div>
+            </button>
           ))}
         </div>
       </div>

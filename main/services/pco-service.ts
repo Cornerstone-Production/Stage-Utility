@@ -2,9 +2,45 @@
 // Flattens JSON:API responses to slim DTOs. ~30s in-memory cache.
 
 import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
+import { scheduleItems } from "./automation-item-schedule.js";
+import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
+import { pickServiceTime } from "./pick-service-time.js";
+
+/**
+ * PCO rejected the credentials (401).
+ *
+ * Its own type because it is a CONFIGURATION fault, not a transient one:
+ * retrying cannot fix it, so callers on a timer must stand down rather than
+ * ask again every tick. Matching on the message text instead would break the
+ * moment the wording changed — and the wording is operator-facing copy.
+ */
+export class PcoAuthError extends Error {
+  constructor() {
+    super("PCO auth failed — check App ID/Secret in Integrations settings");
+    this.name = "PcoAuthError";
+  }
+}
 import { scrub } from "./scrub.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
+
+/**
+ * Is `candidate` an absolute URL on the same origin as `base`?
+ *
+ * Used before following a URL that arrived in a response body and will be sent
+ * the operator's PCO credentials. Origin, not prefix: a string test would accept
+ * `https://api.planningcenteronline.com.evil.example/`. Anything unparseable,
+ * relative, or off-origin is rejected, and the caller falls back to a URL it
+ * built itself.
+ */
+function sameOrigin(candidate: unknown, base: string): candidate is string {
+  if (typeof candidate !== "string" || !candidate) return false;
+  try {
+    return new URL(candidate).origin === new URL(base).origin;
+  } catch {
+    return false;
+  }
+}
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
 // everything, which re-pulled it constantly (the live timer polls every 1–4s and
 // the auto-advance check reads plan times every tick). Split by volatility:
@@ -16,6 +52,14 @@ const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 const CACHE_TTL_MS = 30_000; // default / fallback
 const TTL_LONG_MS = 15 * 60_000;
 const TTL_MEDIUM_MS = 3 * 60_000;
+// A request that FAILED is cached for this long, and no longer. Not caching a
+// failure at all was the other half of the mistake: getLive() calls getPlanTimes
+// on every live tick (~1/s during a service), and its only rate limiter is this
+// cache, so a PCO incident turned into ~1 req/s of retries per failing endpoint
+// and the app rate-limited itself out of PCO's quota. Long enough to throttle a
+// retry storm, short enough that a blip does not blank the countdown for the
+// fifteen minutes a success is held for.
+const TTL_FAILED_MS = 30_000;
 /** Short-lived cache for attachment `open` signed URLs (PCO issues ~1h links). */
 const ATTACH_OPEN_TTL_MS = 10 * 60_000;
 /** Retry budget for transient PCO failures (429 / 5xx / network). */
@@ -74,23 +118,12 @@ interface ServiceTime {
   endsAt: string | null;
 }
 
-/** True when a header title marks the start of the service (the anchor the "service
- *  time" sits at), so items above it are pre-service. Matches common phrasings
- *  case-insensitively — PCO exposes no explicit anchor, so this header is the signal.
- *  Deliberately narrow (won't match "pre-service", "service order", etc.). */
-export function isServiceStartHeader(title: string): boolean {
-  const t = (title ?? "").toUpperCase().replace(/[^A-Z ]+/g, " ").replace(/\s+/g, " ").trim();
-  return t === "SERVICE START" || t.includes("SERVICE START") || t.includes("START OF SERVICE") || t.includes("SERVICE BEGIN");
-}
-
-/** True when a header title marks the END of the service — items at/after it are
- *  post-service (buffer, stream padding, dismissal). When the live controller
- *  reaches this boundary, the service is over even if PCO still reports an item
- *  "live" (operators often park on a trailing buffer), so recording should stop.
- *  Deliberately narrow so it only matches a purpose-placed end marker. */
-export function isServiceEndHeader(title: string): boolean {
-  const t = (title ?? "").toUpperCase().replace(/[^A-Z ]+/g, " ").replace(/\s+/g, " ").trim();
-  return t === "SERVICE END" || t.includes("SERVICE END") || t.includes("END OF SERVICE") || t.includes("SERVICE DISMISS");
+/** Any of a plan's times: service occurrences, rehearsal, call times, and the
+ *  named ones a church adds for its own cues. Named times are the only exact
+ *  clock PCO offers for a point inside a plan — Items carry no time at all. */
+interface PlanTime extends ServiceTime {
+  name: string | null;
+  timeType: string;
 }
 
 /**
@@ -144,6 +177,8 @@ function toItemColors(raw: unknown, custom: boolean): PcoItemTypeColor[] {
 }
 
 class PcoService {
+  /** One-shot: log the Live session's available actions the first time we drive it. */
+  private static loggedLiveActions = false;
   private inFlight = 0;
   private pending: (() => void)[] = [];
 
@@ -257,7 +292,7 @@ class PcoService {
       }
 
       if (response.status === 401) {
-        throw new Error("PCO auth failed — check App ID/Secret in Integrations settings");
+        throw new PcoAuthError();
       }
       if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
         const wait = this.backoffMs(attempt, response.headers.get("Retry-After"));
@@ -288,7 +323,7 @@ class PcoService {
       },
     });
     if (response.status === 401) {
-      throw new Error("PCO auth failed — check App ID/Secret in Integrations settings");
+      throw new PcoAuthError();
     }
     if (response.status === 403) {
       // Almost always: no Live session is actually running for this plan, or the
@@ -324,8 +359,24 @@ class PcoService {
     // PCO exposes the action URL in the live resource's `links` — use it. The
     // Live resource is a singleton, so the path has NO live id (the fallback
     // `.../live/{action}` matches; an id in the path 404s).
-    const linkUrl = (live as unknown as { links?: Record<string, string> }).links?.[action];
-    const url = typeof linkUrl === "string" && linkUrl ? linkUrl : `${base}/live/${action}`;
+    const links = (live as unknown as { links?: Record<string, string> }).links ?? {};
+    // Log every action PCO offers on this Live session, once per run. We only
+    // consume next/previous, so whether PCO can jump straight to an item has been
+    // an open question - and the answer is in this object rather than in the
+    // documentation. Automating "fire the Doors item" is materially safer with a
+    // direct jump than by stepping through (and firing) everything in between.
+    if (!PcoService.loggedLiveActions) {
+      PcoService.loggedLiveActions = true;
+      console.log(`[pco] live actions offered: ${scrub(Object.keys(links).sort().join(", ") || "(none)")}`);
+    }
+    // Only follow a link that still points at PCO. This URL comes out of a
+    // RESPONSE BODY and is then POSTed to with the operator's App ID and secret
+    // in an Authorization header, so anything that could put a different host in
+    // that field would be handed the credentials. The response arrives from PCO
+    // over TLS, so this is defence in depth rather than a live hole — but the
+    // safe answer already exists one line down, which makes the check free.
+    const linkUrl = links[action];
+    const url = sameOrigin(linkUrl, PCO_BASE) ? linkUrl : `${base}/live/${action}`;
     await this.postAction(url, appId, secret);
   }
 
@@ -336,7 +387,7 @@ class PcoService {
     appId: string,
     secret: string,
   ): Promise<PcoResponse<T>> {
-    console.log(`[pco] POST ${url}`);
+    console.log(`[pco] POST ${scrub(url)}`);
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -345,7 +396,7 @@ class PcoService {
       },
     });
     if (response.status === 401) {
-      throw new Error("PCO auth failed — check App ID/Secret in Integrations settings");
+      throw new PcoAuthError();
     }
     if (!response.ok) {
       const body = await response.text().catch(() => "");
@@ -562,7 +613,10 @@ class PcoService {
       .sort((a, b) => a.sequence - b.sequence)
       .map((c) => c.name);
 
-    this.cacheSet(cacheKey, result, TTL_LONG_MS);
+    // Only cache a real answer. The request above yields null on failure and the
+    // parse below turns that into an empty list; caching it would store a FAILURE
+    // as data, with a success's TTL.
+    this.cacheSet(cacheKey, result, json ? TTL_LONG_MS : TTL_FAILED_MS);
     return result;
   }
 
@@ -650,20 +704,11 @@ class PcoService {
     serviceTypeId: string,
     planId: string,
   ): Promise<string[]> {
-    const cacheKey = `plan-times:${appId}:${planId}`;
-    const cached = this.cacheGet<string[]>(cacheKey);
-    if (cached) return cached;
-
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times?per_page=50`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const items = json && Array.isArray(json.data) ? json.data : [];
-    const times = items
-      .filter((t) => t.attributes.time_type === "service" && typeof t.attributes.starts_at === "string")
-      .map((t) => t.attributes.starts_at as string)
+    const times = await this.getPlanTimes(appId, secret, serviceTypeId, planId);
+    return times
+      .filter((t) => t.timeType === "service")
+      .map((t) => t.startsAt)
       .sort((a, b) => Date.parse(a) - Date.parse(b));
-
-    this.cacheSet(cacheKey, times, TTL_LONG_MS);
-    return times;
   }
 
   /** All rehearsal + service times for a plan (ISO starts/ends). Drives the
@@ -674,23 +719,10 @@ class PcoService {
     serviceTypeId: string,
     planId: string,
   ): Promise<{ type: string; startsAt: string; endsAt: string | null }[]> {
-    const cacheKey = `plan-times-full:${appId}:${planId}`;
-    const cached = this.cacheGet<{ type: string; startsAt: string; endsAt: string | null }[]>(cacheKey);
-    if (cached) return cached;
-
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times?per_page=50`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const items = json && Array.isArray(json.data) ? json.data : [];
-    const times = items
-      .filter((t) => (t.attributes.time_type === "service" || t.attributes.time_type === "rehearsal") && typeof t.attributes.starts_at === "string")
-      .map((t) => ({
-        type: t.attributes.time_type as string,
-        startsAt: t.attributes.starts_at as string,
-        endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
-      }));
-
-    this.cacheSet(cacheKey, times, TTL_LONG_MS);
-    return times;
+    const times = await this.getPlanTimes(appId, secret, serviceTypeId, planId);
+    return times
+      .filter((t) => t.timeType === "service" || t.timeType === "rehearsal")
+      .map((t) => ({ type: t.timeType, startsAt: t.startsAt, endsAt: t.endsAt }));
   }
 
   /** The organization's IANA time zone (e.g. "America/Chicago"), used to render
@@ -886,9 +918,8 @@ class PcoService {
     // The chosen "service" plan_time occurrence (e.g. 9am vs 11am). Resolved in
     // EVERY mode (cached LONG) so it can (a) supply the pre-service countdown target
     // and (b) let SPL history separate back-to-back services that share one plan.
-    const serviceTime = this.pickServiceTime(
-      await this.getServiceTimes(appId, secret, serviceTypeId, planId),
-    );
+    const planTimes = await this.getPlanTimes(appId, secret, serviceTypeId, planId);
+    const serviceTime = this.pickServiceTime(planTimes.filter((t) => t.timeType === "service"));
     const serviceTimeId = serviceTime?.id ?? null;
     const serviceTimeStartsAt = serviceTime?.startsAt ?? null;
 
@@ -910,6 +941,20 @@ class PcoService {
     // listPlanItems is cached, so this is essentially free on most live ticks.
     const planItems = await this.listPlanItems(appId, secret, serviceTypeId, planId).catch(() => []);
     const { currentItemTitle, nextItemTitle } = resolvePlanCurrentNext(planItems, itemId);
+    // Item clock for the automation engine (PCO puts no time on an Item). Built
+    // from the already-cached rundown and plan times, so it costs no extra request.
+    // A plan_time named after an item pins that item exactly; the rest are derived.
+    const itemSchedule = scheduleItems(
+      planItems,
+      serviceTimeStartsAt,
+      planTimes.flatMap((t) => (t.name ? [{ name: t.name, startsAt: t.startsAt }] : [])),
+    );
+    // Rehearsal + service times for the time-relative automation triggers. Carried
+    // in every mode below: "an hour before rehearsal" has to fire when nothing is
+    // live, which is most of the week.
+    const planTimesDto = planTimes
+      .filter((t) => t.timeType === "service" || t.timeType === "rehearsal")
+      .map((t) => ({ id: t.id, name: t.name, timeType: t.timeType, startsAt: t.startsAt }));
 
     if (it && typeof liveStartAt === "string" && liveStartAt && itemNode) {
       // "Full Item Length" = the *plan item's* length (ItemTime.length is often 0)
@@ -943,6 +988,8 @@ class PcoService {
         itemType: curIdx >= 0 ? (planItems[curIdx]?.itemType ?? null) : null,
         serviceTimeId,
         serviceTimeStartsAt,
+        itemSchedule,
+        planTimes: planTimesDto,
         serviceEnded,
         beforeServiceStart,
       };
@@ -978,6 +1025,8 @@ class PcoService {
         nextItemTitle,
         serviceTimeId,
         serviceTimeStartsAt,
+        itemSchedule,
+        planTimes: planTimesDto,
       };
     }
 
@@ -993,49 +1042,88 @@ class PcoService {
       nextItemTitle,
       serviceTimeId,
       serviceTimeStartsAt,
+      itemSchedule,
+      planTimes: planTimesDto,
     };
   }
 
   /**
-   * Fetch + cache a plan's "service" plan_times ONCE (start countdown and
-   * auto-rollover end both derive from this). Previously start + end each made a
-   * separate request to the identical /plan_times URL; this collapses them to one
-   * call per plan, cached LONG since service times are effectively static day-of.
+   * Fetch + cache a plan's plan_times ONCE, for everything that needs them.
+   *
+   * The start countdown, the auto-rollover end, the derived item clock, the
+   * ScriptView projected clock and the reconnect scheduler all read this one
+   * list, fetched whole and filtered by the caller.
+   *
+   * "Once" was aspirational until this was the only fetch: three copies of the
+   * same request lived here, under three cache keys, so a plan's times were
+   * pulled three times over — and two of them asked for per_page=50 while the
+   * comment on this one explains why 50 is not enough. A plan routinely carries
+   * rehearsal, call, review and several service times, so the short page quietly
+   * clipped the tail of the two lists that fed the ScriptView clock and the
+   * reconnect scheduler.
+   *
+   * Cached LONG — plan times are effectively static day-of. The key carries the
+   * appId as well as the plan: two orgs' credentials must not share an entry.
    */
+  private async getPlanTimes(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<PlanTime[]> {
+    const cacheKey = `plan-times:${appId}:${planId}`;
+    const cached = this.cacheGet<PlanTime[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times?per_page=100`;
+    const json = await this.request(url, appId, secret).catch(() => null);
+    const raw = json && Array.isArray(json.data) ? json.data : [];
+    const times = raw
+      .map((t) => ({
+        id: t.id,
+        name: typeof t.attributes.name === "string" ? t.attributes.name : null,
+        timeType: typeof t.attributes.time_type === "string" ? t.attributes.time_type : "",
+        startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
+        endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
+      }))
+      .filter((t): t is PlanTime => !!t.startsAt);
+
+    this.cacheSet(cacheKey, times, json ? TTL_LONG_MS : TTL_FAILED_MS);
+    return times;
+  }
+
+  /** Just the "service" occurrences (e.g. 9am vs 11am). */
   private async getServiceTimes(
     appId: string,
     secret: string,
     serviceTypeId: string,
     planId: string,
   ): Promise<ServiceTime[]> {
-    const cacheKey = `plan-times:${planId}`;
-    const cached = this.cacheGet<ServiceTime[]>(cacheKey);
-    if (cached) return cached;
-
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/plan_times`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const times = json && Array.isArray(json.data) ? json.data : [];
-    const services = times
-      .filter((t) => t.attributes.time_type === "service")
-      .map((t) => ({
-        id: t.id,
-        startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
-        endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
-      }))
-      .filter((t): t is ServiceTime => !!t.startsAt);
-
-    this.cacheSet(cacheKey, services, TTL_LONG_MS);
-    return services;
+    const times = await this.getPlanTimes(appId, secret, serviceTypeId, planId);
+    return times.filter((t) => t.timeType === "service");
   }
 
-  /** Choose the relevant "service" time: the soonest whose end is still in the
-   *  future, else the latest. (Same selection start + end always shared.) */
+  /**
+   * Choose the relevant "service" time: the soonest that has not finished, else
+   * the latest. (Same selection start + end always shared.)
+   *
+   * PCO only sets `ends_at` when a plan time was given a length, and plenty are
+   * entered without one. The old test treated a missing end as "still upcoming",
+   * which never went false — so on a Sunday with two end-less times the ascending
+   * sort returned the 9am one all day. serviceTimeId feeds the
+   * `${serviceTypeId}:${planId}:${serviceTimeId}` key in all three recorders, so
+   * the 11am was recorded into the 9am's record: one merged curve, a peak spanning
+   * both, and an attendance baseline never re-taken. That is precisely the
+   * separation this field exists to provide.
+   *
+   * With no end time there is no direct signal that a service is over, but there
+   * is an indirect one: a later service has begun. So an end-less time is finished
+   * once any later-starting time has started. Where ends_at IS set it is used as
+   * before, which stays more precise — the gap between one service ending and the
+   * next beginning belongs to the next.
+   */
   private pickServiceTime(services: ServiceTime[]): ServiceTime | null {
-    const now = Date.now();
-    const upcoming = services
-      .filter((t) => (t.endsAt ? Date.parse(t.endsAt) > now : true))
-      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
-    return upcoming ?? services.slice().sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt))[0] ?? null;
+    return pickServiceTime(services);
   }
 
   /** The current plan's service END time (ISO) — used by auto-mode rollover. */

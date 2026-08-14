@@ -2,12 +2,14 @@
 //
 // Every route must finish responding before it returns (see RouteCtx).
 
+import { errorMessage } from "../errors.js";
 import { type RouteCtx, error, json, readBody } from "./context.js";
 import { AUTOMATION_ACTIONS } from "../automation-actions.js";
 import { AUTOMATION_CONDITIONS } from "../automation-conditions.js";
 import { automationEngine } from "../automation-engine.js";
 import { automationLog } from "../automation-log.js";
 import { AUTOMATION_TRIGGERS } from "../automation-triggers.js";
+import { stageController } from "../stage-controller.js";
 
 /** Strip functions — didFire/holds/run cannot cross the wire. */
 const shape = (o: Record<string, { id: string; label: string; params: unknown; help?: string }>) =>
@@ -22,6 +24,19 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
       conditions: shape(AUTOMATION_CONDITIONS),
       actions: shape(AUTOMATION_ACTIONS),
     });
+    return;
+  }
+
+  // Options for params declaring optionsFrom: "plan-items". Served from the live
+  // payload's own item clock rather than a fresh PCO call, so the dropdown offers
+  // exactly what the trigger will match against — a title that appears here is one
+  // the rule can actually fire on. Empty (never an error) when no plan is loaded:
+  // the rule editor has to open regardless.
+  if (method === "GET" && pathname === "/api/automation/plan-items") {
+    const schedule = stageController.getLastLive()?.itemSchedule ?? [];
+    // The VALUE is the title, not the id. Ids are new objects every plan, so an id
+    // picked on Tuesday is dead by Sunday.
+    json(res, { items: schedule.map((i) => ({ value: i.title, label: i.title, dueAt: i.dueAt, exact: i.exact })) });
     return;
   }
 
@@ -56,7 +71,7 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     try {
       json(res, await automationEngine.testFire(testMatch[1]));
     } catch (err) {
-      error(res, err instanceof Error ? err.message : String(err), 400);
+      error(res, errorMessage(err), 400);
     }
     return;
   }

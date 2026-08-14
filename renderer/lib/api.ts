@@ -6,6 +6,8 @@
 // The renderer is always served from the same origin as the HTTP server
 // (port 8788), so all paths here are relative.
 
+import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
+
 type Params = Record<string, unknown> | undefined;
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
@@ -13,6 +15,12 @@ type Params = Record<string, unknown> | undefined;
 // Hard ceiling so a request that never settles (e.g. a stalled backend route)
 // surfaces as an error instead of hanging a query in its loading state forever.
 const REQUEST_TIMEOUT_MS = 15000;
+
+/** An HTTP error carrying its status and the server's machine-readable `code`. */
+export interface ApiError extends Error {
+  status?: number;
+  code?: string;
+}
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
@@ -30,11 +38,18 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     let msg = res.statusText;
+    let body: { error?: string; code?: string } | null = null;
     try {
-      const body = await res.json();
+      body = await res.json();
       if (typeof body?.error === "string") msg = body.error;
     } catch { /* ignore */ }
-    throw new Error(msg);
+    // Carry the status and any machine-readable `code` on the Error. Callers that
+    // only interpolate the message are unaffected, but one that has to tell a
+    // conflict from a failure (a 409 is a choice, not an error) now can.
+    const err = new Error(msg) as ApiError;
+    err.status = res.status;
+    if (typeof body?.code === "string") err.code = body.code;
+    throw err;
   }
   return res.json() as Promise<T>;
 }
@@ -102,9 +117,6 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     // Adds a role for any category this service type defines that no role covers.
     // Only ever adds — never merges, never removes.
-    case "scriptview:seedRoles":
-      return post<T>("/api/scriptview/roles/seed", { serviceTypeId: p.serviceTypeId });
-
     case "scriptview:noteCategories": {
       const id = p.serviceTypeId as string;
       return apiFetch<T>(`/api/scriptview/note-categories?serviceTypeId=${encodeURIComponent(id)}`);
@@ -137,9 +149,6 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "stage:setPlanMode":
       return post<T>("/api/plan/mode", p);
-
-    case "stage:setSlots":
-      return post<T>("/api/slots", p);
 
     case "stage:refresh":
       return post<T>("/api/refresh");
@@ -250,6 +259,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       const id = p.id as string;
       return del<T>(`/api/baptism/sessions/${encodeURIComponent(id)}`);
     }
+    case "baptism:getTriggers":
+      return apiFetch<T>(`/api/baptism/triggers?planId=${encodeURIComponent(String(p.planId ?? ""))}`);
+    case "baptism:setTriggers":
+      return post<T>("/api/baptism/triggers", {
+        planId: p.planId,
+        testimonyItemId: p.testimonyItemId,
+        baptismItemId: p.baptismItemId,
+      });
 
     case "spl:getVisibleMetrics":
       return apiFetch<T>("/api/spl/visible-metrics");
@@ -295,12 +312,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/reconnect-schedule", p);
 
     case "settings:setBaptismAutoStart":
-      return post<T>("/api/settings/baptism-auto-start", {
+      return post<T>("/api/baptism-auto-start", {
         enabled: p.enabled,
         testimonyKeyword: p.testimonyKeyword,
       });
     case "settings:setTaperWindow":
       return post<T>("/api/taper-window", p);
+    case "settings:setTimezone":
+      return post<T>("/api/timezone", p);
 
     case "update:setTrack":
       return post<T>("/api/update/track", p);
@@ -362,7 +381,10 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "presets:apply": {
       const id = p.id as string;
-      return post<T>(`/api/presets/${encodeURIComponent(id)}/apply`, { displayId: p.displayId });
+      return post<T>(`/api/presets/${encodeURIComponent(id)}/apply`, {
+        viewId: p.viewId,
+        displayId: p.displayId,
+      });
     }
 
     case "presets:delete": {
@@ -401,14 +423,13 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { kind: p.kind });
     }
 
-    case "views:setNdiSource": {
-      const id = p.id as string;
-      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { ndiSource: p.ndiSource });
-    }
 
     case "views:setLayout": {
       const id = p.id as string;
-      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { layout: p.layout });
+      // layoutRev omitted = save unconditionally (the explicit overwrite path).
+      const body: Record<string, unknown> = { layout: p.layout };
+      if (typeof p.layoutRev === "number") body.layoutRev = p.layoutRev;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, body);
     }
 
     case "views:setSlotsLayout": {
@@ -416,9 +437,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { slotsLayout: p.slotsLayout });
     }
 
-    case "views:setShowLiveControls": {
+    case "views:setScriptViewLayout": {
       const id = p.id as string;
-      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { showLiveControls: p.showLiveControls });
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { scriptViewLayoutId: p.scriptViewLayoutId });
     }
 
     case "views:setSlots": {
@@ -620,6 +641,7 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "automation:registry": return apiFetch("/api/automation/registry");
     case "automation:rules": return apiFetch("/api/automation/rules");
+    case "automation:plan-items": return apiFetch("/api/automation/plan-items");
     case "automation:addRule": return post("/api/automation/rules", params);
     case "automation:updateRule": return patch(`/api/automation/rules/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);
     case "automation:removeRule": return del(`/api/automation/rules/${(params as { id: string }).id}`);
@@ -635,7 +657,6 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "rosstalk:test": return post(`/api/rosstalk/targets/${(params as { id: string }).id}/test`);
     case "rosstalk:commands": return apiFetch("/api/rosstalk/commands");
     case "rosstalk:send": return post("/api/rosstalk/send", params);
-    case "rosstalk:simulate": return apiFetch("/api/rosstalk/simulate");
     case "rosstalk:setSimulate": return post("/api/rosstalk/simulate", params);
     case "osc:send":
       return post<T>("/api/osc/send", p);
@@ -688,26 +709,13 @@ const sseListeners: SseListener[] = [];
  * `hydrated-channels.test.ts` reads remote-server.ts and fails if the two lists
  * drift, so a new hydrated channel cannot silently reintroduce the bug.
  */
-export const HYDRATED_CHANNELS = [
-  "server:hello",
-  "stage:state-changed",
-  "pco:live",
-  "propresenter:status",
-  "propresenter:instances",
-  "spl:metrics",
-  "spl:history",
-  "attendance:history",
-  "service-timeline:history",
-  "baptism:state",
-  "obs:status",
-  "reaper:status",
-  "update:status",
-  "osc:feedback",
-  "people:count",
-  "displays:presence",
-] as const;
+// The canonical list moved to sse-channels.ts so the shared SSE worker can share
+// it — that module imports nothing, which is what makes it safe in a worker.
+// Re-exported here because this is the import path everything already uses,
+// including hydrated-channels.test.ts, which pins the list against the server.
+export { HYDRATED_CHANNELS };
 
-const hydratedSet = new Set<string>(HYDRATED_CHANNELS);
+const hydratedSet = HYDRATED_SET;
 /** Last payload seen per hydrated channel, for replay to late subscribers. */
 const lastPayload = new Map<string, unknown>();
 
@@ -738,10 +746,26 @@ function reportChannels(): void {
   }, 200);
 }
 
-// ── Optional shared-worker SSE relay ────────────────────────────────────────
-// One EventSource shared across all this machine's tabs (fixes the ~6-connection
-// HTTP/1.1 limit on multi-window machines). Opt-in and off by default so untested
-// concurrency can't regress live displays; the direct path below stays the default.
+// ── Shared-worker SSE relay ─────────────────────────────────────────────────
+// One EventSource shared across all this machine's tabs. Browsers cap concurrent
+// connections at ~6 per origin over HTTP/1.1, and every tab holds one permanently
+// for its event stream — so the sixth tab could not load AT ALL: nothing was left
+// for its /api/state, which then died at REQUEST_TIMEOUT_MS. Measured: three tabs
+// hold three connections direct and one through the worker.
+//
+// STILL OPT-IN, deliberately, even though the worker now carries reconnect with
+// backoff, hydrate replay and a wake nudge. Those close the worker-to-SERVER gap.
+// Testing an 8-tab machine through a server restart found the remaining hole is
+// tab-to-WORKER: when the shared stream breaks, every already-open tab is
+// orphaned silently. `ensureWorker` builds the worker once and nothing watches
+// the port afterwards, so a tab has no way to notice it has stopped receiving —
+// observed as three tabs sitting on a title three state-changes stale, while a
+// reloaded tab picked up the next change immediately.
+//
+// That is worse than the per-tab path it would replace: there a dead stream costs
+// one tab and self-heals, here it costs every tab on the machine and does not.
+// Defaulting this on needs a port heartbeat (tab pings, worker pongs, tab
+// re-creates the worker or falls back to a direct EventSource when the pong stops).
 //   Enable:  localStorage.setItem("stage:sharedSse", "1")  (then reload)
 let sharedSse = (() => {
   try {
@@ -811,13 +835,60 @@ function ensureEventSource(): EventSource {
 
   // (Re)report our channel set on every (re)connect — the server drops the filter
   // when a stream closes, so a transparent reconnect needs a fresh report.
-  eventSource.onopen = () => reportChannels();
+  eventSource.onopen = () => {
+    sseReconnectDelayMs = SSE_RECONNECT_MIN_MS;
+    reportChannels();
+  };
 
   eventSource.onerror = (e) => {
-    console.warn("[api] SSE error — browser will auto-reconnect", e);
+    // CONNECTING means the browser is retrying on its own — leave it alone.
+    // CLOSED means it has GIVEN UP, and nothing else would ever reopen the
+    // stream: the page goes on rendering its last snapshot, silently receiving
+    // nothing, until someone reloads it. That is what a display looks like when
+    // it "stops updating" after a server restart — the browser closes the stream
+    // on an error response and never comes back on its own.
+    if (eventSource?.readyState === EventSource.CLOSED) {
+      console.warn("[api] SSE closed — scheduling reconnect", e);
+      scheduleSseReconnect();
+    }
   };
 
   return eventSource;
+}
+
+let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let sseReconnectDelayMs = 1000;
+const SSE_RECONNECT_MIN_MS = 1000;
+const SSE_RECONNECT_MAX_MS = 30_000;
+
+/** Reopen a permanently-closed stream, backing off so a server that is still
+ *  down is not hammered by every display in the building at once. */
+function scheduleSseReconnect(): void {
+  if (sseReconnectTimer) return;
+  sseReconnectTimer = setTimeout(() => {
+    sseReconnectTimer = null;
+    sseReconnectDelayMs = Math.min(sseReconnectDelayMs * 2, SSE_RECONNECT_MAX_MS);
+    ensureEventSource();
+  }, sseReconnectDelayMs);
+}
+
+// A kiosk display can sit untouched for days. When its tab is shown again, make
+// sure the stream is actually alive rather than trusting that it survived —
+// a closed one reconnects immediately instead of waiting out the backoff.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    // Shared path: the worker owns the stream, so ask IT to check. A machine that
+    // slept may have had the stream closed underneath every tab at once.
+    if (sharedSse && sseWorker) {
+      try { sseWorker.port.postMessage({ type: "wake" }); } catch { /* ignore */ }
+      return;
+    }
+    if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+      sseReconnectDelayMs = SSE_RECONNECT_MIN_MS;
+      ensureEventSource();
+    }
+  });
 }
 
 /**

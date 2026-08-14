@@ -6,6 +6,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
+import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import { stageController } from "../stage-controller.js";
 
@@ -58,6 +59,26 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // ── Baptism auto-start ──────────────────────────────────────────────────
+    //
+    // stageController.setBaptismAutoStart existed with no route and no caller in
+    // main/ at all: the client posted to /api/settings/baptism-auto-start, which
+    // no module handled, so the operator got a 404 toast and the setting never
+    // persisted. Filed here beside the other settings setters rather than under
+    // /api/settings/, which was a path shape nothing else in this app uses.
+    if (method === "POST" && pathname === "/api/baptism-auto-start") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const patch: Parameters<typeof stageController.setBaptismAutoStart>[0] = {};
+      if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+      if (typeof body.testimonyKeyword === "string") patch.testimonyKeyword = body.testimonyKeyword;
+      if (Object.keys(patch).length === 0) {
+        error(res, "body.enabled (boolean) or body.testimonyKeyword (string) required");
+        return;
+      }
+      json(res, await stageController.setBaptismAutoStart(patch));
+      return;
+    }
+
     // ── Public URL (DNS) ────────────────────────────────────────────────────
     if (method === "POST" && pathname === "/api/public-url") {
       const body = await readBody(req) as Record<string, unknown>;
@@ -75,7 +96,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await stageController.setIconColor(key, color));
       } catch (err) {
-        error(res, err instanceof Error ? err.message : String(err));
+        error(res, errorMessage(err));
       }
       return;
     }

@@ -68,6 +68,41 @@ inputs, To, Console, Dest and Feed for outputs.
 **Import** accepts CSV and Excel with column mapping, for bringing in an existing
 spreadsheet.
 
+## Export and print
+
+Three ways out, beside the Import button:
+
+| | For |
+|---|---|
+| **Export CSV** | anything that reads a spreadsheet, and re-importing here |
+| **Export Excel** | sending to someone — column widths set, header frozen |
+| **Print** | the copy that gets taped to the rack |
+
+The file always covers the **one sheet you are looking at**. If you are editing a
+variant, that variant's patch is exported and its name is in the filename, so
+`analog-stage-baptism-week-2026-08-03.csv` is not mistakable for the default a year
+later.
+
+Columns are `Rack ch`, `Console`, `Dir`, `Source / Name`, `Mic / Feed`, `48V`,
+`Rack`, `Path`, `Owner`, `Notes`. **Path** carries the whole signal chain as
+`Snake A:2 -> SD Rack:2`, which is the column an engineer actually traces; a direct
+patch leaves it blank. A hop whose device has since been deleted shows the raw
+device id rather than disappearing — losing a hop would misstate the path, and the
+path is the point of the document.
+
+Channels are written as text, so a leading zero survives: `01` stays `01`.
+Endpoints marked unused are left out.
+
+The headings are chosen so this app's own importer recognises every column without
+hand-mapping, which makes the export a working backup as well as a document.
+
+Export reads the **saved** sheet, so the buttons are disabled while you have
+unsaved changes rather than quietly handing back an older patch.
+
+Print hides the app around the table and prints black on white. The column header
+repeats for each rack, and rack groups are kept off page boundaries. There is no
+separate PDF export — print to PDF.
+
 ## Where it is stored
 
 `patch.json` in the data directory, included in config backups.

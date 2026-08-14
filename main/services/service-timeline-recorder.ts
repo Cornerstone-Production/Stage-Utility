@@ -6,41 +6,35 @@
 //
 // On each live tick it detects item transitions: the outgoing item is finalized
 // (endedAt + actualDurationSec) and the incoming item opened (plannedLengthSec +
-// startedAt from PCO live_start_at). Records are keyed like the SPL + attendance
-// records and persisted, so a mid-service restart resumes the same record.
+// startedAt from PCO live_start_at).
+//
+// The record lifecycle — which occurrence is open, when to start or close one, the
+// debounced write, forget() — lives in ServiceRecorder, shared with the SPL and
+// attendance recorders. Only the item timing below is specific to this one.
 
 import type { PcoLiveDTO, ServiceTimeline } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
-import { isLiveServiceToday } from "./spl-recorder.js";
-import { stageController } from "./stage-controller.js";
+import { shouldRecordLive } from "./live-service-gate.js";
+import { ServiceRecorder, type NewRecordContext, type RecorderStore } from "./service-recorder.js";
 
-const PERSIST_DEBOUNCE_MS = 4000;
-/** Short gap between live-item ticks = same service (hold the record through a
- *  serviceTimeId roll on overrun); a long gap = a new service occurrence. */
-const SERVICE_GAP_MS = 10 * 60_000;
+class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
+  protected readonly label = "service-timeline-recorder";
+  protected readonly store: RecorderStore<ServiceTimeline> = serviceTimelineStore;
+  protected readonly persistDebounceMs = 4000;
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-function todayLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-class ServiceTimelineRecorder {
-  private current: ServiceTimeline | null = null;
-  private currentKey: string | null = null;
-  private lastLiveAt = 0; // last live-item tick (to detect the gap between services)
   private lastItemId: string | null = null;
   private nextSequence = 0;
-  private busy = false;
-  private dirty = false;
-  private persistTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** Active in-progress record (for hydration), or null when nothing is recording. */
-  getCurrent(): ServiceTimeline | null {
-    return this.current;
+  protected createRecord(ctx: NewRecordContext): ServiceTimeline {
+    return { ...ctx, endedAt: null, items: [] };
+  }
+
+  protected override onRecordEstablished(): void {
+    // Continue the stored sequence rather than restarting it — a resumed record
+    // would otherwise reissue numbers already in use.
+    this.nextSequence = (this.current?.items ?? []).reduce((m, it) => Math.max(m, it.sequence), -1) + 1;
+    this.lastItemId = null; // re-detect the live item on the next tick
   }
 
   /** Called by the live-poller after each pco:live broadcast. */
@@ -48,7 +42,10 @@ class ServiceTimelineRecorder {
     if (!live || this.busy) return;
     this.busy = true;
     try {
-      if (live.mode === "item" && live.currentItemId && !live.serviceEnded && isLiveServiceToday(live)) {
+      // `currentItemId` is re-tested here purely so TypeScript narrows it; the
+      // recording policy itself lives entirely in shouldRecordLive.
+      const open = this.current != null && this.current.endedAt == null;
+      if (live.currentItemId && !live.serviceEnded && shouldRecordLive(live, open)) {
         const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
         this.lastLiveAt = Date.now();
         await this.ensureRecord(live, gapSinceLive);
@@ -74,61 +71,6 @@ class ServiceTimelineRecorder {
     } finally {
       this.busy = false;
     }
-  }
-
-  private async ensureRecord(live: PcoLiveDTO, gapSinceLive = Infinity): Promise<void> {
-    const st = stageController.getState();
-    if (!st.serviceTypeId || !st.planId) return;
-    const date = todayLocal();
-    const serviceTimeId = live.serviceTimeId;
-    const key = `${st.serviceTypeId}:${st.planId}:${serviceTimeId ?? date}`;
-    if (this.currentKey === key && this.current) return;
-
-    // Hold the open record through a serviceTimeId change within the same live service
-    // (overrun rolls pickServiceTime to the next occurrence; a null is a cache miss).
-    // A short gap since the last live tick = same service → keep appending, don't
-    // split. Only a long gap means a genuinely new service occurrence.
-    if (
-      this.current &&
-      this.current.serviceTypeId === st.serviceTypeId &&
-      this.current.planId === st.planId &&
-      this.current.serviceDate === date &&
-      (serviceTimeId == null || gapSinceLive < SERVICE_GAP_MS)
-    ) {
-      return;
-    }
-
-    // Key changed → finalize + persist the outgoing record.
-    if (this.current) {
-      this.finalizeRecord();
-      await serviceTimelineStore.upsert(this.current);
-    }
-
-    // Resume an existing record for this occurrence (e.g. after a restart), else create.
-    const existing = await serviceTimelineStore.get(key);
-    if (existing) {
-      this.current = existing;
-      this.current.endedAt = null; // reopened
-      this.nextSequence = existing.items.reduce((m, it) => Math.max(m, it.sequence), -1) + 1;
-    } else {
-      this.current = {
-        serviceKey: key,
-        serviceTypeId: st.serviceTypeId,
-        serviceTypeName: st.serviceTypeName ?? null,
-        planId: st.planId,
-        planTitle: st.planTitle,
-        seriesTitle: st.planSeriesTitle ?? null,
-        serviceDate: date,
-        serviceTimeId: serviceTimeId ?? null,
-        serviceTimeStartsAt: live.serviceTimeStartsAt,
-        startedAt: new Date().toISOString(),
-        endedAt: null,
-        items: [],
-      };
-      this.nextSequence = 0;
-    }
-    this.currentKey = key;
-    this.lastItemId = null; // re-detect the live item on the next tick
   }
 
   /** Open (or reopen) the current item — snapshot planned length + actual start. */
@@ -170,30 +112,21 @@ class ServiceTimelineRecorder {
     }
   }
 
-  private finalizeRecord(): void {
-    if (!this.current) return;
+  /** Close every open item, then let the base stamp the record's end once. */
+  protected override finalizeRecord(): void {
+    // One clock read for the items AND the record's own end, as before.
     const endMs = Date.now();
     const iso = new Date(endMs).toISOString();
-    for (const it of this.current.items) {
-      if (!it.endedAt) {
-        it.endedAt = iso;
-        const startMs = Date.parse(it.startedAt);
-        it.actualDurationSec = Number.isFinite(startMs) ? Math.max(0, Math.round((endMs - startMs) / 1000)) : null;
+    if (this.current) {
+      for (const it of this.current.items) {
+        if (!it.endedAt) {
+          it.endedAt = iso;
+          const startMs = Date.parse(it.startedAt);
+          it.actualDurationSec = Number.isFinite(startMs) ? Math.max(0, Math.round((endMs - startMs) / 1000)) : null;
+        }
       }
     }
-    this.current.endedAt = iso;
-  }
-
-  private schedulePersist(): void {
-    this.dirty = true;
-    if (this.persistTimer) return;
-    this.persistTimer = setTimeout(() => {
-      this.persistTimer = null;
-      if (this.dirty && this.current) {
-        this.dirty = false;
-        void serviceTimelineStore.upsert(this.current);
-      }
-    }, PERSIST_DEBOUNCE_MS);
+    super.finalizeRecord(iso);
   }
 }
 

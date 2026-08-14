@@ -14,6 +14,7 @@ import * as path from "node:path";
 
 import readXlsxFile from "read-excel-file/node";
 import writeXlsxFile from "write-excel-file/node";
+import { setAppTimeZone } from "./app-timezone.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-history-export-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -490,5 +491,20 @@ describe("service time", () => {
     const buf = await buildHistoryWorkbook({ include: ["spl"] });
     const { headers } = await sheetOf(buf, "SPL");
     assert.ok(headers.includes("Service time"));
+  });
+
+  test("is written in the app's zone, not the server's locale", async () => {
+    // A UTC server exported a 4:00am-Chicago seed as "9:00 AM" — the column that
+    // exists to tell a 9am from an 11am was naming neither. It must read the same
+    // wherever the host clock happens to be set.
+    setAppTimeZone("America/Chicago");
+    try {
+      const buf = await buildHistoryWorkbook({ include: ["spl"] });
+      const { rows } = await sheetOf(buf, "SPL");
+      // 09:00Z is 04:00 in Chicago (CDT, -0500).
+      assert.equal(String(rows[0]!["Service time"]), "4:00 AM");
+    } finally {
+      setAppTimeZone(null);
+    }
   });
 });

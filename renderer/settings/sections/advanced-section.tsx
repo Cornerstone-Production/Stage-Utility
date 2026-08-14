@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon } from "lucide-react";
@@ -106,6 +107,10 @@ function UpdatesPanel({
   // Merged but not yet released — CI still running, or red. Only worth saying when
   // there is nothing to install, otherwise it competes with the update itself.
   const unreleased = s?.tagBased ? (s.unreleasedCommits ?? 0) : 0;
+  // A release that exists but cannot be installed here yet — archives still
+  // uploading, or the Homebrew tap not regenerated. Same idea as `unreleased`,
+  // one step further along the pipeline.
+  const awaiting = s?.awaitingPackage ?? null;
   const [trackSel, setTrackSel] = useState<string | null>(null);
   // Update lock — a live service / active recording blocks self-updates (which
   // restart the process) unless overridden. Re-checked whenever a service goes
@@ -149,7 +154,7 @@ function UpdatesPanel({
   async function onRestart() {
     const doRestart = () =>
       void invoke("update:restart").catch((e) =>
-        window.alert(`Restart failed: ${e instanceof Error ? e.message : String(e)}`),
+        window.alert(`Restart failed: ${errorMessage(e)}`),
       );
     // Locked during a live service / recording, same as self-update — a manual
     // restart interrupts displays too. Overridable for a genuine emergency.
@@ -191,16 +196,19 @@ function UpdatesPanel({
     );
     if (ok) {
       void invoke("update:setTrack", { branch, override: locked }).catch((e) =>
-        window.alert(`Track switch failed: ${e instanceof Error ? e.message : String(e)}`),
+        window.alert(`Track switch failed: ${errorMessage(e)}`),
       );
     }
   }
 
-  // Not a git checkout → can't self-update. Only show this once a check has
-  // actually confirmed it (lastCheckedAt set) — otherwise a freshly-restarted
-  // server briefly serves the default `isGitRepo:false` and flashes this banner
-  // before the first check runs.
-  if (s && !s.isGitRepo && s.lastCheckedAt) {
+  // No usable updater → say so. Gated on canUpdate, NOT on isGitRepo: a Homebrew
+  // or tarball install is not a checkout and updates perfectly well through its
+  // own strategy. Keying this off isGitRepo told exactly those installs to update
+  // from the command line while a working updater sat behind the message.
+  //
+  // Only shown once a check has confirmed it (lastCheckedAt set) — otherwise a
+  // freshly-restarted server flashes this before the first check runs.
+  if (s && s.canUpdate === false && s.lastCheckedAt) {
     return (
       <FieldSet>
         <FieldGroup>
@@ -208,8 +216,9 @@ function UpdatesPanel({
             <FieldContent>
               <FieldLabel>Software updates</FieldLabel>
               <FieldDescription>
-                This install isn't a git checkout, so in-app updates aren't available. Update from the
-                command line on the server (see INSTALL.md). Current version: v{s.version}.
+                {s.updateBlockedReason ??
+                  "In-app updates aren't available for this install. Update from the command line on the server (see INSTALL.md)."}{" "}
+                Current version: v{s.version}.
               </FieldDescription>
             </FieldContent>
           </Field>
@@ -301,14 +310,21 @@ function UpdatesPanel({
             ) : null}
 
             {/* Last apply result */}
-            {!updating && s?.lastResult && !s.lastResult.ok ? (
+            {/* Never beside the success banner. The version handshake is ground
+                truth — the server demonstrably came back on a new version — while
+                the result file is a claim written by the run that restarted it,
+                and a strategy can write "failed" for a step that happened after
+                the new build was already live. Showing both left the operator
+                reading "Update installed successfully" directly above "Last
+                update failed" for the same run. */}
+            {!justUpdated && !updating && s?.lastResult && !s.lastResult.ok ? (
               <p className="mt-1 flex items-start gap-1.5 text-caption2 text-red-10">
                 <AlertTriangleIcon className="size-3.5 shrink-0 mt-0.5" />
                 Last update failed{s.lastResult.finishedAt ? ` (${new Date(s.lastResult.finishedAt).toLocaleString()})` : ""}.
                 {s.lastResult.log ? ` ${s.lastResult.log.split("\n").filter(Boolean).slice(-1)[0]}` : ""}
               </p>
             ) : null}
-            {!justUpdated && s && available === 0 && !updating && (!s.lastResult || s.lastResult.ok) ? (
+            {!justUpdated && s && available === 0 && !awaiting && !updating && (!s.lastResult || s.lastResult.ok) ? (
               <p className="mt-1 flex items-center gap-1.5 text-caption2 text-green-10">
                 <CheckCircle2Icon className="size-3.5" /> You're on the latest release.
               </p>
@@ -316,7 +332,16 @@ function UpdatesPanel({
             {/* Work is merged but not released. Normal for a few minutes while the
                 release build runs; if it persists, that build failed and the track
                 is stalled — which should read as "waiting", not "up to date". */}
-            {!updating && available === 0 && unreleased > 0 ? (
+            {/* The package for a published release is still being built. Normal for
+                a few minutes after a release; if it persists, that build failed —
+                which must read as "waiting", not "up to date". */}
+            {!updating && available === 0 && awaiting ? (
+              <p className="mt-1 text-caption2 text-gray-9">
+                {awaiting} has been released, but the {s?.trackSource === "formula" ? "Homebrew package" : "download"} for
+                it isn't ready yet. It usually appears within a few minutes.
+              </p>
+            ) : null}
+            {!updating && available === 0 && !awaiting && unreleased > 0 ? (
               <p className="mt-1 text-caption2 text-gray-9">
                 {unreleased} commit{unreleased === 1 ? "" : "s"} merged since {s?.targetTag} and not yet
                 released. Updates arrive once the release build passes.
@@ -362,7 +387,12 @@ function UpdatesPanel({
             </FieldContent>
             <div className="flex items-center gap-2">
               <Select value={trackSel ?? s.branch ?? ""} onValueChange={setTrackSel} disabled={updating}>
-                <SelectTrigger className="w-28" aria-label="Update track"><SelectValue /></SelectTrigger>
+                {/* Placeholder rather than a default: the track is unknown on an
+                    install whose layout we cannot read, and showing "main" there
+                    is how a beta box came to report itself as stable. */}
+                <SelectTrigger className="w-28" aria-label="Update track">
+                  <SelectValue placeholder="unknown" />
+                </SelectTrigger>
                 <SelectContent>
                   {s.tracks.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                 </SelectContent>
@@ -504,7 +534,7 @@ function AutoBackupPanel() {
       const next = await invoke<BackupSchedule>("backup:setSchedule", partial);
       queryClient.setQueryData(["backup:schedule"], next);
     } catch (e) {
-      toast.error(`Couldn't save: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Couldn't save: ${errorMessage(e)}`);
     }
   }
 
@@ -516,7 +546,7 @@ function AutoBackupPanel() {
       if (next.lastError) toast.error(`Backup failed: ${next.lastError}`);
       else toast.success("Backup written.");
     } catch (e) {
-      toast.error(`Backup failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Backup failed: ${errorMessage(e)}`);
     } finally {
       setBusy(false);
     }
@@ -645,7 +675,7 @@ function ConfigSnapshotPanel() {
       await refresh();
       toast.success("Snapshot saved.");
     } catch (e) {
-      toast.error(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Save failed: ${errorMessage(e)}`);
     } finally {
       setBusy(false);
     }
@@ -657,7 +687,7 @@ function ConfigSnapshotPanel() {
       await invoke("config:recallSnapshot", { id });
       toast.success("Restoring… the server is restarting.");
     } catch (e) {
-      toast.error(`Recall failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Recall failed: ${errorMessage(e)}`);
     }
   }
 
@@ -667,7 +697,7 @@ function ConfigSnapshotPanel() {
       await invoke("config:deleteSnapshot", { id });
       await refresh();
     } catch (e) {
-      toast.error(`Delete failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Delete failed: ${errorMessage(e)}`);
     }
   }
 
@@ -681,7 +711,7 @@ function ConfigSnapshotPanel() {
         toast.success("Restoring… the server is restarting.");
       }
     } catch (err) {
-      toast.error(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Import failed: ${errorMessage(err)}`);
     } finally {
       if (fileRef.current) fileRef.current.value = "";
     }
@@ -757,6 +787,95 @@ function ConfigSnapshotPanel() {
   );
 }
 
+/**
+ * The zone the server makes wall-clock decisions in.
+ *
+ * Worth a control of its own because the failure it prevents is invisible: a
+ * server left on UTC (the default on most Linux images and every container) rolls
+ * its date at 7pm in Chicago, which once stopped every recorder in the middle of a
+ * live service. Showing the host's own zone next to a live clock makes a wrong one
+ * obvious at a glance, instead of at 7pm on a Sunday.
+ */
+function TimezoneField({
+  timezone,
+  hostTimezone,
+  onChange,
+}: {
+  timezone: string | null;
+  hostTimezone: string;
+  onChange: (tz: string | null) => Promise<void>;
+}) {
+  const FOLLOW = "__host__";
+  const zones = (() => {
+    // supportedValuesOf is widely available but not universal; fall back to the
+    // zones we can name rather than rendering an empty picker.
+    const f = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
+    const all = typeof f === "function" ? f("timeZone") : [];
+    if (all.length) return all;
+    const browser = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return Array.from(new Set([hostTimezone, browser, "UTC"].filter(Boolean)));
+  })();
+
+  const effective = timezone ?? hostTimezone;
+  // A live clock in the chosen zone — the fastest way to confirm it is right.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const reads = (() => {
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        timeZone: effective,
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).format(new Date(now));
+    } catch {
+      return "—";
+    }
+  })();
+
+  return (
+    <Field orientation="horizontal">
+      <FieldContent>
+        <FieldLabel>
+          Time zone
+          <InfoHint className="ml-1.5 align-middle">
+            Everything the server decides by the clock reads this: which day a service is
+            filed under, the update window, and the day-of-week and time-of-day automation
+            conditions. Recording a live service does not — once Planning Center reports a
+            service live, nothing time-based can stop it being recorded.
+          </InfoHint>
+        </FieldLabel>
+        <FieldDescription>
+          The server clock reads <span className="font-mono">{hostTimezone}</span>. Set this
+          if that is not your local zone — servers commonly run UTC.
+          {" "}Now: <span className="font-mono tabular-nums">{reads}</span>
+        </FieldDescription>
+      </FieldContent>
+      <Select
+        value={timezone ?? FOLLOW}
+        onValueChange={(v: string) => void onChange(v === FOLLOW ? null : v)}
+      >
+        <SelectTrigger className="w-64" aria-label="Time zone">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={FOLLOW}>Follow server clock ({hostTimezone})</SelectItem>
+          {zones.map((z) => (
+            <SelectItem key={z} value={z}>
+              {z}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
 export function AdvancedSection({
   stageState,
   updateStatus,
@@ -782,7 +901,7 @@ export function AdvancedSection({
   const tw = stageState.taperWindow ?? { preMin: 60, postMin: 60 };
 
   return (
-    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
+    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       <UpdatesPanel
         updateStatus={updateStatus}
         autoUpdate={stageState.autoUpdate ?? DEFAULT_AUTO_UPDATE}
@@ -876,6 +995,16 @@ export function AdvancedSection({
               </Field>
             </>
           )}
+        </FieldGroup>
+      </FieldSet>
+
+          <FieldSet flat>
+        <FieldGroup>
+          <TimezoneField
+            timezone={stageState.timezone ?? null}
+            hostTimezone={stageState.hostTimezone ?? "UTC"}
+            onChange={handlers.handleSetTimezone}
+          />
         </FieldGroup>
       </FieldSet>
 

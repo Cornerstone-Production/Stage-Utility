@@ -18,6 +18,8 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { getUserDataPath } from "./app-paths.js";
+import { registerStore, type StoreClass } from "./store-registry.js";
+import { atomicWrite } from "./write-queue.js";
 
 /** Everything this store holds is addressed by `serviceKey`. */
 export interface Keyed {
@@ -37,17 +39,32 @@ function safeName(key: string): string {
 export class KeyedRecordStore<T extends Keyed> {
   private cache: Map<string, T> | null = null;
   private chain: Promise<unknown> = Promise.resolve();
+  /** In-flight load, so concurrent callers share one directory scan. */
+  private loading: Promise<Map<string, T>> | null = null;
+  /** Bumped by invalidate(), so an in-flight load cannot install a stale cache. */
+  private loadGeneration = 0;
 
   /**
    * @param dirName   directory under the data dir, e.g. "spl-history"
    * @param legacyFile the single-document file this replaces, migrated on first use
    * @param startedAt  sort key for `list()` — newest first
    */
+  /**
+   * @param classification See DataStore. Registered under the LEGACY
+   *   single-document filename, which still exists on older installs — so a
+   *   snapshot reading it by name would silently capture that stale document and
+   *   none of the per-service files. `kind: "directory"` is what lets
+   *   configSnapshot refuse that rather than write a backup missing most of its
+   *   content.
+   */
   constructor(
     private readonly dirName: string,
     private readonly legacyFile: string,
     private readonly startedAt: (r: T) => string,
-  ) {}
+    classification: StoreClass,
+  ) {
+    registerStore({ filename: legacyFile, classification, kind: "directory" });
+  }
 
   private dir(): string {
     return path.join(getUserDataPath(), this.dirName);
@@ -101,16 +118,35 @@ export class KeyedRecordStore<T extends Keyed> {
   private async writeOne(record: T): Promise<void> {
     const dir = this.dir();
     await fs.mkdir(dir, { recursive: true });
-    const file = path.join(dir, safeName(record.serviceKey));
-    // Atomic: a reader never sees a partial file, and an interrupted write leaves
-    // the previous one intact. Same reasoning as DataStore.
-    const tmp = `${file}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(record, null, 2), "utf8");
-    await fs.rename(tmp, file);
+    // Through the shared helper, which names its scratch file uniquely. The
+    // fixed `${file}.tmp` this used is the exact shape write-queue.ts exists to
+    // remove: two writers to one key share the temp path, writeFile is not
+    // atomic, and the first rename promotes a spliced file. DataStore and
+    // secrets were converted; the store holding every recorded service was
+    // missed — the same fix applied to two of its three call sites.
+    await atomicWrite(path.join(dir, safeName(record.serviceKey)), JSON.stringify(record, null, 2));
   }
 
   private async loadAll(): Promise<Map<string, T>> {
     if (this.cache) return this.cache;
+    // Concurrent callers share one load. list() and get() are not on the write
+    // queue, so two arriving together each ran the whole read AND migrateLegacy
+    // — which renames the legacy file out from under the other and writes the
+    // same per-key files twice.
+    if (!this.loading) {
+      this.loading = this.loadOnce().finally(() => {
+        this.loading = null;
+      });
+    }
+    return this.loading;
+  }
+
+  private async loadOnce(): Promise<Map<string, T>> {
+    // Captured before the awaits. invalidate() bumps it, so a load already in
+    // flight when an import rewrites the directory returns its (now stale) map
+    // to whoever asked but does NOT install it as the cache — which would
+    // silently undo the invalidation it raced.
+    const gen = this.loadGeneration;
     const map = new Map<string, T>();
     let names: string[] = [];
     try {
@@ -128,7 +164,7 @@ export class KeyedRecordStore<T extends Keyed> {
       }
     }
     await this.migrateLegacy(map);
-    this.cache = map;
+    if (gen === this.loadGeneration) this.cache = map;
     return map;
   }
 
@@ -165,5 +201,7 @@ export class KeyedRecordStore<T extends Keyed> {
   /** Drop the in-memory copy — used after an import writes files behind our back. */
   invalidate(): void {
     this.cache = null;
+    this.loading = null;
+    this.loadGeneration += 1;
   }
 }

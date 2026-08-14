@@ -4,14 +4,11 @@
 import type { OscTargetConfig } from "../types/osc.js";
 import { DataStore } from "./data-store.js";
 
-const store = new DataStore<OscTargetConfig[]>("osc-targets.json", []);
-
-export const oscStore = {
-  async load(): Promise<OscTargetConfig[]> {
-    return store.load();
-  },
-
-  async save(targets: OscTargetConfig[]): Promise<void> {
-    return store.save(targets);
-  },
-};
+/**
+ * This IS the DataStore — there is no wrapper.
+ *
+ * The object that used to sit here forwarded load() and save() verbatim and
+ * added nothing else, in seven files. It had to be edited every time the store's
+ * own API grew, and it hid update() and reload() from callers for no reason.
+ */
+export const oscStore = new DataStore<OscTargetConfig[]>("osc-targets.json", [], "config");

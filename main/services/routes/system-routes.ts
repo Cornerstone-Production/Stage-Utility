@@ -5,9 +5,11 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, readBody } from "./context.js";
+import { errorMessage } from "../errors.js";
+import { type RouteCtx, json, error, readBody, readBodyOrEmpty, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
+import { exitForRestart } from "../update/relaunch.js";
 import { backupScheduler } from "../backup-scheduler.js";
 import { configSnapshot } from "../config-snapshot.js";
 import { splRecorder } from "../spl-recorder.js";
@@ -29,9 +31,12 @@ function serviceActivity(): { active: boolean; reasons: string[] } {
   return { active: reasons.length > 0, reasons };
 }
 
-/** Exit shortly after replying, so the service manager restarts us. */
+/** Exit shortly after replying, so the service manager restarts us. On launchd
+ *  the exit alone is not enough — it parks KeepAlive respawns ("pended
+ *  nondemand spawn = inefficient") — so a detached kickstart rides along. A
+ *  config restore once left a Homebrew box dark exactly this way. */
 function scheduleRestart(): void {
-  setTimeout(() => process.exit(0), 1200);
+  exitForRestart(1200);
 }
 
 export async function systemRoutes(c: RouteCtx): Promise<void> {
@@ -50,7 +55,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/update/apply") {
-      const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+      const body = await readBodyOrEmpty(req);
       const lock = serviceActivity();
       if (lock.active && body.override !== true) {
         json(res, { error: "locked", locked: true, reasons: lock.reasons }, 409);
@@ -119,6 +124,17 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    if (method === "POST" && pathname === "/api/timezone") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const tz = typeof body.timezone === "string" ? body.timezone : null;
+      try {
+        json(res, await stageController.setTimezone(tz));
+      } catch (err) {
+        json(res, { error: errorMessage(err) }, 400);
+      }
+      return;
+    }
+
     // ── Config snapshot (backup / restore) ──────────────────────────────────
     // Download the full config (secrets excluded) as a .json file.
     if (method === "GET" && pathname === "/api/config/export") {
@@ -133,7 +149,9 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     }
     // Restore an uploaded config bundle, then restart to apply.
     if (method === "POST" && pathname === "/api/config/import") {
-      const body = await readBody(req) as Record<string, unknown>;
+      // A snapshot carries every config file and every uploaded image, base64'd,
+      // so the ordinary JSON ceiling would refuse a bundle this app exported.
+      const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown>;
       const bundle = "bundle" in body ? body.bundle : body;
       try {
         const applied = await configSnapshot.apply(bundle);

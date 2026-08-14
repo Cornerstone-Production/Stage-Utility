@@ -1,0 +1,49 @@
+# Does the updater survive its own service teardown?
+#
+# The unit tests prove the app ASKS for the right thing. They prove nothing about
+# whether the work finishes once the service running it dies - which is the part
+# that differs per platform and the part that breaks a machine when it is wrong.
+#
+# These run on GitHub-hosted runners because they are full VMs with real service
+# managers: systemd on ubuntu, launchd on macOS, Task Scheduler on Windows. That
+# matters beyond convenience - without it the systemd and Windows paths would be
+# written on a Mac and verified nowhere, which is how the cgroup difference
+# between launchd and systemd would have reached a live service.
+name: survival
+
+on:
+  push:
+    paths:
+      - "scripts/survival/**"
+      - "main/services/update/**"
+      - "main/services/updater.ts"
+      - "install.sh"
+      - "install.ps1"
+      - ".github/workflows/survival.yml"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  survival:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            run: bash scripts/survival/run-linux.sh
+          - os: macos-latest
+            run: bash scripts/survival/run-macos.sh
+          - os: windows-latest
+            run: pwsh scripts/survival/run-windows.ps1
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Survival test
+        run: ${{ matrix.run }}

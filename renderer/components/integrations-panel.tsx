@@ -1,3 +1,4 @@
+import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification } from "../lib/api";
 import { Tooltip } from "./ui/tooltip";
 import { useStageState } from "../main/use-stage-state";
@@ -219,6 +220,13 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
       console.log("[IntegrationsPanel:save]", descriptor.id, Object.keys(config));
       const next = await ipc<IntegrationState>("integrations:setConfig", { id: descriptor.id, config });
       onStateChange(next);
+      // Re-seed the form from what was actually saved. `dirty` compares the form
+      // against initialConfig(state), and that is not always what was typed: a
+      // password comes back MASKED, and any value the backend normalises comes
+      // back in its own form. Leaving the typed value in place made the two
+      // permanently unequal, so "Unsaved changes" stayed up after a successful
+      // save — most visibly after changing a secret.
+      setLocalConfig(initialConfig(descriptor, next));
       toast.success(`${descriptor.label} settings saved.`);
     } catch (err) {
       console.error("[IntegrationsPanel:save] error", err);
@@ -256,7 +264,11 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    // Getting-started sends "Connect Planning Center" straight at this card's form.
+    <div
+      className="flex flex-col gap-3"
+      data-flash-id={descriptor.id === "planning-center" ? "pco-credentials" : undefined}
+    >
       {/* Schema-driven form */}
       <FieldSet flat>
         <FieldGroup>
@@ -426,7 +438,7 @@ function SenSourceScopePicker({
     try {
       setLocations(await invoke<{ locationId: string; name: string }[]>("sensource:listLocations"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -438,7 +450,7 @@ function SenSourceScopePicker({
     try {
       setZones(await invoke<VeaZone[]>("sensource:listZones"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setZonesLoading(false);
     }
@@ -457,7 +469,7 @@ function SenSourceScopePicker({
         setLocations(locs);
         setZones(zs);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(errorMessage(err));
       } finally {
         if (!cancelled) {
           setLoading(false);

@@ -22,6 +22,12 @@ and carries its own host / port / channel-count config:
 State broadcasts on the `wireless:connections-changed` SSE channel (connection
 list + runtime status). Charger bays flow through the shared stage state.
 
+Where a driver needs a password — Spectera's base-station API password — it is
+kept in the encrypted `secrets.bin`, not in `wireless-connections.json`, so it is
+excluded from config snapshots like every other credential. The API and the SSE
+channel report it as `••••` when set and `""` when not; saving the mask back
+leaves it unchanged, and saving an empty value clears it.
+
 ## Setup
 
 **On the gear:** give each receiver / charger a static IP and enable its network
@@ -37,3 +43,11 @@ meter rate is set once and applies to all wireless gear.
 - **Wireless channel** — one channel's RF bars, battery %, frequency, audio level
   (each toggleable).
 - **Charger battery** — a charger bay's battery state.
+
+## Reconnecting
+
+A receiver that drops is retried with a growing back-off, clamped to the service
+window — so gear nobody is looking at is not polled hard all week. Opening the
+Wireless Gear panel overrides that: while you are watching, retries stay brisk
+regardless of the window, so a pack you are waiting on comes back promptly rather
+than on the dormant schedule.

@@ -21,7 +21,15 @@ import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
  * what that service is.
  *
  * Null when nothing is open — the caller records no key rather than a guessed one.
+ *
+ * "Open" means `endedAt == null`, not merely "a record exists". The recorder holds
+ * its last record indefinitely — deliberately, since the taper and the resume path
+ * both need it after the service closes — so testing for the record's presence
+ * returned Sunday's key for the rest of the week. A baptism run on the Wednesday
+ * was stamped with the 11am's identity and linked onto that service in History.
  */
 export function currentServiceKey(): string | null {
-  return serviceTimelineRecorder.getCurrent()?.serviceKey ?? null;
+  const record = serviceTimelineRecorder.getCurrent();
+  if (!record || record.endedAt != null) return null;
+  return record.serviceKey;
 }

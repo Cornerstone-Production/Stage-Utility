@@ -1,9 +1,9 @@
-import { invoke, onNotification } from "../lib/api";
+import { invoke, onNotification, type ApiError } from "../lib/api";
 import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { buildLabel } from "../lib/build-label";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { useState, useEffect, useRef, useMemo, Fragment } from "react";
-import { PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { useState, useEffect, useRef, Fragment } from "react";
+import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import {
   SplitView,
@@ -16,6 +16,7 @@ import {
   Tooltip,
   toast,
   ErrorBoundary,
+  confirm,
 } from "../components/ui";
 import {
   Loader2Icon,
@@ -330,10 +331,15 @@ export function SettingsView() {
     applyAccentVar(stageState?.accentColor);
   }, [stageState?.accentColor]);
 
-  // Fetch all service types
+  // Fetch all service types. Gated on PCO being configured, as the plan and
+  // team-position queries below already are: without credentials the request can
+  // only fail, and it was retrying on every settings load — filling the server log
+  // with "PCO not configured" handler errors on a machine that simply has not been
+  // set up yet.
   const { data: serviceTypes = [] } = useQuery({
     queryKey: ["stage:listServiceTypes"],
     queryFn: () => ipc<ServiceTypeDTO[]>("stage:listServiceTypes"),
+    enabled: !!stageState?.pcoConfigured,
   });
 
   // Fetch plans (depends on selected service type)
@@ -371,30 +377,12 @@ export function SettingsView() {
     queryFn: () => ipc<SlotPreset[]>("presets:list"),
   });
 
-  // The unified History tab shows whenever PCO is configured or there's any recorded
-  // data (service timing, attendance, or SPL) — so past history stays reachable even
-  // after the recording integration is powered off/disabled.
-  const { data: splHistoryList } = useQuery({
-    queryKey: ["spl:listHistory"],
-    queryFn: () => ipc<ServiceSplHistory[]>("spl:listHistory"),
-  });
-  const { data: attendanceList } = useQuery({
-    queryKey: ["attendance:listHistory"],
-    queryFn: () => ipc<ServiceAttendance[]>("attendance:listHistory"),
-  });
-  const { data: timelineList } = useQuery({
-    queryKey: ["serviceTimeline:list"],
-    queryFn: () => ipc<ServiceTimeline[]>("serviceTimeline:list"),
-  });
-  const showHistory =
-    (stageState?.pcoConfigured ?? false) ||
-    (timelineList?.length ?? 0) > 0 ||
-    (attendanceList?.length ?? 0) > 0 ||
-    (splHistoryList?.length ?? 0) > 0;
-  const sections = useMemo(
-    () => SECTIONS.filter((s) => s.id !== "service-history" || showHistory),
-    [showHistory],
-  );
+  // Every section is always in the nav. History used to be hidden until PCO was
+  // configured or some history existed, which meant a fresh install offered it on
+  // the landing page and the Connect tab while the sidebar pretended it did not
+  // exist — the tab looked missing rather than empty. An empty section explains
+  // itself; an absent one reads as a bug.
+  const sections = SECTIONS;
 
   // In-app update status (git-based; surfaced in the Advanced tab).
   const { data: updateStatus = null } = useQuery({
@@ -575,8 +563,21 @@ export function SettingsView() {
     return unsub;
   }, [queryClient]);
 
-  // DnD sensors
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // DnD sensors — mouse and touch deliberately separate.
+  //
+  // A single PointerSensor treats them identically: it claims the gesture on
+  // touch-down and waits to see whether you move far enough to be dragging,
+  // which is exactly the window in which the page cannot scroll. On a phone
+  // that made the Displays and Views lists unscrollable, because every swipe
+  // that began on a card started as a maybe-drag.
+  //
+  // Distance works for a mouse, where a click is a distinct act from a drag.
+  // Touch needs TIME instead: hold briefly to drag, swipe to scroll. 200ms is
+  // short enough to feel deliberate and long enough that a flick never trips it.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  );
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -666,9 +667,33 @@ export function SettingsView() {
   }
 
   // Jump to another settings section (with the same crossfade as the sidebar).
-  function navigateToSection(id: string) {
+  /**
+   * Switch tabs, and optionally point at the control that actually does the job.
+   *
+   * Landing on the right tab still leaves you hunting for the field, which on a
+   * dense tab like Integrations is most of the work. `flash` names a
+   * `data-flash-id` somewhere in the destination; once it has rendered, it is
+   * scrolled into view and outlined briefly. Matching by attribute rather than by
+   * ref means a section needs only to label its target, not export anything.
+   */
+  function navigateToSection(id: string, flash?: string) {
     const sec = sections.find((s) => s.id === id);
-    if (sec) withViewTransition(() => setActiveSection(sec));
+    if (!sec) return;
+    withViewTransition(() => setActiveSection(sec));
+    if (!flash) return;
+    // Two frames: one for React to commit the new section, one for layout to
+    // settle so scrollIntoView lands somewhere real.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const el = document.querySelector<HTMLElement>(`[data-flash-id="${flash}"]`);
+        if (!el) return;
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.remove("su-flash");
+        void el.offsetWidth; // restart the animation if it is already running
+        el.classList.add("su-flash");
+        window.setTimeout(() => el.classList.remove("su-flash"), 2000);
+      }),
+    );
   }
 
   async function handleSetPublicUrl(url: string | null) {
@@ -685,8 +710,13 @@ export function SettingsView() {
     try {
       const status = await ipc<UpdateStatus>("update:check");
       queryClient.setQueryData(["update:status"], status);
-      if (!status.isGitRepo) toast.error("Not a git install — update from the command line.");
-      else if (status.error) toast.error(`Update check failed: ${status.error}`);
+      // canUpdate, NOT isGitRepo: a Homebrew or tarball install is not a git
+      // checkout and checks fine. Keying this toast off isGitRepo told every
+      // packaged install "update from the command line" over a check that had
+      // just succeeded — the same bug the backend gate had, one layer up.
+      if (status.canUpdate === false) {
+        toast.error(status.updateBlockedReason ?? "In-app updates are not available for this install.");
+      } else if (status.error) toast.error(`Update check failed: ${status.error}`);
       else if (status.behind > 0) toast.success(`${status.behind} update${status.behind === 1 ? "" : "s"} available.`);
       else toast.success("You're up to date.");
     } catch (err) {
@@ -733,14 +763,6 @@ export function SettingsView() {
     }
   }
 
-  async function handleSetBaptismAutoStart(partial: { enabled?: boolean; testimonyKeyword?: string }) {
-    try {
-      const next = await ipc<StageState>("settings:setBaptismAutoStart", partial);
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to update baptism auto-start: ${String(err)}`);
-    }
-  }
 
   async function handleSetTaperWindow(partial: { preMin?: number; postMin?: number }) {
     try {
@@ -748,6 +770,15 @@ export function SettingsView() {
       queryClient.setQueryData(["stage:getState"], next);
     } catch (err) {
       toast.error(`Failed to update taper settings: ${String(err)}`);
+    }
+  }
+
+  async function handleSetTimezone(tz: string | null) {
+    try {
+      const next = await ipc<StageState>("settings:setTimezone", { timezone: tz });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to set the time zone: ${String(err)}`);
     }
   }
 
@@ -944,11 +975,44 @@ export function SettingsView() {
     }
   }
 
-  async function handleSetViewLayout(id: string, layout: LayoutDTO) {
+  const revOf = (s: StageState | undefined, id: string) =>
+    s?.views?.find((v) => v.id === id)?.layoutRev ?? 0;
+
+  async function handleSetViewLayout(
+    id: string,
+    layout: LayoutDTO,
+    layoutRev?: number,
+  ): Promise<{ rev: number; discarded: boolean }> {
     try {
-      const next = await ipc<StageState>("views:setLayout", { id, layout });
+      const next = await ipc<StageState>("views:setLayout", { id, layout, layoutRev });
       queryClient.setQueryData(["stage:getState"], next);
+      return { rev: revOf(next, id), discarded: false };
     } catch (err) {
+      // 409: someone else saved this view since this editor opened it. Neither
+      // outcome is safe to pick automatically — one loses their work, the other
+      // loses yours — so the person who can see both decides.
+      if ((err as ApiError).code === "layout-conflict") {
+        const overwrite = await confirm({
+          title: "Someone else changed this view",
+          message: `${(err as Error).message} Overwrite their version with yours, or discard your changes and load theirs?`,
+          confirmLabel: "Overwrite theirs",
+          cancelLabel: "Keep theirs",
+          destructive: true,
+        });
+        if (overwrite) {
+          // No layoutRev = save unconditionally. Deliberate, and only reachable
+          // from the dialog above.
+          const next = await ipc<StageState>("views:setLayout", { id, layout });
+          queryClient.setQueryData(["stage:getState"], next);
+          toast.success("Layout saved, replacing the other version.");
+          return { rev: revOf(next, id), discarded: false };
+        }
+        await queryClient.invalidateQueries({ queryKey: ["stage:getState"] });
+        toast.success("Loaded their version. Your changes were discarded.");
+        // Not an error to the caller — a chosen outcome. `discarded` tells the
+        // editor to restart on the layout it just pulled.
+        return { rev: revOf(queryClient.getQueryData<StageState>(["stage:getState"]), id), discarded: true };
+      }
       toast.error(`Failed to save layout: ${String(err)}`);
       throw err;
     }
@@ -1001,7 +1065,7 @@ export function SettingsView() {
     try {
       // Persist any pending editor edits first so the preset captures what's on screen.
       if (slotsDirty) await saveSlots();
-      const presets = await ipc<SlotPreset[]>("presets:save", { name, displayId: selectedViewId });
+      const presets = await ipc<SlotPreset[]>("presets:save", { name, viewId: selectedViewId });
       queryClient.setQueryData(["presets:list"], presets);
       toast.success(`Saved arrangement "${name}".`);
     } catch (err) {
@@ -1011,9 +1075,21 @@ export function SettingsView() {
 
   async function handleApplyPreset(id: string) {
     try {
-      const next = await ipc<StageState>("presets:apply", { id, displayId: selectedViewId });
+      const next = await ipc<StageState & { appliedViewId?: string }>("presets:apply", {
+        id,
+        viewId: selectedViewId,
+      });
       queryClient.setQueryData(["stage:getState"], next);
-      const viewSlots = next.slotsByView?.[selectedViewId] ?? [];
+      // Read back the view the SERVER says it wrote, not the one we asked for.
+      // Those differed when an output shared an id with a view, and reading the
+      // requested id showed the unchanged slots — a silent no-op under a success
+      // toast. If they still differ, that is a bug worth surfacing, not hiding.
+      const appliedTo = next.appliedViewId ?? selectedViewId;
+      if (appliedTo !== selectedViewId) {
+        toast.error(`Arrangement went to "${appliedTo}", not the view you are editing. Nothing was changed here.`);
+        return;
+      }
+      const viewSlots = next.slotsByView?.[appliedTo] ?? [];
       setLocalSlots([...viewSlots].sort((a, b) => a.order - b.order));
       setSlotsDirty(false);
       toast.success("Arrangement applied.");
@@ -1185,7 +1261,7 @@ export function SettingsView() {
     handleSetAutoUpdate,
     handleSetReconnectSchedule,
     handleSetTaperWindow,
-    handleSetBaptismAutoStart,
+    handleSetTimezone,
     handleSetAllowedServiceTypes,
     handleSetBranding,
     updateSlot,
@@ -1284,19 +1360,19 @@ export function SettingsView() {
         return <BrandingSection stageState={stageState} handlers={handlers} />;
       case "service-history":
         return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
             <ServiceHistorySection key={historyNonce} />
           </div>
         );
       case "baptisms":
         return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
             <BaptismsSection />
           </div>
         );
       case "patch":
         return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]">
+          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
             <PatchSection />
           </div>
         );

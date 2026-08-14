@@ -17,11 +17,36 @@
 // anchor question the version calculation answers.
 
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
 
 const [, , version, fromRef] = process.argv;
 if (!version) {
   console.error("usage: release-notes.mjs <version> [from-ref]");
   process.exit(1);
+}
+
+/**
+ * A hand-written notice for one release, prepended above everything generated.
+ *
+ * Some releases need a sentence no commit range can produce — "this one needs
+ * a manual step", "this changes where X lives". Generated notes cannot know
+ * that, and a note remembered at release time is a note eventually forgotten,
+ * so it lives in the repo next to the change that made it necessary.
+ *
+ * docs/release-notes/1.10.0.md → shown on the v1.10.0 release, and nowhere else.
+ */
+function upgradeNotice(v) {
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  try {
+    // Trailing newline restored after the trim: the generated sections each end
+    // in one and are joined with another, which is what puts a blank line
+    // between them. A fully-trimmed notice left the next heading butted
+    // straight onto its last line of prose.
+    return readFileSync(path.join(here, "..", "docs", "release-notes", `${v}.md`), "utf8").trim() + "\n";
+  } catch {
+    return ""; // the ordinary case: nothing special about this release
+  }
 }
 
 /** Commit types that change nothing an operator could notice. */
@@ -81,9 +106,16 @@ function section(title, items) {
 
 const install = `## Install
 
+Two supported ways in. Pick whichever suits the machine.
+
+**Linux and macOS** — one line, registers an auto-starting service
+
 \`\`\`bash
 curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.sh | sudo bash
 \`\`\`
+
+**Windows** — in an Administrator PowerShell
+
 \`\`\`powershell
 irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.ps1 | iex
 \`\`\`
@@ -93,6 +125,7 @@ running it? Update from **Settings → Advanced → Updates**.
 `;
 
 const parts = [
+  upgradeNotice(version),
   breaking.length ? section("Breaking", breaking) : "",
   section("New", features),
   section("Fixed", fixes),

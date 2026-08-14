@@ -12,6 +12,12 @@ connection to `GET /api/v1/transcript/stream`, normalises each event into a
 `TranscriptLineDTO`, keeps a rolling buffer (up to 100 lines), and re-broadcasts
 on the `prodcom:transcript` channel. It reconnects (~4 s) if the stream drops.
 
+A dropped cable or a switch port going down leaves the socket half-open — no
+close arrives, so nothing would notice. TCP keepalive probes the box every 30s
+once the stream is quiet and reconnects when it stops answering, which is why a
+silent room does not trip it: a live box answers the probe whether or not anyone
+is speaking.
+
 Transcript field names aren't in ProdCom's public docs, so `normalizeLine()`
 parses defensively — trying several likely field names, degrading to raw text,
 and never throwing. Interim partials (many per second while someone speaks) are

@@ -2,6 +2,7 @@
 // Holds descriptors + config + state; persist non-secret via settingsStore,
 // secrets via secretsStore; broadcasts "integrations:state-changed".
 
+import { errorMessage } from "./errors.js";
 import type { IntegrationDescriptor, IntegrationState } from "../types/integrations.js";
 import { scrub } from "./scrub.js";
 import type { PeopleCountDTO } from "../types/stage.js";
@@ -571,9 +572,22 @@ class IntegrationManager {
       // Validate against PCO and, if it accepts, load the lineup so the kiosk
       // updates immediately. A failure reports an error status but never fails
       // the save — the credentials are already persisted either way.
-      if (await this.verifyPcoCredentials()) {
-        await stageController.refresh();
-      }
+      //
+      // Deliberately NOT awaited. The credentials are already on disk by the time
+      // we get here, so everything below is catch-up work for other surfaces, not
+      // part of saving. Awaiting it made the save's HTTP response wait on a full
+      // PCO lineup fetch — service types, plans, items, team positions — which on
+      // a cold cache outruns the renderer's 15s request timeout. The browser then
+      // aborted a save that had ALREADY SUCCEEDED, the settings form never got the
+      // state back to re-seed from, and "Unsaved changes" stayed on screen telling
+      // the operator to save credentials that were sitting safely in secrets.bin.
+      // Saving one thing must not be able to fail on how long a different thing
+      // takes.
+      void this.verifyPcoCredentials()
+        .then((ok) => (ok ? stageController.refresh() : undefined))
+        .catch((err) => {
+          console.error("[integration-manager] post-save PCO refresh failed", err);
+        });
     }
 
     if (id === "propresenter") {
@@ -792,7 +806,7 @@ class IntegrationManager {
 
       return { ok: false, message: `No test available for integration: ${id}` };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       this.setConnectionState(id, "error", msg);
       this.broadcastStates();
       return { ok: false, message: msg };
@@ -1143,9 +1157,16 @@ class IntegrationManager {
       const types = await pcoService.listServiceTypes(appId, secret);
       this.setConnectionState("planning-center", "connected", `Connected — ${types.length} service type(s)`);
       this.broadcastStates();
+      // The poller stands down on an auth failure, and start() is otherwise
+      // called only at boot — so without this, fixing the credentials would
+      // leave the countdown dead until someone restarted the server.
+      // Idempotent: start() is a no-op when it is already running.
+      void import("./live-poller.js")
+        .then((m) => m.livePoller.start())
+        .catch((err) => console.error("[integration-manager] could not restart the live poller:", err));
       return true;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       console.warn(`[integration-manager] PCO credential check failed: ${msg}`);
       this.setConnectionState("planning-center", "error", msg);
       this.broadcastStates();

@@ -2,6 +2,7 @@
 // integration configs (non-secret fields), display options.
 
 import type { BaptismAutoStart, DisplayInfo, Output } from "../types/stage.js";
+import { setAppTimeZone } from "./app-timezone.js";
 import { externalizeBrandingImages } from "./branding-image-store.js";
 import { DataStore } from "./data-store.js";
 
@@ -51,7 +52,14 @@ export interface SettingsData {
   defaultAvatarOriginal: string | null;
   defaultAvatarCrop: { scale: number; x: number; y: number } | null;
   /** Show NDI-related controls (source field, NDI video object). Off by default —
-   *  NDI is only used by the native Apple client. */
+   *  NDI is only used by the native Apple client.
+   *
+   *  Deliberately dormant on this branch, not dead: the NDI UI was removed from
+   *  `main` while the schema stayed, so nothing in renderer/ reads this and the
+   *  only writer is stageController.setNdiEnabled. It reads like an oversight and
+   *  is not one — deleting it costs the migration path back when the Apple client
+   *  lands. Same for a View's `ndiSource`, which layout-renderer and layout-editor
+   *  still read. */
   ndiEnabled: boolean;
   /** Public base URL (e.g. a DNS name behind a reverse proxy) used for the connect
    *  QR code and display links instead of the LAN IP. Null = use the LAN IP. */
@@ -66,6 +74,11 @@ export interface SettingsData {
   reconnectSchedule?: { enabled: boolean; leadMin: number; tailMin: number; dormantMin: number };
   /** Attendance ramp/taper capture windows in minutes (preMin/postMin). */
   taperWindow?: { preMin: number; postMin: number };
+  /** IANA zone every wall-clock decision is made in (schedules, day-of-week and
+   *  time-of-day automation conditions, which day a service files under). Null =
+   *  follow the host clock — fine on a machine set to local time, wrong on the
+   *  UTC default most servers and containers ship with. */
+  timezone?: string | null;
   /** Local UDP port the OSC integration listens on for device feedback. */
   oscFeedbackPort: number;
   /** Smaart metric keys to surface in the SPL History tab (empty = auto default). */
@@ -117,19 +130,28 @@ const DEFAULT_SETTINGS: SettingsData = {
  *  when unset) and the stage state the Advanced tab reads. */
 export const DEFAULT_TAPER_WINDOW = { preMin: 60, postMin: 60 };
 
-const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS);
+const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS, "config");
+
+/** Keep the process-wide zone in step with what was just read or written. Every
+ *  path in and out of settings funnels through here so no caller can forget, and
+ *  a sync `appTimeZone()` (automation conditions, schedules) is always current. */
+function syncTimeZone(data: SettingsData): SettingsData {
+  setAppTimeZone(data.timezone ?? null);
+  return data;
+}
 
 export const settingsStore = {
   async load(): Promise<SettingsData> {
-    return store.load();
+    return syncTimeZone(await store.load());
   },
 
   async save(data: SettingsData): Promise<void> {
+    syncTimeZone(data);
     return store.save(data);
   },
 
   async get(): Promise<SettingsData> {
-    return store.load();
+    return syncTimeZone(await store.load());
   },
 
   async patch(partial: Partial<SettingsData>): Promise<SettingsData> {
@@ -141,6 +163,6 @@ export const settingsStore = {
     // Serialized atomic read-modify-write — prevents a concurrent patch (e.g. the
     // live poller advancing the plan while the operator changes display routing)
     // from clobbering this one's fields.
-    return store.update((current) => ({ ...current, ...clean }));
+    return syncTimeZone(await store.update((current) => ({ ...current, ...clean })));
   },
 };

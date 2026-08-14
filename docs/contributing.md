@@ -113,10 +113,16 @@ the body.
 - Feature work branches off `beta`, never off `main`.
 - **Never force-push `beta` or `main`.** Deployments track `beta` and a rewrite
   breaks their in-app updater.
-- PRs to `main` are opened but never merged without explicit per-PR approval.
-- Pushing directly to `beta` is fine for small changes.
+- **PRs are merged by the maintainer, and only by the maintainer.** An agent
+  never runs `gh pr merge` — verbal approval in conversation is not
+  authorisation. Get CI green, report the PR ready, and stop. (This replaces an
+  earlier "explicit per-PR approval" wording, under which an agent once merged
+  two PRs on a casual "you can merge them".)
+- **Nothing is pushed directly to `beta` or `main`.** Every change — including a
+  one-line fix — goes through a pull request off `beta`. Release automation is the
+  exception: it commits the version bump and tag to those branches by design.
 
-## Before you push
+## Before you open a PR
 
 ```bash
 npm run lint && npm run type-check && npm test && npm run build
@@ -124,6 +130,9 @@ npm run lint && npm run type-check && npm test && npm run build
 
 CI runs the same four. There is one long-standing lint warning
 (`patch-import.tsx:170`); anything beyond that is yours.
+
+Chain them with `&&`, not `;`. With `;` a failure scrolls past and the commit
+lands anyway — that is how a type error once reached `beta`.
 
 ## React state
 

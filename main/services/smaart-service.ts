@@ -8,6 +8,7 @@
 // one SPL stream per input. Readings are throttled before broadcast so an 8 fps
 // meter never re-renders every display 8×/sec.
 
+import { errorMessage } from "./errors.js";
 import type { SplMetricsDTO } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { StatusIntegration } from "./integration-base.js";
@@ -79,7 +80,7 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
         message: `Connected to ${app} ${ver} — ${inputs.length} calibrated input(s)`,
       };
     } catch (err) {
-      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      return { ok: false, message: errorMessage(err) };
     } finally {
       adapter.close();
     }
@@ -115,7 +116,7 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
       );
       this.publish(this.last, true);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       if (this.attempt === 0) console.warn(`[smaart] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
       adapter.close();
@@ -199,9 +200,13 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
       clearTimeout(this.throttleTimer);
       this.throttleTimer = null;
     }
-    // 4 Hz to nobody is wasted work — skip the push when no display renders SPL
-    // meters. Recording is unaffected (it reads this.last, not the broadcast).
-    if (this.hasSubscribers) broadcast(this.channel, snapshot);
+    // 4 Hz to nobody is wasted work — skip the push when nothing is consuming SPL.
+    // Recording is unaffected (it reads this.last, not the broadcast).
+    //
+    // inDemand, not hasSubscribers: the automation engine consumes this channel
+    // in-process, so the subscriber check could not see it and spl.crossed-above
+    // rules never fired unless a browser happened to be rendering a meter.
+    if (this.inDemand) broadcast(this.channel, snapshot);
   }
 }
 

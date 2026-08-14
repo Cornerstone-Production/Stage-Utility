@@ -5,6 +5,12 @@ The HTTP surface. Also what Bitfocus Companion and the automation engine call.
 All endpoints are under `/api`. State-changing routes return the updated
 `StageState`. Live updates arrive on the SSE stream rather than by polling.
 
+Request bodies are capped and a body over the limit is refused with `413` rather
+than being read into memory. The cap depends on what the route carries: 8 MB for
+ordinary JSON, 24 MB where the body is an image (`/api/branding`,
+`/api/layout-images`), 64 MB for a config bundle (`/api/config/import`), and
+128 MB for a binary upload.
+
 **Stage & plan**
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -87,6 +93,31 @@ screens.
 | GET | `/api/obs/status` | OBS streaming / recording / scene state |
 | GET | `/api/baptism` \| `/api/baptism/sessions` | Live baptism state / saved sessions (+ start/next/baptized actions) |
 
+**Correcting a recording**
+
+A recording is one thing stored in three places — per-item timings, SPL and
+attendance — all keyed by the same `serviceKey`. These routes treat it as one
+thing.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| DELETE | `/api/service-timeline/:key` \| `/api/attendance/history/:key` \| `/api/spl/history/:key` | Delete the recording. Any of the three deletes **all three**; the response is `{ deleted, records }` naming what was removed |
+| POST | `/api/history/window` | Move a recording's start/end, trimming items and samples outside it |
+| POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples |
+| POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
+| POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
+
+Two things to know:
+
+- **A service that is recording right now cannot be edited or deleted** — these
+  answer `409`. The recorder holds the same record and would write its own copy
+  back over any change, and releasing it only makes the next live tick start a
+  fresh empty record in its place. Correcting a recording is a post-hoc repair.
+- **Deleting a recording keeps its raw samples.** The
+  [data archive](../data-archive.md) is the source of truth the records are
+  derived from; removing it is a separate, irreversible decision. A merge does
+  move the raw samples, because otherwise a later rebuild would undo the merge.
+
 **ScriptView**
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -102,4 +133,4 @@ screens.
 | POST | `/api/branding` | Update app name + logos |
 | GET | `/api/events` | Multiplexed Server-Sent Events stream with per-connection channel filtering. Channels: `stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `spl:metrics`, `spl:history`, `people:count`, `attendance:history`, `service-timeline:history`, `obs:status`, `osc:feedback`, `baptism`, `integrations:state-changed`, `wireless:connections-changed` |
 | POST | `/api/events/subscribe` | Set the channels a connection wants (channel filtering) |
-| GET | `/photos?u=…` | Cached Planning Center photo proxy |
+| GET | `/photos?u=…` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy |

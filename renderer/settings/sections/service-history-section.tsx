@@ -1,3 +1,5 @@
+import { clamp } from "@main/services/clamp";
+import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
@@ -88,6 +90,10 @@ interface OverviewData {
   overrunTrend: Trend | null;
   peakAttendance: string;
   peakSub?: string;
+  /** The service type these figures are scoped to, for the labels. The overview
+   *  has always filtered by activeType; the labels said "weekend" regardless, so
+   *  an Events night showed Events numbers under a Weekend heading. */
+  scopeName: string | null;
 }
 
 /** ISO → local "HH:MM" for a <input type="time">, or "" if absent/invalid. */
@@ -239,6 +245,12 @@ const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
 export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean } = {}) {
   const [list, setList] = useState<ServiceTimeline[] | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // An explicit Overview scope, which STICKS. Without it the scope was derived from
+  // selectedKey — but opening a service hides the overview, and going back cleared
+  // the selection, so the scope snapped straight back to the day's newest service.
+  // On a day with a morning weekend service and an evening event you could never
+  // get the weekend overview to stay up. Null = follow the old derivation.
+  const [overviewType, setOverviewType] = useState<string | null>(null);
   const [detail, setDetail] = useState<ServiceTimeline | null>(null);
   // The matching attendance + SPL records (same serviceKey) for the combined report.
   const [attendance, setAttendance] = useState<ServiceAttendance | null>(null);
@@ -375,6 +387,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // newest-first; `day` auto-selects the newest day, so this lands on "most recent"
   // out of the box). Keeps each type's averages separate without a manual filter.
   const activeType = useMemo<string | null>(() => {
+    if (overviewType) return overviewType;
     if (selectedKey) {
       const s = (list ?? []).find((x) => x.serviceKey === selectedKey);
       if (s) return s.serviceTypeId;
@@ -384,7 +397,20 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       if (s) return s.serviceTypeId;
     }
     return (list ?? [])[0]?.serviceTypeId ?? null;
-  }, [selectedKey, day, list]);
+  }, [overviewType, selectedKey, day, list]);
+  /** Every service type in the history, for the Overview scope picker. Only worth
+   *  showing when there is more than one — a single-type church should not see a
+   *  control with one option in it. */
+  const serviceTypes = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const s of list ?? []) {
+      if (s.serviceTypeId && !seen.has(s.serviceTypeId)) {
+        seen.set(s.serviceTypeId, s.serviceTypeName ?? s.serviceTypeId);
+      }
+    }
+    return [...seen].map(([id, name]) => ({ id, name }));
+  }, [list]);
+
   const activeTypeName = useMemo<string | null>(() => {
     if (!activeType) return null;
     const s = (list ?? []).find((x) => x.serviceTypeId === activeType);
@@ -519,17 +545,31 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       overrunTrend,
       peakAttendance: peakWeekend ? peakWeekend.value.toLocaleString() : "—",
       peakSub: peakWeekend ? shortDay(peakWeekend.day) : undefined,
+      scopeName: activeTypeName,
     };
-  }, [list, attList, day, activeType]);
+  }, [list, attList, day, activeType, activeTypeName]);
 
   async function deleteService(key: string, title: string) {
-    if (!(await confirm({ title: "Delete recording?", message: `Delete the service-timing recording for "${title}"? This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
+    // Names all three, because it deletes all three. It always meant to: the
+    // timing, SPL and attendance records are one recording split across three
+    // stores, and a dialog that promised only the timings while the other two
+    // silently stayed behind was the more honest half of a real bug.
+    if (!(await confirm({
+      title: "Delete recording?",
+      message: `Delete the recording for "${title}" — service timings, SPL and attendance? This can't be undone. The raw samples in the data archive are kept.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    }))) return;
     setList((prev) => (prev ? prev.filter((s) => s.serviceKey !== key) : prev));
     if (selectedKey === key) setSelectedKey(null);
     try {
       await invoke("serviceTimeline:delete", { serviceKey: key });
-    } catch {
+    } catch (e) {
+      // Say why. The row reappearing on its own — which is all this used to do —
+      // reads as a glitch, and the most likely reason for a refusal is one the
+      // operator can act on: the service is still recording.
       reload();
+      toast.error(`Couldn't delete that recording: ${errorMessage(e)}`);
     }
   }
 
@@ -596,7 +636,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         setReloadKey((k) => k + 1);
         toast.success("Service times updated");
       } catch (e) {
-        toast.error(`Couldn't update times: ${e instanceof Error ? e.message : String(e)}`);
+        toast.error(`Couldn't update times: ${errorMessage(e)}`);
       }
     }
     async function recalc() {
@@ -628,7 +668,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         setReloadKey((k) => k + 1);
         toast.success("Merged");
       } catch (e) {
-        toast.error(`Merge failed: ${e instanceof Error ? e.message : String(e)}`);
+        toast.error(`Merge failed: ${errorMessage(e)}`);
       }
     }
     async function toggleCounted(item: ServiceTimelineItem) {
@@ -870,9 +910,24 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           instrument strip. Scoped to the active service type (from the selection /
           most-recent), labeled so the numbers are never a silent blend of types. */}
       <div className="flex flex-col gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">
-          Overview{activeTypeName ? ` · ${activeTypeName}` : ""}{day ? ` · through ${fmtDay(day)}` : " · all time"}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">
+            Overview{activeTypeName ? ` · ${activeTypeName}` : ""}{day ? ` · through ${fmtDay(day)}` : " · all time"}
+          </span>
+          {serviceTypes.length > 1 && (
+            <select
+              value={overviewType ?? ""}
+              onChange={(e) => setOverviewType(e.target.value || null)}
+              aria-label="Overview service type"
+              className="h-6 rounded-md border border-line-strong bg-field px-1.5 text-caption2 text-fg focus:border-focus focus:outline-none"
+            >
+              <option value="">Follow selection</option>
+              {serviceTypes.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
         <OverviewBlend overview={overview} />
       </div>
 
@@ -906,7 +961,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             const sum = summarize(s, live ? nowTick : undefined);
             const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
             return (
-              <div key={s.serviceKey} className="flex items-center gap-1 rounded-lg border border-gray-5 bg-gray-2 pr-1.5 hover:bg-gray-3 transition-colors">
+              // su-card, like every other top-level box on this page (Export, the
+              // Overview, the calendar, the selected-day summary). These rows had
+              // their own `bg-gray-2` + `rounded-lg` treatment, so the one column
+              // an operator actually reads down was the one thing that did not
+              // match the surface around it. The recessed grey is still right for
+              // the Stat tiles and the time editor — those sit INSIDE a card, and
+              // giving them the parent's surface would flatten the nesting.
+              <div key={s.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
                 <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(s.serviceKey)}>
                   <div className="flex flex-col min-w-0">
                     <span className="text-body font-medium text-gray-12 truncate">{s.planTitle ?? s.serviceKey}</span>
@@ -977,7 +1039,9 @@ function OverviewBlend({ overview }: { overview: OverviewData }) {
     <div className="su-card px-5 py-5 flex flex-col">
       <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-8">
         <div className="shrink-0">
-          <div className="text-caption1 uppercase tracking-[0.08em] text-fg-muted">Avg weekend</div>
+          <div className="text-caption1 uppercase tracking-[0.08em] text-fg-muted">
+            Avg {overview.scopeName ?? "service"}
+          </div>
           <div className="mt-1 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
             {overview.avgAttendance}
           </div>
@@ -988,7 +1052,9 @@ function OverviewBlend({ overview }: { overview: OverviewData }) {
                 {overview.attTrend.pct != null
                   ? `${overview.attTrend.pct >= 0 ? "+" : "−"}${Math.round(Math.abs(overview.attTrend.pct) * 100)}%`
                   : "changed"}{" "}
-                vs the prior {overview.attTrend.priorCount} weekend{overview.attTrend.priorCount === 1 ? "" : "s"}
+                vs the prior {overview.attTrend.priorCount}{" "}
+                {overview.scopeName ?? "service"}
+                {overview.attTrend.priorCount === 1 ? "" : "s"}
               </span>
             </div>
           )}
@@ -1058,7 +1124,7 @@ function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
           if (!svg) return;
           const r = svg.getBoundingClientRect();
           const frac = (e.clientX - r.left) / r.width; // 0..1 across the plotted width
-          setHover(Math.min(points.length - 1, Math.max(0, Math.round(frac * (points.length - 1)))));
+          setHover(clamp(Math.round(frac * (points.length - 1)), 0, points.length - 1));
         }}
         onPointerLeave={() => setHover(null)}
         role="img"

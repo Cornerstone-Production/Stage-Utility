@@ -28,6 +28,15 @@ import { promisify } from "node:util";
 
 import type { UpdateStatus } from "../types/stage.js";
 import { getUserDataPath } from "./app-paths.js";
+import { detectInstallKind } from "./update/install-kind.js";
+import { detectTrack } from "./update/detect-track.js";
+import { CHANGELOG_CAP, fetchReleases, packagedUpdateStatus, type ReleaseInfo } from "./update/release-check.js";
+import { fetchTapVersion, homebrewInstallable, tarballInstallable } from "./update/package-availability.js";
+import { FORMULA } from "./update/homebrew-strategy.js";
+import { selectStrategy } from "./update/select-strategy.js";
+import { ApplyWatchdog } from "./update/apply-watchdog.js";
+import { exitForRestart } from "./update/relaunch.js";
+
 import { broadcast } from "./broadcaster.js";
 import { latestOnTrack, newerThan } from "./release-tags.js";
 import { appendUpdateLog, updateLogPath } from "./update-log.js";
@@ -36,8 +45,6 @@ const execFileAsync = promisify(execFile);
 
 // main/services/updater.ts → repo root is two levels up.
 const REPO_ROOT = APP_ROOT;
-
-const CHANGELOG_CAP = 20;
 
 // Update tracks the operator may switch between in-app (git branches on origin).
 // "main" = stable/production, "beta" = pre-release test track.
@@ -67,7 +74,27 @@ function pkgVersion(): string {
   return "0.0.0";
 }
 
-class Updater {
+/** Seams for tests: a fake git and a canned releases response let a test drive
+ *  the REAL checkForUpdate path as a packaged install, on a machine that is a
+ *  checkout. The app itself constructs the singleton below with no deps. */
+interface UpdaterDeps {
+  git?: (args: string[], timeoutMs?: number) => Promise<string>;
+  fetchReleases?: typeof fetchReleases;
+  version?: () => string;
+  /** Replaced in tests so the real polling path can run without launching an
+   *  installer. Production always uses node's spawn. */
+  spawn?: typeof spawn;
+  /** Shortened in tests; production waits the full STALL_TIMEOUT_MS. */
+  stallMs?: number;
+}
+
+export class Updater {
+  constructor(private readonly deps: UpdaterDeps = {}) {}
+
+  // pkgVersion() directly, NOT this.version(): field initializers run before
+  // parameter properties are assigned, so reading `this.deps` here crashes.
+  // Harmless to skip the seam — this initial value is never observed, because
+  // getStatus() overwrites `version` on every read.
   private status: UpdateStatus = {
     isGitRepo: false,
     branch: null,
@@ -88,12 +115,19 @@ class Updater {
     error: null,
   };
 
+  private version(): string {
+    return this.deps.version ? this.deps.version() : pkgVersion();
+  }
+
   // While an apply runs, poll the progress/result files the detached script
   // writes so we can broadcast sub-phase progress (the server stays alive through
   // pull/install/build and is only killed at the very end).
   private liveLogOffset = 0;
   private progressTimer: ReturnType<typeof setInterval> | null = null;
   private applyStartedAt = 0;
+  /** Bounds an apply that dies without reporting — the UI must always be
+   *  able to leave the "updating" phase. */
+  private readonly watchdog = new ApplyWatchdog();
 
   /** Log an update lifecycle event to stdout (captured live in the /log buffer)
    *  and to the persisted update.log (survives the post-update restart). */
@@ -128,9 +162,67 @@ class Updater {
     }
   }
 
+  /**
+   * The track a packaged install follows, plus where that answer came from.
+   *
+   * A packaged install has no branch to read, so this is derived from the
+   * install: the formula name for Homebrew, the version for a tarball. The sha
+   * and commit date are cleared with it — on a packaged install they described
+   * whichever repository happened to be up the tree, which was worse than
+   * showing nothing.
+   */
+  /** Where the updater records the track it last launched an update on. In the
+   *  data dir because that outlives every release — the point of the record. */
+  private trackRecordFile(): string {
+    return path.join(getUserDataPath(), "update-track");
+  }
+
+  private recordedTrack(): string | null {
+    try {
+      return fs.readFileSync(this.trackRecordFile(), "utf8").trim() || null;
+    } catch {
+      return null; // never written — older install, or a fresh one
+    }
+  }
+
+  private packagedTrack(): Pick<UpdateStatus, "branch" | "trackSource" | "currentSha" | "currentDate"> {
+    const kind = detectInstallKind(process.env, REPO_ROOT, fs.existsSync);
+    const { track, source } = detectTrack({
+      kind,
+      appRoot: REPO_ROOT,
+      version: this.version(),
+      gitBranch: null,
+      recorded: this.recordedTrack(),
+    });
+    return { branch: track, trackSource: source, currentSha: null, currentDate: null };
+  }
+
+  /**
+   * Is THIS DIRECTORY a checkout — not merely inside somebody's? The single
+   * predicate for "packaged or not", shared by the check and the track-switch
+   * pin so the two can never disagree about what kind of install this is.
+   */
+  private async isCheckout(): Promise<boolean> {
+    const top = await this.git(["rev-parse", "--show-toplevel"]).catch(() => "");
+    if (top === "") return false;
+    // realpath, not resolve: --show-toplevel dereferences symlinks (macOS's
+    // /var IS one), so a literal comparison calls a real checkout packaged.
+    // Same comparison as server-version.ts — 2 sites, both fixed together.
+    try {
+      return fs.realpathSync(top) === fs.realpathSync(REPO_ROOT);
+    } catch {
+      return false; // a path that cannot be resolved is not this checkout
+    }
+  }
+
   private async git(args: string[], timeoutMs = 60_000): Promise<string> {
+    if (this.deps.git) return this.deps.git(args, timeoutMs);
     const { stdout } = await execFileAsync("git", args, { cwd: REPO_ROOT, timeout: timeoutMs });
     return stdout.trim();
+  }
+
+  private fetchReleases(): Promise<ReleaseInfo[]> {
+    return (this.deps.fetchReleases ?? fetchReleases)();
   }
 
   /** Read the detached updater's last result file (written by scripts/update.*). */
@@ -145,11 +237,38 @@ class Updater {
     }
   }
 
+  /**
+   * Whether in-app updates are possible here, and why not when they are not.
+   *
+   * Asks the strategy layer rather than assuming a checkout: a Homebrew or
+   * tarball install updates fine and is not a git repo. The UI used to gate on
+   * isGitRepo, so the moment that became correct for packaged installs those
+   * installs were told to update from the command line — with a working updater
+   * sitting right behind the message.
+   */
+  private updatability(): { canUpdate: boolean; updateBlockedReason: string | null } {
+    const kind = detectInstallKind(process.env, REPO_ROOT, fs.existsSync);
+    const strategy = selectStrategy(kind, process.platform);
+    if (!strategy) {
+      return {
+        canUpdate: false,
+        updateBlockedReason:
+          `Could not tell how this copy was installed (detected "${kind}"), so there is no ` +
+          "safe way to update it in place. Update from the command line on the server.",
+      };
+    }
+    const ok = strategy.canApply();
+    return ok.ok
+      ? { canUpdate: true, updateBlockedReason: null }
+      : { canUpdate: false, updateBlockedReason: ok.reason };
+  }
+
   /** Cached status (no network). Refreshes the local bits (sha, result file). */
   getStatus(): UpdateStatus {
     return {
       ...this.status,
-      version: pkgVersion(),
+      ...this.updatability(),
+      version: this.version(),
       step: this.status.phase === "updating" ? this.status.step : null,
       restartPending: this.isRestartPending(),
       lastResult: this.readResult(),
@@ -163,13 +282,22 @@ class Updater {
     this.status.phase = "checking";
     this.status.error = null;
     try {
-      // Is this a git checkout at all?
-      const inside = await this.git(["rev-parse", "--is-inside-work-tree"]).catch(() => "false");
-      if (inside !== "true") {
-        this.status = { ...this.status, isGitRepo: false, phase: "idle", lastCheckedAt: new Date().toISOString() };
-        this.broadcast();
-        return this.getStatus();
-      }
+      // Is THIS DIRECTORY a checkout — not merely inside somebody's?
+      //
+      // `git rev-parse` walks UP the tree, and a Homebrew keg lives inside
+      // /opt/homebrew, which is a git repository (that is how brew updates
+      // itself). --is-inside-work-tree therefore answered "true" on every
+      // Homebrew install, and the branch, sha, commit date and "behind" count
+      // all described HOMEBREW. A box running beta reported main, with one of
+      // Homebrew's commits as its sha.
+      //
+      // Worse than the wrong label: applyUpdate gates on this and then runs
+      // `git status --porcelain`, so a dirty Homebrew checkout refused in-app
+      // updates with an error about a working tree the operator cannot see.
+      //
+      // Comparing the toplevel to the app root answers the question actually
+      // being asked. A checkout matches; a keg inside Homebrew's repo does not.
+      if (!(await this.isCheckout())) return await this.checkPackaged();
 
       const branch = await this.git(["rev-parse", "--abbrev-ref", "HEAD"]);
       // --tags so a box that has never seen them gets the full set; --force so a
@@ -246,7 +374,8 @@ class Updater {
         ...this.status,
         isGitRepo: true,
         branch,
-        version: pkgVersion(),
+        trackSource: "git" as const,
+        version: this.version(),
         currentSha,
         currentDate,
         behind,
@@ -275,6 +404,81 @@ class Updater {
     return this.getStatus();
   }
 
+  /**
+   * The packaged half of a check: no repository to fetch, so the track comes
+   * from the install itself and what is newest comes from the releases API —
+   * the same source install.sh resolves against.
+   *
+   * Without the release check this set the track and stopped: `behind` stayed 0
+   * forever, so the UI said "Up to date" with the Update button disabled and the
+   * scheduled auto-apply never fired, on every install that was not a checkout.
+   * The strategies could apply an update; nothing ever detected one.
+   */
+  /**
+   * Whether THIS box can install a given release right now.
+   *
+   * A release is published before its per-platform archives finish uploading
+   * and before the Homebrew tap is regenerated. Offering one inside that window
+   * produces an installer that 404s, or a `brew upgrade` that does nothing and
+   * restarts the displays for it. The predicate lets the check report the gap
+   * instead of pretending the box is current.
+   */
+  private async installableHere(track: string): Promise<(r: ReleaseInfo) => boolean> {
+    const kind = detectInstallKind(process.env, REPO_ROOT, fs.existsSync);
+    if (kind === "homebrew") {
+      const formula = track === "beta" ? FORMULA.beta : FORMULA.main;
+      // Null when the tap cannot be read — homebrewInstallable then allows
+      // everything, so an unreachable tap never invents a "still building".
+      const tapVersion = await fetchTapVersion(formula, (url) => fetch(url, { signal: AbortSignal.timeout(10_000) }));
+      return (r) => homebrewInstallable(r, tapVersion);
+    }
+    if (kind === "tarball") {
+      return (r) => tarballInstallable(r, process.platform, process.arch);
+    }
+    return () => true;
+  }
+
+  private async checkPackaged(): Promise<UpdateStatus> {
+    // Derived from the install itself — the formula for Homebrew, the version
+    // for a tarball. Never defaulted: a confidently wrong track is the bug this
+    // replaces.
+    const packaged = this.packagedTrack();
+
+    let availability: Partial<UpdateStatus> = {};
+    let error: string | null = null;
+    if (packaged.branch) {
+      try {
+        availability = packagedUpdateStatus(
+          await this.fetchReleases(),
+          packaged.branch,
+          this.version(),
+          await this.installableHere(packaged.branch),
+        );
+      } catch (err) {
+        // Same contract as a failed `git fetch` on the git path: report it, keep
+        // the last known numbers, stay idle.
+        error = String(err instanceof Error ? err.message : err);
+      }
+    } else {
+      error =
+        "Could not tell which update track this install follows, so there is " +
+        "nothing to compare against. Reinstall with the documented installer.";
+    }
+
+    this.status = {
+      ...this.status,
+      isGitRepo: false,
+      ...packaged,
+      ...availability,
+      version: this.version(),
+      phase: "idle",
+      lastCheckedAt: new Date().toISOString(),
+      error,
+    };
+    this.broadcast();
+    return this.getStatus();
+  }
+
   get behind(): number {
     return this.status.behind;
   }
@@ -299,15 +503,35 @@ class Updater {
    */
   async applyUpdate(opts: { deferRestart?: boolean } = {}): Promise<UpdateStatus> {
     if (this.status.phase === "updating") throw new Error("An update is already running.");
-    if (!this.status.isGitRepo) {
-      // Re-check in case we never fetched.
-      await this.checkForUpdate();
-      if (!this.status.isGitRepo) throw new Error("Not a git checkout — update from the command line.");
-    }
-    const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
-    if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before updating.");
+    // Can this install update at all? Asked of the strategy layer, not of
+    // isGitRepo: a Homebrew or tarball install is not a checkout and updates
+    // through its own strategy. Refusing on isGitRepo blocked exactly those.
+    const { canUpdate, updateBlockedReason } = this.updatability();
+    if (!canUpdate) throw new Error(updateBlockedReason ?? "In-app updates are not available for this install.");
 
-    const branch = this.status.branch ?? "main";
+    // The dirty-tree check is a GIT concern. A packaged install has no working
+    // tree, and running git here read whatever repository happened to be up the
+    // directory tree — on Homebrew, /opt/homebrew's own.
+    if (this.status.isGitRepo) {
+      const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
+      if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before updating.");
+    }
+
+    // Resolve the track rather than assuming one. This was `this.status.branch ?? "main"`,
+    // and the fallback is not harmless: launch() RECORDS the track it used, so a
+    // box whose track could not be detected — a tarball install with no
+    // update-track record and an unreadable VERSION — was moved onto the stable
+    // line and stayed there, silently, having been put on beta deliberately.
+    if (!this.status.branch) await this.checkForUpdate();
+    const branch = this.status.branch;
+    if (!branch) {
+      // Refusing beats guessing: an unpinned apply on the wrong track is not
+      // something the operator can see happening, or easily undo.
+      throw new Error(
+        "Cannot tell which release track this install follows, so there is nothing safe to update to. " +
+          "Pick a track in Settings → Advanced, or re-run the installer with STAGE_TRACK set.",
+      );
+    }
     return this.launch(branch, false, opts.deferRestart === true, this.status.targetTag ?? null);
   }
 
@@ -322,15 +546,40 @@ class Updater {
    */
   private async targetTagFor(branch: string): Promise<string | null> {
     try {
-      await this.git(["fetch", "--quiet", "--tags", "--force", "origin", branch], 90_000);
-      const tags = (await this.git(["tag", "--list", "v[0-9]*", "--merged", `origin/${branch}`]))
-        .split("\n")
-        .map((t) => t.trim())
-        .filter(Boolean);
-      return latestOnTrack(tags, branch)?.tag ?? null;
-    } catch {
-      return null; // offline or no such branch — the script surfaces the failure
+      return latestOnTrack(await this.candidateTags(branch), branch)?.tag ?? null;
+    } catch (err) {
+      // Null is a real answer ("no pin — resolve the newest at apply time"),
+      // but the failure that produced it must not vanish: unpinned, the
+      // installer lands on whatever is newest when IT runs, which may not be
+      // what the operator was shown.
+      this.logEvent(
+        `could not resolve the newest release on ${branch}; applying unpinned — ${String(err instanceof Error ? err.message : err)}`,
+      );
+      return null;
     }
+  }
+
+  /**
+   * The release tags a track has to choose from.
+   *
+   * A packaged install has no repository to fetch them from, so the releases API
+   * is its source of truth, exactly as in checkForUpdate. Decided by install
+   * kind rather than status.isGitRepo, which is false on a checkout that has
+   * never run a check.
+   */
+  private async candidateTags(branch: string): Promise<string[]> {
+    // The same predicate checkForUpdate uses, so the check and the pin cannot
+    // disagree about what kind of install this is (an install-kind test here
+    // called a checkout with a declared kind "packaged" while the check called
+    // it git).
+    if (!(await this.isCheckout())) {
+      return (await this.fetchReleases()).map((r) => r.tag);
+    }
+    await this.git(["fetch", "--quiet", "--tags", "--force", "origin", branch], 90_000);
+    return (await this.git(["tag", "--list", "v[0-9]*", "--merged", `origin/${branch}`]))
+      .split("\n")
+      .map((t) => t.trim())
+      .filter(Boolean);
   }
 
   /**
@@ -341,16 +590,18 @@ class Updater {
   async switchTrack(branch: string): Promise<UpdateStatus> {
     if (!TRACKS.includes(branch)) throw new Error(`Unknown update track: ${branch}`);
     if (this.status.phase === "updating") throw new Error("An update is already running.");
-    if (!this.status.isGitRepo) {
-      await this.checkForUpdate();
-      if (!this.status.isGitRepo) throw new Error("Not a git checkout — switch tracks from the command line.");
-    }
+    const { canUpdate, updateBlockedReason } = this.updatability();
+    if (!canUpdate) throw new Error(updateBlockedReason ?? "Switching tracks is not available for this install.");
+
     if (branch === this.status.branch) {
       // Already on this track — just run a normal update so it's not a no-op.
       return this.applyUpdate();
     }
-    const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
-    if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before switching tracks.");
+    // Git-only, for the same reason as applyUpdate.
+    if (this.status.isGitRepo) {
+      const dirty = await this.git(["status", "--porcelain"]).catch(() => "");
+      if (dirty) throw new Error("Working tree has uncommitted changes; resolve them before switching tracks.");
+    }
 
     return this.launch(branch, true, false, await this.targetTagFor(branch));
   }
@@ -362,6 +613,12 @@ class Updater {
    * exits after the HTTP response has flushed.
    */
   restart(): UpdateStatus {
+    // Refuse FIRST. This guard used to sit below the marker removal, so a restart
+    // requested while an update was running deleted the pending-restart marker and
+    // then threw — no restart happened, but isRestartPending() now answered false,
+    // so the UI stopped offering the restart the update was still waiting for. The
+    // operator's only remaining route was a shell.
+    if (this.status.phase === "updating") throw new Error("An update is already running.");
     // Taking the restart resolves the pending state; clear it before we exit so a
     // relaunch does not come up still claiming an update is waiting.
     try {
@@ -369,21 +626,51 @@ class Updater {
     } catch {
       /* best-effort */
     }
-    if (this.status.phase === "updating") throw new Error("An update is already running.");
     console.log("[updater] manual restart requested — exiting for the service manager to relaunch");
     this.status = { ...this.status, phase: "updating", step: "restarting" };
     this.broadcast();
-    setTimeout(() => process.exit(0), 600);
+    // launchd parks KeepAlive respawns, so exit alone leaves a Homebrew (or
+    // macOS tarball) box dark; exitForRestart pairs the exit with the detached
+    // kickstart that brings it back.
+    exitForRestart(600);
     return this.getStatus();
   }
 
   /** Spawn the detached update/switch script and enter the "updating" phase. */
   private launch(branch: string, checkout: boolean, deferRestart: boolean, tag: string | null): UpdateStatus {
-    const isWin = process.platform === "win32";
-    const script = path.join(REPO_ROOT, "scripts", isWin ? "update.ps1" : "update.sh");
+    // How this copy was installed decides how it updates. A git checkout pulls
+    // and builds; a packaged install re-runs its own installer; a Homebrew
+    // install asks brew. Refusing here rather than spawning is the point: the
+    // child is detached with stdio ignored, so anything that fails after the
+    // spawn fails silently, writes nothing to the progress or result file, and
+    // leaves the UI on "Downloading update..." with no way to learn it is over.
+    const kind = detectInstallKind(process.env, REPO_ROOT, fs.existsSync);
+    const strategy = selectStrategy(kind, process.platform);
+    if (!strategy) {
+      throw new Error(
+        `Cannot update: this install was not recognised (detected "${kind}"). ` +
+          "Reinstall with the documented installer, or use brew upgrade.",
+      );
+    }
+    const ready = strategy.canApply();
+    if (!ready.ok) throw new Error(`Cannot update: ${ready.reason}`);
+
+    // Remember which track this box is on, in the data dir so it outlives the
+    // release. Without this a packaged install's track is INFERRED from its
+    // version, and the inference flips silently: a beta box that takes the
+    // stable it is deliberately offered has a hyphen-less VERSION afterwards,
+    // reads as "main" from then on, and never sees another beta.
+    try {
+      fs.writeFileSync(this.trackRecordFile(), branch);
+    } catch (err) {
+      // Not fatal to the update itself, but say so: the next check may report
+      // the wrong track.
+      this.logEvent(`could not record the update track: ${String(err)}`);
+    }
 
     // Clear stale progress/result so the poller only reacts to this run.
     this.applyStartedAt = Date.now();
+    this.watchdog.begin(this.applyStartedAt);
     try {
       fs.writeFileSync(this.progressFile(), JSON.stringify({ step: "pull", at: new Date().toISOString() }));
     } catch {
@@ -431,15 +718,33 @@ class Updater {
         `${this.status.currentTag ?? this.status.currentSha ?? "?"} -> ${tag ?? this.status.latestSha ?? "tip"}` +
         ` (${this.status.behind} commit${this.status.behind === 1 ? "" : "s"})`,
     );
-    const child = isWin
-      ? spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], {
-          cwd: REPO_ROOT,
-          detached: true,
-          stdio: "ignore",
-          env,
-          windowsHide: true,
-        })
-      : spawn("bash", [script], { cwd: REPO_ROOT, detached: true, stdio: "ignore", env });
+    // The strategy decides what runs; this stays the only place that spawns.
+    const plan = strategy.plan({
+      track: branch,
+      checkout,
+      deferRestart,
+      version: tag,
+      env: env as Record<string, string>,
+    });
+
+    // Record exactly what is about to run. When an update fails on a machine
+    // nobody can attach to, this line plus the installer's own output in
+    // update.log is the whole diagnosis: which install kind was detected, which
+    // strategy that chose, and the literal command it ran.
+    this.logEvent(
+      `install kind=${kind} strategy=${strategy.kind} platform=${process.platform} root=${REPO_ROOT}`,
+    );
+    this.logEvent(`spawning (cwd=${plan.cwd ?? REPO_ROOT}): ${plan.command} ${plan.args.join(" ")}`);
+    const child = (this.deps.spawn ?? spawn)(plan.command, plan.args, {
+      // The strategy's, when it has one. A packaged install must NOT run from
+      // the install root: that directory is what the update replaces, and the
+      // script dies the moment it is deleted underneath it.
+      cwd: plan.cwd ?? REPO_ROOT,
+      detached: true,
+      stdio: "ignore",
+      env: plan.env,
+      ...(process.platform === "win32" ? { windowsHide: true } : {}),
+    });
     child.unref();
 
     this.status = { ...this.status, phase: "updating", step: "pull" };
@@ -473,14 +778,14 @@ class Updater {
    * Only the script's own `[update]` narration is forwarded; npm and vite's raw
    * output stays in update.log rather than flooding /log with progress bars.
    */
-  private drainLiveLog(): void {
+  private drainLiveLog(): boolean {
     let text: string;
     try {
       text = fs.readFileSync(this.liveLogFile(), "utf8");
     } catch {
-      return; // not created yet
+      return false; // not created yet
     }
-    if (text.length <= this.liveLogOffset) return;
+    if (text.length <= this.liveLogOffset) return false;
     const fresh = text.slice(this.liveLogOffset);
     this.liveLogOffset = text.length;
     for (const raw of fresh.split("\n")) {
@@ -488,6 +793,7 @@ class Updater {
       if (!line.startsWith("[update]")) continue;
       this.logEvent(line.replace(/^\[update\]\s?/, ""));
     }
+    return true;
   }
 
   private startProgressPolling(): void {
@@ -501,7 +807,17 @@ class Updater {
       if (result && Date.parse(result.finishedAt || "") >= this.applyStartedAt) {
         this.drainLiveLog();
         if (result.ok) {
-          if (this.status.step !== "restarting") {
+          if (this.isRestartPending()) {
+            // Deferred apply: the new build is installed and NOTHING is going
+            // to kill this process. Waiting for a death that never comes left
+            // the phase stuck on "updating" — which restart() refuses to act
+            // during, so the operator could not even take the restart the
+            // update was waiting for.
+            this.logEvent("build applied — restart deferred until the operator takes it");
+            this.status = { ...this.status, phase: "idle", step: null };
+            this.stopProgressPolling();
+            this.broadcast();
+          } else if (this.status.step !== "restarting") {
             this.logEvent("build succeeded — restarting into the new version");
             this.status = { ...this.status, step: "restarting" };
             this.broadcast();
@@ -515,11 +831,30 @@ class Updater {
         }
         return;
       }
-      this.drainLiveLog();
+      const grew = this.drainLiveLog();
       const step = this.readProgressStep();
-      if (step && step !== this.status.step) {
+      const advanced = step !== null && step !== this.status.step;
+      if (advanced) {
         this.logEvent(`step: ${step}`);
         this.status = { ...this.status, step };
+        this.broadcast();
+      }
+      if (grew || advanced) {
+        this.watchdog.progress(Date.now());
+        return;
+      }
+      // Nothing has been written for a long time. A script cannot report a
+      // failure it did not survive — a killed process, a power cut mid-apply,
+      // or (observed on a real box) a working directory deleted underneath it,
+      // after which every remaining command failed. Without this the page sits
+      // on "Downloading update…" forever, and a reload still finds a phase
+      // claiming an update is running that ended long ago.
+      if (this.watchdog.stalled(Date.now(), this.deps.stallMs)) {
+        const silence = this.watchdog.silentFor(Date.now());
+        this.logEvent(`update STALLED — nothing written for ${silence}; giving up (see update.log)`);
+        this.writeStalledResult(silence);
+        this.status = { ...this.status, phase: "idle", step: null };
+        this.stopProgressPolling();
         this.broadcast();
       }
     }, 1000);
@@ -527,7 +862,27 @@ class Updater {
     this.progressTimer.unref?.();
   }
 
+  /** Report the stall through the same result file the scripts use, so the
+   *  verdict survives a reload instead of living only in this process. */
+  private writeStalledResult(silence: string): void {
+    try {
+      fs.writeFileSync(
+        this.resultFile(),
+        JSON.stringify({
+          ok: false,
+          finishedAt: new Date().toISOString(),
+          log: `The update stopped responding — nothing was written for ${silence}. The server is still running the current version; see update.log.`,
+        }),
+      );
+    } catch (err) {
+      // Not fatal: the phase still drops back to idle in this process. Say so,
+      // because the operator's page will then disagree after a reload.
+      this.logEvent(`could not record the stalled update: ${String(err)}`);
+    }
+  }
+
   private stopProgressPolling(): void {
+    this.watchdog.end();
     if (this.progressTimer) {
       clearInterval(this.progressTimer);
       this.progressTimer = null;

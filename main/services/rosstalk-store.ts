@@ -7,8 +7,8 @@
 import type { RossTalkTargetConfig } from "../types/rosstalk.js";
 import { DataStore } from "./data-store.js";
 
-const targets = new DataStore<RossTalkTargetConfig[]>("rosstalk-targets.json", []);
-const settings = new DataStore<{ simulate: boolean }>("rosstalk-settings.json", { simulate: true });
+const targets = new DataStore<RossTalkTargetConfig[]>("rosstalk-targets.json", [], "config");
+const settings = new DataStore<{ simulate: boolean }>("rosstalk-settings.json", { simulate: true }, "config");
 
 export const rosstalkStore = {
   async loadTargets(): Promise<RossTalkTargetConfig[]> {

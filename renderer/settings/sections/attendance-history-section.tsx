@@ -1,26 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Tooltip } from "../../components/ui/tooltip";
-import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { ChevronLeftIcon, ChevronRightIcon, Trash2Icon, UsersIcon } from "lucide-react";
+import { clamp } from "@main/services/clamp";
+import { useRef, useState } from "react";
 
-import { invoke, onNotification } from "../../lib/api";
-import { confirm, EmptyState, SkeletonRows } from "../../components/ui";
 
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-}
 function fmtTime(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-function fmtDay(day: string): string {
-  const d = new Date(`${day}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return day;
-  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 }
 
 // Which chart series/overlays and summary cards to surface, mirroring the SPL
@@ -83,198 +69,6 @@ export function servicePeakAttendance(rec: ServiceAttendance): number {
   let max = s[0].attendance;
   for (const x of s) if (x.attendance > max) max = x.attendance;
   return perServiceAttendance(max, s);
-}
-
-export function AttendanceHistorySection() {
-  const [list, setList] = useState<ServiceAttendance[] | null>(null);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [detail, setDetail] = useState<ServiceAttendance | null>(null);
-  // The matching service-timeline record (same serviceKey) for PCO item markers.
-  const [timeline, setTimeline] = useState<ServiceTimeline | null>(null);
-  const [day, setDay] = useState<string | null>(null);
-
-  function reload() {
-    invoke<ServiceAttendance[]>("attendance:listHistory")
-      .then((l) => setList(l))
-      .catch(() => setList([]));
-  }
-  useEffect(() => {
-    reload();
-  }, []);
-
-  // Live updates while a service is recording — refresh the open detail/list.
-  useEffect(() => {
-    return onNotification("attendance:history", (p) => {
-      const rec = p as ServiceAttendance | null;
-      if (!rec) return;
-      setList((prev) => {
-        if (!prev) return prev;
-        const i = prev.findIndex((s) => s.serviceKey === rec.serviceKey);
-        if (i === -1) return [rec, ...prev];
-        const next = prev.slice();
-        next[i] = rec;
-        return next;
-      });
-      setDetail((d) => (d && d.serviceKey === rec.serviceKey ? rec : d));
-    });
-  }, []);
-
-  // Keep the open service's PCO item markers fresh as items go live.
-  useEffect(() => {
-    return onNotification("service-timeline:history", (p) => {
-      const rec = p as ServiceTimeline | null;
-      if (!rec) return;
-      setTimeline((t) => (selectedKey && rec.serviceKey === selectedKey ? rec : t));
-    });
-  }, [selectedKey]);
-
-  // Clearing is synchronous, so it happens in the same render the selection
-  // clears — the panel never shows the old service's numbers under no selection.
-  useResyncOn([selectedKey], () => {
-    if (!selectedKey) {
-      setDetail(null);
-      setTimeline(null);
-    }
-  });
-
-  useEffect(() => {
-    if (!selectedKey) return;
-    let cancelled = false;
-    invoke<ServiceAttendance | null>("attendance:getHistory", { serviceKey: selectedKey })
-      .then((d) => !cancelled && setDetail(d))
-      .catch(() => !cancelled && setDetail(null));
-    // Best-effort: the matching timeline record drives PCO plan-item markers.
-    invoke<ServiceTimeline | null>("serviceTimeline:get", { serviceKey: selectedKey })
-      .then((t) => !cancelled && setTimeline(t))
-      .catch(() => !cancelled && setTimeline(null));
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedKey]);
-
-  const days = useMemo(() => {
-    const set = new Set<string>();
-    for (const s of list ?? []) set.add(s.serviceDate);
-    return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
-  }, [list]);
-
-  useResyncOn([days, day], () => {
-    if (day == null && days.length > 0) setDay(days[0]);
-  });
-
-  const dayServices = useMemo(() => (list ?? []).filter((s) => s.serviceDate === day), [list, day]);
-
-  async function deleteService(key: string, title: string) {
-    if (!(await confirm({ title: "Delete recording?", message: `Delete the attendance recording for "${title}"? This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
-    setList((prev) => (prev ? prev.filter((s) => s.serviceKey !== key) : prev));
-    if (selectedKey === key) setSelectedKey(null);
-    try {
-      await invoke("attendance:deleteHistory", { serviceKey: key });
-    } catch {
-      reload();
-    }
-  }
-
-  if (list === null) {
-    return (
-      <div className="py-6">
-        <SkeletonRows rows={5} />
-      </div>
-    );
-  }
-
-  if (list.length === 0) {
-    return (
-      <div className="py-8">
-        <EmptyState
-          icon={<UsersIcon />}
-          title="No attendance recorded yet"
-          hint="Attendance is recorded while a service runs in Planning Center Live with the SenSource people counter connected."
-        />
-      </div>
-    );
-  }
-
-  // ── Detail view: one service's attendance trend + summary. ──
-  if (detail) {
-    const live = detail.endedAt == null;
-    return (
-      <div className="flex flex-col gap-4">
-        <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
-          ← All services
-        </button>
-        <div className="flex flex-col">
-          <span className="text-title3 font-semibold text-gray-12">
-            {detail.planTitle ?? detail.serviceKey}
-            {live && <span className="ml-2 align-middle rounded-full bg-red-9 px-2 py-0.5 text-[10px] font-semibold text-white">LIVE</span>}
-          </span>
-          <span className="text-caption1 text-gray-9">
-            {detail.seriesTitle ? `${detail.seriesTitle} · ` : ""}
-            {fmtDate(detail.startedAt)}
-            {fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt) ? ` · ${fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt)}` : ""}
-          </span>
-        </div>
-        <AttendanceDetail detail={detail} timeline={timeline} />
-      </div>
-    );
-  }
-
-  // ── List view: services for the selected day, with day navigation. ──
-  const dayIdx = day ? days.indexOf(day) : -1;
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <button
-          className="rounded-md border border-gray-5 p-1.5 text-gray-11 enabled:hover:bg-gray-3 disabled:opacity-40"
-          disabled={dayIdx < 0 || dayIdx >= days.length - 1}
-          onClick={() => setDay(days[dayIdx + 1])}
-          aria-label="Earlier day"
-        >
-          <ChevronLeftIcon className="size-4" />
-        </button>
-        <span className="text-body font-medium text-gray-12">{day ? fmtDay(day) : "—"}</span>
-        <button
-          className="rounded-md border border-gray-5 p-1.5 text-gray-11 enabled:hover:bg-gray-3 disabled:opacity-40"
-          disabled={dayIdx <= 0}
-          onClick={() => setDay(days[dayIdx - 1])}
-          aria-label="Later day"
-        >
-          <ChevronRightIcon className="size-4" />
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        {dayServices.map((s) => (
-          <div key={s.serviceKey} className="flex items-center gap-1 rounded-lg border border-gray-5 bg-gray-2 pr-1.5 hover:bg-gray-3 transition-colors">
-            <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(s.serviceKey)}>
-              <div className="flex flex-col min-w-0">
-                <span className="text-body font-medium text-gray-12 truncate">{s.planTitle ?? s.serviceKey}</span>
-                <span className="text-caption2 text-gray-9 truncate">
-                  {fmtTime(s.serviceTimeStartsAt ?? s.startedAt) ? `${fmtTime(s.serviceTimeStartsAt ?? s.startedAt)} · ` : ""}
-                  {s.seriesTitle ? `${s.seriesTitle} · ` : ""}
-                  {s.endedAt == null ? "recording…" : `${s.samples.length} samples`}
-                </span>
-              </div>
-              <span className="shrink-0 tabular-nums text-caption1 text-right">
-                <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">peak </span><span className="text-accent">{servicePeakAttendance(s).toLocaleString()}</span></span>
-                <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">room </span><span className="text-green-11">{s.peakOccupancy.toLocaleString()}</span></span>
-              </span>
-            </button>
-            <Tooltip label="Delete recording">
-              <button
-                className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
-                onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
-                aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
-              >
-                <Trash2Icon className="size-4" />
-              </button>
-            </Tooltip>
-          </div>
-        ))}
-        {dayServices.length === 0 && <p className="text-caption1 text-gray-9">No services on this day.</p>}
-      </div>
-    </div>
-  );
 }
 
 /** The full attendance detail — metric picker + summary cards + trend chart — for
@@ -469,7 +263,7 @@ function AttendanceChart({
 
   // Service-proper window: the arrival ramp sits left of it and the emptying-room
   // taper to the right, so those tails get dimmed while the service band stays clear.
-  const clampX = (v: number) => Math.max(padL, Math.min(W - padR, v));
+  const clampX = (v: number) => clamp(v, padL, W - padR);
   const sStart = serviceStartedAt ? Date.parse(serviceStartedAt) : NaN;
   const sEnd = serviceEndedAt ? Date.parse(serviceEndedAt) : NaN;
   const bandX0 = Number.isFinite(sStart) ? clampX(xt(serviceStartedAt as string)) : null;
@@ -612,9 +406,9 @@ function AttendanceChart({
                 if (showOccupancy) rows.push({ t: `Attendance ${hs.occupancy.toLocaleString()}`, kind: "val" });
                 if (showAttendance) rows.push({ t: `Entries ${hs.attendance.toLocaleString()}`, kind: "val" });
                 for (const m of hoverItems) rows.push({ t: `▸ ${m.label.length > 24 ? `${m.label.slice(0, 23)}…` : m.label}`, kind: "item" });
-                const boxW = Math.min(W - padL - padR, Math.max(96, Math.round(Math.max(...rows.map((r) => r.t.length)) * 5) + 14));
+                const boxW = clamp(Math.round(Math.max(...rows.map((r) => r.t.length)) * 5) + 14, 96, W - padL - padR);
                 const boxH = 6 + rows.length * 12;
-                const bx = Math.min(Math.max(hx + 6, padL), W - padR - boxW);
+                const bx = clamp(hx + 6, padL, W - padR - boxW);
                 return (
                   <g>
                     <rect x={bx} y={padT + 2} width={boxW} height={boxH} rx={4} fill="var(--gray-1)" stroke="var(--gray-6)" opacity={0.97} />

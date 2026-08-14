@@ -9,6 +9,7 @@
 // dismissed unread, where "3 new, 41 already here" makes an archive from the wrong
 // box obvious while it is still a click away.
 
+import { errorMessage } from "@main/services/errors";
 import { DownloadIcon, UploadIcon } from "lucide-react";
 import { useRef, useState, type ChangeEvent } from "react";
 
@@ -92,7 +93,7 @@ export function DataArchivePanel() {
       setChoice("skip"); // keeping what is here is always the default
 
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
+      toast.error(errorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -114,15 +115,28 @@ export function DataArchivePanel() {
         body.merged.length > 0 && `merged ${body.merged.length}`,
         body.replaced.length > 0 && `replaced ${body.replaced.length}`,
       ].filter(Boolean);
-      toast.success(
-        parts.length === 0
-          ? "Nothing changed — everything in that file was already here."
-          : `Import done: ${parts.join(", ")}.`,
-      );
+      // A raw-file failure does not abort the import — the summary records are
+      // already applied — but it must not read as a clean success either. On a
+      // full card every raw write fails and the samples behind these services are
+      // simply absent, which nothing else would ever tell the operator.
+      const failed: { file: string; reason: string }[] = body.rawFilesFailed ?? [];
+      if (failed.length > 0) {
+        toast.error(
+          `Import finished, but ${plural(failed.length, "raw sample file")} could not be written ` +
+            `(${failed[0].reason}). The services are here; their samples are not. Check disk space, ` +
+            `then import again — keep the file.`,
+        );
+      } else {
+        toast.success(
+          parts.length === 0
+            ? "Nothing changed — everything in that file was already here."
+            : `Import done: ${parts.join(", ")}.`,
+        );
+      }
       setPending(null);
       setChoice("skip");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
+      toast.error(errorMessage(err));
     } finally {
       setBusy(false);
     }
