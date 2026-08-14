@@ -6,7 +6,8 @@
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import { QueryClient } from "@tanstack/react-query";
 import { Shell } from "./shell";
-import { DESTINATIONS, NESTED_ROUTES } from "./destinations";
+import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations";
+import { SettingsIndexRoute } from "./settings-index";
 import { ErrorBoundaryView } from "../components/ui/error-boundary-view";
 
 const rootRoute = createRootRoute({
@@ -24,7 +25,7 @@ const rootRoute = createRootRoute({
 // must not blank the rail and strand the operator with no way out. The settings
 // panel keys its ErrorBoundary by section for the same reason.
 const routes = [
-  ...DESTINATIONS.map((d) =>
+  ...ALL_DESTINATIONS.map((d) =>
     createRoute({
       getParentRoute: () => rootRoute,
       path: d.path,
@@ -40,6 +41,15 @@ const routes = [
       errorComponent: ErrorBoundaryView,
     }),
   ),
+  // Bare /settings, plus the legacy #hash deep links that pointed into the old
+  // tabbed panel. Those are in bookmarks and in Connect's copy-to-clipboard
+  // links, so they redirect rather than 404.
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/settings",
+    component: SettingsIndexRoute,
+    errorComponent: ErrorBoundaryView,
+  }),
 ];
 
 const routeTree = rootRoute.addChildren(routes);

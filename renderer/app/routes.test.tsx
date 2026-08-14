@@ -7,7 +7,7 @@ import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
-const { DESTINATIONS } = await import("./destinations.js");
+const { DESTINATIONS, SETTINGS_DESTINATIONS, ALL_DESTINATIONS, NAV_GROUPS } = await import("./destinations.js");
 const { OPERATOR_PATHS } = await import("../../main/services/routes/operator-paths.js");
 
 after(() => {
@@ -18,7 +18,7 @@ describe("operator destinations", () => {
   test("every destination is a path the server routes to the operator app", () => {
     // A rail entry the server does not claim renders the kiosk instead: the
     // link looks right, and clicking it leaves the shell entirely.
-    for (const d of DESTINATIONS) {
+    for (const d of ALL_DESTINATIONS) {
       const claimed = OPERATOR_PATHS.some((p) => d.path === p || d.path.startsWith(`${p}/`));
       assert.ok(claimed, `${d.path} is in the rail but the server does not route it`);
     }
@@ -27,7 +27,7 @@ describe("operator destinations", () => {
   test("every operator path the server claims has a destination", () => {
     // The reverse gap is a page that exists and is unreachable. Asserted as an
     // EXACT set rather than a count, so adding one on either side fails loudly.
-    const railTops = new Set(DESTINATIONS.map((d) => `/${d.path.split("/")[1]}`));
+    const railTops = new Set(ALL_DESTINATIONS.map((d) => `/${d.path.split("/")[1]}`));
     assert.deepEqual(
       [...railTops].sort(),
       [...OPERATOR_PATHS].sort(),
@@ -36,13 +36,43 @@ describe("operator destinations", () => {
   });
 
   test("paths and labels are unique", () => {
-    assert.equal(new Set(DESTINATIONS.map((d) => d.path)).size, DESTINATIONS.length);
-    assert.equal(new Set(DESTINATIONS.map((d) => d.label)).size, DESTINATIONS.length);
+    assert.equal(new Set(ALL_DESTINATIONS.map((d) => d.path)).size, ALL_DESTINATIONS.length);
+    assert.equal(new Set(ALL_DESTINATIONS.map((d) => d.label)).size, ALL_DESTINATIONS.length);
+  });
+
+  test("every work destination appears in exactly one nav group", () => {
+    // In no group it renders outside the list; in two it renders twice. Both
+    // are silent - the rail simply looks wrong, with nothing failing.
+    const grouped = NAV_GROUPS.flatMap((g) => g.paths);
+    for (const d of DESTINATIONS) {
+      const count = grouped.filter((p) => p === d.path).length;
+      assert.equal(count, 1, `${d.path} appears in ${count} nav groups`);
+    }
+  });
+
+  test("nav groups name no path that is not a destination", () => {
+    const known = new Set(DESTINATIONS.map((d) => d.path));
+    for (const g of NAV_GROUPS) {
+      for (const p of g.paths) {
+        assert.ok(known.has(p), `nav group "${g.label}" lists ${p}, which is not a destination`);
+      }
+    }
+  });
+
+  test("settings destinations all live under /settings", () => {
+    // The split is the point of the phase: work in the rail, configuration
+    // under Settings. One leaking out puts a config page back among the work.
+    for (const d of SETTINGS_DESTINATIONS) {
+      assert.ok(d.path.startsWith("/settings/"), `${d.path} is not under /settings`);
+    }
+    for (const d of DESTINATIONS) {
+      assert.ok(!d.path.startsWith("/settings"), `${d.path} is work but sits under /settings`);
+    }
   });
 
   test("no destination label carries an emoji", () => {
     const emoji = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
-    for (const d of DESTINATIONS) {
+    for (const d of ALL_DESTINATIONS) {
       assert.equal(emoji.test(d.label), false, `${d.label} contains an emoji`);
     }
   });

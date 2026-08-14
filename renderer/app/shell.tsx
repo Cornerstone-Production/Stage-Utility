@@ -11,7 +11,9 @@ import { Outlet, useRouterState } from "@tanstack/react-router";
 import { SplitView } from "../components/ui/split-view";
 import { Rail } from "./rail";
 import { ContextBar } from "./context-bar";
-import { DESTINATIONS } from "./destinations";
+import { ALL_DESTINATIONS } from "./destinations";
+import { useStageLiveWiring } from "./live-wiring";
+import { useStageStateQuery } from "./queries";
 import { useSidebarCollapsed } from "../lib/use-sidebar-collapsed";
 import { useSidebarWidth, RAIL_WIDTH } from "../lib/use-sidebar-width";
 
@@ -22,7 +24,7 @@ import { useSidebarWidth, RAIL_WIDTH } from "../lib/use-sidebar-width";
  */
 function PageHeader() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const active = DESTINATIONS.find((d) => d.path === pathname);
+  const active = ALL_DESTINATIONS.find((d) => d.path === pathname);
   if (!active) return null;
   return (
     <header className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 shrink-0">
@@ -34,8 +36,16 @@ function PageHeader() {
 
 export function Shell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const active = DESTINATIONS.find((d) => pathname === d.path || pathname.startsWith(`${d.path}/`));
+  // Longest match first: /settings/branding must beat /settings.
+  const active = [...ALL_DESTINATIONS]
+    .sort((a, b) => b.path.length - a.path.length)
+    .find((d) => pathname === d.path || pathname.startsWith(`${d.path}/`));
   const { collapsed, toggle } = useSidebarCollapsed();
+  // Mounted HERE, not on a route: these subscriptions must outlive any single
+  // page. On a route they would unsubscribe the moment you navigated away, and
+  // the app would stop seeing live changes until you happened to come back.
+  const { data: stageState } = useStageStateQuery();
+  useStageLiveWiring(stageState?.accentColor);
   const { width, dragging, startResize, reset: resetWidth } = useSidebarWidth();
 
   return (

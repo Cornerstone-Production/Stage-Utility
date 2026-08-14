@@ -15,11 +15,19 @@ describe("operator paths", () => {
     assert.ok(isOperatorPath("/patch/rack-a"));
   });
 
-  it("leaves the kiosk and settings alone", () => {
-    // These belong to index.html and settings-window.html. Claiming one would
-    // black out a wall display or the control surface.
-    for (const p of ["/", "/display-1", "/display-lobby", "/settings", "/settings/"]) {
+  it("leaves the kiosk alone", () => {
+    // These belong to index.html. Claiming one would black out a wall display.
+    for (const p of ["/", "/display-1", "/display-lobby"]) {
       assert.equal(isOperatorPath(p), false, `${p} must NOT be an operator path`);
+    }
+  });
+
+  it("claims /settings, which is no longer its own document", () => {
+    // settings-window.html is retired: the settings surfaces are routes in the
+    // operator app now. This flipped from the opposite assertion, which was
+    // correct while the panel had its own entry point.
+    for (const p of ["/settings", "/settings/", "/settings/branding"]) {
+      assert.ok(isOperatorPath(p), `${p} must be an operator path`);
     }
   });
 

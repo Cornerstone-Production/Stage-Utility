@@ -12,7 +12,12 @@ export const OPERATOR_PATHS = [
   "/patch",
   "/scriptview",
   "/automation",
-  "/integrations",
+  "/plan",
+  "/views",
+  "/displays",
+  // The settings panel is no longer its own document; /settings and everything
+  // under it are routes in the operator app.
+  "/settings",
 ] as const;
 
 /**

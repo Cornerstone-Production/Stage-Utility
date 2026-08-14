@@ -3,15 +3,26 @@
 // Two lists would let a destination exist in the rail with no route (a dead
 // link) or a route with no rail entry (an unreachable page). routes.test.tsx
 // asserts this set matches the server's OPERATOR_PATHS exactly.
+//
+// Two lists exist here, not one, and the split is meaningful: DESTINATIONS is
+// work, SETTINGS_DESTINATIONS is configuration you touch once. That is the whole
+// point of the phase — History is a place you go, not a tab inside a thing
+// called Settings.
 
 import type { FunctionComponent, ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
 import {
   CableIcon,
+  CalendarIcon,
   ClockIcon,
   DropletIcon,
+  LayoutTemplateIcon,
   ListChecksIcon,
+  MonitorIcon,
+  PaletteIcon,
   PlugIcon,
+  QrCodeIcon,
+  SlidersHorizontalIcon,
   ZapIcon,
 } from "lucide-react";
 
@@ -22,12 +33,20 @@ import { BaptismOperator } from "../main/baptism-operator";
 import { ServiceHistorySection } from "../settings/sections/service-history-section";
 import { AutomationSection } from "../settings/sections/automation-section";
 import { IntegrationsSection } from "../settings/sections/integrations-section";
+import {
+  AdvancedRoute,
+  BrandingRoute,
+  ConnectRoute,
+  DisplaysRoute,
+  PlanRoute,
+  ViewsRoute,
+} from "./settings-routes";
 
 export interface Destination {
   /** Route path. Nested routes use the top-level segment for rail grouping. */
   path: string;
   label: string;
-  /** Subtitle under the page title. Mirrors SECTION_DESC in settings, so the same
+  /** Subtitle under the page title. Mirrors the old SECTION_DESC, so the same
    *  surface is described the same way wherever it is reached from. */
   description: string;
   icon: ReactNode;
@@ -35,7 +54,29 @@ export interface Destination {
   Component: FunctionComponent;
 }
 
+/** Work surfaces — the rail proper. */
 export const DESTINATIONS: readonly Destination[] = [
+  {
+    path: "/plan",
+    label: "Plan",
+    description: "Choose which Planning Center plan the displays follow.",
+    icon: <CalendarIcon className="size-4" />,
+    Component: PlanRoute,
+  },
+  {
+    path: "/views",
+    label: "Views",
+    description: "Build and arrange what each display shows.",
+    icon: <LayoutTemplateIcon className="size-4" />,
+    Component: ViewsRoute,
+  },
+  {
+    path: "/scriptview",
+    label: "ScriptView",
+    description: "Named rundown column presets for the ScriptView dashboard.",
+    icon: <ListChecksIcon className="size-4" />,
+    Component: ScriptViewIndex,
+  },
   {
     path: "/patch",
     label: "Patch",
@@ -46,27 +87,11 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: PatchView,
   },
   {
-    path: "/scriptview",
-    label: "ScriptView",
-    description: "Named rundown column presets for the ScriptView dashboard.",
-    icon: <ListChecksIcon className="size-4" />,
-    Component: ScriptViewIndex,
-  },
-  {
-    path: "/history",
-    label: "History",
-    description: "Every service you've run — timing and attendance.",
-    icon: <ClockIcon className="size-4" />,
-    // The same component the settings tab renders. history-view.tsx was a
-    // 38-line wrapper around it and is deleted once this route exists.
-    Component: ServiceHistorySection,
-  },
-  {
-    path: "/baptism",
-    label: "Baptisms",
-    description: "Time testimonies and baptisms live.",
-    icon: <DropletIcon className="size-4" />,
-    Component: BaptismOperator,
+    path: "/displays",
+    label: "Displays",
+    description: "Point each physical screen at a View.",
+    icon: <MonitorIcon className="size-4" />,
+    Component: DisplaysRoute,
   },
   {
     path: "/automation",
@@ -76,12 +101,85 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: AutomationSection,
   },
   {
-    path: "/integrations",
+    path: "/history",
+    label: "History",
+    description: "Every service you've run — timing and attendance.",
+    icon: <ClockIcon className="size-4" />,
+    // The same component the old settings tab rendered.
+    Component: ServiceHistorySection,
+  },
+  {
+    path: "/baptism",
+    label: "Baptisms",
+    description: "Time testimonies and baptisms live.",
+    icon: <DropletIcon className="size-4" />,
+    Component: BaptismOperator,
+  },
+];
+
+/**
+ * Configuration — reached under Settings rather than from the rail proper.
+ *
+ * Integrations moved from `/integrations` (where Phase 1a briefly put it) to
+ * `/settings/integrations`: it is set-up-once configuration, not work. The old
+ * path never shipped, so nothing is redirected.
+ */
+export const SETTINGS_DESTINATIONS: readonly Destination[] = [
+  {
+    path: "/settings/integrations",
     label: "Integrations",
     description: "Connect the gear and services that run your service.",
     icon: <PlugIcon className="size-4" />,
     Component: IntegrationsSection,
   },
+  {
+    path: "/settings/connect",
+    label: "Connect",
+    description: "Share the display link and QR for phones on the network.",
+    icon: <QrCodeIcon className="size-4" />,
+    Component: ConnectRoute,
+  },
+  {
+    path: "/settings/branding",
+    label: "Branding",
+    description: "Your organization's name, logo, and accent color.",
+    icon: <PaletteIcon className="size-4" />,
+    Component: BrandingRoute,
+  },
+  {
+    path: "/settings/advanced",
+    label: "Advanced",
+    description: "Updates, network address, capture windows, and full config.",
+    icon: <SlidersHorizontalIcon className="size-4" />,
+    Component: AdvancedRoute,
+  },
+];
+
+/** Every routed destination, work and configuration alike. */
+export const ALL_DESTINATIONS: readonly Destination[] = [
+  ...DESTINATIONS,
+  ...SETTINGS_DESTINATIONS,
+];
+
+/**
+ * Nav clusters. Each group answers one question, which is what an earlier set of
+ * labels did not: "Output" had collected anything screen-adjacent (Patch is a
+ * document, Integrations are devices), and "Identity" had become the bucket for
+ * whatever fit nowhere.
+ *
+ * Deferred in Phase 1a because six destinations needed no grouping. The rail
+ * now carries twelve.
+ */
+export const NAV_GROUPS: { label: string; paths: string[] }[] = [
+  // What is shown. Patch belongs here because volunteers READ it at /patch; the
+  // "output" in its description is XLR, not a display.
+  { label: "Content", paths: ["/plan", "/views", "/scriptview", "/patch"] },
+  // Where it shows.
+  { label: "Screens", paths: ["/displays"] },
+  // What it talks to. Automation rules act ON integrations.
+  { label: "Devices", paths: ["/automation"] },
+  // A service you ran — one live, one recorded.
+  { label: "Services", paths: ["/history", "/baptism"] },
 ];
 
 /**
