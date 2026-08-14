@@ -263,8 +263,24 @@ thing it configures, rather than living in a separate panel.
 
 `views-section.tsx` (content) and `outputs-section.tsx` (physical screens) become
 one surface: a card per Output showing what it is currently displaying and
-whether it is online, with the display-View library alongside. Assignment
-happens directly rather than through a dropdown in a different tab.
+whether it is online. Assignment happens directly rather than through a dropdown
+in a different tab.
+
+`views-section.tsx` is now **deleted**, its capabilities rehomed rather than
+dropped:
+
+| Capability | Where it lives now |
+|---|---|
+| Create a view | `+ New view…` in a screen's view picker, and a `New view` button below the grid — both open the shared `NewViewDialog`, which keeps the kind and starting-template steps |
+| Rename / duplicate / delete a view | On the view itself: the per-view editor route, and the menu on an unassigned-view card. Both delete paths confirm first |
+| Reach a view no screen shows | A `Views not on a screen` section below the grid, shown only when non-empty |
+| Edit a view | The per-view editor route (`ViewDetail`, moved to `view-detail.tsx`) |
+| **Reorder views manually** | **Dropped on purpose.** Order was only ever read by the view picker; nothing else consumed it. The picker now sorts by name, which needs no maintaining |
+
+Unassigned views deliberately sit in their own section rather than mixed into the
+grid: a screen is a physical thing with a URL, a presence dot and a lock, and a
+view is content. Greying an orphan view inside the same grid would read as
+"disabled" rather than "not in use".
 
 This merges the presentation only. The Views-and-Outputs data model is correct
 and unchanged — a View is content, an Output is a screen, one View can drive many

@@ -5,13 +5,15 @@ import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, GripVerticalIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
 /** Shared menu-item styling, so the six actions cannot drift apart. */
 const MENU_ITEM =
   "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill";
+const MENU_CONTENT =
+  "z-50 min-w-48 rounded-md border border-line-strong bg-popover p-1 shadow-md backdrop-blur-xl";
 import {
   Button,
   Input,
@@ -21,24 +23,18 @@ import {
   SelectItem,
   SelectValue,
   toast,
+  confirm,
 } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
+import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 
-const KIND_LABELS: Record<ViewKind, string> = {
-  slots: "Mic Slots",
-  dashboard: "Dashboard",
-  stage: "Stage",
-  transcription: "Transcription",
-  custom: "Custom Layout",
-  script: "Script",
-  "spl-rundown": "SPL Rundown",
-};
-
 const UNROUTED = "__none__";
+// A sentinel, never a stored value: picking it opens the new-view dialog.
+const NEW_VIEW = "__new__";
 
 interface OutputRowProps {
   output: Output;
@@ -61,12 +57,13 @@ interface OutputRowProps {
   /** Open the layout editor for this display's view. Absent when it has no
    *  free-form layout to edit (every kind except "custom"). */
   onEditLayout?: () => void;
+  onRequestNewView: () => void;
 }
 
 // One card per display: the name reads as a title, the View it shows is the one
 // prominent control, Open + Lock stay in reach, and the URL sits quietly in the
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
-function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onSetSlug, onSetView, onSetLocked, onOpenWindow, onRefresh, onRemove, onEditLayout }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onSetSlug, onSetView, onSetLocked, onOpenWindow, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const [editSlug, setEditSlug] = useState(output.slug ?? "");
   const [slugError, setSlugError] = useState<string | null>(null);
@@ -89,6 +86,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: output.id,
   });
+  const { role: _dragRole, tabIndex: _dragTabIndex, ...dragA11y } = attributes;
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -119,29 +117,34 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
   // permanent rows of mono URL per card buried the thing the card is FOR — what
   // that screen is showing.
   const [showSlug, setShowSlug] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className="flex flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]"
+      // The whole card is the drag handle - a grip icon said "you can rearrange
+      // these" about a grid that already implies it. The sensors need real
+      // travel (mouse) or a short hold (touch) before a drag starts, so an
+      // ordinary click still reaches the controls; the ones that own their own
+      // pointer gestures stop propagation below.
+      // listeners only, and attributes MINUS role/tabIndex: dnd-kit's attributes
+      // set role="button", which on a grip was right but on a card containing a
+      // name field and a view picker announces a button wrapping textboxes and
+      // comboboxes. The drag-description attributes are still useful, so they
+      // are kept.
+      {...dragA11y}
+      {...listeners}
+      className="flex cursor-grab flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)] active:cursor-grabbing"
     >
       {/* Header: drag handle + tinted icon + editable name + status + overflow */}
       <div className="flex items-center gap-2 px-3 pt-2.5">
-        <button
-          {...attributes}
-          {...listeners}
-          className="cursor-grab active:cursor-grabbing touch-pan-y shrink-0 text-fg-faint hover:text-fg-muted transition-colors"
-          aria-label="Drag to reorder"
-          tabIndex={-1}
-        >
-          <GripVerticalIcon className="size-4" />
-        </button>
         <IconTint itemKey={output.id} icon={MonitorIcon} color={iconColor} label={output.name} />
         <Input
           value={editName}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
           onBlur={handleBlur}
+          onPointerDown={(e) => e.stopPropagation()}
           className="h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0"
           aria-label="Display name"
         />
@@ -155,7 +158,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
         {/* Everything set-once lives here: opening, locking, the URLs, refresh
             and remove. The card face keeps only what an operator changes while
             working — what it shows, and the way into its layout. */}
-        <DropdownMenu.Root>
+        <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenu.Trigger asChild>
             <button
               className="flex size-7 shrink-0 items-center justify-center rounded-md text-fg-subtle hover:bg-fill hover:text-fg transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-focus"
@@ -165,11 +168,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
             </button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              align="end"
-              sideOffset={4}
-              className="z-50 min-w-48 rounded-md border border-line-strong bg-popover p-1 shadow-md backdrop-blur-xl"
-            >
+            <DropdownMenu.Content align="end" sideOffset={4} className={MENU_CONTENT}>
               <DropdownMenu.Item onSelect={onOpenWindow} className={MENU_ITEM}>
                 <ExternalLinkIcon className="size-3.5 text-fg-subtle" />
                 Open display
@@ -182,9 +181,23 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
                 {output.locked ? "Unlock display" : "Lock display"}
               </DropdownMenu.Item>
               <DropdownMenu.Item
-                onSelect={async () => {
-                  if (await copyText(outputUrl)) toast.success("URL copied");
-                  else toast.error("Couldn't copy — open the menu again and use Friendly URL to see it");
+                // preventDefault keeps the menu OPEN across the copy. Without it
+                // Radix closes and returns focus to the trigger, which discards
+                // the textarea selection the fallback path copies from - so over
+                // plain HTTP (how prod is served) this button did nothing at all.
+                onSelect={(e) => {
+                  e.preventDefault();
+                  // Mount the copy textarea inside the menu itself: Radix traps
+                  // focus in there, so a textarea anywhere else loses its
+                  // selection before the copy happens.
+                  const menu = (e.currentTarget as HTMLElement | null)?.closest<HTMLElement>(
+                    "[data-radix-menu-content]",
+                  );
+                  void copyText(outputUrl, menu).then((ok) => {
+                    setMenuOpen(false);
+                    if (ok) toast.success("URL copied");
+                    else toast.error("Couldn't copy — use Friendly URL below to see it");
+                  });
                 }}
                 className={MENU_ITEM}
               >
@@ -206,7 +219,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
               <DropdownMenu.Item
                 onSelect={onRemove}
                 disabled={!canRemove}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-red-11 outline-none data-[highlighted]:bg-red-a3 data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
+                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-red-11 outline-none data-[highlighted]:bg-red-3 data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
               >
                 <TrashIcon className="size-3.5" />
                 Remove display
@@ -235,10 +248,20 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
       <div className="flex items-center justify-between gap-2 px-3 py-2.5">
         {/* A pill, not a full-width field. The card is a thing you glance at;
             a form control spanning it made every card read as a form. */}
-        <Select value={output.viewId ?? UNROUTED} onValueChange={(v: string) => onSetView(v === UNROUTED ? null : v)}>
+        <Select
+          value={output.viewId ?? UNROUTED}
+          onValueChange={(v: string) => {
+            // Creating a view is nearly always in service of assigning one, so
+            // the picker is where the need arises. The sentinel opens the
+            // dialog and the new view is assigned here on the way back, rather
+            // than sending a sentinel id to the server as a real value.
+            if (v === NEW_VIEW) { onRequestNewView(); return; }
+            onSetView(v === UNROUTED ? null : v);
+          }}
+        >
           <SelectTrigger
             className={cn(
-              "h-7 w-auto min-w-0 max-w-[62%] rounded-lg border-transparent px-2.5 text-footnote font-medium",
+              "h-7 w-auto min-w-0 max-w-[70%] truncate rounded-lg border-transparent px-2.5 text-footnote font-medium",
               output.viewId ? "bg-fill text-fg" : "bg-warn-3 text-warn-11",
             )}
           >
@@ -248,9 +271,10 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
             <SelectItem value={UNROUTED}>— Unrouted —</SelectItem>
             {views.map((v) => (
               <SelectItem key={v.id} value={v.id}>
-                {v.name} · {KIND_LABELS[v.kind]}
+                {v.name}
               </SelectItem>
             ))}
+            <SelectItem value={NEW_VIEW}>+ New view…</SelectItem>
           </SelectContent>
         </Select>
         <Tooltip label={onEditLayout ? "Edit this view's layout" : "Only a custom view has a layout to edit"}>
@@ -297,6 +321,102 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
   );
 }
 
+// A view nothing is showing. Same card shape as a screen so the page has one
+// visual vocabulary, but deliberately WITHOUT the screen affordances - no URL,
+// no presence dot, no lock, no open-in-a-window - because it is not a screen.
+// That absence is what distinguishes the two, rather than a grey wash.
+function UnassignedViewCard({
+  view,
+  onRename,
+  onDuplicate,
+  onRemove,
+  onEditLayout,
+}: {
+  view: { id: string; name: string; kind: ViewKind };
+  onRename: (name: string) => void;
+  onDuplicate: () => void;
+  onRemove: () => void;
+  onEditLayout?: () => void;
+}) {
+  const [editName, setEditName] = useState(view.name);
+  // Follow a rename that happened elsewhere (a duplicate, an import) without
+  // clobbering what is being typed here.
+  useResyncOn([view.name], () => setEditName(view.name));
+
+  return (
+    <div className="flex flex-col overflow-hidden rounded-xl border border-dashed border-line bg-surface">
+      <div className="flex items-center gap-2 px-3 pt-2.5">
+        <Input
+          value={editName}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
+          onBlur={() => {
+            const next = editName.trim();
+            if (next && next !== view.name) onRename(next);
+            else setEditName(view.name);
+          }}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          className="h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0"
+          aria-label="View name"
+        />
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button type="button" className="shrink-0 rounded-md p-1 text-fg-subtle hover:bg-fill hover:text-fg" aria-label={`More actions for ${view.name}`}>
+              <MoreVerticalIcon className="size-4" />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content className={MENU_CONTENT} align="end" sideOffset={4}>
+              <DropdownMenu.Item onSelect={onDuplicate} className={MENU_ITEM}>
+                <CopyIcon className="size-3.5 text-fg-subtle" />
+                Duplicate view
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                // Confirmed, because deleting a view cannot be undone and this
+                // item sits directly under "Duplicate view". The old Views list
+                // confirmed; dropping it here would have made a misclick
+                // destroy an operator's layout with no way back.
+                onSelect={async () => {
+                  const ok = await confirm({
+                    title: `Delete "${view.name}"?`,
+                    message: "This cannot be undone.",
+                    confirmLabel: "Delete view",
+                    destructive: true,
+                  });
+                  if (ok) onRemove();
+                }}
+                className={cn(MENU_ITEM, "text-red-11 data-[highlighted]:bg-red-3")}
+              >
+                <TrashIcon className="size-3.5" />
+                Delete view
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      </div>
+
+      <div className="px-3 pt-2">
+        <LazyPreview viewId={view.id} />
+      </div>
+
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+        <span className="truncate rounded-lg bg-fill px-2.5 py-1 text-footnote font-medium text-fg-muted">
+          {KIND_LABELS[view.kind]}
+        </span>
+        <Tooltip label={onEditLayout ? "Edit this view's layout" : "Only a custom view has a layout to edit"}>
+          <button
+            type="button"
+            onClick={onEditLayout}
+            disabled={!onEditLayout}
+            className="shrink-0 text-footnote text-accent transition-opacity hover:underline disabled:text-fg-faint disabled:no-underline disabled:opacity-60"
+          >
+            Edit layout
+          </button>
+        </Tooltip>
+      </div>
+    </div>
+  );
+}
+
 export function OutputsSection({
   stageState,
   handlers,
@@ -306,7 +426,20 @@ export function OutputsSection({
   onEditLayout?: (viewId: string) => void;
 }) {
   const outputs = stageState.outputs ?? [];
-  const views = stageState.views ?? [];
+  // Sorted by name. Manual view ordering used to exist and only ever sorted
+  // THIS dropdown - nothing else read the order - so it was dropped in favour of
+  // an order that needs no maintaining. See docs/design/app-shell-redesign.md.
+  const views = [...(stageState.views ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+
+  // Which output asked for a new view, so the created view can be assigned back
+  // to it. "" means the dialog was opened from the unassigned section, where
+  // there is nothing to assign to.
+  const [creatingFor, setCreatingFor] = useState<string | null>(null);
+
+  // A view no screen points at. Without a home these are unreachable: the only
+  // way in was the Views list this page replaced.
+  const assigned = new Set(outputs.map((o) => o.viewId).filter(Boolean));
+  const unassigned = views.filter((v) => !assigned.has(v.id));
   // Prefer the configured public URL (DNS) so display links match what operators
   // actually browse to; fall back to the current origin.
   const baseUrl = stageState.publicUrl || window.location.origin;
@@ -337,8 +470,7 @@ export function OutputsSection({
     <div data-flash-id="displays-list" className="px-5 max-sm:px-3 flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       <p className="text-caption1 text-gray-9">
         Each display is a physical screen at its own URL. Point it at a <span className="font-medium">View</span>{" "}
-        (built under the Views tab) to choose what it shows — and many screens can share one View, so you
-        change content in one place.
+        to choose what it shows — and many screens can share one View, so you change content in one place.
       </p>
 
       <DndContext sensors={handlers.sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -365,6 +497,7 @@ export function OutputsSection({
                 onOpenWindow={() => handlers.handleOpenOutputWindow(output.id)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}
+                onRequestNewView={() => setCreatingFor(output.id)}
                 onEditLayout={
                   // Only a custom-kind view has a free-form layout; the built-in
                   // kinds would open an editor with nothing to edit.
@@ -397,7 +530,53 @@ export function OutputsSection({
         </SortableContext>
       </DndContext>
 
+      {/* Views with no screen pointing at them.
+          Deliberately NOT mixed into the grid above: a screen is a physical
+          thing with a URL, a presence dot and a lock, and a view is content.
+          Greying an orphan view inside the same grid reads as "disabled"
+          rather than "not in use". This appears only when there is something
+          to show, so the common case is the screens grid and nothing else. */}
+      {unassigned.length > 0 && (
+        <div className="mt-2 flex flex-col gap-2 border-t border-line pt-5">
+          <h3 className="text-callout font-semibold text-fg">Views not on a screen</h3>
+          <p className="text-caption2 text-fg-subtle">
+            Built, but nothing is showing them. Point a screen at one above, or tidy them up here.
+          </p>
+          <div className="grid gap-3 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
+            {unassigned.map((v) => (
+              <UnassignedViewCard
+                key={v.id}
+                view={v}
+                onRename={(name) => handlers.handleRenameView(v.id, name)}
+                onDuplicate={() => handlers.handleDuplicateView(v.id)}
+                onRemove={() => handlers.handleRemoveView(v.id)}
+                onEditLayout={onEditLayout && v.kind === "custom" ? () => onEditLayout(v.id) : undefined}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* One dialog for the whole page. Controlled, because it is opened from a
+          view picker on any card as well as from the button below. */}
+      <NewViewDialog
+        handlers={handlers}
+        open={creatingFor !== null}
+        onOpenChange={(o) => { if (!o) setCreatingFor(null); }}
+        onCreated={(id) => {
+          // Assign it straight to the screen that asked, so "New view..." in a
+          // picker is one action rather than create-then-go-find-it.
+          if (creatingFor) handlers.handleSetOutputView(creatingFor, id);
+          setCreatingFor(null);
+        }}
+        trigger={<span className="hidden" />}
+      />
+
       <div className="flex flex-wrap items-center gap-2">
+        <Button variant="transparent" size="small" onClick={() => setCreatingFor("")}>
+          <PlusIcon className="size-3.5 text-gray-9" />
+          New view
+        </Button>
         {outputs.length > 0 && (
           <Button
             variant="transparent"

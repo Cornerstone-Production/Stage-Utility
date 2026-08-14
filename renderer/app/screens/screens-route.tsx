@@ -12,11 +12,17 @@
 //
 // The Views master list is gone: editing a view is its own route, so opening
 // the editor no longer scrolls the page and shifts it out of reach.
+//
+// Everything that list used to own now lives on this page. Creating a view is
+// "New view..." in a screen's picker (and a button below the grid); renaming,
+// duplicating and deleting are on the view itself; a view no screen shows
+// appears under "Views not on a screen" rather than being reachable only from a
+// side panel. Manual view REORDERING was dropped on purpose: nothing read the
+// order except that one dropdown, which now sorts by name.
 
 import { Loader2Icon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { OutputsSection } from "../../settings/sections/outputs-section";
-import { ViewsSection } from "../../settings/sections/views-section";
 import { useStageSettings } from "../use-stage-settings";
 
 export function ScreensRoute() {
@@ -42,31 +48,6 @@ export function ScreensRoute() {
           s.setSelectedViewId(viewId);
           router.navigate({ to: `/screens/${viewId}/edit` as never });
         }}
-      />
-
-      {/* The view manager, PENDING INTEGRATION - not hidden.
-          The cards above and the per-view editor route now cover the main flow
-          (see a screen, edit its layout on its own page). What still lives only
-          here is creating a view, duplicating one, reordering them, and reaching
-          a view that no screen currently shows. Until those have a home on this
-          page, deleting this would take four capabilities with it - and hiding
-          it would leave a component nobody uses and nobody maintains, which is
-          how two editors were already orphaned once.
-          reachable.test.ts fails if this stops being rendered, so it cannot be
-          quietly dropped or quietly forgotten. */}
-      <ViewsSection
-        stageState={s.stageState}
-        wirelessChannels={s.wirelessChannels}
-        teamPositions={s.teamPositions}
-        layoutTemplates={s.layoutTemplates}
-        selectedViewId={s.selectedViewId}
-        setSelectedViewId={s.setSelectedViewId}
-        localSlots={s.localSlots}
-        slotsDirty={s.slotsDirty}
-        isSavingSlots={s.isSavingSlots}
-        resolvedDraftSlots={s.resolvedDraftSlots}
-        slotPresets={s.slotPresets}
-        handlers={s.handlers}
       />
     </div>
   );

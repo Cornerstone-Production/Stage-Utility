@@ -5,14 +5,14 @@
 // has its own URL: the editor is the whole page, and the Screens cards are the
 // list.
 //
-// This renders ViewDetail directly rather than ViewsSection with its list
+// This renders ViewDetail directly rather than a list-plus-detail screen
 // hidden. A hidden component is one nobody uses and nobody maintains, and this
 // codebase has already orphaned two editors that way.
 
 import { Loader2Icon, ChevronLeftIcon } from "lucide-react";
 import { useParams } from "@tanstack/react-router";
 import { AppLink } from "../app-link";
-import { ViewDetail } from "../../settings/sections/views-section";
+import { ViewDetail } from "../../settings/sections/view-detail";
 import { useStageSettings } from "../use-stage-settings";
 
 export function ViewEditorRoute() {
@@ -60,6 +60,8 @@ export function ViewEditorRoute() {
         <ViewDetail
           key={view.id}
           view={view}
+          // Arrived here from a screen's "Edit layout": go straight in.
+          startEditing
           stageState={s.stageState}
           wirelessChannels={s.wirelessChannels}
           teamPositions={s.teamPositions}
