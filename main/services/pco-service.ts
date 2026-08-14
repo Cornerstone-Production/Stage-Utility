@@ -23,6 +23,24 @@ export class PcoAuthError extends Error {
 import { scrub } from "./scrub.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
+
+/**
+ * Is `candidate` an absolute URL on the same origin as `base`?
+ *
+ * Used before following a URL that arrived in a response body and will be sent
+ * the operator's PCO credentials. Origin, not prefix: a string test would accept
+ * `https://api.planningcenteronline.com.evil.example/`. Anything unparseable,
+ * relative, or off-origin is rejected, and the caller falls back to a URL it
+ * built itself.
+ */
+function sameOrigin(candidate: unknown, base: string): candidate is string {
+  if (typeof candidate !== "string" || !candidate) return false;
+  try {
+    return new URL(candidate).origin === new URL(base).origin;
+  } catch {
+    return false;
+  }
+}
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
 // everything, which re-pulled it constantly (the live timer polls every 1–4s and
 // the auto-advance check reads plan times every tick). Split by volatility:
@@ -349,10 +367,16 @@ class PcoService {
     // direct jump than by stepping through (and firing) everything in between.
     if (!PcoService.loggedLiveActions) {
       PcoService.loggedLiveActions = true;
-      console.log(`[pco] live actions offered: ${Object.keys(links).sort().join(", ") || "(none)"}`);
+      console.log(`[pco] live actions offered: ${scrub(Object.keys(links).sort().join(", ") || "(none)")}`);
     }
+    // Only follow a link that still points at PCO. This URL comes out of a
+    // RESPONSE BODY and is then POSTed to with the operator's App ID and secret
+    // in an Authorization header, so anything that could put a different host in
+    // that field would be handed the credentials. The response arrives from PCO
+    // over TLS, so this is defence in depth rather than a live hole — but the
+    // safe answer already exists one line down, which makes the check free.
     const linkUrl = links[action];
-    const url = typeof linkUrl === "string" && linkUrl ? linkUrl : `${base}/live/${action}`;
+    const url = sameOrigin(linkUrl, PCO_BASE) ? linkUrl : `${base}/live/${action}`;
     await this.postAction(url, appId, secret);
   }
 
@@ -363,7 +387,7 @@ class PcoService {
     appId: string,
     secret: string,
   ): Promise<PcoResponse<T>> {
-    console.log(`[pco] POST ${url}`);
+    console.log(`[pco] POST ${scrub(url)}`);
     const response = await fetch(url, {
       method: "POST",
       headers: {
