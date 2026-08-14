@@ -43,14 +43,26 @@ export interface PhaseContext {
   /** `endedAt` of the record being held, if it has been closed. */
   endedAt: string | null;
   /**
-   * `serviceTimeId` of the record being held.
+   * `serviceStartedAt` of the record being held — set once, the first tick that
+   * classified as "service", so it answers "did this record cover a service that
+   * actually ran?"
    *
-   * The taper describes a room emptying from the service that just ran, so it
-   * must never be applied to the record for the service we are ramping TOWARD.
-   * Without this the two are indistinguishable, and a late-starting service
-   * tapered its own arrival crowd — see the header.
+   * The taper describes a room emptying from a service that HAPPENED, so it must
+   * never be applied to a record that only ever held an arrival ramp. Without
+   * that distinction a late-starting service tapered its own arrival crowd: it
+   * sits in "preservice" past the ramp grace, the fall-through closes the fresh
+   * record, and the taper immediately reopens it — see the header.
+   *
+   * This was `heldServiceTimeId`, compared for INEQUALITY against the live
+   * occurrence. That blocked the false taper, but it also blocked every true one
+   * for the last service of a day: pick-service-time deliberately keeps
+   * reporting the service that just happened, so the ids matched and the taper
+   * never fired. On a single-service Sunday the configured window recorded
+   * nothing at all — the attendance trend flatlined at the benediction and the
+   * emptying-room curve was missing from History and every export. The ids were
+   * never the question; whether the service ran is.
    */
-  heldServiceTimeId: string | null;
+  heldServiceStartedAt: string | null;
   /** Arrival-ramp lead window (ms). 0 disables the ramp. */
   preMs: number;
   /** Post-service taper window (ms). 0 disables the taper. */
@@ -81,14 +93,11 @@ export function classifyPhase(
 
   // 3. The taper — the room emptying from the service that just ran.
   //
-  // The held record must be a DIFFERENT occurrence from the one PCO is currently
-  // reporting. A service that starts late sits in "preservice" past the ramp
-  // grace; the fall-through above then reached here, the recorder closed the
-  // fresh record, and the taper immediately reopened it — so the room filling
-  // for that service was recorded as its own post-service taper, before it had
-  // begun. Comparing the occurrence is what separates "emptying from the last"
-  // from "filling for the next".
-  if (ctx.postMs > 0 && ctx.endedAt && ctx.heldServiceTimeId !== live.serviceTimeId) {
+  // The held record must have COVERED a service. A record that only ever held an
+  // arrival ramp has no serviceStartedAt, which is what keeps a late-starting
+  // service from tapering its own arrival crowd (see the field's doc). "Filling
+  // for the next" is already handled above: the ramp is tested first, on purpose.
+  if (ctx.postMs > 0 && ctx.endedAt && ctx.heldServiceStartedAt) {
     const ended = Date.parse(ctx.endedAt);
     if (Number.isFinite(ended) && nowMs - ended <= ctx.postMs) return "post";
   }
