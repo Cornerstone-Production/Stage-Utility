@@ -12,7 +12,7 @@
 
 import type { PatchDevice, PatchEndpoint, PatchHop, PatchSheet } from "../types/stage.js";
 import { zonedDateKey } from "./app-timezone.js";
-import { mergeOverrides } from "./patch-resolve.js";
+import { mergeOverrides, resolvePatch } from "./patch-resolve.js";
 
 export interface ExportRow {
   rackCh: string;
@@ -101,6 +101,18 @@ export interface ExportOptions {
   /** Include endpoints marked unused. Off by default: they are blank rows on
    *  paper, and a patch sheet is read at a glance. */
   includeUnused?: boolean;
+  /**
+   * Export what a given plan actually runs: default → standing variant →
+   * per-plan variant → that week's tweaks, via resolvePatch. Takes precedence
+   * over `variantId`, which cannot express a week.
+   *
+   * Without this the "This week" tab had nothing to send. It passed
+   * variantId=null, so the download was the untouched DEFAULT patch while the
+   * screen showed the variant plus this Sunday's tweaks — an engineer who
+   * swapped a mic for the week taped a sheet to the rack showing the old patch,
+   * with nothing in the file or its name to say anything had been dropped.
+   */
+  plan?: { planId: string | null; serviceTypeId: string | null };
 }
 
 /**
@@ -114,7 +126,11 @@ export function exportRows(
   options: ExportOptions = {},
 ): ExportRow[] {
   const variant = variantId ? sheet.variants.find((v) => v.id === variantId) : null;
-  const endpoints = variant ? mergeOverrides(sheet.endpoints, variant.overrides) : sheet.endpoints;
+  const endpoints = options.plan
+    ? resolvePatch(sheet, options.plan).endpoints
+    : variant
+      ? mergeOverrides(sheet.endpoints, variant.overrides)
+      : sheet.endpoints;
   const devices = sheet.devices ?? [];
 
   return [...endpoints]

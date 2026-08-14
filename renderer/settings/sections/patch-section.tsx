@@ -39,15 +39,24 @@ const EMPTY: PatchFile = {
 function ExportControls({
   sheetId,
   variantId,
+  plan,
   dirty,
 }: {
   sheetId: string;
   variantId: string | null;
+  /** Set only on the "This week" tab — the export then resolves the plan's
+   *  variant and tweaks server-side, the same way the table on screen does. */
+  plan: { planId: string | null; serviceTypeId: string | null } | null;
   dirty: boolean;
 }) {
   const download = (format: "csv" | "xlsx") => {
     const q = new URLSearchParams({ sheetId, format });
-    if (variantId) q.set("variantId", variantId);
+    if (plan?.planId) {
+      q.set("planId", plan.planId);
+      if (plan.serviceTypeId) q.set("serviceTypeId", plan.serviceTypeId);
+    } else if (variantId) {
+      q.set("variantId", variantId);
+    }
     window.location.href = `/api/patch/export?${q.toString()}`;
   };
   const blocked = dirty ? "Save your changes first — the export comes from the saved sheet" : undefined;
@@ -271,7 +280,12 @@ export function PatchSection() {
           <Button variant="filled" size="small" onClick={() => setImporting((v) => !v)}>
             <UploadIcon className="size-3.5" /> Import CSV
           </Button>
-          <ExportControls sheetId={sheet.id} variantId={editingVariant?.id ?? null} dirty={dirty} />
+          <ExportControls
+            sheetId={sheet.id}
+            variantId={editingVariant?.id ?? null}
+            plan={isWeek && plan?.planId ? { planId: plan.planId, serviceTypeId: plan.serviceTypeId } : null}
+            dirty={dirty}
+          />
         </div>
       </div>
 
