@@ -1,11 +1,10 @@
-// Rail + page header + content. The one layout every operator surface renders
-// inside, which is what makes the app feel like one program rather than a set of
-// pages that happen to share a server.
-//
-// The live context bar mounts above the header in the next commit.
+// Rail + context bar + page header + content. The one layout every operator
+// surface renders inside, which is what makes the app feel like one program
+// rather than a set of pages that happen to share a server.
 
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { Rail } from "./rail";
+import { ContextBar } from "./context-bar";
 import { DESTINATIONS } from "./destinations";
 
 /**
@@ -30,6 +29,7 @@ export function Shell() {
     <div className="flex h-[100dvh] overflow-hidden bg-bg">
       <Rail />
       <div className="flex flex-col flex-1 min-w-0">
+        <ContextBar />
         <PageHeader />
         <main className="flex-1 min-h-0 overflow-y-auto">
           <Outlet />
