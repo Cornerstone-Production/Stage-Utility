@@ -125,3 +125,111 @@ describe("update result-file contract", () => {
     assert.doesNotMatch(body[0], /`"error`":|`"at`":/, "the old {ok,error,at} shape must be gone");
   });
 });
+
+describe("the installer records which track it was asked for", () => {
+  // `beta` deliberately takes stable releases too — a release outranks the
+  // prereleases that led to it — so a beta box lands on a hyphen-less version
+  // as a matter of course. detect-track infers the track from that version
+  // string when nothing else says otherwise, and the inference then reads
+  // "main" and never offers another beta.
+  //
+  // updater.ts writes this record on every in-app apply, but install.sh never
+  // did. So `STAGE_TRACK=beta` plus a fresh install landed on stable with no
+  // record: the operator asked for beta and quietly got main.
+  //
+  // Driven through the REAL script. curl/tar/sha256sum are stubbed on PATH so
+  // the download, verify and unpack all succeed offline — the record is written
+  // after those, deliberately, so that a failed install never relabels the track
+  // of a working one. A source check would not have caught that ordering.
+  it("writes the track into the data directory, where it outlives every release", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stage-track-"));
+    const data = path.join(dir, "data");
+    const prefix = path.join(dir, "prefix");
+    const bin = path.join(dir, "bin");
+    fs.mkdirSync(prefix, { recursive: true });
+    fs.mkdirSync(bin, { recursive: true });
+
+    const DIGEST = "0".repeat(64);
+    const stub = (name: string, body: string) => {
+      const f = path.join(bin, name);
+      fs.writeFileSync(f, `#!/usr/bin/env bash\n${body}\n`);
+      fs.chmodSync(f, 0o755);
+    };
+    // -o means "download the archive"; anything else is the releases API call,
+    // which must name the archive and carry its digest.
+    stub(
+      "curl",
+      `out=""
+       for ((i=1; i<=$#; i++)); do if [ "\${!i}" = "-o" ]; then j=$((i+1)); out="\${!j}"; fi; done
+       if [ -n "$out" ]; then printf 'archive' > "$out"; exit 0; fi
+       printf '{\\n "assets": [\\n  {\\n   "name": "%s",\\n   "digest": "sha256:%s"\\n  }\\n ]\\n}\\n' "stage-utility-9.9.9-\${STAGE_TEST_PLATFORM}.tar.gz" "${DIGEST}"`,
+    );
+    stub("sha256sum", `printf '${DIGEST}  -\n'`);
+    // Unpack = produce the runtime the script insists on before switching.
+    stub("tar", `d=""; for ((i=1; i<=$#; i++)); do if [ "\${!i}" = "-C" ]; then j=$((i+1)); d="\${!j}"; fi; done
+       mkdir -p "$d"; printf '#!/bin/sh\\n' > "$d/node"; chmod +x "$d/node"`);
+
+    const arch = process.arch === "arm64" ? "arm64" : "x64";
+    const platform = `${process.platform === "darwin" ? "darwin" : "linux"}-${arch}`;
+
+    execFileSync("bash", [path.join(REPO, "install.sh")], {
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+        STAGE_TEST_PLATFORM: platform,
+        STAGE_UPDATE_MODE: "swap",
+        STAGE_TRACK: "beta",
+        STAGE_PREFIX: prefix,
+        STAGE_DATA: data,
+        STAGE_VERSION: "v9.9.9",
+        // An account that already exists, so the Linux branch skips `useradd`.
+        // Without it this passed on macOS — whose LaunchDaemon runs as root, so
+        // that branch never executes — and failed on Linux CI with "useradd:
+        // Permission denied". Same platform trap as the getcwd assertion that
+        // failed here once already.
+        STAGE_USER: os.userInfo().username,
+      },
+      stdio: "pipe",
+    });
+
+    const record = path.join(data, "update-track");
+    assert.ok(fs.existsSync(record), "the installer must record the track it was given");
+    assert.equal(fs.readFileSync(record, "utf8").trim(), "beta");
+  });
+});
+
+describe("installer portability", () => {
+  // mawk is the DEFAULT awk on Debian and Ubuntu — most Linux servers — and it
+  // does not support interval expressions (`{64}`), with no flag to enable
+  // them. install.sh used `match($0, /[0-9a-f]{64}/)` to pull the published
+  // checksum out of the release JSON; under mawk that never matched, the
+  // extraction returned empty, and the install died with "publishes no checksum
+  // … refusing to install unverified". The one-line installer could not install
+  // on a stock Debian or Ubuntu box at all.
+  //
+  // It failed safe, which is why it stayed quiet, and every machine with gawk —
+  // including GitHub's runners, which is why CI and the survival job were both
+  // green — took the same path and passed.
+  //
+  // Matched on the construct rather than on a comment: a regex literal
+  // containing `{n}` or `{n,m}`. Prose cannot satisfy it.
+  it("uses no regex interval expressions, which mawk cannot parse", () => {
+    const src = fs.readFileSync(path.join(REPO, "install.sh"), "utf8");
+    const offenders = src
+      .split("\n")
+      .map((line, i) => ({ line: line.trim(), n: i + 1 }))
+      // Whole-line comments only. The comment above this fix quotes the very
+      // pattern it removed, and would otherwise flag itself. Deliberately NOT
+      // stripping trailing comments from code lines: doing that to a scan in
+      // this repo once swallowed real code and hid a route that existed.
+      .filter(({ line }) => !line.startsWith("#"))
+      .filter(({ line }) => /\/[^/\n]*\{[0-9]+(,[0-9]*)?\}[^/\n]*\//.test(line));
+
+    assert.deepEqual(
+      offenders,
+      [],
+      "these lines use a regex interval expression; mawk silently never matches it — " +
+        "expand it, or check length() instead",
+    );
+  });
+});

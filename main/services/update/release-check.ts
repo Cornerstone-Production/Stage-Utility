@@ -33,6 +33,10 @@ export interface ReleaseInfo {
    *  archives finish uploading, so this is how a tarball install tells "there is
    *  a new version" from "there is a new version I can actually install". */
   assets: string[];
+  /** The release notes markdown. A packaged install has no git history to read,
+   *  so this is the only place it can find out what actually changed — see
+   *  changeLinesFrom. */
+  body: string | null;
 }
 
 /**
@@ -61,6 +65,7 @@ export function parseReleases(json: unknown): ReleaseInfo[] {
             .map((a) => (a && typeof a === "object" ? (a as { name?: unknown }).name : null))
             .filter((n): n is string => typeof n === "string"))
         : [],
+      body: typeof (rec as { body?: unknown }).body === "string" ? (rec as { body: string }).body : null,
     });
   }
   return out;
@@ -97,6 +102,49 @@ export type PackagedAvailability = Required<
 export const CHANGELOG_CAP = 20;
 
 /** Availability for a packaged install: current version vs the published releases. */
+/**
+ * Sections of the generated release notes that list what changed. Everything
+ * else in the body is prose an operator does not need in a status panel: the
+ * upgrade notice (a blockquote), the Highlights paragraphs, and the Install
+ * section's commands.
+ */
+const CHANGE_SECTIONS = /^##\s+(new|fixed|changed|improved|breaking)\b/i;
+
+/** "…and 12 more", the notes generator's own truncation marker. */
+const TRUNCATION_MARKER = /^(?:…|\.\.\.)and \d+ more$/;
+
+/**
+ * The change lines out of a release's notes.
+ *
+ * scripts/release-notes.mjs writes `- **scope** — subject` under `## New` and
+ * `## Fixed`, so the subject is recoverable without re-deriving it from git —
+ * which a packaged install cannot do, having no repository.
+ *
+ * The commit TYPE is deliberately not reconstructed. `## Fixed` holds both
+ * `fix` and `perf`, so labelling every line `fix(...)` to match a checkout's
+ * display exactly would mean stating something false about perf commits. The
+ * scope lead-in carries the useful part either way.
+ */
+export function changeLinesFrom(body: string | null): string[] {
+  if (!body) return [];
+  const out: string[] = [];
+  let inChangeSection = false;
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("##")) {
+      inChangeSection = CHANGE_SECTIONS.test(line);
+      continue;
+    }
+    // A blockquote is the upgrade notice, which is prose and often long.
+    if (!inChangeSection || !line.startsWith("- ")) continue;
+    const text = line.slice(2).trim();
+    if (!text || TRUNCATION_MARKER.test(text)) continue;
+    // Markdown emphasis and code ticks are noise in a plain-text panel.
+    out.push(text.replace(/\*\*/g, "").replace(/`/g, ""));
+  }
+  return out;
+}
+
 export function packagedUpdateStatus(
   releases: ReleaseInfo[],
   track: string,
@@ -135,11 +183,23 @@ export function packagedUpdateStatus(
   else newer = [];
 
   const byTag = new Map(releases.map((r) => [r.tag, r]));
-  const changelog = newer.slice(0, CHANGELOG_CAP).map((t) => {
+  // What actually changed, not just which versions exist. A git checkout reads
+  // commit subjects out of its own history; a packaged install has no history,
+  // and used to list bare tags — "v1.10.0, v1.10.0-beta.38, v1.10.0-beta.37"
+  // told an operator nothing they could act on, while the same box's git
+  // sibling showed the real subjects. The release notes carry those lines, so
+  // read them from there and the two panels say the same thing.
+  const changelog: string[] = [];
+  for (const t of newer) {
+    if (changelog.length >= CHANGELOG_CAP) break;
     const rel = byTag.get(t.tag);
-    // The release name when it says more than the tag; otherwise just the tag.
-    return rel?.name && rel.name !== t.tag ? `${t.tag} — ${rel.name}` : t.tag;
-  });
+    const lines = changeLinesFrom(rel?.body ?? null);
+    if (lines.length) changelog.push(...lines);
+    // No notes, or notes with no change list (a hand-written release): the tag
+    // is still better than nothing.
+    else changelog.push(rel?.name && rel.name !== t.tag ? `${t.tag} — ${rel.name}` : t.tag);
+  }
+  changelog.length = Math.min(changelog.length, CHANGELOG_CAP);
 
   return {
     tagBased: true,
