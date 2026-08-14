@@ -73,17 +73,23 @@ verification as a stable release — CI has to pass before the tag exists. They
 are the right choice for a spare machine you are testing on, and the wrong one
 for the machine running Sunday.
 
+Note the URL: a beta install fetches the installer from the **`beta` branch**,
+not `main`. `main` only moves when a stable release is cut, so an installer fix
+already shipped to beta would not reach a beta install for days — and the fix it
+is missing may be the one that lets it install at all. In-app updates do the
+same on your behalf: a beta box runs beta's installer, a stable box runs main's.
+
 **Linux and macOS**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/beta/install.sh \
   | sudo env STAGE_TRACK=beta bash
 ```
 
 **Windows** — in an Administrator PowerShell:
 
 ```powershell
-$env:STAGE_TRACK = "beta"; irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/install.ps1 | iex
+$env:STAGE_TRACK = "beta"; irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/beta/install.ps1 | iex
 ```
 
 To pin one exact version instead of "newest on the track", add
