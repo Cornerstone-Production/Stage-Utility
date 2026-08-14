@@ -100,7 +100,12 @@ write_result() {
   if [ "$OLD_REV" != "none" ] && [ "$NEW_REV" != "none" ] && [ "$OLD_REV" != "$NEW_REV" ]; then
     echo "[update] $(git rev-parse --short "$OLD_REV") -> $(git rev-parse --short "$NEW_REV") ($(git rev-list --count "$OLD_REV..$NEW_REV" 2>/dev/null || echo '?') commits)"
     echo "[update] what changed:"
-    git log --no-merges --pretty=format:'[update]   %s' "$OLD_REV..$NEW_REV" 2>/dev/null | head -40
+    # `-n 40`, not `| head -40`: under `set -o pipefail` a reader that stops
+    # early SIGPIPEs the writer and fails the whole pipeline — which here would
+    # abort the update at the narration step, after the pull. Letting git limit
+    # itself removes the early-closing reader entirely. (Same shape as the
+    # installer's release-JSON pipes.)
+    git log --no-merges -n 40 --pretty=format:'[update]   %s' "$OLD_REV..$NEW_REV" 2>/dev/null
     echo ""
   fi
   NEED_INSTALL=1

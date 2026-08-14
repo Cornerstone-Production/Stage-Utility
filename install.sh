@@ -126,7 +126,11 @@ else
   else
     RELEASE_JSON=$(api "releases/latest")
   fi
-  TAG=$(printf '%s' "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+  # A here-string, not `printf … |`: the beta response is ~275 KB, far past the
+  # 64 KB pipe buffer, and `head -1` stops reading after the first match. The
+  # writer then takes SIGPIPE and `set -o pipefail` turns that into a failed
+  # install. A here-string is backed by a temp file, so nothing can SIGPIPE.
+  TAG=$(grep -o '"tag_name": *"[^"]*"' <<<"$RELEASE_JSON" | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
 fi
 [ -n "${TAG:-}" ] || die "Could not determine a release to install. Is the repository reachable?"
 VERSION="${TAG#v}"
@@ -166,12 +170,17 @@ say "Verifying"
 # want is the first one after this archive's name. Anchoring on the exact name
 # is what stops another platform's hash being read as this one's — and the
 # response is pretty-printed, so the two fields are never on the same line.
-WANT=$(printf '%s' "$RELEASE_JSON" | awk -v want="\"name\": \"${ARCHIVE}\"" '
+# Same here-string reason as above, and this is the one that actually bit: awk
+# `exit`s the moment it has the digest — which for the newest release is in the
+# first few KB — so the writer was still pushing 275 KB into a closed pipe.
+# Observed as `printf: write error: Broken pipe` on a real beta install, with
+# the script dying before it verified anything.
+WANT=$(awk -v want="\"name\": \"${ARCHIVE}\"" '
   index($0, want) { found = 1; next }
   found && /"digest": "sha256:/ {
     if (match($0, /[0-9a-f]{64}/)) { print substr($0, RSTART, RLENGTH); exit }
   }
-')
+' <<<"$RELEASE_JSON")
 
 [ -n "${WANT:-}" ] \
   || die "Release ${TAG} publishes no checksum for ${ARCHIVE}; refusing to install unverified."
