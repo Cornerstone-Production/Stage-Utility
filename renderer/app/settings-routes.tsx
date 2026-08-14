@@ -9,8 +9,6 @@
 
 import { useState } from "react";
 import { Loader2Icon } from "lucide-react";
-import { ViewsSection } from "../settings/sections/views-section";
-import { OutputsSection } from "../settings/sections/outputs-section";
 import { ConnectSection } from "../settings/sections/connect-section";
 import { BrandingSection } from "../settings/sections/branding-section";
 import { AdvancedSection } from "../settings/sections/advanced-section";
@@ -24,33 +22,6 @@ function Loading() {
       <Loader2Icon className="size-5 text-fg-subtle animate-spin" />
     </div>
   );
-}
-
-export function ViewsRoute() {
-  const s = useStageSettings();
-  if (s.stageLoading || !s.stageState) return <Loading />;
-  return (
-    <ViewsSection
-      stageState={s.stageState}
-      wirelessChannels={s.wirelessChannels}
-      teamPositions={s.teamPositions}
-      layoutTemplates={s.layoutTemplates}
-      selectedViewId={s.selectedViewId}
-      setSelectedViewId={s.setSelectedViewId}
-      localSlots={s.localSlots}
-      slotsDirty={s.slotsDirty}
-      isSavingSlots={s.isSavingSlots}
-      resolvedDraftSlots={s.resolvedDraftSlots}
-      slotPresets={s.slotPresets}
-      handlers={s.handlers}
-    />
-  );
-}
-
-export function DisplaysRoute() {
-  const s = useStageSettings();
-  if (s.stageLoading || !s.stageState) return <Loading />;
-  return <OutputsSection stageState={s.stageState} handlers={s.handlers} />;
 }
 
 export function ConnectRoute() {

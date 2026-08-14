@@ -13,6 +13,8 @@ export const OPERATOR_PATHS = [
   "/scriptview",
   "/automation",
   "/plan",
+  "/screens",
+  // Kept so the paths they replaced still redirect rather than 404.
   "/views",
   "/displays",
   // The settings panel is no longer its own document; /settings and everything

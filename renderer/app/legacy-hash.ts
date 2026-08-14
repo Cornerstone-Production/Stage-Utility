@@ -27,9 +27,10 @@ export const LEGACY_SECTION_IDS = [
 const ROUTES: Record<(typeof LEGACY_SECTION_IDS)[number], string> = {
   // Plan folded into Home in Phase 2; the tab's content is the front page now.
   plan: "/",
-  views: "/views",
+  // Views and Displays merged into Screens in Phase 2.
+  views: "/screens",
   scriptview: "/scriptview",
-  displays: "/displays",
+  displays: "/screens",
   patch: "/patch",
   automation: "/automation",
   // History and Baptisms were tabs whose standalone twins are the real pages now.

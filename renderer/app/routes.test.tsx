@@ -35,9 +35,11 @@ describe("operator destinations", () => {
     const railTops = new Set(
       ALL_DESTINATIONS.filter((d) => d.path !== "/").map((d) => `/${d.path.split("/")[1]}`),
     );
-    // /plan is routed for its redirect (see redirects.tsx) and deliberately has
-    // no rail entry - its content is Home's now.
-    const expected = OPERATOR_PATHS.filter((p) => p !== "/plan");
+    // Retired paths are routed for their REDIRECTS (see redirects.tsx) and
+    // deliberately have no rail entry: /plan's content is Home's, and /views
+    // and /displays merged into /screens. They stay routed so bookmarks land.
+    const retired = new Set(["/plan", "/views", "/displays"]);
+    const expected = OPERATOR_PATHS.filter((p) => !retired.has(p));
     assert.deepEqual(
       [...railTops].sort(),
       [...expected].sort(),
@@ -135,5 +137,26 @@ describe("the kiosk no longer serves operator surfaces", () => {
     assert.equal(await exists("../main/baptism-operator-view.tsx"), false, "baptism-operator-view.tsx must be deleted");
     assert.equal(await exists("../main/patch-view.tsx"), true, "patch-view.tsx is a distinct surface and must stay");
     assert.equal(await exists("../main/scriptview-index-view.tsx"), true, "scriptview-index-view.tsx is a distinct surface and must stay");
+  });
+});
+
+describe("retired paths still land somewhere", () => {
+  test("every moved route points at a destination that exists", async () => {
+    // A redirect to a path with no route is a 404 with extra steps - and these
+    // are paths that SHIPPED, so they are in bookmarks and in Getting Started.
+    const { MOVED_ROUTES } = await import("./redirects.js");
+    const known = new Set(ALL_DESTINATIONS.map((d) => d.path));
+    for (const [from, to] of Object.entries(MOVED_ROUTES)) {
+      assert.ok(known.has(to), `${from} redirects to ${to}, which is not a routed destination`);
+    }
+  });
+
+  test("no retired path is also a live destination", () => {
+    // Both a redirect and a destination for one path is ambiguous, and which
+    // wins depends on route order rather than intent.
+    const known = new Set(ALL_DESTINATIONS.map((d) => d.path));
+    for (const from of ["/plan", "/views", "/displays"]) {
+      assert.equal(known.has(from), false, `${from} is retired but still a destination`);
+    }
   });
 });

@@ -11,6 +11,9 @@ import { useRouter } from "@tanstack/react-router";
 export const MOVED_ROUTES: Record<string, string> = {
   // Plan folded into Home in Phase 2.
   "/plan": "/",
+  // Views and Displays merged into one Screens surface.
+  "/views": "/screens",
+  "/displays": "/screens",
 };
 
 export function makeRedirect(to: string) {
