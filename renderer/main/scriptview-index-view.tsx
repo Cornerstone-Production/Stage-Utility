@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "../components/ui/tooltip";
 import { Loader2Icon, ListChecksIcon, ArrowRightIcon, ChevronDownIcon } from "lucide-react";
 
-import { BrandLogo } from "../components/brand-logo";
 import { useStageState } from "./use-stage-state";
 import { invoke } from "../lib/api";
 
@@ -27,7 +26,7 @@ export function scriptViewUrl(typeName: string, layoutId: string, layoutName?: s
 // dropdown + open arrow, deep-linking to /scriptview/{serviceTypeId}/{layoutId}.
 // Our own take on ScriptViewer's "Plans" page, in the kiosk design language.
 export function ScriptViewIndex() {
-  const { state, isLoading: stateLoading } = useStageState();
+  const { isLoading: stateLoading } = useStageState();
   const [types, setTypes] = useState<ServiceTypeDTO[] | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
   const [shownIds, setShownIds] = useState<string[]>([]);
@@ -64,8 +63,6 @@ export function ScriptViewIndex() {
   ];
   const selectedFor = (typeId: string) => sel[typeId] ?? globalLayouts[0]?.id ?? ALL_COLUMNS_LAYOUT_ID;
 
-  // Same centered brand mark the display picker shows above its list.
-  const centerLogo = state?.emptySlotLogo ?? state?.appLogo;
 
   return (
     // `h-full` rather than `h-[100dvh]`, and no `kiosk-surface` or safe-area
@@ -80,19 +77,12 @@ export function ScriptViewIndex() {
       {/* Scroll container + inner min-h-full centering wrapper: centers when the
           list is short, scrolls without clipping the ends when it's long. */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-        <div className="min-h-full flex flex-col items-center justify-center gap-8 px-6 py-8">
-        {centerLogo && (
-          <BrandLogo
-            logo={centerLogo}
-            monochrome
-            className="text-fg-faint shrink-0"
-            style={{ width: "clamp(6rem,22vmin,16rem)", height: "clamp(6rem,22vmin,16rem)" }}
-          />
-        )}
+        {/* Left-aligned and top-anchored. The centred brand mark and vertical
+            centering belonged to a standalone page that owned the whole window;
+            inside the shell they pushed the list halfway down a screen that
+            already has a title and a rail. */}
+        <div className="flex flex-col gap-8 px-5 max-sm:px-3 pb-[50vh] max-sm:pb-24">
         <div className="flex flex-col gap-2 w-full max-w-md">
-          <span className="text-caption2 font-medium uppercase tracking-wider text-fg-subtle text-center select-none mb-1" style={{ letterSpacing: "0.08em" }}>
-            Pick a service
-          </span>
 
           {error ? (
             <p className="text-body text-red-10 text-center px-4">{error}</p>
@@ -130,6 +120,12 @@ export function ScriptViewIndex() {
               );
             })
           )}
+          <a
+            href="/scriptview/presets"
+            className="mt-2 self-start text-caption1 text-accent hover:underline"
+          >
+            Edit column presets
+          </a>
         </div>
         </div>
       </div>

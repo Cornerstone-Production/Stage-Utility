@@ -33,6 +33,8 @@ import { BaptismOperator } from "../main/baptism-operator";
 import { ServiceHistorySection } from "../settings/sections/service-history-section";
 import { AutomationSection } from "../settings/sections/automation-section";
 import { IntegrationsSection } from "../settings/sections/integrations-section";
+import { PatchSection } from "../settings/sections/patch-section";
+import { ScriptViewSection } from "../settings/sections/scriptview-section";
 import {
   AdvancedRoute,
   BrandingRoute,
@@ -73,14 +75,14 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     path: "/scriptview",
     label: "ScriptView",
-    description: "Named rundown column presets for the ScriptView dashboard.",
+    description: "Pick a service to open its rundown.",
     icon: <ListChecksIcon className="size-4" />,
     Component: ScriptViewIndex,
   },
   {
     path: "/patch",
     label: "Patch",
-    description: "Stage input & output patch — record it, and surface each week's to volunteers.",
+    description: "This week's inputs and outputs — what's set, and what changed.",
     icon: <CableIcon className="size-4" />,
     // The volunteer-facing read view, NOT the settings editor. These are
     // different surfaces; the editor is reached from within this one.
@@ -203,7 +205,19 @@ function ScriptViewPlanRoute() {
   );
 }
 
-/** Nested routes that are reachable but not listed in the rail. */
+/**
+ * Nested routes that are reachable but not listed in the rail.
+ *
+ * The two editors live here rather than as rail entries because each is the
+ * back of a surface that IS in the rail: you open Patch to read this week's
+ * patch and edit it from there. Routing only the viewers is exactly how both
+ * editors became unreachable when Settings dissolved — see reachable.test.ts.
+ *
+ * `/patch/edit` and `/scriptview/presets` are literal segments and cannot
+ * collide with `$serviceType/$layout`, which is three deep.
+ */
 export const NESTED_ROUTES: readonly { path: string; Component: FunctionComponent }[] = [
   { path: "/scriptview/$serviceType/$layout", Component: ScriptViewPlanRoute },
+  { path: "/scriptview/presets", Component: ScriptViewSection },
+  { path: "/patch/edit", Component: PatchSection },
 ];
