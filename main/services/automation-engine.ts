@@ -20,6 +20,8 @@ import { automationLog } from "./automation-log.js";
 import { automationStore } from "./automation-store.js";
 import { integrationManager } from "./integration-manager.js";
 import { signalStore } from "./signal-store.js";
+import { smaartService } from "./smaart-service.js";
+import { sensourceService } from "./sensource-service.js";
 import { obsService } from "./obs-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
@@ -249,6 +251,32 @@ class AutomationEngine {
   private serviceKey(): string | null {
     return this.serviceKeyFromBus ?? stageController.getLastLive()?.serviceTimeId ?? null;
   }
+
+  /**
+   * Does any armed, enabled rule read this channel?
+   *
+   * Answered for services that skip broadcasting when no browser is watching:
+   * this engine listens in-process, so it is demand the SSE subscriber check
+   * cannot see. Recomputed per call rather than cached — rules are edited at
+   * runtime, and a cache would leave a newly-created rule dark until a restart.
+   */
+  wantsChannel(channel: string): boolean {
+    if (this.settings.disarmed) return false;
+    return this.rules.some(
+      (rule) => rule.enabled && AUTOMATION_TRIGGERS[rule.trigger.id]?.channel === channel,
+    );
+  }
 }
 
 export const automationEngine = new AutomationEngine();
+
+// Keep the channels this engine evaluates flowing even with no browser attached.
+//
+// smaart-service skipped the broadcast entirely without SSE subscribers, so
+// spl.crossed-above / crossed-below never fired on an unattended box — the normal
+// state for an appliance. sensource's gate throttles polling rather than
+// broadcasting, so people.count triggers were evaluating counts up to a minute
+// stale. Registered here, at the consumer, matching how attendance-recorder and
+// tsl-service declare their own demand.
+smaartService.addDemandSource(() => automationEngine.wantsChannel("spl:metrics"));
+sensourceService.addDemandSource(() => automationEngine.wantsChannel("people:count"));

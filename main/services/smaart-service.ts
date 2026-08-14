@@ -200,9 +200,13 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
       clearTimeout(this.throttleTimer);
       this.throttleTimer = null;
     }
-    // 4 Hz to nobody is wasted work — skip the push when no display renders SPL
-    // meters. Recording is unaffected (it reads this.last, not the broadcast).
-    if (this.hasSubscribers) broadcast(this.channel, snapshot);
+    // 4 Hz to nobody is wasted work — skip the push when nothing is consuming SPL.
+    // Recording is unaffected (it reads this.last, not the broadcast).
+    //
+    // inDemand, not hasSubscribers: the automation engine consumes this channel
+    // in-process, so the subscriber check could not see it and spl.crossed-above
+    // rules never fired unless a browser happened to be rendering a meter.
+    if (this.inDemand) broadcast(this.channel, snapshot);
   }
 }
 
