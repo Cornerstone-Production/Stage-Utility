@@ -37,6 +37,7 @@ screens, the settings UI and a phone remote from one port.
 | [API reference](docs/reference/api.md) | the HTTP surface |
 | [Contributing](docs/contributing.md) | commit convention, branching, releases |
 | [Project structure](docs/contributing-appendix.md) | orientation in the codebase |
+| [App shell redesign](docs/design/app-shell-redesign.md) | design for the operator shell, consoles and in-place editing (not yet built) |
 
 ---
 
