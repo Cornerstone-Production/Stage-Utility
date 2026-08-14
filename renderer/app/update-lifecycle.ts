@@ -22,6 +22,9 @@ const UPDATE_DONE_KEY = "stageUtility.update.done";
 let serverVersion: string | null = null;
 let reloadScheduled = false;
 
+/** Brief beat so the "restarting" step paints before the reload. */
+export const RELOAD_DELAY_MS = 900;
+
 export function noteServerVersion(version: string): void {
   if (serverVersion === null) serverVersion = version;
 }
@@ -76,8 +79,7 @@ export function finishUpdateAndReload(version: string | null): void {
   } catch {
     /* the reload still needs to happen; only the banner is lost */
   }
-  // Brief beat so the "restarting" step paints before the reload.
-  setTimeout(() => window.location.reload(), 900);
+  setTimeout(() => window.location.reload(), RELOAD_DELAY_MS);
 }
 
 /**

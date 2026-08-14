@@ -14,6 +14,7 @@ const {
   takeJustUpdated,
   finishUpdateAndReload,
   __resetForTests,
+  RELOAD_DELAY_MS,
 } = await import("./update-lifecycle.js");
 
 after(() => teardown());
@@ -64,10 +65,17 @@ describe("update lifecycle handshake", () => {
   test("finishing twice schedules only one reload", () => {
     // The two completion signals race. Two reloads would drop the banner the
     // first was meant to show.
+    //
+    // Counted by DELAY, not by "any setTimeout": jsdom's Storage schedules
+    // timers of its own, so a blanket counter reported two reloads for a single
+    // call and made this look like a broken guard when the guard was fine.
     let reloads = 0;
     const realSetTimeout = globalThis.setTimeout;
     // @ts-expect-error test stub
-    globalThis.setTimeout = (_fn: () => void) => { reloads += 1; return 0 as unknown as NodeJS.Timeout; };
+    globalThis.setTimeout = (fn: () => void, ms?: number) => {
+      if (ms === RELOAD_DELAY_MS) reloads += 1;
+      return 0 as unknown as NodeJS.Timeout;
+    };
     finishUpdateAndReload("1.2.3");
     finishUpdateAndReload("1.2.3");
     globalThis.setTimeout = realSetTimeout;
