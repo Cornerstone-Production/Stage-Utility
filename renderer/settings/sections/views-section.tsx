@@ -119,7 +119,11 @@ function SortableViewItem({
  *  needs a sentinel. It never reaches the server — it maps back to null. */
 const ALL_COLUMNS = "__all__";
 
-function ViewDetail({
+/**
+ * One view's editor. Exported so a route can render it for a single view with
+ * no master list beside it — the list is the Screens cards now.
+ */
+export function ViewDetail({
   view,
   stageState,
   wirelessChannels,

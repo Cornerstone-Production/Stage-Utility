@@ -5,7 +5,8 @@ import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, GripVerticalIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, GripVerticalIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, PencilIcon } from "lucide-react";
+import { ViewPreview } from "./view-preview";
 import {
   Button,
   Input,
@@ -53,12 +54,15 @@ interface OutputRowProps {
   onOpenWindow: () => void;
   onRefresh: () => void;
   onRemove: () => void;
+  /** Open the layout editor for this display's view. Absent when it has no
+   *  free-form layout to edit (every kind except "custom"). */
+  onEditLayout?: () => void;
 }
 
 // One card per display: the name reads as a title, the View it shows is the one
 // prominent control, Open + Lock stay in reach, and the URL sits quietly in the
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
-function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onSetSlug, onSetView, onSetLocked, onOpenWindow, onRefresh, onRemove }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onSetSlug, onSetView, onSetLocked, onOpenWindow, onRefresh, onRemove, onEditLayout }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const [editSlug, setEditSlug] = useState(output.slug ?? "");
   const [slugError, setSlugError] = useState<string | null>(null);
@@ -173,6 +177,22 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
         </DropdownMenu.Root>
       </div>
 
+      {/* A LIVE preview: the real kiosk renderers in an iframe, scaled — the same
+          component the layout editor uses. A static placeholder here answered
+          "what view is assigned" but not "what is actually on that wall", which
+          is the question the card exists for. */}
+      {output.viewId ? (
+        <div className="px-3 pt-2">
+          <ViewPreview viewId={output.viewId} />
+        </div>
+      ) : (
+        <div className="px-3 pt-2">
+          <div className="grid aspect-video place-items-center rounded-lg border border-dashed border-line text-caption1 text-fg-subtle">
+            Nothing assigned
+          </div>
+        </div>
+      )}
+
       {/* Shows → View. Sized like every other select in the app: an oversized
           trigger here (17px in a 36px control, against 13px/28px elsewhere) made
           the whole tab read as a different scale. The card layout and the "Shows"
@@ -200,8 +220,14 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
       <div className="flex items-center gap-3 px-3 pb-2">
         <Button variant="filled" size="small" onClick={onOpenWindow} aria-label={`Open window for ${output.name}`}>
           <ExternalLinkIcon className="size-3.5 text-gray-9" />
-          Open window
+          Open
         </Button>
+        {onEditLayout && (
+          <Button variant="transparent" size="small" onClick={onEditLayout} aria-label={`Edit layout for ${output.name}`}>
+            <PencilIcon className="size-3.5" />
+            Edit layout
+          </Button>
+        )}
         {/* The padlock is the state, so a separate switch beside it said the same
             thing twice. Closed and accented = locked, open and muted = not. */}
         <Tooltip label="Hide the settings/QR link and home logo on this display so a handed-out link can't navigate away">
@@ -260,7 +286,14 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
   );
 }
 
-export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "stageState" | "handlers">) {
+export function OutputsSection({
+  stageState,
+  handlers,
+  onEditLayout,
+}: Pick<SectionProps, "stageState" | "handlers"> & {
+  /** Open the layout editor for a view. Absent when there is nowhere to open. */
+  onEditLayout?: (viewId: string) => void;
+}) {
   const outputs = stageState.outputs ?? [];
   const views = stageState.views ?? [];
   // Prefer the configured public URL (DNS) so display links match what operators
@@ -316,6 +349,14 @@ export function OutputsSection({ stageState, handlers }: Pick<SectionProps, "sta
                 onOpenWindow={() => handlers.handleOpenOutputWindow(output.id)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}
+                onEditLayout={
+                  // Only a custom-kind view has a free-form layout; the built-in
+                  // kinds would open an editor with nothing to edit.
+                  onEditLayout && output.viewId &&
+                  stageState.views?.find((v) => v.id === output.viewId)?.kind === "custom"
+                    ? () => onEditLayout(output.viewId!)
+                    : undefined
+                }
               />
             ))}
           </div>

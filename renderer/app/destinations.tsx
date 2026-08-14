@@ -35,6 +35,7 @@ import { IntegrationsSection } from "../settings/sections/integrations-section";
 import { PatchSection } from "../settings/sections/patch-section";
 import { HomeRoute } from "./home/home-route";
 import { ScreensRoute } from "./screens/screens-route";
+import { ViewEditorRoute } from "./screens/view-editor-route";
 import { ScriptViewSection } from "../settings/sections/scriptview-section";
 import {
   AdvancedRoute,
@@ -214,4 +215,6 @@ export const NESTED_ROUTES: readonly { path: string; Component: FunctionComponen
   { path: "/scriptview/$serviceType/$layout", Component: ScriptViewPlanRoute },
   { path: "/scriptview/presets", Component: ScriptViewSection },
   { path: "/patch/edit", Component: PatchSection },
+  // A view's editor is its own page rather than a panel beside a master list.
+  { path: "/screens/$viewId/edit", Component: ViewEditorRoute },
 ];
