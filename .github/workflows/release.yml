@@ -218,6 +218,19 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           npm version "$V" --no-git-tag-version
           git add package.json package-lock.json
+          # `[skip ci]` is inert today and kept deliberately — it reads like a
+          # contradiction next to the CI dispatch below, so: a push made with
+          # GITHUB_TOKEN triggers NO workflows at all, marker or not. That is
+          # the actual reason this commit went unchecked for so long, and
+          # removing the marker would not have changed it. The dispatch below is
+          # what fixed it, and CI genuinely runs against this commit — v1.10.1
+          # on main carries a passing `build` from a workflow_dispatch run.
+          #
+          # Kept because it stops a redundant push-triggered run if the token
+          # here is ever swapped for a PAT (which does trigger workflows). Such
+          # a run would stand down on its own — the bump is a `chore`, so there
+          # is nothing releasable since the tag just created — but it would run
+          # ci.yml a second time over the same tree for nothing.
           git commit -m "chore(release): v$V [skip ci]"
           git tag "v$V"
 
