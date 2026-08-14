@@ -33,6 +33,10 @@ const IDLE_INTERVAL_MS = 4000;
 // serviceWindow never sleeps past the next window opening, and fails open when the
 // schedule is unknown, so the ramp-up before rehearsal is unaffected.
 const DORMANT_INTERVAL_MS = 5 * 60_000;
+// After an auth failure. Slow enough that genuinely wrong credentials cost
+// almost nothing and say so once rather than once per tick, fast enough that a
+// rotated token or a PCO auth blip heals itself well inside one service.
+const AUTH_RETRY_INTERVAL_MS = 5 * 60_000;
 
 // Everything on the live DTO that a client actually reacts to. serverNow is
 // deliberately excluded: it changes every tick but the client ticks the countdown
@@ -65,10 +69,24 @@ class LivePoller {
   /** Collapses a repeating failure so one outage cannot evict the whole log. */
   private readonly errors = new RepeatLog("[live-poller] fetch error:");
 
+  /**
+   * Begin polling, or bring the next tick forward if we are already polling.
+   *
+   * The re-arm matters because an auth failure now backs off for minutes rather
+   * than stopping. `if (running) return` used to be harmless — a stood-down
+   * poller was not running, so start() always took effect — but with the backoff
+   * it would make integration-manager's post-credential-save start() a no-op,
+   * and the operator who just fixed their App ID would wait out the backoff
+   * wondering whether it had worked.
+   */
   start(): void {
-    if (this.running) return;
+    const wasRunning = this.running;
     this.running = true;
-    console.log("[live-poller] start");
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    if (!wasRunning) console.log("[live-poller] start");
     void this.tick();
   }
 
@@ -107,14 +125,26 @@ class LivePoller {
     try {
       live = await stageController.fetchLive();
     } catch (err) {
-      // Bad credentials are a CONFIGURATION fault: every retry fails the same
-      // way, forever, and asking again every 4s achieves nothing but writing
-      // one line per tick until the log holds nothing else. Stand down and wait
-      // to be told the credentials changed — integration-manager restarts this
-      // poller the moment a credential check passes.
+      // Bad credentials are usually a CONFIGURATION fault: every retry fails the
+      // same way and asking again every 4s writes one line per tick until the
+      // log holds nothing else. So back off hard — but do NOT stop.
+      //
+      // Stopping was worse than the noise it prevented. start() is called from
+      // boot and from integration-manager when a credential check passes, and
+      // nothing re-verifies on a timer, so a single 401 ended polling for the
+      // life of the process. A 401 is not always a typo: a rotated token, an org
+      // re-authorisation, or a PCO auth blip produces one too, and fetchLive()
+      // fans out to several requests so any one of them is enough. Mid-service
+      // that froze the countdown on every display and stopped the SPL,
+      // attendance and timeline recorders — which are fed from this tick — with
+      // no raw archive to rebuild from and no recovery short of a restart.
+      //
+      // Saving credentials still restarts the poller, so the fast path is intact;
+      // this is only the floor under it.
       if (err instanceof PcoAuthError) {
-        console.error(`[live-poller] ${err.message} — polling stopped until the credentials are saved`);
-        this.stop();
+        const decision = this.errors.fail(`[live-poller] ${err.message} — retrying every 5 minutes`, Date.now());
+        if (decision.line) console.error(decision.line);
+        this.schedule(AUTH_RETRY_INTERVAL_MS);
         return;
       }
       // Transient (e.g. 429 / network) — keep last client state, slow down.
