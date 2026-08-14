@@ -31,7 +31,10 @@ import { getUserDataPath } from "./app-paths.js";
 import { detectInstallKind } from "./update/install-kind.js";
 import { detectTrack } from "./update/detect-track.js";
 import { CHANGELOG_CAP, fetchReleases, packagedUpdateStatus, type ReleaseInfo } from "./update/release-check.js";
+import { fetchTapVersion, homebrewInstallable, tarballInstallable } from "./update/package-availability.js";
+import { FORMULA } from "./update/homebrew-strategy.js";
 import { selectStrategy } from "./update/select-strategy.js";
+import { ApplyWatchdog } from "./update/apply-watchdog.js";
 import { exitForRestart } from "./update/relaunch.js";
 
 import { broadcast } from "./broadcaster.js";
@@ -78,6 +81,11 @@ interface UpdaterDeps {
   git?: (args: string[], timeoutMs?: number) => Promise<string>;
   fetchReleases?: typeof fetchReleases;
   version?: () => string;
+  /** Replaced in tests so the real polling path can run without launching an
+   *  installer. Production always uses node's spawn. */
+  spawn?: typeof spawn;
+  /** Shortened in tests; production waits the full STALL_TIMEOUT_MS. */
+  stallMs?: number;
 }
 
 export class Updater {
@@ -117,6 +125,9 @@ export class Updater {
   private liveLogOffset = 0;
   private progressTimer: ReturnType<typeof setInterval> | null = null;
   private applyStartedAt = 0;
+  /** Bounds an apply that dies without reporting — the UI must always be
+   *  able to leave the "updating" phase. */
+  private readonly watchdog = new ApplyWatchdog();
 
   /** Log an update lifecycle event to stdout (captured live in the /log buffer)
    *  and to the persisted update.log (survives the post-update restart). */
@@ -403,6 +414,30 @@ export class Updater {
    * scheduled auto-apply never fired, on every install that was not a checkout.
    * The strategies could apply an update; nothing ever detected one.
    */
+  /**
+   * Whether THIS box can install a given release right now.
+   *
+   * A release is published before its per-platform archives finish uploading
+   * and before the Homebrew tap is regenerated. Offering one inside that window
+   * produces an installer that 404s, or a `brew upgrade` that does nothing and
+   * restarts the displays for it. The predicate lets the check report the gap
+   * instead of pretending the box is current.
+   */
+  private async installableHere(track: string): Promise<(r: ReleaseInfo) => boolean> {
+    const kind = detectInstallKind(process.env, REPO_ROOT, fs.existsSync);
+    if (kind === "homebrew") {
+      const formula = track === "beta" ? FORMULA.beta : FORMULA.main;
+      // Null when the tap cannot be read — homebrewInstallable then allows
+      // everything, so an unreachable tap never invents a "still building".
+      const tapVersion = await fetchTapVersion(formula, (url) => fetch(url, { signal: AbortSignal.timeout(10_000) }));
+      return (r) => homebrewInstallable(r, tapVersion);
+    }
+    if (kind === "tarball") {
+      return (r) => tarballInstallable(r, process.platform, process.arch);
+    }
+    return () => true;
+  }
+
   private async checkPackaged(): Promise<UpdateStatus> {
     // Derived from the install itself — the formula for Homebrew, the version
     // for a tarball. Never defaulted: a confidently wrong track is the bug this
@@ -417,6 +452,7 @@ export class Updater {
           await this.fetchReleases(),
           packaged.branch,
           this.version(),
+          await this.installableHere(packaged.branch),
         );
       } catch (err) {
         // Same contract as a failed `git fetch` on the git path: report it, keep
@@ -620,6 +656,7 @@ export class Updater {
 
     // Clear stale progress/result so the poller only reacts to this run.
     this.applyStartedAt = Date.now();
+    this.watchdog.begin(this.applyStartedAt);
     try {
       fs.writeFileSync(this.progressFile(), JSON.stringify({ step: "pull", at: new Date().toISOString() }));
     } catch {
@@ -684,7 +721,7 @@ export class Updater {
       `install kind=${kind} strategy=${strategy.kind} platform=${process.platform} root=${REPO_ROOT}`,
     );
     this.logEvent(`spawning (cwd=${plan.cwd ?? REPO_ROOT}): ${plan.command} ${plan.args.join(" ")}`);
-    const child = spawn(plan.command, plan.args, {
+    const child = (this.deps.spawn ?? spawn)(plan.command, plan.args, {
       // The strategy's, when it has one. A packaged install must NOT run from
       // the install root: that directory is what the update replaces, and the
       // script dies the moment it is deleted underneath it.
@@ -727,14 +764,14 @@ export class Updater {
    * Only the script's own `[update]` narration is forwarded; npm and vite's raw
    * output stays in update.log rather than flooding /log with progress bars.
    */
-  private drainLiveLog(): void {
+  private drainLiveLog(): boolean {
     let text: string;
     try {
       text = fs.readFileSync(this.liveLogFile(), "utf8");
     } catch {
-      return; // not created yet
+      return false; // not created yet
     }
-    if (text.length <= this.liveLogOffset) return;
+    if (text.length <= this.liveLogOffset) return false;
     const fresh = text.slice(this.liveLogOffset);
     this.liveLogOffset = text.length;
     for (const raw of fresh.split("\n")) {
@@ -742,6 +779,7 @@ export class Updater {
       if (!line.startsWith("[update]")) continue;
       this.logEvent(line.replace(/^\[update\]\s?/, ""));
     }
+    return true;
   }
 
   private startProgressPolling(): void {
@@ -779,11 +817,30 @@ export class Updater {
         }
         return;
       }
-      this.drainLiveLog();
+      const grew = this.drainLiveLog();
       const step = this.readProgressStep();
-      if (step && step !== this.status.step) {
+      const advanced = step !== null && step !== this.status.step;
+      if (advanced) {
         this.logEvent(`step: ${step}`);
         this.status = { ...this.status, step };
+        this.broadcast();
+      }
+      if (grew || advanced) {
+        this.watchdog.progress(Date.now());
+        return;
+      }
+      // Nothing has been written for a long time. A script cannot report a
+      // failure it did not survive — a killed process, a power cut mid-apply,
+      // or (observed on a real box) a working directory deleted underneath it,
+      // after which every remaining command failed. Without this the page sits
+      // on "Downloading update…" forever, and a reload still finds a phase
+      // claiming an update is running that ended long ago.
+      if (this.watchdog.stalled(Date.now(), this.deps.stallMs)) {
+        const silence = this.watchdog.silentFor(Date.now());
+        this.logEvent(`update STALLED — nothing written for ${silence}; giving up (see update.log)`);
+        this.writeStalledResult(silence);
+        this.status = { ...this.status, phase: "idle", step: null };
+        this.stopProgressPolling();
         this.broadcast();
       }
     }, 1000);
@@ -791,7 +848,27 @@ export class Updater {
     this.progressTimer.unref?.();
   }
 
+  /** Report the stall through the same result file the scripts use, so the
+   *  verdict survives a reload instead of living only in this process. */
+  private writeStalledResult(silence: string): void {
+    try {
+      fs.writeFileSync(
+        this.resultFile(),
+        JSON.stringify({
+          ok: false,
+          finishedAt: new Date().toISOString(),
+          log: `The update stopped responding — nothing was written for ${silence}. The server is still running the current version; see update.log.`,
+        }),
+      );
+    } catch (err) {
+      // Not fatal: the phase still drops back to idle in this process. Say so,
+      // because the operator's page will then disagree after a reload.
+      this.logEvent(`could not record the stalled update: ${String(err)}`);
+    }
+  }
+
   private stopProgressPolling(): void {
+    this.watchdog.end();
     if (this.progressTimer) {
       clearInterval(this.progressTimer);
       this.progressTimer = null;

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { Updater } from "./updater.js";
 import { parseReleases, type ReleaseInfo } from "./update/release-check.js";
+import { platformAsset } from "./update/package-availability.js";
 
 // The regression this file guards: `checkForUpdate` on a packaged install used
 // to set the track and stop. `behind` stayed 0 forever, the UI said "Up to
@@ -15,11 +16,25 @@ import { parseReleases, type ReleaseInfo } from "./update/release-check.js";
 // packaged install genuinely lacks: git answers "this is not a checkout", and
 // the releases API answers with a canned response.
 
+/** A published release, carrying the archive THIS machine would install — so
+ *  the fixture is a real release rather than one whose upload never finished
+ *  (which the updater now, correctly, refuses to offer). */
+function published(tag: string, publishedAt: string) {
+  const asset = platformAsset(tag.replace(/^v/, ""), process.platform, process.arch);
+  return {
+    tag_name: tag,
+    name: tag,
+    draft: false,
+    published_at: publishedAt,
+    assets: asset ? [{ name: asset }] : [],
+  };
+}
+
 const RELEASES = parseReleases([
-  { tag_name: "v1.10.0-beta.27", name: "v1.10.0-beta.27", draft: false, published_at: "2026-08-13T00:00:00Z" },
-  { tag_name: "v1.10.0-beta.26", name: "v1.10.0-beta.26", draft: false, published_at: "2026-08-12T00:00:00Z" },
-  { tag_name: "v1.9.5", name: "v1.9.5", draft: false, published_at: "2026-07-01T00:00:00Z" },
-  { tag_name: "v1.9.4", name: "v1.9.4", draft: false, published_at: "2026-06-20T00:00:00Z" },
+  published("v1.10.0-beta.27", "2026-08-13T00:00:00Z"),
+  published("v1.10.0-beta.26", "2026-08-12T00:00:00Z"),
+  published("v1.9.5", "2026-07-01T00:00:00Z"),
+  published("v1.9.4", "2026-06-20T00:00:00Z"),
 ]);
 
 /** git as a packaged install sees it: not a checkout, and nothing else works. */

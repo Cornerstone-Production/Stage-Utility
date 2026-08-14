@@ -1,17 +1,8 @@
 # Homebrew
 
-> **Not currently supported. Use the [one-line installer](install-and-config.md#install)
-> instead.**
->
-> Homebrew installs work, but **updating them does not, reliably**. `brew upgrade`
-> stops the service and never restarts it, and on macOS the restart afterwards hits
-> two launchd failures — a stale label that refuses to bootstrap, and a spawn that
-> launchd parks. Even the recovery script below has not proved dependable in
-> practice, so it is off the supported list until that is fixed.
->
-> This page is kept for machines already installed this way. It is not a
-> recommendation, and Homebrew has been removed from the README, the install guide
-> and the release notes.
+> **Update from Settings → Advanced, not from `brew upgrade`.** Both work, but
+> only the in-app path restarts the service for you — see
+> [In-app updates](#in-app-updates).
 
 On macOS and Linux, Stage Utility can be installed and kept running by Homebrew
 instead of the [one-line installer](install-and-config.md#install).
@@ -32,8 +23,9 @@ touches them.
 | `brew services stop stage-utility` | stop it |
 | `brew services info stage-utility` | is it running, and where are the logs |
 
-To move to a newer release, see [Upgrading from the terminal](#upgrading-from-the-terminal)
-below — `brew upgrade` on its own leaves the service stopped.
+To move to a newer release, use [In-app updates](#in-app-updates). The terminal
+path works too but needs extra steps, because `brew upgrade` on its own leaves
+the service stopped — see [Upgrading from the terminal](#upgrading-from-the-terminal).
 
 The formula installs a prebuilt archive that already contains its own Node
 runtime, so it depends on nothing and compiles nothing.
@@ -98,16 +90,31 @@ what to check if the server never comes back, and it leaves the service alone if
 On Linux, `brew services` uses systemd and the two launchd recovery steps are
 skipped; the upgrade, restart and health check work the same.
 
-**Or use the in-app updater**, which has none of these problems — see below.
+**Or use the in-app updater**, which handles all of this — see below. That is
+the supported path; this section is for when you are already at a terminal, or
+recovering a box whose app is not running.
 
 ## In-app updates
 
-**Settings → Advanced → Updates** works here, and so does switching tracks. The
-app never writes into the keg: it runs `brew update && brew upgrade` for you, so
-Homebrew stays the source of truth and `brew info` keeps telling the truth.
+**Settings → Advanced → Updates** is the supported way to update a Homebrew
+install, and it works unattended: the server comes back on the new version by
+itself. Switching tracks works the same way. The app never writes into the keg —
+it runs `brew update && brew upgrade` for you — so Homebrew stays the source of
+truth and `brew info` keeps telling the truth.
 
-It also restarts the service properly afterwards, clearing a stale launchd label
-first and forcing the spawn after — the two steps a plain `brew upgrade` skips.
+Getting there took fixing four separate faults, all of which a plain
+`brew upgrade` still has, and two of which are invisible:
+
+| | |
+|---|---|
+| `brew upgrade` never restarts the service | the app restarts it explicitly |
+| a stale launchd label refuses to bootstrap (`5: Input/output error`) | cleared with `bootout` first |
+| launchd **parks** a start issued outside a foreground session — brew reports success, nothing runs | forced with `kickstart -k -p` |
+| `brew cleanup` deletes the keg the update script is *running from*, after which every `brew` command fails | the script runs from a directory the update cannot delete |
+
+The restart no longer depends on `brew upgrade`'s exit code either: brew stops
+the service *before* it can fail, so a brew that swaps the keg and then exits
+non-zero has already darkened the box and still owes the restart.
 This is the one place that reliably can: on macOS the server itself runs as a
 `gui/<uid>` launchd agent, so the updater it spawns is already inside that
 session and may bootstrap into it. A `post_install` hook in the formula cannot —

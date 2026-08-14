@@ -116,6 +116,13 @@ npm start          # → http://localhost:8788/
 from source and requiring Node ≥ 24 on the machine. `sudo ./scripts/uninstall.sh`
 removes it. Step-by-step per platform is in [INSTALL.md](../../INSTALL.md).
 
+### Homebrew
+
+On macOS or a Linux workstation, [Homebrew](homebrew.md) is a supported
+alternative: it runs the app as a user agent that starts at login (port 8788),
+rather than a system service that starts at boot. Updates work from
+**Settings → Advanced** the same way.
+
 ## Uninstalling
 
 Every method leaves two things behind: the **service registration** that starts
