@@ -104,10 +104,18 @@ const kickstart = (formula: string): string => `(${kickstartLabel(serviceLabel(f
  * update.sh use — it is what lets the UI leave the "updating" phase. A brew run
  * that failed without writing one left the page waiting forever on a run that
  * was already dead. No-op when the env var is absent (a human at a terminal).
+ *
+ * The keys are `ok`/`finishedAt`/`log`, matching updater.ts readResult(). They
+ * were `ok`/`error`/`at`, which readResult ignores: `finishedAt` came back
+ * undefined, `Date.parse("")` is NaN, and NaN >= applyStartedAt is false, so the
+ * result never matched the run that produced it. The tap-lag no-op — which
+ * writes a false result and deliberately restarts nothing — was therefore
+ * invisible, and the UI waited out the full 10-minute watchdog before reporting
+ * a stall for a run that had finished cleanly and said exactly why.
  */
 const writeResult = (ok: boolean, error: string): string =>
   `if [ -n "$STAGE_UPDATE_RESULT" ]; then ` +
-  `printf '{"ok":%s,"error":"%s","at":"%s"}' ${ok} "${error}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STAGE_UPDATE_RESULT"; fi`;
+  `printf '{"ok":%s,"finishedAt":"%s","log":"%s"}' ${ok} "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${error}" > "$STAGE_UPDATE_RESULT"; fi`;
 
 /**
  * Everything brew and launchctl print lands in update.log. The script runs

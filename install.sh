@@ -38,6 +38,13 @@ die()  { printf '%serror%s %s\n' "$C_ERR" "$C_OFF" "$*" >&2; write_result false 
 # both helpers become no-ops. The format matches scripts/update.sh exactly,
 # because the app's poller already knows how to read it — which is why driving
 # the installer from the app needs no UI change at all.
+#
+# "Matches exactly" is load-bearing and was once merely claimed: this wrote
+# {ok,error,at} while updater.ts reads {ok,finishedAt,log}. The poller compares
+# `Date.parse(finishedAt) >= applyStartedAt`, and Date.parse(undefined) is NaN,
+# so every result written here was silently discarded — a clean failure that had
+# already explained itself surfaced as the watchdog's 10-minute "stopped
+# responding". The field names below are a contract with readResult().
 _now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 write_progress() {
   [ -n "${STAGE_UPDATE_PROGRESS:-}" ] || return 0
@@ -54,7 +61,7 @@ _json_escape() {
 }
 write_result() {
   [ -n "${STAGE_UPDATE_RESULT:-}" ] || return 0
-  printf '{"ok":%s,"error":"%s","at":"%s"}' "$1" "$(_json_escape "${2:-}")" "$(_now)" \
+  printf '{"ok":%s,"finishedAt":"%s","log":"%s"}' "$1" "$(_now)" "$(_json_escape "${2:-}")" \
     >"$STAGE_UPDATE_RESULT" 2>/dev/null || true
 }
 # Any unexpected failure reports too, so the UI can never wait forever on a run
