@@ -87,6 +87,7 @@ import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect,
   ImageConfig, NumberField, NumberInput, PixelField,
 } from "./inspector-rows";
+import { ResponsiveControls } from "./responsive-controls";
 
 
 type SurfaceKind = "flat" | "glass" | "elevated" | "solid" | "outline";
@@ -213,7 +214,7 @@ function PlanAttachmentConfig({
   onConfig: (config: LayoutObjectConfig) => void;
   o: LayoutObject;
   canvas: LayoutCanvas;
-  onGeom: (g: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h">>) => void;
+  onGeom: (g: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h" | "anchor" | "keepAspect" | "minPx" | "maxPx">>) => void;
 }) {
   const [files, setFiles] = useState<PcoAttachmentDTO[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -343,7 +344,7 @@ export function Inspector({
   /** True when this object — or an ancestor container — is locked. */
   locked: boolean;
   slotsViews: View[];
-  onGeom: (g: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h">>) => void;
+  onGeom: (g: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h" | "anchor" | "keepAspect" | "minPx" | "maxPx">>) => void;
   onStyle: (patch: Partial<LayoutStyle>) => void;
   onConfig: (config: LayoutObjectConfig) => void;
   onReorder: (d: "front" | "back" | "up" | "down") => void;
@@ -1322,6 +1323,13 @@ export function Inspector({
         <PixelField label="W" value={o.w} dim={parentW} onChange={(v) => onGeom({ w: clamp(v, MIN, 1 - o.x) })} />
         <PixelField label="H" value={o.h} dim={parentH} onChange={(v) => onGeom({ h: clamp(v, MIN, 1 - o.y) })} />
       </div>
+
+      {/* How this object behaves when the window is not the design's shape.
+          Sits with position and size because that is what it modifies. */}
+      <ResponsiveControls
+        settings={{ anchor: o.anchor, keepAspect: o.keepAspect, minPx: o.minPx, maxPx: o.maxPx }}
+        onChange={(patch) => onGeom(patch)}
+      />
     </div>
   );
 }

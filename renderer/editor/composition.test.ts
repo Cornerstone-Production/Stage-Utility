@@ -26,6 +26,11 @@ function stripComments(src: string): string {
 /** Parts the shell must actually RENDER, not merely import. */
 const RENDERED_PARTS = ["Inspector", "EditorCanvas"];
 
+/** Controls the inspector must render. A responsive model nothing can configure
+ *  is a model nobody uses — three helpers in this redesign were written, tested
+ *  and reachable from no UI, so this checks the last mile. */
+const INSPECTOR_PARTS = ["ResponsiveControls"];
+
 describe("the editor shell composes its parts", () => {
   test("the scan finds the shell at all, so it cannot pass vacuously", () => {
     assert.ok(shell.length > 5000, "layout-editor.tsx looks too small — this scan is broken");
@@ -45,6 +50,13 @@ describe("the editor shell composes its parts", () => {
         new RegExp(`<${part}[\\s/>]`),
         `${part} is imported but never rendered — the feature left with the file`,
       );
+    });
+  }
+
+  for (const part of INSPECTOR_PARTS) {
+    test(`${part} is rendered by the inspector`, () => {
+      const src = stripComments(readFileSync(path.join(HERE, "inspector.tsx"), "utf8"));
+      assert.match(src, new RegExp(`<${part}[\\s/>]`), `${part} is imported but never rendered`);
     });
   }
 
