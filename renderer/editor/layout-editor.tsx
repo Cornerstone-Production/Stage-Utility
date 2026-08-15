@@ -13,6 +13,7 @@ import {
   
   Grid3x3Icon,
   AlignHorizontalDistributeCenterIcon,
+  MonitorSmartphoneIcon,
   SaveIcon,
   DownloadIcon,
   
@@ -109,7 +110,9 @@ import {
 } from "../main/layout-objects";
 import { invoke } from "../lib/api";
 import { fitFor } from "../main/console-fit";
+import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
+import { ShapePreview, PREVIEW_SHAPES, type PreviewShape } from "./preview-shape";
 import { AlignmentGuides } from "./alignment-guides";
 
 /** How close an edge must come before it snaps, in rendered pixels. Small enough
@@ -932,6 +935,13 @@ export function LayoutEditor({
   // don't depend on the height we set, so this isn't circular.
   const canvasCellRef = useRef<HTMLDivElement>(null);
   const [canvasH, setCanvasH] = useState<number | null>(null);
+  // Which shape the canvas cell is showing. Design is the editor; the others are
+  // read-only renders of another viewport (see preview-shape.tsx).
+  const [previewShape, setPreviewShape] = useState<PreviewShape>(PREVIEW_SHAPES[0]);
+  // The cell's own rendered size, so a preview can scale itself to fit. Measured
+  // rather than derived: at a non-design shape the cell's height comes from the
+  // DESIGN aspect, which tells a phone preview nothing about the room it has.
+  const [previewAvail, setPreviewAvail] = useState({ w: 0, h: 0 });
   // Available height from the canvas/panel row's top to the viewport bottom — the
   // inspector panel is capped to this so it scrolls INTERNALLY (see the side panel
   // below) instead of growing the editor and scrolling the preview out of view.
@@ -954,6 +964,7 @@ export function LayoutEditor({
       // see the box sizing above for why that made the preview disagree with the
       // display about what fits on screen.
       setCanvasH(Math.round(Math.min(fit, cap)));
+      setPreviewAvail({ w: width, h: Math.round(Math.min(fit, cap)) });
       // A touch shorter than the raw available height so the section's own bottom
       // padding doesn't tip the page into a few px of scroll.
       setAvailH(Math.max(240, Math.round(maxH) - 12));
@@ -1478,6 +1489,45 @@ export function LayoutEditor({
         >
           <AlignHorizontalDistributeCenterIcon className="size-3.5" /> Align
         </Button>
+        {/* Shape preview. Only Design is editable; the rest render the same
+            LayoutRenderer the kiosk mounts, read-only, at that viewport. */}
+        <Popover.Root>
+          <Popover.Trigger asChild>
+            <Button
+              variant={previewShape.vp ? "accent" : "filled"}
+              size="small"
+              tooltip="See this layout on a window of a different shape"
+            >
+              <MonitorSmartphoneIcon className="size-3.5" />
+              {previewShape.label}
+              <ChevronDownIcon className="size-3.5 text-fg-muted" />
+            </Button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content sideOffset={6} className="z-50 rounded-lg border border-line bg-popover p-1 shadow-lg">
+              <div className="flex flex-col">
+                {PREVIEW_SHAPES.map((s) => (
+                  <Button
+                    key={s.id}
+                    variant={previewShape.id === s.id ? "accent" : "transparent"}
+                    size="small"
+                    className="justify-start"
+                    onClick={() => setPreviewShape(s)}
+                  >
+                    {s.label}
+                    {s.vp ? (
+                      <span className="ml-2 text-caption2 text-fg-subtle tabular-nums">
+                        {s.vp.w}&times;{s.vp.h}
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-caption2 text-fg-subtle">editable</span>
+                    )}
+                  </Button>
+                ))}
+              </div>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
         <Button variant="filled" size="small" onClick={snapAllToGrid} aria-label="Snap all objects to grid" tooltip="Snap every object's position + size to the grid">
           Snap all
         </Button>
@@ -1617,7 +1667,17 @@ export function LayoutEditor({
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
         <div ref={canvasCellRef} className="flex-1 min-w-0 @max-4xl:flex-none" style={{ height: canvasH ?? undefined }}>
-          {data.state ? (
+          {previewShape.vp ? (
+            // The live edit state, not the saved view: the point is to check the
+            // change you just made against another shape before saving it.
+            <ShapePreview
+              shape={previewShape}
+              layout={{ version: 1, canvas, objects }}
+              ndiSource={view.ndiSource ?? null}
+              surface={viewSurface(view)}
+              avail={previewAvail}
+            />
+          ) : data.state ? (
             <EditorCanvas
               effectiveFit={effectiveFit}
               canvas={canvas}
