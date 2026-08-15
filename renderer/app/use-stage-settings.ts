@@ -722,7 +722,7 @@ export function useStageSettings() {
   }
 
   /**
-   * Make a screen a read-only display or an interactive touch panel.
+   * Make a screen a read-only display or an interactive control surface.
    *
    * NOT optimistic. The server refuses some of these — demoting a panel that is
    * showing a console, for one — and an optimistic flip would show the operator

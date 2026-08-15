@@ -129,7 +129,7 @@ export function NewViewDialog({
               <span className="min-w-0">
                 <span className="block text-footnote font-medium text-fg">A control surface you operate</span>
                 <span className="block text-caption2 text-fg-subtle">
-                  Buttons work. Opens in the app, or pinned to a touch panel.
+                  Buttons work. Opens in the app, or pinned to a control surface.
                 </span>
               </span>
             </label>

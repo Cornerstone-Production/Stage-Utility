@@ -185,7 +185,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           aria-label="Display name"
         />
         {outputMode(output) === "panel" && (
-          <Tooltip label="A touch panel: controls on this screen are live">
+          <Tooltip label="A control surface: controls on this screen are live">
             <span className="shrink-0 rounded-full border border-accent bg-accent-a3 px-2 py-0.5 text-caption2 font-medium text-accent">
               panel
             </span>
@@ -228,11 +228,11 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
                 onSelect={async () => {
                   const toPanel = outputMode(output) !== "panel";
                   const ok = await confirm({
-                    title: toPanel ? `Use "${output.name}" as a touch panel?` : `Make "${output.name}" a display again?`,
+                    title: toPanel ? `Use "${output.name}" as a control surface?` : `Make "${output.name}" a display again?`,
                     message: toPanel
                       ? "Buttons on this screen will work. Anyone standing at it can press them."
                       : "This screen becomes read-only. Its buttons will render but do nothing.",
-                    confirmLabel: toPanel ? "Use as a touch panel" : "Make it a display",
+                    confirmLabel: toPanel ? "Use as a control surface" : "Make it a display",
                   });
                   if (ok) onSetMode(toPanel ? "panel" : "display");
                 }}
@@ -241,7 +241,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
                 {outputMode(output) === "panel"
                   ? <MonitorIcon className="size-3.5 text-fg-subtle" />
                   : <HandIcon className="size-3.5 text-fg-subtle" />}
-                {outputMode(output) === "panel" ? "Use as a display" : "Use as a touch panel"}
+                {outputMode(output) === "panel" ? "Use as a display" : "Use as a control surface"}
               </DropdownMenu.Item>
               <DropdownMenu.Item
                 onSelect={() => onSetLocked(!(output.locked ?? false))}

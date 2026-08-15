@@ -76,7 +76,7 @@ describe("binding a view to a screen", () => {
         // The exact words the screen's menu uses. An instruction naming
         // something the operator cannot find is worse than no instruction —
         // this refusal used to say "panel mode", which appears nowhere in the UI.
-        assert.match(e.message, /Use as a touch panel/, "must name the menu item, in its words");
+        assert.match(e.message, /Use as a control surface/, "must name the menu item, in its words");
         assert.ok(!/^\w+:\w+ —/.test(e.message), "must not carry the internal handler name");
         return true;
       },

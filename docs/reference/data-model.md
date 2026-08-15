@@ -33,7 +33,7 @@ A view also declares what it is **for**, alongside its kind:
 | Audience | anyone walking past | the operator |
 
 A screen has a matching **mode**. It is a read-only `display` unless deliberately
-set to `panel` — the way a touchscreen is built. Only a panel may show a console
+set to `panel` — the way a control surface is built. Only a panel may show a console
 view, and that rule is enforced by the server, not just the picker: a wall screen
 cannot end up rendering a live button by accident.
 
@@ -46,7 +46,7 @@ so there is nowhere to put a control.
 ### Upgrading an existing install
 
 Nothing has to be done by hand. On first start, any view containing a button
-becomes a console and the screens showing it become panels, so a touch panel that
+becomes a console and the screens showing it become panels, so a control surface that
 worked before still works. What moved is written to the log, so a stray control
 left on a wall display years ago can be spotted and set back deliberately.
 

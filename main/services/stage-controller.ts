@@ -1666,7 +1666,7 @@ export class StageController {
         const names = stranded.map((o) => o.name || o.id).join(", ");
         throw new Error(
           `"${view.name}" is showing on ${names}. ` +
-            `Open ${stranded.length === 1 ? "that screen's" : "those screens'"} menu and choose "Use as a touch panel" first, ` +
+            `Open ${stranded.length === 1 ? "that screen's" : "those screens'"} menu and choose "Use as a control surface" first, ` +
             `or point ${stranded.length === 1 ? "it" : "them"} at a different view.`,
         );
       }
@@ -2012,8 +2012,8 @@ export class StageController {
       const output = this.state.outputs.find((o) => o.id === id)!;
       if (viewSurface(view) === "console" && outputMode(output) !== "panel") {
         throw new Error(
-          `"${view.name}" is a control surface and "${output.name}" is a wall screen. ` +
-            `If it is a touch panel, open its menu and choose "Use as a touch panel" first.`,
+          `"${view.name}" has live controls, so it can only go on a control surface. ` +
+            `"${output.name}" is a wall screen — open its menu and choose "Use as a control surface" first.`,
         );
       }
     }
@@ -2027,7 +2027,7 @@ export class StageController {
   }
 
   /**
-   * Make a screen a read-only display or an interactive touch panel.
+   * Make a screen a read-only display or an interactive control surface.
    *
    * Demoting a panel that currently shows a console is refused rather than
    * silently unbinding it: the operator would be left with a screen showing
