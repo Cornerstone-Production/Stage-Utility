@@ -312,8 +312,8 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           // The preview iframe sets pointer-events:none, so the click lands here.
           <LazyPreview
             viewId={output.viewId}
-            href={outputUrl}
-            hrefTitle={`Open ${output.name} in a new tab`}
+            onExpand={onEditLayout}
+            expandLabel={`Edit what ${output.name} shows`}
           />
         ) : (
           <div className="grid aspect-video place-items-center rounded-lg border border-dashed border-line text-caption1 text-fg-subtle">
@@ -356,15 +356,19 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
             <SelectItem value={NEW_VIEW}>+ New view…</SelectItem>
           </SelectContent>
         </Select>
-        <Tooltip label={onEditLayout ? "Edit this view's layout" : "Only a custom view has a layout to edit"}>
-          <button
-            type="button"
-            onClick={onEditLayout}
-            disabled={!onEditLayout}
-            className="shrink-0 text-footnote text-accent transition-opacity hover:underline disabled:text-fg-faint disabled:no-underline disabled:opacity-60"
+        {/* Opening the real screen moved here, because the preview now opens the
+            editor. An anchor, so middle-click and cmd-click behave and the URL
+            shows on hover. */}
+        <Tooltip label={`Open ${output.name} in a new tab`}>
+          <a
+            href={outputUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex shrink-0 items-center gap-1 text-footnote text-accent transition-opacity hover:underline"
           >
-            Edit layout
-          </button>
+            Open
+            <ExternalLinkIcon className="size-3" />
+          </a>
         </Tooltip>
       </div>
 
@@ -486,7 +490,11 @@ function UnassignedViewCard({
       </div>
 
       <div className="px-3 pt-2">
-        <LazyPreview viewId={view.id} />
+        <LazyPreview
+          viewId={view.id}
+          onExpand={onEditLayout}
+          expandLabel={`Edit ${view.name}`}
+        />
       </div>
 
       <div className="flex items-center justify-between gap-2 px-3 py-2.5">
@@ -500,16 +508,8 @@ function UnassignedViewCard({
             </span>
           )}
         </span>
-        <Tooltip label={onEditLayout ? "Edit this view's layout" : "Only a custom view has a layout to edit"}>
-          <button
-            type="button"
-            onClick={onEditLayout}
-            disabled={!onEditLayout}
-            className="shrink-0 text-footnote text-accent transition-opacity hover:underline disabled:text-fg-faint disabled:no-underline disabled:opacity-60"
-          >
-            Edit layout
-          </button>
-        </Tooltip>
+        {/* No "Open" here: this view is on no screen, so there is no screen URL
+            to open. The preview above is the way in. */}
       </div>
     </div>
   );
@@ -605,12 +605,13 @@ export function OutputsSection({
                 onRemove={() => handlers.handleRemoveOutput(output.id)}
                 onRequestNewView={() => setCreatingFor(output.id)}
                 onEditLayout={
-                  // Only a custom-kind view has a free-form layout; the built-in
-                  // kinds would open an editor with nothing to edit.
-                  onEditLayout && output.viewId &&
-                  stageState.views?.find((v) => v.id === output.viewId)?.kind === "custom"
-                    ? () => onEditLayout(output.viewId!)
-                    : undefined
+                  // ANY assigned view, not just a custom one. The comment here
+                  // used to say the built-in kinds "would open an editor with
+                  // nothing to edit" — which was simply wrong: a slots view's
+                  // editor is where its slot set and column positions live, and
+                  // a script view's is where its column preset is chosen.
+                  // Greying this out left no way to edit a mic board at all.
+                  onEditLayout && output.viewId ? () => onEditLayout(output.viewId!) : undefined
                 }
               />
             ))}
@@ -664,7 +665,7 @@ export function OutputsSection({
                       handlers.handleSetViewSurface(v.id, viewSurface(v) === "console" ? "display" : "console")
                     }
                     onRemove={() => handlers.handleRemoveView(v.id)}
-                    onEditLayout={onEditLayout && v.kind === "custom" ? () => onEditLayout(v.id) : undefined}
+                    onEditLayout={onEditLayout ? () => onEditLayout(v.id) : undefined}
                   />
                 ))}
               </div>
