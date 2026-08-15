@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
+import { readFileSync } from "node:fs";
 
 // The DOM must exist before the component modules are evaluated - a `before`
 // hook runs after the module body, so a static import would render into nothing.
@@ -39,12 +40,26 @@ describe("operator destinations", () => {
     // deliberately have no rail entry: /plan's content is Home's, and /views
     // and /displays merged into /screens. They stay routed so bookmarks land.
     const retired = new Set(["/plan", "/views", "/displays"]);
-    const expected = OPERATOR_PATHS.filter((p) => !retired.has(p));
+    // /consoles has no STATIC destination: its rail entries are one per console
+    // the operator built, derived from state in rail.tsx. The server must still
+    // claim the path or a direct load serves the kiosk bundle — which is exactly
+    // the bug that put it here.
+    const dynamic = new Set(["/consoles"]);
+    const expected = OPERATOR_PATHS.filter((p) => !retired.has(p) && !dynamic.has(p));
     assert.deepEqual(
       [...railTops].sort(),
       [...expected].sort(),
       "the rail and the server's operator paths must be the same set",
     );
+  });
+
+  test("a console produces a rail entry, so /consoles is not an empty exemption", () => {
+    // The exemption above says console rail entries come from state. This checks
+    // that claim rather than trusting it: an exemption nobody verifies is how the
+    // next real gap hides behind a comment.
+    const rail = readFileSync(new URL("./rail.tsx", import.meta.url), "utf8");
+    assert.match(rail, /viewSurface\(v\) === "console"/, "rail.tsx no longer derives console entries");
+    assert.ok(rail.includes("/consoles/"), "rail.tsx no longer builds /consoles/<id> paths");
   });
 
   test("paths and labels are unique", () => {

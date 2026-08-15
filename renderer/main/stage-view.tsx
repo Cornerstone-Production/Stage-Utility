@@ -14,6 +14,7 @@ import { ScriptView } from "./script-view";
 import { SplRundownView } from "./spl-rundown-view";
 import { LayoutRenderer } from "./layout-renderer";
 import { capabilityLive, contextForOutput } from "./render-context";
+import { viewSurface } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
 
@@ -483,6 +484,7 @@ export function StageView() {
                   contextForOutput(currentDisplay?.mode, !!previewViewId),
                   "control",
                 )}
+                surface={viewSurface(activeView)}
               />
             </div>
           </div>

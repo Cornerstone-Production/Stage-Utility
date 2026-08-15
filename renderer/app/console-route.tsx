@@ -92,6 +92,7 @@ export function ConsoleRoute() {
             layout={view.layout}
             ndiSource={view.ndiSource ?? null}
             interactive={capabilityLive("shell", "control")}
+            surface="console"
           />
         ) : (
           <EmptyState
