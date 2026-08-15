@@ -35,6 +35,7 @@ import { IntegrationsSection } from "../settings/sections/integrations-section";
 import { PatchSection } from "../settings/sections/patch-section";
 import { HomeRoute } from "./home/home-route";
 import { ScreensRoute } from "./screens/screens-route";
+import { ConsoleRoute } from "./console-route";
 import { ViewEditorRoute } from "./screens/view-editor-route";
 import { ScriptViewSection } from "../settings/sections/scriptview-section";
 import {
@@ -217,4 +218,8 @@ export const NESTED_ROUTES: readonly { path: string; Component: FunctionComponen
   { path: "/patch/edit", Component: PatchSection },
   // A view's editor is its own page rather than a panel beside a master list.
   { path: "/screens/$viewId/edit", Component: ViewEditorRoute },
+  // A console, in the shell. Phase 3 gave a View a surface but gave a console
+  // nowhere to be: it rendered only on a panel Output, which meant the one
+  // surface built for the operator was the one the operator could not open.
+  { path: "/consoles/$viewId", Component: ConsoleRoute },
 ];
