@@ -35,6 +35,16 @@ export type PaletteGroup = (typeof PALETTE_GROUP_ORDER)[number];
 export interface LayoutObjectSpec {
   /** Shown in the palette, the layer list and the inspector header. */
   label: string;
+  /**
+   * One line saying what this SHOWS, for the palette card.
+   *
+   * Required, so a new object type cannot join the palette as a bare name with
+   * no explanation — `tsc` refuses. Written for someone who has not met the
+   * object before: "Red while OBS is recording", not "OBS status indicator".
+   *
+   * Keep under 60 characters; the palette card gives it one line.
+   */
+  blurb: string;
   /** Which palette section this appears under, or null to keep it OUT of the
    *  add-object palette (NDI is placed by the native client, not by hand). */
   group: PaletteGroup | null;
@@ -114,24 +124,28 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // Layout
   container: {
     label: "Container",
+    blurb: "Groups other objects so they move and scale together",
     group: "Layout",
     config: () => ({ type: "container" }),
     style: () => ({ ...CARD_PRESETS.neutral }),
   },
   shape: {
     label: "Shape",
+    blurb: "A plain rectangle or circle, for dividing up a screen",
     group: "Layout",
     config: () => ({ type: "shape", shape: "rect" }),
     style: () => ({ background: "#3b82f6", opacity: 1 }),
   },
   image: {
     label: "Image",
+    blurb: "A picture from a file or URL",
     group: "Layout",
     config: () => ({ type: "image", src: "" }),
     style: BARE,
   },
   "brand-logo": {
     label: "Logo",
+    blurb: "Your church logo, from Branding",
     group: "Layout",
     config: () => ({ type: "brand-logo", useEmptySlotLogo: false }),
     style: BARE,
@@ -140,18 +154,21 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // Text & time
   text: {
     label: "Text",
+    blurb: "Words you type, that do not change",
     group: "Text & time",
     config: () => ({ type: "text", text: "Text" }),
     style: () => TEXT(),
   },
   clock: {
     label: "Clock",
+    blurb: "The wall clock, 12 or 24 hour",
     group: "Text & time",
     config: () => ({ type: "clock", showSeconds: true, format: "12h" }),
     style: () => TEXT(),
   },
   "countdown-timer": {
     label: "PCO countdown",
+    blurb: "Time until the service starts, from Planning Center",
     group: "Text & time",
     config: () => ({ type: "countdown-timer" }) as LayoutObjectConfig,
     style: () => TEXT(),
@@ -160,6 +177,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // PCO / service
   "live-controls": {
     label: "PCO Prev/Next",
+    blurb: "Previous and next buttons for the service",
     group: "PCO / service",
     config: () => ({ type: "live-controls" }) as LayoutObjectConfig,
     style: BARE,
@@ -167,6 +185,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "current-service-item": {
     label: "Current item",
+    blurb: "What the plan is on right now",
     group: "PCO / service",
     config: () => ({ type: "current-service-item" }) as LayoutObjectConfig,
     style: () => TEXT(),
@@ -175,6 +194,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "next-service-item": {
     label: "Next item",
+    blurb: "What comes after the current item",
     group: "PCO / service",
     config: () => ({ type: "next-service-item" }) as LayoutObjectConfig,
     style: () => TEXT(),
@@ -183,6 +203,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "service-order": {
     label: "Service order (legacy)",
+    blurb: "The plan as a running list, with the live item marked",
     group: null,
     retired: {
       replacedBy: "view-embed",
@@ -193,6 +214,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "view-embed": {
     label: "Embedded view",
+    blurb: "Another view, shown inside this one",
     group: "PCO / service",
     config: () => ({ type: "view-embed", viewId: null }),
     // The size the ScriptView PAGE actually renders at, expressed as a fraction
@@ -210,12 +232,14 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "service-pacing": {
     label: "Service pacing",
+    blurb: "How far ahead or behind the plan the service is",
     group: "PCO / service",
     config: () => ({ type: "service-pacing", hideWhenIdle: false, showLabel: false }),
     style: () => READOUT(0.1),
   },
   "plan-attachment": {
     label: "Plan file",
+    blurb: "A page from a file attached to the plan",
     group: "PCO / service",
     config: () => ({ type: "plan-attachment", match: "stage plot", page: 1 }),
     style: BARE,
@@ -224,6 +248,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // ProPresenter
   "current-slide-text": {
     label: "Current slide",
+    blurb: "The words on the slide showing now",
     group: "ProPresenter",
     config: () => ({ type: "current-slide-text" }) as LayoutObjectConfig,
     style: () => TEXT(),
@@ -232,6 +257,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "next-slide-text": {
     label: "Next slide",
+    blurb: "The words on the slide coming next",
     group: "ProPresenter",
     config: () => ({ type: "next-slide-text" }) as LayoutObjectConfig,
     style: () => TEXT(),
@@ -240,6 +266,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "current-slide-notes": {
     label: "Slide notes",
+    blurb: "The speaker notes on the slide showing now",
     group: "ProPresenter",
     config: () => ({ type: "current-slide-notes" }) as LayoutObjectConfig,
     style: () => TEXT(),
@@ -248,6 +275,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "slide-thumbnail": {
     label: "Slide image",
+    blurb: "A picture of the slide showing now",
     group: "ProPresenter",
     config: () => ({ type: "slide-thumbnail" }) as LayoutObjectConfig,
     style: BARE,
@@ -256,6 +284,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "section-chip": {
     label: "Section chip",
+    blurb: "The part of the service running now, as a label",
     group: "ProPresenter",
     config: () => ({ type: "section-chip", which: "current" }),
     style: () => TEXT(),
@@ -263,6 +292,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "pp-timer": {
     label: "ProPresenter timer",
+    blurb: "A timer from ProPresenter, by name",
     group: "ProPresenter",
     config: () => ({ type: "pp-timer", timerName: null, propresenterInstanceId: null, warnStates: true, hideWhenIdle: false, showLabel: true }),
     style: () => READOUT(0.1),
@@ -270,6 +300,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "slide-progress": {
     label: "Slide progress",
+    blurb: "How far through the current presentation",
     group: "ProPresenter",
     config: () => ({ type: "slide-progress", propresenterInstanceId: null, display: "fraction", showLabel: false }),
     style: () => TEXT(),
@@ -279,12 +310,14 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // Mics & RF
   "slots-grid": {
     label: "Mic slots",
+    blurb: "Who is on which mic, as a grid of cards",
     group: "Mics & RF",
     config: () => ({ type: "slots-grid", source: "inline", sourceViewId: null }),
     style: () => TEXT(),
   },
   "charger-battery": {
     label: "Charger battery",
+    blurb: "Battery levels in the charger bays",
     group: "Mics & RF",
     config: () => ({ type: "charger-battery", bays: [], show: { battery: true, charging: true } }),
     style: () => TEXT({ fontSize: 0.045, textAlign: "left" }),
@@ -292,6 +325,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "wireless-summary": {
     label: "Wireless summary",
+    blurb: "How many packs are online, and their batteries",
     group: "Mics & RF",
     config: () => ({ type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" }),
     style: () => PILL(),
@@ -299,6 +333,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "wireless-channel": {
     label: "Mic channel",
+    blurb: "RF and battery for one wireless pack",
     group: "Mics & RF",
     config: () => ({ type: "wireless-channel", channelId: null, show: { rf: true, battery: true, frequency: true, audio: false }, showLabel: true }),
     style: () => PILL(),
@@ -308,6 +343,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // Audio (SPL)
   "spl-meter": {
     label: "SPL meter",
+    blurb: "The live sound level from Smaart",
     group: "Audio (SPL)",
     config: () => ({ type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null }),
     style: () => TEXT(),
@@ -317,6 +353,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // Transcription
   "transcript-strip": {
     label: "Transcription",
+    blurb: "Live captions of what is being said",
     group: "Transcription",
     config: () => ({ type: "transcript-strip", mode: "rolling" }),
     style: () => TEXT({ fontSize: 0.045, textAlign: "left", vAlign: "bottom" }),
@@ -326,6 +363,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // People
   "people-counter": {
     label: "People counter",
+    blurb: "How many people are in the room",
     group: "People",
     config: () => ({ type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true }),
     style: () => READOUT(0.12),
@@ -333,12 +371,14 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "people-panel": {
     label: "People summary",
+    blurb: "Several attendance numbers side by side",
     group: "People",
     config: () => ({ type: "people-panel", metrics: ["occupancy", "peak", "attendance"], showLabels: true, orientation: "row" }),
     style: () => READOUT(0.1),
   },
   "people-graph": {
     label: "People graph",
+    blurb: "How the room has filled over time",
     group: "People",
     config: () => ({ type: "people-graph", metric: "occupancy", showLabel: true, label: "In room" }),
     style: () => ({ color: "#5b9cff", ...CARD_PRESETS.neutral }),
@@ -348,6 +388,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // Baptisms
   "baptism-timer": {
     label: "Baptism timer",
+    blurb: "The running baptism clock, or the session's totals",
     group: "Baptisms",
     config: () => ({ type: "baptism-timer", field: "live", showLabel: true, label: "" }),
     style: () => READOUT(0.14),
@@ -357,6 +398,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // recorders; the two device-specific objects below are for when you want one.
   "record-status": {
     label: "Record status",
+    blurb: "Red while anything is recording",
     group: "Status",
     config: () => ({ type: "record-status", source: "any", hideWhenIdle: false, fillWhenRecording: true }),
     style: () => PILL({ fontWeight: 700, uppercase: true }),
@@ -365,6 +407,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // OBS / REAPER — bold pills that fill red while recording.
   "obs-status": {
     label: "OBS status",
+    blurb: "Red while OBS is recording or streaming",
     group: "OBS",
     config: () => ({ type: "obs-status", mode: "recording", showTimecode: false, hideWhenIdle: false, fillWhenRecording: true }),
     style: () => PILL({ fontWeight: 700, uppercase: true }),
@@ -372,6 +415,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "reaper-status": {
     label: "REAPER status",
+    blurb: "Red while REAPER is recording",
     group: "REAPER",
     config: () => ({ type: "reaper-status", showPosition: false, hideWhenIdle: false, fillWhenRecording: true }),
     style: () => PILL({ fontWeight: 700, uppercase: true }),
@@ -381,6 +425,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // Control
   "osc-button": {
     label: "OSC button",
+    blurb: "Sends an OSC message to gear on the network",
     group: "Control",
     config: () => ({ type: "osc-button", targetId: null, label: "Button", address: "/", args: [], feedback: null }),
     style: () => PILL({ fontSize: 0.045 }),
@@ -389,6 +434,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
 
   "rosstalk-button": {
     label: "RossTalk button",
+    blurb: "Fires a RossTalk command at a switcher",
     group: "Control",
     config: () => ({ type: "rosstalk-button", targetId: null, commandId: null, params: {}, label: "RossTalk" }),
     style: () => PILL({ fontSize: 0.045 }),
@@ -397,6 +443,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
 
   "action-button": {
     label: "Action button",
+    blurb: "Runs one of the app's own actions",
     group: "Control",
     config: () => ({ type: "action-button", actionId: "", params: {}, label: "Action" }),
     style: () => PILL({ fontSize: 0.045 }),
@@ -404,6 +451,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
 
   notes: {
     label: "Notes",
+    blurb: "A shared note anyone can type into",
     group: "Control",
     config: () => ({ type: "notes", placeholder: "Notes for this service" }),
     style: () => ({ fontSize: 0.035, align: "left" as const }),
@@ -411,6 +459,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
 
   checklist: {
     label: "Checklist",
+    blurb: "A list of things to tick off",
     group: "Control",
     config: () => ({ type: "checklist", title: "Pre-service" }),
     style: () => ({ fontSize: 0.035, align: "left" as const }),
@@ -419,6 +468,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // Status
   "integration-status": {
     label: "Integration status",
+    blurb: "Whether one integration is connected",
     group: "Status",
     config: () => ({ type: "integration-status", integrationId: null, showLabel: true }),
     style: () => PILL(),
@@ -427,6 +477,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // Video layer — native client only; the web build ignores it.
   "ndi-video": {
     label: "NDI video",
+    blurb: "An NDI video source from the network",
     group: null,
     config: () => ({ type: "ndi-video" }) as LayoutObjectConfig,
     style: BARE,
