@@ -36,11 +36,14 @@ sensource-probe*.json
 .playwright-mcp/
 .impeccable/
 
-# Internal working documents. These are notes to ourselves — agent execution
-# plans with task checkboxes, proposals with a "decisions for you" section, and
-# references to local tooling paths that exist on no other machine. Published
-# design docs belong in docs/ proper, written for a stranger.
-docs/superpowers/
+# Internal working documents. These are notes to ourselves — proposals with a
+# "decisions for you" section, and references to local tooling paths that exist
+# on no other machine.
+#
+# docs/superpowers/ was here and is now TRACKED again: the specs and plans are
+# how a change was decided and how it was carried out, and a reviewer reading a
+# PR should be able to read the plan it implements. They keep their task
+# checkboxes and their agent directive header; that is what they are.
 docs/design-overhaul/
 DESIGN_TOKENS_PROPOSAL.md
 scripts/survival/.survival-*.log
