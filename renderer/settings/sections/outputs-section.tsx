@@ -408,12 +408,14 @@ function UnassignedViewCard({
   view,
   onRename,
   onDuplicate,
+  onToggleSurface,
   onRemove,
   onEditLayout,
 }: {
   view: View;
   onRename: (name: string) => void;
   onDuplicate: () => void;
+  onToggleSurface: () => void;
   onRemove: () => void;
   onEditLayout?: () => void;
 }) {
@@ -445,6 +447,16 @@ function UnassignedViewCard({
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content className={MENU_CONTENT} align="end" sideOffset={4}>
+              {/* Only a custom layout can be a console: the built-in kinds have
+                  no layout to put a control on. */}
+              {view.kind === "custom" && (
+                <DropdownMenu.Item onSelect={onToggleSurface} className={MENU_ITEM}>
+                  {viewSurface(view) === "console"
+                    ? <MonitorIcon className="size-3.5 text-fg-subtle" />
+                    : <HandIcon className="size-3.5 text-fg-subtle" />}
+                  {viewSurface(view) === "console" ? "Make it a wall screen" : "Make it a control surface"}
+                </DropdownMenu.Item>
+              )}
               <DropdownMenu.Item onSelect={onDuplicate} className={MENU_ITEM}>
                 <CopyIcon className="size-3.5 text-fg-subtle" />
                 Duplicate view
@@ -647,7 +659,10 @@ export function OutputsSection({
                     key={v.id}
                     view={v}
                     onRename={(name) => handlers.handleRenameView(v.id, name)}
-                    onDuplicate={() => handlers.handleDuplicateView(v.id)}
+                        onDuplicate={() => handlers.handleDuplicateView(v.id)}
+                    onToggleSurface={() =>
+                      handlers.handleSetViewSurface(v.id, viewSurface(v) === "console" ? "display" : "console")
+                    }
                     onRemove={() => handlers.handleRemoveView(v.id)}
                     onEditLayout={onEditLayout && v.kind === "custom" ? () => onEditLayout(v.id) : undefined}
                   />

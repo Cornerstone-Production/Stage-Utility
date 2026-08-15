@@ -27,6 +27,7 @@ import { SlotEditor } from "./slots-section";
 import { LayoutEditor } from "./layout-editor";
 import { ViewPreview } from "./view-preview";
 import { KIND_LABELS, KIND_ORDER } from "./new-view-dialog";
+import { viewSurface } from "@main/types/views";
 
 const PREVIEW_ASPECTS = [
   { id: "16:9", label: "16:9 · landscape", ratio: 16 / 9 },
@@ -123,6 +124,26 @@ export function ViewDetail({
             ))}
           </SelectContent>
         </Select>
+        {/* What it is FOR, beside what it IS. Offered only for a custom layout:
+            the built-in kinds have no editable layout, so a console among them
+            would have nowhere to put a control — and the server refuses it too.
+
+            Changing this is refused, with the reason, when screens are showing
+            the view; the toast carries that message rather than the console. */}
+        {view.kind === "custom" && (
+          <Select
+            value={viewSurface(view)}
+            onValueChange={(v: string) => handlers.handleSetViewSurface(view.id, v as "display" | "console")}
+          >
+            <SelectTrigger className="w-44 shrink-0" aria-label="What this view is for">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="display">Wall screen</SelectItem>
+              <SelectItem value="console">Control surface</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
         <Button variant="filled" size="small" onClick={() => handlers.handleDuplicateView(view.id)}>
           <CopyIcon className="size-3.5 text-fg-muted" />
           Duplicate
