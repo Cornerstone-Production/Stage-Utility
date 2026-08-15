@@ -29,6 +29,12 @@ that a callback stopped being passed.
 - `Cmd/Ctrl-C` — copy, `Cmd/Ctrl-V` — paste with fresh ids, `Cmd/Ctrl-D` — duplicate
 - paste and duplicate deep-clone children, giving every nested object a new id
 
+There is **no arrow-key nudge**. The first draft of this list claimed one, from
+habit rather than from reading — the editor's key handlers are exactly the five
+above. Worth a note because "the inventory said so" is how a split gets blamed
+for losing something that was never there, and equally how a real gap gets
+waved through.
+
 ### Context menu
 - Copy, Paste, Duplicate, Delete, each labelled for a multi-selection
 - layer order within the object's own sibling scope
