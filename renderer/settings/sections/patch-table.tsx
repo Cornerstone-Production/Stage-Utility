@@ -68,7 +68,7 @@ function PathCell({ path, stageDevices, onChange }: { path: PatchHop[] | undefin
             </select>
             <input value={h.connector} list={listId} onChange={(e) => setHop(i, { connector: e.target.value })} placeholder="ch" className="h-6 w-14 rounded border border-line-strong bg-field px-1.5 text-caption2 tabular-nums text-fg focus:outline-none focus:border-focus" />
             {listId && <datalist id={listId}>{labels.map((l) => <option key={l} value={l} />)}</datalist>}
-            <button type="button" onClick={() => remove(i)} className="rounded p-0.5 text-fg-subtle hover:text-warn-11" aria-label="Remove hop"><XIcon className="size-3.5" /></button>
+            <button type="button" onClick={() => remove(i)} className="rounded p-0.5 text-fg-subtle hover:text-danger-11" aria-label="Remove hop"><XIcon className="size-3.5" /></button>
           </div>
         );
       })}
