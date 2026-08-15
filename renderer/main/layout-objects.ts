@@ -395,6 +395,27 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     integration: { id: "rosstalk", label: "RossTalk" },
   },
 
+  "action-button": {
+    label: "Action button",
+    group: "Control",
+    config: () => ({ type: "action-button", actionId: "", params: {}, label: "Action" }),
+    style: () => PILL({ fontSize: 0.045 }),
+  },
+
+  notes: {
+    label: "Notes",
+    group: "Control",
+    config: () => ({ type: "notes", placeholder: "Notes for this service" }),
+    style: () => ({ fontSize: 0.035, align: "left" as const }),
+  },
+
+  checklist: {
+    label: "Checklist",
+    group: "Control",
+    config: () => ({ type: "checklist", title: "Pre-service" }),
+    style: () => ({ fontSize: 0.035, align: "left" as const }),
+  },
+
   // Status
   "integration-status": {
     label: "Integration status",

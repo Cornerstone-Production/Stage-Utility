@@ -25,6 +25,8 @@ import "./osc-store.js";
 import "./patch-store.js";
 import "./presets-store.js";
 import "./rosstalk-store.js";
+import "./bar-config-store.js";
+import "./notes-store.js";
 import "./scriptview-config-store.js";
 import "./scriptview-layouts-store.js";
 import "./scriptview-roles-store.js";

@@ -26,6 +26,7 @@ import {
 } from "../../components/ui";
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { DataArchivePanel } from "./data-archive-panel";
+import { BarItemsChooser } from "./bar-items-chooser";
 import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
 
@@ -909,6 +910,19 @@ export function AdvancedSection({
         justUpdated={justUpdated ?? null}
         onDismissJustUpdated={onDismissJustUpdated}
       />
+
+      <FieldSet>
+        <Collapsible
+          label="Context bar"
+          summary="Which items appear above every page"
+          headerClassName="px-4 py-2.5"
+        >
+          <BarItemsChooser
+            selected={stageState.barItems ?? []}
+            onChange={(items) => handlers.handleSetBarItems(items)}
+          />
+        </Collapsible>
+      </FieldSet>
 
       <FieldSet>
         <Collapsible label="Network & behavior" summary="Public address, reconnects, attendance" headerClassName="px-4 py-2.5">

@@ -661,6 +661,21 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "osc:send":
       return post<T>("/api/osc/send", p);
 
+    case "action:invoke":
+      return post<T>("/api/action/invoke", p);
+
+    case "outputs:setMode":
+      return patch<T>(`/api/outputs/${encodeURIComponent(String(p.id))}`, { mode: p.mode });
+
+    case "barItems:set":
+      return post<T>("/api/bar-items", p);
+
+    case "notes:set":
+      return post<T>("/api/notes", p);
+
+    case "views:setSurface":
+      return patch<T>(`/api/views/${encodeURIComponent(String(p.id))}`, { surface: p.surface });
+
     case "osc:getFeedback":
       return apiFetch<T>("/api/osc/feedback");
 

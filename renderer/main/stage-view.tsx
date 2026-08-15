@@ -13,6 +13,7 @@ import { TranscriptionView } from "./transcription-view";
 import { ScriptView } from "./script-view";
 import { SplRundownView } from "./spl-rundown-view";
 import { LayoutRenderer } from "./layout-renderer";
+import { capabilityLive, contextForOutput } from "./render-context";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
 
@@ -470,9 +471,19 @@ export function StageView() {
               locked={outputLocked}
             />
             <div className="flex-1 min-h-0">
-              {/* interactive only on a real display route — never in the
-                  "/preview-…" iframe, so live-control objects can't fire PCO. */}
-              <LayoutRenderer layout={activeView.layout} ndiSource={activeView.ndiSource ?? null} interactive={!previewViewId} />
+              {/* Controls are live only where the operator deliberately made
+                  them so. A screen is a read-only display unless it was set to
+                  panel mode, and a "/preview-…" iframe is always a display —
+                  otherwise the Screens page could advance the service by being
+                  looked at, since every card renders one. */}
+              <LayoutRenderer
+                layout={activeView.layout}
+                ndiSource={activeView.ndiSource ?? null}
+                interactive={capabilityLive(
+                  contextForOutput(currentDisplay?.mode, !!previewViewId),
+                  "control",
+                )}
+              />
             </div>
           </div>
         </StageErrorBoundary>

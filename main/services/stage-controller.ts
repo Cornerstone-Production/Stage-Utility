@@ -2,6 +2,10 @@
 // Every mutating method ends with broadcast("stage:state-changed").
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
+import { migrateSurfaces, migrationLog } from "./surface-migration.js";
+import { notesStore, type NotesContent } from "./notes-store.js";
+import { barConfigStore } from "./bar-config-store.js";
+import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub } from "./scrub.js";
@@ -157,6 +161,8 @@ export class StageController {
     views: [{ id: PRIMARY_DISPLAY_ID, name: "Slots", kind: "slots", ndiSource: null, createdAt: "" }],
     outputs: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", viewId: PRIMARY_DISPLAY_ID }],
     slotsByView: {},
+    barItems: [],
+    notesByObject: {},
     slotsByLayoutObject: {},
     resolvedByOutput: {},
     chargerBays: [],
@@ -235,6 +241,8 @@ export class StageController {
   // ── Init ─────────────────────────────────────────────────────────────
 
   async init(): Promise<void> {
+    await notesStore.init();
+    await barConfigStore.init();
     console.log("[stage-controller] init");
     let settings = await settingsStore.load();
 
@@ -258,6 +266,10 @@ export class StageController {
 
     this.state = {
       ...this.state,
+      // Loaded above; without this the field stays {} and every note reads empty
+      // until the first edit — the content would look lost.
+      barItems: barConfigStore.get().items,
+      notesByObject: notesStore.all(),
       serviceTypeId: settings.serviceTypeId,
       serviceTypeName: settings.serviceTypeName,
       planMode: settings.planMode,
@@ -323,7 +335,7 @@ export class StageController {
     if (storedOutputs && storedOutputs.length > 0 && storedViews.length > 0) {
       const { views, changed } = retuneEmbedFontSize(storedViews);
       if (changed > 0) await viewsStore.save(views);
-      return { views, outputs: storedOutputs };
+      return this.applySurfaceMigration(views, storedOutputs);
     }
 
     // First run: migrate from the legacy `displays` array (or the default).
@@ -351,7 +363,37 @@ export class StageController {
     console.log(
       `[stage-controller] migrated ${legacy.length} legacy display(s) → ${views.length} view(s) + ${outputs.length} output(s)`,
     );
-    return { views, outputs };
+    return this.applySurfaceMigration(views, outputs);
+  }
+
+  /**
+   * Give every View a surface and every Output a mode, preserving behaviour.
+   *
+   * Applied on BOTH load paths — the stored one and the first-run legacy one —
+   * because a migration that runs on only one of two paths is how half an
+   * install ends up on a schema the rest of the code assumes. Persisted, so it
+   * decides once rather than on every boot; the decision is then the operator's
+   * to change.
+   */
+  private async applySurfaceMigration(
+    views: View[],
+    outputs: Output[],
+  ): Promise<{ views: View[]; outputs: Output[] }> {
+    const result = migrateSurfaces(views, outputs);
+    const viewsChanged = result.views.some((v, i) => v !== views[i]);
+    const outputsChanged = result.outputs.some((o, i) => o !== outputs[i]);
+    if (!viewsChanged && !outputsChanged) return { views, outputs };
+
+    if (viewsChanged) await viewsStore.save(result.views);
+    if (outputsChanged) await settingsStore.patch({ outputs: result.outputs });
+
+    // Logged in full: a stray live-controls left on a wall display years ago
+    // will pull that screen into panel mode, and the only way an operator learns
+    // that is by being told.
+    for (const line of migrationLog(result)) {
+      console.log(`[surface-migration] ${line}`);
+    }
+    return { views: result.views, outputs: result.outputs };
   }
 
   // ── PCO credentials ───────────────────────────────────────────────────
@@ -1558,12 +1600,21 @@ export class StageController {
     return [...this.state.views];
   }
 
-  async createView(name: string, kind: ViewKind = "slots"): Promise<StageState> {
+  async createView(
+    name: string,
+    kind: ViewKind = "slots",
+    surface: ViewSurface = "display",
+  ): Promise<StageState> {
     const id = this.nextViewId();
+    // Only a custom View has an editable layout, so only a custom View has
+    // anywhere to put a control. Anything else asked for as a console would be
+    // a console that cannot carry one - a promise the UI could not keep.
+    const effectiveSurface: ViewSurface = kind === "custom" ? surface : "display";
     const view: View = {
       id,
       name: name?.trim() || defaultViewName(kind),
       kind,
+      surface: effectiveSurface,
       ndiSource: null,
       createdAt: new Date().toISOString(),
       layout: kind === "custom" ? defaultCustomLayout() : null,
@@ -1594,6 +1645,41 @@ export class StageController {
   }
 
   /** Change a View's kind (used by the legacy /api/displays kind alias). */
+  /**
+   * Change what a View is for.
+   *
+   * Converting a View that is currently bound REFUSES, naming the screens it
+   * drives, rather than silently unbinding them. Silently unbinding is how an
+   * operator discovers on Sunday morning that a screen went blank on Thursday.
+   */
+  async setViewSurface(id: string, surface: ViewSurface): Promise<StageState> {
+    const view = this.state.views.find((v) => v.id === id);
+    if (!view) throw new Error(`views:setSurface — view ${id} not found`);
+
+    if (surface === "console") {
+      // Every display-mode screen showing this View would become an invalid
+      // binding the moment it turned into a console.
+      const stranded = this.state.outputs.filter(
+        (o) => o.viewId === id && outputMode(o) !== "panel",
+      );
+      if (stranded.length > 0) {
+        const names = stranded.map((o) => o.name || o.id).join(", ");
+        throw new Error(
+          `views:setSurface — "${view.name}" is showing on ${names}. ` +
+            `Set ${stranded.length === 1 ? "that screen" : "those screens"} to panel mode first, or point ${stranded.length === 1 ? "it" : "them"} somewhere else.`,
+        );
+      }
+    }
+
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, surface } : v));
+    console.log(`[stage-controller] setViewSurface view=${scrub(id)} → ${surface}`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
   async setViewKind(id: string, kind: ViewKind): Promise<StageState> {
     if (!this.state.views.find((v) => v.id === id)) {
       throw new Error(`views:setKind — view ${id} not found`);
@@ -1781,6 +1867,22 @@ export class StageController {
         await slotsStore.removeDisplay(oid);
         this.rawSlotsByObject.delete(oid);
       }
+      // And any notes/checklist content those objects held. Same reason the
+      // inline slots above are cleaned up: content is keyed by object id, and
+      // without this notes.json accumulates the text of every object ever
+      // deleted — carried into every backup, forever.
+      const objectIds: string[] = [];
+      const collect = (list: readonly LayoutObject[] | undefined) => {
+        for (const o of list ?? []) {
+          objectIds.push(o.id);
+          collect(o.children);
+        }
+      };
+      collect(removed.layout?.objects);
+      if (objectIds.length > 0) {
+        await notesStore.forget(objectIds);
+        this.state = { ...this.state, notesByObject: notesStore.all() };
+      }
     }
     // Unroute any outputs pointing at this view (render placeholder, never fail).
     const outputs = this.state.outputs.map((o) =>
@@ -1899,11 +2001,78 @@ export class StageController {
     if (viewId !== null && !this.state.views.find((v) => v.id === viewId)) {
       throw new Error(`outputs:setView — view ${viewId} not found`);
     }
+    // THE safety property, and it lives here rather than in the settings
+    // dropdown: a dropdown that only offers bindable views makes the mistake
+    // hard to reach, but an API call, a Companion button or a restored config
+    // can still ask for it. A wall screen must not be able to render a live
+    // control at all.
+    if (viewId !== null) {
+      const view = this.state.views.find((v) => v.id === viewId)!;
+      const output = this.state.outputs.find((o) => o.id === id)!;
+      if (viewSurface(view) === "console" && outputMode(output) !== "panel") {
+        throw new Error(
+          `outputs:setView — "${view.name}" is a console and "${output.name}" is a display. ` +
+            `Set that screen to panel mode first if it is a touch panel.`,
+        );
+      }
+    }
     const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, viewId } : o));
     console.log(`[stage-controller] setOutputView output=${scrub(id)} → view=${scrub(viewId ?? "(none)")}`);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
     this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * Make a screen a read-only display or an interactive touch panel.
+   *
+   * Demoting a panel that currently shows a console is refused rather than
+   * silently unbinding it: the operator would be left with a screen showing
+   * nothing and no indication why.
+   */
+  async setOutputMode(id: string, mode: OutputMode): Promise<StageState> {
+    const output = this.state.outputs.find((o) => o.id === id);
+    if (!output) throw new Error(`outputs:setMode — output ${id} not found`);
+
+    if (mode === "display" && output.viewId) {
+      const view = this.state.views.find((v) => v.id === output.viewId);
+      if (view && viewSurface(view) === "console") {
+        throw new Error(
+          `outputs:setMode — "${output.name}" is showing the console "${view.name}". ` +
+            `Point it at a display view first, or it would be left showing nothing.`,
+        );
+      }
+    }
+
+    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, mode } : o));
+    console.log(`[stage-controller] setOutputMode output=${scrub(id)} → ${mode}`);
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * Save what an operator typed into a notes/checklist object.
+   *
+   * Awaited before broadcasting: "it looked saved until the next restart" is a
+   * failure this repository has already had with a config write, and this is
+   * somebody's pre-service checklist.
+   */
+  async setNotes(objectId: string, content: NotesContent): Promise<StageState> {
+    await notesStore.set(objectId, content);
+    this.state = { ...this.state, notesByObject: notesStore.all() };
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Set which context-bar items appear, and in what order. Global config. */
+  async setBarItems(items: string[]): Promise<StageState> {
+    const saved = await barConfigStore.set(items);
+    this.state = { ...this.state, barItems: saved.items };
     this.broadcast();
     return this.state;
   }

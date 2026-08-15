@@ -15,6 +15,7 @@ import {
   saveLayoutGroup,
   deleteLayoutGroup,
 } from "../layout-library.js";
+import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind } from "./context.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
@@ -63,11 +64,29 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // POST /api/notes — { objectId, content }
+    // What an operator typed into a notes/checklist object. Awaited before the
+    // response, so a failed write is a failed request rather than a silent loss.
+    if (method === "POST" && pathname === "/api/notes") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.objectId !== "string" || typeof body.content !== "object" || body.content === null) {
+        error(res, "body.objectId (string) and body.content (object) required");
+        return;
+      }
+      try {
+        json(res, await stageController.setNotes(body.objectId, body.content as NotesContent));
+      } catch (err) {
+        error(res, errorMessage(err));
+      }
+      return;
+    }
+
     if (method === "POST" && pathname === "/api/views") {
       const body = await readBody(req) as Record<string, unknown>;
       const name = typeof body.name === "string" ? body.name : undefined;
       const kind = isDisplayKind(body.kind) ? body.kind : "slots";
-      const state = await stageController.createView(name ?? "", kind);
+      const surface = body.surface === "console" ? "console" : "display";
+      const state = await stageController.createView(name ?? "", kind, surface);
       json(res, state, 201);
       return;
     }
@@ -167,12 +186,27 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         && (body.slotsLayout === null || typeof body.slotsLayout === "object");
       const hasScriptViewLayout = "scriptViewLayoutId" in body
         && (body.scriptViewLayoutId === null || typeof body.scriptViewLayoutId === "string");
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout) {
-        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), or body.scriptViewLayoutId (string|null) required");
+      // Narrowed to a literal rather than cast: `as` asserts a type without
+      // proving it, so the value handed on is still the caller's string as far
+      // as anything reading the code — or analysing it — can tell.
+      const surface = body.surface === "console" ? "console" : body.surface === "display" ? "display" : null;
+      const hasSurface = surface !== null;
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout && !hasSurface) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), or body.scriptViewLayoutId (string|null) required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameView(id, body.name as string);
+      // Refused with its reason: converting a bound View names the screens it
+      // would strand rather than silently unbinding them.
+      if (hasSurface) {
+        try {
+          state = await stageController.setViewSurface(id, surface);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
       if (hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
       if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
       if (hasLayout) {
@@ -316,13 +350,34 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasBlackout = typeof body.blackout === "boolean";
       const hasLocked = typeof body.locked === "boolean";
       const hasSlug = typeof body.slug === "string";
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasSlug) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), or body.slug (string) required");
+      const mode = body.mode === "panel" ? "panel" : body.mode === "display" ? "display" : null;
+      const hasMode = mode !== null;
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasSlug && !hasMode) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameOutput(id, body.name as string);
-      if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null);
+      // Mode BEFORE viewId, so a single request can turn a screen into a panel
+      // and point it at a console. The other order refuses its own second half.
+      if (hasMode) {
+        try {
+          state = await stageController.setOutputMode(id, mode);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
+      // A refused binding is a 400 with the reason, not a 500 stack trace: the
+      // operator has to see WHY a console will not go on a wall screen.
+      if (hasViewId) {
+        try {
+          state = await stageController.setOutputView(id, body.viewId as string | null);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
       if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
       if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
       // A rejected slug is a 400 with the reason, not a silent no-op — the operator

@@ -18,6 +18,8 @@ import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessChannels } from "./use-wireless-channels";
 import { OscButton } from "./osc-button";
+import { ActionButton } from "./action-button";
+import { NotesObject, ChecklistObject } from "./notes-objects";
 import { RossTalkButton } from "./rosstalk-button";
 import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
@@ -741,6 +743,28 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
           ts={ts}
         />
       );
+    case "notes":
+      return (
+        <NotesObject
+          objectId={o.id}
+          config={c}
+          editable={ctx.interactive}
+          all={ctx.state?.notesByObject}
+          ts={ts}
+        />
+      );
+    case "checklist":
+      return (
+        <ChecklistObject
+          objectId={o.id}
+          config={c}
+          editable={ctx.interactive}
+          all={ctx.state?.notesByObject}
+          ts={ts}
+        />
+      );
+    case "action-button":
+      return <ActionButton config={c} interactive={ctx.interactive} ts={ts} />;
     case "osc-button":
       return (
         <OscButton

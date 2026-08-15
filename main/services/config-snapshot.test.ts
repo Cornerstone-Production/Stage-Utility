@@ -97,9 +97,12 @@ function declaredStoreCount(): number {
 const EXPECTED_CONFIG = [
   "automation-rules.json",
   "automation-settings.json",
+  "bar-config.json",
   "baptism-triggers.json",
   "layout-groups.json",
   "layout-templates.json",
+  // The operator's own work product typed into notes/checklist objects.
+  "notes.json",
   "osc-targets.json",
   "patch.json",
   "presets.json",

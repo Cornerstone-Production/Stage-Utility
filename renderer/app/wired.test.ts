@@ -46,6 +46,24 @@ const WIRING: { what: string; helper: string; usedBy: string }[] = [
   },
 ];
 
+/**
+ * Handlers that exist on useStageSettings and must be REACHABLE from the UI.
+ *
+ * The same orphan shape as above, one level up. handleSetViewSurface was
+ * written, routed, tested end to end at the API — and called by nothing, so
+ * changing an existing view's surface was simply impossible. Everything looked
+ * complete because the server half was.
+ *
+ * A handler nothing calls is a feature nobody can use.
+ */
+const REACHABLE_HANDLERS = [
+  "handleSetViewSurface",
+  "handleSetOutputMode",
+  "handleSetBarItems",
+  "handleAddView",
+  "handleRemoveView",
+];
+
 function stripComments(src: string): string {
   return src
     .replace(/\/\*[\s\S]*?\*\//g, " ")
@@ -72,6 +90,35 @@ describe("shell behaviours are wired, not merely written", () => {
       );
     });
   }
+
+  test("every state handler is reachable from a component", () => {
+    // Scans the whole renderer EXCEPT the two files that merely declare the
+    // handlers, so defining one does not count as using it.
+    const all: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) { if (entry.name !== "node_modules") walk(full); }
+        else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) all.push(full);
+      }
+    };
+    walk(RENDERER);
+
+    const DECLARERS = ["use-stage-settings.ts", "types.ts"];
+    const callers = all
+      .filter((f) => !DECLARERS.includes(path.basename(f)))
+      .map((f) => stripComments(readFileSync(f, "utf8")))
+      .join("\n");
+
+    const unreachable = REACHABLE_HANDLERS.filter(
+      (h) => !new RegExp(`${h}\\s*\\(`).test(callers),
+    );
+    assert.deepEqual(
+      unreachable,
+      [],
+      `these handlers are called by nothing — the feature cannot be reached:\n    ${unreachable.join("\n    ")}`,
+    );
+  });
 
   test("no module under lib/ is imported by nothing", () => {
     // The shape of the withViewTransition bug, generalised: a helper written for

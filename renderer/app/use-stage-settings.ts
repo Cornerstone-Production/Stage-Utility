@@ -25,6 +25,7 @@ import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } fr
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke, type ApiError } from "../lib/api";
+import { errorMessage } from "@main/services/errors";
 import { toast, confirm } from "../components/ui";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import type { SectionHandlers } from "../settings/types";
@@ -403,9 +404,13 @@ export function useStageSettings() {
   }
 
   // ── Views (content) ──────────────────────────────────────────────────
-  async function handleAddView(name: string, kind: ViewKind): Promise<string | null> {
+  async function handleAddView(
+    name: string,
+    kind: ViewKind,
+    surface: "display" | "console" = "display",
+  ): Promise<string | null> {
     try {
-      const next = await ipc<StageState>("views:add", { name, kind });
+      const next = await ipc<StageState>("views:add", { name, kind, surface });
       queryClient.setQueryData(["stage:getState"], next);
       // Select the newly-created view (last in the list).
       const created = next.views?.[next.views.length - 1];
@@ -716,6 +721,49 @@ export function useStageSettings() {
     }
   }
 
+  /**
+   * Make a screen a read-only display or an interactive touch panel.
+   *
+   * NOT optimistic. The server refuses some of these — demoting a panel that is
+   * showing a console, for one — and an optimistic flip would show the operator
+   * the change happening and then silently undo it. The refusal is the useful
+   * part; it says what to do instead.
+   */
+  async function handleSetOutputMode(id: string, mode: "display" | "panel") {
+    try {
+      const next = await ipc<StageState>("outputs:setMode", { id, mode });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
+  /** Change what a View is for. Refused, with its reason, when screens would be
+   *  stranded — so the message reaches the operator rather than the console. */
+  async function handleSetViewSurface(id: string, surface: "display" | "console") {
+    try {
+      const next = await ipc<StageState>("views:setSurface", { id, surface });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
+  /** Which context-bar items appear, and in what order. Global config. */
+  async function handleSetBarItems(items: string[]) {
+    const prev = queryClient.getQueryData<StageState>(["stage:getState"]);
+    if (prev) queryClient.setQueryData(["stage:getState"], { ...prev, barItems: items });
+    try {
+      const next = await ipc<StageState>("barItems:set", { items });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      // Put the old order back rather than leaving the UI showing a bar the
+      // server does not have.
+      if (prev) queryClient.setQueryData(["stage:getState"], prev);
+      toast.error(errorMessage(err));
+    }
+  }
+
   async function handleRemoveOutput(id: string) {
     try {
       const next = await ipc<StageState>("outputs:remove", { id });
@@ -801,6 +849,9 @@ export function useStageSettings() {
     handleRenameOutput,
     handleSetOutputView,
     handleSetOutputLocked,
+    handleSetOutputMode,
+    handleSetBarItems,
+    handleSetViewSurface,
     handleRemoveOutput,
     handleReorderOutputs,
     handleOpenOutputWindow,

@@ -89,6 +89,9 @@ export interface View {
   ndiSource?: string | null;
   /** ISO creation timestamp (for stable ordering). */
   createdAt: string;
+  /** What this View is for. Absent = "display" — read through {@link viewSurface},
+   *  never directly, so the default stays in one place. */
+  surface?: ViewSurface;
   /** Free-form layout for kind === "custom"; null/absent for the built-in kinds. */
   layout?: LayoutDTO | null;
   /**
@@ -219,6 +222,16 @@ export type LayoutObjectConfig =
   // so a strip can show only the channels you care about.
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number; hideChannels?: string[] }
   | { type: "live-controls" } // PCO Services Live Prev/Next buttons (interactive)
+  // The operator's own work product, stored per object id in notes.json (a
+  // "config" store, so it rides along in every backup). `placeholder` is the
+  // prompt shown while empty; the content itself is never in the layout.
+  | { type: "notes"; placeholder?: string }
+  | { type: "checklist"; title?: string; resetDaily?: boolean }
+  // A button bound to an entry in the automation action registry. The general
+  // form of osc-button/rosstalk-button, which stay as they are so existing
+  // layouts keep working — this is for everything else the registry can already
+  // do, including advancing PCO Live.
+  | { type: "action-button"; actionId: string; params?: Record<string, unknown>; label?: string }
   // Shure SBC charger bay battery levels. `bays` lists which bays to show (by
   // ChargerBay id) with an optional custom label; `show` toggles each metric.
   | {
@@ -502,6 +515,39 @@ export interface LayoutGroup {
   createdAt: string;
 }
 
+/**
+ * What a View is FOR.
+ *
+ * A layout is designed for one context, not both: a display View is read from
+ * across a room and carries no controls; a console View is laid out for arm's
+ * length and can carry controls, drill-down targets and editable fields. A
+ * single layout forced to serve both is worse at each.
+ */
+export type ViewSurface = "display" | "console";
+
+/**
+ * How an Output renders.
+ *
+ * `display` is a read-only wall screen. `panel` is a console pinned chrome-free
+ * to a physical screen — which is how a touchscreen is built. An Output is a
+ * display unless deliberately changed, so nothing becomes interactive by
+ * accident.
+ */
+export type OutputMode = "display" | "panel";
+
+/** A View's surface. Absent means "display": a View written before this field
+ *  existed was rendering on a wall screen, and anything unrecognised (a hand
+ *  edit, a downgrade) must read as the read-only one rather than the live one. */
+export function viewSurface(v: Pick<View, "surface">): ViewSurface {
+  return v.surface === "console" ? "console" : "display";
+}
+
+/** An Output's mode. Absent — or unrecognised — means "display". The safety
+ *  property is an explicit opt-in, never an inference. */
+export function outputMode(o: Pick<Output, "mode">): OutputMode {
+  return o.mode === "panel" ? "panel" : "display";
+}
+
 /** A physical screen at a URL slug, routed to exactly one View (or none). */
 export interface Output {
   /** Permanent. Never rewritten after creation — slots.json and every other store
@@ -520,6 +566,10 @@ export interface Output {
   /** When true, this display's top bar hides its nav escape hatches (QR/settings +
    *  home logo) so a handed-out link can't navigate away from the display. */
   locked?: boolean;
+  /** How this screen renders. Absent = "display" — read through {@link outputMode}.
+   *  Only a "panel" may be bound to a console View, enforced server-side in
+   *  stage-controller's setOutputView. */
+  mode?: OutputMode;
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */

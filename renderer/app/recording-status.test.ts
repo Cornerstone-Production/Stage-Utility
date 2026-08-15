@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { recordingStat, loudestSpl } from "./live-panel.js";
+import { recordingStat, loudestSpl } from "./recording-status.js";
 
 // Mid-service, recording and SPL are the two things you cannot recover after the
 // fact, so these read the state rather than restate it. The distinction that

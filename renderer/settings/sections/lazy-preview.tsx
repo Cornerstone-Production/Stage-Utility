@@ -19,7 +19,7 @@
 // or a worker the heartbeat had to abandon — where the old limit still bites.
 
 import { useEffect, useRef, useState } from "react";
-import { PlayIcon } from "lucide-react";
+import { PlayIcon, ExpandIcon } from "lucide-react";
 import { ViewPreview } from "./view-preview";
 
 /**
@@ -57,17 +57,17 @@ function release(token: symbol): void {
 export function LazyPreview({
   viewId,
   aspect,
-  href,
-  hrefTitle,
+  onExpand,
+  expandLabel,
 }: {
   viewId: string;
   aspect?: number;
-  /** When set, a STREAMING preview becomes a link opening this in a new tab.
-   *  Only the streaming branch: the paused placeholder is a button whose job is
-   *  to load the preview, and a button inside an anchor would both navigate and
-   *  never load it. */
-  href?: string;
-  hrefTitle?: string;
+  /** When set, a STREAMING preview becomes a button that opens the editor.
+   *  Only the streaming branch: the paused placeholder is already a button whose
+   *  job is to load the preview, and nesting the two would mean a first click
+   *  that expands something the operator cannot see yet. */
+  onExpand?: () => void;
+  expandLabel?: string;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const tokenRef = useRef<symbol>(Symbol("preview"));
@@ -126,16 +126,31 @@ export function LazyPreview({
   return (
     <div ref={boxRef}>
       {streaming ? (
-        href ? (
-          <a
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            title={hrefTitle}
-            className="block rounded-xl transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        onExpand ? (
+          // The preview IS the way in. A scrim plus a centred expand icon on
+          // hover, rather than a permanently-visible affordance: the preview's
+          // job is to show what the screen shows, and chrome sitting on it all
+          // the time competes with that.
+          <button
+            type="button"
+            onClick={onExpand}
+            title={expandLabel}
+            aria-label={expandLabel}
+            className="group relative block w-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
             <ViewPreview viewId={viewId} aspect={aspect} />
-          </a>
+            <span
+              className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/0 opacity-0 transition-all duration-150 group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
+              aria-hidden="true"
+            >
+              {/* A SOLID neutral grey, not white at reduced opacity. Opacity made
+                  it read as faded rather than as a deliberate colour — the icon
+                  should look like an affordance, not like it is disappearing.
+                  #d4d4d4 is strictly R=G=B, per the no-colour-cast rule for
+                  anything sitting on a dark surface. */}
+              <ExpandIcon className="size-7 text-[#d4d4d4]" strokeWidth={1.5} />
+            </span>
+          </button>
         ) : (
           <ViewPreview viewId={viewId} aspect={aspect} />
         )
