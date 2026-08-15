@@ -329,10 +329,13 @@ Reintroduce the most representative clipping bug and watch its test go red.
 - Modify: `renderer/main/layout-objects.ts` (`defaultStyle`),
   `renderer/editor/inspector.tsx`
 
-- [ ] **Step 1: Audit `defaultStyle` for all 38 types**
+- [x] **Step 1: Audit `defaultStyle` for all 41 types**
 
-A freshly added object should look finished. Record every type whose default is
-unstyled or wrong before changing any of them.
+Result: no defects. 35 of 41 carry a default style. The 6 without — live-controls,
+brand-logo, image, ndi-video, plan-attachment, slide-thumbnail — are media and
+control objects with no text to style, which style themselves internally; the
+browser sweep in Task 3 confirms all 41 render legibly with their defaults. No
+changes made, because the audit found nothing to change.
 
 - [ ] **Step 2: Add "Reset to default look"**
 

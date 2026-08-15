@@ -1104,6 +1104,19 @@ export function LayoutEditor({
   function updateStyle(id: string, patch: Partial<LayoutStyle>) {
     setObjects((prev) => mapById(prev, id, (o) => ({ ...o, style: { ...o.style, ...patch } })));
   }
+  /**
+   * Put an object's look back to the default for its type.
+   *
+   * REPLACES the style rather than patching it — every other style edit is a
+   * merge, and a merge cannot clear a field, so "reset" via onStyle would leave
+   * behind exactly the hand-tuning it was meant to undo.
+   *
+   * Style only. Geometry, configuration and the responsive settings are the
+   * operator's separate decisions and are not this button's business.
+   */
+  function resetLook(id: string) {
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, style: defaultStyle(o.config.type) })));
+  }
   function updateConfig(id: string, config: LayoutObjectConfig) {
     setObjects((prev) => mapById(prev, id, (o) => ({ ...o, config })));
   }
@@ -1835,6 +1848,7 @@ export function LayoutEditor({
                 slotsViews={slotsViews}
                 onGeom={(g) => { /* numeric position edits */ pushHistory(); update(selected.id, g); }}
                 onStyle={withHistory((patch: Partial<LayoutStyle>) => updateStyle(selected.id, patch))}
+                onResetLook={withHistory(() => resetLook(selected.id))}
                 onConfig={withHistory((config: LayoutObjectConfig) => updateConfig(selected.id, config))}
                 onReorder={(d) => reorder(selected.id, d)}
                 onDuplicate={() => duplicateObject(selected.id)}

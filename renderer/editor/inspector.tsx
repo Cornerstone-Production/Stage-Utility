@@ -332,7 +332,7 @@ function PlanAttachmentConfig({
 
 /** Object types fed by ProPresenter — they get the per-object instance picker. */
 export function Inspector({
-  o, canvas, parentW, parentH, nested, locked, slotsViews, onGeom, onStyle, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
+  o, canvas, parentW, parentH, nested, locked, slotsViews, onGeom, onStyle, onResetLook, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
 }: {
   o: LayoutObject;
   canvas: LayoutCanvas;
@@ -346,6 +346,9 @@ export function Inspector({
   slotsViews: View[];
   onGeom: (g: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h" | "anchor" | "keepAspect" | "minPx" | "maxPx">>) => void;
   onStyle: (patch: Partial<LayoutStyle>) => void;
+  /** Replace the style with the type's default. Not a patch: a merge cannot clear
+   *  a field, so a patch-based reset would leave the tuning it means to undo. */
+  onResetLook: () => void;
   onConfig: (config: LayoutObjectConfig) => void;
   onReorder: (d: "front" | "back" | "up" | "down") => void;
   onDuplicate: () => void;
@@ -1199,6 +1202,17 @@ export function Inspector({
             {STYLE_PRESETS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
           </SelectContent>
         </Select>
+      </Row>
+      {/* The way back. Every other control here adds to the styling; without this
+          the only route out of a look you have tuned into a corner is to delete
+          the object and start again, which loses its position and settings too. */}
+      <Row
+        label="Reset"
+        hint="Put this object's look back to the default for its type. Its position, size, settings and behaviour on other window shapes are left alone — and it can be undone."
+      >
+        <Button variant="filled" size="small" onClick={onResetLook}>
+          Reset to default look
+        </Button>
       </Row>
 
       {/* Style */}
