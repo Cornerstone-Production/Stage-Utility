@@ -83,40 +83,63 @@ warning say something a default cannot infer.
 
 ## What the panel becomes
 
-**17 style fields → 1.**
+**17 style fields → 1.** Only `color`, on text.
 
 | Field | Fate | Why |
 |---|---|---|
 | `fontSize` | **Removed** | The widget sizes text to its box, and keeps sizing it as the box changes |
 | `fontWeight`, `italic`, `uppercase`, `letterSpacing` | **Removed** | The widget's own typography; a clock is a clock |
 | `textAlign`, `vAlign` | **Removed** | The widget centres itself unless its content says otherwise |
-| `background`, `opacity`, `boxShadow` | **Removed** | The card look goes: no tint, no glass, no elevation |
+| `background`, `opacity`, `boxShadow` | **Removed** | The card look goes entirely: the body is transparent, so the canvas shows through |
 | `cornerRadius`, `padding`, `borderWidth` | **Removed** | One radius, one padding, one outline weight, app-wide |
-| `borderColor` | **Replaced** | Becomes **Section colour** — see below |
+| `borderColor` | **Removed** | One neutral outline, app-wide. Section colour was proposed and cut — see below |
 | `textShadow`, `lineClamp` | **Removed** | Auto-sizing makes both unnecessary |
 | **`color`** | **Kept** | The only field with real meaning |
 
 ### The new kiosk look
 
-A widget is its content, a 1px outline, and nothing else. No fill, no
-transparency, no shadow. The outline exists to separate the widget from the
-canvas, not to decorate it.
+A widget is **its content and a 1px outline**. Nothing else.
 
-**Section colour** is the one visual choice: a small set of named colours applied
-to the outline (and only the outline), so a wall of widgets can be grouped at a
-glance — audio here, video there.
+The body is **transparent** — the canvas shows straight through, and the outline
+is the only thing separating the widget from it. Not a subtle fill, not a darker
+shade: nothing.
 
-Three questions it needs to answer, answered:
+That is a production decision before it is a visual one. Stage displays live in
+dark rooms, and every filled panel on a confidence monitor is light spilling onto
+the platform and onto a performer's face. On an LED wall true black is also less
+power and a deeper black. A fill whose only job is to say "this is a widget" pays
+that cost to do something the outline already does.
 
-| | |
-|---|---|
-| **Can the outline colour be changed?** | Yes — from a named set (Neutral, Timers, Audio, Video, Streaming, Gear), not a free picker. A named set is a grouping vocabulary; a free picker is decoration, and decoration is what this phase is removing. |
-| **Can it be turned off?** | Yes, and it is off by default. **Neutral** is the default and draws a plain grey outline. Nothing gains a colour unless someone assigns one. |
-| **Can text colour still be changed?** | Yes. `color` is the one style field that survives, and it stays a full colour picker — it is the field with real, meaningful variation, and a red overrun or a green countdown says something no default can infer. |
+**The rule: no fill as decoration; fill only as state.**
 
-A deliberate asymmetry: **text colour is free, outline colour is a fixed set.**
-Text colour carries meaning about the value; outline colour only groups widgets,
-and a grouping vocabulary with infinite values does not group anything.
+One deliberate exception, which already exists: **recording fills the box red.**
+That is an alarm, not decoration, and it has to be unmissable at thirty feet. The
+widget owns it — it stops being a setting (see the config cull). The same applies
+to any future state that means "look at this right now".
+
+**Section colour is cut.** It was proposed as a grouping vocabulary and did not
+survive the question "what does it represent?". The widget's category is derivable
+from its type, so colouring by it is automatic and tells a viewer nothing the
+content does not; operator-assigned grouping is a decision, and inventing
+decisions is what this phase removes; status is already carried by the content.
+A 1px coloured outline is also close to invisible from thirty feet, so it failed
+at the one job it had.
+
+If grouping is ever needed it will be on a **control surface** — twenty-odd
+buttons, dense and interactive, hunted through under time pressure — not on a
+wall. It comes back then, scoped to consoles, earned by a real case.
+
+**So one style field survives: `color`, on text.**
+
+### What this gives up
+
+Named, because it is a real trade: with no fill, a widget over a canvas
+**background image** inherits whatever is behind it, and text over a busy image
+gets hard to read. The old `background` field quietly covered that case. The
+outline plus the text's own contrast handles a plain background; a busy image
+behind live data is a problem the operator created and can solve by changing the
+image. If a real display depends on a fill for legibility, that is the case that
+brings a fill back.
 
 ### Config options: 80 across 41 types
 
@@ -167,9 +190,9 @@ display will look different on a Sunday morning.
 | `renderer/editor/palette.tsx` (new) | The sidebar: grouped widget cards, draggable |
 | `renderer/editor/drag-to-place.ts` (new) | Pure: drop point → a sensible default rect |
 | `renderer/editor/draw-to-create.ts` (new) | Pure: drawn rect → normalised, clamped rect |
-| `renderer/main/widget-frame.tsx` (new) | The one frame every widget renders in: outline, section colour, padding |
+| `renderer/main/widget-frame.tsx` (new) | The one frame every widget renders in: transparent body, 1px outline, one padding |
 | `renderer/main/layout-objects.ts` | Default styles collapse to almost nothing |
-| `renderer/editor/inspector.tsx` | Shows / Colour / Position — that is all |
+| `renderer/editor/inspector.tsx` | Shows / Text colour / Position — that is all |
 | `renderer/app/home/home-layout.ts` (new) | Home's default layouts, as data |
 
 ---
@@ -179,7 +202,9 @@ display will look different on a Sunday morning.
 **Files:** Create `object-catalog.ts` + test
 
 - [ ] **Step 1:** `Record<LayoutObjectType, CatalogEntry>` with group, label, blurb,
-      icon and section colour. Typed as a full Record so a missing entry fails `tsc`.
+      icon and an accent. The accent tints the icon tile **in the palette only** —
+      editor chrome, so an operator can find a widget in a list. It never reaches
+      the kiosk. Typed as a full Record so a missing entry fails `tsc`.
 - [ ] **Step 2:** Test asserts exactly 41 entries and that every blurb is 1–80 chars.
 - [ ] **Step 3:** Prove it — delete an entry, watch `tsc` and the test both fail.
 - [ ] **Step 4:** Commit.
@@ -254,7 +279,7 @@ test("a flick becomes a default-sized widget, not a 2px one", () => {
 `layout-renderer.tsx`, `inspector.tsx`
 
 - [ ] **Step 1: The frame.** Every widget renders inside `WidgetFrame`: 1px
-      outline in the section colour, one radius, one padding, no fill, no shadow.
+      neutral outline, one radius, one padding, transparent body, no shadow.
       One component, so the look cannot drift per type.
 - [ ] **Step 2: Text sizes itself, always.** Extend Phase 5's `useFitScale` from
       the readouts that had bugs to every widget that renders text, and make it the
@@ -282,7 +307,7 @@ test("every text-rendering widget fits its own box", () => {
 
 ```ts
 test("the inspector offers exactly the fields we decided to keep", () => {
-  assert.deepEqual(editableStyleFields().sort(), ["color", "sectionColor"]);
+  assert.deepEqual(editableStyleFields(), ["color"]);
 });
 
 test("stored values for removed fields are preserved, not stripped", () => {
@@ -419,8 +444,10 @@ undo:
 - **Text size becomes automatic.** An operator who deliberately made a clock small
   to fit a label beside it loses that lever — the widget will fill its box. The
   answer is to resize the widget, which is a better lever anyway.
-- **Per-object background colour is gone.** Section colour on the outline replaces
-  grouping-by-fill. A layout using fill to mean something loses that meaning.
+- **Per-object background colour is gone**, with nothing replacing it. A layout
+  using fill to mean something loses that meaning; the answer is to say it in the
+  content instead. Widgets over a canvas background image lose the fill that made
+  them legible — see "What this gives up".
 
 If any of these is wrong for a real display you have, say which and it stays.
 
