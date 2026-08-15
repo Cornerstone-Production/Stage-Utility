@@ -17,6 +17,9 @@ interface SplitViewProps {
   mobileTitle?: React.ReactNode;
   expandedWidth?: number;
   railWidth?: number;
+  /** Suppress the collapse width animation — set while the sidebar is being
+   *  dragged, where a 150ms transition turns direct manipulation into lag. */
+  resizing?: boolean;
   className?: string;
 }
 
@@ -39,6 +42,7 @@ export function SplitView({
   mobileTitle,
   expandedWidth = 200,
   railWidth = 56,
+  resizing = false,
   className,
 }: SplitViewProps) {
   const isMobile = useIsMobile();
@@ -117,7 +121,12 @@ export function SplitView({
   return (
     <div className={cn("flex h-full w-full overflow-hidden", className)}>
       <div
-        className="shrink-0 h-full overflow-hidden transition-[width] duration-150"
+        className={cn(
+          "shrink-0 h-full overflow-hidden",
+          // Animate the collapse, but never while dragging: a width transition
+          // mid-drag rubber-bands behind the pointer.
+          !resizing && "transition-[width] duration-150",
+        )}
         style={{ width: `${railed ? railWidth : expandedWidth}px` }}
       >
         <SidebarChromeProvider value={chrome}>{sidebar}</SidebarChromeProvider>

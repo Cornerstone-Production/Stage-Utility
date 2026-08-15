@@ -1,6 +1,9 @@
 import { invoke, onNotification, type ApiError } from "../lib/api";
 import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { buildLabel } from "../lib/build-label";
+import { useTheme } from "../lib/use-theme";
+import { useSidebarCollapsed } from "../lib/use-sidebar-collapsed";
+import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useState, useEffect, useRef, Fragment } from "react";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
@@ -32,8 +35,6 @@ import {
   ListChecksIcon,
   ZapIcon,
   SlidersHorizontalIcon,
-  SunIcon,
-  MoonIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   ExternalLinkIcon,
@@ -49,7 +50,6 @@ import { IntegrationsSection } from "./sections/integrations-section";
 import { ConnectSection } from "./sections/connect-section";
 import { BrandingSection } from "./sections/branding-section";
 import { applyAccentVar } from "../lib/apply-accent";
-import { cn } from "../lib/cn";
 import { AdvancedSection } from "./sections/advanced-section";
 import { AutomationSection } from "./sections/automation-section";
 import { ServiceHistorySection } from "./sections/service-history-section";
@@ -102,120 +102,7 @@ function useEscapeToClose() {
 // is set by an inline script in settings-window.html (reading this same
 // localStorage key) so there's no flash on load.
 
-const THEME_STORAGE_KEY = "stage-utility-theme";
-
-/** "system" follows the OS and keeps following it as the OS changes. */
-export type ThemeMode = "system" | "light" | "dark";
-
-const SYSTEM_DARK = "(prefers-color-scheme: dark)";
-
-function storedMode(): ThemeMode {
-  try {
-    const raw = localStorage.getItem(THEME_STORAGE_KEY);
-    if (raw === "light" || raw === "dark" || raw === "system") return raw;
-  } catch {
-    // localStorage unavailable (private mode etc.) — fall through to system.
-  }
-  // No stored choice means the app has always followed the OS, so an install that
-  // predates this option keeps the behaviour it already had.
-  return "system";
-}
-
-function useTheme() {
-  const [mode, setModeState] = useState<ThemeMode>(storedMode);
-  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains("dark"));
-
-  // One place decides what `.dark` should be, so the class can never disagree with
-  // the mode — whether it changed because the operator picked one or because the OS
-  // flipped underneath us.
-  useEffect(() => {
-    const mq = window.matchMedia(SYSTEM_DARK);
-    const apply = () => {
-      const dark = mode === "system" ? mq.matches : mode === "dark";
-      document.documentElement.classList.toggle("dark", dark);
-      setIsDark(dark);
-    };
-    apply();
-    if (mode !== "system") return;
-    // Only worth listening while following the OS; a fixed choice ignores it.
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, [mode]);
-
-  function setMode(next: ThemeMode) {
-    setModeState(next);
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, next);
-    } catch {
-      // Theme still applies for this session; it just will not survive a reload.
-    }
-  }
-
-  return { mode, isDark, setMode };
-}
-
 // ---- sidebar collapse (desktop icon rail) -----------------------------------
-
-const SIDEBAR_COLLAPSED_KEY = "settings-sidebar-collapsed";
-
-/** Segmented theme picker — light, follow the system, dark. `vertical` stacks the
- *  segments so it fits the narrow collapsed rail. */
-function ThemeTogglePill({
-  mode,
-  setMode,
-  vertical = false,
-}: {
-  mode: ThemeMode;
-  setMode: (m: ThemeMode) => void;
-  vertical?: boolean;
-}) {
-  const options: { m: ThemeMode; label: string; Icon: typeof SunIcon }[] = [
-    { m: "light", label: "Light mode", Icon: SunIcon },
-    { m: "system", label: "Match system", Icon: MonitorIcon },
-    { m: "dark", label: "Dark mode", Icon: MoonIcon },
-  ];
-  return (
-    <div className={cn("flex items-center gap-px rounded-lg bg-accent/12 p-0.5 shrink-0", vertical && "flex-col")}>
-      {options.map(({ m, label, Icon }) => (
-        <button
-          key={m}
-          type="button"
-          onClick={() => mode !== m && setMode(m)}
-          aria-label={label}
-          aria-pressed={mode === m}
-          className={cn(
-            "flex h-5 w-6 items-center justify-center rounded-md transition-colors",
-            mode === m ? "text-accent" : "text-fg-subtle hover:text-fg",
-          )}
-        >
-          <Icon className="size-3.5" />
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function useSidebarCollapsed() {
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
-  function toggle() {
-    setCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
-      } catch {
-        // localStorage unavailable — collapse still applies for this session.
-      }
-      return next;
-    });
-  }
-  return { collapsed, toggle };
-}
 
 // ---- sidebar section definitions --------------------------------------------
 
@@ -254,7 +141,16 @@ const SECTION_DESC: Record<string, string> = {
 // labels did not: "Output" had collected anything screen-adjacent (Patch is a
 // document, Integrations are devices), and "Identity" had become the bucket for the
 // two sections that fit nowhere — including Baptisms, which is a live stopwatch.
-/** Tabs whose content also lives at a standalone URL, and what to call the link. */
+/**
+ * Tabs whose content is also reachable in the operator app, and what to call the
+ * link.
+ *
+ * Two kinds, despite looking alike. History and Baptisms render the SAME
+ * component in both places, so these links go to the route that replaced a
+ * deleted standalone wrapper. Patch and ScriptView are different surfaces — the
+ * volunteer patch view and the rundown viewer — so those links lead to a
+ * genuinely separate page whose editor is the tab you are standing in.
+ */
 const SECTION_PAGE: Record<string, { path: string; label: string } | undefined> = {
   scriptview: { path: "/scriptview", label: "Open ScriptView" },
   patch: { path: "/patch", label: "Open patch sheet" },

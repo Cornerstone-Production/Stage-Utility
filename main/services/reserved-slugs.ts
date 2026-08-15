@@ -1,10 +1,9 @@
 // The one authority for URL slugs the app already owns.
 //
 // A display's URL slug is matched against the same path space as the app's own
-// pages. If a display could take the slug "history", it would not conflict — the
-// router in renderer/main/root-view.tsx tests that path FIRST, so the display
-// would silently render the History page instead. That is worse than a duplicate,
-// which is at least detectable.
+// pages. If a display could take the slug "history", the server resolves that
+// path to the operator app FIRST, so the display would never render at all —
+// worse than a duplicate, which is at least detectable.
 //
 // The router, the server's route table and the slug validator therefore all have
 // to agree. Adding a page without reserving its path here is a CI failure (see
@@ -15,16 +14,24 @@
 // renderer code pull in node-dependent backend modules. The settings UI fetches
 // this list instead of keeping a copy that can drift.
 
-/** Paths the app serves itself. A display slug may never take one of these. */
+import { OPERATOR_PATHS } from "./routes/operator-paths.js";
+
+/**
+ * Paths the app serves itself. A display slug may never take one of these.
+ *
+ * The operator surfaces are DERIVED from OPERATOR_PATHS rather than restated.
+ * They were listed by hand until the operator app took them over, and adding
+ * /automation and /integrations there left both unreserved — a display slugged
+ * "automation" would have resolved to the operator app and never rendered.
+ * Deriving removes that class of mistake: a new operator route is reserved the
+ * moment it is routed.
+ */
 export const RESERVED_SLUGS: readonly string[] = [
   "", // the display picker
   "settings",
   "log",
   "photos",
-  "baptism",
-  "history",
-  "patch",
-  "scriptview",
+  ...OPERATOR_PATHS.map((p) => p.replace(/^\//, "")),
 ];
 
 /** Prefix reserved for the settings live-preview iframes (see stage-view.tsx). */
