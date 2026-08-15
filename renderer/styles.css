@@ -49,6 +49,29 @@
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
+  /* ── Motion ──────────────────────────────────────────────────────────────
+     Three durations and two easings. A motion system with nine durations is
+     one nobody applies consistently, and the app was already near-uniform by
+     accident: 86 of 89 transition utilities ran on Tailwind's default, with
+     three one-off durations disagreeing.
+
+     --motion-quick is wired to Tailwind's DEFAULT below, so every bare
+     `transition-colors` inherits the token without 51 files being edited. That
+     is the point: a token nobody has to remember to use.
+
+     Motion here conveys state — a thing became hoverable, a panel arrived. It
+     never decorates. */
+  --motion-instant: 90ms;   /* hover, press: must feel like the pointer itself */
+  --motion-quick: 160ms;    /* toggles, tabs, toasts */
+  --motion-settled: 260ms;  /* dialogs, route changes, anything that travels */
+
+  --motion-ease: cubic-bezier(0.2, 0.6, 0.2, 1);      /* arrives and settles */
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);   /* leaves without lingering */
+
+  /* Tailwind's bare `transition-*` utilities resolve to these. */
+  --default-transition-duration: var(--motion-quick);
+  --default-transition-timing-function: var(--motion-ease);
+
   /* Gray scale (1–12 + alpha) */
   --color-gray-1:   var(--gray-1);
   --color-gray-2:   var(--gray-2);
@@ -341,7 +364,23 @@
     animation: su-flash-pulse 2s ease-in-out;
     border-radius: 0.875rem;
   }
+  /* One place that honours the operating system's reduced-motion setting, rather
+     than per-component motion-reduce: variants that each have to be remembered.
+     Not `animation: none` globally - a spinner that stops spinning reads as a
+     frozen app - so this collapses duration instead of removing the animation. */
   @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 1ms !important;
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+    }
+    /* The spinner is the exception: it means "still working", and one frame of
+       it means nothing. Kept turning, slowly. */
+    .animate-spin {
+      animation-duration: 1.4s !important;
+      animation-iteration-count: infinite !important;
+    }
     .su-flash {
       animation: none;
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent-9, #2e6691) 55%, transparent);

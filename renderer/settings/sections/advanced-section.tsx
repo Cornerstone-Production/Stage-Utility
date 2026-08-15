@@ -69,7 +69,7 @@ function UpdateProgress({ step }: { step: UpdateStatus["step"] }) {
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-a4">
         <div
-          className="h-full rounded-full bg-accent transition-[width] duration-700 ease-out"
+          className="h-full rounded-full bg-accent transition-[width] duration-(--motion-settled) ease-out"
           style={{ width: `${meta.pct}%` }}
         />
       </div>

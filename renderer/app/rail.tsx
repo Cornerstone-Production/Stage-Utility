@@ -189,7 +189,7 @@ export function Rail({
               type="button"
               aria-label="Expand sidebar"
               onClick={onToggleCollapsed}
-              className="rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors"
+              className="rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors duration-(--motion-instant)"
             >
               <PanelLeftOpenIcon className="size-4" />
             </button>
@@ -220,7 +220,7 @@ export function Rail({
                   type="button"
                   aria-label="Collapse sidebar"
                   onClick={onToggleCollapsed}
-                  className="rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors"
+                  className="rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors duration-(--motion-instant)"
                 >
                   <PanelLeftCloseIcon className="size-4" />
                 </button>
