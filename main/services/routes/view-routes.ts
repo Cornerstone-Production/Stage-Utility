@@ -67,7 +67,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const body = await readBody(req) as Record<string, unknown>;
       const name = typeof body.name === "string" ? body.name : undefined;
       const kind = isDisplayKind(body.kind) ? body.kind : "slots";
-      const state = await stageController.createView(name ?? "", kind);
+      const surface = body.surface === "console" ? "console" : "display";
+      const state = await stageController.createView(name ?? "", kind, surface);
       json(res, state, 201);
       return;
     }

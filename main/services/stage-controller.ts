@@ -1590,12 +1590,21 @@ export class StageController {
     return [...this.state.views];
   }
 
-  async createView(name: string, kind: ViewKind = "slots"): Promise<StageState> {
+  async createView(
+    name: string,
+    kind: ViewKind = "slots",
+    surface: ViewSurface = "display",
+  ): Promise<StageState> {
     const id = this.nextViewId();
+    // Only a custom View has an editable layout, so only a custom View has
+    // anywhere to put a control. Anything else asked for as a console would be
+    // a console that cannot carry one - a promise the UI could not keep.
+    const effectiveSurface: ViewSurface = kind === "custom" ? surface : "display";
     const view: View = {
       id,
       name: name?.trim() || defaultViewName(kind),
       kind,
+      surface: effectiveSurface,
       ndiSource: null,
       createdAt: new Date().toISOString(),
       layout: kind === "custom" ? defaultCustomLayout() : null,

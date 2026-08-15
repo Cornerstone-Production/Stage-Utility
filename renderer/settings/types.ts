@@ -69,7 +69,7 @@ export interface SectionHandlers {
   discardSlots: () => void;
   handleSetViewSlotsLayout: (id: string, slotsLayout: SlotsLayout | null) => Promise<void>;
   // Views (content)
-  handleAddView: (name: string, kind: ViewKind) => Promise<string | null>;
+  handleAddView: (name: string, kind: ViewKind, surface?: "display" | "console") => Promise<string | null>;
   handleRenameView: (id: string, name: string) => Promise<void>;
   handleDuplicateView: (id: string) => Promise<void>;
   handleRemoveView: (id: string) => Promise<void>;
@@ -103,6 +103,8 @@ export interface SectionHandlers {
   handleRenameOutput: (id: string, name: string) => Promise<void>;
   handleSetOutputView: (id: string, viewId: string | null) => Promise<void>;
   handleSetOutputLocked: (id: string, locked: boolean) => Promise<void>;
+  handleSetOutputMode: (id: string, mode: "display" | "panel") => Promise<void>;
+  handleSetViewSurface: (id: string, surface: "display" | "console") => Promise<void>;
   handleRemoveOutput: (id: string) => Promise<void>;
   handleReorderOutputs: (ids: string[]) => Promise<void>;
   handleOpenOutputWindow: (id: string) => Promise<void>;

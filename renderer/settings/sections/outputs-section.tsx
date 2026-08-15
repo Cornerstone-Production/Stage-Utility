@@ -5,7 +5,7 @@ import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
@@ -28,9 +28,24 @@ import {
 import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
+import { viewSurface, outputMode } from "@main/types/views";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+
+/**
+ * The Views a given screen may actually be pointed at.
+ *
+ * Convenience, NOT the safety property: the server refuses an invalid binding
+ * regardless (stage-controller's setOutputView). This only stops the operator
+ * reaching for something that will be refused.
+ */
+export function bindableViews(views: readonly View[], output: Pick<Output, "mode">): View[] {
+  // A panel accepts either; a display accepts display views only.
+  return outputMode(output) === "panel"
+    ? [...views]
+    : views.filter((v) => viewSurface(v) === "display");
+}
 
 const UNROUTED = "__none__";
 // A sentinel, never a stored value: picking it opens the new-view dialog.
@@ -51,6 +66,7 @@ interface OutputRowProps {
   onSetSlug: (slug: string) => Promise<void>;
   onSetView: (viewId: string | null) => void;
   onSetLocked: (locked: boolean) => void;
+  onSetMode: (mode: "display" | "panel") => void;
   onOpenWindow: () => void;
   onRefresh: () => void;
   onRemove: () => void;
@@ -63,7 +79,7 @@ interface OutputRowProps {
 // One card per display: the name reads as a title, the View it shows is the one
 // prominent control, Open + Lock stay in reach, and the URL sits quietly in the
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
-function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onSetSlug, onSetView, onSetLocked, onOpenWindow, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onSetSlug, onSetView, onSetLocked, onSetMode, onOpenWindow, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const [editSlug, setEditSlug] = useState(output.slug ?? "");
   const [slugError, setSlugError] = useState<string | null>(null);
@@ -168,6 +184,13 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           className="h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0"
           aria-label="Display name"
         />
+        {outputMode(output) === "panel" && (
+          <Tooltip label="A touch panel: controls on this screen are live">
+            <span className="shrink-0 rounded-full border border-accent bg-accent-a3 px-2 py-0.5 text-caption2 font-medium text-accent">
+              panel
+            </span>
+          </Tooltip>
+        )}
         <Tooltip label={online ? "A screen is connected to this display" : "No screen is currently connected"}>
           <span className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted">
             <span className={`size-2 rounded-full ${online ? "bg-ok-9" : "bg-fg-faint"}`} />
@@ -197,6 +220,28 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
               <DropdownMenu.Item onSelect={onOpenWindow} className={MENU_ITEM}>
                 <ExternalLinkIcon className="size-3.5 text-fg-subtle" />
                 Open display
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                // Confirmed, and the confirm says what actually changes. Turning
+                // a screen into a panel makes its controls live to anyone
+                // standing at it, which is not something to do by misclick.
+                onSelect={async () => {
+                  const toPanel = outputMode(output) !== "panel";
+                  const ok = await confirm({
+                    title: toPanel ? `Use "${output.name}" as a touch panel?` : `Make "${output.name}" a display again?`,
+                    message: toPanel
+                      ? "Buttons on this screen will work. Anyone standing at it can press them."
+                      : "This screen becomes read-only. Its buttons will render but do nothing.",
+                    confirmLabel: toPanel ? "Use as a touch panel" : "Make it a display",
+                  });
+                  if (ok) onSetMode(toPanel ? "panel" : "display");
+                }}
+                className={MENU_ITEM}
+              >
+                {outputMode(output) === "panel"
+                  ? <MonitorIcon className="size-3.5 text-fg-subtle" />
+                  : <HandIcon className="size-3.5 text-fg-subtle" />}
+                {outputMode(output) === "panel" ? "Use as a display" : "Use as a touch panel"}
               </DropdownMenu.Item>
               <DropdownMenu.Item
                 onSelect={() => onSetLocked(!(output.locked ?? false))}
@@ -303,7 +348,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={UNROUTED}>— Unrouted —</SelectItem>
-            {views.map((v) => (
+            {bindableViews(views, output).map((v) => (
               <SelectItem key={v.id} value={v.id}>
                 {v.name}
               </SelectItem>
@@ -366,7 +411,7 @@ function UnassignedViewCard({
   onRemove,
   onEditLayout,
 }: {
-  view: { id: string; name: string; kind: ViewKind };
+  view: View;
   onRename: (name: string) => void;
   onDuplicate: () => void;
   onRemove: () => void;
@@ -433,8 +478,15 @@ function UnassignedViewCard({
       </div>
 
       <div className="flex items-center justify-between gap-2 px-3 py-2.5">
-        <span className="truncate rounded-lg bg-fill px-2.5 py-1 text-footnote font-medium text-fg-muted">
-          {KIND_LABELS[view.kind]}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate rounded-lg bg-fill px-2.5 py-1 text-footnote font-medium text-fg-muted">
+            {KIND_LABELS[view.kind]}
+          </span>
+          {viewSurface(view) === "console" && (
+            <span className="shrink-0 rounded-lg border border-accent px-2 py-0.5 text-caption2 font-medium text-accent">
+              console
+            </span>
+          )}
         </span>
         <Tooltip label={onEditLayout ? "Edit this view's layout" : "Only a custom view has a layout to edit"}>
           <button
@@ -474,6 +526,13 @@ export function OutputsSection({
   // way in was the Views list this page replaced.
   const assigned = new Set(outputs.map((o) => o.viewId).filter(Boolean));
   const unassigned = views.filter((v) => !assigned.has(v.id));
+  // Grouped, because a console and a display are different kinds of thing now:
+  // one is content for a wall, the other is a control surface. An
+  // undifferentiated list makes an operator open each to find out which.
+  const unassignedGroups = [
+    { key: "console" as const, label: "Consoles", items: unassigned.filter((v) => viewSurface(v) === "console") },
+    { key: "display" as const, label: "Displays", items: unassigned.filter((v) => viewSurface(v) === "display") },
+  ].filter((g) => g.items.length > 0);
   // Prefer the configured public URL (DNS) so display links match what operators
   // actually browse to; fall back to the current origin.
   const baseUrl = stageState.publicUrl || window.location.origin;
@@ -528,6 +587,7 @@ export function OutputsSection({
                 onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
+                onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
                 onOpenWindow={() => handlers.handleOpenOutputWindow(output.id)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}
@@ -576,18 +636,25 @@ export function OutputsSection({
           <p className="text-caption2 text-fg-subtle">
             Built, but nothing is showing them. Point a screen at one above, or tidy them up here.
           </p>
-          <div className="grid gap-3 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
-            {unassigned.map((v) => (
-              <UnassignedViewCard
-                key={v.id}
-                view={v}
-                onRename={(name) => handlers.handleRenameView(v.id, name)}
-                onDuplicate={() => handlers.handleDuplicateView(v.id)}
-                onRemove={() => handlers.handleRemoveView(v.id)}
-                onEditLayout={onEditLayout && v.kind === "custom" ? () => onEditLayout(v.id) : undefined}
-              />
-            ))}
-          </div>
+          {unassignedGroups.map((g) => (
+            <div key={g.key} className="flex flex-col gap-2">
+              {unassignedGroups.length > 1 && (
+                <h4 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">{g.label}</h4>
+              )}
+              <div className="grid gap-3 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
+                {g.items.map((v) => (
+                  <UnassignedViewCard
+                    key={v.id}
+                    view={v}
+                    onRename={(name) => handlers.handleRenameView(v.id, name)}
+                    onDuplicate={() => handlers.handleDuplicateView(v.id)}
+                    onRemove={() => handlers.handleRemoveView(v.id)}
+                    onEditLayout={onEditLayout && v.kind === "custom" ? () => onEditLayout(v.id) : undefined}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

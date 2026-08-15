@@ -28,6 +28,7 @@ const KIND_LABELS: Record<ViewKind, string> = {
 const KIND_ORDER: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "script", "spl-rundown", "custom"];
 
 type StartFrom = "blank" | "dashboard" | "confidence";
+type Surface = "display" | "console";
 
 export function NewViewDialog({
   handlers,
@@ -46,6 +47,7 @@ export function NewViewDialog({
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ViewKind>("slots");
   const [startFrom, setStartFrom] = useState<StartFrom>("blank");
+  const [surface, setSurface] = useState<Surface>("display");
 
   return (
     <Dialog
@@ -57,7 +59,9 @@ export function NewViewDialog({
       confirmLabel="Create"
       confirmDisabled={false}
       onConfirm={async () => {
-        const id = await handlers.handleAddView(name.trim(), kind);
+        // Only a custom View has a layout to put a control on, so only a custom
+        // View can be a console. The server enforces this too.
+        const id = await handlers.handleAddView(name.trim(), kind, kind === "custom" ? surface : "display");
         if (id && kind === "custom" && startFrom !== "blank") {
           const objects = startFrom === "dashboard" ? dashboardTemplate() : confidenceMonitorTemplate();
           await handlers.handleSetViewLayout(id, {
@@ -69,6 +73,7 @@ export function NewViewDialog({
         setName("");
         setKind("slots");
         setStartFrom("blank");
+        setSurface("display");
         if (id) onCreated?.(id);
       }}
     >
@@ -92,6 +97,44 @@ export function NewViewDialog({
             ))}
           </SelectContent>
         </Select>
+        {/* What it is FOR, in the operator's words rather than the schema's.
+            Offered only for a custom layout: the built-in kinds have no editable
+            layout, so a console among them could not carry a control. */}
+        {kind === "custom" && (
+          <fieldset className="flex flex-col gap-1.5 border-0 p-0 m-0">
+            <legend className="text-caption2 text-fg-subtle p-0">What is it for</legend>
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-line p-2.5 hover:bg-fill">
+              <input
+                type="radio"
+                name="view-surface"
+                className="mt-0.5"
+                checked={surface === "display"}
+                onChange={() => setSurface("display")}
+              />
+              <span className="min-w-0">
+                <span className="block text-footnote font-medium text-fg">A wall screen anyone can see</span>
+                <span className="block text-caption2 text-fg-subtle">
+                  Read-only. Controls never fire, whatever you put on it.
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-line p-2.5 hover:bg-fill">
+              <input
+                type="radio"
+                name="view-surface"
+                className="mt-0.5"
+                checked={surface === "console"}
+                onChange={() => setSurface("console")}
+              />
+              <span className="min-w-0">
+                <span className="block text-footnote font-medium text-fg">A control surface you operate</span>
+                <span className="block text-caption2 text-fg-subtle">
+                  Buttons work. Opens in the app, or pinned to a touch panel.
+                </span>
+              </span>
+            </label>
+          </fieldset>
+        )}
         {kind === "custom" && (
           <label className="flex flex-col gap-1.5">
             <span className="text-caption2 text-fg-subtle">Start from</span>
