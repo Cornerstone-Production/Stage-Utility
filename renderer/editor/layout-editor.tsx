@@ -14,6 +14,7 @@ import {
   Grid3x3Icon,
   AlignHorizontalDistributeCenterIcon,
   MonitorSmartphoneIcon,
+  LayoutGridIcon,
   SaveIcon,
   DownloadIcon,
   
@@ -112,6 +113,8 @@ import { invoke } from "../lib/api";
 import { fitFor } from "../main/console-fit";
 import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
+import { Palette } from "./palette";
+import { rectForDrop, localiseToParent, defaultDropSize } from "./drag-to-place";
 import { ShapePreview, PREVIEW_SHAPES, type PreviewShape } from "./preview-shape";
 import { AlignmentGuides } from "./alignment-guides";
 
@@ -368,7 +371,7 @@ function EditorCanvas({
   effectiveFit,
   canvas, objects, selectedId, selectedIds, gridOn, alignOn, ctx, ndiSource, interactive,
   onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
-  onContextMenu,
+  onContextMenu, onDropType,
 }: {
   /** What the layout will actually do — a console with no explicit fit is
    *  responsive. Passed in so the canvas and the toolbar cannot disagree. */
@@ -385,6 +388,9 @@ function EditorCanvas({
   ndiSource: string | null;
   /** When false the canvas is a read-only preview (no overlay, handles, or drag). */
   interactive: boolean;
+  /** A widget was dropped from the palette, at this point in canvas fractions.
+   *  Optional: the canvas works exactly as before without it. */
+  onDropType?: (point: { x: number; y: number }) => void;
   onSelect: (id: string | null, additive?: boolean) => void;
   /** Marquee drag on empty canvas → select all top-level objects it intersects. */
   onMarqueeSelect: (ids: string[], additive: boolean) => void;
@@ -718,6 +724,16 @@ function EditorCanvas({
           }}
           onPointerDown={interactive ? startMarquee : undefined}
           onContextMenu={interactive && onContextMenu ? onContextMenu : undefined}
+          // Palette drops. dragover must preventDefault or the browser refuses
+          // the drop entirely. Nothing else about the canvas changes: pointer
+          // drags, resizing and marquee selection are untouched.
+          onDragOver={interactive && onDropType ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } : undefined}
+          onDrop={interactive && onDropType ? (e) => {
+            e.preventDefault();
+            const r = e.currentTarget.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) return;
+            onDropType({ x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height });
+          } : undefined}
         >
           {/* Content layer (visual only). Letterbox: design dims scaled. Fill: the
               layer IS the box (objects positioned by % of the live box). The grid
@@ -886,6 +902,14 @@ export function LayoutEditor({
   // On by default: lining an object up with its neighbours is the common case,
   // and Alt suppresses it for the drag where it is not.
   const [alignOn, setAlignOn] = useState(true);
+  // The palette is a second door beside the Add-object dropdown, which is
+  // unchanged. Open by default in edit mode: browsing is the common case for
+  // someone building a view, and the dropdown is there for anyone who knows
+  // exactly what they want.
+  const [paletteOpen, setPaletteOpen] = useState(true);
+  // The type mid-drag from the palette. A ref as well as state: the drop
+  // handler runs from a DOM event and would otherwise read a stale closure.
+  const paletteDragType = useRef<LayoutObjectType | null>(null);
   const [saving, setSaving] = useState(false);
   const [tplName, setTplName] = useState("");
   // Rendered canvas box size (reported by EditorCanvas) — so the Snap actions use
@@ -917,6 +941,23 @@ export function LayoutEditor({
   // Opt-in: hide palette objects whose integration isn't set up (default off).
   const [hideUnconfigured, setHideUnconfigured] = useState(
     () => localStorage.getItem(HIDE_UNCONFIGURED_KEY) === "1",
+  );
+
+  // The palette and the Add-object dropdown offer the SAME set, filtered by the
+  // same rule. Two lists that could disagree about which objects exist is how an
+  // operator finds a widget in one place and not the other.
+  const paletteTypes = PALETTE_GROUPS.flatMap((g) =>
+    g.types.filter((t) => {
+      const need = objectIntegration(t);
+      return !(hideUnconfigured && need && !configuredIntegrations.has(need.id));
+    }),
+  );
+  // Dimmed, not hidden: the object works, its data source just is not set up yet.
+  const dimmedTypes = new Set(
+    paletteTypes.filter((t) => {
+      const need = objectIntegration(t);
+      return !!need && !configuredIntegrations.has(need.id);
+    }),
   );
   const toggleHideUnconfigured = useCallback(() => {
     setHideUnconfigured((v) => {
@@ -1130,6 +1171,42 @@ export function LayoutEditor({
     setObjects((prev) => updates.reduce((tree, u) => mapById(tree, u.id, (o) => ({ ...o, ...u.geom })), prev));
     setDirty(true);
   }, []);
+
+  /**
+   * A widget dropped from the palette, at a point in canvas fractions.
+   *
+   * Deliberately NOT routed through addObject: that function places at a fixed
+   * default spot and, when a container is selected, nests into it. A drop says
+   * where it goes, and nesting follows the pointer rather than the selection —
+   * dropping onto a container puts it in that container, dropping on open canvas
+   * does not, regardless of what happened to be selected.
+   */
+  function dropObject(type: LayoutObjectType, point: { x: number; y: number }) {
+    const isContainer = type === "container";
+    const abs = rectForDrop(point, defaultDropSize(isContainer));
+
+    // Which container, if any, is under the drop point. Same rule the drag path
+    // uses, so dropping and dragging agree about where things land.
+    const targets: { id: string; abs: FracRect; depth: number }[] = [];
+    forEachWithRect(objects, (n) => {
+      if (n.o.config.type === "container" && !isLockedInTree(objects, n.o.id)) {
+        targets.push({ id: n.o.id, abs: n.abs, depth: n.depth });
+      }
+    });
+    const intoId = findDropContainer(targets, isContainer, point.x, point.y);
+    const into = intoId ? targets.find((t) => t.id === intoId) : null;
+
+    pushHistory();
+    const geom = into ? localiseToParent(abs, into.abs) : abs;
+    const o = makeObject(type, zTop + 1, geom);
+    if (into) {
+      setObjects((prev) => insertChild(prev, into.id, o));
+    } else {
+      setObjects((prev) => [...prev, o]);
+    }
+    setSelectedIds(new Set([o.id]));
+    setDirty(true);
+  }
 
   function addObject(type: LayoutObjectType) {
     pushHistory();
@@ -1493,6 +1570,16 @@ export function LayoutEditor({
           <Grid3x3Icon className="size-3.5" /> Grid
         </Button>
         <Button
+          variant={paletteOpen ? "accent" : "filled"}
+          size="small"
+          onClick={() => setPaletteOpen((v) => !v)}
+          aria-label="Toggle the widget palette"
+          aria-pressed={paletteOpen}
+          tooltip="Browse every widget, with a line on what each one shows. Drag one onto the canvas."
+        >
+          <LayoutGridIcon className="size-3.5" /> Widgets
+        </Button>
+        <Button
           variant={alignOn ? "accent" : "filled"}
           size="small"
           onClick={() => setAlignOn((v) => !v)}
@@ -1679,6 +1766,23 @@ export function LayoutEditor({
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
+        {/* Palette — a second door beside the Add-object dropdown, which is
+            unchanged. Hidden outside edit mode, and collapsible for anyone who
+            wants the canvas wider. */}
+        {isEditing && paletteOpen && (
+          <div
+            className="w-56 shrink-0 overflow-y-auto rounded-xl border border-line bg-surface @max-4xl:w-full @max-4xl:max-h-64"
+            style={{ maxHeight: canvasH ?? undefined }}
+          >
+            <Palette
+              types={paletteTypes}
+              dimmed={dimmedTypes}
+              onAdd={addObject}
+              onDragStart={(t) => { paletteDragType.current = t; }}
+              onDragEnd={() => { paletteDragType.current = null; }}
+            />
+          </div>
+        )}
         <div ref={canvasCellRef} className="flex-1 min-w-0 @max-4xl:flex-none" style={{ height: canvasH ?? undefined }}>
           {previewShape.vp ? (
             // The live edit state, not the saved view: the point is to check the
@@ -1710,6 +1814,11 @@ export function LayoutEditor({
               onReparent={reparentIntoContainer}
               onBoxSize={handleBoxSize}
               onContextMenu={isEditing ? openContextMenu : undefined}
+              onDropType={isEditing ? (point) => {
+                const t = paletteDragType.current;
+                paletteDragType.current = null;
+                if (t) dropObject(t, point);
+              } : undefined}
             />
           ) : (
             <div className="w-full h-full rounded-xl border border-line flex items-center justify-center text-fg-subtle">
