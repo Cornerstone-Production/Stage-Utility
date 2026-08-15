@@ -12,6 +12,19 @@ import { stageController } from "../stage-controller.js";
 
 export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
+    // ── Context bar items ─────────────────────────────────────────────────
+    // Which items appear and in what order. Global config, so every operator
+    // reads the same strip.
+    if (method === "POST" && pathname === "/api/bar-items") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (!Array.isArray(body.items) || body.items.some((i) => typeof i !== "string")) {
+        error(res, "body.items (string[]) required");
+        return;
+      }
+      json(res, await stageController.setBarItems(body.items as string[]));
+      return;
+    }
+
     // ── QR visibility ─────────────────────────────────────────────────────
     if (method === "POST" && pathname === "/api/show-qr") {
       const body = await readBody(req) as Record<string, unknown>;

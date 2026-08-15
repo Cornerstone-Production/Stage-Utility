@@ -4,6 +4,7 @@
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
 import { notesStore, type NotesContent } from "./notes-store.js";
+import { barConfigStore } from "./bar-config-store.js";
 import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
@@ -160,6 +161,7 @@ export class StageController {
     views: [{ id: PRIMARY_DISPLAY_ID, name: "Slots", kind: "slots", ndiSource: null, createdAt: "" }],
     outputs: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", viewId: PRIMARY_DISPLAY_ID }],
     slotsByView: {},
+    barItems: [],
     notesByObject: {},
     slotsByLayoutObject: {},
     resolvedByOutput: {},
@@ -240,6 +242,7 @@ export class StageController {
 
   async init(): Promise<void> {
     await notesStore.init();
+    await barConfigStore.init();
     console.log("[stage-controller] init");
     let settings = await settingsStore.load();
 
@@ -265,6 +268,7 @@ export class StageController {
       ...this.state,
       // Loaded above; without this the field stays {} and every note reads empty
       // until the first edit — the content would look lost.
+      barItems: barConfigStore.get().items,
       notesByObject: notesStore.all(),
       serviceTypeId: settings.serviceTypeId,
       serviceTypeName: settings.serviceTypeName,
@@ -2045,6 +2049,14 @@ export class StageController {
   async setNotes(objectId: string, content: NotesContent): Promise<StageState> {
     await notesStore.set(objectId, content);
     this.state = { ...this.state, notesByObject: notesStore.all() };
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Set which context-bar items appear, and in what order. Global config. */
+  async setBarItems(items: string[]): Promise<StageState> {
+    const saved = await barConfigStore.set(items);
+    this.state = { ...this.state, barItems: saved.items };
     this.broadcast();
     return this.state;
   }
