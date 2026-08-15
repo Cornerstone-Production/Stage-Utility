@@ -107,6 +107,7 @@ import {
   
 } from "../main/layout-objects";
 import { invoke } from "../lib/api";
+import { fitFor } from "../main/console-fit";
 import { uid, dashboardTemplate, confidenceMonitorTemplate, CANVAS_PRESETS } from "./layout-templates";
 import { Inspector } from "./inspector";
 import {
@@ -349,10 +350,14 @@ function OverlayNode({
 }
 
 function EditorCanvas({
+  effectiveFit,
   canvas, objects, selectedId, selectedIds, gridOn, ctx, ndiSource, interactive,
   onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
   onContextMenu,
 }: {
+  /** What the layout will actually do — a console with no explicit fit is
+   *  responsive. Passed in so the canvas and the toolbar cannot disagree. */
+  effectiveFit: "contain" | "responsive";
   canvas: LayoutCanvas;
   objects: LayoutObject[];
   selectedId: string | null;
@@ -427,7 +432,7 @@ function EditorCanvas({
   // models the one shape it does know: the design canvas. Same box as letterbox
   // mode; what still differs is `H`, which tracks the live box so the preview is a
   // true scale model rather than a fixed design-space render.
-  const fill = canvas.fit === "fill";
+  const fill = effectiveFit === "responsive";
   const scale = avail.w > 0 && avail.h > 0 ? Math.min(avail.w / canvas.width, avail.h / canvas.height) : 0;
   const boxW = canvas.width * scale;
   const boxH = canvas.height * scale;
@@ -798,6 +803,10 @@ export function LayoutEditor({
   const [dragLayerOver, setDragLayerOver] = useState<{ id: string; edge: "above" | "below" } | null>(null);
   const [history, setHistory] = useState<LayoutObject[][]>([]);
   const [dirty, setDirty] = useState(false);
+  // The effective fit, not just the stored one: a console with nothing set is
+  // responsive, and a toolbar showing "Letterbox" selected would tell the
+  // operator the opposite of what they see.
+  const effectiveFit = fitFor(view, canvas.fit);
   const [gridOn, setGridOn] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tplName, setTplName] = useState("");
@@ -1426,8 +1435,26 @@ export function LayoutEditor({
               <div className="flex flex-col gap-1.5">
                 <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Fit</span>
                 <ButtonGroup>
-                  <Button variant={canvas.fit !== "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "contain" }); setDirty(true); }} tooltip="Letterbox: keep the design aspect (adds bars on mismatched screens)">Letterbox</Button>
-                  <Button variant={canvas.fit === "fill" ? "accent" : "filled"} size="small" onClick={() => { setCanvas({ ...canvas, fit: "fill" }); setDirty(true); }} tooltip="Fill: use the whole window; objects reflow to its shape (no bars)">Fill</Button>
+                  {/* Letterbox or Responsive. "Fill" was the old name for the
+                      right-hand option and only reflowed proportionally; it is
+                      still accepted from a stored layout and reads as
+                      Responsive, so an old file selects the right button. */}
+                  <Button
+                    variant={effectiveFit === "contain" ? "accent" : "filled"}
+                    size="small"
+                    onClick={() => { setCanvas({ ...canvas, fit: "contain" }); setDirty(true); }}
+                    tooltip="Letterbox: keep the design's shape exactly, with bars on a screen of a different shape. Right for a wall screen."
+                  >
+                    Letterbox
+                  </Button>
+                  <Button
+                    variant={effectiveFit === "responsive" ? "accent" : "filled"}
+                    size="small"
+                    onClick={() => { setCanvas({ ...canvas, fit: "responsive" }); setDirty(true); }}
+                    tooltip="Responsive: use the whole window. Objects hold their anchors, keep their shape where asked, and stack into a column when the window is a very different shape."
+                  >
+                    Responsive
+                  </Button>
                 </ButtonGroup>
               </div>
             </Popover.Content>
@@ -1507,6 +1534,7 @@ export function LayoutEditor({
         <div ref={canvasCellRef} className="flex-1 min-w-0 @max-4xl:flex-none" style={{ height: canvasH ?? undefined }}>
           {data.state ? (
             <EditorCanvas
+          effectiveFit={effectiveFit}
               canvas={canvas}
               objects={objects}
               selectedId={selectedId}
