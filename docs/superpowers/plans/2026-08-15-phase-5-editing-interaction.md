@@ -412,10 +412,12 @@ dragging one does not move the others — there is nothing to reflow. The proble
 it was reaching for, seeing the layout at another shape without leaving the
 editor, is Task 2. Stated here rather than dropped silently.
 
-## Open questions for the maintainer
+## Decisions
 
-1. **Stacking threshold.** 2560x800 currently stacks. Carried over from Phase 4
-   and still unresolved; the preview in Task 2 makes it visible, which may be
-   enough to settle it either way.
-2. **Min/max height.** Phase 4 exposes width clamps only. Adding height is
-   cheap; leaving it out keeps the inspector shorter.
+1. **Stacking threshold — left as it is.** 2560x800 still stacks. Deferred
+   deliberately rather than forgotten; the Task 2 preview makes the behaviour
+   visible, so it can be settled later against a real layout.
+2. **Width clamps only.** Min/max height is not built. Phase 4's width-only
+   inspector is the final shape. `responsive-layout.ts` keeps its `minPx.h` /
+   `maxPx.h` support, so a layout that sets them by hand still works — there is
+   simply no control for it.

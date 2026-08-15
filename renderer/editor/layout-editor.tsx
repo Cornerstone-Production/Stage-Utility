@@ -12,6 +12,7 @@ import {
   
   
   Grid3x3Icon,
+  AlignHorizontalDistributeCenterIcon,
   SaveIcon,
   DownloadIcon,
   
@@ -108,6 +109,12 @@ import {
 } from "../main/layout-objects";
 import { invoke } from "../lib/api";
 import { fitFor } from "../main/console-fit";
+import { alignRect, type Guide } from "./alignment";
+import { AlignmentGuides } from "./alignment-guides";
+
+/** How close an edge must come before it snaps, in rendered pixels. Small enough
+ *  that deliberate placement is never fought, large enough to catch a hand. */
+const ALIGN_TOLERANCE_PX = 8;
 import { uid, dashboardTemplate, confidenceMonitorTemplate, CANVAS_PRESETS } from "./layout-templates";
 import { Inspector } from "./inspector";
 import {
@@ -262,6 +269,11 @@ interface DragState {
   canReparent: boolean;
   /** Container drop targets captured at drag start. */
   targets: DropTarget[];
+  /** Absolute canvas rects of everything the dragged object may align to,
+   *  snapshotted at drag start. Excludes the dragged object, its own subtree
+   *  (an object cannot line up with its own child) and, in a group move, the
+   *  rest of the group — which is moving with it and would drag the guides along. */
+  siblings: FracRect[];
   /** For a multi-selection move: start rects of all selected top-level objects
    *  (incl. the dragged one). Present → move the whole group by the same delta. */
   group?: { id: string; x: number; y: number; w: number; h: number }[];
@@ -351,7 +363,7 @@ function OverlayNode({
 
 function EditorCanvas({
   effectiveFit,
-  canvas, objects, selectedId, selectedIds, gridOn, ctx, ndiSource, interactive,
+  canvas, objects, selectedId, selectedIds, gridOn, alignOn, ctx, ndiSource, interactive,
   onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
   onContextMenu,
 }: {
@@ -363,6 +375,9 @@ function EditorCanvas({
   selectedId: string | null;
   selectedIds: Set<string>;
   gridOn: boolean;
+  /** Snap to the other objects' edges, centres and spacing. Independent of the
+   *  grid: both can be on, and grid runs first so alignment only refines. */
+  alignOn: boolean;
   ctx: Omit<LayoutRenderCtx, "H" | "ndiSource" | "interactive">;
   ndiSource: string | null;
   /** When false the canvas is a read-only preview (no overlay, handles, or drag). */
@@ -452,6 +467,15 @@ function EditorCanvas({
   // Latest local geom set during the active drag (so pointerup can hit-test the
   // drop without depending on the parent's async state update).
   const dragGeom = useRef<Pick<LayoutObject, "x" | "y" | "w" | "h"> | null>(null);
+  // Guides for the CURRENT drag only. Mirrored into a ref so the move handler can
+  // check "are any drawn?" without listing guides as an effect dependency, which
+  // would rebind the window listeners on every frame of a drag.
+  const [guides, setGuidesState] = useState<Guide[]>([]);
+  const guidesRef = useRef<Guide[]>([]);
+  const setGuides = useCallback((g: Guide[]) => {
+    guidesRef.current = g;
+    setGuidesState(g);
+  }, []);
 
   // Window-level move/up while dragging.
   useEffect(() => {
@@ -462,15 +486,45 @@ function EditorCanvas({
     const onMove = (e: globalThis.PointerEvent) => {
       const dx = (e.clientX - drag.px) / drag.parentW;
       const dy = (e.clientY - drag.py) / drag.parentH;
+      // Alt is the escape hatch from every kind of snapping. Read live from the
+      // event rather than captured at drag start, so it can be pressed and
+      // released mid-drag.
+      const free = e.altKey;
       let geom: Pick<LayoutObject, "x" | "y" | "w" | "h">;
       if (drag.mode === "move") {
         const local = { x: drag.start.x + dx, y: drag.start.y + dy, w: drag.start.w, h: drag.start.h };
-        const snapped = gridOn ? snapRectToGrid(local, drag.parentAbs, boxW, boxH, false) : local;
+        const snapped = gridOn && !free ? snapRectToGrid(local, drag.parentAbs, boxW, boxH, false) : local;
         geom = { x: clamp(snapped.x, 0, 1 - drag.start.w), y: clamp(snapped.y, 0, 1 - drag.start.h), w: drag.start.w, h: drag.start.h };
       } else {
         const g = applyResize(drag.start, drag.mode, dx, dy);
-        geom = gridOn ? snapRectToGrid(g, drag.parentAbs, boxW, boxH, true) : g;
+        geom = gridOn && !free ? snapRectToGrid(g, drag.parentAbs, boxW, boxH, true) : g;
       }
+
+      // Alignment runs AFTER the grid and in absolute canvas space, so a nested
+      // object lines up with the lines actually drawn rather than with a grid
+      // relative to its own parent. A group move is excluded: the group has no
+      // single edge to align, and snapping the primary would shear the others.
+      if (alignOn && !free && !drag.group) {
+        const abs = composeRect(drag.parentAbs, geom);
+        const { rect, guides } = alignRect(
+          abs,
+          drag.siblings,
+          { w: boxW, h: boxH },
+          ALIGN_TOLERANCE_PX,
+          drag.mode === "move" ? null : drag.mode,
+        );
+        const back = localizeRect(drag.parentAbs, rect);
+        geom = {
+          x: clamp(back.x, 0, 1 - back.w),
+          y: clamp(back.y, 0, 1 - back.h),
+          w: back.w,
+          h: back.h,
+        };
+        setGuides(guides);
+      } else if (guidesRef.current.length) {
+        setGuides([]);
+      }
+
       dragGeom.current = geom;
       // Group move: shift every selected top-level object by the same delta as the
       // dragged (primary) one. No reparenting while moving a group.
@@ -505,6 +559,7 @@ function EditorCanvas({
       }
       dragGeom.current = null;
       setDropTargetId(null);
+      setGuides([]);
       setDrag(null);
     };
     window.addEventListener("pointermove", onMove);
@@ -512,8 +567,12 @@ function EditorCanvas({
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      // A drag that ends by unmount (route change, undo, the object deleted from
+      // under it) never reaches onUp, and a stale guide would hang on the canvas
+      // with nothing dragging.
+      setGuides([]);
     };
-  }, [drag, boxW, boxH, gridOn, canvas, onGeom, onGeomMany, onReparent]);
+  }, [drag, boxW, boxH, gridOn, alignOn, canvas, onGeom, onGeomMany, onReparent, setGuides]);
 
   function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) {
     e.stopPropagation();
@@ -545,10 +604,19 @@ function EditorCanvas({
           .filter((obj) => selectedIds.has(obj.id) && !isLockedInTree(objects, obj.id))
           .map((obj) => ({ id: obj.id, x: obj.x, y: obj.y, w: obj.w, h: obj.h }))
       : undefined;
+    // Alignment targets, in the same walk. Hidden objects are skipped: an
+    // invisible thing must not pull a visible one, and the operator would have
+    // no way to see why it jumped.
+    const movingIds = new Set(excluded);
+    group?.forEach((g) => movingIds.add(g.id));
+    const siblings: FracRect[] = [];
+    forEachWithRect(objects, (n) => {
+      if (!movingIds.has(n.o.id) && !n.o.hidden) siblings.push(n.abs);
+    });
     setDrag({
       id: o.id, mode, start: o, px: e.clientX, py: e.clientY,
       parentW: parentAbs.w * boxW, parentH: parentAbs.h * boxH,
-      parentAbs, depth, canReparent: depth === 0, targets, group,
+      parentAbs, depth, canReparent: depth === 0, targets, siblings, group,
     });
   }
 
@@ -679,6 +747,10 @@ function EditorCanvas({
               the grid. */}
           {interactive && (
             <div style={{ position: "absolute", top: 0, left: 0, width: boxW, height: boxH }}>
+              {/* Alignment guides. In the overlay, which shares the grid and
+                  content layers' explicit box, so a guide sits exactly on the
+                  edge it claims to mark. */}
+              <AlignmentGuides guides={guides} />
               {/* Live drop-target highlight: the container the dragged object would
                   land in, drawn behind the selection boxes. */}
               {dropTargetId && drag && (() => {
@@ -808,6 +880,9 @@ export function LayoutEditor({
   // operator the opposite of what they see.
   const effectiveFit = fitFor(view, canvas.fit);
   const [gridOn, setGridOn] = useState(true);
+  // On by default: lining an object up with its neighbours is the common case,
+  // and Alt suppresses it for the drag where it is not.
+  const [alignOn, setAlignOn] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tplName, setTplName] = useState("");
   // Rendered canvas box size (reported by EditorCanvas) — so the Snap actions use
@@ -1393,6 +1468,16 @@ export function LayoutEditor({
         <Button variant={gridOn ? "accent" : "filled"} size="small" onClick={() => setGridOn((v) => !v)} aria-label="Toggle snap grid">
           <Grid3x3Icon className="size-3.5" /> Grid
         </Button>
+        <Button
+          variant={alignOn ? "accent" : "filled"}
+          size="small"
+          onClick={() => setAlignOn((v) => !v)}
+          aria-label="Toggle align to objects"
+          aria-pressed={alignOn}
+          tooltip="Snap to other objects' edges, centres and spacing. Hold Alt while dragging to place freely."
+        >
+          <AlignHorizontalDistributeCenterIcon className="size-3.5" /> Align
+        </Button>
         <Button variant="filled" size="small" onClick={snapAllToGrid} aria-label="Snap all objects to grid" tooltip="Snap every object's position + size to the grid">
           Snap all
         </Button>
@@ -1534,11 +1619,12 @@ export function LayoutEditor({
         <div ref={canvasCellRef} className="flex-1 min-w-0 @max-4xl:flex-none" style={{ height: canvasH ?? undefined }}>
           {data.state ? (
             <EditorCanvas
-          effectiveFit={effectiveFit}
+              effectiveFit={effectiveFit}
               canvas={canvas}
               objects={objects}
               selectedId={selectedId}
               selectedIds={selectedIds}
+              alignOn={alignOn}
               gridOn={gridOn && isEditing}
               interactive={isEditing}
               ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
