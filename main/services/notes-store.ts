@@ -65,24 +65,41 @@ function assertSafeObjectId(objectId: string): void {
 
 const store = new DataStore<NotesFile>("notes.json", {}, "config");
 
-let cache: NotesFile = {};
+/**
+ * A MAP, not an object.
+ *
+ * The key comes from the client, and a Map has no prototype-key semantics at
+ * all: map.set("__proto__", x) stores an ordinary entry and reaches nothing.
+ * That removes the whole class of remote property injection rather than
+ * defending against one instance of it — the earlier null-prototype object was
+ * safe in practice but still wrote to a computed property name, which is both
+ * harder to prove and harder to read.
+ *
+ * The validation above is kept anyway: it rejects nonsense ids at the door, so
+ * a typo cannot silently create an entry nothing will ever read.
+ */
+let cache = new Map<string, NotesContent>();
 let loaded = false;
+
+/** Map -> plain object for the JSON file. Object.fromEntries defines
+ *  properties rather than assigning them, so it cannot trigger a setter. */
+function toFile(map: ReadonlyMap<string, NotesContent>): NotesFile {
+  return Object.fromEntries(map) as NotesFile;
+}
 
 export const notesStore = {
   async init(): Promise<void> {
-    // Whatever is on disk is re-keyed onto a null-prototype object, so a
-    // notes.json that already contains a hostile key cannot pollute on load.
-    cache = Object.assign(Object.create(null) as NotesFile, await store.load());
+    cache = new Map(Object.entries(await store.load()));
     loaded = true;
   },
 
   /** Everything, for the state broadcast. */
   all(): NotesFile {
-    return cache;
+    return toFile(cache);
   },
 
   get(objectId: string): NotesContent {
-    return Object.hasOwn(cache, objectId) ? cache[objectId] : {};
+    return cache.get(objectId) ?? {};
   },
 
   /**
@@ -95,27 +112,19 @@ export const notesStore = {
   async set(objectId: string, content: NotesContent): Promise<void> {
     assertSafeObjectId(objectId);
     if (!loaded) await notesStore.init();
-    // Object.create(null) rather than {}: a null-prototype map has no
-    // __proto__ setter to write through even if a key ever got past the check
-    // above. Two barriers, because the cost is nothing and the failure is
-    // process-wide.
-    const next: NotesFile = Object.assign(Object.create(null) as NotesFile, cache);
-    next[objectId] = content;
-    cache = next;
-    await store.save(cache);
+    cache.set(objectId, content);
+    await store.save(toFile(cache));
   },
 
   /** Forget an object's content — called when the object itself is deleted, so
    *  notes.json does not accumulate orphans for every object ever created. */
   async forget(objectIds: readonly string[]): Promise<void> {
     if (!loaded) await notesStore.init();
-    const next: NotesFile = Object.assign(Object.create(null) as NotesFile, cache);
     let changed = false;
     for (const id of objectIds) {
-      if (Object.hasOwn(next, id)) { delete next[id]; changed = true; }
+      if (cache.delete(id)) changed = true;
     }
     if (!changed) return;
-    cache = next;
-    await store.save(cache);
+    await store.save(toFile(cache));
   },
 };
