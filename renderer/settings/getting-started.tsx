@@ -6,9 +6,9 @@ interface Step {
   label: string;
   hint: string;
   done: boolean;
-  /** Settings section to jump to when the step is clicked. */
-  section: string;
-  /** `data-flash-id` of the control in that section to outline on arrival. */
+  /** Route to jump to when the step is clicked. */
+  path: string;
+  /** `data-flash-id` of the control on that route to outline on arrival. */
   flash?: string;
 }
 
@@ -23,7 +23,7 @@ export function GettingStarted({
   onDismiss,
 }: {
   stageState: StageState;
-  onNavigate: (sectionId: string, flash?: string) => void;
+  onNavigate: (path: string, flash?: string) => void;
   onDismiss: () => void;
 }) {
   // A fresh install already ships one View and one routed Output, so "is anything
@@ -37,28 +37,28 @@ export function GettingStarted({
       label: "Connect Planning Center",
       hint: "Enter your PCO app credentials so plans, items, and the live countdown flow in.",
       done: stageState.pcoConfigured,
-      section: "integrations",
+      path: "/settings/integrations",
       flash: "pco-credentials",
     },
     {
       label: "Select a service & plan",
       hint: "Pick the service type and the plan this machine should follow.",
       done: !!stageState.planId,
-      section: "plan",
+      path: "/plan",
       flash: "plan-selection",
     },
     {
       label: "Create a view",
       hint: "Build what a screen shows — mic slots, a dashboard, transcription, or a custom layout.",
       done: madeOwnView,
-      section: "views",
+      path: "/views",
       flash: "views-list",
     },
     {
       label: "Route a display",
       hint: "Point a screen at the View you built.",
       done: routedOwnView,
-      section: "displays",
+      path: "/displays",
       flash: "displays-list",
     },
   ];
@@ -88,7 +88,7 @@ export function GettingStarted({
             <button
               key={step.label}
               type="button"
-              onClick={() => onNavigate(step.section, step.flash)}
+              onClick={() => onNavigate(step.path, step.flash)}
               className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-gray-a3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               {step.done ? (

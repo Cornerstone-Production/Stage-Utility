@@ -12,11 +12,12 @@
 // SplitView needs the same values to size the panel and to decide between the
 // inline rail and the mobile drawer.
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useRouter, useRouterState } from "@tanstack/react-router";
-import { PanelLeftCloseIcon, PanelLeftOpenIcon, SettingsIcon } from "lucide-react";
+import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import {
   Sidebar,
+  SidebarGroupLabel,
   SidebarList,
   SidebarListItem,
   useSidebarChrome,
@@ -30,7 +31,13 @@ import { buildLabel } from "../lib/build-label";
 import { useStageState } from "../main/use-stage-state";
 import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
-import { DESTINATIONS, type Destination } from "./destinations";
+import {
+  ALL_DESTINATIONS,
+  DESTINATIONS,
+  NAV_GROUPS,
+  SETTINGS_DESTINATIONS,
+  type Destination,
+} from "./destinations";
 import { cn } from "../lib/cn";
 
 interface RailProps {
@@ -69,8 +76,11 @@ export function Rail({
     return () => { cancelled = true; };
   }, []);
 
+  // Longest match first: /settings/branding must beat /settings.
   const active =
-    DESTINATIONS.find((d) => pathname === d.path || pathname.startsWith(`${d.path}/`)) ?? null;
+    [...ALL_DESTINATIONS]
+      .sort((a, b) => b.path.length - a.path.length)
+      .find((d) => pathname === d.path || pathname.startsWith(`${d.path}/`)) ?? null;
 
   return (
     <Sidebar className="relative">
@@ -93,34 +103,30 @@ export function Rail({
       )}
 
       <SidebarList
-        items={[...DESTINATIONS]}
+        items={[...ALL_DESTINATIONS]}
         selectedItem={active ?? undefined}
         onSelectedItemChange={(d: Destination) => router.navigate({ to: d.path })}
         getItemKey={(d: Destination) => d.path}
       >
-        {DESTINATIONS.map((d) => (
+        {NAV_GROUPS.map((g) => {
+          const items = DESTINATIONS.filter((d) => g.paths.includes(d.path));
+          if (items.length === 0) return null;
+          return (
+            <Fragment key={g.label}>
+              <SidebarGroupLabel>{g.label}</SidebarGroupLabel>
+              {items.map((d) => (
+                <SidebarListItem key={d.path} item={d} icon={d.icon} title={d.label} />
+              ))}
+            </Fragment>
+          );
+        })}
+        <SidebarGroupLabel>Settings</SidebarGroupLabel>
+        {SETTINGS_DESTINATIONS.map((d) => (
           <SidebarListItem key={d.path} item={d} icon={d.icon} title={d.label} />
         ))}
       </SidebarList>
 
       <div className="mt-auto">
-        {/* Settings is still its own document in Phase 1a; it becomes routes in
-            Phase 1b, at which point it joins the list above. Quieter and smaller
-            than a destination because it is not one. */}
-        <a
-          href="/settings"
-          className={cn(
-            "flex items-center gap-2.5 mx-2 rounded-lg px-2.5 py-1.5",
-            "text-caption1 font-medium text-fg-subtle transition-colors",
-            "hover:bg-fill hover:text-fg",
-            railed && "justify-center px-0",
-          )}
-          aria-label={railed ? "Settings" : undefined}
-        >
-          <SettingsIcon className="size-3.5 shrink-0" />
-          {!railed && <span>Settings</span>}
-        </a>
-
         {/* Version, theme and collapse. Rail-aware: collapsed stacks a compact
             toggle over the expand button so the wide pill and the version never
             clip the narrow rail. */}

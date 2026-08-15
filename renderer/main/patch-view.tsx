@@ -263,8 +263,14 @@ export function PatchView() {
           </>
         )}
 
+        {/* The editor is the back of this page. Without this link it is a route
+            nobody can find — which is exactly what happened when Settings
+            dissolved and only the viewer was routed. "Settings → Patch" is also
+            no longer where it lives. */}
         <div className="mt-6 flex items-center justify-center gap-2 text-caption2 text-fg-faint">
-          <CableIcon className="size-3.5" /> Read-only · updates live · edited in Settings → Patch
+          <CableIcon className="size-3.5" />
+          <span>Read-only · updates live ·</span>
+          <a href="/patch/edit" className="text-accent hover:underline">Edit the patch</a>
         </div>
       </div>
     </div>

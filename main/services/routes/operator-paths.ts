@@ -1,5 +1,5 @@
 // Which URLs belong to the operator app (app.html) rather than the kiosk
-// (index.html) or the settings panel (settings-window.html).
+// (index.html).
 //
 // Routing is implemented twice — the `cleanUrls` Vite plugin for dev and
 // `remote-server.ts` for prod — and the two have drifted before. Both import
@@ -12,7 +12,12 @@ export const OPERATOR_PATHS = [
   "/patch",
   "/scriptview",
   "/automation",
-  "/integrations",
+  "/plan",
+  "/views",
+  "/displays",
+  // The settings panel is no longer its own document; /settings and everything
+  // under it are routes in the operator app.
+  "/settings",
 ] as const;
 
 /**

@@ -30,6 +30,14 @@ const EXPOSED = [
   "requestAnimationFrame",
   "cancelAnimationFrame",
   "MutationObserver",
+  // Web Storage, from jsdom rather than from Node. Node exposes these only
+  // behind a flag and only on some versions, so a test that touched
+  // sessionStorage passed locally and failed on CI with "sessionStorage is not
+  // defined" — the same shape as the platform gaps that have bitten this repo
+  // before. Taking them from jsdom makes the harness answer the same way
+  // everywhere, and gives each test file a storage that the teardown discards.
+  "localStorage",
+  "sessionStorage",
 ] as const;
 
 /**

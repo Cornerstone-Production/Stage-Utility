@@ -2,7 +2,7 @@
 //
 // Extracted from settings-view.tsx so the two shells cannot drift into offering
 // different toggles. The pre-paint application still lives in each entry
-// document's inline script (settings-window.html, app.html) — that has to run
+// document's inline script (app.html) — that has to run
 // before React, or the page flashes the wrong theme on load.
 //
 // The `.dark` class on <html> drives the Radix color scales.

@@ -123,6 +123,7 @@ describe("IPC channel wiring", () => {
       ["stage:setNdiEnabled", "NDI schema is dormant on this branch; the UI ships with the native app"],
       ["stage:getRemoteUrl", "the remote URL is read from stage:getState instead"],
       ["outputs:openWindow", "Electron-era window opener; the web build navigates directly"],
+      ["window:closeSettings", "Escape closed the settings WINDOW; Settings is routes inside the app now, so there is nothing to close to"],
       ["app:getInfo", "version info comes from /api/version"],
     ]);
 

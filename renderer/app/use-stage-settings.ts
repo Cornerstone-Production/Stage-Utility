@@ -1,351 +1,61 @@
-import { invoke, onNotification, type ApiError } from "../lib/api";
-import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
-import { buildLabel } from "../lib/build-label";
-import { useTheme } from "../lib/use-theme";
-import { useSidebarCollapsed } from "../lib/use-sidebar-collapsed";
-import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
-import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { useState, useEffect, useRef, Fragment } from "react";
+// Every write the settings surfaces make, and the local editor state they need.
+//
+// Lifted out of settings-view.tsx UNCHANGED - the handler bodies here were moved
+// mechanically, not retyped, so a surface that misbehaves after the move is a
+// routing problem rather than a rewritten handler. The returned object is the
+// same `SectionHandlers` the sections already take, so no section's props
+// changed either.
+//
+// It carries the slot-editor state (localSlots, slotsDirty, ...) because the
+// contract does: SectionHandlers includes updateSlot/addSlot/saveSlots and the
+// dnd sensors, which cannot exist without it. That state is local to the Views
+// surface, and only that route calls this for its slot half.
+//
+// What deliberately did NOT come along:
+//   - the four SSE subscriptions and applyAccentVar, which must outlive any one
+//     route and now live in live-wiring.ts, mounted once by the Shell
+//   - the update-restart handshake, now module-scoped in update-lifecycle.ts
+//     so it survives navigating away mid-update
+//   - navigateToSection, which becomes routing plus flash.ts
+//   - useEscapeToClose, which called window:closeSettings - meaningless once
+//     Settings is routes inside the app rather than its own window
+
+import { useState, useEffect } from "react";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
+import { useQueryClient } from "@tanstack/react-query";
+import { invoke, type ApiError } from "../lib/api";
+import { toast, confirm } from "../components/ui";
+import { useResyncOn } from "@renderer/lib/use-resync-on";
+import type { SectionHandlers } from "../settings/types";
 import {
-  SplitView,
-  Sidebar,
-  SidebarList,
-  SidebarListItem,
-  SidebarGroupLabel,
-  ScrollArea,
-  Button,
-  Tooltip,
-  toast,
-  ErrorBoundary,
-  confirm,
-} from "../components/ui";
-import {
-  Loader2Icon,
-  MonitorIcon,
-  CalendarIcon,
-  LayoutTemplateIcon,
-  CableIcon,
-  PlugIcon,
-  QrCodeIcon,
-  PaletteIcon,
-  ClockIcon,
-  DropletIcon,
-  ListChecksIcon,
-  ZapIcon,
-  SlidersHorizontalIcon,
-  PanelLeftCloseIcon,
-  PanelLeftOpenIcon,
-  ExternalLinkIcon,
-} from "lucide-react";
-import { useIsMobile } from "../lib/use-media-query";
-import { withViewTransition } from "../lib/view-transition";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { SectionItem, WirelessChannel, SectionHandlers } from "./types";
-import { PlanSection } from "./sections/plan-section";
-import { ViewsSection } from "./sections/views-section";
-import { OutputsSection } from "./sections/outputs-section";
-import { IntegrationsSection } from "./sections/integrations-section";
-import { ConnectSection } from "./sections/connect-section";
-import { BrandingSection } from "./sections/branding-section";
-import { applyAccentVar } from "../lib/apply-accent";
-import { AdvancedSection } from "./sections/advanced-section";
-import { AutomationSection } from "./sections/automation-section";
-import { ServiceHistorySection } from "./sections/service-history-section";
-import { PatchSection } from "./sections/patch-section";
-import { ScriptViewSection } from "./sections/scriptview-section";
-import { BaptismsSection } from "./sections/baptisms-section";
-import { GettingStarted } from "./getting-started";
-import { BrandHeader } from "./brand-header";
-import { BrandLogo } from "../components/brand-logo";
+  useStageStateQuery,
+  useServiceTypes,
+  usePlans,
+  useTeamPositions,
+  useWirelessChannels,
+  useLayoutTemplates,
+  useSlotPresets,
+  useUpdateStatus,
+} from "./queries";
+import { markUpdatePending } from "./update-lifecycle";
 
-// ---- helpers ----------------------------------------------------------------
-
-// sessionStorage handshake spanning the update restart: "pending" is written when
-// the operator presses Update now; the post-restart page reads "done" to show a
-// success banner. sessionStorage (not local) so it's scoped to this tab.
-const UPDATE_PENDING_KEY = "stageUtility.update.pending";
-const UPDATE_DONE_KEY = "stageUtility.update.done";
-
+/** Matches settings-view.tsx's local helper, so the moved bodies are identical. */
 function ipc<T>(channel: string, ...args: unknown[]): Promise<T> {
   return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
 }
 
-// ---- close on Escape --------------------------------------------------------
-
-function useEscapeToClose() {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (e.defaultPrevented) return;
-      const el = document.activeElement;
-      if (
-        el instanceof HTMLInputElement ||
-        el instanceof HTMLTextAreaElement ||
-        el instanceof HTMLSelectElement ||
-        (el instanceof HTMLElement && el.isContentEditable)
-      )
-        return;
-      if (document.querySelector("[data-radix-popper-content-wrapper]")) return;
-      e.preventDefault();
-      invoke("window:closeSettings");
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
-}
-
-// ---- light / dark theme -----------------------------------------------------
-//
-// The `.dark` class on <html> drives the Radix color scales. The initial value
-// is set by an inline script in settings-window.html (reading this same
-// localStorage key) so there's no flash on load.
-
-// ---- sidebar collapse (desktop icon rail) -----------------------------------
-
-// ---- sidebar section definitions --------------------------------------------
-
-const SECTIONS: SectionItem[] = [
-  { id: "plan", label: "Plan", icon: <CalendarIcon className="size-4" /> },
-  { id: "views", label: "Views", icon: <LayoutTemplateIcon className="size-4" /> },
-  { id: "scriptview", label: "ScriptView", icon: <ListChecksIcon className="size-4" /> },
-  { id: "displays", label: "Displays", icon: <MonitorIcon className="size-4" /> },
-  { id: "integrations", label: "Integrations", icon: <PlugIcon className="size-4" /> },
-  { id: "patch", label: "Patch", icon: <CableIcon className="size-4" /> },
-  { id: "connect", label: "Connect", icon: <QrCodeIcon className="size-4" /> },
-  { id: "branding", label: "Branding", icon: <PaletteIcon className="size-4" /> },
-  { id: "service-history", label: "History", icon: <ClockIcon className="size-4" /> },
-  { id: "baptisms", label: "Baptisms", icon: <DropletIcon className="size-4" /> },
-  { id: "automation", label: "Automation", icon: <ZapIcon className="size-4" /> },
-  { id: "advanced", label: "Advanced", icon: <SlidersHorizontalIcon className="size-4" /> },
-];
-
-// Per-tab header subtitles (shown under the section title in the content pane).
-const SECTION_DESC: Record<string, string> = {
-  plan: "Choose which Planning Center plan the displays follow.",
-  views: "Build and arrange what each display shows.",
-  scriptview: "Named rundown column presets for the ScriptView dashboard.",
-  displays: "Point each physical screen at a View.",
-  integrations: "Connect the gear and services that run your service.",
-  connect: "Share the display link and QR for phones on the network.",
-  branding: "Your organization's name, logo, and accent color.",
-  "service-history": "Every service you've run — timing and attendance.",
-  baptisms: "Time testimonies and baptisms live.",
-  patch: "Stage input & output patch — record it, and surface each week's to volunteers.",
-  automation: "When something happens in Stage, do something to a device.",
-  advanced: "Updates, network address, capture windows, and full config.",
-};
-
-// Nav clusters. Each group answers one question, which is what the previous set of
-// labels did not: "Output" had collected anything screen-adjacent (Patch is a
-// document, Integrations are devices), and "Identity" had become the bucket for the
-// two sections that fit nowhere — including Baptisms, which is a live stopwatch.
-/**
- * Tabs whose content is also reachable in the operator app, and what to call the
- * link.
- *
- * Two kinds, despite looking alike. History and Baptisms render the SAME
- * component in both places, so these links go to the route that replaced a
- * deleted standalone wrapper. Patch and ScriptView are different surfaces — the
- * volunteer patch view and the rundown viewer — so those links lead to a
- * genuinely separate page whose editor is the tab you are standing in.
- */
-const SECTION_PAGE: Record<string, { path: string; label: string } | undefined> = {
-  scriptview: { path: "/scriptview", label: "Open ScriptView" },
-  patch: { path: "/patch", label: "Open patch sheet" },
-  "service-history": { path: "/history", label: "Open history" },
-  baptisms: { path: "/baptism", label: "Open operator page" },
-};
-
-const NAV_GROUPS: { label: string; ids: string[] }[] = [
-  // What is shown. Patch belongs here because volunteers READ it at /patch; the
-  // "output" in its description is XLR, not a display.
-  { label: "Content", ids: ["plan", "views", "scriptview", "patch"] },
-  // Where it shows. Connect is a phone rather than a monitor, but it is the same
-  // job — getting the app onto a screen — not machine configuration.
-  { label: "Screens", ids: ["displays", "connect"] },
-  // What it talks to. Automation rules act ON integrations, so configuring a device
-  // and configuring its behaviour sit together instead of three tabs apart.
-  { label: "Devices", ids: ["integrations", "automation"] },
-  // A service you ran — one live, one recorded.
-  { label: "Services", ids: ["service-history", "baptisms"] },
-  // The install itself.
-  { label: "System", ids: ["branding", "advanced"] },
-];
-
-// ---- main settings view -----------------------------------------------------
-
-export function SettingsView() {
-  useEscapeToClose();
-  const theme = useTheme();
-  const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed();
-  const isMobile = useIsMobile();
-  const railed = collapsed && !isMobile;
+export function useStageSettings() {
   const queryClient = useQueryClient();
 
-  // Restore the tab from the URL hash (e.g. #integrations) so a refresh stays put
-  // and tabs are deep-linkable; otherwise open on Views (a better first-run landing
-  // than Plan, which assumes PCO). Sidebar order is unchanged — this is only the
-  // default active tab.
-  const [activeSection, setActiveSection] = useState<SectionItem>(() => {
-    const id = window.location.hash.replace(/^#/, "");
-    const fallback = SECTIONS.find((s) => s.id === "views") ?? SECTIONS[0];
-    return SECTIONS.find((s) => s.id === id) ?? fallback;
-  });
-  // Bumped whenever the History nav is clicked so the section remounts back to its
-  // landing list (instead of staying on the service you'd drilled into).
-  const [historyNonce, setHistoryNonce] = useState(0);
-
-  // Mirror the active tab into the URL hash. replaceState keeps tab-switching out
-  // of the history stack (so Back leaves Settings rather than cycling tabs).
-  useEffect(() => {
-    if (window.location.hash.replace(/^#/, "") !== activeSection.id) {
-      window.history.replaceState(null, "", `#${activeSection.id}`);
-    }
-  }, [activeSection]);
-
-  // Follow external hash changes (manual edit / deep link opened in-session).
-  useEffect(() => {
-    const onHash = () => {
-      const id = window.location.hash.replace(/^#/, "");
-      const next = SECTIONS.find((s) => s.id === id);
-      if (next) setActiveSection((cur) => (cur.id === next.id ? cur : next));
-    };
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
-
-  // Fetch current stage state
-  const { data: stageState, isLoading: stageLoading } = useQuery({
-    queryKey: ["stage:getState"],
-    queryFn: () => ipc<StageState>("stage:getState"),
-  });
-
-  // Apply the themeable brand accent to the settings root as it changes.
-  useEffect(() => {
-    applyAccentVar(stageState?.accentColor);
-  }, [stageState?.accentColor]);
-
-  // Fetch all service types. Gated on PCO being configured, as the plan and
-  // team-position queries below already are: without credentials the request can
-  // only fail, and it was retrying on every settings load — filling the server log
-  // with "PCO not configured" handler errors on a machine that simply has not been
-  // set up yet.
-  const { data: serviceTypes = [] } = useQuery({
-    queryKey: ["stage:listServiceTypes"],
-    queryFn: () => ipc<ServiceTypeDTO[]>("stage:listServiceTypes"),
-    enabled: !!stageState?.pcoConfigured,
-  });
-
-  // Fetch plans (depends on selected service type)
-  const { data: plans = [] } = useQuery({
-    queryKey: ["stage:listPlans", stageState?.serviceTypeId],
-    queryFn: () =>
-      stageState?.serviceTypeId
-        ? ipc<PlanDTO[]>("stage:listPlans", { serviceTypeId: stageState.serviceTypeId })
-        : Promise.resolve([]),
-    enabled: !!stageState?.serviceTypeId,
-  });
-
-  // Fetch team positions for the position dropdown (depends on service type + PCO configured)
-  const { data: teamPositions = [] } = useQuery({
-    queryKey: ["stage:listTeamPositions", stageState?.serviceTypeId],
-    queryFn: () => ipc<TeamPositionDTO[]>("stage:listTeamPositions"),
-    enabled: !!stageState?.serviceTypeId && !!stageState?.pcoConfigured,
-  });
-
-  // Fetch wireless channels
-  const { data: wirelessChannels = [] } = useQuery({
-    queryKey: ["wireless:listChannels"],
-    queryFn: () => ipc<WirelessChannel[]>("wireless:listChannels"),
-  });
-
-  // Fetch reusable custom-layout templates
-  const { data: layoutTemplates = [] } = useQuery({
-    queryKey: ["layoutTemplates:list"],
-    queryFn: () => ipc<LayoutTemplate[]>("layoutTemplates:list"),
-  });
-
-  // Fetch saved slot arrangements (presets — global, recall into any view)
-  const { data: slotPresets = [] } = useQuery({
-    queryKey: ["presets:list"],
-    queryFn: () => ipc<SlotPreset[]>("presets:list"),
-  });
-
-  // Every section is always in the nav. History used to be hidden until PCO was
-  // configured or some history existed, which meant a fresh install offered it on
-  // the landing page and the Connect tab while the sidebar pretended it did not
-  // exist — the tab looked missing rather than empty. An empty section explains
-  // itself; an absent one reads as a bug.
-  const sections = SECTIONS;
-
-  // In-app update status (git-based; surfaced in the Advanced tab).
-  const { data: updateStatus = null } = useQuery({
-    queryKey: ["update:status"],
-    queryFn: () => ipc<UpdateStatus>("update:status"),
-  });
-
-  // Tracks the running server's code version (from server:hello). Used to detect
-  // that an in-app update finished: the post-restart hello carries a new version.
-  const serverVersionRef = useRef<string | null>(null);
-  // Set once on mount from the handshake the pre-restart page left behind, so the
-  // Updates panel can show a "successfully updated" banner after the auto-reload.
-  const [justUpdated, setJustUpdated] = useState<{ version: string } | null>(() => {
-    try {
-      const raw = sessionStorage.getItem(UPDATE_DONE_KEY);
-      if (!raw) return null;
-      sessionStorage.removeItem(UPDATE_DONE_KEY);
-      return JSON.parse(raw) as { version: string };
-    } catch {
-      return null;
-    }
-  });
-  // One-shot guard so the two completion signals (server:hello version change and
-  // update:status returning to idle after the restart) can't double-reload.
-  const reloadScheduledRef = useRef(false);
-  const hasPendingUpdate = () => {
-    try {
-      return !!sessionStorage.getItem(UPDATE_PENDING_KEY);
-    } catch {
-      return false;
-    }
-  };
-  /** The update we kicked off has finished and the new build is live → record the
-   *  success banner and reload once to swap in the new assets. */
-  const finishUpdateAndReload = (version: string | null) => {
-    if (reloadScheduledRef.current) return;
-    reloadScheduledRef.current = true;
-    try {
-      sessionStorage.removeItem(UPDATE_PENDING_KEY);
-      if (version) sessionStorage.setItem(UPDATE_DONE_KEY, JSON.stringify({ version }));
-    } catch {
-      /* ignore */
-    }
-    // Brief beat so the "restarting" step paints before the reload.
-    setTimeout(() => window.location.reload(), 900);
-  };
-
-  // Detect update completion across the server restart: a server:hello whose
-  // version differs from the one captured when we pressed "Update now" means the
-  // new build is live → record it and reload this page to load the new assets.
-  useEffect(() => {
-    return onNotification("server:hello", (payload: unknown) => {
-      const version = (payload as { version?: string } | null)?.version ?? null;
-      if (!version || version === "unknown") return;
-      if (serverVersionRef.current === null) serverVersionRef.current = version;
-      let pending: { fromVersion: string | null } | null;
-      try {
-        const raw = sessionStorage.getItem(UPDATE_PENDING_KEY);
-        pending = raw ? (JSON.parse(raw) as { fromVersion: string | null }) : null;
-      } catch {
-        pending = null;
-      }
-      if (pending && version !== pending.fromVersion) {
-        finishUpdateAndReload(version);
-      }
-    });
-  }, []);
+  const { data: stageState, isLoading: stageLoading } = useStageStateQuery();
+  const { data: serviceTypes = [] } = useServiceTypes(stageState);
+  const { data: plans = [] } = usePlans(stageState);
+  const { data: teamPositions = [] } = useTeamPositions(stageState);
+  const { data: wirelessChannels = [] } = useWirelessChannels();
+  const { data: layoutTemplates = [] } = useLayoutTemplates();
+  const { data: slotPresets = [] } = useSlotPresets();
+  const { data: updateStatus = null } = useUpdateStatus();
 
   // Selected View for the Views tab master-detail (default to the first view).
   const [selectedViewId, setSelectedViewId] = useState<string>("");
@@ -398,67 +108,6 @@ export function SettingsView() {
       clearTimeout(t);
     };
   }, [slotsDirty, localSlots]);
-
-  // Subscribe to live state changes from backend
-  useEffect(() => {
-    const unsub = onNotification("stage:state-changed", (payload: unknown) => {
-      const s = payload as StageState;
-      queryClient.setQueryData(["stage:getState"], s);
-    });
-    // Telemetry rides its own channel so a meter twitch does not re-send the whole
-    // state document; merge it back so the slots editor's RF bars stay live.
-    const unsubDevices = onNotification("slots:devices", (payload: unknown) => {
-      queryClient.setQueryData(["stage:getState"], (prev: StageState | undefined) =>
-        prev ? applyDeviceTelemetry(prev, payload as Record<string, SlotDevice>) : prev,
-      );
-    });
-    return () => {
-      unsub();
-      unsubDevices();
-    };
-  }, [queryClient]);
-
-  // Live update-status pushes (availability check, apply progress). This channel
-  // now hydrates on every SSE (re)connect, so the post-restart reconnect delivers
-  // the finished state here even if the server:hello reload was missed: if we had
-  // an update in flight and it's no longer "updating" (and didn't error), the new
-  // build is live → reload to pick up its assets. This is the durable completion
-  // signal; the server:hello handler above is the faster path when it fires.
-  useEffect(() => {
-    const unsub = onNotification("update:status", (payload: unknown) => {
-      const status = payload as UpdateStatus;
-      queryClient.setQueryData(["update:status"], status);
-      if (hasPendingUpdate() && status.phase !== "updating") {
-        if (status.error) {
-          // Failed apply — server stayed on the old build. Clear the flag and let
-          // the panel show the error rather than reloading.
-          try {
-            sessionStorage.removeItem(UPDATE_PENDING_KEY);
-          } catch {
-            /* ignore */
-          }
-        } else {
-          finishUpdateAndReload(status.version ?? null);
-        }
-      }
-    });
-    return unsub;
-  }, [queryClient]);
-
-  // When Planning Center connects, refetch service types and plans
-  useEffect(() => {
-    const unsub = onNotification("integrations:state-changed", (payload: unknown) => {
-      const states = payload as IntegrationState[];
-      const pco = states.find((s) => s.id === "planning-center");
-      if (pco?.connection === "connected") {
-        queryClient.invalidateQueries({ queryKey: ["stage:listServiceTypes"] });
-        queryClient.invalidateQueries({ queryKey: ["stage:getState"] });
-        queryClient.invalidateQueries({ queryKey: ["stage:listPlans"] });
-      }
-    });
-    return unsub;
-  }, [queryClient]);
-
   // DnD sensors — mouse and touch deliberately separate.
   //
   // A single PointerSensor treats them identically: it claims the gesture on
@@ -562,36 +211,6 @@ export function SettingsView() {
     }
   }
 
-  // Jump to another settings section (with the same crossfade as the sidebar).
-  /**
-   * Switch tabs, and optionally point at the control that actually does the job.
-   *
-   * Landing on the right tab still leaves you hunting for the field, which on a
-   * dense tab like Integrations is most of the work. `flash` names a
-   * `data-flash-id` somewhere in the destination; once it has rendered, it is
-   * scrolled into view and outlined briefly. Matching by attribute rather than by
-   * ref means a section needs only to label its target, not export anything.
-   */
-  function navigateToSection(id: string, flash?: string) {
-    const sec = sections.find((s) => s.id === id);
-    if (!sec) return;
-    withViewTransition(() => setActiveSection(sec));
-    if (!flash) return;
-    // Two frames: one for React to commit the new section, one for layout to
-    // settle so scrollIntoView lands somewhere real.
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        const el = document.querySelector<HTMLElement>(`[data-flash-id="${flash}"]`);
-        if (!el) return;
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        el.classList.remove("su-flash");
-        void el.offsetWidth; // restart the animation if it is already running
-        el.classList.add("su-flash");
-        window.setTimeout(() => el.classList.remove("su-flash"), 2000);
-      }),
-    );
-  }
-
   async function handleSetPublicUrl(url: string | null) {
     try {
       const next = await ipc<StageState>("stage:setPublicUrl", { url });
@@ -627,14 +246,7 @@ export function SettingsView() {
       // Remember the version we're updating FROM, so the server:hello after the
       // restart (carrying a new version) tells us the apply finished — then we
       // reload this page to pick up the new assets and show a success banner.
-      try {
-        sessionStorage.setItem(
-          UPDATE_PENDING_KEY,
-          JSON.stringify({ fromVersion: serverVersionRef.current, at: Date.now() }),
-        );
-      } catch {
-        /* ignore */
-      }
+      markUpdatePending();
       toast.success("Updating… this page will reload automatically when it's done.");
     } catch (err) {
       toast.error(`Failed to start update: ${String(err)}`);
@@ -1197,206 +809,24 @@ export function SettingsView() {
     sensors,
   };
 
-  if (stageLoading || !stageState) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <Loader2Icon className="size-5 text-gray-9 animate-spin" />
-      </div>
-    );
-  }
-
-  function renderSection() {
-    if (!stageState) return null;
-    switch (activeSection.id) {
-      case "plan":
-        return (
-          <>
-            {!stageState.onboardingDismissed && (
-              <GettingStarted
-                stageState={stageState}
-                onNavigate={navigateToSection}
-                onDismiss={handleDismissOnboarding}
-              />
-            )}
-            <PlanSection
-              stageState={stageState}
-              serviceTypes={serviceTypes}
-              plans={plans}
-              isRefreshing={isRefreshing}
-              handlers={handlers}
-            />
-          </>
-        );
-      case "views":
-        return (
-          <ViewsSection
-            stageState={stageState}
-            wirelessChannels={wirelessChannels}
-            teamPositions={teamPositions}
-            layoutTemplates={layoutTemplates}
-            selectedViewId={selectedViewId}
-            setSelectedViewId={setSelectedViewId}
-            localSlots={localSlots}
-            slotsDirty={slotsDirty}
-            isSavingSlots={isSavingSlots}
-            resolvedDraftSlots={resolvedDraftSlots}
-            slotPresets={slotPresets}
-            handlers={handlers}
-          />
-        );
-      case "scriptview":
-        return <ScriptViewSection />;
-      case "displays":
-        return <OutputsSection stageState={stageState} handlers={handlers} />;
-      case "integrations":
-        return <IntegrationsSection />;
-      case "connect":
-        return <ConnectSection stageState={stageState} handlers={handlers} />;
-      case "branding":
-        return <BrandingSection stageState={stageState} handlers={handlers} />;
-      case "service-history":
-        return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
-            <ServiceHistorySection key={historyNonce} />
-          </div>
-        );
-      case "baptisms":
-        return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
-            <BaptismsSection />
-          </div>
-        );
-      case "patch":
-        return (
-          <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
-            <PatchSection />
-          </div>
-        );
-      case "automation":
-        return <AutomationSection />;
-      case "advanced":
-        return <AdvancedSection stageState={stageState} updateStatus={updateStatus} handlers={handlers} justUpdated={justUpdated} onDismissJustUpdated={() => setJustUpdated(null)} />;
-    }
-  }
-
-  return (
-    <SplitView
-      collapsed={collapsed}
-      mobileTitle={activeSection.label}
-      sidebar={
-        <Sidebar>
-          {/* Header row: brand (expanded) or just the expand toggle (rail). The
-              desktop collapse toggle is hidden on mobile (the drawer is always
-              shown expanded). */}
-          {railed ? (
-            stageState.appLogo ? (
-              <div className="flex flex-col items-center pt-2">
-                <BrandLogo
-                  logo={stageState.appLogo}
-                  monochrome={stageState.appLogoMonochrome}
-                  className="size-8 rounded-md text-gray-12"
-                />
-              </div>
-            ) : null
-          ) : (
-            <BrandHeader
-              name={stageState.appName}
-              logo={stageState.appLogo}
-              monochrome={stageState.appLogoMonochrome}
-            />
-          )}
-
-          <SidebarList
-            items={sections}
-            selectedItem={activeSection}
-            onSelectedItemChange={(s: SectionItem) => withViewTransition(() => {
-              if (s.id === "service-history") setHistoryNonce((n) => n + 1);
-              setActiveSection(s);
-            })}
-            getItemKey={(s: SectionItem) => s.id}
-          >
-            {NAV_GROUPS.map((g) => {
-              const items = sections.filter((s) => g.ids.includes(s.id));
-              if (items.length === 0) return null;
-              return (
-                <Fragment key={g.label}>
-                  <SidebarGroupLabel>{g.label}</SidebarGroupLabel>
-                  {items.map((section) => (
-                    <SidebarListItem key={section.id} item={section} icon={section.icon} title={section.label} />
-                  ))}
-                </Fragment>
-              );
-            })}
-          </SidebarList>
-
-          {/* Footer: theme toggle + the sidebar collapse control (moved here from
-              the cramped header). Rail-aware — collapsed stacks a compact toggle
-              over the expand button so the wide pill + version never clip the
-              narrow rail. */}
-          {railed ? (
-            <div className="mt-auto flex flex-col items-center gap-1.5 px-2 py-2.5">
-              <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} vertical />
-              <Button variant="transparent" size="small" iconOnly aria-label="Expand sidebar" onClick={toggleCollapsed}>
-                <PanelLeftOpenIcon className="size-4 text-gray-11" />
-              </Button>
-            </div>
-          ) : (
-            <div className="mt-auto flex items-center justify-between gap-2 px-3 py-2.5">
-              {/* The label truncates in the sidebar, so the hover carries the whole
-                  build identity — version, track, commit and date. That is what gets
-                  asked for when something needs diagnosing, and it saves opening
-                  Advanced to read it. */}
-              <Tooltip label={buildLabel(updateStatus)} side="top">
-                <span className="min-w-0 text-[11.5px] leading-none text-fg-subtle tabular-nums truncate">
-                  {updateStatus?.version ? `v${updateStatus.version}` : ""}
-                  {updateStatus?.branch ? ` · ${updateStatus.branch}` : ""}
-                </span>
-              </Tooltip>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <ThemeTogglePill mode={theme.mode} setMode={theme.setMode} />
-                <Button
-                  variant="transparent"
-                  size="small"
-                  iconOnly
-                  aria-label="Collapse sidebar"
-                  onClick={toggleCollapsed}
-                  className="max-sm:hidden"
-                >
-                  <PanelLeftCloseIcon className="size-4 text-gray-11" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </Sidebar>
-      }
-    >
-      <ScrollArea className="h-full">
-        {/* Per-tab header (title + subtitle), matching the mockup. */}
-        <header className="px-5 max-sm:px-3 pt-6 max-sm:pt-5 flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-title2 font-semibold text-fg leading-tight">{activeSection.label}</h1>
-            {SECTION_DESC[activeSection.id] && (
-              <p className="text-footnote text-fg-muted mt-1 max-w-[68ch]">{SECTION_DESC[activeSection.id]}</p>
-            )}
-          </div>
-          {/* Every tab that has a standalone page gets the same header link, so a
-              section is never the odd one out — declared once rather than copied
-              per tab. */}
-          {SECTION_PAGE[activeSection.id] && (
-            <a
-              href={SECTION_PAGE[activeSection.id]!.path}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-caption1 text-fg-muted transition-colors hover:bg-fill hover:text-fg"
-            >
-              {SECTION_PAGE[activeSection.id]!.label} <ExternalLinkIcon className="size-3.5" />
-            </a>
-          )}
-        </header>
-        {/* Keep a render error in one section from blanking the whole window. Keyed
-            by the active tab so switching sections resets the boundary. */}
-        <ErrorBoundary key={activeSection.id}>{renderSection()}</ErrorBoundary>
-      </ScrollArea>
-    </SplitView>
-  );
+  return {
+    stageState,
+    stageLoading,
+    serviceTypes,
+    plans,
+    teamPositions,
+    wirelessChannels,
+    layoutTemplates,
+    slotPresets,
+    updateStatus,
+    selectedViewId,
+    setSelectedViewId,
+    localSlots,
+    slotsDirty,
+    isSavingSlots,
+    isRefreshing,
+    resolvedDraftSlots,
+    handleDismissOnboarding,
+    handlers,
+  };
 }
