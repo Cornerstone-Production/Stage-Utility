@@ -41,6 +41,19 @@ function sectionComponents(): string[] {
   return out;
 }
 
+/**
+ * Every app source, with COMMENTS STRIPPED.
+ *
+ * Stripping matters: this guard passed while ViewsSection was orphaned, because
+ * a comment in view-editor-route.tsx explaining that it renders ViewDetail
+ * "rather than ViewsSection" contained the name. A scan prose can satisfy is a
+ * scan that reports what you hoped rather than what is true — the exact failure
+ * this repository has hit before with a route-coverage check.
+ *
+ * Only comments are removed, and only whole ones: string contents are left
+ * alone, because over-stripping is the OTHER failure this repo has hit, where a
+ * scan swallowed real code and hid a route that existed.
+ */
 function appSources(): string {
   let all = "";
   const walk = (dir: string) => {
@@ -48,12 +61,20 @@ function appSources(): string {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
       else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith(".test.ts") && !entry.name.endsWith(".test.tsx")) {
-        all += readFileSync(full, "utf8");
+        all += stripComments(readFileSync(full, "utf8"));
       }
     }
   };
   walk(APP_DIR);
   return all;
+}
+
+/** Remove /* block *\/ and // line comments. Deliberately simple. */
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/^\s*\/\/.*$/gm, " ")
+    .replace(/\s\/\/[^\n"'`]*$/gm, " ");
 }
 
 describe("every settings section is still reachable", () => {
@@ -86,6 +107,26 @@ describe("every settings section is still reachable", () => {
         `${name} IS routed — remove it from NOT_ROUTED so the list keeps meaning something`,
       );
     }
+  });
+
+  test("a component named only in a comment does not count as routed", () => {
+    // The bug this test itself had. Without stripping, a comment reading
+    // "rather than ViewsSection" satisfied the scan while ViewsSection was
+    // reachable from nowhere.
+    const stripped = stripComments(`
+      // renders ViewDetail rather than GhostSection
+      /* GhostSection is not used here */
+      const x = 1; // trailing mention of GhostSection
+    `);
+    assert.equal(/\bGhostSection\b/.test(stripped), false, "comments must not satisfy the scan");
+  });
+
+  test("stripping leaves real code alone", () => {
+    // Over-stripping is the other failure: a scan that swallowed real code once
+    // hid a route that existed.
+    const stripped = stripComments('import { RealSection } from "./x";\nconst u = "https://example.com/a";');
+    assert.ok(/\bRealSection\b/.test(stripped), "real identifiers must survive");
+    assert.ok(stripped.includes("https://example.com/a"), "string contents must survive");
   });
 
   test("every NOT_ROUTED entry gives a reason", () => {

@@ -1,0 +1,167 @@
+// A live preview that only holds a connection while you can see it.
+//
+// Each ViewPreview is an iframe running the real kiosk page, and every kiosk
+// page opens a LONG-LIVED SSE stream. A browser allows roughly six concurrent
+// connections per origin over HTTP/1.1, so a Screens page with eight displays
+// exhausted the pool: the previews after the sixth never loaded, and the page's
+// own /api/state request queued behind them and timed out. The symptom looked
+// like a slow server; the cause was this page holding every connection open.
+//
+// Two limits fix it, and both are needed:
+//   - visibility, so a preview scrolled off screen gives its connection back;
+//   - a hard cap, because a large monitor can have more than six cards visible
+//     at once and no amount of scrolling helps.
+//
+// The real fix is the SharedWorker SSE in lib/api.ts, now ON by default: every
+// tab and every preview iframe on the machine shares ONE event stream, so a
+// preview costs a short page load rather than a permanent connection. This file
+// is the backstop for when that is unavailable — a browser without SharedWorker,
+// or a worker the heartbeat had to abandon — where the old limit still bites.
+
+import { useEffect, useRef, useState } from "react";
+import { PlayIcon } from "lucide-react";
+import { ViewPreview } from "./view-preview";
+
+/**
+ * How many previews may stream at once.
+ *
+ * Generous, because sharing one stream is what actually removes the constraint
+ * and this is only the fallback. Kept finite anyway: a hundred iframes is a
+ * memory and CPU problem on a Raspberry Pi long before it is a connection
+ * problem, and nothing else bounds how many screens an operator can create.
+ */
+const MAX_LIVE_PREVIEWS = 12;
+
+/** Ids currently streaming, and everyone waiting for a slot to free up. */
+const live = new Set<symbol>();
+const waiting = new Set<() => void>();
+
+function acquire(token: symbol): boolean {
+  if (live.has(token)) return true;
+  if (live.size >= MAX_LIVE_PREVIEWS) return false;
+  live.add(token);
+  return true;
+}
+
+function release(token: symbol): void {
+  if (!live.delete(token)) return;
+  // Wake ONE waiter, not all of them: waking every waiter would have them all
+  // claim a slot at once and blow straight back through the cap.
+  const next = waiting.values().next();
+  if (!next.done) {
+    waiting.delete(next.value);
+    next.value();
+  }
+}
+
+export function LazyPreview({
+  viewId,
+  aspect,
+  href,
+  hrefTitle,
+}: {
+  viewId: string;
+  aspect?: number;
+  /** When set, a STREAMING preview becomes a link opening this in a new tab.
+   *  Only the streaming branch: the paused placeholder is a button whose job is
+   *  to load the preview, and a button inside an anchor would both navigate and
+   *  never load it. */
+  href?: string;
+  hrefTitle?: string;
+}) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const tokenRef = useRef<symbol>(Symbol("preview"));
+  const [visible, setVisible] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  // Set when the operator asks for this one specifically, which jumps the queue
+  // rather than leaving them with a placeholder they cannot resolve.
+  const [forced, setForced] = useState(false);
+
+  // Only render while on screen. rootMargin starts it slightly before it
+  // arrives, so scrolling does not feel like it is waiting on you.
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+    const obs = new IntersectionObserver(
+      ([entry]) => setVisible(entry.isIntersecting),
+      { rootMargin: "200px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  // Claim a slot when visible; give it back when not. The cleanup is what makes
+  // scrolling free connections rather than accumulate them.
+  //
+  // Scheduled rather than run inline: claiming may have to WAIT for a slot, so
+  // it is asynchronous by nature, and setting state synchronously inside an
+  // effect triggers cascading renders (the compiler lint rejects it).
+  useEffect(() => {
+    const token = tokenRef.current;
+    let cancelled = false;
+
+    if (!visible && !forced) {
+      release(token);
+      queueMicrotask(() => { if (!cancelled) setStreaming(false); });
+      return () => { cancelled = true; };
+    }
+
+    const tryClaim = () => {
+      if (cancelled) return;
+      if (acquire(token)) queueMicrotask(() => { if (!cancelled) setStreaming(true); });
+      else waiting.add(tryClaim);
+    };
+    queueMicrotask(tryClaim);
+
+    return () => {
+      cancelled = true;
+      waiting.delete(tryClaim);
+      release(token);
+    };
+  }, [visible, forced]);
+
+  return (
+    <div ref={boxRef}>
+      {streaming ? (
+        href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            title={hrefTitle}
+            className="block rounded-xl transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <ViewPreview viewId={viewId} aspect={aspect} />
+          </a>
+        ) : (
+          <ViewPreview viewId={viewId} aspect={aspect} />
+        )
+      ) : (
+        <button
+          type="button"
+          onClick={() => setForced(true)}
+          className="grid aspect-video w-full place-items-center gap-1.5 rounded-lg border border-dashed border-line text-fg-subtle transition-colors hover:bg-fill hover:text-fg"
+          aria-label="Load this preview"
+        >
+          <PlayIcon className="size-4" />
+          <span className="text-caption2">
+            {visible ? "Preview paused — tap to load" : "Preview"}
+          </span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Test seam: the cap, and the current live count. */
+export const __previewLimits = {
+  MAX_LIVE_PREVIEWS,
+  liveCount: () => live.size,
+  reset: () => {
+    live.clear();
+    waiting.clear();
+  },
+};

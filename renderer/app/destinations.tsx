@@ -13,10 +13,9 @@ import type { FunctionComponent, ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
 import {
   CableIcon,
-  CalendarIcon,
+  HouseIcon,
   ClockIcon,
   DropletIcon,
-  LayoutTemplateIcon,
   ListChecksIcon,
   MonitorIcon,
   PaletteIcon,
@@ -34,14 +33,14 @@ import { ServiceHistorySection } from "../settings/sections/service-history-sect
 import { AutomationSection } from "../settings/sections/automation-section";
 import { IntegrationsSection } from "../settings/sections/integrations-section";
 import { PatchSection } from "../settings/sections/patch-section";
+import { HomeRoute } from "./home/home-route";
+import { ScreensRoute } from "./screens/screens-route";
+import { ViewEditorRoute } from "./screens/view-editor-route";
 import { ScriptViewSection } from "../settings/sections/scriptview-section";
 import {
   AdvancedRoute,
   BrandingRoute,
   ConnectRoute,
-  DisplaysRoute,
-  PlanRoute,
-  ViewsRoute,
 } from "./settings-routes";
 
 export interface Destination {
@@ -59,18 +58,18 @@ export interface Destination {
 /** Work surfaces — the rail proper. */
 export const DESTINATIONS: readonly Destination[] = [
   {
-    path: "/plan",
-    label: "Plan",
-    description: "Choose which Planning Center plan the displays follow.",
-    icon: <CalendarIcon className="size-4" />,
-    Component: PlanRoute,
+    path: "/",
+    label: "Home",
+    description: "This week's service, and what still needs setting up.",
+    icon: <HouseIcon className="size-4" />,
+    Component: HomeRoute,
   },
   {
-    path: "/views",
-    label: "Views",
-    description: "Build and arrange what each display shows.",
-    icon: <LayoutTemplateIcon className="size-4" />,
-    Component: ViewsRoute,
+    path: "/screens",
+    label: "Screens",
+    description: "Every physical screen, what it shows, and whether it is on.",
+    icon: <MonitorIcon className="size-4" />,
+    Component: ScreensRoute,
   },
   {
     path: "/scriptview",
@@ -87,13 +86,6 @@ export const DESTINATIONS: readonly Destination[] = [
     // The volunteer-facing read view, NOT the settings editor. These are
     // different surfaces; the editor is reached from within this one.
     Component: PatchView,
-  },
-  {
-    path: "/displays",
-    label: "Displays",
-    description: "Point each physical screen at a View.",
-    icon: <MonitorIcon className="size-4" />,
-    Component: DisplaysRoute,
   },
   {
     path: "/automation",
@@ -172,12 +164,15 @@ export const ALL_DESTINATIONS: readonly Destination[] = [
  * Deferred in Phase 1a because six destinations needed no grouping. The rail
  * now carries twelve.
  */
+/** Home sits above the groups rather than inside one — it is the front door. */
+export const UNGROUPED_PATHS = ["/"];
+
 export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // What is shown. Patch belongs here because volunteers READ it at /patch; the
   // "output" in its description is XLR, not a display.
-  { label: "Content", paths: ["/plan", "/views", "/scriptview", "/patch"] },
+  { label: "Content", paths: ["/scriptview", "/patch"] },
   // Where it shows.
-  { label: "Screens", paths: ["/displays"] },
+  { label: "Screens", paths: ["/screens"] },
   // What it talks to. Automation rules act ON integrations.
   { label: "Devices", paths: ["/automation"] },
   // A service you ran — one live, one recorded.
@@ -220,4 +215,6 @@ export const NESTED_ROUTES: readonly { path: string; Component: FunctionComponen
   { path: "/scriptview/$serviceType/$layout", Component: ScriptViewPlanRoute },
   { path: "/scriptview/presets", Component: ScriptViewSection },
   { path: "/patch/edit", Component: PatchSection },
+  // A view's editor is its own page rather than a panel beside a master list.
+  { path: "/screens/$viewId/edit", Component: ViewEditorRoute },
 ];

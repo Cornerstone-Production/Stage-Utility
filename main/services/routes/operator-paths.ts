@@ -13,6 +13,8 @@ export const OPERATOR_PATHS = [
   "/scriptview",
   "/automation",
   "/plan",
+  "/screens",
+  // Kept so the paths they replaced still redirect rather than 404.
   "/views",
   "/displays",
   // The settings panel is no longer its own document; /settings and everything
@@ -29,6 +31,10 @@ export const OPERATOR_PATHS = [
  */
 export function isOperatorPath(pathname: string): boolean {
   const clean = pathname.split("?")[0].split("#")[0];
+  // The root is Home now. Matched exactly and never by prefix: "/" is a prefix
+  // of every path, so folding it into the loop below would claim /display-1 and
+  // black out every wall screen.
+  if (clean === "" || clean === "/") return true;
   return OPERATOR_PATHS.some(
     (p) => clean === p || clean === `${p}/` || clean.startsWith(`${p}/`),
   );

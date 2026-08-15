@@ -1142,6 +1142,7 @@ export function LayoutEditor({
   onSaveTemplate,
   onUpdateTemplate,
   onDeleteTemplate,
+  startEditing = false,
 }: {
   view: View;
   slotsViews: View[];
@@ -1149,6 +1150,8 @@ export function LayoutEditor({
   onSave: (layout: LayoutDTO) => Promise<void>;
   onSaveTemplate: (name: string, layout: LayoutDTO) => Promise<void>;
   onUpdateTemplate: (id: string, patch: { name?: string; layout?: LayoutDTO }) => Promise<void>;
+  /** Open straight into editing, for callers that arrived to edit. */
+  startEditing?: boolean;
   onDeleteTemplate: (id: string) => Promise<void>;
 }) {
   const data = useLayoutData();
@@ -1212,7 +1215,10 @@ export function LayoutEditor({
   );
   // View-only by default: a custom view opens as a clean preview until "Edit" is
   // clicked, so a stray drag on a live display's layout can't mutate it.
-  const [isEditing, setIsEditing] = useState(false);
+  // Starts in preview unless the caller arrived specifically to edit. Reaching
+  // this from a screen's "Edit layout" and then having to press "Edit layout"
+  // again is the same button twice for one intent.
+  const [isEditing, setIsEditing] = useState(startEditing);
   const [confirmLeave, setConfirmLeave] = useState(false);
   // Reusable object/container groups (loaded from the global library).
   const [groups, setGroups] = useState<LayoutGroup[]>([]);

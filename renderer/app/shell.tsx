@@ -9,6 +9,7 @@
 
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { SplitView } from "../components/ui/split-view";
+import { useRouteResetKey } from "./route-reset";
 import { Rail } from "./rail";
 import { ContextBar } from "./context-bar";
 import { ALL_DESTINATIONS } from "./destinations";
@@ -41,6 +42,7 @@ export function Shell() {
     .sort((a, b) => b.path.length - a.path.length)
     .find((d) => pathname === d.path || pathname.startsWith(`${d.path}/`));
   const { collapsed, toggle } = useSidebarCollapsed();
+  const resetKey = useRouteResetKey();
   // Mounted HERE, not on a route: these subscriptions must outlive any single
   // page. On a route they would unsubscribe the moment you navigated away, and
   // the app would stop seeing live changes until you happened to come back.
@@ -75,7 +77,11 @@ export function Shell() {
           <ContextBar />
           <PageHeader />
           <main className="flex-1 min-h-0 overflow-y-auto">
-            <Outlet />
+            {/* Keyed so re-selecting the active rail item remounts the route,
+                returning it to its top view. */}
+            <div key={resetKey} className="contents">
+              <Outlet />
+            </div>
           </main>
         </div>
       </SplitView>

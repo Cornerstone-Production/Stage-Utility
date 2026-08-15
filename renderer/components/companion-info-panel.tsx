@@ -9,34 +9,7 @@ import {
   toast,
 } from "./ui";
 import { CopyIcon } from "lucide-react";
-
-// Copy that also works in a non-secure context (prod is served over plain HTTP,
-// where navigator.clipboard is undefined). Falls back to a hidden textarea +
-// execCommand("copy").
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (window.isSecureContext && navigator.clipboard) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // fall through to the legacy path
-  }
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    return ok;
-  } catch {
-    return false;
-  }
-}
+import { copyText } from "../lib/clipboard";
 
 function CopyField({ label, value }: { label: string; value: string }) {
   return (

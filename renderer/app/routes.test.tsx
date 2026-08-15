@@ -7,7 +7,8 @@ import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
-const { DESTINATIONS, SETTINGS_DESTINATIONS, ALL_DESTINATIONS, NAV_GROUPS } = await import("./destinations.js");
+const { DESTINATIONS, SETTINGS_DESTINATIONS, ALL_DESTINATIONS, NAV_GROUPS, UNGROUPED_PATHS } = await import("./destinations.js");
+const { isOperatorPath } = await import("../../main/services/routes/operator-paths.js");
 const { OPERATOR_PATHS } = await import("../../main/services/routes/operator-paths.js");
 
 after(() => {
@@ -18,19 +19,30 @@ describe("operator destinations", () => {
   test("every destination is a path the server routes to the operator app", () => {
     // A rail entry the server does not claim renders the kiosk instead: the
     // link looks right, and clicking it leaves the shell entirely.
+    // Asked through isOperatorPath rather than the raw list, because "/" is
+    // deliberately special-cased there: as a list entry it would prefix-match
+    // every path and claim /display-N, blacking out every wall screen.
     for (const d of ALL_DESTINATIONS) {
-      const claimed = OPERATOR_PATHS.some((p) => d.path === p || d.path.startsWith(`${p}/`));
-      assert.ok(claimed, `${d.path} is in the rail but the server does not route it`);
+      assert.ok(isOperatorPath(d.path), `${d.path} is in the rail but the server does not route it`);
     }
   });
 
   test("every operator path the server claims has a destination", () => {
     // The reverse gap is a page that exists and is unreachable. Asserted as an
     // EXACT set rather than a count, so adding one on either side fails loudly.
-    const railTops = new Set(ALL_DESTINATIONS.map((d) => `/${d.path.split("/")[1]}`));
+    // "/" is excluded from both sides: it is routed by the special case above,
+    // not by the list. Every OTHER operator path must have a destination.
+    const railTops = new Set(
+      ALL_DESTINATIONS.filter((d) => d.path !== "/").map((d) => `/${d.path.split("/")[1]}`),
+    );
+    // Retired paths are routed for their REDIRECTS (see redirects.tsx) and
+    // deliberately have no rail entry: /plan's content is Home's, and /views
+    // and /displays merged into /screens. They stay routed so bookmarks land.
+    const retired = new Set(["/plan", "/views", "/displays"]);
+    const expected = OPERATOR_PATHS.filter((p) => !retired.has(p));
     assert.deepEqual(
       [...railTops].sort(),
-      [...OPERATOR_PATHS].sort(),
+      [...expected].sort(),
       "the rail and the server's operator paths must be the same set",
     );
   });
@@ -44,7 +56,9 @@ describe("operator destinations", () => {
     // In no group it renders outside the list; in two it renders twice. Both
     // are silent - the rail simply looks wrong, with nothing failing.
     const grouped = NAV_GROUPS.flatMap((g) => g.paths);
-    for (const d of DESTINATIONS) {
+    // Home sits above the groups rather than inside one - it is the front door,
+    // not a member of a category.
+    for (const d of DESTINATIONS.filter((d) => !UNGROUPED_PATHS.includes(d.path))) {
       const count = grouped.filter((p) => p === d.path).length;
       assert.equal(count, 1, `${d.path} appears in ${count} nav groups`);
     }
@@ -123,5 +137,26 @@ describe("the kiosk no longer serves operator surfaces", () => {
     assert.equal(await exists("../main/baptism-operator-view.tsx"), false, "baptism-operator-view.tsx must be deleted");
     assert.equal(await exists("../main/patch-view.tsx"), true, "patch-view.tsx is a distinct surface and must stay");
     assert.equal(await exists("../main/scriptview-index-view.tsx"), true, "scriptview-index-view.tsx is a distinct surface and must stay");
+  });
+});
+
+describe("retired paths still land somewhere", () => {
+  test("every moved route points at a destination that exists", async () => {
+    // A redirect to a path with no route is a 404 with extra steps - and these
+    // are paths that SHIPPED, so they are in bookmarks and in Getting Started.
+    const { MOVED_ROUTES } = await import("./redirects.js");
+    const known = new Set(ALL_DESTINATIONS.map((d) => d.path));
+    for (const [from, to] of Object.entries(MOVED_ROUTES)) {
+      assert.ok(known.has(to), `${from} redirects to ${to}, which is not a routed destination`);
+    }
+  });
+
+  test("no retired path is also a live destination", () => {
+    // Both a redirect and a destination for one path is ambiguous, and which
+    // wins depends on route order rather than intent.
+    const known = new Set(ALL_DESTINATIONS.map((d) => d.path));
+    for (const from of ["/plan", "/views", "/displays"]) {
+      assert.equal(known.has(from), false, `${from} is retired but still a destination`);
+    }
   });
 });

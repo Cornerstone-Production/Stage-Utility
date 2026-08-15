@@ -8,6 +8,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { Shell } from "./shell";
 import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations";
 import { SettingsIndexRoute } from "./settings-index";
+import { MOVED_ROUTES, makeRedirect } from "./redirects";
 import { ErrorBoundaryView } from "../components/ui/error-boundary-view";
 
 const rootRoute = createRootRoute({
@@ -50,6 +51,16 @@ const routes = [
     component: SettingsIndexRoute,
     errorComponent: ErrorBoundaryView,
   }),
+  // Paths that shipped and then moved. They redirect rather than 404 - see
+  // redirects.tsx.
+  ...Object.entries(MOVED_ROUTES).map(([from, to]) =>
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: from,
+      component: makeRedirect(to),
+      errorComponent: ErrorBoundaryView,
+    }),
+  ),
 ];
 
 const routeTree = rootRoute.addChildren(routes);

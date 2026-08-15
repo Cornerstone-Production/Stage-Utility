@@ -769,11 +769,55 @@ function reportChannels(): void {
 //   Enable:  localStorage.setItem("stage:sharedSse", "1")  (then reload)
 let sharedSse = (() => {
   try {
-    return typeof SharedWorker !== "undefined" && localStorage.getItem("stage:sharedSse") === "1";
+    // ON by default now that the heartbeat below exists. One SSE per MACHINE
+    // instead of one per tab and per iframe is not a micro-optimisation here: a
+    // browser allows ~6 concurrent connections per origin over HTTP/1.1, and the
+    // Screens page renders a live preview iframe per display. With eight
+    // displays the seventh onward never loaded and the page's own /api/state
+    // request queued behind them until it timed out.
+    //   Opt out: localStorage.setItem("stage:sharedSse", "0")  (then reload)
+    return typeof SharedWorker !== "undefined" && localStorage.getItem("stage:sharedSse") !== "0";
   } catch {
     return false;
   }
 })();
+
+/** Wrappers added to the direct stream while the worker is unavailable, so a
+ *  recovery can remove exactly these and leave real direct listeners alone. */
+const fallbackWrappers: SseListener[] = [];
+
+/** Test seam for the worker fallback/recovery bookkeeping. */
+export const __sseFallback = {
+  wrapperCount: () => fallbackWrappers.length,
+  listenerCount: () => sseListeners.length,
+  handlerChannels: () => [...workerHandlers.keys()],
+  abandon: (why: string) => abandonWorker(why),
+  /** Re-enter the "worker is live" state, as a retry does just before it calls
+   *  ensureWorker(). Without this a test cannot reach the failed-retry path,
+   *  because abandonWorker early-returns once already abandoned. */
+  simulateRetryStart: () => { sharedSse = true; },
+  /** Put a callback in the worker registry, as a tab running ON the worker
+   *  would have. jsdom has no SharedWorker, so without this the registry is
+   *  empty, no wrappers are ever built, and every assertion about them passes
+   *  vacuously. */
+  seedWorkerHandler: (channel: string) => {
+    const set = workerHandlers.get(channel) ?? new Set();
+    set.add(() => {});
+    workerHandlers.set(channel, set);
+  },
+  reset: () => {
+    fallbackWrappers.length = 0;
+    sseListeners.length = 0;
+    workerHandlers.clear();
+  },
+};
+
+/** How often a tab checks the worker is still delivering. */
+const WORKER_PING_MS = 15_000;
+/** How long a missed pong is tolerated before abandoning the worker. */
+const WORKER_PONG_TIMEOUT_MS = 5_000;
+let workerPingTimer: ReturnType<typeof setInterval> | null = null;
+let workerPongTimer: ReturnType<typeof setTimeout> | null = null;
 const workerHandlers = new Map<string, Set<(payload: unknown) => void>>();
 let sseWorker: SharedWorker | null = null;
 
@@ -782,13 +826,23 @@ function ensureWorker(): boolean {
   try {
     sseWorker = new SharedWorker(new URL("./sse-shared-worker.ts", import.meta.url), { type: "module" });
     sseWorker.port.onmessage = (ev: MessageEvent) => {
-      const { channel, data } = ev.data as { channel: string; data: unknown };
+      const msg = ev.data as { type?: string; streamOpen?: boolean; channel?: string; data?: unknown };
+      if (msg.type === "pong") {
+        // Answered: the worker is alive. Whether its STREAM is alive is a
+        // separate question, and a worker with a dead stream is the failure
+        // that kept this off by default - so that counts as no answer.
+        if (workerPongTimer) { clearTimeout(workerPongTimer); workerPongTimer = null; }
+        if (msg.streamOpen === false) abandonWorker("its event stream is closed");
+        return;
+      }
+      const { channel, data } = msg as { channel: string; data: unknown };
       const set = workerHandlers.get(channel);
       if (set) for (const cb of set) {
         try { cb(data); } catch (err) { console.error(`[api] SSE handler error for "${channel}":`, err); }
       }
     };
     sseWorker.port.start();
+    startWorkerHeartbeat();
     addEventListener("pagehide", () => {
       try { sseWorker?.port.postMessage({ type: "bye" }); } catch { /* ignore */ }
     });
@@ -799,6 +853,133 @@ function ensureWorker(): boolean {
     sharedSse = false; // permanent fallback for this session
     return false;
   }
+}
+
+/**
+ * Stop trusting the worker and reconnect this tab directly.
+ *
+ * The whole reason the shared worker was off by default: a worker can be
+ * orphaned, or keep running with a dead stream, and a tab had no way to notice.
+ * Three tabs sat three state-changes stale with nothing reporting it. This is
+ * the escape hatch - noisy in the console on purpose, because a machine falling
+ * back to per-tab streams is worth knowing about.
+ */
+function abandonWorker(why: string): void {
+  if (!sharedSse && !sseWorker) return;
+  console.warn(`[api] shared SSE worker abandoned (${why}) — falling back to a direct stream`);
+  stopWorkerHeartbeat();
+  scheduleWorkerRetry();
+  try { sseWorker?.port.postMessage({ type: "bye" }); } catch { /* it may already be gone */ }
+  sseWorker = null;
+  sharedSse = false; // until a retry succeeds — see scheduleWorkerRetry
+  // Re-establish everything the worker was carrying, directly.
+  //
+  // Only build the fallback wrappers once. A failed RETRY re-enters here while
+  // the previous fallback is still wired up, and rebuilding then would leave two
+  // wrappers per channel - every event handled twice, every list rendered twice.
+  if (fallbackWrappers.length > 0) {
+    ensureEventSource();
+    reportChannels();
+    return;
+  }
+  // workerHandlers is KEPT, not drained: it is the canonical registry of
+  // parsed-payload callbacks, and a later recovery needs it intact. The two
+  // transports disagree about shape — sseListeners holds MessageEvent handlers
+  // while the worker delivers already-parsed data — so each callback gets a
+  // wrapper, and the wrappers are remembered so recovery can unhook exactly
+  // them rather than guessing.
+  for (const [channel, callbacks] of workerHandlers) {
+    for (const cb of callbacks) {
+      const handler = (e: MessageEvent) => {
+        try {
+          cb(JSON.parse(e.data));
+        } catch (err) {
+          console.error(`[api] SSE handler error for "${channel}":`, err);
+        }
+      };
+      fallbackWrappers.push({ channel, handler });
+      sseListeners.push({ channel, handler });
+    }
+  }
+  ensureEventSource();
+  for (const w of fallbackWrappers) eventSource?.addEventListener(w.channel, w.handler);
+  reportChannels();
+}
+
+/**
+ * Try the worker again later, and keep trying.
+ *
+ * Without this, "fall back to a direct stream" is a ONE-WAY door: a transient
+ * hiccup — a worker restart, a laptop waking — would push a tab onto its own
+ * connection permanently, and tab by tab a machine would drift back to one
+ * stream per tab. That is precisely the exhaustion the shared worker exists to
+ * prevent, arrived at slowly instead of immediately, which is worse because
+ * nothing looks wrong until the sixth preview stops loading.
+ *
+ * Backs off so a genuinely broken worker is not retried every few seconds
+ * forever, and caps rather than giving up: the machine may be fine again in an
+ * hour and nobody is going to reload eight wall displays to find out.
+ */
+const WORKER_RETRY_MIN_MS = 30_000;
+const WORKER_RETRY_MAX_MS = 10 * 60_000;
+let workerRetryDelayMs = WORKER_RETRY_MIN_MS;
+let workerRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleWorkerRetry(): void {
+  if (workerRetryTimer) return;
+  workerRetryTimer = setTimeout(() => {
+    workerRetryTimer = null;
+    workerRetryDelayMs = Math.min(workerRetryDelayMs * 2, WORKER_RETRY_MAX_MS);
+    if (typeof SharedWorker === "undefined") return; // nothing to go back to
+    try {
+      if (localStorage.getItem("stage:sharedSse") === "0") return; // opted out
+    } catch { /* storage unavailable — keep trying */ }
+    sharedSse = true;
+    if (!ensureWorker()) return; // ensureWorker already fell back and rescheduled
+    console.log("[api] shared SSE worker recovered — moving this tab back onto it");
+    // Unhook only the wrappers this fallback added. Anything else on the direct
+    // stream was registered elsewhere and is not ours to remove.
+    for (const w of fallbackWrappers) {
+      eventSource?.removeEventListener(w.channel, w.handler);
+      const i = sseListeners.indexOf(w);
+      if (i >= 0) sseListeners.splice(i, 1);
+    }
+    fallbackWrappers.length = 0;
+    // workerHandlers still holds every callback, so the worker picks up exactly
+    // what it was carrying before.
+    workerReport();
+    // Close this tab's own stream, so the connection is actually returned rather
+    // than left open and idle — which would defeat the point of going back.
+    if (eventSource && sseListeners.length === 0) {
+      eventSource.close();
+      eventSource = null;
+    }
+    workerRetryDelayMs = WORKER_RETRY_MIN_MS;
+  }, workerRetryDelayMs);
+}
+
+function startWorkerHeartbeat(): void {
+  stopWorkerHeartbeat();
+  workerPingTimer = setInterval(() => {
+    if (!sseWorker) return;
+    // A missed pong means the worker is gone or wedged. Only one timer is armed
+    // at a time, so a slow answer does not stack up abandonments.
+    if (workerPongTimer) return;
+    workerPongTimer = setTimeout(() => {
+      workerPongTimer = null;
+      abandonWorker("no pong");
+    }, WORKER_PONG_TIMEOUT_MS);
+    try {
+      sseWorker.port.postMessage({ type: "ping" });
+    } catch {
+      abandonWorker("port is dead");
+    }
+  }, WORKER_PING_MS);
+}
+
+function stopWorkerHeartbeat(): void {
+  if (workerPingTimer) { clearInterval(workerPingTimer); workerPingTimer = null; }
+  if (workerPongTimer) { clearTimeout(workerPongTimer); workerPongTimer = null; }
 }
 
 function workerReport(): void {
