@@ -2,7 +2,7 @@
 //
 // Three interactive object types already exist — osc-button, rosstalk-button and
 // live-controls — and they render on real screens today. Defaulting every View to
-// "display" would silently disable the buttons on any touch panel currently in
+// "display" would silently disable the buttons on any control surface currently in
 // service: the screen would keep rendering, the buttons would keep drawing, and
 // pressing one would do nothing. That is the worst possible failure, because
 // nothing announces it.

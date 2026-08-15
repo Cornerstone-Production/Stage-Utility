@@ -5,7 +5,7 @@ import { migrateSurfaces, migrationLog } from "./surface-migration.js";
 import { viewSurface, outputMode } from "../types/views.js";
 
 // The migration exists so that upgrading does not silently disable the buttons
-// on a touch panel that works today. These build real layouts and run the real
+// on a control surface that works today. These build real layouts and run the real
 // function, rather than asserting field values on a fixture — the design doc
 // asks for exactly that, because "surface is console" is not the property that
 // matters. "The button still works" is.
@@ -35,7 +35,7 @@ const obj = (type: string, extra: Record<string, unknown> = {}) =>
 
 describe("surface migration", () => {
   test("a View with an OSC button becomes a console, and its screen a panel", () => {
-    // The case that would otherwise break: a working touch panel.
+    // The case that would otherwise break: a working control surface.
     const views = [view({ id: "v1", name: "Booth Panel", layout: layout([obj("osc-button")]) })];
     const outputs = [{ id: "out1", name: "Booth Touchscreen", viewId: "v1" }] as Output[];
 
