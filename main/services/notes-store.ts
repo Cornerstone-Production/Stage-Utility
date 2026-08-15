@@ -32,6 +32,37 @@ export interface NotesContent {
 /** objectId → what is in it. */
 type NotesFile = Record<string, NotesContent>;
 
+/**
+ * Layout object ids as this app generates them.
+ *
+ * The id is chosen by the CLIENT — it comes from the layout, which arrives over
+ * HTTP — and it is used as a property name. Without this, posting an objectId of
+ * "__proto__" writes through to Object.prototype and every plain object in the
+ * process gains a `text` field. That is prototype pollution, and it is a real
+ * remote vector rather than a theoretical one: the notes route accepts any
+ * string.
+ *
+ * Ids are generated as short slugs, so an allowlist is both correct and cheap;
+ * anything else is rejected rather than sanitised, because a "cleaned" id would
+ * silently write to the wrong key.
+ */
+const SAFE_OBJECT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * Names that are letters and underscores — and so pass the pattern above — but
+ * are never legitimate object ids and are exactly what an attacker reaches for.
+ *
+ * The pattern alone is NOT enough, which is the trap: "__proto__" is made
+ * entirely of characters the allowlist permits.
+ */
+const FORBIDDEN_IDS = new Set(["__proto__", "constructor", "prototype"]);
+
+function assertSafeObjectId(objectId: string): void {
+  if (!SAFE_OBJECT_ID.test(objectId) || FORBIDDEN_IDS.has(objectId)) {
+    throw new Error(`notes: refusing an unsafe object id "${objectId.slice(0, 32)}"`);
+  }
+}
+
 const store = new DataStore<NotesFile>("notes.json", {}, "config");
 
 let cache: NotesFile = {};
@@ -39,7 +70,9 @@ let loaded = false;
 
 export const notesStore = {
   async init(): Promise<void> {
-    cache = await store.load();
+    // Whatever is on disk is re-keyed onto a null-prototype object, so a
+    // notes.json that already contains a hostile key cannot pollute on load.
+    cache = Object.assign(Object.create(null) as NotesFile, await store.load());
     loaded = true;
   },
 
@@ -49,7 +82,7 @@ export const notesStore = {
   },
 
   get(objectId: string): NotesContent {
-    return cache[objectId] ?? {};
+    return Object.hasOwn(cache, objectId) ? cache[objectId] : {};
   },
 
   /**
@@ -60,8 +93,15 @@ export const notesStore = {
    * has already had with a config write. The caller gets the rejection.
    */
   async set(objectId: string, content: NotesContent): Promise<void> {
+    assertSafeObjectId(objectId);
     if (!loaded) await notesStore.init();
-    cache = { ...cache, [objectId]: content };
+    // Object.create(null) rather than {}: a null-prototype map has no
+    // __proto__ setter to write through even if a key ever got past the check
+    // above. Two barriers, because the cost is nothing and the failure is
+    // process-wide.
+    const next: NotesFile = Object.assign(Object.create(null) as NotesFile, cache);
+    next[objectId] = content;
+    cache = next;
     await store.save(cache);
   },
 
@@ -69,10 +109,10 @@ export const notesStore = {
    *  notes.json does not accumulate orphans for every object ever created. */
   async forget(objectIds: readonly string[]): Promise<void> {
     if (!loaded) await notesStore.init();
-    const next = { ...cache };
+    const next: NotesFile = Object.assign(Object.create(null) as NotesFile, cache);
     let changed = false;
     for (const id of objectIds) {
-      if (id in next) { delete next[id]; changed = true; }
+      if (Object.hasOwn(next, id)) { delete next[id]; changed = true; }
     }
     if (!changed) return;
     cache = next;

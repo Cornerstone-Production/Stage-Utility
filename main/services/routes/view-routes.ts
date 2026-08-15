@@ -186,7 +186,11 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         && (body.slotsLayout === null || typeof body.slotsLayout === "object");
       const hasScriptViewLayout = "scriptViewLayoutId" in body
         && (body.scriptViewLayoutId === null || typeof body.scriptViewLayoutId === "string");
-      const hasSurface = body.surface === "display" || body.surface === "console";
+      // Narrowed to a literal rather than cast: `as` asserts a type without
+      // proving it, so the value handed on is still the caller's string as far
+      // as anything reading the code — or analysing it — can tell.
+      const surface = body.surface === "console" ? "console" : body.surface === "display" ? "display" : null;
+      const hasSurface = surface !== null;
       if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout && !hasSurface) {
         error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), or body.scriptViewLayoutId (string|null) required");
         return;
@@ -197,7 +201,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       // would strand rather than silently unbinding them.
       if (hasSurface) {
         try {
-          state = await stageController.setViewSurface(id, body.surface as "display" | "console");
+          state = await stageController.setViewSurface(id, surface);
         } catch (err) {
           error(res, errorMessage(err));
           return;
@@ -346,7 +350,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasBlackout = typeof body.blackout === "boolean";
       const hasLocked = typeof body.locked === "boolean";
       const hasSlug = typeof body.slug === "string";
-      const hasMode = body.mode === "display" || body.mode === "panel";
+      const mode = body.mode === "panel" ? "panel" : body.mode === "display" ? "display" : null;
+      const hasMode = mode !== null;
       if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasSlug && !hasMode) {
         error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
         return;
@@ -357,7 +362,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       // and point it at a console. The other order refuses its own second half.
       if (hasMode) {
         try {
-          state = await stageController.setOutputMode(id, body.mode as "display" | "panel");
+          state = await stageController.setOutputMode(id, mode);
         } catch (err) {
           error(res, errorMessage(err));
           return;

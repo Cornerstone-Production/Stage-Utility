@@ -86,3 +86,49 @@ describe("notes content", () => {
 });
 
 after(() => fs.rm(TMP, { recursive: true, force: true }));
+
+// The object id is chosen by the CLIENT — it arrives in a request body — and is
+// used as a property name. CodeQL caught this as a high-severity remote
+// property injection, and it is a real vector rather than a theoretical one:
+// the notes route accepts any string.
+describe("notes store rejects hostile object ids", () => {
+  beforeEach(async () => {
+    await fs.rm(path.join(TMP, "notes.json"), { force: true });
+    await notesStore.init();
+  });
+
+  it("refuses __proto__ rather than writing through to Object.prototype", async () => {
+    await assert.rejects(
+      () => notesStore.set("__proto__", { text: "polluted" } as never),
+      /unsafe object id/,
+    );
+    // The proof that matters: an unrelated plain object must be untouched.
+    assert.equal(({} as Record<string, unknown>).text, undefined, "Object.prototype was polluted");
+  });
+
+  it("refuses constructor and prototype", async () => {
+    await assert.rejects(() => notesStore.set("constructor", {}), /unsafe object id/);
+    await assert.rejects(() => notesStore.set("prototype", {}), /unsafe object id/);
+  });
+
+  it("refuses ids with path or control characters", async () => {
+    for (const bad of ["../escape", "a/b", "a b", "a\nb", ""]) {
+      await assert.rejects(() => notesStore.set(bad, {}), /unsafe object id/, `accepted "${bad}"`);
+    }
+  });
+
+  it("still accepts the ids this app actually generates", async () => {
+    // The check must not be so tight that real objects stop saving.
+    for (const ok of ["n1", "obj-1", "obj_1", "AbC123", "a".repeat(64)]) {
+      await notesStore.set(ok, { text: ok });
+      assert.equal(notesStore.get(ok).text, ok);
+    }
+  });
+
+  it("does not report content for a prototype key that was never set", async () => {
+    // Reading is the other half: `cache["toString"]` on a plain object would
+    // return a function rather than the empty content the renderer expects.
+    assert.deepEqual(notesStore.get("toString"), {});
+    assert.deepEqual(notesStore.get("__proto__"), {});
+  });
+});
