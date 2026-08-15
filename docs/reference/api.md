@@ -35,8 +35,8 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/views` | List views |
-| POST | `/api/views` | Create a view (`{name, kind}`) |
-| PATCH | `/api/views/:id` | Update name / kind / `ndiSource` / `layout` |
+| POST | `/api/views` | Create a view (`{name, kind, surface?}`) |
+| PATCH | `/api/views/:id` | Update name / kind / `ndiSource` / `layout` / `surface`. Converting a bound view is refused, naming the screens |
 | POST | `/api/views/:id/slots` | Save a slots-view's slots |
 | POST | `/api/views/:id/duplicate` | Duplicate a view |
 | POST | `/api/views/:id/copy-slots` | Copy slots from another view |
@@ -44,9 +44,12 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | DELETE | `/api/views/:id` | Delete a view |
 | GET | `/api/outputs` | List physical displays |
 | POST | `/api/outputs` | Add a display |
-| PATCH | `/api/outputs/:id` | Rename / route to a view (`{viewId}`) |
+| PATCH | `/api/outputs/:id` | Rename / route to a view (`{viewId}`) / set `{mode}` (`display`\|`panel`). A console view on a display screen is refused |
 | POST | `/api/outputs/reorder` | Reorder displays |
 | DELETE | `/api/outputs/:id` | Remove a display |
+| POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does |
+| POST | `/api/notes` | Save a notes/checklist object's content (`{objectId, content}`) |
+| POST | `/api/bar-items` | Set the context bar's items and order (`{items}`) |
 | GET / POST | `/api/layout-templates` | List / save a custom-layout template |
 | PATCH / DELETE | `/api/layout-templates/:id` | Update / delete a template |
 

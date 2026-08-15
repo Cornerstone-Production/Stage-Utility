@@ -1867,6 +1867,22 @@ export class StageController {
         await slotsStore.removeDisplay(oid);
         this.rawSlotsByObject.delete(oid);
       }
+      // And any notes/checklist content those objects held. Same reason the
+      // inline slots above are cleaned up: content is keyed by object id, and
+      // without this notes.json accumulates the text of every object ever
+      // deleted — carried into every backup, forever.
+      const objectIds: string[] = [];
+      const collect = (list: readonly LayoutObject[] | undefined) => {
+        for (const o of list ?? []) {
+          objectIds.push(o.id);
+          collect(o.children);
+        }
+      };
+      collect(removed.layout?.objects);
+      if (objectIds.length > 0) {
+        await notesStore.forget(objectIds);
+        this.state = { ...this.state, notesByObject: notesStore.all() };
+      }
     }
     // Unroute any outputs pointing at this view (render placeholder, never fail).
     const outputs = this.state.outputs.map((o) =>

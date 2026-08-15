@@ -12,6 +12,8 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "../lib/api";
+import { errorMessage } from "@main/services/errors";
+import { toast } from "../components/ui";
 
 interface NotesContent {
   text?: string;
@@ -25,24 +27,37 @@ const SAVE_DEBOUNCE_MS = 600;
 function useSavedContent(objectId: string, all: Record<string, NotesContent> | undefined) {
   const server = all?.[objectId];
   const [local, setLocal] = useState<NotesContent | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef(false);
 
-  // Follow the server unless this operator is mid-edit — otherwise a broadcast
-  // triggered by their own save would yank the cursor back.
+  // Follow the server unless this operator is mid-edit, or a save FAILED —
+  // otherwise a broadcast triggered by their own save would yank the cursor
+  // back, and a failed save would silently replace what they wrote with the
+  // older server copy.
   useEffect(() => {
-    if (!pending.current) setLocal(null);
-  }, [server]);
+    if (!pending.current && !saveError) setLocal(null);
+  }, [server, saveError]);
 
   function save(next: NotesContent) {
     setLocal(next);
     pending.current = true;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
-      // The failure is reported by the caller's toast layer; swallowing it here
-      // would make "it looked saved" the default.
+      // The catch REPORTS rather than swallowing. api.ts throws and does not
+      // toast, so an empty catch here would lose the operator's typing in
+      // silence — "it looked saved until the next restart" is precisely the
+      // failure this repository has a rule against.
+      //
+      // setSaveError also stops the local copy being dropped on the next server
+      // broadcast, so what they typed stays on screen instead of reverting
+      // under them while an error toast explains why.
       void invoke("notes:set", { objectId, content: next })
-        .catch(() => { /* surfaced by api's error toast */ })
+        .then(() => { setSaveError(null); })
+        .catch((e: unknown) => {
+          setSaveError(errorMessage(e));
+          toast.error(`Could not save that note: ${errorMessage(e)}`);
+        })
         .finally(() => { pending.current = false; });
     }, SAVE_DEBOUNCE_MS);
   }

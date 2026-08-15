@@ -164,3 +164,34 @@ describe("converting a view's surface", () => {
     assert.equal(viewSurface(s.views.find((v) => v.id === "vc")!), "display");
   });
 });
+
+describe("deleting a view", () => {
+  it("takes its notes with it", async () => {
+    // notesStore.forget() existed, was tested, and was called by NOTHING — so
+    // notes.json would have accumulated the text of every object ever deleted
+    // and carried it into every backup. The inline mic-slots beside it were
+    // already cleaned up; this is the same rule applied to the same shape.
+    const { notesStore } = await import("./notes-store.js");
+    ctl.state.views = [
+      { id: "v1", name: "Doomed", kind: "custom", createdAt: "", surface: "display",
+        layout: { version: 1, canvas: { width: 1920, height: 1080, background: null },
+          objects: [
+            { id: "n1", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "notes" } },
+            { id: "box", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "container" },
+              children: [{ id: "n2", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "notes" } }] },
+          ] } },
+      { id: "v2", name: "Keeper", kind: "custom", createdAt: "", surface: "display" },
+    ] as View[];
+    ctl.state.outputs = [] as Output[];
+
+    await notesStore.set("n1", { text: "top level" });
+    await notesStore.set("n2", { text: "nested in a container" });
+    await notesStore.set("other", { text: "belongs to another view" });
+
+    await stageController.deleteView("v1");
+
+    assert.deepEqual(notesStore.get("n1"), {}, "the object's notes must go with it");
+    assert.deepEqual(notesStore.get("n2"), {}, "including one nested in a container");
+    assert.equal(notesStore.get("other").text, "belongs to another view", "and nothing else may be touched");
+  });
+});
