@@ -5,6 +5,7 @@
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, error, json, readBody } from "./context.js";
 import { AUTOMATION_ACTIONS } from "../automation-actions.js";
+import { invokeAction } from "../action-invoke.js";
 import { AUTOMATION_CONDITIONS } from "../automation-conditions.js";
 import { automationEngine } from "../automation-engine.js";
 import { automationLog } from "../automation-log.js";
@@ -17,6 +18,24 @@ const shape = (o: Record<string, { id: string; label: string; params: unknown; h
 
 export async function automationRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
+
+  // POST /api/action/invoke — { actionId, params? }
+  // An operator pressed a control on a console. The SAME registry the automation
+  // engine fires from: one place to add a capability, two ways to reach it.
+  if (method === "POST" && pathname === "/api/action/invoke") {
+    const body = await readBody(req) as Record<string, unknown>;
+    if (typeof body.actionId !== "string") {
+      error(res, "body.actionId (string) required");
+      return;
+    }
+    const params = (body.params && typeof body.params === "object" && !Array.isArray(body.params))
+      ? body.params as Record<string, unknown>
+      : {};
+    // invokeAction never throws: a failure returns { ok: false, detail } and is
+    // reported to the operator rather than swallowed or turned into a 500.
+    json(res, await invokeAction(body.actionId, params));
+    return;
+  }
 
   if (method === "GET" && pathname === "/api/automation/registry") {
     json(res, {

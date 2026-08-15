@@ -222,6 +222,11 @@ export type LayoutObjectConfig =
   // so a strip can show only the channels you care about.
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number; hideChannels?: string[] }
   | { type: "live-controls" } // PCO Services Live Prev/Next buttons (interactive)
+  // A button bound to an entry in the automation action registry. The general
+  // form of osc-button/rosstalk-button, which stay as they are so existing
+  // layouts keep working — this is for everything else the registry can already
+  // do, including advancing PCO Live.
+  | { type: "action-button"; actionId: string; params?: Record<string, unknown>; label?: string }
   // Shure SBC charger bay battery levels. `bays` lists which bays to show (by
   // ChargerBay id) with an optional custom label; `show` toggles each metric.
   | {

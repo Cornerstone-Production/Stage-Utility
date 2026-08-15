@@ -661,6 +661,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "osc:send":
       return post<T>("/api/osc/send", p);
 
+    case "action:invoke":
+      return post<T>("/api/action/invoke", p);
+
     case "osc:getFeedback":
       return apiFetch<T>("/api/osc/feedback");
 

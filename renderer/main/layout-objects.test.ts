@@ -156,6 +156,9 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "rosstalk-button", label: "RossTalk button", group: "Control", after: "osc-button" },
   { type: "record-status", label: "Record status", group: "Status", after: null },
   { type: "view-embed", label: "Embedded view", group: "PCO / service", after: "next-service-item" },
+  // The general form of the two buttons above: bound to any entry in the
+  // automation action registry rather than one integration.
+  { type: "action-button", label: "Action button", group: "Control", after: "rosstalk-button" },
 ];
 
 /**

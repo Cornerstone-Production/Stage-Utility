@@ -37,6 +37,8 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   "osc-button": ["control"],
   "rosstalk-button": ["control"],
   "live-controls": ["control"],
+  // The general form of the two above: bound to any action in the registry.
+  "action-button": ["control"],
 
   // ── Readouts with somewhere to go when pressed in the shell. ─────────────
   "spl-meter": ["readout", "drilldown"],

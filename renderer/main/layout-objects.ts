@@ -395,6 +395,13 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     integration: { id: "rosstalk", label: "RossTalk" },
   },
 
+  "action-button": {
+    label: "Action button",
+    group: "Control",
+    config: () => ({ type: "action-button", actionId: "", params: {}, label: "Action" }),
+    style: () => PILL({ fontSize: 0.045 }),
+  },
+
   // Status
   "integration-status": {
     label: "Integration status",

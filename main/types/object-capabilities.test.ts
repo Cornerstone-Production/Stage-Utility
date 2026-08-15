@@ -17,8 +17,8 @@ describe("capability registry", () => {
     // backup while the suite stayed green.
     assert.equal(
       Object.keys(CAPABILITIES).length,
-      38,
-      "38 object types exist — if this number changed, decide the new type's capabilities deliberately",
+      39,
+      "39 object types exist — if this number changed, decide the new type's capabilities deliberately",
     );
   });
 
@@ -37,7 +37,7 @@ describe("capability registry", () => {
       .filter(([, caps]) => caps.includes("control"))
       .map(([t]) => t)
       .sort();
-    assert.deepEqual(controls, ["live-controls", "osc-button", "rosstalk-button"]);
+    assert.deepEqual(controls, ["action-button", "live-controls", "osc-button", "rosstalk-button"]);
   });
 
   test("every drill-down target belongs to an object that declares drilldown", () => {
