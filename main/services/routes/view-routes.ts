@@ -15,6 +15,7 @@ import {
   saveLayoutGroup,
   deleteLayoutGroup,
 } from "../layout-library.js";
+import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind } from "./context.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
@@ -60,6 +61,23 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // ── Views (content definitions) ───────────────────────────────────────
     if (method === "GET" && pathname === "/api/views") {
       json(res, stageController.getViews());
+      return;
+    }
+
+    // POST /api/notes — { objectId, content }
+    // What an operator typed into a notes/checklist object. Awaited before the
+    // response, so a failed write is a failed request rather than a silent loss.
+    if (method === "POST" && pathname === "/api/notes") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.objectId !== "string" || typeof body.content !== "object" || body.content === null) {
+        error(res, "body.objectId (string) and body.content (object) required");
+        return;
+      }
+      try {
+        json(res, await stageController.setNotes(body.objectId, body.content as NotesContent));
+      } catch (err) {
+        error(res, errorMessage(err));
+      }
       return;
     }
 

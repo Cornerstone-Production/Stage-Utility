@@ -667,6 +667,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "outputs:setMode":
       return patch<T>(`/api/outputs/${encodeURIComponent(String(p.id))}`, { mode: p.mode });
 
+    case "notes:set":
+      return post<T>("/api/notes", p);
+
     case "views:setSurface":
       return patch<T>(`/api/views/${encodeURIComponent(String(p.id))}`, { surface: p.surface });
 

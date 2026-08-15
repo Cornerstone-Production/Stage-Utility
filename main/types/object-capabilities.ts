@@ -40,6 +40,10 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   // The general form of the two above: bound to any action in the registry.
   "action-button": ["control"],
 
+  // ── Editable. These hold the operator's own work product. ───────────────
+  notes: ["editable"],
+  checklist: ["editable"],
+
   // ── Readouts with somewhere to go when pressed in the shell. ─────────────
   "spl-meter": ["readout", "drilldown"],
   "people-counter": ["readout", "drilldown"],

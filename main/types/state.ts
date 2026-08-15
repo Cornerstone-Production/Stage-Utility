@@ -27,6 +27,9 @@ export interface StageState {
   /** Resolved slots keyed by View id (for slots-kind Views). Drives both the
    *  kiosk (via the output's routed view) and the settings editor/preview. */
   slotsByView: Record<string, Slot[]>;
+  /** Content of notes/checklist objects, keyed by layout object id. The layout
+   *  holds the design; this holds what the operator typed into it. */
+  notesByObject: Record<string, { text?: string; items?: { id: string; text: string; done: boolean }[] }>;
   /** Resolved slots for inline mic-slots objects, keyed by the layout object's id
    *  (a custom-layout `slots-grid` with `source: "inline"`). */
   slotsByLayoutObject: Record<string, Slot[]>;

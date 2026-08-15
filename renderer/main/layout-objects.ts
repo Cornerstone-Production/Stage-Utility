@@ -402,6 +402,20 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     style: () => PILL({ fontSize: 0.045 }),
   },
 
+  notes: {
+    label: "Notes",
+    group: "Control",
+    config: () => ({ type: "notes", placeholder: "Notes for this service" }),
+    style: () => ({ fontSize: 0.035, align: "left" as const }),
+  },
+
+  checklist: {
+    label: "Checklist",
+    group: "Control",
+    config: () => ({ type: "checklist", title: "Pre-service" }),
+    style: () => ({ fontSize: 0.035, align: "left" as const }),
+  },
+
   // Status
   "integration-status": {
     label: "Integration status",

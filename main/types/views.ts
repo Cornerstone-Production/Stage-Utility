@@ -222,6 +222,11 @@ export type LayoutObjectConfig =
   // so a strip can show only the channels you care about.
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number; hideChannels?: string[] }
   | { type: "live-controls" } // PCO Services Live Prev/Next buttons (interactive)
+  // The operator's own work product, stored per object id in notes.json (a
+  // "config" store, so it rides along in every backup). `placeholder` is the
+  // prompt shown while empty; the content itself is never in the layout.
+  | { type: "notes"; placeholder?: string }
+  | { type: "checklist"; title?: string; resetDaily?: boolean }
   // A button bound to an entry in the automation action registry. The general
   // form of osc-button/rosstalk-button, which stay as they are so existing
   // layouts keep working — this is for everything else the registry can already

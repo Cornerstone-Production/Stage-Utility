@@ -100,6 +100,8 @@ const EXPECTED_CONFIG = [
   "baptism-triggers.json",
   "layout-groups.json",
   "layout-templates.json",
+  // The operator's own work product typed into notes/checklist objects.
+  "notes.json",
   "osc-targets.json",
   "patch.json",
   "presets.json",

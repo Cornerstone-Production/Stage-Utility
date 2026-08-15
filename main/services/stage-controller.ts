@@ -3,6 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
+import { notesStore, type NotesContent } from "./notes-store.js";
 import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
@@ -159,6 +160,7 @@ export class StageController {
     views: [{ id: PRIMARY_DISPLAY_ID, name: "Slots", kind: "slots", ndiSource: null, createdAt: "" }],
     outputs: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", viewId: PRIMARY_DISPLAY_ID }],
     slotsByView: {},
+    notesByObject: {},
     slotsByLayoutObject: {},
     resolvedByOutput: {},
     chargerBays: [],
@@ -237,6 +239,7 @@ export class StageController {
   // ── Init ─────────────────────────────────────────────────────────────
 
   async init(): Promise<void> {
+    await notesStore.init();
     console.log("[stage-controller] init");
     let settings = await settingsStore.load();
 
@@ -260,6 +263,9 @@ export class StageController {
 
     this.state = {
       ...this.state,
+      // Loaded above; without this the field stays {} and every note reads empty
+      // until the first edit — the content would look lost.
+      notesByObject: notesStore.all(),
       serviceTypeId: settings.serviceTypeId,
       serviceTypeName: settings.serviceTypeName,
       planMode: settings.planMode,
@@ -2025,6 +2031,20 @@ export class StageController {
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
     this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * Save what an operator typed into a notes/checklist object.
+   *
+   * Awaited before broadcasting: "it looked saved until the next restart" is a
+   * failure this repository has already had with a config write, and this is
+   * somebody's pre-service checklist.
+   */
+  async setNotes(objectId: string, content: NotesContent): Promise<StageState> {
+    await notesStore.set(objectId, content);
+    this.state = { ...this.state, notesByObject: notesStore.all() };
     this.broadcast();
     return this.state;
   }
