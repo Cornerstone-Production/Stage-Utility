@@ -10,8 +10,8 @@ the options that only existed because they did not.
 **Architecture:** The cull comes first and everything follows from it. Options are
 removed only where the widget can make the decision better than a person can, and
 every removal is justified against what the real config actually uses. The sidebar
-palette and drag-to-place replace the add-object dropdown. Home becomes
-layout-backed, carrying a debt from Phase 4.
+palette and drag-to-place are added beside the existing dropdown, which is
+untouched. Home becomes layout-backed, carrying a debt from Phase 4.
 
 **Tech Stack:** React, `useFitScale` (Phase 5), `node:test` + jsdom.
 
@@ -22,7 +22,7 @@ deferrals:
 
 | Deferred | Promised for | This plan |
 |---|---|---|
-| **Home as an editable console** | Phase 4 | **In scope** — Task 5 |
+| **Home as an editable console** | Phase 4 | **In scope** — Task 6 |
 | Stacking threshold | Phase 5 | Deferred again; still no evidence either way |
 | Min/max height | Phase 5 | Not building, by decision |
 
@@ -36,6 +36,10 @@ Everything else deferred across Phases 1a–5 was built; the audit is at the end
   uses it" is evidence; "it feels cluttered" is not.
 - **An operator's stored data is never deleted to tidy up.** Removed style fields
   stay in the schema and in their files.
+- **The existing way of adding, moving and resizing widgets does not change.**
+  Everything new here is a second way in, not a replacement. The Add-object
+  dropdown, dragging an object, grabbing a handle to resize, and marquee
+  selection all behave exactly as they do today.
 - New `catch` blocks rethrow or return the failure.
 - Dark surfaces stay strictly R=G=B neutral. No purple, no tints.
 - Motion uses the Phase 5 tokens.
@@ -100,7 +104,19 @@ canvas, not to decorate it.
 
 **Section colour** is the one visual choice: a small set of named colours applied
 to the outline (and only the outline), so a wall of widgets can be grouped at a
-glance — audio here, video there. Default is neutral.
+glance — audio here, video there.
+
+Three questions it needs to answer, answered:
+
+| | |
+|---|---|
+| **Can the outline colour be changed?** | Yes — from a named set (Neutral, Timers, Audio, Video, Streaming, Gear), not a free picker. A named set is a grouping vocabulary; a free picker is decoration, and decoration is what this phase is removing. |
+| **Can it be turned off?** | Yes, and it is off by default. **Neutral** is the default and draws a plain grey outline. Nothing gains a colour unless someone assigns one. |
+| **Can text colour still be changed?** | Yes. `color` is the one style field that survives, and it stays a full colour picker — it is the field with real, meaningful variation, and a red overrun or a green countdown says something no default can infer. |
+
+A deliberate asymmetry: **text colour is free, outline colour is a fixed set.**
+Text colour carries meaning about the value; outline colour only groups widgets,
+and a grouping vocabulary with infinite values does not group anything.
 
 ### Config options: 80 across 41 types
 
@@ -178,12 +194,22 @@ modify `layout-editor.tsx`
 A persistent panel beside the canvas: grouped cards with a coloured icon, the
 name, and one line saying what it shows. Drag a card onto the canvas to place it.
 
-Both gestures, because they answer different questions:
+**Additive only.** The Add-object dropdown stays and behaves identically; dragging
+and resizing an object are untouched. This is a second door, not a replacement.
 
-- **Drag from the palette** — "I want one of those." Lands at the drop point at a
-  sensible default size.
-- **Draw on the canvas** — "I want something exactly here, this big." Opens the
-  same catalog, filtered, at that rect.
+Three ways in, because they answer different questions:
+
+- **The dropdown** — unchanged, exactly as today.
+- **Drag from the palette** — "I want one of those." Lands centred on the drop
+  point at a sensible default size.
+- **Draw on the canvas** — "I want something exactly here, this big."
+
+**Draw-to-create collides with marquee selection**, which is the current meaning of
+a plain drag on empty canvas (`startMarquee`). Marquee wins: it is existing
+behaviour and this plan does not change existing behaviour. Draw-to-create is
+therefore a **held modifier** (or the palette's own drag), so a plain drag still
+rubber-band-selects exactly as it does now. If that feels wrong in the hand, the
+alternative is a mode toggle in the toolbar — but not silently taking the gesture.
 
 - [ ] **Step 1: Write the failing tests for both geometries**
 
@@ -292,7 +318,80 @@ test("stored values for removed fields are preserved, not stripped", () => {
 
 ---
 
-### Task 5: Home, editable — the carried debt
+### Task 5: Locking the layout while you work in it
+
+**Files:** modify `layout-editor.tsx`; create `layout-lock.test.ts`
+
+Reaching for one object and catching the edge of another resizes it by accident.
+Undo fixes it only if you noticed.
+
+Per-object locking already exists — the padlock in the Layers panel, gating move,
+resize and delete via `isLockedInTree`. It is the wrong tool here: it means
+clicking twenty padlocks before you can click around safely.
+
+What is missing is a **canvas-wide toggle**. Locked, handles are not rendered and
+edges cannot be grabbed at all; objects still select, and the inspector still
+edits what they show. Unlocked is today's behaviour, exactly.
+
+- [ ] **Step 1: Write the failing tests**
+
+```ts
+test("locked: a pointerdown on a resize handle does nothing", () => {
+  // Not "the handle is hidden but still live" - the commonest version of this
+  // bug. Hidden and inert are different things, and only one of them helps.
+  const before = geomOf("clock");
+  lockLayout(); dragHandle("clock", "se", { dx: 40, dy: 40 });
+  assert.deepEqual(geomOf("clock"), before);
+});
+
+test("locked: an object still selects, and the inspector still edits it", () => {
+  // A lock that blocks selection makes the layout unreadable while locked.
+  lockLayout(); click("clock");
+  assert.equal(selectedId(), "clock");
+  assert.ok(inspectorEditable());
+});
+
+test("locked: dragging an object does not move it either", () => {
+  const before = geomOf("clock");
+  lockLayout(); dragObject("clock", { dx: 60, dy: 0 });
+  assert.deepEqual(geomOf("clock"), before);
+});
+
+test("unlocked is exactly today's behaviour", () => {
+  const before = geomOf("clock");
+  dragHandle("clock", "se", { dx: 40, dy: 40 });
+  assert.notDeepEqual(geomOf("clock"), before);
+});
+
+test("the per-object padlock still works while the canvas is unlocked", () => {
+  // The two locks are independent; the new one must not quietly replace the old.
+  lockObject("clock");
+  dragObject("clock", { dx: 60, dy: 0 });
+  assert.deepEqual(geomOf("clock"), geomOf("clock"));
+});
+```
+
+- [ ] **Step 2:** Run, watch them fail.
+- [ ] **Step 3:** Implement. The gate goes in `startDrag`, beside the existing
+      `isLockedInTree` check, so there is one place where "this cannot move"
+      is decided rather than two that can disagree.
+- [ ] **Step 4:** Green.
+- [ ] **Step 5: Prove the guards.** Render the handles while locked but leave the
+      gate in — the "handles hidden but live" test must still pass, proving it
+      tests inertness rather than visibility. Then remove the gate and watch the
+      resize and drag tests go red.
+- [ ] **Step 6:** Decide the default. **Unlocked**, because a locked editor that
+      does nothing on the first drag is a puzzle. The toggle sits beside Grid and
+      Align, and its state is remembered per session, not per view — it is about
+      how you are working right now, not about the layout.
+- [ ] **Step 7: Browser pass.** Lock, try to grab every handle on three objects,
+      confirm nothing moves and selection still works. Unlock, confirm resizing is
+      exactly as before.
+- [ ] **Step 8:** Commit.
+
+---
+
+### Task 6: Home, editable — the carried debt
 
 Unchanged from the previous draft; see the audit for why it is here. Home's panels
 are bespoke React, not layout objects, so the sequence is objects → default layout
@@ -341,7 +440,7 @@ If any of these is wrong for a real display you have, say which and it stays.
 | Snapping and alignment guides | Phase 5 | Built |
 | Default-look pass, reset | Phase 5 | Built |
 | Motion tokens | Phase 5 | Built |
-| **Home as an editable console** | **Phase 4** | **MISSED — Task 5 here** |
+| **Home as an editable console** | **Phase 4** | **MISSED — Task 6 here** |
 | Stacking threshold | Phase 5 | Deferred by decision |
 | Min/max height | Phase 5 | Not building, by decision |
 
