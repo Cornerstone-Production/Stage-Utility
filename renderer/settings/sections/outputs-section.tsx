@@ -116,6 +116,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
   // always shown. It is set once per screen and then never touched, and two
   // permanent rows of mono URL per card buried the thing the card is FOR — what
   // that screen is showing.
+  const [nameFocused, setNameFocused] = useState(false);
   const [showSlug, setShowSlug] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -138,14 +139,32 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
         className="flex cursor-grab items-center gap-2 px-3 pt-2.5 active:cursor-grabbing"
       >
         {/* Also inside the drag handle: the swatch opens a colour picker. */}
-        <span onPointerDown={(e) => e.stopPropagation()} className="flex shrink-0">
+        <span
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          className="flex shrink-0"
+        >
           <IconTint itemKey={output.id} icon={MonitorIcon} color={iconColor} label={output.name} />
         </span>
         <Input
           value={editName}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
-          onBlur={handleBlur}
-          onPointerDown={(e) => e.stopPropagation()}
+          onBlur={() => { setNameFocused(false); handleBlur(); }}
+          onFocus={() => setNameFocused(true)}
+          // Claim the gesture ONLY while editing. This field is flex-1, so
+          // blocking unconditionally made the entire middle of the header
+          // undraggable - a dead strip exactly where you would grab the card.
+          // Unfocused it passes the gesture through to the drag handle, which is
+          // safe because the sensors need 5px of travel (mouse) or a 200ms hold
+          // (touch): a plain click still lands here and focuses. Once focused,
+          // dragging to select text works normally again.
+          //
+          // mousedown/touchstart, NOT pointerdown: dnd-kit's MouseSensor and
+          // TouchSensor bind onMouseDown/onTouchStart, and stopping a
+          // pointerdown does nothing to the mousedown that follows it. The
+          // pointerdown version of this guard was inert.
+          onMouseDown={(e) => { if (nameFocused) e.stopPropagation(); }}
+          onTouchStart={(e) => { if (nameFocused) e.stopPropagation(); }}
           className="h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0"
           aria-label="Display name"
         />
@@ -162,9 +181,11 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
         <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenu.Trigger asChild>
             <button
-              // Inside the drag handle, so it must claim its own pointer or
-              // opening the menu reads as the start of a drag.
-              onPointerDown={(e) => e.stopPropagation()}
+              // Inside the drag handle, so it must claim the gesture or opening
+              // the menu reads as the start of a drag. See the name field above
+              // for why this is mousedown/touchstart and not pointerdown.
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
               className="flex size-7 shrink-0 items-center justify-center rounded-md text-fg-subtle hover:bg-fill hover:text-fg transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-focus"
               aria-label={`More actions for ${output.name}`}
             >

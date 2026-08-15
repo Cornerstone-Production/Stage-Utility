@@ -84,7 +84,7 @@ export function HomeRoute() {
           outputCount={state.outputs?.length ?? 0}
         />
       ) : (
-        <IdlePanel state={state} onlineOutputIds={online} />
+        <IdlePanel state={state} onlineOutputIds={online} secondsToStart={secondsToStart} />
       )}
 
       <PlanSection
