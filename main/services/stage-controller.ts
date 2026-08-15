@@ -2,6 +2,7 @@
 // Every mutating method ends with broadcast("stage:state-changed").
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
+import { migrateSurfaces, migrationLog } from "./surface-migration.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub } from "./scrub.js";
@@ -323,7 +324,7 @@ export class StageController {
     if (storedOutputs && storedOutputs.length > 0 && storedViews.length > 0) {
       const { views, changed } = retuneEmbedFontSize(storedViews);
       if (changed > 0) await viewsStore.save(views);
-      return { views, outputs: storedOutputs };
+      return this.applySurfaceMigration(views, storedOutputs);
     }
 
     // First run: migrate from the legacy `displays` array (or the default).
@@ -351,7 +352,37 @@ export class StageController {
     console.log(
       `[stage-controller] migrated ${legacy.length} legacy display(s) → ${views.length} view(s) + ${outputs.length} output(s)`,
     );
-    return { views, outputs };
+    return this.applySurfaceMigration(views, outputs);
+  }
+
+  /**
+   * Give every View a surface and every Output a mode, preserving behaviour.
+   *
+   * Applied on BOTH load paths — the stored one and the first-run legacy one —
+   * because a migration that runs on only one of two paths is how half an
+   * install ends up on a schema the rest of the code assumes. Persisted, so it
+   * decides once rather than on every boot; the decision is then the operator's
+   * to change.
+   */
+  private async applySurfaceMigration(
+    views: View[],
+    outputs: Output[],
+  ): Promise<{ views: View[]; outputs: Output[] }> {
+    const result = migrateSurfaces(views, outputs);
+    const viewsChanged = result.views.some((v, i) => v !== views[i]);
+    const outputsChanged = result.outputs.some((o, i) => o !== outputs[i]);
+    if (!viewsChanged && !outputsChanged) return { views, outputs };
+
+    if (viewsChanged) await viewsStore.save(result.views);
+    if (outputsChanged) await settingsStore.patch({ outputs: result.outputs });
+
+    // Logged in full: a stray live-controls left on a wall display years ago
+    // will pull that screen into panel mode, and the only way an operator learns
+    // that is by being told.
+    for (const line of migrationLog(result)) {
+      console.log(`[surface-migration] ${line}`);
+    }
+    return { views: result.views, outputs: result.outputs };
   }
 
   // ── PCO credentials ───────────────────────────────────────────────────
