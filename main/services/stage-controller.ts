@@ -3,6 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
+import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub } from "./scrub.js";
@@ -1625,6 +1626,41 @@ export class StageController {
   }
 
   /** Change a View's kind (used by the legacy /api/displays kind alias). */
+  /**
+   * Change what a View is for.
+   *
+   * Converting a View that is currently bound REFUSES, naming the screens it
+   * drives, rather than silently unbinding them. Silently unbinding is how an
+   * operator discovers on Sunday morning that a screen went blank on Thursday.
+   */
+  async setViewSurface(id: string, surface: ViewSurface): Promise<StageState> {
+    const view = this.state.views.find((v) => v.id === id);
+    if (!view) throw new Error(`views:setSurface — view ${id} not found`);
+
+    if (surface === "console") {
+      // Every display-mode screen showing this View would become an invalid
+      // binding the moment it turned into a console.
+      const stranded = this.state.outputs.filter(
+        (o) => o.viewId === id && outputMode(o) !== "panel",
+      );
+      if (stranded.length > 0) {
+        const names = stranded.map((o) => o.name || o.id).join(", ");
+        throw new Error(
+          `views:setSurface — "${view.name}" is showing on ${names}. ` +
+            `Set ${stranded.length === 1 ? "that screen" : "those screens"} to panel mode first, or point ${stranded.length === 1 ? "it" : "them"} somewhere else.`,
+        );
+      }
+    }
+
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, surface } : v));
+    console.log(`[stage-controller] setViewSurface view=${scrub(id)} → ${surface}`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
   async setViewKind(id: string, kind: ViewKind): Promise<StageState> {
     if (!this.state.views.find((v) => v.id === id)) {
       throw new Error(`views:setKind — view ${id} not found`);
@@ -1930,8 +1966,53 @@ export class StageController {
     if (viewId !== null && !this.state.views.find((v) => v.id === viewId)) {
       throw new Error(`outputs:setView — view ${viewId} not found`);
     }
+    // THE safety property, and it lives here rather than in the settings
+    // dropdown: a dropdown that only offers bindable views makes the mistake
+    // hard to reach, but an API call, a Companion button or a restored config
+    // can still ask for it. A wall screen must not be able to render a live
+    // control at all.
+    if (viewId !== null) {
+      const view = this.state.views.find((v) => v.id === viewId)!;
+      const output = this.state.outputs.find((o) => o.id === id)!;
+      if (viewSurface(view) === "console" && outputMode(output) !== "panel") {
+        throw new Error(
+          `outputs:setView — "${view.name}" is a console and "${output.name}" is a display. ` +
+            `Set that screen to panel mode first if it is a touch panel.`,
+        );
+      }
+    }
     const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, viewId } : o));
     console.log(`[stage-controller] setOutputView output=${scrub(id)} → view=${scrub(viewId ?? "(none)")}`);
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * Make a screen a read-only display or an interactive touch panel.
+   *
+   * Demoting a panel that currently shows a console is refused rather than
+   * silently unbinding it: the operator would be left with a screen showing
+   * nothing and no indication why.
+   */
+  async setOutputMode(id: string, mode: OutputMode): Promise<StageState> {
+    const output = this.state.outputs.find((o) => o.id === id);
+    if (!output) throw new Error(`outputs:setMode — output ${id} not found`);
+
+    if (mode === "display" && output.viewId) {
+      const view = this.state.views.find((v) => v.id === output.viewId);
+      if (view && viewSurface(view) === "console") {
+        throw new Error(
+          `outputs:setMode — "${output.name}" is showing the console "${view.name}". ` +
+            `Point it at a display view first, or it would be left showing nothing.`,
+        );
+      }
+    }
+
+    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, mode } : o));
+    console.log(`[stage-controller] setOutputMode output=${scrub(id)} → ${mode}`);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
     this.recomputeResolved();

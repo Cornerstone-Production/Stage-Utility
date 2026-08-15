@@ -167,12 +167,23 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         && (body.slotsLayout === null || typeof body.slotsLayout === "object");
       const hasScriptViewLayout = "scriptViewLayoutId" in body
         && (body.scriptViewLayoutId === null || typeof body.scriptViewLayoutId === "string");
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout) {
-        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), or body.scriptViewLayoutId (string|null) required");
+      const hasSurface = body.surface === "display" || body.surface === "console";
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout && !hasSurface) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), or body.scriptViewLayoutId (string|null) required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameView(id, body.name as string);
+      // Refused with its reason: converting a bound View names the screens it
+      // would strand rather than silently unbinding them.
+      if (hasSurface) {
+        try {
+          state = await stageController.setViewSurface(id, body.surface as "display" | "console");
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
       if (hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
       if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
       if (hasLayout) {
@@ -316,13 +327,33 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasBlackout = typeof body.blackout === "boolean";
       const hasLocked = typeof body.locked === "boolean";
       const hasSlug = typeof body.slug === "string";
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasSlug) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), or body.slug (string) required");
+      const hasMode = body.mode === "display" || body.mode === "panel";
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasSlug && !hasMode) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameOutput(id, body.name as string);
-      if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null);
+      // Mode BEFORE viewId, so a single request can turn a screen into a panel
+      // and point it at a console. The other order refuses its own second half.
+      if (hasMode) {
+        try {
+          state = await stageController.setOutputMode(id, body.mode as "display" | "panel");
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
+      // A refused binding is a 400 with the reason, not a 500 stack trace: the
+      // operator has to see WHY a console will not go on a wall screen.
+      if (hasViewId) {
+        try {
+          state = await stageController.setOutputView(id, body.viewId as string | null);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
       if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
       if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
       // A rejected slug is a 400 with the reason, not a silent no-op — the operator
