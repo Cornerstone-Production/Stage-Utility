@@ -261,6 +261,42 @@ function useFitScale<T extends HTMLElement = HTMLSpanElement>(deps: unknown[]): 
   return { wrapRef, elRef, scale };
 }
 
+/**
+ * The wrapper half of the fit: the box that is measured AGAINST.
+ *
+ * StatusDot and BaptismTimer carried byte-identical copies of this markup, which
+ * is how a fix to the way things fit lands in one readout and misses the other.
+ *
+ * The wrapper and the scaled node must be different elements — measuring the
+ * same node that shrinks makes it chase its own tail.
+ */
+function FitBox({
+  ts,
+  wrapRef,
+  children,
+}: {
+  ts: CSSProperties;
+  wrapRef: React.RefObject<HTMLDivElement | null>;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      ref={wrapRef}
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent:
+          ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center",
+        overflow: "hidden",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 function RecordingFill({ label, ts }: { label: string; ts: CSSProperties }) {
   const basePx = parseFloat(String(ts.fontSize)) || 16;
   const { wrapRef, elRef, scale } = useFitScale([label, basePx, ts.fontWeight]);
@@ -328,20 +364,7 @@ function StatusDot({
   const basePx = parseFloat(String(ts.fontSize)) || 16;
   const { wrapRef, elRef, scale } = useFitScale([label, basePx, ts.fontWeight]);
   return (
-    // The wrapper is the box being fitted TO; the inner span is what gets scaled.
-    // Measuring the same node that shrinks would chase its own tail.
-    <div
-      ref={wrapRef}
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent:
-          ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center",
-        overflow: "hidden",
-      }}
-    >
+    <FitBox ts={ts} wrapRef={wrapRef}>
       <span
         ref={elRef}
         style={{
@@ -360,7 +383,7 @@ function StatusDot({
         />
         {label ? <span>{label}</span> : null}
       </span>
-    </div>
+    </FitBox>
   );
 }
 
@@ -1442,23 +1465,12 @@ function BaptismTimer({
   const basePx = parseFloat(String(ts.fontSize)) || 16;
   const { wrapRef, elRef, scale } = useFitScale([value, label, basePx, ts.fontWeight]);
   return (
-    <div
-      ref={wrapRef}
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent:
-          ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center",
-        overflow: "hidden",
-      }}
-    >
+    <FitBox ts={ts} wrapRef={wrapRef}>
       <span ref={elRef} style={{ ...ts, width: undefined, maxWidth: "100%", fontSize: `${basePx * scale}px`, whiteSpace: "nowrap" }}>
         {value}
         {label ? <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{label}</span> : null}
       </span>
-    </div>
+    </FitBox>
   );
 }
 
