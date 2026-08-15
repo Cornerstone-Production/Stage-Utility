@@ -90,7 +90,7 @@ warning say something a default cannot infer.
 | `fontSize` | **Removed** | The widget sizes text to its box, and keeps sizing it as the box changes |
 | `fontWeight`, `italic`, `uppercase`, `letterSpacing` | **Removed** | The widget's own typography; a clock is a clock |
 | `textAlign`, `vAlign` | **Removed** | The widget centres itself unless its content says otherwise |
-| `background`, `opacity`, `boxShadow` | **Removed** | The card look goes entirely: the body is transparent, so the canvas shows through |
+| `background`, `opacity`, `boxShadow` | **Removed** | The card look goes entirely: the body is the canvas's own colour, opaque |
 | `cornerRadius`, `padding`, `borderWidth` | **Removed** | One radius, one padding, one outline weight, app-wide |
 | `borderColor` | **Removed** | One neutral outline, app-wide. Section colour was proposed and cut — see below |
 | `textShadow`, `lineClamp` | **Removed** | Auto-sizing makes both unnecessary |
@@ -100,20 +100,26 @@ warning say something a default cannot infer.
 
 A widget is **its content and a 1px outline**. Nothing else.
 
-The body is **transparent** — the canvas shows straight through, and the outline
-is the only thing separating the widget from it. Not a subtle fill, not a darker
-shade: nothing.
+The body is **opaque, painted in the canvas's own background colour**. Not
+transparent — opaque in the colour behind it. On a default black canvas the two
+look identical, and the opaque version also occludes whatever is underneath.
 
-That is a production decision before it is a visual one. Stage displays live in
-dark rooms, and every filled panel on a confidence monitor is light spilling onto
-the platform and onto a performer's face. On an LED wall true black is also less
-power and a deeper black. A fill whose only job is to say "this is a widget" pays
-that cost to do something the outline already does.
+That difference is not theoretical: **5 pairs of top-level objects overlap in the
+real config today**. Transparent bodies let the lower one bleed through the upper
+one's text. Opaque bodies stack cleanly, and because the fill is the canvas colour
+there is still nothing to see but content and an outline.
+
+Painted from the canvas colour rather than hardcoded black, so a layout with a
+non-default background still matches rather than punching black holes in itself.
+
+The light argument is unaffected: black is black. Stage displays live in dark
+rooms, and a widget that emits no more than the canvas behind it spills no light
+onto the platform or a performer's face. On an LED wall it stays true black.
 
 **The rule: no fill as decoration; fill only as state.**
 
 One deliberate exception, which already exists: **recording fills the box red.**
-That is an alarm, not decoration, and it has to be unmissable at thirty feet. The
+That is an alarm, not decoration, and has to be unmissable at thirty feet. The
 widget owns it — it stops being a setting (see the config cull). The same applies
 to any future state that means "look at this right now".
 
@@ -130,16 +136,6 @@ buttons, dense and interactive, hunted through under time pressure — not on a
 wall. It comes back then, scoped to consoles, earned by a real case.
 
 **So one style field survives: `color`, on text.**
-
-### What this gives up
-
-Named, because it is a real trade: with no fill, a widget over a canvas
-**background image** inherits whatever is behind it, and text over a busy image
-gets hard to read. The old `background` field quietly covered that case. The
-outline plus the text's own contrast handles a plain background; a busy image
-behind live data is a problem the operator created and can solve by changing the
-image. If a real display depends on a fill for legibility, that is the case that
-brings a fill back.
 
 ### Config options: 80 across 41 types
 
@@ -161,13 +157,12 @@ rather than "how should it look?"
 
 ---
 
-## The decision this needs from the maintainer
+## Decided: the new look applies everywhere
 
 Removing the styling changes how **existing displays look after an upgrade**.
-That is the point, but it is not reversible by an operator, so it is a call to
-make deliberately.
+Decision made — **option A, apply everywhere.**
 
-**A. The new look everywhere (recommended).** Existing per-object styling stops
+**A. The new look everywhere (chosen).** Existing per-object styling stops
 being rendered. Every display gets flat widgets with outlines on next upgrade.
 The stored values stay in the files untouched, so a rollback restores the old
 look — nothing is destroyed, only ignored.
@@ -176,9 +171,9 @@ look — nothing is destroyed, only ignored.
 tints. Nothing changes on upgrade — but two looks coexist forever and the
 renderer keeps every code path this phase set out to delete.
 
-A is recommended: B keeps the bloat and buys nothing except the absence of a
-surprise. **A must be flagged in the release notes**, because someone's stage
-display will look different on a Sunday morning.
+B keeps the bloat and buys nothing except the absence of a surprise, so A it is.
+**A must be flagged in the release notes**, because someone's stage display will
+look different on a Sunday morning.
 
 ---
 
@@ -190,7 +185,7 @@ display will look different on a Sunday morning.
 | `renderer/editor/palette.tsx` (new) | The sidebar: grouped widget cards, draggable |
 | `renderer/editor/drag-to-place.ts` (new) | Pure: drop point → a sensible default rect |
 | `renderer/editor/draw-to-create.ts` (new) | Pure: drawn rect → normalised, clamped rect |
-| `renderer/main/widget-frame.tsx` (new) | The one frame every widget renders in: transparent body, 1px outline, one padding |
+| `renderer/main/widget-frame.tsx` (new) | The one frame every widget renders in: opaque canvas-coloured body, 1px outline, one padding |
 | `renderer/main/layout-objects.ts` | Default styles collapse to almost nothing |
 | `renderer/editor/inspector.tsx` | Shows / Text colour / Position — that is all |
 | `renderer/app/home/home-layout.ts` (new) | Home's default layouts, as data |
@@ -279,8 +274,31 @@ test("a flick becomes a default-sized widget, not a 2px one", () => {
 `layout-renderer.tsx`, `inspector.tsx`
 
 - [ ] **Step 1: The frame.** Every widget renders inside `WidgetFrame`: 1px
-      neutral outline, one radius, one padding, transparent body, no shadow.
+      neutral outline, one radius, one padding, a body painted in the canvas's
+      own background colour, no shadow.
       One component, so the look cannot drift per type.
+- [ ] **Step 1b: Guard that widgets occlude each other.**
+
+```ts
+test("an overlapping widget hides what is under it, not blends with it", () => {
+  // 5 pairs of top-level objects overlap in a real config. A transparent body
+  // lets the lower one's text bleed through the upper one's, which reads as a
+  // rendering fault rather than a layout mistake.
+  const frame = renderFrame({ canvasBackground: "#0a0a0a" });
+  assert.equal(computed(frame).backgroundColor, "rgb(10, 10, 10)");
+  assert.notEqual(computed(frame).backgroundColor, "rgba(0, 0, 0, 0)");
+});
+
+test("the body follows the canvas colour rather than hardcoding black", () => {
+  // Otherwise a non-default canvas gets black holes punched in it.
+  const frame = renderFrame({ canvasBackground: "#123456" });
+  assert.equal(computed(frame).backgroundColor, "rgb(18, 52, 86)");
+});
+```
+
+Prove both: make the body `transparent` and watch the first fail; hardcode
+`#000` and watch the second.
+
 - [ ] **Step 2: Text sizes itself, always.** Extend Phase 5's `useFitScale` from
       the readouts that had bugs to every widget that renders text, and make it the
       default path rather than an opt-in. This is the change that makes `fontSize`
@@ -446,8 +464,9 @@ undo:
   answer is to resize the widget, which is a better lever anyway.
 - **Per-object background colour is gone**, with nothing replacing it. A layout
   using fill to mean something loses that meaning; the answer is to say it in the
-  content instead. Widgets over a canvas background image lose the fill that made
-  them legible — see "What this gives up".
+  content instead. (An earlier draft worried about widgets over a canvas
+  background *image* — there is no such feature: `LayoutCanvas.background` is a
+  solid colour or null. The concern was imaginary and is withdrawn.)
 
 If any of these is wrong for a real display you have, say which and it stays.
 
