@@ -1,7 +1,7 @@
 // What each layout object can DO, as opposed to what it looks like.
 //
 // The rendering context decides which of these are live: a wall display renders
-// readouts only, a touch panel adds controls and editing, and a console in the
+// readouts only, a control surface adds controls and editing, and a console in the
 // operator shell adds drill-down. That gating is what stops a wall screen
 // showing a live button by accident, and it needs one place that says which
 // objects are buttons in the first place.

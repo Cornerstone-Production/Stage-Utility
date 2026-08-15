@@ -10,7 +10,7 @@ time, against this document.
 to share a server. This redesign gives the operator surfaces one shell with real
 navigation, turns the root URL into a working home rather than a link list, and
 makes a layout something an operator can act on and edit in place — while a wall
-display stays inert unless it is deliberately made a touch panel.
+display stays inert unless it is deliberately made a control surface.
 
 **Not in scope:** the visual language. Type, color tokens, materials and
 elevation were settled in the design overhaul (see `STYLE_GUIDE.md`). This is
@@ -132,7 +132,7 @@ output surfaces**.
   genuine configuration. `settings-window.html` retires and its sections become
   routes. (The rail is settled in Section 2.)
 - **The output surface** — screens pinned at `/display-N`. Chrome-free, forced
-  dark, and read-only unless explicitly made a touch panel (Section 4).
+  dark, and read-only unless explicitly made a control surface (Section 4).
 
 These stay **two HTML entry points** rather than merging into one bundle. The
 decision is close — a single entry with route-level code splitting would be
@@ -166,7 +166,7 @@ surface: "display" | "console"
 | Audience | anyone walking past | the operator |
 
 The `panel` case — a console pinned chrome-free to a physical screen, which is
-how a touchscreen is built — is defined in Section 4.
+how a control surface is built — is defined in Section 4.
 
 A layout is designed for one context, not both. A display View is laid out to be
 read from across a room and carries no controls; a console View is laid out for
@@ -422,7 +422,7 @@ accident.
 
 Three interactive object types already exist — `rosstalk-button`, `osc-button`
 and `live-controls` — and they render on wall displays today. Migrating every
-existing View to `display` would silently disable the buttons on any touch panel
+existing View to `display` would silently disable the buttons on any control surface
 currently in service.
 
 Migration is therefore behavior-preserving: **any existing View containing a

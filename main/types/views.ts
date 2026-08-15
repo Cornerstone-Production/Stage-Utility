@@ -544,7 +544,7 @@ export type ViewSurface = "display" | "console";
  * How an Output renders.
  *
  * `display` is a read-only wall screen. `panel` is a console pinned chrome-free
- * to a physical screen — which is how a touchscreen is built. An Output is a
+ * to a physical screen — which is how a control surface is built. An Output is a
  * display unless deliberately changed, so nothing becomes interactive by
  * accident.
  */

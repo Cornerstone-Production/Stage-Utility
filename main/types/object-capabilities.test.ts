@@ -24,7 +24,7 @@ describe("capability registry", () => {
 
   test("the three existing interactive objects are controls", () => {
     // These render on real screens today. Demoting one to a readout would make
-    // a working touch panel silently stop responding.
+    // a working control surface silently stop responding.
     for (const t of ["osc-button", "rosstalk-button", "live-controls"] as const) {
       assert.ok(isControl(t), `${t} must be a control`);
     }

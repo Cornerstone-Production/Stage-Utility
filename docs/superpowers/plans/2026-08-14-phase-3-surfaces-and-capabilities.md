@@ -33,7 +33,7 @@ present there.
   something appearing more than once, grep for every instance; say in the commit
   how many were found and how many changed.
 - Migration is **behavior-preserving**, never a blanket default. Existing
-  installs must not lose a working touch panel.
+  installs must not lose a working control surface.
 - Numeric fields use the themed `NumberInput`, never a raw `<input type="number">`.
 
 ---
@@ -411,7 +411,7 @@ test("converting a bound View names the Output it would strand", async () => {
       if (viewSurface(view) === "console" && outputMode(output) !== "panel") {
         throw new Error(
           `outputs:setView — "${view.name}" is a console and ${output.name} is a display. ` +
-          `Set that screen to panel mode first if it is a touch panel.`,
+          `Set that screen to panel mode first if it is a control surface.`,
         );
       }
     }
@@ -577,7 +577,7 @@ for (const [ctx, cap, expected] of MATRIX) {
   see" / "A control surface you operate".
 
 - [ ] **Step 2: Panel mode on a screen card.** In the overflow menu beside Lock:
-  "Use as a touch panel", with a confirm that says plainly what changes —
+  "Use as a control surface", with a confirm that says plainly what changes —
   controls become live on that screen.
 
 - [ ] **Step 3: Group the unassigned-views section** by surface, so consoles and
@@ -772,7 +772,7 @@ Nothing is dropped without a stated reason or a named replacement.
 | `osc-button` object | Fires OSC from any View | **Carried unchanged.** Becomes a specialization of the control capability; existing layouts keep working untouched. |
 | `rosstalk-button` object | Fires RossTalk | **Carried unchanged.** |
 | `live-controls` object | PCO Prev/Next, special-cased | **Carried, generalised.** Becomes an ordinary control backed by `pco.live.advance`, which already exists in the action registry. Capability gating replaces the special case. |
-| Buttons working on a touch panel today | They render and fire on any Output | **Carried by migration.** Any View containing a control migrates to `console` and its Outputs to `panel`, so behaviour is preserved with no operator action. Logged, so a stray control that pulled a wall display into `panel` can be demoted deliberately. |
+| Buttons working on a control surface today | They render and fire on any Output | **Carried by migration.** Any View containing a control migrates to `console` and its Outputs to `panel`, so behaviour is preserved with no operator action. Logged, so a stray control that pulled a wall display into `panel` can be demoted deliberately. |
 | Any View bindable to any Output | No restriction | **Deliberately restricted.** A console View may only bind to a panel Output, refused server-side. The reason: a wall screen must not render a live control by accident. Migration means no install loses a working binding. |
 | `/preview-<view>` live preview | Renders a third presentation | **Carried, corrected.** Renders in the View's own declared surface, so the preview shows what the screen will show. |
 | Views list ungrouped | One flat list | **Replaced.** Grouped by surface, since the two are now different kinds of thing. |

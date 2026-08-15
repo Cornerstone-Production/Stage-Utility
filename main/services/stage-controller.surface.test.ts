@@ -73,7 +73,11 @@ describe("binding a view to a screen", () => {
       (e: Error) => {
         assert.match(e.message, /FOH Console/, "must name the view");
         assert.match(e.message, /Lobby/, "must name the screen");
-        assert.match(e.message, /panel mode/i, "must say how to fix it");
+        // The exact words the screen's menu uses. An instruction naming
+        // something the operator cannot find is worse than no instruction —
+        // this refusal used to say "panel mode", which appears nowhere in the UI.
+        assert.match(e.message, /Use as a control surface/, "must name the menu item, in its words");
+        assert.ok(!/^\w+:\w+ —/.test(e.message), "must not carry the internal handler name");
         return true;
       },
     );
@@ -110,7 +114,7 @@ describe("changing a screen's mode", () => {
     await stageController.setOutputView("booth", "vc");
     await assert.rejects(
       () => stageController.setOutputMode("booth", "display"),
-      /showing the console/i,
+      /showing the control surface/i,
     );
   });
 

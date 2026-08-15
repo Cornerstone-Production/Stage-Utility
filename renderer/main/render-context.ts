@@ -14,7 +14,7 @@ import type { Capability } from "@main/types/object-capabilities";
 
 /**
  * - `display` — a read-only wall screen. Anyone can walk past it.
- * - `panel` — a console pinned chrome-free to a physical screen: a touchscreen
+ * - `panel` — a console pinned chrome-free to a physical screen: a control surface
  *   the operator deliberately opted in.
  * - `shell` — a console inside the operator app, where navigation exists.
  */
