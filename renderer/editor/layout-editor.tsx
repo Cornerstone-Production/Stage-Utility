@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
-import { Tooltip } from "../../components/ui/tooltip";
-import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
+import { Tooltip } from "../components/ui/tooltip";
+import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
 import {
   UndoIcon,
   Trash2Icon,
@@ -54,8 +54,8 @@ import {
   DialogFooter,
   InfoHint,
   UnsavedBanner,
-} from "../../components/ui";
-import { ObjectContent, boxStyle, useLayoutData, loadProcessedAttachment, type LayoutRenderCtx } from "../../main/layout-renderer";
+} from "../components/ui";
+import { ObjectContent, boxStyle, useLayoutData, loadProcessedAttachment, type LayoutRenderCtx } from "../main/layout-renderer";
 import {
   findById,
   mapById,
@@ -70,7 +70,7 @@ import {
   deepCloneFreshIds,
   isLockedInTree,
   type FracRect,
-} from "../../main/layout-tree";
+} from "../main/layout-tree";
 import {
   GRID,
   HANDLES,
@@ -83,17 +83,17 @@ import {
   snapRectToGrid,
   snapTo,
   type Handle,
-} from "./layout-geometry.js";
-import { useSplState } from "../../main/use-spl-state";
-import { useWirelessChannels } from "../../main/use-wireless-channels";
-import { usePeopleCountState } from "../../main/use-people-count-state";
-import { useObsState } from "../../main/use-obs-state";
-import { useReaperState } from "../../main/use-reaper-state";
-import { useOscTargets } from "../../main/use-osc-state";
-import { useStageState } from "../../main/use-stage-state";
-import { usePlanItems } from "../../main/use-plan-items";
-import { usePropInstances } from "../../main/use-dashboard-state";
-import { useConfiguredIntegrations, useIntegrations } from "../../main/use-integration-states";
+} from "../settings/sections/layout-geometry.js";
+import { useSplState } from "../main/use-spl-state";
+import { useWirelessChannels } from "../main/use-wireless-channels";
+import { usePeopleCountState } from "../main/use-people-count-state";
+import { useObsState } from "../main/use-obs-state";
+import { useReaperState } from "../main/use-reaper-state";
+import { useOscTargets } from "../main/use-osc-state";
+import { useStageState } from "../main/use-stage-state";
+import { usePlanItems } from "../main/use-plan-items";
+import { usePropInstances } from "../main/use-dashboard-state";
+import { useConfiguredIntegrations, useIntegrations } from "../main/use-integration-states";
 import {
   CARD_PRESETS,
   isKnownObjectType,
@@ -106,9 +106,9 @@ import {
   objectIntegration,
   typeLabel,
   usesPropInstance,
-} from "../../main/layout-objects";
-import { invoke } from "../../lib/api";
-import { InlineSlotsEditor } from "./inline-slots-editor";
+} from "../main/layout-objects";
+import { invoke } from "../lib/api";
+import { InlineSlotsEditor } from "../settings/sections/inline-slots-editor";
 
 // ── object metadata ──────────────────────────────────────────────────────────
 

@@ -10,7 +10,7 @@
 import { useState, type ChangeEvent, type ReactNode } from "react";
 
 import { Dialog, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "../../components/ui";
-import { dashboardTemplate, confidenceMonitorTemplate } from "./layout-editor";
+import { dashboardTemplate, confidenceMonitorTemplate } from "../../editor/layout-editor";
 import type { SectionHandlers } from "../types";
 
 // Copied verbatim from the list this replaces. Retyping it from memory dropped

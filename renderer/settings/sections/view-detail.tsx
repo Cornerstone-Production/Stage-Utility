@@ -24,7 +24,7 @@ import {
 import { invoke } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { SlotEditor } from "./slots-section";
-import { LayoutEditor } from "./layout-editor";
+import { LayoutEditor } from "../../editor/layout-editor";
 import { ViewPreview } from "./view-preview";
 import { KIND_LABELS, KIND_ORDER } from "./new-view-dialog";
 import { viewSurface } from "@main/types/views";
