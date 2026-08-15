@@ -178,35 +178,174 @@ test("edit mode is NOT available on a wall display", () => {
 
 ---
 
-## Task 4: Consoles default to fill
+## Task 4: A responsive fit, replacing `fill`
 
-**Files:** create `renderer/editor/console-fit.ts`; modify the renderer's fit resolution.
+**Files:** create `renderer/main/responsive-layout.ts`; modify `main/types/views.ts`,
+`renderer/main/layout-renderer.tsx`, the editor's canvas controls and inspector.
 
-- [ ] **Step 1: Write the failing test:**
+**Interfaces:**
+- Produces: `resolveLayout(objects, canvas, viewport): PlacedObject[]` — pure, the whole decision in one testable function.
+- Produces: `fitFor(view, explicit): "contain" | "responsive"`.
+
+### Why this replaces `fill` rather than joining it
+
+`fill` is not a transform stretch — objects are fractional and fonts are
+fractions of the live window height, so **text already does not distort**. What
+breaks is everything else: a square tile becomes a wide rectangle, a row of
+three across becomes three slivers on a tall window, and a layout built on a
+laptop is unusable on a phone. Proportional reflow is the whole of its
+responsiveness, and that is not enough.
+
+Nothing in the real config uses `fill` today — every layout is `contain` — so
+replacing it costs no migration. A stored `fit: "fill"` still parses and is read
+as `responsive`, for any install that did set it.
+
+### The model
+
+Four mechanisms, smallest first. Each is independently useful, and the first
+alone already beats `fill`.
+
+1. **Anchors.** Each object may pin edges: `left`, `right`, `top`, `bottom`, or
+   `center` per axis. Unpinned edges stay proportional, which is exactly today's
+   behaviour — so the default is a no-op and an untouched layout renders as it
+   does now. An object pinned right stays the same distance from the right edge
+   instead of drifting.
+
+2. **Keep aspect.** An object may declare its box keeps the design's aspect,
+   scaling uniformly inside the space it is given rather than stretching. Right
+   for logos, slide thumbnails, NDI video and anything with a natural shape.
+
+3. **Size clamps.** Optional min/max in real pixels, so a control cannot shrink
+   below a tappable size on a small window nor balloon on a 4K wall.
+
+4. **Stacking.** When the viewport deviates far enough from the design shape —
+   or is genuinely narrow — top-level objects reflow into a single column in
+   reading order (top-to-bottom, then left-to-right). This is the part that makes
+   a console built on a laptop usable on a phone, and it is the only mechanism
+   that changes the arrangement rather than the arithmetic.
+
+- [ ] **Step 1: Write the failing tests.** Pure function, so the whole model is
+  testable without rendering:
 
 ```ts
-test("a console fills the window", () => {
-  // A 16:9 design pillar-boxed into a laptop window wastes most of the screen.
-  assert.equal(fitFor({ surface: "console" }, undefined), "fill");
-});
+const CANVAS = { width: 1920, height: 1080 };
+const obj = (over) => ({ id: "o", x: 0.1, y: 0.1, w: 0.2, h: 0.2, z: 0, config: { type: "text" }, ...over });
 
-test("a display letterboxes, honouring the design", () => {
-  // A wall screen has a known aspect; the design should be honoured exactly.
-  assert.equal(fitFor({ surface: "display" }, undefined), "contain");
-});
+describe("responsive layout", () => {
+  test("with no anchors it is exactly proportional — today's behaviour", () => {
+    // The default must be a no-op, or every existing layout changes on upgrade.
+    const [p] = resolveLayout([obj({})], CANVAS, { w: 1920, h: 1080 });
+    assert.deepEqual([p.left, p.top, p.width, p.height], [192, 108, 384, 216]);
+  });
 
-test("an explicit fit on the layout always wins", () => {
-  // The operator set it deliberately; a default must not override a choice.
-  assert.equal(fitFor({ surface: "console" }, "contain"), "contain");
-  assert.equal(fitFor({ surface: "display" }, "fill"), "fill");
+  test("an object pinned right keeps its distance from the right edge", () => {
+    const o = obj({ x: 0.7, w: 0.2, anchor: { x: "right" } });
+    // design: right edge sits 0.1 * 1920 = 192px from the right
+    const [p] = resolveLayout([o], CANVAS, { w: 1200, h: 1080 });
+    assert.equal(Math.round(1200 - (p.left + p.width)), 192);
+  });
+
+  test("keepAspect scales uniformly instead of stretching", () => {
+    const o = obj({ w: 0.2, h: 0.2, keepAspect: true });   // square in a 16:9 design
+    const [p] = resolveLayout([o], CANVAS, { w: 3840, h: 1080 });
+    assert.equal(Math.round(p.width), Math.round(p.height), "a square must stay square");
+  });
+
+  test("a size clamp stops a control shrinking below tappable", () => {
+    const o = obj({ w: 0.1, minPx: { w: 44 } });
+    const [p] = resolveLayout([o], CANVAS, { w: 320, h: 800 });
+    assert.ok(p.width >= 44);
+  });
+
+  test("a narrow window stacks top-level objects into a column", () => {
+    const a = obj({ id: "a", x: 0.05, y: 0.1, w: 0.4, h: 0.3 });
+    const b = obj({ id: "b", x: 0.55, y: 0.1, w: 0.4, h: 0.3 });
+    const placed = resolveLayout([a, b], CANVAS, { w: 390, h: 844 });
+    assert.equal(placed[0].left, placed[1].left, "stacked objects share a left edge");
+    assert.ok(placed[1].top >= placed[0].top + placed[0].height, "and do not overlap");
+  });
+
+  test("stacking order is reading order, not z order", () => {
+    // z is paint order and says nothing about what should come first when read.
+    const top = obj({ id: "top", y: 0.05, z: 9 });
+    const bottom = obj({ id: "bottom", y: 0.6, z: 1 });
+    const placed = resolveLayout([bottom, top], CANVAS, { w: 390, h: 844 });
+    assert.deepEqual(placed.map((p) => p.id), ["top", "bottom"]);
+  });
+
+  test("a near-design viewport does NOT stack", () => {
+    // Stacking is for genuinely different shapes. Triggering it on a slightly
+    // narrow laptop would rearrange a layout the operator just built.
+    const placed = resolveLayout([obj({ x: 0.05 }), obj({ id: "b", x: 0.55 })], CANVAS, { w: 1600, h: 1000 });
+    assert.notEqual(placed[0].left, placed[1].left);
+  });
+
+  test("children of a container are placed within it, not the viewport", () => {
+    // Nesting already exists; responsive must not flatten it.
+    const parent = obj({ id: "p", x: 0.5, y: 0, w: 0.5, h: 1, config: { type: "container" },
+      children: [obj({ id: "c", x: 0, y: 0, w: 1, h: 0.5 })] });
+    const placed = resolveLayout([parent], CANVAS, { w: 1920, h: 1080 });
+    const child = placed.find((p) => p.id === "c")!;
+    assert.ok(child.left >= 960, "a child must stay inside its container");
+  });
 });
 ```
 
-- [ ] **Step 2: Run and watch it fail.**
-- [ ] **Step 3: Implement** and wire into the renderer's canvas fit.
-- [ ] **Step 4: Prove it** — invert the two defaults, watch both go red, restore.
-- [ ] **Step 5: Human check** — open a console in a laptop-shaped window and confirm it uses the full area; open a display and confirm it still letterboxes.
-- [ ] **Step 6: Commit** — `feat(editor): consoles fill the window, displays letterbox`
+- [ ] **Step 2: Run and watch them fail.**
+
+- [ ] **Step 3: Implement `resolveLayout`.** Pure and viewport-in/pixels-out, so
+  the editor and the kiosk cannot disagree about where anything goes.
+
+- [ ] **Step 4: Schema.** `anchor`, `keepAspect`, `minPx`, `maxPx` are all
+  OPTIONAL on `LayoutObject`, read through accessors that default to today's
+  behaviour — the same pattern as Phase 3's `surface`, and for the same reason:
+  an existing `views.json` must parse and render identically.
+
+- [ ] **Step 5: `fit`.** `"fill"` is accepted on read and mapped to
+  `"responsive"`; the editor offers Letterbox and Responsive. Say in the commit
+  how many stored layouts used `fill` (zero in the real config, checked).
+
+- [ ] **Step 6: Prove each mechanism.** Four separate proofs: neutralise anchors,
+  `keepAspect`, clamps and stacking in turn, and watch the matching tests go red.
+
+- [ ] **Step 7: The default is a no-op — prove it on real data.** Render every
+  custom view in the real config at its design size with responsive on, and
+  assert every object lands within a pixel of where `contain` puts it. A
+  responsive mode that quietly moves existing layouts is a regression whatever
+  it does at other sizes.
+
+- [ ] **Step 8: Human check at real sizes.** 1440x900, 1920x1080, 390x844 and a
+  deliberately silly 3840x600. Drive it, look at it.
+
+- [ ] **Step 9: Commit** — `feat(layout): a responsive fit for consoles`
+
+---
+
+## Task 4b: Anchors and clamps in the inspector
+
+**Files:** `renderer/editor/inspector.tsx`, `renderer/editor/inspector-rows.tsx`
+
+A model nothing can configure is a model nobody uses — the third orphan of this
+redesign would be a mechanism with no UI.
+
+- [ ] **Step 1: Anchor control.** A nine-cell pin grid (the familiar
+  springs-and-struts control), not two dropdowns: which edges are pinned is
+  spatial information and reads faster as a picture.
+
+- [ ] **Step 2: Keep-aspect toggle and min/max fields.** Numeric fields use the
+  themed `NumberInput`, never a raw `<input type="number">`.
+
+- [ ] **Step 3: A preview-shape control** in the editor toolbar, so a layout can
+  be checked at phone/laptop/wall shapes without leaving it. This is what makes
+  the model usable rather than theoretical.
+
+- [ ] **Step 4: Guard.** Extend the editor composition test so an anchor control
+  that stops being rendered fails.
+
+- [ ] **Step 5: Human check** — set an anchor, switch preview shape, watch it
+  hold. Then save and confirm the real screen agrees with the preview.
+
+- [ ] **Step 6: Commit** — `feat(editor): configure anchors, aspect and size limits`
 
 ---
 
@@ -253,6 +392,8 @@ test("no editing chrome on a display Output", () => {
 | WYSIWYG | Editor imports the renderer's object components | **Carried unchanged.** Never duplicated, so nothing to preserve deliberately. |
 | Conflict detection (`View.rev`) | Editor returns the revision it opened | **Carried unchanged.** Reused as-is; a save built on a layout someone else replaced is still detected. |
 | `fit: "contain"` on displays | Default for every view | **Carried.** Still the default for displays; only consoles change. |
+| `fit: "fill"` | Proportional reflow, no letterbox | **Replaced by `responsive`.** Proportional reflow was the whole of its responsiveness: a square tile became a wide rectangle and a row of three became three slivers on a tall window. `fill` is still accepted on read and maps to `responsive`. Nothing in the real config used it. |
+| Every existing layout's arrangement | Fractional, proportional | **Carried, byte-for-byte.** Anchors, keep-aspect and clamps are all optional and default to today's behaviour, and Task 4 Step 7 asserts every object in the real config lands within a pixel of where it does now. |
 | An explicit `fit` set on a layout | Honoured | **Carried.** A default never overrides a deliberate choice. |
 | Editing on a panel | n/a | **Deliberately absent**, as in Phase 3: a panel pinned to a wall must not be rearrangeable by whoever stands at it. |
 | Editing on a wall display | n/a | **Deliberately absent.** Task 5 tests the absence rather than assuming it. |
@@ -264,7 +405,7 @@ test("no editing chrome on a display Output", () => {
 **Spec coverage.** Section 5's relocation → Task 1; the split → Task 2; edit mode
 on a console route → Task 3; conflict detection reused → parity inventory, and
 Task 2 must not touch it; chrome never mounting on display/panel → Task 5;
-console sizing → Task 4.
+console sizing → Tasks 4 and 4b.
 
 **Type consistency.** `canEditInPlace` (Task 3) and `fitFor` (Task 4) are used by
 those names in their tests and nowhere else yet. `layoutEditingLive` and
@@ -276,6 +417,13 @@ types, live reflow during drag, snapping and alignment guides, the default-look
 styling pass, motion tokens. That is Phase 5, and the design doc separates them
 for a reason: Phase 4 puts the existing editor where it belongs, Phase 5 makes it
 feel right. Mixing them would mean reviewing a move and a redesign as one diff.
+
+**Scope note.** Task 4 grew: a genuinely responsive fit is anchors, aspect
+preservation, size clamps and stacking, plus the UI to configure them — schema,
+renderer and editor. It is bigger than the "consoles default to fill" it
+replaces, and is split into 4 and 4b so the model and its UI can be reviewed
+separately. Said plainly because a task that quietly triples is how a phase
+stops being reviewable.
 
 **Known risk.** Task 2 is the dangerous one. 3,333 lines is enough that a
 mechanical extraction can drop a callback and only fail on an interaction nobody
