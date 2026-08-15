@@ -28,6 +28,8 @@ import { Tooltip } from "../components/ui/tooltip";
 import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
 import { useTheme } from "../lib/use-theme";
 import { buildLabel } from "../lib/build-label";
+import { withViewTransition } from "../lib/view-transition";
+import { resetCurrentRoute } from "./route-reset";
 import { useStageState } from "../main/use-stage-state";
 import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
@@ -106,7 +108,19 @@ export function Rail({
       <SidebarList
         items={[...ALL_DESTINATIONS]}
         selectedItem={active ?? undefined}
-        onSelectedItemChange={(d: Destination) => router.navigate({ to: d.path })}
+        onSelectedItemChange={(d: Destination) => {
+          // Re-selecting the item you are already on resets that route rather
+          // than navigating nowhere: TanStack treats a navigate() to the current
+          // path as a no-op, so without this, clicking "History" while inside a
+          // service did nothing at all.
+          if (d.path === active?.path) {
+            resetCurrentRoute();
+            return;
+          }
+          // Crossfade between destinations. Feature-detected and skipped under
+          // prefers-reduced-motion inside the helper.
+          withViewTransition(() => router.navigate({ to: d.path }));
+        }}
         getItemKey={(d: Destination) => d.path}
       >
         {/* Home first, above the group labels — it is the front door, not a
