@@ -151,7 +151,7 @@ export interface LayoutCanvas {
    * - "fill": fill the whole window — objects (fractional) reflow to the window's
    *   shape, fonts scale by window height; no bars, no distortion.
    */
-  fit?: "contain" | "fill";
+  fit?: "contain" | "fill" | "responsive";
 }
 
 export type LayoutHAlign = "left" | "center" | "right";
@@ -486,6 +486,21 @@ export interface LayoutObject {
   locked?: boolean;
   style?: LayoutStyle;
   config: LayoutObjectConfig;
+  /**
+   * Responsive behaviour. All optional and all OFF by default, so an object that
+   * sets none of them lays out exactly as it always has — see
+   * renderer/main/responsive-layout.ts.
+   */
+  /** Pin an edge instead of drifting proportionally. The pinned distance is held
+   *  in DESIGN pixels, which is what makes it an anchor rather than a fraction. */
+  anchor?: { x?: "left" | "right" | "center"; y?: "top" | "bottom" | "center" };
+  /** Scale evenly inside the space given rather than stretching. For logos,
+   *  thumbnails, video — anything with a natural shape. */
+  keepAspect?: boolean;
+  /** Floor in real pixels, so a control cannot shrink below a tappable size. */
+  minPx?: { w?: number; h?: number };
+  /** Ceiling in real pixels, so an object cannot balloon on a 4K wall. */
+  maxPx?: { w?: number; h?: number };
   /** Nested objects, positioned relative to this object's box. Only meaningful
    *  for `container` objects; absent/empty for leaf objects. */
   children?: LayoutObject[];

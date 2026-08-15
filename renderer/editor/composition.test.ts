@@ -55,14 +55,25 @@ describe("the editor shell composes its parts", () => {
     );
     assert.ok(files.length >= 3, `only found ${files.length} extracted modules — scan looks broken`);
 
-    const all = readdirSync(HERE)
-      .filter((f) => /\.tsx?$/.test(f))
-      .map((f) => readFileSync(path.join(HERE, f), "utf8"))
-      .join("\n");
+    // Scan the WHOLE renderer, not just this directory: an editor module can
+    // legitimately be imported from app/ — can-edit.ts is, by the console route.
+    // Scoping this to the folder reported a wired module as an orphan.
+    const RENDERER = path.join(HERE, "..");
+    const all: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) { if (entry.name !== "node_modules") walk(full); }
+        else if (/\.tsx?$/.test(entry.name)) all.push(readFileSync(full, "utf8"));
+      }
+    };
+    walk(RENDERER);
+    const sources = all.join("\n");
 
     const orphans = files.filter((f) => {
       const mod = f.replace(/\.tsx?$/, "");
-      return !new RegExp(`from "\\./${mod}"`).test(all);
+      // Matches "./mod", "../editor/mod" and "@renderer/editor/mod" alike.
+      return !new RegExp(`from "[^"]*\\b${mod}"`).test(sources);
     });
     assert.deepEqual(orphans, [], `these editor modules are imported by nothing:\n    ${orphans.join("\n    ")}`);
   });

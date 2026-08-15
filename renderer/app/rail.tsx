@@ -27,6 +27,8 @@ import { BrandLogo } from "../components/brand-logo";
 import { Tooltip } from "../components/ui/tooltip";
 import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
 import { useTheme } from "../lib/use-theme";
+import { SlidersHorizontalIcon } from "lucide-react";
+import { viewSurface } from "@main/types/views";
 import { buildLabel } from "../lib/build-label";
 import { withViewTransition } from "../lib/view-transition";
 import { resetCurrentRoute } from "./route-reset";
@@ -79,9 +81,22 @@ export function Rail({
     return () => { cancelled = true; };
   }, []);
 
+  // A rail entry per console View. Derived from state rather than a fixed table,
+  // because consoles are created by the operator — this is the one part of the
+  // rail that is theirs.
+  const consoles: Destination[] = (state?.views ?? [])
+    .filter((v) => viewSurface(v) === "console")
+    .map((v) => ({
+      path: `/consoles/${v.id}`,
+      label: v.name,
+      description: "A console you built.",
+      icon: <SlidersHorizontalIcon className="size-4" />,
+      Component: () => null, // routing is by path; the route table owns the component
+    }));
+
   // Longest match first: /settings/branding must beat /settings.
   const active =
-    [...ALL_DESTINATIONS]
+    [...ALL_DESTINATIONS, ...consoles]
       .sort((a, b) => b.path.length - a.path.length)
       .find((d) => pathname === d.path || pathname.startsWith(`${d.path}/`)) ?? null;
 
@@ -106,7 +121,7 @@ export function Rail({
       )}
 
       <SidebarList
-        items={[...ALL_DESTINATIONS]}
+        items={[...ALL_DESTINATIONS, ...consoles]}
         selectedItem={active ?? undefined}
         onSelectedItemChange={(d: Destination) => {
           // Re-selecting the item you are already on resets that route rather
@@ -128,6 +143,23 @@ export function Rail({
         {DESTINATIONS.filter((d) => UNGROUPED_PATHS.includes(d.path)).map((d) => (
           <SidebarListItem key={d.path} item={d} icon={d.icon} title={d.label} />
         ))}
+        {/* One row per console, above the fixed groups: a console is a place you
+            work, and the spec's rail puts them one click from anywhere rather
+            than behind a picker. Absent entirely until a console exists, so an
+            install that has none sees the rail it has today. */}
+        {consoles.length > 0 && (
+          <Fragment key="consoles">
+            <SidebarGroupLabel>Consoles</SidebarGroupLabel>
+            {consoles.map((c) => (
+              <SidebarListItem
+                key={c.path}
+                item={c}
+                icon={c.icon}
+                title={c.label}
+              />
+            ))}
+          </Fragment>
+        )}
         {NAV_GROUPS.map((g) => {
           const items = DESTINATIONS.filter((d) => g.paths.includes(d.path));
           if (items.length === 0) return null;

@@ -1,4 +1,6 @@
 import { clamp } from "@main/services/clamp";
+import { resolveLayout, type PlacedObject } from "./responsive-layout";
+import { fitFor } from "./console-fit";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
@@ -79,6 +81,9 @@ export interface LayoutRenderCtx {
   /** True only on a real display route. Interactive objects (live controls)
    *  only fire their commands when true — never in the editor or preview iframe. */
   interactive: boolean;
+  /** Pixel placements when the layout is rendering responsively; absent when it
+   *  is letterboxed, in which case objects position by percentage as before. */
+  placed?: Map<string, PlacedObject>;
 }
 
 function pad(n: number): string {
@@ -165,14 +170,29 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
   const kids = o.children?.length
     ? [...o.children].filter((c) => !c.hidden).sort((a, b) => a.z - b.z)
     : null;
-  return (
-    <div
-      style={{
-        position: "absolute",
+  // Responsive layouts are placed in absolute pixels by resolveLayout, which is
+  // where anchors, aspect, clamps and stacking are decided. Everything else keeps
+  // the percentage positioning it has always used — that is what makes the
+  // default a no-op rather than a re-implementation of it.
+  const placed = ctx.placed?.get(o.id);
+  const geometry = placed
+    ? {
+        left: `${placed.left}px`,
+        top: `${placed.top}px`,
+        width: `${placed.width}px`,
+        height: `${placed.height}px`,
+      }
+    : {
         left: `${o.x * 100}%`,
         top: `${o.y * 100}%`,
         width: `${o.w * 100}%`,
         height: `${o.h * 100}%`,
+      };
+  return (
+    <div
+      style={{
+        position: "absolute",
+        ...geometry,
         ...boxStyle(o, ctx.H),
       }}
     >
@@ -1938,7 +1958,19 @@ export function useLayoutData(layout?: LayoutDTO) {
  * Renders a custom-layout View: a fixed design canvas scaled to fit the viewport,
  * with absolutely-positioned, live-data-bound objects.
  */
-export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
+export function LayoutRenderer({
+  layout,
+  ndiSource,
+  interactive = false,
+  surface,
+}: {
+  layout: LayoutDTO;
+  ndiSource: string | null;
+  interactive?: boolean;
+  /** The View's surface, so a console can respond to the window while a display
+   *  honours its design. Absent behaves as a display — the safe default. */
+  surface?: "display" | "console";
+}) {
   const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
@@ -1981,9 +2013,17 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // "fill": objects (fractional) reflow to fill the whole window — no letterbox.
   // Fonts (fractions of canvas HEIGHT) scale by the live window height so they grow
   // with the window instead of the design canvas.
-  const fill = canvas.fit === "fill";
-  const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
+  // A console responds to the window; a display honours its design exactly. An
+  // explicit fit on the layout wins over both.
+  const fit = fitFor({ surface } as View, canvas.fit);
+  const responsive = fit === "responsive";
+  const H = responsive ? dims.h || canvas.height : canvas.height;
+  // Placements are computed once per render, from the live viewport. Absent when
+  // letterboxed, so that path is untouched.
+  const placed = responsive && dims.w && dims.h
+    ? new Map(resolveLayout(layout.objects.filter((o) => !o.hidden), canvas, { w: dims.w, h: dims.h }).map((p) => [p.id, p]))
+    : undefined;
+  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom
@@ -1996,7 +2036,7 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
     <div ref={setBox} className="relative w-full h-full kiosk-surface overflow-hidden flex items-center justify-center">
       <div
         style={
-          fill
+          responsive
             ? {
                 position: "absolute",
                 inset: 0,
