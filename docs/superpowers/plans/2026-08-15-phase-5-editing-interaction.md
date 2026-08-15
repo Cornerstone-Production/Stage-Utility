@@ -261,7 +261,8 @@ the arrangement."
 
 ### Task 3: Every object type survives any shape
 
-38 types. Some have never been rendered at 40px tall.
+41 types, not 38 — the design doc's number was three releases stale. Some had
+never been rendered at a dashboard tile size.
 
 **Files:**
 - Create: `renderer/main/object-resize.test.tsx`
@@ -300,7 +301,7 @@ for (const type of TYPES) {
 test("the sweep covers every type", () => {
   // An exact count, not a floor. A floor with slack is how three config stores
   // went missing from every backup with the suite green.
-  assert.equal(TYPES.length, 38);
+  assert.equal(TYPES.length, 41);
 });
 ```
 

@@ -213,9 +213,60 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
  * and a padded one did not. Positioned this way it covers the padding too, and
  * the fill is the same shape as the object at any style.
  */
+/**
+ * Shrink whatever is inside so it fits the box, instead of spilling out of it.
+ *
+ * The measured sweep across every object type found eight that overflowed their
+ * box at a normal dashboard tile size (259x161) — the status objects by up to
+ * 48px, because a dot plus "OBS: Recording 00:12:34" is simply wider than a
+ * narrow tile and nothing was shrinking it. Clipping is not the fix either: a
+ * status the operator cannot read is the same as no status.
+ *
+ * Converges in a pass or two by back-deriving the natural size from the live
+ * scroll size at the current scale. Floor of 0.3 so it degrades to "small" and
+ * never to "invisible".
+ */
+function useFitScale<T extends HTMLElement = HTMLSpanElement>(deps: unknown[]): {
+  wrapRef: React.RefObject<HTMLDivElement | null>;
+  elRef: React.RefObject<T | null>;
+  scale: number;
+} {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const elRef = useRef<T | null>(null);
+  const [scale, setScale] = useState(1);
+  // The observer is subscribed once per dep change, so its callback would
+  // otherwise close over a stale `scale`.
+  const scaleRef = useLatestRef(scale);
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const el = elRef.current;
+    if (!wrap || !el) return;
+    const measure = () => {
+      const availW = wrap.clientWidth;
+      const availH = wrap.clientHeight;
+      if (availW <= 1 || availH <= 1) return;
+      const cur = scaleRef.current;
+      const natW = el.scrollWidth / cur;
+      const natH = el.scrollHeight / cur;
+      if (natW <= 0 || natH <= 0) return;
+      const desired = clamp(Math.min(availW / natW, availH / natH), 0.3, 1);
+      if (Math.abs(desired - cur) > 0.01) setScale(desired);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, scaleRef]);
+  return { wrapRef, elRef, scale };
+}
+
 function RecordingFill({ label, ts }: { label: string; ts: CSSProperties }) {
+  const basePx = parseFloat(String(ts.fontSize)) || 16;
+  const { wrapRef, elRef, scale } = useFitScale([label, basePx, ts.fontWeight]);
   return (
     <div
+      ref={wrapRef}
       style={{
         position: "absolute",
         inset: 0,
@@ -224,12 +275,17 @@ function RecordingFill({ label, ts }: { label: string; ts: CSSProperties }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        // A long label (a record timecode pushes it wider) clips rather than
-        // spilling past the object.
+        // A long label (a record timecode pushes it wider) shrinks to fit; the
+        // clip stays as the backstop for the pathological case.
         overflow: "hidden",
       }}
     >
-      <span style={{ ...ts, color: "#ffffff" }}>{label}</span>
+      <span
+        ref={elRef}
+        style={{ ...ts, color: "#ffffff", width: undefined, maxWidth: "100%", fontSize: `${basePx * scale}px` }}
+      >
+        {label}
+      </span>
     </div>
   );
 }
@@ -269,22 +325,42 @@ function StatusDot({
   ts: CSSProperties;
   dimmed?: boolean;
 }) {
+  const basePx = parseFloat(String(ts.fontSize)) || 16;
+  const { wrapRef, elRef, scale } = useFitScale([label, basePx, ts.fontWeight]);
   return (
-    <span
+    // The wrapper is the box being fitted TO; the inner span is what gets scaled.
+    // Measuring the same node that shrinks would chase its own tail.
+    <div
+      ref={wrapRef}
       style={{
-        ...ts,
-        width: "auto",
-        display: "inline-flex",
+        width: "100%",
+        height: "100%",
+        display: "flex",
         alignItems: "center",
-        gap: "0.4em",
-        opacity: dimmed ? 0.4 : 1,
+        justifyContent:
+          ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center",
+        overflow: "hidden",
       }}
     >
       <span
-        style={{ width: "0.6em", height: "0.6em", borderRadius: "50%", background: color, flexShrink: 0 }}
-      />
-      {label ? <span>{label}</span> : null}
-    </span>
+        ref={elRef}
+        style={{
+          ...ts,
+          width: "auto",
+          maxWidth: "100%",
+          fontSize: `${basePx * scale}px`,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "0.4em",
+          opacity: dimmed ? 0.4 : 1,
+        }}
+      >
+        <span
+          style={{ width: "0.6em", height: "0.6em", borderRadius: "50%", background: color, flexShrink: 0 }}
+        />
+        {label ? <span>{label}</span> : null}
+      </span>
+    </div>
   );
 }
 
@@ -293,33 +369,10 @@ function StatusDot({
 // otherwise overflow. Converges in a pass or two by back-deriving the natural size
 // from the live scroll size (same approach as ServiceOrderObject's auto-fit).
 function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign?: LayoutVAlign }) {
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const elRef = useRef<HTMLSpanElement | null>(null);
-  const [scale, setScale] = useState(1);
-  // The ResizeObserver below is subscribed once per text/size change, so its
-  // callback would otherwise close over a stale `scale`.
-  const scaleRef = useLatestRef(scale);
   const basePx = parseFloat(String(ts.fontSize)) || 16;
-  useLayoutEffect(() => {
-    const wrap = wrapRef.current;
-    const el = elRef.current;
-    if (!wrap || !el) return;
-    const measure = () => {
-      const availW = wrap.clientWidth;
-      const availH = wrap.clientHeight;
-      if (availW <= 1 || availH <= 1) return;
-      const cur = scaleRef.current;
-      const natW = el.scrollWidth / cur;
-      const natH = el.scrollHeight / cur;
-      if (natW <= 0 || natH <= 0) return;
-      const desired = clamp(Math.min(availW / natW, availH / natH), 0.3, 1);
-      if (Math.abs(desired - cur) > 0.01) setScale(desired);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(wrap);
-    return () => ro.disconnect();
-  }, [text, basePx, ts.fontWeight, scaleRef]);
+  // Same measurement as the status objects — one implementation, so a fix to how
+  // things fit their box cannot land in one of them and miss the others.
+  const { wrapRef, elRef, scale } = useFitScale([text, basePx, ts.fontWeight]);
   const justify = vAlign === "top" ? "flex-start" : vAlign === "bottom" ? "flex-end" : "center";
   const align = ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center";
   return (
@@ -338,7 +391,16 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "text":
       return span(c.text);
     case "clock":
-      return span(clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h", c.showMeridiem ?? true));
+      // FitText, not a bare span: "2:26:41 PM" is 4px wider than a 257px tile,
+      // and a clock that spills past its own box on a dashboard is the single
+      // most visible version of this bug.
+      return (
+        <FitText
+          text={clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h", c.showMeridiem ?? true)}
+          ts={ts}
+          vAlign={o.style?.vAlign}
+        />
+      );
     case "countdown-timer": {
       const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
       if (!t) return (c.hideWhenIdle ?? false) ? null : span("—");
@@ -348,9 +410,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       const warning = c.warnSeconds != null && !t.over && t.seconds <= c.warnSeconds;
       const color = t.over ? "var(--red-10)" : warning ? "var(--yellow-10)" : null;
       return (
-        <span style={color ? { ...ts, color } : ts}>
-          {fmtDuration(t.seconds)}
-        </span>
+        <FitText text={fmtDuration(t.seconds)} ts={color ? { ...ts, color } : ts} vAlign={o.style?.vAlign} />
       );
     }
     case "service-pacing": {
@@ -1263,6 +1323,11 @@ function PeoplePanel({
   const t = people?.total;
   const valuePx = parseFloat(String(ts.fontSize)) || 0.12 * H;
   const labelPx = Math.max(8, valuePx * 0.34);
+  const {
+    wrapRef: fitWrapRef,
+    elRef: fitElRef,
+    scale: fitScale,
+  } = useFitScale<HTMLDivElement>([metrics.join(","), showLabels, col, valuePx, H]);
   // Each tile resolves to a display string + optional color override (vs-average
   // goes green/red). "—" when the underlying value isn't available.
   const tile = (k: string): { text: string; color: string } => {
@@ -1290,7 +1355,14 @@ function PeoplePanel({
     return { text: v == null ? "—" : v.toLocaleString(), color: base };
   };
   return (
+    // Scaled to fit like every other object: the measured sweep found this one
+    // overflowing its box by 386px at a dashboard tile size, because the metrics
+    // wrap onto new rows and the wrapped block is simply taller than the tile.
+    // Gaps and fonts here are fractions of the CANVAS height, so they do not
+    // shrink with the object - scaling the whole block is what makes them.
+    <div ref={fitWrapRef} style={{ width: "100%", height: "100%", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
     <div
+      ref={fitElRef}
       style={{
         display: "flex",
         flexDirection: col ? "column" : "row",
@@ -1300,6 +1372,8 @@ function PeoplePanel({
         height: "100%",
         justifyContent: "space-evenly",
         alignItems: "center",
+        transform: `scale(${fitScale})`,
+        transformOrigin: "center center",
       }}
     >
       {metrics.map((k) => {
@@ -1315,6 +1389,7 @@ function PeoplePanel({
           </div>
         );
       })}
+    </div>
     </div>
   );
 }
@@ -1361,11 +1436,29 @@ function BaptismTimer({
     value = last ? fmtClock(last.testimonyMs + last.baptizeMs) : "—";
     fallback = "last person";
   }
+  // "0:00 avg per person" on a narrow tile is wider than the tile — 49px over in
+  // the measured sweep. Same fit-to-box treatment as every other readout.
+  const label = config.showLabel ? ` ${config.label ?? fallback}` : "";
+  const basePx = parseFloat(String(ts.fontSize)) || 16;
+  const { wrapRef, elRef, scale } = useFitScale([value, label, basePx, ts.fontWeight]);
   return (
-    <span style={ts}>
-      {value}
-      {config.showLabel && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{` ${config.label ?? fallback}`}</span>}
-    </span>
+    <div
+      ref={wrapRef}
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent:
+          ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center",
+        overflow: "hidden",
+      }}
+    >
+      <span ref={elRef} style={{ ...ts, width: undefined, maxWidth: "100%", fontSize: `${basePx * scale}px`, whiteSpace: "nowrap" }}>
+        {value}
+        {label ? <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{label}</span> : null}
+      </span>
+    </div>
   );
 }
 
@@ -2023,6 +2116,14 @@ export function LayoutRenderer({
   const placed = responsive && dims.w && dims.h
     ? new Map(resolveLayout(layout.objects.filter((o) => !o.hidden), canvas, { w: dims.w, h: dims.h }).map((p) => [p.id, p]))
     : undefined;
+  // How far the placed objects actually reach. When stacking gives every object
+  // the 24px floor - many objects on a tall narrow window - the column is taller
+  // than the viewport, and with the container clipped the overflow was simply
+  // gone: no scrollbar, no indication, content the operator could not reach.
+  const contentBottom = placed
+    ? [...placed.values()].reduce((m, o) => Math.max(m, o.top + o.height), 0)
+    : 0;
+  const overflows = responsive && dims.h > 0 && contentBottom > dims.h + 1;
   const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
@@ -2033,13 +2134,23 @@ export function LayoutRenderer({
     bg == null || bg === "#000" || bg === "#000000" || bg === "#080810" || bg === "#0a0a0a";
 
   return (
-    <div ref={setBox} className="relative w-full h-full kiosk-surface overflow-hidden flex items-center justify-center">
+    <div
+      ref={setBox}
+      className={`relative w-full h-full kiosk-surface flex items-center justify-center ${
+        overflows ? "overflow-y-auto overflow-x-hidden" : "overflow-hidden"
+      }`}
+    >
       <div
         style={
           responsive
             ? {
                 position: "absolute",
                 inset: 0,
+                // Grown to the content when the stacked column is taller than the
+                // window, so the container above has something to scroll. Stacking
+                // only happens on a responsive surface, which is a control surface
+                // - something with a touchscreen, not a wall nobody can scroll.
+                ...(overflows ? { bottom: "auto", minHeight: contentBottom } : null),
                 background: inheritSurface ? "transparent" : bg,
               }
             : {
