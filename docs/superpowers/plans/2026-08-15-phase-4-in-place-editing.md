@@ -66,20 +66,29 @@ only ever there because that was its bundle, and settings no longer is one.
 
 - [ ] **Step 2: `git mv`** the file, then update those imports. Nothing else changes: not a line of the body.
 
-- [ ] **Step 3: Prove it is a pure move.**
+- [ ] **Step 3: Rewrite the relative imports INSIDE the file.** The move changes
+  the file's depth — `settings/sections/x` is three deep, `editor/x` is two — so
+  every `../../` in it now resolves one level too high. `git mv` does not rewrite
+  them. Say how many were rewritten.
 
-```bash
-git show HEAD:renderer/settings/sections/layout-editor.tsx > /tmp/before.tsx
-diff /tmp/before.tsx renderer/editor/layout-editor.tsx && echo "IDENTICAL"
+- [ ] **Step 4: Prove it is a pure move, correctly.** Byte-identity is the WRONG
+  property once the depth changes: it passes while every import is broken, which
+  is exactly what happened the first time. Compare with module specifiers blanked
+  out, so every line of behaviour is checked and only the paths are allowed to
+  differ:
+
+```python
+def strip_import_paths(src):
+    return re.sub(r'(from ")[^"]+(")', r'\1<path>\2', src)
+assert strip_import_paths(before) == strip_import_paths(after)
 ```
 
-Expected: `IDENTICAL`. If it prints anything else, something was changed that
-was not meant to be — revert and redo. A move that quietly edits is a move
-nobody can review.
+Expected: identical. If it differs, something was changed that was not meant to
+be — revert and redo. A move that quietly edits is a move nobody can review.
 
-- [ ] **Step 4:** `npm run type-check`, `npm run lint`, `npm test`. Read the output.
+- [ ] **Step 5:** `npm run type-check`, `npm run lint`, `npm test`. Read the output.
 
-- [ ] **Step 5: Commit** — `refactor(editor): move the layout editor into its own directory`
+- [ ] **Step 6: Commit** — `refactor(editor): move the layout editor into its own directory`
 
 ---
 
