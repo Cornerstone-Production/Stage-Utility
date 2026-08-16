@@ -162,6 +162,10 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // The operator's own work product, stored outside the layout in notes.json.
   { type: "notes", label: "Notes", group: "Control", after: "action-button" },
   { type: "checklist", label: "Checklist", group: "Control", after: "notes" },
+  // Home's own cards, so Home is built from the same widget set as every other
+  // surface rather than being a bespoke page (Phase 6, carrying a Phase 4 debt).
+  { type: "home-readiness", label: "Readiness", group: "PCO / service", after: "view-embed" },
+  { type: "home-next-service", label: "Next service", group: "PCO / service", after: "home-readiness" },
 ];
 
 /**

@@ -83,6 +83,12 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   "transcript-strip": ["readout"],
   "view-embed": ["readout"],
   "wireless-summary": ["readout"],
+  // Home's cards. Readouts on a wall, and on the shell they drill through to
+  // the page that fixes what they are reporting.
+  // Readout only: the card's own rows already link to the page that fixes each
+  // check, so the OBJECT has nowhere separate to drill to.
+  "home-readiness": ["readout"],
+  "home-next-service": ["readout"],
 };
 
 /**

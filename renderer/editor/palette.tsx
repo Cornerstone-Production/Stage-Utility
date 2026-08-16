@@ -68,6 +68,8 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
   checklist: CheckSquareIcon,
   "view-embed": FrameIcon,
   "ndi-video": CastIcon,
+  "home-readiness": CheckSquareIcon,
+  "home-next-service": ListIcon,
 };
 
 /**

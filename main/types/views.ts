@@ -205,6 +205,11 @@ export type LayoutObjectConfig =
   | { type: "current-slide-notes"; propresenterInstanceId?: string | null }
   | { type: "slide-thumbnail"; propresenterInstanceId?: string | null }
   | { type: "section-chip"; which: "current" | "next" | "nextArrangement"; propresenterInstanceId?: string | null }
+  // Home's own cards, so Home is built from the same widget set as every other
+  // surface rather than being a bespoke page. Neither takes options: what they
+  // show is the state of this install, and there is nothing to choose.
+  | { type: "home-readiness" }
+  | { type: "home-next-service" }
   // A timer running INSIDE ProPresenter (its stage/countdown timers) — distinct from
   // the PCO countdown. `timerName` picks one by name (blank = the first reported);
   // `warnStates` colors the readout when the timer's state reads as overrun/expired.

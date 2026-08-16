@@ -13,10 +13,10 @@ import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER } from "./layout-objects.js";
 const TYPES = Object.keys(LAYOUT_OBJECTS) as (keyof typeof LAYOUT_OBJECTS)[];
 
 describe("the catalog covers every object type", () => {
-  test("exactly 41 types, and the two registries agree", () => {
+  test("exactly 43 types, and the two registries agree", () => {
     // An EXACT count, not a floor. The design doc said 38 while the capability
     // registry held 41; nothing noticed for three releases.
-    assert.equal(TYPES.length, 41);
+    assert.equal(TYPES.length, 43);
     assert.deepEqual(
       TYPES.slice().sort(),
       Object.keys(CAPABILITIES).sort(),

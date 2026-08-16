@@ -1,5 +1,7 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
+import { NextServiceCard, ReadinessCard } from "../app/home/idle-panel";
+import { readinessChecks } from "../app/home/readiness";
 import { fitFor } from "./console-fit";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
@@ -453,6 +455,26 @@ function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign
       <span ref={elRef} style={{ ...ts, width: undefined, maxWidth: "100%", display: "inline-block", fontSize: `${basePx * scale}px` }}>{text}</span>
     </div>
   );
+}
+
+
+/**
+ * Home's readiness card, as a layout object.
+ *
+ * Renders the same ReadinessCard the fixed Home panel does. The online-output
+ * list comes from the state snapshot rather than the live presence hook: an
+ * object on a wall display has no business subscribing to presence, and a check
+ * that lags by a poll is better than one that only works on the shell.
+ */
+function HomeReadinessObject({ ctx }: { ctx: LayoutRenderCtx }) {
+  const online = ctx.state.outputs.filter((o) => o.viewId).map((o) => o.id);
+  return <ReadinessCard checks={readinessChecks(ctx.state, online)} />;
+}
+
+/** Seconds until the next service, or null. Same source as the context bar. */
+function homeSecondsToStart(ctx: LayoutRenderCtx): number | null {
+  const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
+  return t && !t.over ? t.seconds : null;
 }
 
 export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
@@ -976,6 +998,13 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         </div>
       );
     }
+    // Home's cards. They render the SAME components Home's fixed panel does, so
+    // the editable Home and the built-in one cannot drift into looking like two
+    // different products.
+    case "home-readiness":
+      return <HomeReadinessObject ctx={ctx} />;
+    case "home-next-service":
+      return <NextServiceCard state={ctx.state} secondsToStart={homeSecondsToStart(ctx)} />;
     default: {
       // Exhaustiveness guard: every LayoutObjectType must have a case above. Add
       // a type to the registry without a renderer here and this assignment stops

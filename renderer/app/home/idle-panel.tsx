@@ -151,6 +151,63 @@ function useHistoryRecords() {
   return { list, attList };
 }
 
+
+/* ── Home's cards, extracted so a layout object and the fixed Home panel render
+      THE SAME markup rather than two copies that drift. Moved verbatim: this
+      changes where they live, not what they draw. ── */
+
+export function NextServiceCard({
+  state,
+  secondsToStart,
+}: {
+  state: StageState;
+  secondsToStart?: number | null;
+}) {
+  return (
+      <section className="rounded-xl border border-line bg-surface px-4 py-3">
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+            Next service
+          </h2>
+          {secondsToStart != null && secondsToStart > 0 && (
+            <span className="ml-auto font-mono tabular-nums text-callout text-fg">
+              in {fmtDuration(secondsToStart)}
+            </span>
+          )}
+        </div>
+        <p className="mt-1 text-body text-fg">
+          {state.planTitle ?? "No plan selected"}
+        </p>
+        <p className="text-caption1 text-fg-subtle">
+          {[state.serviceTypeName, state.planSeriesTitle, state.planDates]
+            .filter(Boolean)
+            .join(" · ") || "Choose a service type and plan below"}
+        </p>
+      </section>
+  );
+}
+
+export function ReadinessCard({ checks }: { checks: readonly ReadinessCheck[] }) {
+  const todo = outstanding(checks);
+  return (
+      <section className="rounded-xl border border-line bg-surface overflow-hidden">
+        <header className="flex items-baseline gap-2 px-4 py-3 border-b border-line">
+          <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+            Ready for the next service
+          </h2>
+          <span className="ml-auto text-caption1 text-fg-subtle">
+            {todo.length === 0
+              ? "everything set"
+              : `${todo.length} to sort out`}
+          </span>
+        </header>
+        {checks.map((c) => (
+          <CheckRow key={c.id} check={c} />
+        ))}
+      </section>
+  );
+}
+
 export function IdlePanel({
   state,
   onlineOutputIds,
@@ -162,7 +219,6 @@ export function IdlePanel({
   secondsToStart?: number | null;
 }) {
   const checks = readinessChecks(state, onlineOutputIds);
-  const todo = outstanding(checks);
   const { list, attList } = useHistoryRecords();
 
   // Scoped to the ACTIVE service type, like History's Overview — an Events night
@@ -184,42 +240,9 @@ export function IdlePanel({
       {/* Next service. The countdown is in the context bar too, but the bar is a
           glance and this is the answer to "what am I preparing for" - it names
           the plan and the series, which the bar has no room for. */}
-      <section className="rounded-xl border border-line bg-surface px-4 py-3">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
-            Next service
-          </h2>
-          {secondsToStart != null && secondsToStart > 0 && (
-            <span className="ml-auto font-mono tabular-nums text-callout text-fg">
-              in {fmtDuration(secondsToStart)}
-            </span>
-          )}
-        </div>
-        <p className="mt-1 text-body text-fg">
-          {state.planTitle ?? "No plan selected"}
-        </p>
-        <p className="text-caption1 text-fg-subtle">
-          {[state.serviceTypeName, state.planSeriesTitle, state.planDates]
-            .filter(Boolean)
-            .join(" · ") || "Choose a service type and plan below"}
-        </p>
-      </section>
+      <NextServiceCard state={state} secondsToStart={secondsToStart} />
 
-      <section className="rounded-xl border border-line bg-surface overflow-hidden">
-        <header className="flex items-baseline gap-2 px-4 py-3 border-b border-line">
-          <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
-            Ready for the next service
-          </h2>
-          <span className="ml-auto text-caption1 text-fg-subtle">
-            {todo.length === 0
-              ? "everything set"
-              : `${todo.length} to sort out`}
-          </span>
-        </header>
-        {checks.map((c) => (
-          <CheckRow key={c.id} check={c} />
-        ))}
-      </section>
+      <ReadinessCard checks={checks} />
 
       {/* Headlines only, and every one of them a way INTO History. Home restating
           History in full is how the two would drift apart; this is a glance with

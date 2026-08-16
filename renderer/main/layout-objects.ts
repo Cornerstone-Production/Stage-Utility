@@ -230,6 +230,20 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     // it to match the page had no way to get there by eye.
     style: () => TEXT({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
   },
+  "home-readiness": {
+    label: "Readiness",
+    blurb: "What still needs doing before the next service",
+    group: "PCO / service",
+    config: () => ({ type: "home-readiness" }),
+    style: BARE,
+  },
+  "home-next-service": {
+    label: "Next service",
+    blurb: "The next plan, its series and when it starts",
+    group: "PCO / service",
+    config: () => ({ type: "home-next-service" }),
+    style: BARE,
+  },
   "service-pacing": {
     label: "Service pacing",
     blurb: "How far ahead or behind the plan the service is",
