@@ -23,6 +23,7 @@ screens, the settings UI and a phone remote from one port.
 | [Install, deploy and configure](docs/ops/install-and-config.md) | putting it on a machine, running it in development |
 | [Integrations](docs/integrations/README.md) | every device and service it talks to |
 | [Data model](docs/reference/data-model.md) | Views, Outputs and Slots — the nouns |
+| [Layout editor](docs/reference/layout-editor.md) | placing objects, other window shapes, motion |
 | [Display URLs](docs/display-urls.md) | addressing screens |
 | [Slots](docs/slots.md) | matching people and devices to positions |
 | [Attendance and service history](docs/features/attendance-and-history.md) | what a service records, and reading it back |

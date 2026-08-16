@@ -261,7 +261,8 @@ the arrangement."
 
 ### Task 3: Every object type survives any shape
 
-38 types. Some have never been rendered at 40px tall.
+41 types, not 38 — the design doc's number was three releases stale. Some had
+never been rendered at a dashboard tile size.
 
 **Files:**
 - Create: `renderer/main/object-resize.test.tsx`
@@ -300,7 +301,7 @@ for (const type of TYPES) {
 test("the sweep covers every type", () => {
   // An exact count, not a floor. A floor with slack is how three config stores
   // went missing from every backup with the suite green.
-  assert.equal(TYPES.length, 38);
+  assert.equal(TYPES.length, 41);
 });
 ```
 
@@ -328,10 +329,13 @@ Reintroduce the most representative clipping bug and watch its test go red.
 - Modify: `renderer/main/layout-objects.ts` (`defaultStyle`),
   `renderer/editor/inspector.tsx`
 
-- [ ] **Step 1: Audit `defaultStyle` for all 38 types**
+- [x] **Step 1: Audit `defaultStyle` for all 41 types**
 
-A freshly added object should look finished. Record every type whose default is
-unstyled or wrong before changing any of them.
+Result: no defects. 35 of 41 carry a default style. The 6 without — live-controls,
+brand-logo, image, ndi-video, plan-attachment, slide-thumbnail — are media and
+control objects with no text to style, which style themselves internally; the
+browser sweep in Task 3 confirms all 41 render legibly with their defaults. No
+changes made, because the audit found nothing to change.
 
 - [ ] **Step 2: Add "Reset to default look"**
 
@@ -412,10 +416,12 @@ dragging one does not move the others — there is nothing to reflow. The proble
 it was reaching for, seeing the layout at another shape without leaving the
 editor, is Task 2. Stated here rather than dropped silently.
 
-## Open questions for the maintainer
+## Decisions
 
-1. **Stacking threshold.** 2560x800 currently stacks. Carried over from Phase 4
-   and still unresolved; the preview in Task 2 makes it visible, which may be
-   enough to settle it either way.
-2. **Min/max height.** Phase 4 exposes width clamps only. Adding height is
-   cheap; leaving it out keeps the inspector shorter.
+1. **Stacking threshold — left as it is.** 2560x800 still stacks. Deferred
+   deliberately rather than forgotten; the Task 2 preview makes the behaviour
+   visible, so it can be settled later against a real layout.
+2. **Width clamps only.** Min/max height is not built. Phase 4's width-only
+   inspector is the final shape. `responsive-layout.ts` keeps its `minPx.h` /
+   `maxPx.h` support, so a layout that sets them by hand still works — there is
+   simply no control for it.

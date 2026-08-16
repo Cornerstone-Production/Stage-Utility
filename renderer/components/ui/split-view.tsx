@@ -125,7 +125,7 @@ export function SplitView({
           "shrink-0 h-full overflow-hidden",
           // Animate the collapse, but never while dragging: a width transition
           // mid-drag rubber-bands behind the pointer.
-          !resizing && "transition-[width] duration-150",
+          !resizing && "transition-[width] duration-(--motion-quick)",
         )}
         style={{ width: `${railed ? railWidth : expandedWidth}px` }}
       >

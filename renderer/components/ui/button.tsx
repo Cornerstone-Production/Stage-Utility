@@ -22,7 +22,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         className={cn(
           // Base
           "inline-flex items-center justify-center gap-1.5 rounded-md font-medium",
-          "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+          "transition-colors duration-(--motion-instant) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
           "disabled:pointer-events-none disabled:opacity-40 select-none",
           // Size
           size === "small" && !iconOnly && "h-6 px-2 text-caption1",

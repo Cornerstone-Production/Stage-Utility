@@ -140,7 +140,7 @@ export function LazyPreview({
           >
             <ViewPreview viewId={viewId} aspect={aspect} />
             <span
-              className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/0 opacity-0 transition-all duration-150 group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
+              className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
               aria-hidden="true"
             >
               {/* A SOLID neutral grey, not white at reduced opacity. Opacity made
