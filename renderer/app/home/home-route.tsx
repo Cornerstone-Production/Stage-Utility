@@ -19,6 +19,8 @@ import { useOutputPresence } from "./use-output-presence";
 import { GettingStarted } from "../../settings/getting-started";
 import { PlanSection } from "../../settings/sections/plan-section";
 import { flashTarget } from "../flash";
+import { AppLink } from "../app-link";
+import { HOME_VIEW_ID } from "@main/services/home-view";
 import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
 import { IdlePanel } from "./idle-panel";
@@ -74,6 +76,19 @@ export function HomeRoute() {
           onDismiss={s.handleDismissOnboarding}
         />
       )}
+
+      {/* Home is a View now (see main/services/home-view.ts), so it is edited
+          like every other surface. The panels below still render the fixed
+          arrangement — this link is the door to rearranging it, and the objects
+          it offers are the same components these panels draw. */}
+      <div className="flex justify-end">
+        <AppLink
+          to={`/screens/${HOME_VIEW_ID}/edit`}
+          className="text-caption1 text-accent hover:underline"
+        >
+          Edit this dashboard
+        </AppLink>
+      </div>
 
       {mode === "live" ? (
         <LivePanel

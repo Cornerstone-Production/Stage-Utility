@@ -3,6 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
+import { seedHomeView } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { barConfigStore } from "./bar-config-store.js";
 import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
@@ -379,8 +380,12 @@ export class StageController {
     views: View[],
     outputs: Output[],
   ): Promise<{ views: View[]; outputs: Output[] }> {
-    const result = migrateSurfaces(views, outputs);
-    const viewsChanged = result.views.some((v, i) => v !== views[i]);
+    // Home is seeded here rather than in its own pass: both run on load, both
+    // may write views, and two writers racing over the same file is how one of
+    // them loses. Seeding first means the surface migration also sees Home.
+    const seeded = seedHomeView(views);
+    const result = migrateSurfaces(seeded as View[], outputs);
+    const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
     const outputsChanged = result.outputs.some((o, i) => o !== outputs[i]);
     if (!viewsChanged && !outputsChanged) return { views, outputs };
 
