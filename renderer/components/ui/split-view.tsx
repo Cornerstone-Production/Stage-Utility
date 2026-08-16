@@ -105,7 +105,10 @@ export function SplitView({
               aria-describedby={undefined}
               onTouchStart={onTouchStart}
               onTouchEnd={onSwipeEnd((dx) => { if (dx < 0) closeDrawer(); })}
-              className="fixed left-0 top-0 z-50 flex h-full w-64 max-w-[82vw] flex-col overflow-hidden bg-surface pt-[env(safe-area-inset-top)] shadow-xl focus:outline-none"
+              // bg-rail, not bg-surface: on mobile this drawer IS the rail, so
+              // anything showing through it — an overscroll bounce, a rounding
+              // gap — should be the rail's colour rather than the content's.
+              className="fixed left-0 top-0 z-50 flex h-full w-64 max-w-[82vw] flex-col overflow-hidden bg-rail pt-[env(safe-area-inset-top)] shadow-xl focus:outline-none"
             >
               <DialogPrimitive.Title className="sr-only">Settings navigation</DialogPrimitive.Title>
               <SidebarChromeProvider value={chrome}>
