@@ -31,9 +31,13 @@ Rebuild and restart it after each task so the maintainer can review.
 
 | PR | What | State |
 |---|---|---|
-| #267 | Phase 5 — editing interaction and object polish | open |
-| #268 | Phase 6 plan | open |
-| #269 | destructive actions red, not amber | open |
+| #267 | Phase 5 — editing interaction and object polish | open, awaiting the maintainer |
+| #268 | Phase 6 plan | merged |
+| #269 | destructive actions red, not amber | merged |
+
+`feat/phase-6` CONTAINS #267's commits, so it has no PR of its own yet: opening
+one against `beta` would duplicate a review that is already open. The order is
+merge #267, then raise this branch. Pushed either way, so nothing is only local.
 
 **Phase 6 shipped:** object blurbs for all 43 types, the widget palette with
 drag-to-place, draw-to-create (Shift gesture pending — see Task 2), the layout
