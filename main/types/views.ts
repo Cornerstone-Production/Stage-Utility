@@ -510,8 +510,47 @@ export type LayoutObjectConfig =
 
 export type LayoutObjectType = LayoutObjectConfig["type"];
 
+/**
+ * Which tile a widget fills on Home's grid — columns × rows.
+ *
+ * Four preset shapes on a three-column grid, chosen so they tile: `S 1×1`,
+ * `M 2×1`, `L 2×2`, `XL 3×2`. `S + M`, `S + L` and `S + S + S` each fill a row,
+ * and a Large leaves a 1-wide, 2-tall gap that two stacked Smalls complete
+ * exactly. Small is 1×1, so every leftover slot is fillable and nothing can
+ * strand a gap.
+ *
+ * Deliberately NOT a width and a height: a size is a choice from four, which is
+ * what keeps Home free of a canvas.
+ */
+export type HomeCardSize = "s" | "m" | "l" | "xl";
+
+/**
+ * When a Home card is on the page.
+ *
+ * Home has two moods — a service is running, or it is the rest of the week — and
+ * this used to be a rule hidden in the code: the timer simply belonged to "live"
+ * and vanished for six days. Once an operator places widgets themselves, a card
+ * that disappears without being asked to looks broken, so the rule becomes a
+ * setting they can see and change.
+ */
+export type HomeVisibility = "always" | "live" | "idle";
+
+/** Where a widget sits on Home. Absent on objects that live on a canvas. */
+export interface HomePlacement {
+  size?: HomeCardSize;
+  when?: HomeVisibility;
+}
+
 export interface LayoutObject {
   id: string;
+  /**
+   * Home only: the grid tile and when to show it.
+   *
+   * Home reads this INSTEAD of x/y/w/h — it has no canvas, so the geometry below
+   * is filler the type requires. On every other surface this is absent and the
+   * geometry is the real thing. See main/services/home-view.ts.
+   */
+  home?: HomePlacement;
   /** Position/size as fractions of the PARENT (the canvas for top-level objects,
    *  or the containing container's box for nested children) — all 0..1. */
   x: number;

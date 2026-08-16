@@ -455,12 +455,25 @@ widget without a canvas. Text scales off a nominal height derived from the card'
 pixel height, so a default readout lands at roughly a third of its card, which is
 what the canvas already does.
 
-- [ ] **Step 1:** Size on the object, defaults per type, pure grid operations.
-- [ ] **Step 2:** Home renders the grid through the shared renderer.
-- [ ] **Step 3:** The editor: add from the palette, resize, drag, remove.
-- [ ] **Step 4:** Per-widget visibility — *Always / During a service / Rest of the
-      week* — replacing the mood rule Task 6 hid inside the code.
-- [ ] **Step 5:** Guards, each proven. **Step 6:** Browser. **Step 7:** Commit.
+- [x] **Step 1:** `LayoutObject.home = { size, when }`, defaults per type on the
+      registry spec (`homeSize` / `homeWhen`), and the grid operations in
+      `home-cards.ts` — all pure, all non-mutating.
+- [x] **Step 2:** `home-grid.tsx` renders each card through `ObjectContent` with
+      a context built from `useLayoutData`, and `boxStyle` for the card's own
+      frame. **The frame was the one real bug**: rendering `ObjectContent` alone
+      left every Home card transparent and edge-to-edge, because on a canvas it
+      is the object WRAPPER that paints the box.
+- [x] **Step 3:** In-place editing — hover a card for its size picker, visibility
+      and remove; drag a card onto another to reorder; `Add widget` opens a sheet
+      with all 43 widgets, searchable, each offering all four sizes.
+- [x] **Step 4:** Visibility is a per-card setting, and the editor shows EVERY
+      card including ones whose mood is not current — you cannot arrange what the
+      page is hiding.
+- [x] **Step 5–7:** 22 guards in `home-cards.test.ts`, including the tiling
+      arithmetic itself. Driven in a browser against a copy of the real config:
+      added a Clock at Small, resized it to Large, confirmed both landed on disk
+      (`layoutRev` 2, `{"size":"l","when":"always"}`) and survived a restart.
+      Three columns hold to a 900px window; 760px drops to two. Committed.
 
 **Sequencing note.** I argued for the widget pass (Task 7) first, so the grid has
 designed widgets to arrange. Overruled deliberately — the grid is the more

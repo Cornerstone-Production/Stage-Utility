@@ -22,7 +22,6 @@ import { useRouter } from "@tanstack/react-router";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useDashboardState } from "../../main/use-dashboard-state";
 import { useStageSettings } from "../use-stage-settings";
-import { useOutputPresence } from "./use-output-presence";
 import { GettingStarted } from "../../settings/getting-started";
 import { PlanSection } from "../../settings/sections/plan-section";
 import { flashTarget } from "../flash";
@@ -31,16 +30,18 @@ import type { LayoutObject } from "@main/types/views";
 import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
 import { Commission } from "./commission";
-import { HomeEditor } from "./home-editor";
-import { cardRows, reorderCards, toggleCard, visibleCards } from "./home-cards";
-import { HomeCard } from "./cards";
+import { addCard, moveCard, removeCard, setSize, setWhen, visibleCards } from "./home-cards";
+import { HomeGrid } from "./home-grid";
+import { AddWidgetButton, AddWidgetSheet, CardChrome } from "./home-editor";
 
 export function HomeRoute() {
   const { pcoLive } = useDashboardState();
   const s = useStageSettings();
-  const online = useOutputPresence();
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
   /** The card list as the operator has it, ahead of the server. See `save`. */
   const [pending, setPending] = useState<LayoutObject[] | null>(null);
   /** The same list, readable synchronously inside one React batch. Written in
@@ -128,7 +129,20 @@ export function HomeRoute() {
       });
   }
 
-  const cards = visibleCards(objects, mode);
+  // Editing shows EVERY card, including ones whose mood is not the current one —
+  // you cannot arrange what the page is hiding from you. Off the editor, Home
+  // shows only what belongs to right now.
+  const cards = editing ? objects : visibleCards(objects, mode);
+
+  /** Reorder by dropping one card on another. Indexes are into the full list. */
+  function drop(targetId: string) {
+    if (!dragId || dragId === targetId) return;
+    const from = objects.findIndex((o) => o.id === dragId);
+    const to = objects.findIndex((o) => o.id === targetId);
+    save((objs) => moveCard(objs, from, to));
+    setDragId(null);
+    setOverId(null);
+  }
 
   return (
     <div className="pt-1 pb-[50vh] max-sm:pb-24 flex flex-col gap-3">
@@ -144,42 +158,50 @@ export function HomeRoute() {
       )}
 
       {home && (
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-2">
+          {editing && <AddWidgetButton onClick={() => setAdding(true)} />}
           <button
             type="button"
             onClick={() => setEditing((e) => !e)}
             className="inline-flex items-center gap-1.5 text-caption1 text-accent hover:underline"
           >
             {editing ? <CheckIcon className="size-3.5" /> : <PencilIcon className="size-3.5" />}
-            {editing ? "Done" : "Edit cards"}
+            {editing ? "Done" : "Edit widgets"}
           </button>
         </div>
       )}
 
-      {editing && home ? (
-        <HomeEditor
-          rows={cardRows(objects)}
-          sensors={s.handlers.sensors}
-          onToggle={(t) => save((objs) => toggleCard(objs, t))}
-          onReorder={(from, to) => save((objs) => reorderCards(objs, from, to))}
+      {home?.layout && (
+        <HomeGrid
+          layout={{ ...home.layout, objects: cards }}
+          cards={cards}
+          chrome={
+            editing
+              ? (o) => (
+                  <CardChrome
+                    card={o}
+                    dragging={dragId === o.id || overId === o.id}
+                    onSize={(size) => save((objs) => setSize(objs, o.id, size))}
+                    onWhen={(when) => save((objs) => setWhen(objs, o.id, when))}
+                    onRemove={() => save((objs) => removeCard(objs, o.id))}
+                    onDragStart={() => setDragId(o.id)}
+                    onDragOver={() => setOverId(o.id)}
+                    onDrop={() => drop(o.id)}
+                  />
+                )
+              : undefined
+          }
         />
-      ) : (
-        cards.map((t) => (
-          <HomeCard
-            key={t}
-            type={t}
-            state={state}
-            pcoLive={pcoLive}
-            now={now}
-            skewMs={skewMs}
-            // Live presence, not the state snapshot: the shell is subscribed
-            // anyway, so Home's readiness check reflects a screen dropping off
-            // the moment it happens.
-            onlineOutputIds={online}
-            secondsToStart={secondsToStart}
-          />
-        ))
       )}
+
+      <AddWidgetSheet
+        open={adding}
+        onClose={() => setAdding(false)}
+        onAdd={(type, size) => {
+          setAdding(false);
+          save((objs) => setSize(addCard(objs, type, `home-${type}-${objs.length + 1}-${objs.length}`), `home-${type}-${objs.length + 1}-${objs.length}`, size));
+        }}
+      />
 
       <PlanSection
         stageState={state}

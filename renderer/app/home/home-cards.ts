@@ -1,183 +1,163 @@
-// What Home shows, in what order, and how the operator changes it.
+// Home's grid: what is on it, how big, in what order, and when.
 //
-// Pure. Home's editor is presence and order and nothing else, so all of it is
-// array work over the Home View's object list — testable without rendering, and
-// without a server.
+// Pure. Home has no canvas, so all of it is array work over the Home View's
+// object list — testable without rendering and without a server.
 //
-// The View's GEOMETRY is deliberately unused here. See main/services/home-view.ts
-// for why Home keeps a layout it does not lay out.
+// The View's x/y/w/h is deliberately unused. See main/services/home-view.ts for
+// why Home keeps a layout it does not lay out.
 
-import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
+import type { HomeCardSize, HomeVisibility, LayoutObject, LayoutObjectConfig } from "@main/types/views";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
 import type { HomeMode } from "./home-mode";
 
-/**
- * The card types Home draws — DERIVED from the object config union, not listed
- * beside it.
- *
- * Every `home-*` member of LayoutObjectConfig is a Home card, so adding a fifth
- * one cannot leave Home silently ignoring it: WHEN below is a Record over this
- * type, and a missing entry fails `tsc`. A hand-kept parallel list would have
- * gone stale the first time somebody added a card and forgot this file. The same
- * `Extract` backs `defaultHomeLayout`.
- */
-export type HomeCardType = Extract<LayoutObjectConfig, { type: `home-${string}` }>["type"];
+/** Columns in the grid. Every size is a whole number of these. */
+export const COLUMNS = 3;
 
 /**
- * The mood each card belongs to.
+ * The four tiles, in columns × rows.
  *
- * Home has two: a service is running, or it is Thursday. A running timer is
- * noise on a Thursday and a readiness checklist is noise mid-service, so a card
- * is on the page in one mood and absent in the other. This preserves the
- * behaviour the two fixed panels had — it is not a new rule.
+ * Chosen so they tile, which is the whole reason there are four and not a
+ * width field: `S + M`, `S + L` and `S + S + S` each fill a row exactly, `XL`
+ * is a row of its own, and a Large leaves a 1-wide, 2-tall gap that two stacked
+ * Smalls complete. Small being 1×1 is what makes every leftover slot fillable.
  *
- * This object is also where HOME_CARD_TYPES gets its ORDER, which is the order
- * a switched-off card is offered back in.
+ * What this gives up, knowingly: `M + M` is 4 over a 3-wide row, so two equal
+ * halves side by side is not expressible. Thirds and 1/3 + 2/3 replace it.
  */
-const WHEN: Record<HomeCardType, HomeMode> = {
-  "home-live-status": "live",
-  "home-next-service": "idle",
-  "home-readiness": "idle",
-  "home-recent-services": "idle",
+export const SIZES: Record<HomeCardSize, { w: number; h: number; label: string }> = {
+  s: { w: 1, h: 1, label: "Small" },
+  m: { w: 2, h: 1, label: "Medium" },
+  l: { w: 2, h: 2, label: "Large" },
+  xl: { w: 3, h: 2, label: "Extra large" },
 };
 
-/** Derived from WHEN's keys, so the two cannot disagree about what exists. */
-export const HOME_CARD_TYPES = Object.keys(WHEN) as HomeCardType[];
+export const SIZE_ORDER: HomeCardSize[] = ["s", "m", "l", "xl"];
 
-/** Said in the editor, so a card that is present but not showing right now reads
- *  as scheduled rather than broken. One line per mood, not one per card — a card
- *  whose hint contradicts its mood is then unrepresentable. */
-const HINT: Record<HomeMode, string> = {
-  live: "While a service is running",
-  idle: "The rest of the week",
+/** What each visibility means, in the operator's words. */
+export const WHEN_LABELS: Record<HomeVisibility, string> = {
+  always: "Always",
+  live: "During a service",
+  idle: "Rest of the week",
 };
 
-interface HomeCardSpec {
-  type: HomeCardType;
-  /** The label the registry already carries. Not a second copy. */
-  label: string;
-  when: HomeMode;
-  hint: string;
+/** A card's size, falling back to the registry's default for its type. */
+export function sizeOf(o: LayoutObject): HomeCardSize {
+  return o.home?.size ?? defaultSize(o.config.type);
 }
 
-function cardSpec(type: HomeCardType): HomeCardSpec {
-  return { type, label: LAYOUT_OBJECTS[type].label, when: WHEN[type], hint: HINT[WHEN[type]] };
+/** A card's visibility. Cards default to always — a widget somebody placed
+ *  should be on the page unless they said otherwise. */
+export function whenOf(o: LayoutObject): HomeVisibility {
+  return o.home?.when ?? defaultWhen(o.config.type);
 }
 
-/** True for the types Home knows how to draw. Anything else in Home's layout is
- *  a leftover from when Home was edited on a canvas — kept, never dropped. */
-export function isHomeCard(type: string): type is HomeCardType {
-  return type in WHEN;
+/** The size a widget of this type arrives at. Medium unless the registry says
+ *  otherwise — see `homeSize` on the spec. */
+export function defaultSize(type: string): HomeCardSize {
+  return LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS]?.homeSize ?? "m";
 }
 
-/**
- * The card objects in the layout, keyed by type, in the layout's order.
- *
- * One of each: a duplicate would render the same card twice and give the editor
- * two rows that toggle each other. A Map because insertion order IS the card
- * order — the same walk backs both `cardOrder` and `reorderCards`, which were
- * two spellings of it.
- */
-function cardsByType(objects: readonly LayoutObject[]): Map<HomeCardType, LayoutObject> {
-  const out = new Map<HomeCardType, LayoutObject>();
-  for (const o of objects) {
-    const t = o.config.type;
-    if (isHomeCard(t) && !out.has(t)) out.set(t, o);
-  }
-  return out;
+export function defaultWhen(type: string): HomeVisibility {
+  return LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS]?.homeWhen ?? "always";
 }
 
-/** Home's cards, in the layout's order. Non-card objects are skipped. */
-export function cardOrder(objects: readonly LayoutObject[]): HomeCardType[] {
-  return [...cardsByType(objects).keys()];
+/** The cards on the page right now, in order. */
+export function visibleCards(objects: readonly LayoutObject[], mode: HomeMode): LayoutObject[] {
+  return objects.filter((o) => {
+    const w = whenOf(o);
+    return w === "always" || w === mode;
+  });
 }
 
-/** The cards actually on the page right now. */
-export function visibleCards(objects: readonly LayoutObject[], mode: HomeMode): HomeCardType[] {
-  return cardOrder(objects).filter((t) => WHEN[t] === mode);
-}
+// ── Operations ───────────────────────────────────────────────────────────────
+// Every one returns a NEW array and never mutates its input, so a caller can
+// compare by reference and a failed save can put the old list straight back.
 
-export interface HomeCardRow extends HomeCardSpec {
-  /** On the page (when its mood comes round), or switched off. */
-  present: boolean;
-}
-
-/**
- * The editor's rows: every card Home has, present ones first in their stored
- * order, then the ones switched off.
- *
- * Absent cards are listed too — an editor that only shows what is already there
- * gives you no way to put something back, which is how a "hide" becomes a
- * delete.
- */
-export function cardRows(objects: readonly LayoutObject[]): HomeCardRow[] {
-  const present = cardOrder(objects);
-  const rest = HOME_CARD_TYPES.filter((t) => !present.includes(t));
+/** Add a widget at the end, at its type's default size. */
+export function addCard(
+  objects: readonly LayoutObject[],
+  type: string,
+  id: string,
+): LayoutObject[] {
+  const spec = LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS];
   return [
-    ...present.map((t) => ({ ...cardSpec(t), present: true })),
-    ...rest.map((t) => ({ ...cardSpec(t), present: false })),
+    ...objects,
+    {
+      id,
+      // Geometry Home never reads. Filled because the type requires it, and
+      // stacked rather than piled so an output still bound to Home from before
+      // the grid renders something legible instead of four cards on one spot.
+      x: 0.04,
+      y: Math.min(0.9, 0.04 + objects.length * 0.06),
+      w: 0.92,
+      h: 0.2,
+      z: objects.length + 1,
+      home: { size: defaultSize(type), when: defaultWhen(type) },
+      config: spec.config() as LayoutObjectConfig,
+      style: spec.style(),
+    } as LayoutObject,
   ];
 }
 
-/** A fresh object for a card. Geometry is filled in because the type demands it,
- *  not because Home reads it. The id is the type — one card of each kind, so
- *  there is nothing else it could usefully be, and it matches what
- *  `defaultHomeLayout` seeds. */
-function makeCard(type: HomeCardType): LayoutObject {
-  return {
-    id: type,
-    x: 0.04,
-    y: 0.06,
-    w: 0.92,
-    h: 0.2,
-    z: 1,
-    config: LAYOUT_OBJECTS[type].config() as LayoutObjectConfig,
-    style: {},
-  } as LayoutObject;
+export function removeCard(objects: readonly LayoutObject[], id: string): LayoutObject[] {
+  return objects.filter((o) => o.id !== id);
+}
+
+export function setSize(objects: readonly LayoutObject[], id: string, size: HomeCardSize): LayoutObject[] {
+  return objects.map((o) => (o.id === id ? { ...o, home: { ...o.home, size } } : o));
+}
+
+export function setWhen(objects: readonly LayoutObject[], id: string, when: HomeVisibility): LayoutObject[] {
+  return objects.map((o) => (o.id === id ? { ...o, home: { ...o.home, when } } : o));
 }
 
 /**
- * Switch a card on or off.
+ * Move a card to another position in the list.
  *
- * Off removes every object of that type; on appends one at the end, which is
- * where a newly added thing belongs — anywhere else and it appears somewhere the
- * operator was not looking. Non-card objects are untouched.
+ * Indexes are into the FULL list, not the visible one — the editor shows every
+ * card including the ones whose mood is not current, so what you drag is what
+ * you reorder. Out-of-range indexes return the list unchanged rather than
+ * throwing: a drag that ends on nothing is a no-op, not an error.
  */
-export function toggleCard(objects: readonly LayoutObject[], type: HomeCardType): LayoutObject[] {
-  const has = objects.some((o) => o.config.type === type);
-  if (has) return objects.filter((o) => o.config.type !== type);
-  return [...objects, makeCard(type)];
-}
-
-/**
- * Move a present card from one position to another, both indexes into the
- * PRESENT card list rather than into the raw object array — the editor's rows
- * are cards, and the array may hold strays between them.
- *
- * Out-of-range indexes return the list unchanged rather than throwing: a drag
- * that ends on nothing is a no-op, not an error.
- */
-export function reorderCards(
-  objects: readonly LayoutObject[],
-  from: number,
-  to: number,
-): LayoutObject[] {
-  const order = cardOrder(objects);
-  if (from < 0 || to < 0 || from >= order.length || to >= order.length || from === to) {
+export function moveCard(objects: readonly LayoutObject[], from: number, to: number): LayoutObject[] {
+  if (from < 0 || to < 0 || from >= objects.length || to >= objects.length || from === to) {
     return [...objects];
   }
-  const next = order.slice();
+  const next = [...objects];
   next.splice(to, 0, next.splice(from, 1)[0]);
+  return next;
+}
 
-  // Rebuilt from the objects that are already there, so every card keeps its own
-  // identity — this reorders, it does not recreate.
-  //
-  // Nothing is dropped. The drawn card of each type goes first, in the new
-  // order, and everything else — a second object of a type Home already draws,
-  // an object Home cannot draw at all — is appended untouched. Neither is
-  // reachable from this editor, but both are reachable from a restored snapshot,
-  // and deleting an operator's data to tidy a list is not this function's call.
-  const drawn = cardsByType(objects);
-  const kept = new Set(drawn.values());
-  return [...next.map((t) => drawn.get(t)!), ...objects.filter((o) => !kept.has(o))];
+/**
+ * How full each row is, walking the cards in order.
+ *
+ * The editor shows this so the arithmetic is visible while you arrange: a row
+ * that does not reach three columns has a gap in it. Rows are computed the way
+ * the grid packs them — a card that does not fit the remaining space starts a
+ * new row — with a tall card counted in every row it covers.
+ */
+export function rowFill(cards: readonly LayoutObject[]): number[] {
+  const rows: number[] = [];
+  let row = 0;
+  let spare: number[] = [];
+  for (const c of cards) {
+    const { w, h } = SIZES[sizeOf(c)];
+    while (rows.length <= row) rows.push(0);
+    if (rows[row] + w > COLUMNS) {
+      row = rows.length;
+      rows.push(0);
+    }
+    for (let i = 0; i < h; i++) {
+      while (rows.length <= row + i) rows.push(0);
+      rows[row + i] += w;
+    }
+    if (h > 1) spare.push(row);
+    if (rows[row] >= COLUMNS) {
+      // This row is closed; continue on the first row that still has space.
+      const next = rows.findIndex((n, i) => i > row && n < COLUMNS);
+      row = next === -1 ? rows.length : next;
+      spare = spare.filter((r) => r !== row);
+    }
+  }
+  return rows;
 }

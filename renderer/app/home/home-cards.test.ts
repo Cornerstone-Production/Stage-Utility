@@ -2,198 +2,179 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import {
-  HOME_CARD_TYPES,
-  cardOrder,
-  cardRows,
-  isHomeCard,
-  reorderCards,
-  toggleCard,
+  COLUMNS,
+  SIZES,
+  SIZE_ORDER,
+  addCard,
+  defaultSize,
+  moveCard,
+  removeCard,
+  rowFill,
+  setSize,
+  setWhen,
+  sizeOf,
   visibleCards,
+  whenOf,
 } from "./home-cards.js";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects.js";
+import type { HomeCardSize, LayoutObject } from "@main/types/views";
 
-/** A layout object with the geometry Home ignores, so a test that depended on it
- *  would be depending on nonsense. */
-const obj = (type: string, id = type) =>
-  ({ id, x: 0, y: 0, w: 1, h: 1, z: 1, config: { type }, style: {} }) as never;
+/** A card, with the geometry Home ignores. */
+const card = (id: string, type: string, size?: HomeCardSize, when?: string) =>
+  ({
+    id, x: 0, y: 0, w: 1, h: 1, z: 1,
+    config: { type },
+    style: {},
+    ...(size || when ? { home: { ...(size ? { size } : {}), ...(when ? { when } : {}) } } : {}),
+  }) as unknown as LayoutObject;
 
-const DEFAULT = [
-  obj("home-live-status"),
-  obj("home-next-service"),
-  obj("home-readiness"),
-  obj("home-recent-services"),
-];
-
-describe("one widget set", () => {
-  test("every Home card is a type in the shared registry", () => {
-    // A Home-only card would be the beginning of two widget sets: one for the
-    // front page and one for everything else, drifting apart card by card.
-    // Phase 6 exists specifically to prevent that.
-    for (const t of HOME_CARD_TYPES) {
-      assert.ok(t in LAYOUT_OBJECTS, `${t} is a Home card but not a registry object`);
+describe("the four tiles", () => {
+  test("every size is a whole number of columns, and none is wider than the grid", () => {
+    for (const s of SIZE_ORDER) {
+      assert.equal(SIZES[s].w, Math.round(SIZES[s].w));
+      assert.ok(SIZES[s].w >= 1 && SIZES[s].w <= COLUMNS, `${s} is ${SIZES[s].w} of ${COLUMNS}`);
     }
   });
 
-  test("each carries the registry's own label, not a second copy", () => {
-    for (const row of cardRows(DEFAULT)) {
-      assert.equal(row.label, LAYOUT_OBJECTS[row.type].label);
+  test("they are the shapes that tile", () => {
+    // THE arithmetic. S+M, S+L and S+S+S each fill a row exactly, and XL is a
+    // row of its own. If any of these stops holding, the grid grows gaps that
+    // nothing can fill and the whole model is worth revisiting.
+    const w = (s: HomeCardSize) => SIZES[s].w;
+    assert.equal(w("s") + w("m"), COLUMNS, "S + M must fill a row");
+    assert.equal(w("s") + w("l"), COLUMNS, "S + L must fill a row");
+    assert.equal(w("s") * 3, COLUMNS, "three Smalls must fill a row");
+    assert.equal(w("xl"), COLUMNS, "XL must be the full width");
+  });
+
+  test("Small is 1x1, so every leftover slot is fillable", () => {
+    // The property that stops a layout stranding a gap: whatever space is left,
+    // a Small fits it.
+    assert.deepEqual({ w: SIZES.s.w, h: SIZES.s.h }, { w: 1, h: 1 });
+  });
+
+  test("a Large leaves exactly two Smalls' worth of room beside it", () => {
+    // The block that makes the grid read as composed rather than striped.
+    const beside = (COLUMNS - SIZES.l.w) * SIZES.l.h;
+    assert.equal(beside, 2 * (SIZES.s.w * SIZES.s.h));
+  });
+
+  test("two Mediums deliberately do NOT fit", () => {
+    // Recorded because it is what the three-column grid gives up: two equal
+    // halves side by side is not expressible. If someone "fixes" this, they have
+    // changed the model and should mean to.
+    assert.ok(SIZES.m.w * 2 > COLUMNS);
+  });
+});
+
+describe("defaults", () => {
+  test("a card with nothing set falls back to its type's size", () => {
+    assert.equal(sizeOf(card("a", "clock")), defaultSize("clock"));
+    assert.equal(sizeOf(card("a", "clock", "xl")), "xl");
+  });
+
+  test("every registry type has a size that exists", () => {
+    // A typo in a spec would silently hand a widget an undefined tile.
+    for (const t of Object.keys(LAYOUT_OBJECTS)) {
+      assert.ok(SIZE_ORDER.includes(defaultSize(t)), `${t} has size "${defaultSize(t)}"`);
     }
   });
-});
 
-describe("order and presence", () => {
-  test("cards render in the layout's array order", () => {
-    const flipped = [obj("home-readiness"), obj("home-next-service")];
-    assert.deepEqual(cardOrder(flipped), ["home-readiness", "home-next-service"]);
-  });
-
-  test("a card that is not in the layout is not on the page", () => {
-    assert.deepEqual(cardOrder([obj("home-next-service")]), ["home-next-service"]);
-  });
-
-  test("a duplicate renders once", () => {
-    // Two objects of one type would draw the same card twice and give the editor
-    // two switches that fight each other.
-    const dup = [obj("home-readiness", "a"), obj("home-readiness", "b")];
-    assert.deepEqual(cardOrder(dup), ["home-readiness"]);
-  });
-
-  test("live and idle cards do not appear together", () => {
-    // The behaviour the two fixed panels had. A running timer is noise on a
-    // Thursday, and a readiness checklist is noise mid-service.
-    assert.deepEqual(visibleCards(DEFAULT, "live"), ["home-live-status"]);
-    assert.deepEqual(visibleCards(DEFAULT, "idle"), [
-      "home-next-service",
-      "home-readiness",
-      "home-recent-services",
-    ]);
-  });
-
-  test("every card belongs to exactly one mood, so none is unreachable", () => {
-    const shown = new Set([...visibleCards(DEFAULT, "live"), ...visibleCards(DEFAULT, "idle")]);
-    assert.deepEqual([...shown].sort(), [...HOME_CARD_TYPES].sort());
+  test("a placed widget shows up unless its type says otherwise", () => {
+    // Defaulting to "always" is what stops a widget somebody deliberately added
+    // from being invisible for six days with no explanation.
+    assert.equal(whenOf(card("a", "clock")), "always");
+    assert.equal(whenOf(card("a", "home-live-status")), "live");
   });
 });
 
-describe("the editor's rows", () => {
-  test("switched-off cards are listed too", () => {
-    // An editor that only shows what is already there gives you no way to put
-    // something back, which turns "hide" into "delete".
-    const rows = cardRows([obj("home-readiness")]);
-    assert.equal(rows.length, HOME_CARD_TYPES.length);
-    assert.deepEqual(
-      rows.map((r) => r.present),
-      [true, false, false, false],
-    );
+describe("what is on the page", () => {
+  const list = [
+    card("a", "clock"),                       // always
+    card("b", "home-live-status"),            // live
+    card("c", "home-readiness"),              // idle
+    card("d", "spl-meter", "s", "live"),
+  ];
+
+  test("during a service", () => {
+    assert.deepEqual(visibleCards(list, "live").map((o) => o.id), ["a", "b", "d"]);
   });
 
-  test("present cards come first, in their stored order", () => {
-    const rows = cardRows([obj("home-recent-services"), obj("home-next-service")]);
-    assert.deepEqual(
-      rows.filter((r) => r.present).map((r) => r.type),
-      ["home-recent-services", "home-next-service"],
-    );
-  });
-});
-
-describe("toggling", () => {
-  test("off removes the card", () => {
-    const next = toggleCard(DEFAULT, "home-readiness");
-    assert.ok(!cardOrder(next).includes("home-readiness"));
+  test("the rest of the week", () => {
+    assert.deepEqual(visibleCards(list, "idle").map((o) => o.id), ["a", "c"]);
   });
 
-  test("on appends it at the end, where a new thing belongs", () => {
-    const without = toggleCard(DEFAULT, "home-readiness");
-    assert.deepEqual(cardOrder(toggleCard(without, "home-readiness")), [
-      "home-live-status",
-      "home-next-service",
-      "home-recent-services",
-      "home-readiness",
-    ]);
-  });
-
-  test("off then on leaves every OTHER card exactly where it was", () => {
-    const round = toggleCard(toggleCard(DEFAULT, "home-live-status"), "home-live-status");
-    assert.deepEqual(
-      cardOrder(round).filter((t) => t !== "home-live-status"),
-      cardOrder(DEFAULT).filter((t) => t !== "home-live-status"),
-    );
-  });
-
-  test("the input is not mutated", () => {
-    const before = cardOrder(DEFAULT);
-    toggleCard(DEFAULT, "home-readiness");
-    assert.deepEqual(cardOrder(DEFAULT), before);
+  test("order is preserved — visibility filters, it does not sort", () => {
+    const shown = visibleCards(list, "live");
+    assert.deepEqual(shown.map((o) => o.id), ["a", "b", "d"]);
   });
 });
 
-describe("reordering", () => {
-  test("moves a card down", () => {
-    assert.deepEqual(cardOrder(reorderCards(DEFAULT, 0, 2)), [
-      "home-next-service",
-      "home-readiness",
-      "home-live-status",
-      "home-recent-services",
-    ]);
+describe("editing", () => {
+  const base = [card("a", "clock"), card("b", "spl-meter")];
+
+  test("adding puts the widget at the end, at its type's size", () => {
+    const next = addCard(base, "home-readiness", "new");
+    assert.equal(next.length, 3);
+    assert.equal(next[2].id, "new");
+    assert.equal(sizeOf(next[2]), defaultSize("home-readiness"));
   });
 
-  test("moves a card up", () => {
-    assert.deepEqual(cardOrder(reorderCards(DEFAULT, 3, 0)), [
-      "home-recent-services",
-      "home-live-status",
-      "home-next-service",
-      "home-readiness",
-    ]);
+  test("adding gives the object a real config and style from the registry", () => {
+    // Not a bare shell: a card added on Home must be the same object a canvas
+    // would place, or the two surfaces are drawing different widgets.
+    const o = addCard(base, "countdown-timer", "new")[2];
+    assert.equal(o.config.type, "countdown-timer");
+    assert.deepEqual(o.config, LAYOUT_OBJECTS["countdown-timer"].config());
+    assert.deepEqual(o.style, LAYOUT_OBJECTS["countdown-timer"].style());
   });
 
-  test("an out-of-range index changes nothing", () => {
+  test("removing takes exactly one card", () => {
+    assert.deepEqual(removeCard(base, "a").map((o) => o.id), ["b"]);
+  });
+
+  test("resizing changes only that card, and keeps its other placement", () => {
+    const next = setSize(setWhen(base, "a", "live"), "a", "xl");
+    assert.equal(sizeOf(next[0]), "xl");
+    assert.equal(whenOf(next[0]), "live", "setting the size dropped the visibility");
+    assert.equal(sizeOf(next[1]), sizeOf(base[1]));
+  });
+
+  test("moving reorders without losing anything", () => {
+    const three = [...base, card("c", "notes")];
+    assert.deepEqual(moveCard(three, 2, 0).map((o) => o.id), ["c", "a", "b"]);
+    assert.equal(moveCard(three, 2, 0).length, 3);
+  });
+
+  test("an out-of-range move changes nothing", () => {
     // A drag that ends on nothing is a no-op, not an exception that blanks the
     // page it was dropped on.
-    assert.deepEqual(cardOrder(reorderCards(DEFAULT, 0, 9)), cardOrder(DEFAULT));
-    assert.deepEqual(cardOrder(reorderCards(DEFAULT, -1, 0)), cardOrder(DEFAULT));
+    assert.deepEqual(moveCard(base, 0, 9).map((o) => o.id), ["a", "b"]);
+    assert.deepEqual(moveCard(base, -1, 0).map((o) => o.id), ["a", "b"]);
   });
 
-  test("objects keep their identity — this reorders, it does not recreate", () => {
-    // A recreated object would take a fresh id, and anything keyed on that id
-    // (a per-object note, a preset) would quietly lose its association.
-    const moved = reorderCards(DEFAULT, 0, 1);
-    for (const o of moved) {
-      assert.ok(
-        DEFAULT.some((d) => d === o),
-        "an object was rebuilt rather than moved",
-      );
-    }
+  test("nothing mutates its input", () => {
+    const before = base.map((o) => o.id);
+    addCard(base, "clock", "x"); removeCard(base, "a"); setSize(base, "a", "xl"); moveCard(base, 0, 1);
+    assert.deepEqual(base.map((o) => o.id), before);
   });
 });
 
-describe("objects Home does not draw", () => {
-  // Home has no canvas, so nothing can add one now — but a restored snapshot
-  // could carry one, and deleting an operator's data to tidy something up is
-  // never this code's call. They are skipped when rendering and otherwise left
-  // exactly where they are.
-  const stray = (objs: readonly unknown[]) =>
-    (objs as { config: { type: string } }[]).filter((o) => !isHomeCard(o.config.type)).length;
-
-  test("are not drawn", () => {
-    assert.deepEqual(cardOrder([...DEFAULT, obj("clock")]), cardOrder(DEFAULT));
-    assert.equal(isHomeCard("clock"), false);
+describe("row arithmetic", () => {
+  test("S + M fills one row", () => {
+    assert.deepEqual(rowFill([card("a", "clock", "s"), card("b", "clock", "m")]), [COLUMNS]);
   });
 
-  test("survive a reorder", () => {
-    assert.equal(stray(reorderCards([...DEFAULT, obj("clock")], 0, 1)), 1);
+  test("S + L fills the block", () => {
+    // L is two rows tall, so it counts in both.
+    assert.deepEqual(rowFill([card("a", "clock", "l"), card("b", "clock", "s")]), [COLUMNS, SIZES.l.w]);
   });
 
-  test("survive a toggle", () => {
-    assert.equal(stray(toggleCard([...DEFAULT, obj("clock")], "home-readiness")), 1);
+  test("an XL is a row of its own, twice over", () => {
+    assert.deepEqual(rowFill([card("a", "clock", "xl")]), [COLUMNS, COLUMNS]);
   });
 
-  test("a duplicate card object is kept too, not quietly deleted", () => {
-    // cardOrder draws one of each, which is right. Reordering used to DELETE the
-    // extra while doing it — silent data loss on the operator's first drag, for
-    // a state a restored snapshot can produce.
-    const dup = [...DEFAULT, obj("home-readiness", "second-copy")];
-    const after = reorderCards(dup, 0, 1);
-    assert.equal(after.length, dup.length, "an object went missing");
-    assert.ok(after.some((o) => (o as { id: string }).id === "second-copy"));
+  test("a lone Medium leaves a gap, and says so", () => {
+    assert.deepEqual(rowFill([card("a", "clock", "m")]), [SIZES.m.w]);
   });
 });

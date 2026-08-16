@@ -1,124 +1,223 @@
-// Home's editor, in Home's tab.
+// Home's editor — the controls that sit ON the grid, and the sheet that adds to it.
 //
-// Phase 6 sent this to the canvas editor at /screens/home/edit. Nobody places
-// pixels on a home dashboard — it is a stack of cards you either want or you do
-// not — so this is the whole editor: a switch and a drag handle per card.
+// Editing happens in place: cards stay where they are and grow a size picker and
+// a remove button on hover. A separate list of rows would have been easier to
+// build and would have shown an arrangement you could not see, which is the
+// thing the grid exists to fix.
 //
-// It replaces the page in place rather than opening beside it. A split view
-// would halve the cards it is editing, and the list is short enough to hold in
-// your head; Done puts the real page back.
+// It replaces the show/hide toggles. Nothing is lost — the palette IS the list
+// of widgets that are off — and three things are gained: how big, in what order,
+// and when.
 
-import { DndContext, closestCenter, type DragEndEvent, type SensorDescriptor, type SensorOptions } from "@dnd-kit/core";
-import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { GripVerticalIcon } from "lucide-react";
+import { useState } from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { PlusIcon, XIcon, GripVerticalIcon } from "lucide-react";
 
-import { Switch } from "../../components/ui/switch";
+import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER } from "../../main/layout-objects";
+import type { HomeCardSize, HomeVisibility, LayoutObject } from "@main/types/views";
+import { DialogOverlay } from "../../components/ui/dialog";
 import { cn } from "../../lib/cn";
-import type { HomeCardRow, HomeCardType } from "./home-cards";
-import { useSortableRow } from "../../lib/use-sortable-row";
+import { SIZES, SIZE_ORDER, WHEN_LABELS, defaultSize, sizeOf, whenOf } from "./home-cards";
 
-function CardRow({
-  row,
-  onToggle,
+/** The controls drawn over one card while editing. */
+export function CardChrome({
+  card,
+  onSize,
+  onWhen,
+  onRemove,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  dragging,
 }: {
-  row: HomeCardRow;
-  onToggle: () => void;
+  card: LayoutObject;
+  onSize: (s: HomeCardSize) => void;
+  onWhen: (w: HomeVisibility) => void;
+  onRemove: () => void;
+  onDragStart: () => void;
+  onDragOver: () => void;
+  onDrop: () => void;
+  dragging: boolean;
 }) {
-  // A card that is switched off has no position on the page, so there is nothing
-  // to reorder it against.
-  const { setNodeRef, style, dragA11y, listeners } = useSortableRow(row.type, {
-    disabled: !row.present,
-  });
-
+  const label = LAYOUT_OBJECTS[card.config.type as keyof typeof LAYOUT_OBJECTS]?.label ?? card.config.type;
+  const when = whenOf(card);
+  const size = sizeOf(card);
   return (
     <div
-      ref={setNodeRef}
-      style={style}
-      {...dragA11y}
+      // The whole card is the drag handle and the drop target, so a drag can
+      // start and land anywhere on it rather than only on a grip the size of a
+      // thumbnail.
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={(e) => { e.preventDefault(); onDragOver(); }}
+      onDrop={(e) => { e.preventDefault(); onDrop(); }}
       className={cn(
-        "flex items-center gap-3 rounded-xl border border-line bg-surface px-3 py-2.5",
-        !row.present && "opacity-60",
+        "absolute inset-0 cursor-grab rounded-xl ring-1 ring-inset ring-transparent transition-colors",
+        "hover:ring-accent/60 focus-within:ring-accent/60 active:cursor-grabbing",
+        dragging && "opacity-40",
       )}
     >
-      <button
-        type="button"
-        {...listeners}
-        disabled={!row.present}
-        aria-label={`Reorder ${row.label}`}
-        className={cn(
-          "shrink-0 text-fg-subtle transition-colors",
-          row.present ? "cursor-grab hover:text-fg active:cursor-grabbing" : "cursor-default opacity-0",
-        )}
-      >
-        <GripVerticalIcon className="size-4" />
-      </button>
-
-      <span className="min-w-0 flex-1">
-        <span className="block text-body text-fg">{row.label}</span>
-        <span className="block text-caption1 text-fg-subtle truncate">{row.hint}</span>
+      <span className="absolute left-1.5 top-1.5 text-fg-subtle opacity-0 transition-opacity group-hover/card:opacity-100">
+        <GripVerticalIcon className="size-3.5" />
       </span>
 
-      <Switch checked={row.present} onCheckedChange={onToggle} aria-label={`Show ${row.label} on Home`} />
+      <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-lg border border-line bg-bg/95 p-0.5 opacity-0 shadow-sm backdrop-blur transition-opacity focus-within:opacity-100 group-hover/card:opacity-100">
+        {SIZE_ORDER.map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => onSize(s)}
+            aria-pressed={s === size}
+            aria-label={`${label}: ${SIZES[s].label}`}
+            title={`${SIZES[s].label} — ${SIZES[s].w}×${SIZES[s].h}`}
+            className={cn(
+              "grid h-5 w-6 place-items-center rounded-[5px] text-caption2 font-semibold transition-colors",
+              s === size ? "bg-accent text-white" : "text-fg-subtle hover:text-fg",
+            )}
+          >
+            {s.toUpperCase()}
+          </button>
+        ))}
+        <span className="mx-0.5 h-4 w-px bg-line" />
+        <select
+          value={when}
+          onChange={(e) => onWhen(e.target.value as HomeVisibility)}
+          aria-label={`${label}: when to show it`}
+          className="h-5 max-w-24 rounded-[5px] bg-transparent px-1 text-caption2 text-fg-subtle outline-none hover:text-fg"
+        >
+          {(Object.keys(WHEN_LABELS) as HomeVisibility[]).map((w) => (
+            <option key={w} value={w}>{WHEN_LABELS[w]}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${label}`}
+          className="grid h-5 w-5 place-items-center rounded-[5px] text-fg-subtle transition-colors hover:bg-danger-9 hover:text-white"
+        >
+          <XIcon className="size-3" />
+        </button>
+      </div>
+
+      {/* Which mood this card belongs to, when it is not "always" — so a card on
+          the page today that will vanish on Sunday says so rather than looking
+          broken when it goes. */}
+      {when !== "always" && (
+        <span className="absolute bottom-1.5 left-1.5 rounded-full border border-line bg-bg/90 px-1.5 py-px text-caption2 text-fg-subtle opacity-0 transition-opacity group-hover/card:opacity-100">
+          {WHEN_LABELS[when]}
+        </span>
+      )}
     </div>
   );
 }
 
-export function HomeEditor({
-  rows,
-  sensors,
-  onToggle,
-  onReorder,
+/** The add sheet: every widget in the app, at any of the four sizes. */
+export function AddWidgetSheet({
+  open,
+  onClose,
+  onAdd,
 }: {
-  rows: readonly HomeCardRow[];
-  sensors: SensorDescriptor<SensorOptions>[];
-  onToggle: (type: HomeCardType) => void;
-  /** Both indexes are into the PRESENT cards, which is what the list shows. */
-  onReorder: (from: number, to: number) => void;
+  open: boolean;
+  onClose: () => void;
+  onAdd: (type: string, size: HomeCardSize) => void;
 }) {
-  const present = rows.filter((r) => r.present);
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
 
-  function handleDragEnd(e: DragEndEvent) {
-    const { active, over } = e;
-    if (!over || active.id === over.id) return;
-    const ids = present.map((r) => r.type as string);
-    onReorder(ids.indexOf(active.id as string), ids.indexOf(over.id as string));
-  }
+  const groups = PALETTE_GROUP_ORDER.map((g) => ({
+    group: g,
+    items: Object.entries(LAYOUT_OBJECTS)
+      .filter(([, s]) => s.group === g && !s.retired)
+      .filter(([t, s]) =>
+        !needle || s.label.toLowerCase().includes(needle) || t.includes(needle) || s.blurb.toLowerCase().includes(needle),
+      ),
+  })).filter((g) => g.items.length > 0);
 
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-caption1 text-fg-subtle">
-        Switch a card off to take it off Home, and drag to reorder. Home has no
-        canvas — the cards stack top to bottom, whatever the window is.
-      </p>
+    <DialogPrimitive.Root open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogPrimitive.Portal>
+        <DialogOverlay />
+        <DialogPrimitive.Content
+          className={cn(
+            "fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-xl -translate-x-1/2 -translate-y-1/2 flex-col",
+            "rounded-xl border border-line-strong bg-bg p-5 shadow-xl",
+            "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+          )}
+        >
+          <DialogPrimitive.Title className="text-subheadline font-semibold text-fg">Add a widget</DialogPrimitive.Title>
+          <DialogPrimitive.Description className="mb-3 mt-0.5 text-caption1 text-fg-subtle">
+            Every widget in the app. Pick a size — the highlighted one is where that widget usually starts.
+          </DialogPrimitive.Description>
 
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        {/* Only the present cards are sortable. The switched-off ones render
-            below, outside the context, so dropping onto one is not a gesture
-            that appears to do something and does not. */}
-        <SortableContext items={present.map((r) => r.type)} strategy={verticalListSortingStrategy}>
-          <div className="flex flex-col gap-2">
-            {present.map((r) => (
-              <CardRow key={r.type} row={r} onToggle={() => onToggle(r.type)} />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search widgets…"
+            className="mb-2 w-full rounded-lg border border-line bg-surface px-3 py-2 text-footnote text-fg outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          />
+
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            {groups.length === 0 && (
+              <p className="p-6 text-center text-caption1 text-fg-subtle">Nothing matches “{q}”.</p>
+            )}
+            {groups.map(({ group, items }) => (
+              <div key={group}>
+                <p className="px-1 pb-1 pt-3 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+                  {group}
+                </p>
+                {items.map(([t, spec]) => (
+                  <div key={t} className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-fill">
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-footnote font-medium leading-tight text-fg">{spec.label}</span>
+                      <span className="block truncate text-caption2 text-fg-subtle">{spec.blurb}</span>
+                    </span>
+                    <span className="flex shrink-0 gap-1">
+                      {SIZE_ORDER.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => onAdd(t, s)}
+                          aria-label={`Add ${spec.label} as ${SIZES[s].label}`}
+                          title={`${SIZES[s].label} — ${SIZES[s].w}×${SIZES[s].h}`}
+                          className={cn(
+                            "rounded-md border px-1.5 py-1 text-caption2 font-semibold transition-colors",
+                            s === defaultSize(t)
+                              ? "border-accent/50 text-accent hover:bg-accent hover:text-white"
+                              : "border-line text-fg-subtle hover:border-fg-subtle hover:text-fg",
+                          )}
+                        >
+                          {s.toUpperCase()}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
+                ))}
+              </div>
             ))}
           </div>
-        </SortableContext>
-      </DndContext>
 
-      {rows.some((r) => !r.present) && (
-        <>
-          <p className="pt-2 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
-            Not on Home
-          </p>
-          <div className="flex flex-col gap-2">
-            {rows
-              .filter((r) => !r.present)
-              .map((r) => (
-                <CardRow key={r.type} row={r} onToggle={() => onToggle(r.type)} />
-              ))}
-          </div>
-        </>
-      )}
+          <DialogPrimitive.Close
+            aria-label="Close"
+            className="absolute right-3 top-3 grid size-7 place-items-center rounded-md text-fg-subtle transition-colors hover:bg-fill hover:text-fg"
+          >
+            <XIcon className="size-4" />
+          </DialogPrimitive.Close>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  );
+}
 
-    </div>
+/** The button that opens the sheet. */
+export function AddWidgetButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-caption1 font-medium text-fg transition-colors hover:border-line-strong"
+    >
+      <PlusIcon className="size-3.5" />
+      Add widget
+    </button>
   );
 }

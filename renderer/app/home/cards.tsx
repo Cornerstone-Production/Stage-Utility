@@ -20,7 +20,10 @@ import {
 
 import { AppLink } from "../app-link";
 import { readinessChecks, outstanding, type ReadinessCheck } from "./readiness";
-import type { HomeCardType } from "./home-cards";
+import type { LayoutObjectConfig } from "@main/types/views";
+/** The four cards Home draws with its own markup. Derived from the config union
+ *  so a fifth home-* type cannot be silently left out of the switch below. */
+type HomeCardType = Extract<LayoutObjectConfig, { type: `home-${string}` }>["type"];
 import { flashTarget } from "../flash";
 import { cn } from "../../lib/cn";
 import { invoke, onNotification } from "../../lib/api";

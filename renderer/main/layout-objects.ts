@@ -14,6 +14,8 @@
 // bodies with their own hooks and context, not data. That switch has an
 // exhaustiveness check so a type without a renderer is also a compile error.
 
+import type { HomeCardSize, HomeVisibility } from "@main/types/views";
+
 /** Palette sections, in the order the add-object dropdown shows them. */
 export const PALETTE_GROUP_ORDER = [
   "Layout",
@@ -64,6 +66,17 @@ export interface LayoutObjectSpec {
   /** Reads from one ProPresenter machine — offers the instance picker when
    *  more than one is configured. */
   propInstance?: boolean;
+  /**
+   * The tile this widget arrives at on HOME's grid. Medium when absent.
+   *
+   * A judgement about the widget, not about a layout: a clock wants a small
+   * square, a rundown wants the width. The operator changes it per card; this is
+   * only where it starts.
+   */
+  homeSize?: HomeCardSize;
+  /** When this widget is on Home. "always" unless it only makes sense in one of
+   *  Home's two moods — a live timer is noise for six days a week. */
+  homeWhen?: HomeVisibility;
   /**
    * Superseded. Kept renderable, out of the palette, and offered a one-click
    * conversion in the inspector.
@@ -161,6 +174,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Layout",
     config: () => ({ type: "shape", shape: "rect" }),
     style: () => ({ background: "#3b82f6", opacity: 1 }),
+    homeSize: "s",
   },
   image: {
     label: "Image",
@@ -175,6 +189,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Layout",
     config: () => ({ type: "brand-logo", useEmptySlotLogo: false }),
     style: BARE,
+    homeSize: "s",
   },
 
   // Text & time
@@ -184,6 +199,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Text & time",
     config: () => ({ type: "text", text: "Text" }),
     style: () => TEXT(),
+    homeSize: "s",
   },
   clock: {
     label: "Clock",
@@ -191,6 +207,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Text & time",
     config: () => ({ type: "clock", showSeconds: true, format: "12h" }),
     style: () => CARD({ fontWeight: 600 }),
+    homeSize: "s",
   },
   "countdown-timer": {
     label: "PCO countdown",
@@ -207,6 +224,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "PCO / service",
     config: () => ({ type: "live-controls" }) as LayoutObjectConfig,
     style: () => CARD({ fontSize: 0.05, fontWeight: 600 }),
+    homeSize: "m",
+    homeWhen: "live",
     stylingOnly: true,
   },
   "current-service-item": {
@@ -215,6 +234,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "PCO / service",
     config: () => ({ type: "current-service-item" }) as LayoutObjectConfig,
     style: () => TEXT(),
+    homeSize: "m",
+    homeWhen: "live",
     stylingOnly: true,
     propInstance: true,
   },
@@ -224,6 +245,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "PCO / service",
     config: () => ({ type: "next-service-item" }) as LayoutObjectConfig,
     style: () => TEXT(),
+    homeSize: "m",
+    homeWhen: "live",
     stylingOnly: true,
     propInstance: true,
   },
@@ -237,6 +260,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     },
     config: () => ({ type: "service-order", noteCategories: null, showLength: false, highlightLive: true, scroll: "auto", autoFit: true }),
     style: () => TEXT({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
+    homeSize: "l",
   },
   "view-embed": {
     label: "Embedded view",
@@ -255,6 +279,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     // Someone who does want it bigger has the font-size field; someone who wants
     // it to match the page had no way to get there by eye.
     style: () => CARD({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
+    homeSize: "l",
   },
   "home-readiness": {
     label: "Readiness",
@@ -262,6 +287,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "PCO / service",
     config: () => ({ type: "home-readiness" }),
     style: BARE,
+    homeSize: "l",
+    homeWhen: "idle",
   },
   "home-next-service": {
     label: "Next service",
@@ -269,6 +296,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "PCO / service",
     config: () => ({ type: "home-next-service" }),
     style: BARE,
+    homeSize: "m",
+    homeWhen: "idle",
   },
   "home-live-status": {
     label: "Live service status",
@@ -276,6 +305,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "PCO / service",
     config: () => ({ type: "home-live-status" }),
     style: BARE,
+    homeSize: "xl",
+    homeWhen: "live",
   },
   "home-recent-services": {
     label: "Recent services",
@@ -283,6 +314,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "PCO / service",
     config: () => ({ type: "home-recent-services" }),
     style: BARE,
+    homeSize: "xl",
+    homeWhen: "idle",
   },
   "service-pacing": {
     label: "Service pacing",
@@ -290,6 +323,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "PCO / service",
     config: () => ({ type: "service-pacing", hideWhenIdle: false, showLabel: false, caption: "Pacing" }),
     style: () => READOUT(0.1),
+    homeSize: "s",
+    homeWhen: "live",
   },
   "plan-attachment": {
     label: "Plan file",
@@ -297,6 +332,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "PCO / service",
     config: () => ({ type: "plan-attachment", match: "stage plot", page: 1 }),
     style: () => ({ ...CARD_PRESETS.neutral }),
+    homeSize: "l",
   },
 
   // ProPresenter
@@ -306,6 +342,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "ProPresenter",
     config: () => ({ type: "current-slide-text" }) as LayoutObjectConfig,
     style: () => TEXT({ uppercase: true }),
+    homeSize: "m",
+    homeWhen: "live",
     stylingOnly: true,
     propInstance: true,
   },
@@ -315,6 +353,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "ProPresenter",
     config: () => ({ type: "next-slide-text" }) as LayoutObjectConfig,
     style: () => TEXT({ uppercase: true }),
+    homeSize: "m",
+    homeWhen: "live",
     stylingOnly: true,
     propInstance: true,
   },
@@ -324,6 +364,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "ProPresenter",
     config: () => ({ type: "current-slide-notes" }) as LayoutObjectConfig,
     style: () => TEXT({ uppercase: true }),
+    homeSize: "m",
+    homeWhen: "live",
     stylingOnly: true,
     propInstance: true,
   },
@@ -342,6 +384,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "ProPresenter",
     config: () => ({ type: "section-chip", which: "current" }),
     style: () => PILL({ uppercase: true, letterSpacing: 0.04 }),
+    homeSize: "s",
     propInstance: true,
   },
   "pp-timer": {
@@ -350,6 +393,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "ProPresenter",
     config: () => ({ type: "pp-timer", timerName: null, propresenterInstanceId: null, warnStates: true, hideWhenIdle: false, showLabel: true, caption: "Stage timer" }),
     style: () => READOUT(0.1),
+    homeSize: "s",
+    homeWhen: "live",
     propInstance: true,
   },
   "slide-progress": {
@@ -358,6 +403,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "ProPresenter",
     config: () => ({ type: "slide-progress", propresenterInstanceId: null, display: "fraction", showLabel: false }),
     style: () => CARD({ fontWeight: 600 }),
+    homeSize: "s",
     propInstance: true,
   },
 
@@ -368,6 +414,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Mics & RF",
     config: () => ({ type: "slots-grid", source: "inline", sourceViewId: null }),
     style: () => TEXT(),
+    homeSize: "xl",
   },
   "charger-battery": {
     label: "Charger battery",
@@ -375,6 +422,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Mics & RF",
     config: () => ({ type: "charger-battery", bays: [], show: { battery: true, charging: true } }),
     style: () => CARD({ fontSize: 0.045, textAlign: "left" }),
+    homeSize: "s",
     integration: { id: "wireless", label: "wireless" },
   },
   "wireless-summary": {
@@ -383,6 +431,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Mics & RF",
     config: () => ({ type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" }),
     style: () => PILL(),
+    homeSize: "s",
     integration: { id: "wireless", label: "wireless" },
   },
   "wireless-channel": {
@@ -391,6 +440,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Mics & RF",
     config: () => ({ type: "wireless-channel", channelId: null, show: { rf: true, battery: true, frequency: true, audio: false }, showLabel: true }),
     style: () => PILL(),
+    homeSize: "s",
     integration: { id: "wireless", label: "wireless" },
   },
 
@@ -401,6 +451,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Audio (SPL)",
     config: () => ({ type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null, caption: "SPL dB(A)" }),
     style: () => READOUT(0.085),
+    homeSize: "s",
     integration: { id: "smaart", label: "Smaart SPL" },
   },
 
@@ -411,6 +462,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Transcription",
     config: () => ({ type: "transcript-strip", mode: "rolling" }),
     style: () => TEXT({ fontSize: 0.045, textAlign: "left", vAlign: "bottom" }),
+    homeSize: "xl",
     integration: { id: "prodcom", label: "transcription" },
   },
 
@@ -421,6 +473,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "People",
     config: () => ({ type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true, caption: "Attendance" }),
     style: () => READOUT(0.12),
+    homeSize: "s",
     integration: { id: "sensource", label: "SenSource" },
   },
   "people-panel": {
@@ -436,6 +489,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "People",
     config: () => ({ type: "people-graph", metric: "occupancy", showLabel: true, label: "In room" }),
     style: () => ({ color: "#5b9cff", ...CARD_PRESETS.neutral }),
+    homeSize: "l",
     integration: { id: "sensource", label: "SenSource" },
   },
 
@@ -446,6 +500,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Baptisms",
     config: () => ({ type: "baptism-timer", field: "live", showLabel: true, label: "", caption: "Baptisms" }),
     style: () => READOUT(0.14),
+    homeSize: "s",
+    homeWhen: "live",
   },
 
   // Recording state. `record-status` answers "is anything recording?" across both
@@ -456,6 +512,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Status",
     config: () => ({ type: "record-status", source: "any", hideWhenIdle: false, fillWhenRecording: true }),
     style: () => PILL({ fontWeight: 700, uppercase: true }),
+    homeSize: "s",
   },
 
   // OBS / REAPER — bold pills that fill red while recording.
@@ -465,6 +522,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "OBS",
     config: () => ({ type: "obs-status", mode: "recording", showTimecode: false, hideWhenIdle: false, fillWhenRecording: true }),
     style: () => PILL({ fontWeight: 700, uppercase: true }),
+    homeSize: "s",
     integration: { id: "obs", label: "OBS" },
   },
   "reaper-status": {
@@ -473,6 +531,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "REAPER",
     config: () => ({ type: "reaper-status", showPosition: false, hideWhenIdle: false, fillWhenRecording: true }),
     style: () => PILL({ fontWeight: 700, uppercase: true }),
+    homeSize: "s",
     integration: { id: "reaper", label: "REAPER" },
   },
 
@@ -526,6 +585,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: "Status",
     config: () => ({ type: "integration-status", integrationId: null, showLabel: true }),
     style: () => PILL(),
+    homeSize: "s",
   },
 
   // Video layer — native client only; the web build ignores it.
@@ -535,6 +595,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     group: null,
     config: () => ({ type: "ndi-video" }) as LayoutObjectConfig,
     style: BARE,
+    homeSize: "l",
     stylingOnly: true,
   },
 };
