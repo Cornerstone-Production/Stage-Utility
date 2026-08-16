@@ -5,27 +5,60 @@
 // and a compact strip. Shared LOGIC, separate rendering: a second copy of the
 // connected-but-stopped judgement is a second place for the same bug.
 
-/** Is anything actually recording, and what should it say?
+/**
+ * One thing that can be recording.
  *
- *  Two recorders, either of which counts. They are reported TOGETHER because the
- *  question mid-service is "are we getting this?", not "what is OBS doing" - and
- *  a panel that showed only one would read as reassurance while the other sat
- *  stopped. Disconnected is not the same as not recording, and says so. */
-export function recordingStat(
+ * A LIST, not two arguments. "Are we getting this?" is a question about every
+ * recorder at once, and the answer must not need a new parameter each time
+ * another integration learns to record — adding one is now a single entry in
+ * `recorders()` below, and every surface that asks the question updates with it.
+ */
+export interface Recorder {
+  /** How it is named to the operator: "OBS", "REAPER". */
+  name: string;
+  connected: boolean;
+  recording: boolean;
+  /** Elapsed time, when the recorder reports one. */
+  timecode?: string | null;
+}
+
+/**
+ * Every recorder the app knows about, from the live state.
+ *
+ * THE place a new recording integration is added. One entry here and the Home
+ * widget, the context bar and anything else asking the question all cover it.
+ */
+export function recorders(
   obs: { connected: boolean; recording: boolean; recordTimecode: string | null } | null,
   reaper: { connected: boolean; recording: boolean } | null,
+): Recorder[] {
+  return [
+    { name: "OBS", connected: !!obs?.connected, recording: !!obs?.recording, timecode: obs?.recordTimecode ?? null },
+    { name: "REAPER", connected: !!reaper?.connected, recording: !!reaper?.recording },
+  ];
+}
+
+/** Is anything actually recording, and what should it say?
+ *
+ *  Every recorder counts. They are reported TOGETHER because the question
+ *  mid-service is "are we getting this?", not "what is OBS doing" - and a panel
+ *  that showed only one would read as reassurance while the other sat stopped.
+ *  Disconnected is not the same as not recording, and says so. */
+export function recordingStat(
+  list: readonly Recorder[],
 ): { value: string; sub: string; tone?: "danger" | "live" } {
-  const wired = [obs?.connected && "OBS", reaper?.connected && "REAPER"].filter(Boolean) as string[];
+  const wired = list.filter((r) => r.connected);
   if (wired.length === 0) return { value: "—", sub: "no recorder connected" };
 
-  const rolling = [obs?.recording && "OBS", reaper?.recording && "REAPER"].filter(Boolean) as string[];
+  const rolling = wired.filter((r) => r.recording);
   if (rolling.length === 0) {
     // Connected but not rolling, mid-service, is worth noticing.
-    return { value: "stopped", sub: `${wired.join(" + ")} connected`, tone: "danger" };
+    return { value: "stopped", sub: `${wired.map((r) => r.name).join(" + ")} connected`, tone: "danger" };
   }
   return {
-    value: obs?.recordTimecode ?? "recording",
-    sub: rolling.join(" + "),
+    // A timecode from whichever rolling recorder reports one; the word otherwise.
+    value: rolling.find((r) => r.timecode)?.timecode ?? "recording",
+    sub: rolling.map((r) => r.name).join(" + "),
     tone: "live",
   };
 }

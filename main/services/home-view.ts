@@ -63,7 +63,7 @@ export function defaultHomeLayout() {
   let row = 0;
   const card = (config: HomeCardConfig) => ({
     id: config.type,
-    x: 0.04, y: 0.04 + row++ * 0.24, w: 0.92, h: 0.2, z: 1,
+    x: 0.04, y: 0.04 + row++ * 0.135, w: 0.92, h: 0.12, z: 1,
     config,
     style: {},
   });
@@ -75,6 +75,9 @@ export function defaultHomeLayout() {
       // at the top. It is the only card of its mood, so its position among the
       // idle cards never shows.
       card({ type: "home-live-status" }),
+      card({ type: "home-recording" }),
+      card({ type: "home-spl" }),
+      card({ type: "home-screens" }),
       card({ type: "home-next-service" }),
       card({ type: "home-readiness" }),
       card({ type: "home-recent-services" }),
@@ -106,9 +109,53 @@ export function defaultHomeLayout() {
  * Returns the views unchanged when there is nothing to do, so callers can
  * compare by reference and skip a write.
  */
+/**
+ * The stats that used to live INSIDE the live-status card, in the order they
+ * appeared in it. Split out so each can be placed, sized and ordered on its own.
+ */
+const LIVE_STATUS_PARTS = ["home-recording", "home-spl", "home-screens"] as const;
+
+/**
+ * Put back what the split took out.
+ *
+ * `home-live-status` drew a timer AND recording, SPL, screens and history. It is
+ * the timer alone now, so a Home still holding one would silently lose three
+ * readings on upgrade — exactly the "feature removed by upgrade" this file
+ * already guards against for the seed.
+ *
+ * Runs on any Home, edited or not, because the loss has nothing to do with
+ * whether a person has touched it. Keyed off the card's presence and off the
+ * parts being ABSENT, so it cannot fire twice or undo a deliberate removal: once
+ * the pieces are there, or if the operator later deletes them, this sees them as
+ * accounted for and does nothing.
+ */
+function splitLiveStatus(view: View): View {
+  const objects = view.layout?.objects ?? [];
+  const at = objects.findIndex((o) => o.config.type === "home-live-status");
+  if (at === -1) return view;
+  const missing = LIVE_STATUS_PARTS.filter((t) => !objects.some((o) => o.config.type === t));
+  if (missing.length === 0) return view;
+  const parts = missing.map((type, i) => ({
+    id: type,
+    x: 0.04, y: Math.min(0.9, 0.5 + i * 0.06), w: 0.92, h: 0.2, z: objects.length + i + 1,
+    home: { size: "s" as const, when: "always" as const },
+    config: { type } as never,
+    style: {},
+  }));
+  const next = [...objects];
+  // Directly after the timer, which is where they were.
+  next.splice(at + 1, 0, ...(parts as never[]));
+  return { ...view, layout: { ...view.layout!, objects: next } } as View;
+}
+
 export function seedHomeView(views: readonly View[]): View[] {
   const existing = views.find((v) => v.id === HOME_VIEW_ID);
   if (existing) {
+    // The split runs first and REGARDLESS of layoutRev: losing three readings
+    // because a card was decomposed is not something an operator asked for, so
+    // "have they edited it" is the wrong question here.
+    const split = splitLiveStatus(existing);
+    if (split !== existing) return views.map((v) => (v.id === HOME_VIEW_ID ? split : v));
     // `!= null`, not truthy: 0 means "saved once, at revision zero" to anyone
     // hand-writing views.json, and resetting their Home on that reading would be
     // the one thing this function must never do.

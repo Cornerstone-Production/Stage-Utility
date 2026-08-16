@@ -29,9 +29,14 @@ export const SIZES: Record<HomeCardSize, { w: number; h: number; label: string }
   m: { w: 2, h: 1, label: "Medium" },
   l: { w: 2, h: 2, label: "Large" },
   xl: { w: 3, h: 2, label: "Extra large" },
+  // Full width, four rows. For content that is genuinely long — a rundown, a
+  // mic-slots grid, a transcript — where showing less is not an option because
+  // the list IS the widget. Height costs nothing in the tiling: only widths pack
+  // into rows, so a taller tile cannot strand a gap the others could not.
+  tall: { w: 3, h: 4, label: "Tall" },
 };
 
-export const SIZE_ORDER: HomeCardSize[] = ["s", "m", "l", "xl"];
+export const SIZE_ORDER: HomeCardSize[] = ["s", "m", "l", "xl", "tall"];
 
 /** What each visibility means, in the operator's words. */
 export const WHEN_LABELS: Record<HomeVisibility, string> = {

@@ -23,7 +23,7 @@ import { computePcoTimer, fmtDuration } from "../main/pco-timer";
 import { cn } from "../lib/cn";
 import type { ReactNode } from "react";
 import { visibleBarItems, type BarItemId } from "./bar-items";
-import { recordingStat } from "./recording-status";
+import { recordingStat, recorders } from "./recording-status";
 import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
 import { useIntegrations } from "../main/use-integration-states";
@@ -186,7 +186,7 @@ function renderBarItem(
     case "recording": {
       // The same judgement Home makes, from the same function - including
       // "connected but stopped", which is the state worth surfacing.
-      const rec = recordingStat(obs, reaper);
+      const rec = recordingStat(recorders(obs, reaper));
       if (rec.value === "—") return null;
       return (
         <span className={cn("text-footnote font-mono tabular-nums", rec.tone === "danger" ? "text-danger-11" : "text-live-11")}>

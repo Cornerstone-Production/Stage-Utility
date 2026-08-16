@@ -72,6 +72,9 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
   "home-next-service": ListIcon,
   "home-live-status": GaugeIcon,
   "home-recent-services": TrendingUpIcon,
+  "home-recording": CircleDotIcon,
+  "home-spl": AudioLinesIcon,
+  "home-screens": MonitorIcon,
 };
 
 /**

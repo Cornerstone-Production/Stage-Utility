@@ -16,7 +16,15 @@ import type { LayoutRenderCtx } from "../../main/layout-renderer";
 import { SIZES, sizeOf } from "./home-cards";
 
 /** One grid row, in pixels. Two of these plus a gap is a Large or an XL. */
-export const ROW_PX = 104;
+/**
+ * One grid row, in pixels.
+ *
+ * 120, not 104: a Small tile holds a caption, a value and a sub-line, and at 104
+ * the shortest of those — 'SCREENS / 4/5 / one or more offline' — stood 14px
+ * proud of its box. A widget cannot scroll and must not clip, so the row is
+ * sized to the smallest complete widget rather than the widget trimmed to fit.
+ */
+export const ROW_PX = 120;
 const GAP_PX = 12;
 
 /**

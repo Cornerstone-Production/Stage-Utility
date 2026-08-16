@@ -469,10 +469,12 @@ function Captioned({ caption, ts, children }: { caption?: string | null; ts: CSS
       <span
         style={{
           color: ts.color,
-          opacity: 0.55,
-          fontSize: "0.32em",
+          // 0.32em at 55% was unreadable at a dashboard tile — reported off a
+          // real screen. A caption has to be legible or it is decoration.
+          opacity: 0.75,
+          fontSize: "0.46em",
           fontWeight: 600,
-          letterSpacing: "0.1em",
+          letterSpacing: "0.08em",
           textTransform: "uppercase",
           lineHeight: 1.2,
           // Its own font, not the value's: a caption is words, and the mono face
@@ -1041,6 +1043,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "home-next-service":
     case "home-recent-services":
     case "home-live-status":
+    case "home-recording":
+    case "home-spl":
+    case "home-screens":
       // pointer-events-none, ALWAYS — not gated on ctx.interactive like
       // live-controls is.
       //

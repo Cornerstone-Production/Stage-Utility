@@ -233,6 +233,13 @@ export type LayoutObjectConfig =
   | { type: "home-readiness" }
   | { type: "home-next-service" }
   | { type: "home-live-status" }
+  // The stats that used to live INSIDE the live card. Split out so each can be
+  // placed, sized and ordered on its own — the card's look is kept exactly, it
+  // is only the container that goes. Each is integration-agnostic: the recording
+  // one answers "are we getting this?" across every recorder at once.
+  | { type: "home-recording" }
+  | { type: "home-spl" }
+  | { type: "home-screens" }
   | { type: "home-recent-services" }
   // A timer running INSIDE ProPresenter (its stage/countdown timers) — distinct from
   // the PCO countdown. `timerName` picks one by name (blank = the first reported);
@@ -513,8 +520,8 @@ export type LayoutObjectType = LayoutObjectConfig["type"];
 /**
  * Which tile a widget fills on Home's grid — columns × rows.
  *
- * Four preset shapes on a three-column grid, chosen so they tile: `S 1×1`,
- * `M 2×1`, `L 2×2`, `XL 3×2`. `S + M`, `S + L` and `S + S + S` each fill a row,
+ * Five preset shapes on a three-column grid, chosen so they tile: `S 1×1`,
+ * `M 2×1`, `L 2×2`, `XL 3×2`, `Tall 3×4`. `S + M`, `S + L` and `S + S + S` each fill a row,
  * and a Large leaves a 1-wide, 2-tall gap that two stacked Smalls complete
  * exactly. Small is 1×1, so every leftover slot is fillable and nothing can
  * strand a gap.
@@ -522,7 +529,7 @@ export type LayoutObjectType = LayoutObjectConfig["type"];
  * Deliberately NOT a width and a height: a size is a choice from four, which is
  * what keeps Home free of a canvas.
  */
-export type HomeCardSize = "s" | "m" | "l" | "xl";
+export type HomeCardSize = "s" | "m" | "l" | "xl" | "tall";
 
 /**
  * When a Home card is on the page.

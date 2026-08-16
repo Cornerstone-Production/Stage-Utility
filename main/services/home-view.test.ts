@@ -35,6 +35,9 @@ describe("seeding", () => {
   test("Home starts with the cards the fixed panels showed", () => {
     assert.deepEqual(typesOf(seedHomeView([])), [
       "home-live-status",
+      "home-recording",
+      "home-spl",
+      "home-screens",
       "home-next-service",
       "home-readiness",
       "home-recent-services",
@@ -71,7 +74,7 @@ describe("idempotence", () => {
     const after = seedHomeView(edited(once, objects));
     assert.deepEqual(
       typesOf(after),
-      ["home-live-status", "home-next-service", "home-recent-services"],
+      ["home-live-status", "home-recording", "home-spl", "home-screens", "home-next-service", "home-recent-services"],
       "the deleted card came back",
     );
   });
@@ -101,6 +104,9 @@ describe("idempotence", () => {
     );
     assert.deepEqual(typesOf(seedHomeView(stale)), [
       "home-live-status",
+      "home-recording",
+      "home-spl",
+      "home-screens",
       "home-next-service",
       "home-readiness",
       "home-recent-services",

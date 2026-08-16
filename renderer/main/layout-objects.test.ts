@@ -232,6 +232,13 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // one mechanism (Phase 7, Task 6).
   { type: "home-live-status", label: "Live service status", group: "PCO / service", after: "home-next-service" },
   { type: "home-recent-services", label: "Recent services", group: "PCO / service", after: "home-live-status" },
+  // The live card's insides, split out so each can be placed on its own once
+  // Home became a grid. The card kept the timer; these three kept their look.
+  // Each sits beside the widgets it belongs with rather than with the other Home
+  // cards, so none of them displaces the first entry of a group.
+  { type: "home-spl", label: "Sound level", group: "Audio (SPL)", after: "spl-meter" },
+  { type: "home-recording", label: "Recording", group: "Status", after: "integration-status" },
+  { type: "home-screens", label: "Screens online", group: "Status", after: "home-recording" },
 ];
 
 /**

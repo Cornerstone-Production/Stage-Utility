@@ -456,6 +456,15 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
 
   // Transcription
+  "home-spl": {
+    label: "Sound level",
+    blurb: "The loudest meter right now, and which one",
+    group: "Audio (SPL)",
+    config: () => ({ type: "home-spl" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+  },
   "transcript-strip": {
     label: "Transcription",
     blurb: "Live captions of what is being said",
@@ -586,6 +595,24 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     config: () => ({ type: "integration-status", integrationId: null, showLabel: true }),
     style: () => PILL(),
     homeSize: "s",
+  },
+  "home-recording": {
+    label: "Recording",
+    blurb: "Are we getting this? — across every recorder at once",
+    group: "Status",
+    config: () => ({ type: "home-recording" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+  },
+  "home-screens": {
+    label: "Screens online",
+    blurb: "How many displays are connected, of how many",
+    group: "Status",
+    config: () => ({ type: "home-screens" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
   },
 
   // Video layer — native client only; the web build ignores it.

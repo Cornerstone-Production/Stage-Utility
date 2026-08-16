@@ -9,7 +9,7 @@
 // of the week — is NOT here. It lives in home-cards.ts beside the ordering, so a
 // card can be rendered anywhere without dragging Home's rules along with it.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   CheckIcon,
@@ -32,7 +32,7 @@ import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
 import { useObsState } from "../../main/use-obs-state";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
-import { recordingStat, loudestSpl } from "../recording-status";
+import { recordingStat, recorders, loudestSpl } from "../recording-status";
 
 /* ── Shared bits ──────────────────────────────────────────────────────────── */
 
@@ -149,7 +149,7 @@ function Stat({
       >
         {value}
       </span>
-      {sub && <span className="block text-caption1 text-fg-subtle">{sub}</span>}
+      {sub && <span className="block truncate text-caption1 text-fg-subtle" title={sub}>{sub}</span>}
     </>
   );
   const className = "rounded-xl border border-line bg-surface px-4 py-3";
@@ -249,9 +249,21 @@ export function NextServiceCard({
 
 export function ReadinessCard({ checks }: { checks: readonly ReadinessCheck[] }) {
   const todo = outstanding(checks);
+  // Measure the box rather than guess at it: this card is placed at four
+  // different tile sizes on Home and at any size at all on a canvas, so "how
+  // many rows fit" is not something the caller can be trusted to pass in.
+  const { wrapRef, rows } = useRowBudget(ROW_HEIGHT_PX, HEADER_PX);
+
+  // Short box: what still needs doing, and nothing else. A widget does not
+  // scroll and must not clip, so it shows LESS — the passing checks are the
+  // ones you do not need to see, and hiding the outstanding ones would make
+  // "2 to sort out" a lie about the rows underneath it.
+  const shown = rows >= checks.length ? checks : todo.slice(0, Math.max(1, rows));
+  const hidden = checks.length - shown.length;
+
   return (
-    <section className="rounded-xl border border-line bg-surface overflow-hidden">
-      <header className="flex items-baseline gap-2 px-4 py-3 border-b border-line">
+    <section ref={wrapRef} className="flex h-full flex-col overflow-hidden rounded-xl border border-line bg-surface">
+      <header className="flex shrink-0 items-baseline gap-2 border-b border-line px-4 py-3">
         <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
           Ready for the next service
         </h2>
@@ -259,11 +271,43 @@ export function ReadinessCard({ checks }: { checks: readonly ReadinessCheck[] })
           {todo.length === 0 ? "everything set" : `${todo.length} to sort out`}
         </span>
       </header>
-      {checks.map((c) => (
+      {shown.map((c) => (
         <CheckRow key={c.id} check={c} />
       ))}
+      {hidden > 0 && (
+        <p className="px-4 py-2 text-caption1 text-fg-subtle">
+          {todo.length > shown.length
+            ? `+${todo.length - shown.length} more to sort out`
+            : `${hidden} already set`}
+        </p>
+      )}
     </section>
   );
+}
+
+/** One check row, measured once so the budget above is not a guess. */
+const ROW_HEIGHT_PX = 52;
+const HEADER_PX = 45;
+
+/**
+ * How many rows fit in this card, watched as it resizes.
+ *
+ * A widget is a fixed box: it cannot scroll and must not clip, so it has to know
+ * how much room it has and show that much.
+ */
+function useRowBudget(rowPx: number, headerPx: number) {
+  const wrapRef = useRef<HTMLElement | null>(null);
+  const [rows, setRows] = useState(99);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => setRows(Math.max(1, Math.floor((el.clientHeight - headerPx) / rowPx)));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [rowPx, headerPx]);
+  return { wrapRef, rows };
 }
 
 /**
@@ -314,77 +358,74 @@ export function RecentServicesCard({ state }: { state: StageState }) {
 }
 
 /**
- * Live service status — the timer and the current item own the screen, and
- * everything else is a glance.
+ * The service timer — the running item's clock, what it is, and what is next.
  *
- * The timer maths is NOT reimplemented here: computePcoTimer already mirrors
- * PCO's semantics and fmtDuration already formats it. The dashboard, the stage
- * display and the context bar all use that pair; a fourth copy would be a fourth
- * place for the same bug.
- *
- * Recording and SPL come first: mid-service they are the two things you cannot
- * recover after the fact.
+ * It used to carry recording, SPL, screens and history inside it, because Home
+ * had no way to arrange four small things. The grid does, so those are their own
+ * widgets now and this is one job again. The maths is NOT reimplemented:
+ * computePcoTimer mirrors PCO's semantics and fmtDuration formats it, and the
+ * dashboard, the stage display and the context bar all use that pair.
  */
 export function LiveStatusCard({
   pcoLive,
   now,
   skewMs,
-  onlineOutputIds,
-  outputCount,
 }: {
   pcoLive: PcoLiveDTO | null;
   now: number;
   skewMs: number;
-  onlineOutputIds: readonly string[];
-  outputCount: number;
 }) {
   const timer = computePcoTimer(pcoLive, now, skewMs);
-  const obs = useObsState();
-  const reaper = useReaperState();
-  const spl = useSplState();
-  const rec = recordingStat(obs, reaper);
-  const loud = loudestSpl(spl);
-
   return (
-    <div className="flex flex-col gap-3">
-      <section className="rounded-xl border border-line bg-surface px-5 py-5">
-        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-          <span
-            className={cn(
-              // text-fg explicitly. Same trap as the stats below: inheriting
-              // looked fine on the old app page and came out black on black the
-              // moment this card moved onto Home's kiosk surface.
-              "text-large-title font-medium font-mono tabular-nums leading-none text-fg",
-              timer?.over && "text-danger-11",
-            )}
-            style={{ fontSize: "clamp(2.25rem, 6vw, 3.25rem)" }}
-          >
-            {timer ? fmtDuration(timer.seconds) : "—"}
-          </span>
-          {timer?.label && <span className="text-headline text-fg">{timer.label}</span>}
-        </div>
-        {pcoLive?.nextItemTitle && (
-          <p className="text-footnote text-fg-subtle mt-2.5">Next · {pcoLive.nextItemTitle}</p>
-        )}
-      </section>
-
-      {/* Three, not four. A widget is a fixed box that does not scroll, and the
-          fourth stat pushed this card past its tile. History went because it was
-          the only one that was not a live reading — it was a link to another
-          page wearing a stat's clothes, and History is one click away in the
-          rail. */}
-      <div className="grid grid-cols-3 gap-2.5">
-        <Stat label="Recording" value={rec.value} sub={rec.sub} tone={rec.tone} />
-        <Stat label="SPL" value={loud.value} sub={loud.sub} />
-        <Stat
-          label="Screens"
-          value={`${onlineOutputIds.length}/${outputCount}`}
-          sub={onlineOutputIds.length === outputCount ? "all connected" : "one or more offline"}
-          to="/screens"
-          tone={onlineOutputIds.length === outputCount ? undefined : "danger"}
-        />
+    <div className="flex h-full flex-col justify-center">
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <span
+          className={cn(
+            "text-large-title font-medium font-mono tabular-nums leading-none text-fg",
+            timer?.over && "text-danger-11",
+          )}
+          style={{ fontSize: "clamp(2.25rem, 6vw, 3.25rem)" }}
+        >
+          {timer ? fmtDuration(timer.seconds) : "—"}
+        </span>
+        {timer?.label && <span className="text-headline text-fg">{timer.label}</span>}
       </div>
+      {pcoLive?.nextItemTitle && (
+        <p className="text-footnote text-fg-subtle mt-2.5">Next · {pcoLive.nextItemTitle}</p>
+      )}
     </div>
+  );
+}
+
+/**
+ * Are we getting this?
+ *
+ * Every recorder at once, not one widget per integration — the question
+ * mid-service is whether the service is being captured, and a widget reporting
+ * only OBS would read as reassurance while REAPER sat stopped. A new recording
+ * integration joins by being added to `recorders()`; nothing here changes.
+ */
+export function RecordingCard() {
+  const rec = recordingStat(recorders(useObsState(), useReaperState()));
+  return <Stat label="Recording" value={rec.value} sub={rec.sub} tone={rec.tone} />;
+}
+
+/** The loudest meter right now, and which one. */
+export function SplCard() {
+  const loud = loudestSpl(useSplState());
+  return <Stat label="SPL" value={loud.value} sub={loud.sub} />;
+}
+
+/** How many displays are connected, of how many exist. */
+export function ScreensCard({ online, total }: { online: number; total: number }) {
+  return (
+    <Stat
+      label="Screens"
+      value={`${online}/${total}`}
+      sub={online === total ? "all connected" : "one or more offline"}
+      to="/screens"
+      tone={online === total ? undefined : "danger"}
+    />
   );
 }
 
@@ -427,15 +468,13 @@ export function HomeCard({
 }) {
   switch (type) {
     case "home-live-status":
-      return (
-        <LiveStatusCard
-          pcoLive={pcoLive}
-          now={now}
-          skewMs={skewMs}
-          onlineOutputIds={onlineOutputIds}
-          outputCount={(state.outputs ?? []).length}
-        />
-      );
+      return <LiveStatusCard pcoLive={pcoLive} now={now} skewMs={skewMs} />;
+    case "home-recording":
+      return <RecordingCard />;
+    case "home-spl":
+      return <SplCard />;
+    case "home-screens":
+      return <ScreensCard online={onlineOutputIds.length} total={(state.outputs ?? []).length} />;
     case "home-next-service":
       return <NextServiceCard state={state} secondsToStart={secondsToStart} />;
     case "home-readiness":
