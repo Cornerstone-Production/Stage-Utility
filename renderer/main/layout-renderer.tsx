@@ -77,6 +77,9 @@ export interface LayoutRenderCtx {
   skewMs: number;
   ndiSource: string | null;
   /** Canvas height in design px — basis for fraction→px font/spacing sizing. */
+  /** The canvas's own background colour, so a widget's opaque body matches it
+   *  rather than hardcoding black. */
+  canvasBg?: string | null;
   H: number;
   /** True only on a real display route. Interactive objects (live controls)
    *  only fire their commands when true — never in the editor or preview iframe. */
@@ -90,34 +93,70 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** Box-level CSS (position handled by caller): background, border, radius, padding,
- *  opacity, and flex alignment derived from text/vertical alignment. */
-export function boxStyle(o: LayoutObject, H: number): CSSProperties {
-  const s = o.style ?? {};
+/** The frame every widget renders in.
+ *
+ * One radius, one padding, one outline weight, app-wide. There is nothing to
+ * configure and nothing to get wrong.
+ *
+ * `--kiosk-radius` etc. are fractions of canvas HEIGHT so the frame scales with
+ * the design, exactly as the old per-object values did.
+ */
+const FRAME = {
+  /** ~14px on a 1080 canvas. */
+  radius: 0.013,
+  /** ~12px on a 1080 canvas. Enough that text never touches the outline. */
+  padding: 0.011,
+  /** ~1px on a 1080 canvas. */
+  border: 0.001,
+  /** The outline. Neutral, and the only thing separating a widget from the
+   *  canvas — see the Phase 6 plan for why it carries no colour. */
+  line: "rgba(255,255,255,0.22)",
+} as const;
+
+/**
+ * Box-level CSS (position handled by caller).
+ *
+ * The body is OPAQUE, painted in the canvas's own background colour. On a black
+ * canvas that is indistinguishable from transparent — and it also occludes what
+ * is underneath, which transparent does not. Objects overlap in real layouts,
+ * and a transparent body lets the lower one's text bleed through the upper one's,
+ * which reads as a rendering fault rather than a layout mistake.
+ *
+ * Painted from the canvas colour rather than hardcoded black, so a layout with a
+ * non-default background matches it instead of punching holes in itself.
+ *
+ * No fill as decoration; fill only as state. A widget that needs to shout —
+ * recording — paints itself, and owns that decision.
+ */
+export function boxStyle(o: LayoutObject, H: number, canvasBg?: string | null): CSSProperties {
   const css: CSSProperties = {
     display: "flex",
     flexDirection: "column",
-    justifyContent: s.vAlign === "top" ? "flex-start" : s.vAlign === "bottom" ? "flex-end" : "center",
-    alignItems:
-      s.textAlign === "left" ? "flex-start" : s.textAlign === "right" ? "flex-end" : "center",
+    justifyContent: "center",
+    alignItems: "center",
     overflow: "hidden",
     // Border draws inside the box so it never changes the object's footprint.
     boxSizing: "border-box",
+    background: canvasBg || "var(--kiosk-bg, #0a0a0a)",
+    padding: `${FRAME.padding * H}px`,
+    borderRadius: `${FRAME.radius * H}px`,
+    border: `${Math.max(1, FRAME.border * H)}px solid ${FRAME.line}`,
   };
-  if (s.background) css.background = s.background;
-  if (s.opacity != null) css.opacity = s.opacity;
-  if (s.padding != null) css.padding = `${s.padding * H}px`;
-  if (s.cornerRadius != null) css.borderRadius = `${s.cornerRadius * H}px`;
-  // Clamp so a stray/legacy width can't swell into a solid fill.
-  if (s.borderColor && s.borderWidth) css.border = `${Math.min(s.borderWidth, 0.04) * H}px solid ${s.borderColor}`;
-  // Box elevation: a soft two-layer drop shadow scaled by strength + canvas height,
-  // so stacked cards read as layered. Mirrors the textShadow approach; drawn outside
-  // the border-box so it never affects layout.
-  if (s.boxShadow) {
-    const a = Math.min(1, s.boxShadow);
-    css.boxShadow = `0 ${0.006 * a * H}px ${0.02 * a * H}px rgba(0,0,0,${0.45 * a}), 0 ${0.02 * a * H}px ${0.05 * a * H}px rgba(0,0,0,${0.30 * a})`;
+  // A shape IS its fill — it is the one object whose whole job is to be a block
+  // of colour, so it keeps its background and loses the outline.
+  if (o.config.type === "shape") {
+    const s = o.style ?? {};
+    if (s.background) css.background = s.background;
+    css.border = "none";
+    css.padding = 0;
+    if (o.config.shape === "ellipse") css.borderRadius = "50%";
   }
-  if (o.config.type === "shape" && o.config.shape === "ellipse") css.borderRadius = "50%";
+  // A container frames other widgets; a frame around a frame is noise.
+  if (o.config.type === "container") {
+    css.border = "none";
+    css.background = "transparent";
+    css.padding = 0;
+  }
   return css;
 }
 
@@ -193,7 +232,7 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
       style={{
         position: "absolute",
         ...geometry,
-        ...boxStyle(o, ctx.H),
+        ...boxStyle(o, ctx.H, ctx.canvasBg),
       }}
     >
       {kids ? kids.map((c) => <RenderObject key={c.id} o={c} ctx={ctx} />) : <ObjectContent o={o} ctx={ctx} />}
@@ -226,6 +265,9 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
  * scroll size at the current scale. Floor of 0.3 so it degrades to "small" and
  * never to "invisible".
  */
+/** How far a readout may grow beyond its designed size to fill its box. */
+const FIT_MAX_GROWTH = 3;
+
 function useFitScale<T extends HTMLElement = HTMLSpanElement>(deps: unknown[]): {
   wrapRef: React.RefObject<HTMLDivElement | null>;
   elRef: React.RefObject<T | null>;
@@ -249,7 +291,15 @@ function useFitScale<T extends HTMLElement = HTMLSpanElement>(deps: unknown[]): 
       const natW = el.scrollWidth / cur;
       const natH = el.scrollHeight / cur;
       if (natW <= 0 || natH <= 0) return;
-      const desired = clamp(Math.min(availW / natW, availH / natH), 0.3, 1);
+      // Grows as well as shrinks. The base size is a fraction of the CANVAS, so
+      // capping at 1 meant a widget made twice as tall kept the same text and an
+      // operator reached for the font-size field to fix it — which is precisely
+      // the field this phase removes. Sizing from the widget's own box is what
+      // makes that field unnecessary rather than merely unavailable.
+      //
+      // The ceiling stops a two-character readout in a large tile becoming
+      // absurd, and the floor keeps a long string legible rather than vanishing.
+      const desired = clamp(Math.min(availW / natW, availH / natH), 0.3, FIT_MAX_GROWTH);
       if (Math.abs(desired - cur) > 0.01) setScale(desired);
     };
     measure();
@@ -408,7 +458,10 @@ function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign
 export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   const c = o.config;
   const ts = textStyle(o, ctx.H);
-  const span = (text: string) => <span style={ts}>{text}</span>;
+  // Every readout fits its box. This helper backs the plain-text objects
+  // (text, slide text, slide notes), and routing it through FitText is what
+  // makes a per-object font size unnecessary rather than merely unfashionable.
+  const span = (text: string) => <FitText text={text} ts={ts} vAlign={o.style?.vAlign} />;
 
   switch (c.type) {
     case "text":
@@ -2136,14 +2189,14 @@ export function LayoutRenderer({
     ? [...placed.values()].reduce((m, o) => Math.max(m, o.top + o.height), 0)
     : 0;
   const overflows = responsive && dims.h > 0 && contentBottom > dims.h + 1;
-  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
-  const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
-
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom
   // layouts match every other view; only an explicit non-default solid overrides.
   const bg = canvas.background;
   const inheritSurface =
     bg == null || bg === "#000" || bg === "#000000" || bg === "#080810" || bg === "#0a0a0a";
+
+  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed, canvasBg: inheritSurface ? null : bg };
+  const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (
     <div
