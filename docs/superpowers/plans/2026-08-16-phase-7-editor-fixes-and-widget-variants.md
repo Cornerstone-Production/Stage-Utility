@@ -13,7 +13,8 @@
 **Done this session:** the five toolbar/navigation fixes (221ebb4), the context
 menu and page gutter (9ccb4ba), the Phase 6 revert (1a21e7e), the page gutter
 done properly (6470e8c — the first pass fixed 3 of 13 places and doubled the
-other 10), and **Task 6, Home in its own tab (14165c9)**. Deployed to 8799.
+other 10), **Task 6, Home in its own tab (14165c9)**, and its review pass
+(270afbb). Deployed to 8799.
 
 **Next: Task 7 — the widgets, one by one.** Tasks 1 through 6 are complete.
 Nothing else in this plan is outstanding.
@@ -322,6 +323,25 @@ not anticipate, each with a reason:
    are not editable: one mutates PCO selection, the other hands out display URLs.
    Front-door utilities, not dashboard content — stated in the code and the docs
    rather than left as an omission.
+
+**Then the review passes found four more things (270afbb), all fixed:**
+
+1. **A lost update that could resurrect a card.** Every edit was computed from
+   the server's copy, so two changes inside one round-trip both built on the
+   pre-edit array. `save` takes an updater now and applies it to the newest list
+   — `pending` across a round-trip, a ref within one React batch.
+2. **A Home card could kill a wall display.** Three of the four contain links to
+   `/screens` and `/history`, and every surface except Home is on the kiosk
+   router, whose route table is `/`. A touch took the display to "Route not
+   found" and left it there. Wrapped `pointer-events-none` in the layout
+   renderer, matching the `["readout"]` capability they already declare.
+3. **Five more places counted views** and a seeded Home inflated every one —
+   including the SERVER's "cannot remove the last view", which let an operator
+   delete their only real view. Seven call sites total, all through
+   `screensListViews`.
+4. **One sortable row, not five.** The `useSortable`-plus-style block was in four
+   places before this branch added a fifth. `useSortableRow` replaces all of
+   them; every drag surface re-driven in a browser.
 
 ---
 
