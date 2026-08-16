@@ -27,6 +27,7 @@ import { recordingStat, recorders } from "./recording-status";
 import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
 import { useIntegrations } from "../main/use-integration-states";
+import { DisconnectedPopover } from "./disconnected-popover";
 
 export interface ContextBarState {
   isLive: boolean;
@@ -176,11 +177,10 @@ function renderBarItem(
         (i) => i.enabled && i.configured !== false && (i.connection === "error" || i.connection === "disconnected"),
       );
       if (down.length === 0) return null;
-      return (
-        <span className="text-footnote text-warn-11 truncate">
-          {down.length} disconnected
-        </span>
-      );
+      // A count on its own is the least useful place to stop: it says something
+      // is wrong mid-service and leaves you to open Integrations and read every
+      // card to find out what. Clicking it names them and takes you there.
+      return <DisconnectedPopover down={down} labels={integrations?.labels ?? {}} />;
     }
 
     case "recording": {
