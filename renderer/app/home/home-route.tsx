@@ -65,7 +65,7 @@ export function HomeRoute() {
   const mode = homeMode(pcoLive, secondsToStart);
 
   return (
-    <div className="px-5 max-sm:px-3 pt-1 pb-[50vh] max-sm:pb-24 flex flex-col gap-3">
+    <div className="pt-1 pb-[50vh] max-sm:pb-24 flex flex-col gap-3">
       {!state.onboardingDismissed && (
         <GettingStarted
           stageState={state}

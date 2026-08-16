@@ -134,7 +134,18 @@ export function ContextMenu({
   }, [x, y, items]);
 
   useEffect(() => {
-    const close = () => onClose();
+    // Dismiss on a pointerdown OUTSIDE the menu.
+    //
+    // The `contains` check is the whole fix: this listener runs in the capture
+    // phase, so an unfiltered close() fired on the pointerdown of a click on a
+    // menu ITEM, unmounting the menu before the click could reach the button.
+    // Every item — Delete, Copy, Duplicate, Add object — looked normal, hovered
+    // normally, and did nothing at all.
+    const close = (e: Event) => {
+      const target = e.target as Node | null;
+      if (target && ref.current?.contains(target)) return;
+      onClose();
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();

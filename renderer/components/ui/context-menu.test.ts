@@ -24,6 +24,24 @@ describe("destructive menu items use the danger colour", () => {
   });
 });
 
+describe("a menu item's click actually reaches it", () => {
+  // THE bug: the dismiss-on-outside-click listener runs in the CAPTURE phase, so
+  // an unfiltered close() fired on the pointerdown of a click on a menu ITEM and
+  // unmounted the menu before the click could reach the button. Every item
+  // looked normal, hovered normally, and did nothing.
+  test("the dismiss listener ignores pointerdowns inside the menu", () => {
+    const body = SRC.slice(SRC.indexOf("const close ="), SRC.indexOf("const onKey ="));
+    assert.match(body, /ref\.current\?\.contains\(/, "close() must ignore events from inside the menu");
+    assert.match(body, /return;/, "and return without closing");
+  });
+
+  test("it is still bound in the capture phase", () => {
+    // Capture is deliberate: it must close before the canvas beneath acts on the
+    // same click, so dismissing never also starts a selection.
+    assert.match(SRC, /addEventListener\("pointerdown", close, true\)/);
+  });
+});
+
 describe("nothing else confuses the two", () => {
   // Walked recursively, so a new component joins this check by existing rather
   // than by someone remembering to add it here.

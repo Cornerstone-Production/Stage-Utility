@@ -34,7 +34,7 @@ export function ViewEditorRoute() {
     // A deleted view, or a stale link. Says so rather than rendering an empty
     // editor that looks like a loading state that never finishes.
     return (
-      <div className="px-5 max-sm:px-3 py-10 text-center">
+      <div className="py-10 text-center">
         <p className="text-body text-fg">That view no longer exists.</p>
         <AppLink to="/screens" className="text-caption1 text-accent hover:underline mt-2 inline-block">
           Back to Screens
@@ -45,7 +45,7 @@ export function ViewEditorRoute() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="px-5 max-sm:px-3 pb-2">
+      <div className="pb-2">
         <AppLink
           to="/screens"
           className="inline-flex items-center gap-1 text-caption1 text-fg-muted hover:text-fg transition-colors"

@@ -55,7 +55,7 @@ export function ConsoleRoute() {
     // overwriting their work. Remounting on editorEpoch restarts the canvas when
     // a conflict is resolved by keeping the other version.
     return (
-      <div className="h-full min-h-0 px-5 max-sm:px-3 pt-3">
+      <div className="h-full min-h-0 pt-3">
         <LayoutEditor
           key={`${view.id}:${editorEpoch}`}
           view={view}
@@ -78,7 +78,7 @@ export function ConsoleRoute() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {editable && (
-        <div className="flex shrink-0 items-center justify-end gap-2 px-5 max-sm:px-3 py-2">
+        <div className="flex shrink-0 items-center justify-end gap-2 py-2">
           <Button variant="filled" size="small" onClick={() => setEditing(true)}>
             <PencilIcon className="size-3.5 text-fg-muted" />
             Edit this console

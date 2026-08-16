@@ -76,7 +76,10 @@ export function Shell() {
         <div className="flex flex-col h-full min-w-0">
           <ContextBar />
           <PageHeader />
-          <main className="flex-1 min-h-0 overflow-y-auto">
+          {/* Page gutter, applied ONCE here rather than by each route. Routes were
+                padding themselves individually and the ones added recently did not,
+                so the editor and Screens sat flush against the right edge. */}
+          <main className="flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3">
             {/* Keyed so re-selecting the active rail item remounts the route,
                 returning it to its top view. */}
             <div key={resetKey} className="contents">
