@@ -91,7 +91,7 @@ export const CARD_PRESETS: Record<CardAccent, LayoutStyle> = {
   flat: { background: null, borderColor: null, borderWidth: 0, cornerRadius: 0, padding: 0 },
 };
 
-/** The default look: centerd white text at body size. */
+/** The default look: centerd white text at body size, on nothing. */
 const TEXT = (over: LayoutStyle = {}): LayoutStyle => ({
   fontSize: 0.06,
   fontWeight: 500,
@@ -100,11 +100,37 @@ const TEXT = (over: LayoutStyle = {}): LayoutStyle => ({
   vAlign: "middle",
   ...over,
 });
-/** A big bold tabular readout (clock, countdown, timers, counters). */
-const READOUT = (fontSize: number): LayoutStyle => TEXT({ fontSize, fontWeight: 700 });
+
+/**
+ * A readout in a card — the default for anything that shows a VALUE in a box.
+ *
+ * Read out of the operator's own config rather than designed from scratch.
+ * Across four real layouts, `CARD_PRESETS.neutral` had been applied BY HAND to
+ * thirteen different object types — clock, countdown, plan file, people panel,
+ * pacing, people counter, transcript strip, embedded view, live controls and
+ * more — every one carrying the identical background, hairline and radius.
+ *
+ * That is a missing default, not a preference. Half the readouts already shipped
+ * with this card (status chips, buttons, wireless, OBS, REAPER) and half did
+ * not, for no reason anyone could state — so the operator dressed the second
+ * half by hand, once per object, on every layout they built.
+ *
+ * Only new objects are affected: a stored object carries its own style, so no
+ * existing layout moves.
+ */
+const CARD = (over: LayoutStyle = {}): LayoutStyle => ({ ...CARD_PRESETS.neutral, ...TEXT(over) });
+/** A big bold tabular readout in a card (clock, countdown, timers, counters). */
+const READOUT = (fontSize: number): LayoutStyle => CARD({ fontSize, fontWeight: 700 });
 /** A compact glass pill (status chips, buttons, single mic tiles). */
-const PILL = (over: LayoutStyle = {}): LayoutStyle => TEXT({ fontSize: 0.05, fontWeight: 600, ...CARD_PRESETS.neutral, ...over });
-/** Media that paints its own content — no type styling at all. */
+const PILL = (over: LayoutStyle = {}): LayoutStyle => CARD({ fontSize: 0.05, fontWeight: 600, ...over });
+/**
+ * No styling at all.
+ *
+ * For content that paints its own box — media, a shape whose fill IS the object,
+ * a grid of its own tiles, a Home card that draws its own frame — and for
+ * full-bleed text on a stage display, where a card around every line is chrome
+ * nobody asked for. The operator's own layouts leave exactly these bare.
+ */
 const BARE = (): LayoutStyle => ({});
 
 /**
@@ -164,14 +190,14 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "The wall clock, 12 or 24 hour",
     group: "Text & time",
     config: () => ({ type: "clock", showSeconds: true, format: "12h" }),
-    style: () => TEXT(),
+    style: () => CARD({ fontWeight: 600 }),
   },
   "countdown-timer": {
     label: "PCO countdown",
     blurb: "Time until the service starts, from Planning Center",
     group: "Text & time",
     config: () => ({ type: "countdown-timer" }) as LayoutObjectConfig,
-    style: () => TEXT(),
+    style: () => READOUT(0.085),
   },
 
   // PCO / service
@@ -180,7 +206,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "Previous and next buttons for the service",
     group: "PCO / service",
     config: () => ({ type: "live-controls" }) as LayoutObjectConfig,
-    style: BARE,
+    style: () => CARD({ fontSize: 0.05, fontWeight: 600 }),
     stylingOnly: true,
   },
   "current-service-item": {
@@ -228,7 +254,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     // at 1.85× the page breaks exactly that, showing about half the rundown.
     // Someone who does want it bigger has the font-size field; someone who wants
     // it to match the page had no way to get there by eye.
-    style: () => TEXT({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
+    style: () => CARD({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
   },
   "home-readiness": {
     label: "Readiness",
@@ -270,7 +296,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "A page from a file attached to the plan",
     group: "PCO / service",
     config: () => ({ type: "plan-attachment", match: "stage plot", page: 1 }),
-    style: BARE,
+    style: () => ({ ...CARD_PRESETS.neutral }),
   },
 
   // ProPresenter
@@ -279,7 +305,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "The words on the slide showing now",
     group: "ProPresenter",
     config: () => ({ type: "current-slide-text" }) as LayoutObjectConfig,
-    style: () => TEXT(),
+    style: () => TEXT({ uppercase: true }),
     stylingOnly: true,
     propInstance: true,
   },
@@ -288,7 +314,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "The words on the slide coming next",
     group: "ProPresenter",
     config: () => ({ type: "next-slide-text" }) as LayoutObjectConfig,
-    style: () => TEXT(),
+    style: () => TEXT({ uppercase: true }),
     stylingOnly: true,
     propInstance: true,
   },
@@ -297,7 +323,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "The speaker notes on the slide showing now",
     group: "ProPresenter",
     config: () => ({ type: "current-slide-notes" }) as LayoutObjectConfig,
-    style: () => TEXT(),
+    style: () => TEXT({ uppercase: true }),
     stylingOnly: true,
     propInstance: true,
   },
@@ -315,7 +341,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "The part of the service running now, as a label",
     group: "ProPresenter",
     config: () => ({ type: "section-chip", which: "current" }),
-    style: () => TEXT(),
+    style: () => PILL({ uppercase: true, letterSpacing: 0.04 }),
     propInstance: true,
   },
   "pp-timer": {
@@ -331,7 +357,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "How far through the current presentation",
     group: "ProPresenter",
     config: () => ({ type: "slide-progress", propresenterInstanceId: null, display: "fraction", showLabel: false }),
-    style: () => TEXT(),
+    style: () => CARD({ fontWeight: 600 }),
     propInstance: true,
   },
 
@@ -348,7 +374,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "Battery levels in the charger bays",
     group: "Mics & RF",
     config: () => ({ type: "charger-battery", bays: [], show: { battery: true, charging: true } }),
-    style: () => TEXT({ fontSize: 0.045, textAlign: "left" }),
+    style: () => CARD({ fontSize: 0.045, textAlign: "left" }),
     integration: { id: "wireless", label: "wireless" },
   },
   "wireless-summary": {
@@ -374,7 +400,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "The live sound level from Smaart",
     group: "Audio (SPL)",
     config: () => ({ type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null }),
-    style: () => TEXT(),
+    style: () => READOUT(0.085),
     integration: { id: "smaart", label: "Smaart SPL" },
   },
 
@@ -482,7 +508,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "A shared note anyone can type into",
     group: "Control",
     config: () => ({ type: "notes", placeholder: "Notes for this service" }),
-    style: () => ({ fontSize: 0.035, align: "left" as const }),
+    style: () => CARD({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
   },
 
   checklist: {
@@ -490,7 +516,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "A list of things to tick off",
     group: "Control",
     config: () => ({ type: "checklist", title: "Pre-service" }),
-    style: () => ({ fontSize: 0.035, align: "left" as const }),
+    style: () => CARD({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
   },
 
   // Status

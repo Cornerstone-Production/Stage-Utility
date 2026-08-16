@@ -105,6 +105,44 @@ function originalStyle(type: string): Record<string, unknown> {
   return { ...BASE_TEXT };
 }
 
+
+/**
+ * Types deliberately RESTYLED since the consolidation, and what they became.
+ *
+ * The originals above stay pinned so an accidental change is still caught; a
+ * deliberate one is recorded here, at the same bar as adding or retiring a type.
+ *
+ * Nineteen defaults changed at once, for one reason. Across four real layouts the
+ * operator had applied CARD_NEUTRAL BY HAND to thirteen different object types —
+ * the same background, hairline and radius every time — because half the readouts
+ * shipped with a card and half did not. That is a missing default, so the readouts
+ * that lacked it got it. Three ProPresenter text objects went all-caps in the same
+ * pass, which is legibility from the back of a room, not decoration.
+ *
+ * A stored object carries its own style, so no existing layout moved.
+ */
+const RESTYLED: Record<string, Record<string, unknown>> = {
+  "clock": { ...CARD_NEUTRAL, fontSize: 0.06, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "countdown-timer": { ...CARD_NEUTRAL, fontSize: 0.085, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "live-controls": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "view-embed": { ...CARD_NEUTRAL, fontSize: 0.016, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
+  "plan-attachment": { ...CARD_NEUTRAL },
+  "current-slide-text": { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true },
+  "next-slide-text": { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true },
+  "current-slide-notes": { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true },
+  "section-chip": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, letterSpacing: 0.04 },
+  "pp-timer": { ...CARD_NEUTRAL, fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "slide-progress": { ...CARD_NEUTRAL, fontSize: 0.06, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "charger-battery": { ...CARD_NEUTRAL, fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "middle" },
+  "spl-meter": { ...CARD_NEUTRAL, fontSize: 0.085, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "service-pacing": { ...CARD_NEUTRAL, fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "people-counter": { ...CARD_NEUTRAL, fontSize: 0.12, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "people-panel": { ...CARD_NEUTRAL, fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "baptism-timer": { ...CARD_NEUTRAL, fontSize: 0.14, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "notes": { ...CARD_NEUTRAL, fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
+  "checklist": { ...CARD_NEUTRAL, fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
+};
+
 /** defaultConfig() as it was, case for case. */
 const ORIGINAL_CONFIG: Record<string, unknown> = {
   text: { type: "text", text: "Text" },
@@ -282,9 +320,26 @@ describe("layout-object registry vs. the structures it replaced", () => {
     }
   });
 
-  test("default style is unchanged for every type", () => {
+  test("default style is the original, or a recorded restyle", () => {
     for (const t of ALL) {
-      assert.deepEqual(defaultStyle(t as never), originalStyle(t), `defaultStyle("${t}")`);
+      assert.deepEqual(defaultStyle(t as never), RESTYLED[t] ?? originalStyle(t), `defaultStyle("${t}")`);
+    }
+  });
+
+  test("every restyled type is a real type, and actually differs", () => {
+    // A name that no longer exists would silently stop guarding anything, and an
+    // entry identical to the original is a change somebody backed out without
+    // removing the record of it.
+    // Against the whole registry, not ALL: three of the restyled types
+    // (view-embed, notes, checklist) arrived after the consolidation and so have
+    // no entry in the originals.
+    const registry = Object.keys(LAYOUT_OBJECTS);
+    for (const t of Object.keys(RESTYLED)) {
+      assert.ok(registry.includes(t), `RESTYLED names "${t}", which is not an object type`);
+      assert.deepEqual(RESTYLED[t], defaultStyle(t as never), `RESTYLED["${t}"] no longer matches the registry`);
+      if (ALL.includes(t)) {
+        assert.notDeepEqual(RESTYLED[t], originalStyle(t), `RESTYLED["${t}"] matches the original`);
+      }
     }
   });
 
