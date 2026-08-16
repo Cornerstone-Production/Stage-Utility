@@ -15,6 +15,21 @@ import { ObjectContent, boxStyle, useLayoutData } from "../../main/layout-render
 import type { LayoutRenderCtx } from "../../main/layout-renderer";
 import { SIZES, sizeOf } from "./home-cards";
 
+/**
+ * The widget's own styling MINUS the geometry Home supplies itself.
+ *
+ * Radius and hairline are canvas-relative on a display, which is right there and
+ * wrong in a dashboard grid: two tiles of the same size ended up with different
+ * corners because their styling was measured against a nominal canvas rather
+ * than against each other. Home drops both and uses the app's card tokens, so
+ * every tile has one edge. Everything else — background, padding, opacity,
+ * shadow, alignment — is still the object's.
+ */
+export function cardFrame(o: LayoutObject, H: number): CSSProperties {
+  const { borderRadius: _fromCanvas, border: _alsoFromCanvas, ...rest } = boxStyle(o, H);
+  return rest;
+}
+
 /** One grid row, in pixels. Two of these plus a gap is a Large or an XL. */
 /**
  * One grid row, in pixels.
@@ -107,7 +122,8 @@ export function HomeGrid({
       // light, where a clock was literally invisible. This class already exists
       // for exactly that problem (see its comment in styles.css: "measured at
       // 1.14:1"), and it makes Home's grid show what a screen would show.
-      className="kiosk-surface rounded-xl p-3"
+      // kiosk-seamless: the foreground remapping without the slab — see styles.css.
+      className="kiosk-surface kiosk-seamless"
       // A CONTAINER query, not a viewport one: Home sits beside the sidebar, so
       // window width is the wrong signal and collapsed the grid to two columns
       // on a laptop that had room for three.
@@ -127,8 +143,18 @@ export function HomeGrid({
                   hairline, radius, padding. On a canvas the object wrapper
                   applies it; rendering ObjectContent alone left every Home card
                   transparent and edge-to-edge, which read as "the card look did
-                  not ship" rather than "Home forgot the box". */}
-              <div style={{ ...boxStyle(o, NOMINAL_H), width: "100%", height: "100%", overflow: "hidden" }}>
+                  not ship" rather than "Home forgot the box".
+
+                  The FRAME comes from Home, not from the object. Radius and
+                  border width on a canvas are fractions of canvas height, so a
+                  widget landed at 10.66px radius and a 0.08 hairline while
+                  Home's own cards used the app's 12px and 0.09 — measured, and
+                  visible as tiles whose edges do not agree. Colour still comes
+                  from the object, so a red-preset widget stays red. */}
+              <div
+                className="rounded-xl border border-line"
+                style={{ ...cardFrame(o, NOMINAL_H), width: "100%", height: "100%", overflow: "hidden" }}
+              >
                 <ObjectContent o={o} ctx={ctx} />
               </div>
               {chrome?.(o)}

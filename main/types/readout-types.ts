@@ -86,3 +86,35 @@ export const DEFAULT_READOUT_ALIGN: LayoutHAlign = "left";
 export function isNeverChosenAlign(type: LayoutObjectType, style: LayoutStyle | undefined): boolean {
   return IDIOM_TYPES.has(type) && style?.textAlign === "center";
 }
+
+
+/**
+ * The translucent card grounds every object created before Phase 7 carries,
+ * mapped to the opaque value that replaces each.
+ *
+ * Same shape as the never-chosen alignment above: the object registry wrote
+ * these into every object at creation, so they are a default nobody picked. A
+ * card at 4% white does not occlude — put a status widget over a transcript and
+ * the text reads straight through, which looks exactly like the widget being
+ * drawn underneath. Paint order was verified correct while that was happening.
+ *
+ * Each opaque value is the exact blend of the translucent one over the kiosk
+ * black, so a card looks unchanged on a bare canvas and now covers what is
+ * behind it. Lives here rather than in the renderer's registry so the load-time
+ * migration can share the one definition.
+ */
+export const LEGACY_TRANSLUCENT_GROUNDS: Readonly<Record<string, string>> = {
+  "rgba(255,255,255,0.04)": "#141414",
+  "rgba(45,212,150,0.08)": "#0d1a15",
+  "rgba(229,72,77,0.10)": "#201011",
+  "rgba(255,197,61,0.08)": "#1e190e",
+  // The "Elevated" surface look, which carried its own translucent ground.
+  "rgba(255,255,255,0.06)": "#191919",
+};
+
+/** The opaque ground that replaces a never-chosen translucent one, or null when
+ *  the background is anything else — including one the operator chose. */
+export function opaqueGroundFor(background: string | null | undefined): string | null {
+  if (!background) return null;
+  return LEGACY_TRANSLUCENT_GROUNDS[background.replace(/\s+/g, "")] ?? null;
+}

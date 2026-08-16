@@ -11,7 +11,7 @@
 
 import { useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { PlusIcon, XIcon, GripVerticalIcon } from "lucide-react";
+import { XIcon, GripVerticalIcon } from "lucide-react";
 
 import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER } from "../../main/layout-objects";
 import type { HomeCardSize, HomeVisibility, LayoutObject } from "@main/types/views";
@@ -216,16 +216,3 @@ export function AddWidgetSheet({
   );
 }
 
-/** The button that opens the sheet. */
-export function AddWidgetButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-caption1 font-medium text-fg transition-colors hover:border-line-strong"
-    >
-      <PlusIcon className="size-3.5" />
-      Add widget
-    </button>
-  );
-}

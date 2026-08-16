@@ -95,8 +95,19 @@ import { ResponsiveControls } from "./responsive-controls";
 type SurfaceKind = "flat" | "glass" | "elevated" | "solid" | "outline";
 const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
   flat: { background: null, borderColor: null, borderWidth: 0, boxShadow: 0 },
+  // GLASS STAYS TRANSLUCENT. It is the one look whose whole point is that the
+  // canvas shows through, so making it opaque would leave no way to ask for
+  // that at all. Everything else went opaque because nothing else was asking.
+  //
+  // Its ground is the same string the old default card used, so the one-time
+  // migration cannot tell a deliberate Glass from a card that was simply never
+  // restyled, and turns both opaque. Re-applying Glass to a specific widget is
+  // one click, and it is the only way round an ambiguity in the stored data.
   glass: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0 },
-  elevated: { background: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0.6 },
+  // Opaque, like the card presets — an elevated surface that you can read the
+  // page through is a contradiction, and it bled exactly as badly as the rest.
+  // #191919 is the blend of the rgba it replaces over the kiosk black.
+  elevated: { background: "#191919", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0.6 },
   solid: { background: "var(--gray-2)", borderColor: null, borderWidth: 0, cornerRadius: 0.0148, boxShadow: 0.35 },
   outline: { background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015, cornerRadius: 0.0148, boxShadow: 0 },
 };

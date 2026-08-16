@@ -3,7 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
-import { migrateReadoutAlign, countNeverChosenAlign } from "./readout-align-migration.js";
+import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { barConfigStore } from "./bar-config-store.js";
@@ -385,17 +385,18 @@ export class StageController {
     // may write views, and two writers racing over the same file is how one of
     // them loses. Seeding first means the surface migration also sees Home.
     const seeded = seedHomeView(views);
-    // Readouts shed the centre alignment the registry wrote into every object it
-    // created, so the widget idiom's left-aligned composition can be the DEFAULT
-    // while the alignment control still works. Runs in this same pass for the
-    // same reason Home is seeded here: one writer for views.json, not three.
-    const aligned = migrateReadoutAlign(seeded as View[]);
-    const realigned = countNeverChosenAlign(seeded as View[]);
+    // Objects shed the styling the registry wrote into them at creation and
+    // nobody ever chose: readouts' centre alignment, and every card's
+    // translucent ground. Runs in this same pass for the same reason Home is
+    // seeded here: one writer for views.json, not three.
+    const aligned = migrateNeverChosenDefaults(seeded as View[]);
+    const realigned = countNeverChosen(seeded as View[]);
     if (realigned > 0) {
       console.log(
-        `[readout-align] ${realigned} readout${realigned === 1 ? "" : "s"} carried a centre alignment ` +
-          "written by the object registry rather than chosen; cleared so they use the default (left). " +
-          "Alignment is still editable per object in the layout editor.",
+        `[layout-defaults] ${realigned} object${realigned === 1 ? "" : "s"} carried styling written by the ` +
+          "object registry rather than chosen — a centre alignment on readouts, a translucent card ground, " +
+          "or both. Replaced with the current defaults: readouts align left, and cards are opaque so they " +
+          "cover what is behind them. Both are still editable per object in the layout editor.",
       );
     }
     const result = migrateSurfaces(aligned, outputs);

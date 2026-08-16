@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import type { LayoutObjectType } from "../../main/types/stage.js";
+import { LEGACY_TRANSLUCENT_GROUNDS } from "../../main/types/readout-types.js";
 import {
   EMBED_FONT_FRACTION,
   LAYOUT_OBJECTS,
@@ -78,30 +79,62 @@ const OBJECT_INTEGRATION: Record<string, { id: string; label: string }> = {
   "wireless-channel": { id: "wireless", label: "wireless" },
 };
 
-const CARD_NEUTRAL = {
+/** The card as it was ORIGINALLY, translucent ground and all. Pinned so the
+ *  originals below stay the originals; the current ground is CARD_NEUTRAL. */
+const CARD_NEUTRAL_ORIGINAL = {
   background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)",
   borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148,
 };
+
+/**
+ * The card as it is NOW: the same thing with an OPAQUE ground.
+ *
+ * #141414 is the exact blend of rgba(255,255,255,0.04) over the kiosk black, so
+ * a card looks identical on a bare canvas. What changed is that it now occludes:
+ * at 4% white it did not, so a status widget over a transcript let the text read
+ * straight through and looked for all the world like a broken layer order. Paint
+ * order was measured and was correct the whole time.
+ */
+const CARD_NEUTRAL = { ...CARD_NEUTRAL_ORIGINAL, background: "#141414" };
+
+/**
+ * The ground swap, applied to a pinned original.
+ *
+ * Every card preset went opaque at once, on every type that carries one — about
+ * twenty of them, and the change is ONE field with the same value everywhere.
+ * Hand-copying twenty full styles into RESTYLED to record a single uniform swap
+ * would be twenty chances to fat-finger an unrelated field into the "expected"
+ * column, which is how a golden test starts agreeing with the bug.
+ *
+ * So the swap is expressed as the rule it is, using the SAME map the load-time
+ * migration uses — so the test cannot drift from the product. Every other
+ * difference still has to be recorded in RESTYLED by hand.
+ */
+function withCurrentGround(style: Record<string, unknown>): Record<string, unknown> {
+  const bg = typeof style.background === "string" ? style.background : null;
+  const opaque = bg ? LEGACY_TRANSLUCENT_GROUNDS[bg.replace(/\s+/g, "")] : undefined;
+  return opaque ? { ...style, background: opaque } : style;
+}
 const BASE_TEXT = { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 
 /** defaultStyle() as it was, branch for branch. */
 function originalStyle(type: string): Record<string, unknown> {
   if (type === "shape") return { background: "#3b82f6", opacity: 1 };
-  if (type === "container") return { ...CARD_NEUTRAL };
+  if (type === "container") return { ...CARD_NEUTRAL_ORIGINAL };
   if (["ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "live-controls"].includes(type)) return {};
   if (type === "transcript-strip") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "bottom" };
   if (type === "charger-battery") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "middle" };
   if (type === "service-order") return { fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" };
-  if (type === "obs-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_NEUTRAL };
-  if (type === "reaper-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_NEUTRAL };
-  if (type === "osc-button") return { fontSize: 0.045, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_NEUTRAL };
+  if (type === "obs-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_NEUTRAL_ORIGINAL };
+  if (type === "reaper-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_NEUTRAL_ORIGINAL };
+  if (type === "osc-button") return { fontSize: 0.045, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_NEUTRAL_ORIGINAL };
   if (type === "people-counter") return { fontSize: 0.12, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
   if (type === "baptism-timer") return { fontSize: 0.14, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
   if (type === "pp-timer" || type === "service-pacing") return { fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
-  if (type === "wireless-channel") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_NEUTRAL };
+  if (type === "wireless-channel") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_NEUTRAL_ORIGINAL };
   if (type === "people-panel") return { fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
-  if (type === "integration-status" || type === "wireless-summary") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_NEUTRAL };
-  if (type === "people-graph") return { color: "#5b9cff", ...CARD_NEUTRAL };
+  if (type === "integration-status" || type === "wireless-summary") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_NEUTRAL_ORIGINAL };
+  if (type === "people-graph") return { color: "#5b9cff", ...CARD_NEUTRAL_ORIGINAL };
   return { ...BASE_TEXT };
 }
 
@@ -401,7 +434,7 @@ describe("layout-object registry vs. the structures it replaced", () => {
 
   test("default style is the original, or a recorded restyle", () => {
     for (const t of ALL) {
-      assert.deepEqual(defaultStyle(t as never), RESTYLED[t] ?? originalStyle(t), `defaultStyle("${t}")`);
+      assert.deepEqual(defaultStyle(t as never), RESTYLED[t] ?? withCurrentGround(originalStyle(t)), `defaultStyle("${t}")`);
     }
   });
 

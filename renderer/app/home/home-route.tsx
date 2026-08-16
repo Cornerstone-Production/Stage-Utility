@@ -24,6 +24,9 @@ import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useDashboardState } from "../../main/use-dashboard-state";
 import { useStageSettings } from "../use-stage-settings";
 import { GettingStarted } from "../../settings/getting-started";
+import { usePageActions } from "../page-actions";
+import { Button } from "../../components/ui/button";
+import { PlusIcon } from "lucide-react";
 import { flashTarget } from "../flash";
 import { HOME_VIEW_ID, defaultHomeLayout } from "@main/services/home-view";
 import type { LayoutObject } from "@main/types/views";
@@ -31,7 +34,7 @@ import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
 import { addCard, moveCard, removeCard, setSize, setWhen, visibleCards } from "./home-cards";
 import { HomeGrid } from "./home-grid";
-import { AddWidgetButton, AddWidgetSheet, CardChrome } from "./home-editor";
+import { AddWidgetSheet, CardChrome } from "./home-editor";
 
 export function HomeRoute() {
   const { pcoLive } = useDashboardState();
@@ -69,6 +72,42 @@ export function HomeRoute() {
     setPending(null);
     editRef.current = null;
   });
+
+  // ABOVE the loading return, because a hook cannot be called conditionally —
+  // eslint caught this sitting below it. Presence of Home is read straight off
+  // the (possibly absent) state rather than from the derived `home` below, which
+  // does not exist yet at this point in the render.
+  const hasHome = !!s.stageState?.views?.some((v) => v.id === HOME_VIEW_ID);
+  // The controls live in the page HEADER, not on a row of their own — that row
+  // held one link and cost a whole band of the page that most wants the height.
+  // Icon squares, matching the object controls in the custom-view editor.
+  usePageActions(
+    hasHome ? (
+      <>
+        {editing && (
+          <Button
+            variant="filled"
+            size="medium"
+            iconOnly
+            onClick={() => setAdding(true)}
+            aria-label="Add widget"
+          >
+            <PlusIcon className="size-4" />
+          </Button>
+        )}
+        <Button
+          variant={editing ? "accent" : "filled"}
+          size="medium"
+          iconOnly
+          onClick={() => setEditing((e) => !e)}
+          aria-label={editing ? "Done editing widgets" : "Edit widgets"}
+        >
+          {editing ? <CheckIcon className="size-4" /> : <PencilIcon className="size-4" />}
+        </Button>
+      </>
+    ) : null,
+    [hasHome, editing],
+  );
 
   if (s.stageLoading || !s.stageState) {
     return (
@@ -143,6 +182,7 @@ export function HomeRoute() {
     setOverId(null);
   }
 
+
   return (
     <div className="pt-1 pb-[50vh] max-sm:pb-24 flex flex-col gap-3">
       {!state.onboardingDismissed && (
@@ -154,20 +194,6 @@ export function HomeRoute() {
           }}
           onDismiss={s.handleDismissOnboarding}
         />
-      )}
-
-      {home && (
-        <div className="flex items-center justify-end gap-2">
-          {editing && <AddWidgetButton onClick={() => setAdding(true)} />}
-          <button
-            type="button"
-            onClick={() => setEditing((e) => !e)}
-            className="inline-flex items-center gap-1.5 text-caption1 text-accent hover:underline"
-          >
-            {editing ? <CheckIcon className="size-3.5" /> : <PencilIcon className="size-3.5" />}
-            {editing ? "Done" : "Edit widgets"}
-          </button>
-        </div>
       )}
 
       {home?.layout && (

@@ -96,14 +96,31 @@ export interface LayoutObjectSpec {
 
 type CardAccent = "neutral" | "green" | "red" | "amber" | "flat";
 
-/** One-click card accents. Also used by the inspector's style-preset picker. */
+/**
+ * One-click card accents. Also used by the inspector's style-preset picker.
+ *
+ * The grounds are OPAQUE, and each is the exact blend of the translucent value
+ * it replaces over the kiosk black — so a card looks the same as it always did
+ * on a bare canvas, and now actually covers what is behind it.
+ *
+ * The translucent versions made layering unreadable. A card at 4% white does not
+ * occlude: put a status widget over a transcript and the transcript reads
+ * straight through it, which looks exactly like the widget being drawn
+ * underneath. Paint order was verified correct while this was happening — the
+ * card was on top and 96% see-through.
+ *
+ * Deliberately not a blur or a lower alpha: a widget is a card, and a card that
+ * you can read the page through is a tint. An operator who wants the canvas to
+ * show through still has Fill and Opacity in the inspector.
+ */
 export const CARD_PRESETS: Record<CardAccent, LayoutStyle> = {
-  neutral: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  green: { background: "rgba(45,212,150,0.08)", borderColor: "rgba(45,212,150,0.13)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  red: { background: "rgba(229,72,77,0.10)", borderColor: "rgba(229,72,77,0.25)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  amber: { background: "rgba(255,197,61,0.08)", borderColor: "rgba(255,197,61,0.20)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
+  neutral: { background: "#141414", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
+  green: { background: "#0d1a15", borderColor: "rgba(45,212,150,0.13)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
+  red: { background: "#201011", borderColor: "rgba(229,72,77,0.25)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
+  amber: { background: "#1e190e", borderColor: "rgba(255,197,61,0.20)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
   flat: { background: null, borderColor: null, borderWidth: 0, cornerRadius: 0, padding: 0 },
 };
+
 
 /** The default look: centerd white text at body size, on nothing. */
 const TEXT = (over: LayoutStyle = {}): LayoutStyle => ({

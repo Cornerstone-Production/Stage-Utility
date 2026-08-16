@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { AppLink } from "../app-link";
+import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { readinessChecks, outstanding, type ReadinessCheck } from "./readiness";
 import type { LayoutObjectConfig } from "@main/types/views";
 /** The four cards Home draws with its own markup. Derived from the config union
@@ -358,8 +359,17 @@ export function RecentServicesCard({ state }: { state: StageState }) {
   const scope = overview.scopeName ?? "services";
 
   return (
-    <section className="rounded-xl border border-line bg-surface overflow-hidden">
-      <header className="flex items-baseline gap-2 px-4 py-3 border-b border-line">
+    // h-full and a column, because a widget occupies the tile it was given. At
+    // XL this card drew its header and four figures against the top edge and
+    // left the remaining row blank — a third of the widest tile on the page
+    // showing nothing.
+    //
+    // The trend chart fills it, and it is the SAME component the History tab
+    // draws rather than a second chart that looks like it. It appears only when
+    // the tile is tall enough to hold one: at Small or Medium the figures are
+    // the whole widget, which is what those sizes are for.
+    <section className="flex h-full w-full flex-col overflow-hidden rounded-xl border border-line bg-surface">
+      <header className="flex shrink-0 items-baseline gap-2 border-b border-line px-4 py-3">
         <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
           Recent {scope.toLowerCase()}
         </h2>
@@ -367,11 +377,14 @@ export function RecentServicesCard({ state }: { state: StageState }) {
           Open History
         </AppLink>
       </header>
-      <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-line">
+      <div className="grid shrink-0 grid-cols-2 divide-x divide-y divide-line sm:grid-cols-4 sm:divide-y-0">
         <Headline label="Attendance" value={overview.avgAttendance} sub="average" trend={overview.attTrend} />
         <Headline label="Peak" value={overview.peakAttendance} sub={overview.peakSub} />
         <Headline label="Length" value={overview.avgLength} sub="average" />
         <Headline label="Start" value={overview.avgStart} sub="average" />
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden border-t border-line px-2 pb-1 [&:has(>*:empty)]:hidden">
+        <AttendanceTrendChart points={overview.attPoints} />
       </div>
     </section>
   );

@@ -11,6 +11,7 @@ import { Outlet, useRouterState } from "@tanstack/react-router";
 import { SplitView } from "../components/ui/split-view";
 import { useRouteResetKey } from "./route-reset";
 import { Rail } from "./rail";
+import { PageActionsProvider, usePageActionsSlot } from "./page-actions";
 import { ContextBar } from "./context-bar";
 import { ALL_DESTINATIONS } from "./destinations";
 import { useStageLiveWiring } from "./live-wiring";
@@ -26,11 +27,18 @@ import { useSidebarWidth, RAIL_WIDTH } from "../lib/use-sidebar-width";
 function PageHeader() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const active = ALL_DESTINATIONS.find((d) => d.path === pathname);
+  const actions = usePageActionsSlot();
   if (!active) return null;
   return (
-    <header className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 shrink-0">
-      <h1 className="text-title2 font-semibold text-fg leading-tight">{active.label}</h1>
-      <p className="text-footnote text-fg-muted mt-1 max-w-[68ch]">{active.description}</p>
+    // The title and the route's own controls share ONE row. Home used to put its
+    // Edit control on a second row below this one, which cost a whole band of
+    // vertical space on the page that most wants it for content.
+    <header className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 shrink-0 flex items-start gap-3">
+      <div className="min-w-0 flex-1">
+        <h1 className="text-title2 font-semibold text-fg leading-tight">{active.label}</h1>
+        <p className="text-footnote text-fg-muted mt-1 max-w-[68ch]">{active.description}</p>
+      </div>
+      {actions && <div className="flex items-center gap-1.5 shrink-0">{actions}</div>}
     </header>
   );
 }
@@ -73,6 +81,7 @@ export function Shell() {
           />
         }
       >
+        <PageActionsProvider>
         <div className="flex flex-col h-full min-w-0">
           <ContextBar />
           <PageHeader />
@@ -87,6 +96,7 @@ export function Shell() {
             </div>
           </main>
         </div>
+        </PageActionsProvider>
       </SplitView>
     </div>
   );
