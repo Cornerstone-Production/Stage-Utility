@@ -121,10 +121,7 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
         options={[{ value: "attendance", label: "Attendance" }, { value: "occupancy", label: "In room" }]}
         onChange={(v) => onConfig({ ...c, metric: v })}
       />
-      <RowSwitch label="Show value" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-      {(c.showLabel ?? true) && (
-        <RowText label="Label" value={c.label ?? ""} placeholder={c.metric === "attendance" ? "Attendance" : "In room"} onChange={(v) => onConfig({ ...c, label: v })} />
-      )}
+      <RowText label="Label" value={c.label ?? ""} placeholder={c.metric === "attendance" ? "Attendance" : "In room"} onChange={(v) => onConfig({ ...c, label: v })} />
       <RowToggle
         label="Source"
         value={source}
@@ -425,7 +422,6 @@ export function Inspector({
             onChange={(v) => onConfig({ ...c, timerName: v.trim() || null })}
           />
           <RowSwitch label="Color on overrun" checked={c.warnStates ?? true} onChange={(v) => onConfig({ ...c, warnStates: v })} />
-          <RowSwitch label="Show timer name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
           <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
         </>
       )}
@@ -442,9 +438,6 @@ export function Inspector({
             ]}
             onChange={(v) => onConfig({ ...c, display: v })}
           />
-          {(c.display ?? "fraction") !== "bar" && (
-            <RowSwitch label="Show 'slides' label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-          )}
         </>
       )}
       {(() => {
@@ -526,14 +519,6 @@ export function Inspector({
       )}
       {c.type === "service-order" && (
         <>
-          <RowToggle
-            label="Scroll"
-            hint="Follow live: the list auto-scrolls to keep the on-air item in view. Static: the list stays put (the operator scrolls it)."
-            value={c.scroll ?? "auto"}
-            options={[{ value: "auto", label: "Follow live" }, { value: "static", label: "Static" }]}
-            onChange={(v) => onConfig({ ...c, scroll: v })}
-          />
-          <RowSwitch label="Fit to height" checked={c.autoFit ?? true} onChange={(v) => onConfig({ ...c, autoFit: v })} />
           <RowSwitch label="Highlight live" checked={c.highlightLive ?? true} onChange={(v) => onConfig({ ...c, highlightLive: v })} />
           <RowSwitch label="Show length" checked={c.showLength ?? false} onChange={(v) => onConfig({ ...c, showLength: v })} />
           {(() => {
@@ -623,10 +608,7 @@ export function Inspector({
                 </SelectContent>
               </Select>
             </Row>
-            <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-            {(c.showLabel ?? true) && (
-              <RowText label="Label" value={c.label ?? ""} placeholder="integration name" onChange={(v) => onConfig({ ...c, label: v })} />
-            )}
+            <RowText label="Label" value={c.label ?? ""} placeholder="integration name" onChange={(v) => onConfig({ ...c, label: v })} />
           </>
         );
       })()}
@@ -634,10 +616,7 @@ export function Inspector({
         <>
           <RowSwitch label="Online count" checked={c.showOnline ?? true} onChange={(v) => onConfig({ ...c, showOnline: v })} />
           <RowSwitch label="Lowest battery" checked={c.showBattery ?? true} onChange={(v) => onConfig({ ...c, showBattery: v })} />
-          <RowSwitch label="Show label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-          {(c.showLabel ?? false) && (
-            <RowText label="Label" value={c.label ?? ""} placeholder="Mics" onChange={(v) => onConfig({ ...c, label: v })} />
-          )}
+          <RowText label="Label" value={c.label ?? ""} placeholder="Mics" onChange={(v) => onConfig({ ...c, label: v })} />
         </>
       )}
       {c.type === "wireless-channel" && (
@@ -655,7 +634,6 @@ export function Inspector({
           <RowSwitch label="Battery %" checked={c.show?.battery ?? true} onChange={(v) => onConfig({ ...c, show: { ...c.show, battery: v } })} />
           <RowSwitch label="Frequency" checked={c.show?.frequency ?? true} onChange={(v) => onConfig({ ...c, show: { ...c.show, frequency: v } })} />
           <RowSwitch label="Audio level" checked={c.show?.audio ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, audio: v } })} />
-          <RowSwitch label="Show channel name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
         </>
       )}
       {c.type === "service-pacing" && (
@@ -675,7 +653,6 @@ export function Inspector({
               {c.behindColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, behindColor: null })}>Reset</button>}
             </div>
           </Row>
-          <RowSwitch label="Show ahead/behind label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
           <RowSwitch label="Show dash when idle" checked={!(c.hideWhenIdle ?? false)} onChange={(v) => onConfig({ ...c, hideWhenIdle: !v })} />
         </>
       )}
@@ -776,7 +753,6 @@ export function Inspector({
                 </SelectContent>
               </Select>
             </Row>
-            <RowSwitch label="Show metric name" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
             <RowSwitch label="Peak hold" hint="Also show the highest reading seen, held on screen — useful for catching transient peaks during loud moments." checked={c.peakHold ?? false} onChange={(v) => onConfig({ ...c, peakHold: v })} />
             <RowSwitch label="Color thresholds" checked={!!t} onChange={(v) => onConfig({ ...c, thresholds: v ? { amber: 95, red: 100 } : null })} />
             {t && (
@@ -804,7 +780,6 @@ export function Inspector({
           <RowText label="Recording text" value={c.recordingText ?? ""} placeholder="RECORDING" onChange={(v) => onConfig({ ...c, recordingText: v })} />
           <RowText label="Idle text" value={c.idleText ?? ""} placeholder="STANDBY" onChange={(v) => onConfig({ ...c, idleText: v })} />
           <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="NO RECORDER" onChange={(v) => onConfig({ ...c, offlineText: v })} />
-          <RowSwitch label="Fill red while recording" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
           <RowSwitch label="Hide when idle" hint="Pure tally light — nothing on screen unless recording" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
         </>
       )}
@@ -834,7 +809,6 @@ export function Inspector({
             <RowText label="Active text" value={c.recordingText ?? ""} placeholder={activePlaceholder} onChange={(v) => onConfig({ ...c, recordingText: v })} />
             <RowText label="Idle text" value={c.idleText ?? ""} placeholder={idlePlaceholder} onChange={(v) => onConfig({ ...c, idleText: v })} />
             <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="OBS: Offline" onChange={(v) => onConfig({ ...c, offlineText: v })} />
-            <RowSwitch label="Fill red when active" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
             {mode === "recording" && (
               <RowSwitch label="Show timecode" checked={c.showTimecode ?? false} onChange={(v) => onConfig({ ...c, showTimecode: v })} />
             )}
@@ -854,7 +828,6 @@ export function Inspector({
             <RowText label="Recording text" value={c.recordingText ?? ""} placeholder="REAPER: Recording" onChange={(v) => onConfig({ ...c, recordingText: v })} />
             <RowText label="Idle text" value={c.idleText ?? ""} placeholder="REAPER: Standby" onChange={(v) => onConfig({ ...c, idleText: v })} />
             <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="REAPER: Offline" onChange={(v) => onConfig({ ...c, offlineText: v })} />
-            <RowSwitch label="Fill red when recording" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
             <RowSwitch label="Show position" checked={c.showPosition ?? false} onChange={(v) => onConfig({ ...c, showPosition: v })} />
             <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
           </>
@@ -1037,10 +1010,7 @@ export function Inspector({
             ) : (
               <p className="text-caption2 text-fg-muted leading-snug">Peak, low and average are building-wide (today), from the occupancy sensor.</p>
             )}
-            <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-            {(c.showLabel ?? true) && (
-              <RowText label="Label" value={c.label ?? ""} placeholder={labelHint[metric]} onChange={(v) => onConfig({ ...c, label: v })} />
-            )}
+            <RowText label="Label" value={c.label ?? ""} placeholder={labelHint[metric]} onChange={(v) => onConfig({ ...c, label: v })} />
           </>
         );
       })()}
@@ -1074,13 +1044,6 @@ export function Inspector({
             {ORDER.map((k) => (
               <RowSwitch key={k} label={LABEL[k]} hint={HINT[k]} checked={cur.includes(k)} onChange={(v) => toggle(k, v)} />
             ))}
-            <RowToggle
-              label="Layout"
-              value={c.orientation ?? "row"}
-              options={[{ value: "row", label: "Row" }, { value: "column", label: "Stacked" }]}
-              onChange={(v) => onConfig({ ...c, orientation: v as "row" | "column" })}
-            />
-            <RowSwitch label="Show labels" checked={c.showLabels ?? true} onChange={(v) => onConfig({ ...c, showLabels: v })} />
           </>
         );
       })()}
@@ -1098,10 +1061,7 @@ export function Inspector({
               </SelectContent>
             </Select>
           </Row>
-          <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-          {(c.showLabel ?? true) && (
-            <RowText label="Label" value={c.label ?? ""} placeholder="(auto)" onChange={(v) => onConfig({ ...c, label: v })} />
-          )}
+          <RowText label="Label" value={c.label ?? ""} placeholder="(auto)" onChange={(v) => onConfig({ ...c, label: v })} />
           <p className="text-caption2 text-fg-muted leading-snug">Driven by the Baptisms tab. &ldquo;Live&rdquo; ticks the current testimony/baptism; others summarize the session.</p>
         </>
       )}
