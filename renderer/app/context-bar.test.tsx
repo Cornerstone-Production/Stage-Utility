@@ -71,16 +71,51 @@ describe("context bar state", () => {
     assert.ok(s.timerText?.startsWith("−"), `expected a negative timer, got ${s.timerText}`);
   });
 
-  test("counts a pre-service countdown down to the service start", () => {
-    const pre = {
+  const preservice = (targetAt: string) =>
+    ({
       ...LIVE_ITEM,
       mode: "preservice",
       label: "Service starts",
       liveStartAt: null,
-      targetAt: "2026-08-14T14:30:00.000Z",
-    } as PcoLiveDTO;
-    const s = contextBarState(pre, Date.parse("2026-08-14T14:25:00.000Z"), 0);
-    assert.equal(s.isLive, true);
+      targetAt,
+    }) as PcoLiveDTO;
+
+  test("counts a pre-service countdown down to the service start", () => {
+    const s = contextBarState(preservice("2026-08-14T14:30:00.000Z"), Date.parse("2026-08-14T14:25:00.000Z"), 0);
     assert.equal(s.timerText, "5:00");
+  });
+
+  test("a pre-service countdown is NOT live", () => {
+    // THE guard, and this test used to assert the opposite. isLive was true for
+    // any timer at all, so a service two days out — which produces a perfectly
+    // good countdown — lit the green LIVE badge above every page. The bar said
+    // "starts in 2d 0h" and "LIVE" at the same time.
+    const s = contextBarState(preservice("2026-08-14T14:30:00.000Z"), Date.parse("2026-08-14T14:25:00.000Z"), 0);
+    assert.equal(s.isLive, false, "a countdown to a future service reported itself live");
+  });
+
+  test("still not live when the service is days away", () => {
+    // The case actually reported. Five minutes out and two days out are the same
+    // state, and neither is live.
+    const s = contextBarState(preservice("2026-08-16T14:30:00.000Z"), Date.parse("2026-08-14T14:30:00.000Z"), 0);
+    assert.equal(s.isLive, false);
+    assert.equal(s.timerText, "2d 0h");
+  });
+
+  test("still not live once the start time has PASSED", () => {
+    // The subtle one. PCO stays in preservice until an item is actually started,
+    // so the countdown goes negative while nothing is running — and "we are past
+    // the start time" is the moment a false LIVE is most believable and most
+    // wrong, because nobody has begun anything yet.
+    const s = contextBarState(preservice("2026-08-14T14:30:00.000Z"), Date.parse("2026-08-14T14:35:00.000Z"), 0);
+    assert.equal(s.isLive, false, "an overdue start reported itself live");
+    assert.equal(s.isOver, true);
+  });
+
+  test("a running ITEM is live", () => {
+    // The other half: the badge has to still appear when it should, or this is
+    // just a different bug.
+    const s = contextBarState(LIVE_ITEM, Date.parse("2026-08-14T14:05:00.000Z"), 0);
+    assert.equal(s.isLive, true);
   });
 });

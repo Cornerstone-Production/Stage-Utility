@@ -53,7 +53,12 @@ export function contextBarState(
   const timer = computePcoTimer(pcoLive, now, skewMs);
   if (!timer) return { isLive: false, isOver: false, itemTitle: null, timerText: null };
   return {
-    isLive: true,
+    // LIVE means an ITEM is running, not merely that there is something to count.
+    // This was `true` for any timer at all, so a service two days away — which
+    // produces a perfectly good pre-service countdown — lit the green LIVE badge
+    // above every page. The bar was simultaneously saying "starts in 2d 0h" and
+    // "live", and only one of those can be true.
+    isLive: timer.mode === "item",
     isOver: timer.over,
     itemTitle: timer.label,
     timerText: fmtDuration(timer.seconds),
@@ -174,6 +179,11 @@ function renderBarItem(
         : null;
 
     case "live-timer":
+      // The countdown shows whenever there IS one; the green badge only when a
+      // service is actually running. Before a service the same countdown is
+      // still worth having — it is how far out the next one is — it just is not
+      // "live", so it reads as its own label instead.
+      if (!bar.timerText) return null;
       return bar.isLive ? (
         <>
           <span className="size-1.5 rounded-full bg-live-9" aria-hidden="true" />
@@ -182,7 +192,16 @@ function renderBarItem(
             {bar.timerText}
           </span>
         </>
-      ) : null;
+      ) : (
+        <>
+          {bar.itemTitle && (
+            <span className="text-footnote text-fg-muted truncate">{bar.itemTitle}</span>
+          )}
+          <span className={cn("text-footnote font-mono tabular-nums", bar.isOver ? "text-danger-11" : "text-fg-muted")}>
+            {bar.timerText}
+          </span>
+        </>
+      );
 
     case "integration-health": {
       // Counts what is DISCONNECTED. Nothing when all is well: a bar item that
