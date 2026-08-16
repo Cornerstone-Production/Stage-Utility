@@ -15,6 +15,11 @@ interface SplitViewProps {
   collapsed?: boolean;
   /** Shown in the mobile top bar next to the hamburger (e.g. active section). */
   mobileTitle?: React.ReactNode;
+  /** Right-aligned controls for the mobile top bar. On a phone that bar is the
+   *  page header, so the active page's own actions belong on it. Passed in as an
+   *  element rather than read from a context: this is a layout primitive, and it
+   *  should not know what a page action is. */
+  mobileActions?: React.ReactNode;
   expandedWidth?: number;
   railWidth?: number;
   /** Suppress the collapse width animation — set while the sidebar is being
@@ -40,6 +45,7 @@ export function SplitView({
   children,
   collapsed = false,
   mobileTitle,
+  mobileActions,
   expandedWidth = 200,
   railWidth = 56,
   resizing = false,
@@ -84,6 +90,7 @@ export function SplitView({
               <MenuIcon className="size-5 text-fg-muted" />
             </Button>
             {mobileTitle && <span className="text-[14px] font-semibold text-fg truncate">{mobileTitle}</span>}
+            {mobileActions && <div className="ml-auto flex items-center gap-1.5 shrink-0">{mobileActions}</div>}
           </div>
         </div>
 

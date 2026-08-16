@@ -11,7 +11,7 @@ import { Outlet, useRouterState } from "@tanstack/react-router";
 import { SplitView } from "../components/ui/split-view";
 import { useRouteResetKey } from "./route-reset";
 import { Rail } from "./rail";
-import { PageActionsProvider, usePageActionsSlot } from "./page-actions";
+import { PageActionsProvider, PageActionsSlot, usePageActionsSlot } from "./page-actions";
 import { ContextBar } from "./context-bar";
 import { ALL_DESTINATIONS } from "./destinations";
 import { useStageLiveWiring } from "./live-wiring";
@@ -33,7 +33,12 @@ function PageHeader() {
     // The title and the route's own controls share ONE row. Home used to put its
     // Edit control on a second row below this one, which cost a whole band of
     // vertical space on the page that most wants it for content.
-    <header className="px-5 max-sm:px-3 pt-5 max-sm:pt-4 shrink-0 flex items-start gap-3">
+    // HIDDEN ON MOBILE. The top bar already shows the destination's name, so
+    // this repeated it — "Home" twice, plus a description, plus its own padding,
+    // for about 85px of a 844px phone screen spent saying what the bar above it
+    // just said. The actions move to that bar instead; the description is a
+    // desktop luxury.
+    <header className="max-sm:hidden px-5 pt-5 shrink-0 flex items-start gap-3">
       <div className="min-w-0 flex-1">
         <h1 className="text-title2 font-semibold text-fg leading-tight">{active.label}</h1>
         <p className="text-footnote text-fg-muted mt-1 max-w-[68ch]">{active.description}</p>
@@ -66,12 +71,15 @@ export function Shell() {
     // No divider rules between the rail, the context bar and the content: the
     // surfaces already separate them, and 1px lines everywhere read as seams.
     <div className="h-[100dvh] overflow-hidden bg-bg">
+      <PageActionsProvider>
       <SplitView
         collapsed={collapsed}
         expandedWidth={width}
         railWidth={RAIL_WIDTH}
         resizing={dragging}
         mobileTitle={active?.label}
+        // On a phone the top bar IS the page header — see PageHeader.
+        mobileActions={<PageActionsSlot />}
         sidebar={
           <Rail
             onToggleCollapsed={toggle}
@@ -81,7 +89,6 @@ export function Shell() {
           />
         }
       >
-        <PageActionsProvider>
         <div className="flex flex-col h-full min-w-0">
           <ContextBar />
           <PageHeader />
@@ -96,8 +103,8 @@ export function Shell() {
             </div>
           </main>
         </div>
-        </PageActionsProvider>
       </SplitView>
+      </PageActionsProvider>
     </div>
   );
 }

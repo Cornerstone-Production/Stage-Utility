@@ -41,6 +41,17 @@ export function usePageActionsSlot(): ReactNode {
 }
 
 /**
+ * The slot as a component.
+ *
+ * So a surface OUTSIDE this provider's subtree can still host the actions by
+ * being handed this element — the mobile top bar lives in SplitView, a generic
+ * primitive that has no business knowing what a page action is.
+ */
+export function PageActionsSlot() {
+  return <>{usePageActionsSlot()}</>;
+}
+
+/**
  * Put controls in the page header for as long as this component is mounted.
  *
  * CLEARS ON UNMOUNT, which is the whole reason this is an effect rather than a
