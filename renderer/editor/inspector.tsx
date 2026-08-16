@@ -69,6 +69,7 @@ import { useStageState } from "../main/use-stage-state";
 import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
+import { screensListViews } from "@main/services/home-view";
 import {
   CARD_PRESETS,
   isKnownObjectType,
@@ -389,7 +390,10 @@ export function Inspector({
   const propInstances = usePropInstances();
   const integrationsSnap = useIntegrations();
   const captionChannels = Object.keys(useStageState().state?.captionChannelColors ?? {});
-  const embedViews = useStageState().state?.views ?? [];
+  // Home excluded: its stored geometry is meaningless (it is a card list, not a
+  // canvas), so embedding it would draw four cards stacked at whatever filler
+  // coordinates happen to be in the file.
+  const embedViews = screensListViews(useStageState().state?.views ?? []);
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).

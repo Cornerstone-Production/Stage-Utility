@@ -8,6 +8,8 @@
 // Deliberately not a score or a percentage. An operator on a Thursday wants the
 // list of things to fix, not a number that says 80%.
 
+import { screensListViews } from "@main/services/home-view";
+
 export interface ReadinessCheck {
   /** Stable key. Duplicates would render one check twice and hide another. */
   id: string;
@@ -33,7 +35,10 @@ export function readinessChecks(
 ): ReadinessCheck[] {
   const online = new Set(onlineOutputIds);
   const outputs = state.outputs ?? [];
-  const views = state.views ?? [];
+  // Home excluded: it is seeded on every install, so counting it would tick "a
+  // view of your own" before the operator had made one, and inflate the count
+  // shown beside it by one forever.
+  const views = screensListViews(state.views ?? []);
 
   const unassigned = outputs.filter((o) => !o.viewId);
   const offline = outputs.filter((o) => !online.has(o.id));

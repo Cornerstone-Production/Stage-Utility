@@ -119,10 +119,25 @@ describe("the default layout", () => {
     assert.equal(defaultHomeLayout().canvas.fit, "responsive");
   });
 
-  // No geometry assertions. Home reads presence and ORDER only — every x/y/w/h
-  // in this layout is filler the LayoutObject type demands, and a test that
-  // pinned them would be asserting something nothing draws from. See the note
-  // at the top of home-view.ts.
+  test("the cards stack rather than sitting on top of each other", () => {
+    // Home ignores this geometry — but an output BOUND to Home before Phase 7
+    // keeps rendering through the layout renderer, and identical coordinates
+    // would draw four cards exactly on top of each other. Filler, not nonsense.
+    const objs = defaultHomeLayout().objects;
+    for (let i = 1; i < objs.length; i++) {
+      assert.ok(
+        objs[i - 1].y + objs[i - 1].h <= objs[i].y,
+        `${objs[i].id} overlaps ${objs[i - 1].id}`,
+      );
+    }
+  });
+
+  test("every card sits inside the canvas", () => {
+    for (const o of defaultHomeLayout().objects) {
+      assert.ok(o.x >= 0 && o.x + o.w <= 1, `${o.id} escapes horizontally`);
+      assert.ok(o.y >= 0 && o.y + o.h <= 1, `${o.id} escapes vertically`);
+    }
+  });
 });
 
 describe("the Screens list", () => {

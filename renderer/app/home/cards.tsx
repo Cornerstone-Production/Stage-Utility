@@ -20,6 +20,7 @@ import {
 
 import { AppLink } from "../app-link";
 import { readinessChecks, outstanding, type ReadinessCheck } from "./readiness";
+import type { HomeCardType } from "./home-cards";
 import { flashTarget } from "../flash";
 import { cn } from "../../lib/cn";
 import { invoke, onNotification } from "../../lib/api";
@@ -374,10 +375,64 @@ export function LiveStatusCard({
   );
 }
 
-/** The readiness card from a state snapshot, for callers that have no presence
- *  hook — a wall display has no business subscribing to one, and a check that
- *  lags by a poll beats one that only works inside the shell. */
-export function ReadinessCardFromState({ state }: { state: StageState }) {
-  const online = (state.outputs ?? []).filter((o) => o.viewId).map((o) => o.id);
-  return <ReadinessCard checks={readinessChecks(state, online)} />;
+/**
+ * Which screens are currently showing something, from a state snapshot.
+ *
+ * The fallback for callers with no presence hook: an object on a wall display
+ * has no business subscribing to presence, and a count that lags by a poll beats
+ * one that only works inside the shell.
+ */
+export function onlineFromState(state: StageState): string[] {
+  return (state.outputs ?? []).filter((o) => o.viewId).map((o) => o.id);
+}
+
+/**
+ * One card, by type. THE dispatch — there is not a second one.
+ *
+ * Home and the layout renderer both come through here, so a fifth card is added
+ * in one place rather than two that drift. The `never` in the default is what
+ * makes a missing case a compile error instead of a blank space on the front
+ * page.
+ */
+export function HomeCard({
+  type,
+  state,
+  pcoLive,
+  now,
+  skewMs,
+  onlineOutputIds,
+  secondsToStart,
+}: {
+  type: HomeCardType;
+  state: StageState;
+  pcoLive: PcoLiveDTO | null;
+  now: number;
+  skewMs: number;
+  /** Live presence inside the shell; `onlineFromState` on a screen. */
+  onlineOutputIds: readonly string[];
+  secondsToStart: number | null;
+}) {
+  switch (type) {
+    case "home-live-status":
+      return (
+        <LiveStatusCard
+          pcoLive={pcoLive}
+          now={now}
+          skewMs={skewMs}
+          onlineOutputIds={onlineOutputIds}
+          outputCount={(state.outputs ?? []).length}
+        />
+      );
+    case "home-next-service":
+      return <NextServiceCard state={state} secondsToStart={secondsToStart} />;
+    case "home-readiness":
+      return <ReadinessCard checks={readinessChecks(state, onlineOutputIds)} />;
+    case "home-recent-services":
+      return <RecentServicesCard state={state} />;
+    default: {
+      const _never: never = type;
+      void _never;
+      return null;
+    }
+  }
 }

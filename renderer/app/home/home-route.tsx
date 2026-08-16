@@ -16,7 +16,7 @@
 // display URLs. Both are front-door utilities, not dashboard cards, and neither
 // belongs on a wall.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2Icon, PencilIcon, CheckIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -26,28 +26,14 @@ import { useOutputPresence } from "./use-output-presence";
 import { GettingStarted } from "../../settings/getting-started";
 import { PlanSection } from "../../settings/sections/plan-section";
 import { flashTarget } from "../flash";
-import { HOME_VIEW_ID } from "@main/services/home-view";
-import { LAYOUT_OBJECTS } from "../../main/layout-objects";
+import { HOME_VIEW_ID, defaultHomeLayout } from "@main/services/home-view";
+import type { LayoutObject } from "@main/types/views";
 import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
 import { Commission } from "./commission";
 import { HomeEditor } from "./home-editor";
-import {
-  cardRows,
-  isHomeCard,
-  reorderCards,
-  strayTypes,
-  toggleCard,
-  visibleCards,
-  type HomeCardType,
-} from "./home-cards";
-import {
-  LiveStatusCard,
-  NextServiceCard,
-  ReadinessCard,
-  RecentServicesCard,
-} from "./cards";
-import { readinessChecks } from "./readiness";
+import { cardRows, reorderCards, toggleCard, visibleCards } from "./home-cards";
+import { HomeCard } from "./cards";
 
 export function HomeRoute() {
   const { pcoLive } = useDashboardState();
@@ -55,6 +41,11 @@ export function HomeRoute() {
   const online = useOutputPresence();
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  /** The card list as the operator has it, ahead of the server. See `save`. */
+  const [pending, setPending] = useState<LayoutObject[] | null>(null);
+  /** The same list, readable synchronously inside one React batch. Written in
+   *  `save` only — never during a render. */
+  const editRef = useRef<LayoutObject[] | null>(null);
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -69,6 +60,14 @@ export function HomeRoute() {
   const [skewMs, setSkewMs] = useState(0);
   useResyncOn([pcoLive?.serverNow], () => {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
+  });
+
+  // The server has caught up — stop preferring the optimistic copy, so an edit
+  // made anywhere else (a restored snapshot, a second tab) is not masked forever.
+  const savedRev = s.stageState?.views?.find((v) => v.id === HOME_VIEW_ID)?.layoutRev ?? 0;
+  useResyncOn([savedRev], () => {
+    setPending(null);
+    editRef.current = null;
   });
 
   if (s.stageLoading || !s.stageState) {
@@ -88,45 +87,48 @@ export function HomeRoute() {
   const mode = homeMode(pcoLive, secondsToStart);
 
   const home = (state.views ?? []).find((v) => v.id === HOME_VIEW_ID);
-  const objects = home?.layout?.objects ?? [];
+  // A Home whose layout was cleared (a hand-edited views.json, a kind change)
+  // gets this build's default rather than an editor whose switches do nothing.
+  const layout = home?.layout ?? defaultHomeLayout();
+  // `pending` is what the operator has done since the last server round-trip.
+  // WITHOUT it, every edit was computed from the server's copy, so two changes
+  // inside one round-trip both built on the pre-edit array: switching two cards
+  // off in quick succession brought the first one back, and a switch followed by
+  // a drag moved the wrong card. Cleared when the server's revision advances.
+  const objects = pending ?? layout.objects;
 
-  /** Save the card list. Home is the only editor of this view, so there is no
-   *  layoutRev to race against — an unconditional save is not a lost edit here,
-   *  and passing a stale rev would raise a conflict dialog with itself. */
-  function save(next: typeof objects) {
-    if (!home?.layout) return;
-    void s.handlers.handleSetViewLayout(HOME_VIEW_ID, { ...home.layout, objects: next });
+  /**
+   * Apply a change to the card list and store it.
+   *
+   * Takes an updater, not a finished array, and applies it to the NEWEST list
+   * rather than whatever this render closed over. Two things could make that
+   * stale, and both happened:
+   *
+   *  • across a round-trip — `pending`, the operator's copy, until the server
+   *    catches up. Switching two cards off in succession otherwise brought the
+   *    first one back, and a switch followed by a drag moved the wrong card.
+   *  • within one React batch — `editRef`, written here and never during a
+   *    render, because two handlers can both run before anything re-renders.
+   *
+   * No layoutRev: Home has one editor — this one — so there is nothing to
+   * conflict with, and passing a rev would raise a conflict dialog with itself.
+   */
+  function save(update: (objs: readonly LayoutObject[]) => LayoutObject[]) {
+    const next = update(editRef.current ?? objects);
+    editRef.current = next;
+    setPending(next);
+    s.handlers
+      .handleSetViewLayout(HOME_VIEW_ID, { ...layout, objects: next })
+      // Not a swallowed failure: handleSetViewLayout has already told the
+      // operator. This drops the optimistic copy so the page snaps back to what
+      // was actually stored, rather than showing an edit that did not land.
+      .catch(() => {
+        setPending(null);
+        editRef.current = null;
+      });
   }
 
   const cards = visibleCards(objects, mode);
-
-  // Returns an element for EVERY card type — the `never` in the default is what
-  // makes that a compile error rather than a blank space on the front page.
-  function renderCard(type: HomeCardType): ReactNode {
-    switch (type) {
-      case "home-live-status":
-        return (
-          <LiveStatusCard
-            pcoLive={pcoLive}
-            now={now}
-            skewMs={skewMs}
-            onlineOutputIds={online}
-            outputCount={state.outputs?.length ?? 0}
-          />
-        );
-      case "home-next-service":
-        return <NextServiceCard state={state} secondsToStart={secondsToStart} />;
-      case "home-readiness":
-        return <ReadinessCard checks={readinessChecks(state, online)} />;
-      case "home-recent-services":
-        return <RecentServicesCard state={state} />;
-      default: {
-        const _never: never = type;
-        void _never;
-        return null;
-      }
-    }
-  }
 
   return (
     <div className="pt-1 pb-[50vh] max-sm:pb-24 flex flex-col gap-3">
@@ -157,16 +159,26 @@ export function HomeRoute() {
       {editing && home ? (
         <HomeEditor
           rows={cardRows(objects)}
-          strays={strayTypes(objects).map(
-            (t) => LAYOUT_OBJECTS[t as keyof typeof LAYOUT_OBJECTS]?.label ?? t,
-          )}
           sensors={s.handlers.sensors}
-          onToggle={(t) => save(toggleCard(objects, t))}
-          onReorder={(from, to) => save(reorderCards(objects, from, to))}
-          onClearStrays={() => save(objects.filter((o) => isHomeCard(o.config.type)))}
+          onToggle={(t) => save((objs) => toggleCard(objs, t))}
+          onReorder={(from, to) => save((objs) => reorderCards(objs, from, to))}
         />
       ) : (
-        cards.map((t) => <div key={t}>{renderCard(t)}</div>)
+        cards.map((t) => (
+          <HomeCard
+            key={t}
+            type={t}
+            state={state}
+            pcoLive={pcoLive}
+            now={now}
+            skewMs={skewMs}
+            // Live presence, not the state snapshot: the shell is subscribed
+            // anyway, so Home's readiness check reflects a screen dropping off
+            // the moment it happens.
+            onlineOutputIds={online}
+            secondsToStart={secondsToStart}
+          />
+        ))
       )}
 
       <PlanSection

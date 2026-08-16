@@ -7,7 +7,6 @@ import {
   cardRows,
   isHomeCard,
   reorderCards,
-  strayTypes,
   toggleCard,
   visibleCards,
 } from "./home-cards.js";
@@ -168,21 +167,33 @@ describe("reordering", () => {
 });
 
 describe("objects Home does not draw", () => {
-  test("are named rather than silently ignored", () => {
-    const withStray = [...DEFAULT, obj("clock")];
-    assert.deepEqual(strayTypes(withStray), ["clock"]);
+  // Home has no canvas, so nothing can add one now — but a restored snapshot
+  // could carry one, and deleting an operator's data to tidy something up is
+  // never this code's call. They are skipped when rendering and otherwise left
+  // exactly where they are.
+  const stray = (objs: readonly unknown[]) =>
+    (objs as { config: { type: string } }[]).filter((o) => !isHomeCard(o.config.type)).length;
+
+  test("are not drawn", () => {
+    assert.deepEqual(cardOrder([...DEFAULT, obj("clock")]), cardOrder(DEFAULT));
     assert.equal(isHomeCard("clock"), false);
   });
 
   test("survive a reorder", () => {
-    // They are still in the operator's file. Dropping them because the editor
-    // has no row for them is deleting data to tidy something up.
-    const withStray = [...DEFAULT, obj("clock")];
-    assert.deepEqual(strayTypes(reorderCards(withStray, 0, 1)), ["clock"]);
+    assert.equal(stray(reorderCards([...DEFAULT, obj("clock")], 0, 1)), 1);
   });
 
   test("survive a toggle", () => {
-    const withStray = [...DEFAULT, obj("clock")];
-    assert.deepEqual(strayTypes(toggleCard(withStray, "home-readiness")), ["clock"]);
+    assert.equal(stray(toggleCard([...DEFAULT, obj("clock")], "home-readiness")), 1);
+  });
+
+  test("a duplicate card object is kept too, not quietly deleted", () => {
+    // cardOrder draws one of each, which is right. Reordering used to DELETE the
+    // extra while doing it — silent data loss on the operator's first drag, for
+    // a state a restored snapshot can produce.
+    const dup = [...DEFAULT, obj("home-readiness", "second-copy")];
+    const after = reorderCards(dup, 0, 1);
+    assert.equal(after.length, dup.length, "an object went missing");
+    assert.ok(after.some((o) => (o as { id: string }).id === "second-copy"));
   });
 });

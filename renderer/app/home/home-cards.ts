@@ -11,73 +11,90 @@ import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
 import type { HomeMode } from "./home-mode";
 
-/** The card types Home draws. A subset of the shared widget registry — Home has
- *  no widget set of its own, which is the whole point of Phase 6. */
-export const HOME_CARD_TYPES = [
-  "home-live-status",
-  "home-next-service",
-  "home-readiness",
-  "home-recent-services",
-] as const;
+/**
+ * The card types Home draws — DERIVED from the object config union, not listed
+ * beside it.
+ *
+ * Every `home-*` member of LayoutObjectConfig is a Home card, so adding a fifth
+ * one cannot leave Home silently ignoring it: WHEN below is a Record over this
+ * type, and a missing entry fails `tsc`. A hand-kept parallel list would have
+ * gone stale the first time somebody added a card and forgot this file. The same
+ * `Extract` backs `defaultHomeLayout`.
+ */
+export type HomeCardType = Extract<LayoutObjectConfig, { type: `home-${string}` }>["type"];
 
-export type HomeCardType = (typeof HOME_CARD_TYPES)[number];
+/**
+ * The mood each card belongs to.
+ *
+ * Home has two: a service is running, or it is Thursday. A running timer is
+ * noise on a Thursday and a readiness checklist is noise mid-service, so a card
+ * is on the page in one mood and absent in the other. This preserves the
+ * behaviour the two fixed panels had — it is not a new rule.
+ *
+ * This object is also where HOME_CARD_TYPES gets its ORDER, which is the order
+ * a switched-off card is offered back in.
+ */
+const WHEN: Record<HomeCardType, HomeMode> = {
+  "home-live-status": "live",
+  "home-next-service": "idle",
+  "home-readiness": "idle",
+  "home-recent-services": "idle",
+};
 
-export interface HomeCardSpec {
+/** Derived from WHEN's keys, so the two cannot disagree about what exists. */
+export const HOME_CARD_TYPES = Object.keys(WHEN) as HomeCardType[];
+
+/** Said in the editor, so a card that is present but not showing right now reads
+ *  as scheduled rather than broken. One line per mood, not one per card — a card
+ *  whose hint contradicts its mood is then unrepresentable. */
+const HINT: Record<HomeMode, string> = {
+  live: "While a service is running",
+  idle: "The rest of the week",
+};
+
+interface HomeCardSpec {
   type: HomeCardType;
   /** The label the registry already carries. Not a second copy. */
   label: string;
-  /**
-   * The mood this card belongs to.
-   *
-   * Home has two: a service is running, or it is Thursday. A running timer is
-   * noise on a Thursday and a readiness checklist is noise mid-service, so a
-   * card is on the page in one mood and absent in the other. This preserves the
-   * behaviour the two fixed panels had — it is not a new rule.
-   */
   when: HomeMode;
-  /** Said in the editor, so a card that is present but not showing right now
-   *  reads as scheduled rather than broken. */
   hint: string;
 }
 
-const WHEN: Record<HomeCardType, { when: HomeMode; hint: string }> = {
-  "home-live-status": { when: "live", hint: "While a service is running" },
-  "home-next-service": { when: "idle", hint: "The rest of the week" },
-  "home-readiness": { when: "idle", hint: "The rest of the week" },
-  "home-recent-services": { when: "idle", hint: "The rest of the week" },
-};
-
-export function cardSpec(type: HomeCardType): HomeCardSpec {
-  return { type, label: LAYOUT_OBJECTS[type].label, ...WHEN[type] };
+function cardSpec(type: HomeCardType): HomeCardSpec {
+  return { type, label: LAYOUT_OBJECTS[type].label, when: WHEN[type], hint: HINT[WHEN[type]] };
 }
 
 /** True for the types Home knows how to draw. Anything else in Home's layout is
- *  a leftover from when Home was edited on a canvas — kept, not rendered, and
- *  named in the editor rather than vanishing. */
+ *  a leftover from when Home was edited on a canvas — kept, never dropped. */
 export function isHomeCard(type: string): type is HomeCardType {
-  return (HOME_CARD_TYPES as readonly string[]).includes(type);
+  return type in WHEN;
 }
 
-/** Home's cards, in the layout's order, presence and all. Non-card objects are
- *  skipped. */
-export function cardOrder(objects: readonly LayoutObject[]): HomeCardType[] {
-  const seen = new Set<HomeCardType>();
-  const out: HomeCardType[] = [];
+/**
+ * The card objects in the layout, keyed by type, in the layout's order.
+ *
+ * One of each: a duplicate would render the same card twice and give the editor
+ * two rows that toggle each other. A Map because insertion order IS the card
+ * order — the same walk backs both `cardOrder` and `reorderCards`, which were
+ * two spellings of it.
+ */
+function cardsByType(objects: readonly LayoutObject[]): Map<HomeCardType, LayoutObject> {
+  const out = new Map<HomeCardType, LayoutObject>();
   for (const o of objects) {
     const t = o.config.type;
-    // One of each. A duplicate would render the same card twice and give the
-    // editor two rows that toggle each other.
-    if (isHomeCard(t) && !seen.has(t)) {
-      seen.add(t);
-      out.push(t);
-    }
+    if (isHomeCard(t) && !out.has(t)) out.set(t, o);
   }
   return out;
 }
 
+/** Home's cards, in the layout's order. Non-card objects are skipped. */
+export function cardOrder(objects: readonly LayoutObject[]): HomeCardType[] {
+  return [...cardsByType(objects).keys()];
+}
+
 /** The cards actually on the page right now. */
 export function visibleCards(objects: readonly LayoutObject[], mode: HomeMode): HomeCardType[] {
-  return cardOrder(objects).filter((t) => WHEN[t].when === mode);
+  return cardOrder(objects).filter((t) => WHEN[t] === mode);
 }
 
 export interface HomeCardRow extends HomeCardSpec {
@@ -102,16 +119,13 @@ export function cardRows(objects: readonly LayoutObject[]): HomeCardRow[] {
   ];
 }
 
-/** Objects in Home's layout that Home does not draw, by type. */
-export function strayTypes(objects: readonly LayoutObject[]): string[] {
-  return [...new Set(objects.filter((o) => !isHomeCard(o.config.type)).map((o) => o.config.type))];
-}
-
 /** A fresh object for a card. Geometry is filled in because the type demands it,
- *  not because Home reads it. */
+ *  not because Home reads it. The id is the type — one card of each kind, so
+ *  there is nothing else it could usefully be, and it matches what
+ *  `defaultHomeLayout` seeds. */
 function makeCard(type: HomeCardType): LayoutObject {
   return {
-    id: `home-${type}`,
+    id: type,
     x: 0.04,
     y: 0.06,
     w: 0.92,
@@ -156,15 +170,14 @@ export function reorderCards(
   next.splice(to, 0, next.splice(from, 1)[0]);
 
   // Rebuilt from the objects that are already there, so every card keeps its own
-  // identity — this reorders, it does not recreate. Cards first in the new
-  // order, then anything Home does not draw; a duplicate of a card type is
-  // dropped, matching what cardOrder already renders.
-  const first = new Map<string, LayoutObject>();
-  for (const o of objects) {
-    if (isHomeCard(o.config.type) && !first.has(o.config.type)) first.set(o.config.type, o);
-  }
-  return [
-    ...next.map((t) => first.get(t)!),
-    ...objects.filter((o) => !isHomeCard(o.config.type)),
-  ];
+  // identity — this reorders, it does not recreate.
+  //
+  // Nothing is dropped. The drawn card of each type goes first, in the new
+  // order, and everything else — a second object of a type Home already draws,
+  // an object Home cannot draw at all — is appended untouched. Neither is
+  // reachable from this editor, but both are reachable from a restored snapshot,
+  // and deleting an operator's data to tidy a list is not this function's call.
+  const drawn = cardsByType(objects);
+  const kept = new Set(drawn.values());
+  return [...next.map((t) => drawn.get(t)!), ...objects.filter((o) => !kept.has(o))];
 }

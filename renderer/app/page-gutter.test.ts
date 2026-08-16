@@ -18,8 +18,15 @@ import { fileURLToPath } from "node:url";
 
 const RENDERER = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** The gutter itself. Matched as the literal pair, since either half alone is
- *  a different decision — a page may want horizontal padding that is not this. */
+/**
+ * The gutter itself. Matched as the literal pair, since either half alone is a
+ * different decision — a page may want horizontal padding that is not this.
+ *
+ * Known limit: a reordered or interleaved class list ("max-sm:px-3 px-5") would
+ * slip past. Accepted, because this catches the mistake that actually happened —
+ * copy-pasting the pair — and a class-list parser here would be a worse thing to
+ * maintain than the bug it prevents.
+ */
 const GUTTER = "px-5 max-sm:px-3";
 
 /**

@@ -3,7 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
-import { seedHomeView, HOME_VIEW_ID } from "./home-view";
+import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { barConfigStore } from "./bar-config-store.js";
 import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
@@ -1859,7 +1859,11 @@ export class StageController {
     if (!this.state.views.find((v) => v.id === id)) {
       throw new Error(`views:delete — view ${id} not found`);
     }
-    if (this.state.views.length <= 1) {
+    // Home does not count. It is seeded on every install and invisible in every
+    // list, so counting it turned "you cannot delete your last view" into "you
+    // cannot delete Home" — a fresh install reads as 2 views, and deleting the
+    // real one left the operator with nothing and an empty Screens page.
+    if (screensListViews(this.state.views).length <= 1) {
       throw new Error("views:delete — cannot remove the last view");
     }
     console.log(`[stage-controller] deleteView id=${id}`);

@@ -1,6 +1,7 @@
 import { CheckCircle2Icon, CircleIcon, XIcon, RocketIcon } from "lucide-react";
 
 import { Button } from "../components/ui";
+import { screensListViews } from "@main/services/home-view";
 
 interface Step {
   label: string;
@@ -30,7 +31,10 @@ export function GettingStarted({
   // routed?" was true before the operator had done anything — the step arrived
   // pre-ticked and taught nothing. Both view steps therefore measure going BEYOND
   // that default: a View you made, and a screen pointed at it.
-  const madeOwnView = stageState.views.length > 1;
+  // Home is excluded from the count. It is seeded on every install, so counting
+  // it made this step read "done" on a fresh box — exactly the pre-ticked step
+  // the comment above was written to stop.
+  const madeOwnView = screensListViews(stageState.views).length > 1;
   const routedOwnView = madeOwnView && stageState.outputs.some((o) => o.viewId);
   const steps: Step[] = [
     {

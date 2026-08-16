@@ -51,9 +51,19 @@ export function defaultHomeLayout() {
   // Typed against the real config union, so a card whose type is retired stops
   // compiling here rather than seeding an object nothing renders.
   type HomeCardConfig = Extract<LayoutObjectConfig, { type: `home-${string}` }>;
-  const card = (id: string, config: HomeCardConfig) => ({
-    id,
-    x: 0.04, y: 0.06, w: 0.92, h: 0.2, z: 1,
+  // The id IS the type. One card of each kind, so there is nothing else it could
+  // usefully be, and the editor mints the same id when a card is switched back
+  // on — two schemes for the same objects would only be confusing in the file.
+  //
+  // The geometry stacks rather than piling every card on one spot. Home ignores
+  // it — but an output BOUND to Home before Phase 7 keeps rendering through the
+  // layout renderer (setOutputView refuses new bindings, it does not undo old
+  // ones), and identical coordinates would draw four cards exactly on top of
+  // each other. Filler, but not nonsense.
+  let row = 0;
+  const card = (config: HomeCardConfig) => ({
+    id: config.type,
+    x: 0.04, y: 0.04 + row++ * 0.24, w: 0.92, h: 0.2, z: 1,
     config,
     style: {},
   });
@@ -64,10 +74,10 @@ export function defaultHomeLayout() {
       // Live first, so a service that starts while Home is open puts the timer
       // at the top. It is the only card of its mood, so its position among the
       // idle cards never shows.
-      card("home-live", { type: "home-live-status" }),
-      card("home-next", { type: "home-next-service" }),
-      card("home-ready", { type: "home-readiness" }),
-      card("home-recent", { type: "home-recent-services" }),
+      card({ type: "home-live-status" }),
+      card({ type: "home-next-service" }),
+      card({ type: "home-readiness" }),
+      card({ type: "home-recent-services" }),
     ],
   };
 }
@@ -99,7 +109,10 @@ export function defaultHomeLayout() {
 export function seedHomeView(views: readonly View[]): View[] {
   const existing = views.find((v) => v.id === HOME_VIEW_ID);
   if (existing) {
-    if (existing.layoutRev) return views as View[];
+    // `!= null`, not truthy: 0 means "saved once, at revision zero" to anyone
+    // hand-writing views.json, and resetting their Home on that reading would be
+    // the one thing this function must never do.
+    if (existing.layoutRev != null) return views as View[];
     // Same cards already? Return the input untouched, so an unedited Home is not
     // rewritten to disk on every single launch.
     const want = defaultHomeLayout().objects.map((o) => o.config.type).join(",");
@@ -128,9 +141,11 @@ export function seedHomeView(views: readonly View[]): View[] {
  * cards sized for a browser column. Listing it also invited the trip Phase 7
  * removed: open Screens, find "Home", edit it on a canvas.
  *
- * Filtering here rather than at each call site because there are two — the
- * per-output picker and the "Views not on a screen" list — and Home is
- * permanently unassigned, so it would otherwise sit in that second list forever.
+ * One helper rather than a filter at each call site, because there are SEVEN and
+ * they are not all obvious: the per-output picker, the "Views not on a screen"
+ * list, the rail's Consoles group, the embedded-view picker, the default
+ * selection, and the two places that COUNT views to ask "has the operator made
+ * one of their own yet?" — both of which a seeded Home answered wrongly.
  */
 export function screensListViews<T extends { id: string }>(views: readonly T[]): T[] {
   return views.filter((v) => v.id !== HOME_VIEW_ID);

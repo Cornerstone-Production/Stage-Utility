@@ -8,15 +8,14 @@
 // would halve the cards it is editing, and the list is short enough to hold in
 // your head; Done puts the real page back.
 
-import type { CSSProperties } from "react";
 import { DndContext, closestCenter, type DragEndEvent, type SensorDescriptor, type SensorOptions } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { GripVerticalIcon } from "lucide-react";
 
 import { Switch } from "../../components/ui/switch";
 import { cn } from "../../lib/cn";
 import type { HomeCardRow, HomeCardType } from "./home-cards";
+import { useSortableRow } from "../../lib/use-sortable-row";
 
 function CardRow({
   row,
@@ -25,18 +24,11 @@ function CardRow({
   row: HomeCardRow;
   onToggle: () => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: row.type,
-    // A card that is switched off has no position on the page, so there is
-    // nothing to reorder it against.
+  // A card that is switched off has no position on the page, so there is nothing
+  // to reorder it against.
+  const { setNodeRef, style, dragA11y, listeners } = useSortableRow(row.type, {
     disabled: !row.present,
   });
-  const { role: _dragRole, tabIndex: _dragTabIndex, ...dragA11y } = attributes;
-  const style: CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
 
   return (
     <div
@@ -73,20 +65,15 @@ function CardRow({
 
 export function HomeEditor({
   rows,
-  strays,
   sensors,
   onToggle,
   onReorder,
-  onClearStrays,
 }: {
   rows: readonly HomeCardRow[];
-  /** Registry labels for objects in Home's layout that Home does not draw. */
-  strays: readonly string[];
   sensors: SensorDescriptor<SensorOptions>[];
   onToggle: (type: HomeCardType) => void;
   /** Both indexes are into the PRESENT cards, which is what the list shows. */
   onReorder: (from: number, to: number) => void;
-  onClearStrays: () => void;
 }) {
   const present = rows.filter((r) => r.present);
 
@@ -132,25 +119,6 @@ export function HomeEditor({
         </>
       )}
 
-      {strays.length > 0 && (
-        // Only reachable from an install that edited Home on the canvas before
-        // this existed. Named rather than dropped on the quiet: the objects are
-        // still in the file, and this says so and offers the one action.
-        <div className="mt-2 rounded-xl border border-line bg-surface px-3 py-2.5">
-          <p className="text-body text-fg">Left over from the old canvas editor</p>
-          <p className="mt-0.5 text-caption1 text-fg-subtle">
-            {strays.join(", ")} — still stored, but Home does not draw{" "}
-            {strays.length === 1 ? "it" : "them"}.
-          </p>
-          <button
-            type="button"
-            onClick={onClearStrays}
-            className="mt-2 text-caption1 text-accent hover:underline"
-          >
-            Remove {strays.length === 1 ? "it" : "them"}
-          </button>
-        </div>
-      )}
     </div>
   );
 }

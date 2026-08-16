@@ -12,7 +12,7 @@
 import { useEffect } from "react";
 import { Loader2Icon, ChevronLeftIcon } from "lucide-react";
 import { useParams, useRouter } from "@tanstack/react-router";
-import { HOME_VIEW_ID } from "@main/services/home-view";
+import { HOME_VIEW_ID, screensListViews } from "@main/services/home-view";
 import { AppLink } from "../app-link";
 import { ViewDetail } from "../../settings/sections/view-detail";
 import { useStageSettings } from "../use-stage-settings";
@@ -41,7 +41,9 @@ export function ViewEditorRoute() {
     );
   }
 
-  const views = s.stageState.views ?? [];
+  // Home excluded: `canDelete` below is "is this the operator's last view?", and
+  // counting a view they cannot see or delete would answer that wrong.
+  const views = screensListViews(s.stageState.views ?? []);
   const view = views.find((v) => v.id === params.viewId);
 
   if (!view) {

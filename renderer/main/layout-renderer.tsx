@@ -1,11 +1,6 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
-import {
-  NextServiceCard,
-  ReadinessCardFromState,
-  RecentServicesCard,
-  LiveStatusCard,
-} from "../app/home/cards";
+import { HomeCard, onlineFromState } from "../app/home/cards";
 import { fitFor } from "./console-fit";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
@@ -962,23 +957,35 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     // the editable Home and the built-in one cannot drift into looking like two
     // different products.
     case "home-readiness":
-      return <ReadinessCardFromState state={ctx.state} />;
     case "home-next-service":
-      return <NextServiceCard state={ctx.state} secondsToStart={homeSecondsToStart(ctx)} />;
     case "home-recent-services":
-      return <RecentServicesCard state={ctx.state} />;
     case "home-live-status":
+      // pointer-events-none, ALWAYS — not gated on ctx.interactive like
+      // live-controls is.
+      //
+      // Three of these four cards contain in-app links (/screens, /history) put
+      // there for Home, which runs in the operator shell. Every OTHER surface
+      // that renders them — a wall display, a panel, the editor preview — is on
+      // the kiosk router, whose whole route table is "/". A touch on the SPL
+      // stat took a display to a "Route not found" page and left it there until
+      // somebody walked over and reloaded it.
+      //
+      // Their capability is ["readout"], with no drill-down, so a link that does
+      // nothing off the shell is what the model already says they are. Home
+      // renders them directly, not through here, and keeps its links.
       return (
-        <LiveStatusCard
-          pcoLive={ctx.pcoLive}
-          now={ctx.now}
-          skewMs={ctx.skewMs}
-          // From the state snapshot, not a presence hook: an object on a wall
-          // display has no business subscribing to presence, and a count that
-          // lags by a poll beats one that only works inside the shell.
-          onlineOutputIds={(ctx.state.outputs ?? []).filter((o) => o.viewId).map((o) => o.id)}
-          outputCount={(ctx.state.outputs ?? []).length}
-        />
+        <div className="w-full h-full pointer-events-none">
+          <HomeCard
+            type={c.type}
+            state={ctx.state}
+            pcoLive={ctx.pcoLive}
+            now={ctx.now}
+            skewMs={ctx.skewMs}
+            // From the state snapshot, not a presence hook — see onlineFromState.
+            onlineOutputIds={onlineFromState(ctx.state)}
+            secondsToStart={homeSecondsToStart(ctx)}
+          />
+        </div>
       );
     default: {
       // Exhaustiveness guard: every LayoutObjectType must have a case above. Add

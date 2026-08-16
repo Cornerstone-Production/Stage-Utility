@@ -1,7 +1,6 @@
-import { useRef, useState, type ChangeEvent, type CSSProperties } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { DndContext, closestCenter, type DragEndEvent, type DraggableAttributes, type DraggableSyntheticListeners } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import {
   PlusIcon,
   TrashIcon,
@@ -36,6 +35,7 @@ import { cn } from "../../lib/cn";
 import type { SectionHandlers, WirelessChannel } from "../types";
 import { PositionRangeEditor } from "./position-picker";
 import { useStageState } from "../../main/use-stage-state";
+import { useSortableRow } from "../../lib/use-sortable-row";
 
 // ---- slot row (sortable) ----------------------------------------------------
 
@@ -582,14 +582,7 @@ export function SortableSlotGroup({
   onChange: (index: number, updated: Slot) => void;
   onRemove: (index: number) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: slots[0].id,
-  });
-  const style: CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
+  const { setNodeRef, style, attributes, listeners } = useSortableRow(slots[0].id);
   const stacked = slots.length > 1;
 
   const rows = slots.map((slot, i) => {
@@ -798,12 +791,7 @@ export type PresetHandlers = Pick<
 
 /** One draggable preset row: grip + inline-rename + slots count + recall / overwrite / export / delete. */
 function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers: PresetHandlers }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: preset.id });
-  const style: CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
+  const { setNodeRef, style, attributes, listeners } = useSortableRow(preset.id);
   const [editName, setEditName] = useState(preset.name);
 
   function commitName() {

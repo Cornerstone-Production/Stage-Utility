@@ -52,6 +52,20 @@ describe("readiness", () => {
     assert.equal(checks.find((x) => x.id === "views")?.ok, false);
   });
 
+  test("Home does not count as a view the operator made", () => {
+    // Home is seeded on EVERY install, so counting it ticks this check on a
+    // fresh box - the same pre-ticked failure as the shipped default above,
+    // reintroduced the moment Home became a view. It also inflated the count
+    // beside it by one forever.
+    const checks = readinessChecks(
+      { ...ready, views: [{ id: "v1" }, { id: "home" }] } as unknown as StageState,
+      ["d1"],
+    );
+    const c = checks.find((x) => x.id === "views")!;
+    assert.equal(c.ok, false, "Home was counted as a view of the operator's own");
+    assert.doesNotMatch(c.detail, /2 views/, "Home was counted in the number shown");
+  });
+
   test("a fresh install degrades instead of throwing", () => {
     // No PCO, no plan, no outputs, no views. This is the ONLY state where the
     // readiness list is the main thing on the page, so it must not blow up.

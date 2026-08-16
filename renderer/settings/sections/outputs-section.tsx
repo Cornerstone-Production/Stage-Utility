@@ -1,9 +1,8 @@
 import { errorMessage } from "@main/services/errors";
-import { useState, useEffect, type ChangeEvent, type CSSProperties } from "react";
+import { useState, useEffect, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
-import { SortableContext, useSortable, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
 import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
@@ -33,6 +32,7 @@ import { screensListViews } from "@main/services/home-view";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useSortableRow } from "../../lib/use-sortable-row";
 
 /**
  * The Views a given screen may actually be pointed at.
@@ -100,15 +100,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
       setEditSlug(output.slug ?? "");
     }
   }
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: output.id,
-  });
-  const { role: _dragRole, tabIndex: _dragTabIndex, ...dragA11y } = attributes;
-  const style: CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
+  const { setNodeRef, style, dragA11y, listeners } = useSortableRow(output.id);
 
   useResyncOn([output.name], () => {
     setEditName(output.name);

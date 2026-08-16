@@ -113,6 +113,23 @@ describe("binding a view to a screen", () => {
     }
   });
 
+  it("does not let Home stand in for the operator's last view", async () => {
+    // "You cannot delete your last view" counted Home, which is seeded on every
+    // install and shown in no list. A fresh box read as 2 views, so deleting the
+    // real one was allowed and left an operator with nothing but Home and an
+    // empty Screens page.
+    ctl.state.views = [
+      { id: "only", name: "Stage", kind: "custom", createdAt: "", surface: "display" } as View,
+      { id: "home", name: "Home", kind: "custom", createdAt: "", surface: "console" } as View,
+    ];
+    ctl.state.outputs = [];
+    await assert.rejects(
+      () => stageController.deleteView("only"),
+      /last view/i,
+      "the operator's last real view was deleted because Home padded the count",
+    );
+  });
+
   it("still allows unrouting", async () => {
     await stageController.setOutputView("booth", "vc");
     const s = await stageController.setOutputView("booth", null);

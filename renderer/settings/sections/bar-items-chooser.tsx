@@ -5,24 +5,24 @@
 // and made lists unscrollable on a phone.
 
 import { DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { GripVerticalIcon } from "lucide-react";
 import { BAR_ITEMS, DEFAULT_BAR_ORDER, type BarItemId } from "../../app/bar-items";
 import { Checkbox } from "../../components/ui/checkbox";
 import { cn } from "../../lib/cn";
+import { useSortableRow } from "../../lib/use-sortable-row";
 
 const ALL_IDS = Object.keys(BAR_ITEMS) as BarItemId[];
 
 function Row({ id, checked, onToggle }: { id: BarItemId; checked: boolean; onToggle: () => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const { setNodeRef, style, attributes, listeners } = useSortableRow(id);
   const item = BAR_ITEMS[id];
   const Icon = item.icon;
 
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
+      style={style}
       className="flex items-center gap-3 rounded-lg border border-line bg-surface px-3 py-2.5"
     >
       <button
