@@ -478,3 +478,82 @@ what the canvas already does.
 **Sequencing note.** I argued for the widget pass (Task 7) first, so the grid has
 designed widgets to arrange. Overruled deliberately — the grid is the more
 interesting problem and the widget work lands inside it either way.
+
+---
+
+### Task 9: One widget idiom — the Home card style, everywhere
+
+**Agreed, not yet started.** This is where to pick up.
+
+> "I want all of the stage display idiom to match the home card style you
+> created and I want that to be the style going forward"
+
+#### The style, stated
+
+The composition the Home stat cards use, which is the one to standardise on:
+
+```
+CAPTION           ← uppercase, letterspaced, ~55-75% opacity, sans
+0:04:12           ← the value: mono + tabular for numbers, sans for words
+OBS + REAPER      ← the sub-line: what it is, or the qualifier
+```
+
+Left-aligned, inside the neutral card, vertically centred in its box.
+
+**Scaled, not fixed.** A wall read from forty feet needs a much bigger value
+than a dashboard tile. The same COMPOSITION and the same proportions between
+the three lines, sized to the box — not the same pixels.
+
+#### What it replaces
+
+- **Fit-to-fill bare strings.** Most readouts are one string grown until it runs
+  out of room, so the value's size is an accident of its box and its caption
+  ends up microscopic beside it.
+- **Centred readouts.** The cards are left-aligned; the widgets are centred.
+- **The solid-fill status widgets.** `obs-status` and `reaper-status` paint a
+  solid red panel with white text — a third design language again, and the
+  loudest mismatch on Home. Compare to `home-recording-obs`, which says the same
+  thing in the card idiom.
+
+#### Why the first attempt was wrong
+
+A `compact` flag on the render context, set by Home, that capped font size and
+left-aligned. Reverted before commit. It produced TWO idioms — dashboard widgets
+one way, stage widgets another — which is the opposite of the ask. The style is
+not a mode; it is the style.
+
+#### Method
+
+- [ ] **Step 1: the comparison page FIRST.** Generated from the registry like
+      the widget review (artifact `18a02512`), showing every affected widget
+      NOW vs PROPOSED, at BOTH a wall size and a dashboard tile — because the
+      whole claim is that one composition works at both. Approve by looking.
+- [ ] **Step 2:** A shared `Readout` component — caption, value, sub — that
+      scales to its box. One implementation; `Stat` becomes its dashboard-sized
+      instance rather than a second copy.
+- [ ] **Step 3:** Move readouts onto it one at a time, committing per widget so
+      any one can be reverted alone. Roughly twenty: clock, countdown, pp-timer,
+      pacing, SPL, people counter/panel, baptism, slide progress, charger, the
+      wireless pair, the status pills, section chip.
+- [ ] **Step 4:** Decide `obs-status` / `reaper-status`. Their red fill is
+      deliberate — it is a "you can see this across the room" signal — so either
+      the card idiom gains a filled variant, or these keep the fill and gain the
+      caption/value/sub structure inside it. **Open question, ask.**
+- [ ] **Step 5:** Guards. The composition is structural, so it can be asserted:
+      every readout renders a caption, a value and (where it has one) a sub, in
+      that order. Prove each by removing a line.
+- [ ] **Step 6:** Browser, at a real wall size AND a Home tile, against a COPY
+      of the config.
+
+#### Risks, stated up front
+
+- **This lands on real stage displays** — Right Display, ethan, Henry — not just
+  Home. It is a rendering change, so unlike the default-style pass it moves
+  layouts that already exist. That is the point, and it is also why Step 1 is a
+  comparison page rather than a description.
+- **Stored fontSize becomes advisory.** Objects carry a hand-tuned `fontSize`
+  (0.0879 = 95px, and so on). Under a proportional composition that number is
+  the VALUE's size, not the whole widget's — decide whether it still governs, or
+  whether the composition derives all three sizes from the box.
+- **Do not remove a knob in this pass.** The standing rule: a control comes out
+  after its replacement exists and is good, never alongside.
