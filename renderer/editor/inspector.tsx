@@ -70,13 +70,9 @@ import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
 import {
-  CARD_PRESETS,
   isKnownObjectType,
   isOfferableInEmbedPicker,
   objectRetired,
-  
-  
-  defaultStyle,
   isStylingOnly,
   
   typeLabel,
@@ -85,52 +81,12 @@ import {
 import { invoke } from "../lib/api";
 import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect,
-  ImageConfig, NumberField, NumberInput, PixelField,
+  ImageConfig, NumberInput, PixelField,
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
 
 
-type SurfaceKind = "flat" | "glass" | "elevated" | "solid" | "outline";
-const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
-  flat: { background: null, borderColor: null, borderWidth: 0, boxShadow: 0 },
-  glass: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0 },
-  elevated: { background: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0.6 },
-  solid: { background: "var(--gray-2)", borderColor: null, borderWidth: 0, cornerRadius: 0.0148, boxShadow: 0.35 },
-  outline: { background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015, cornerRadius: 0.0148, boxShadow: 0 },
-};
 
-// One consolidated list of preset "looks" for the Style dropdown — each entry is a
-// complete style patch (surface look, optionally color-tinted), so there's a single
-// control instead of separate color + surface rows with duplicate labels.
-const STYLE_PRESETS: { value: string; label: string; style: LayoutStyle }[] = [
-  { value: "flat", label: "Flat", style: SURFACE_PRESETS.flat },
-  { value: "glass", label: "Glass", style: SURFACE_PRESETS.glass },
-  { value: "glass-green", label: "Glass · Green", style: CARD_PRESETS.green },
-  { value: "glass-red", label: "Glass · Red", style: CARD_PRESETS.red },
-  { value: "glass-amber", label: "Glass · Amber", style: CARD_PRESETS.amber },
-  { value: "elevated", label: "Elevated", style: SURFACE_PRESETS.elevated },
-  { value: "solid", label: "Solid", style: SURFACE_PRESETS.solid },
-  { value: "outline", label: "Outline", style: SURFACE_PRESETS.outline },
-];
-
-// Which preset (if any) the current style matches — so the Style dropdown reflects
-// the applied look and reads as "custom" (placeholder) once fields are hand-tweaked.
-// A preset matches when every field IT sets equals the object's value.
-function matchStylePreset(s: LayoutStyle): string {
-  for (const p of STYLE_PRESETS) {
-    const keys = Object.keys(p.style) as (keyof LayoutStyle)[];
-    if (keys.every((k) => (s[k] ?? null) === (p.style[k] ?? null))) return p.value;
-  }
-  return "";
-}
-
-// Nearest labeled stop for the single Elevation slider (None/Low/Med/High).
-function elevationLabel(v: number): string {
-  if (v <= 0.175) return "None";
-  if (v <= 0.5) return "Low";
-  if (v <= 0.825) return "Med";
-  return "High";
-}
 
 const RECORDED_LATEST = "__latest__";
 
@@ -194,7 +150,6 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
 
 /** Thin wrappers over the shared themed NumberInput (kept so existing call sites
  *  and PixelField don't change). */
-const WEIGHTS = [300, 400, 500, 600, 700, 800];
 
 /**
  * Binding + framing controls for a plan-attachment object: a filename match (so it
@@ -390,10 +345,8 @@ export function Inspector({
   const integrationsSnap = useIntegrations();
   const captionChannels = Object.keys(useStageState().state?.captionChannelColors ?? {});
   const embedViews = useStageState().state?.views ?? [];
-  const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
-  const pxOf = (frac: number | undefined, dflt: number) => Math.round((frac ?? dflt) * canvas.height * 10) / 10;
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -1193,122 +1146,34 @@ export function Inspector({
 
       <Separator />
 
-      {/* Style preset — one dropdown of complete "looks" (surface + optional tint).
-          Applies the shared style fields below; fine-tune with Fill / Border / Elevation. */}
-      <Row label="Style" hint="Apply a preset look — surface (Flat/Glass/Elevated/Solid/Outline) with an optional color tint. Fine-tune with Fill, Border, and Elevation below.">
-        <Select value={matchStylePreset(s)} onValueChange={(v: string) => { const p = STYLE_PRESETS.find((x) => x.value === v); if (p) onStyle(p.style); }}>
-          <SelectTrigger><SelectValue placeholder="Apply a look…" /></SelectTrigger>
-          <SelectContent>
-            {STYLE_PRESETS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
+      {/* Colour — the one style field that survived the Phase 6 cull.
+          Everything else the panel used to offer (font size, weight, alignment,
+          fill, opacity, radius, padding, border, elevation, shadow, max lines,
+          uppercase) is now decided by the widget, which sizes its own text and
+          renders in the one app-wide frame. Measured first: of the 17 style
+          fields, three were never used at all, six had a single distinct value
+          across an entire real config, and three only ever moved together as a
+          preset. Colour was the one with genuine variation - a green countdown
+          and a red overrun say something no default can infer.
+
+          Stored values for the removed fields are left untouched in the file, so
+          a rollback restores the old look. They are ignored, not deleted. */}
+      <Row label="Text colour" hint="The colour of this widget's text. Everything else about how it looks is decided by the widget, so it reads correctly at any size.">
+        <input
+          type="color"
+          value={hexForInput(s.color, "#ffffff")}
+          onChange={(e) => onStyle({ color: e.target.value })}
+          className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent"
+          aria-label="Text colour"
+        />
       </Row>
-      {/* The way back. Every other control here adds to the styling; without this
-          the only route out of a look you have tuned into a corner is to delete
-          the object and start again, which loses its position and settings too. */}
       <Row
         label="Reset"
-        hint="Put this object's look back to the default for its type. Its position, size, settings and behaviour on other window shapes are left alone — and it can be undone."
+        hint="Put this widget's colour back to the default for its type. Its position, size and settings are left alone - and it can be undone."
       >
         <Button variant="filled" size="small" onClick={onResetLook}>
           Reset to default look
         </Button>
-      </Row>
-
-      {/* Style */}
-      {isText && (
-        <>
-          <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Type</span>
-          {/* Fall back to THIS type's own default, not a blanket 0.05. An object
-              whose default differs (an embedded view starts at 0.016) otherwise
-              reported a size it was not rendering at, so the first nudge of the
-              stepper jumped it to a number it had never been. */}
-          <Row label="Font size"><NumberField value={pxOf(s.fontSize, defaultStyle(c.type).fontSize ?? 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
-          <Row label="Weight">
-            <Select value={String(s.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{WEIGHTS.map((w) => <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
-            </Select>
-          </Row>
-          <Row label="Color"><input type="color" value={hexForInput(s.color, "#ffffff")} onChange={(e) => onStyle({ color: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" /></Row>
-          <Row label="Align">
-            <ButtonGroup>
-              {(["left", "center", "right"] as const).map((a) => (
-                <Button key={a} variant={(s.textAlign ?? "center") === a ? "accent" : "filled"} size="small" onClick={() => onStyle({ textAlign: a })}>{a[0].toUpperCase()}</Button>
-              ))}
-            </ButtonGroup>
-          </Row>
-          <Row label="V-align">
-            <ButtonGroup>
-              {(["top", "middle", "bottom"] as const).map((a) => (
-                <Button key={a} variant={(s.vAlign ?? "middle") === a ? "accent" : "filled"} size="small" onClick={() => onStyle({ vAlign: a })}>{a[0].toUpperCase()}</Button>
-              ))}
-            </ButtonGroup>
-          </Row>
-          <Row label="Uppercase"><Switch checked={s.uppercase ?? false} onCheckedChange={(v) => onStyle({ uppercase: v })} /></Row>
-          <Row label="Shadow"><NumberInput value={s.textShadow ?? 0} step={0.1} min={0} max={1} onChange={(v) => onStyle({ textShadow: v })} /></Row>
-          <Row label="Max lines"><NumberInput value={s.lineClamp ?? 0} step={1} min={0} max={10} onChange={(v) => onStyle({ lineClamp: v > 0 ? Math.round(v) : null })} /></Row>
-        </>
-      )}
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Fill</span>
-      <Row label="Fill"><input type="color" value={hexForInput(s.background, "#000000")} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" />
-        <Button variant="transparent" size="small" onClick={() => onStyle({ background: null })}>Clear</Button>
-      </Row>
-      <Row label="Opacity">
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={Math.round((s.opacity ?? 1) * 100)}
-          onChange={(e) => onStyle({ opacity: parseInt(e.target.value, 10) / 100 })}
-          className="flex-1 min-w-0 accent-accent"
-          aria-label="Opacity"
-        />
-        <span className="w-9 shrink-0 text-right tabular-nums text-caption2 text-fg">{Math.round((s.opacity ?? 1) * 100)}%</span>
-      </Row>
-      <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
-      <Row label="Padding"><NumberField value={pxOf(s.padding, 0)} step={1} min={0} max={Math.round(0.3 * canvas.height)} suffix="px" onChange={(px) => onStyle({ padding: px / canvas.height })} /></Row>
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Border</span>
-      <Row label="Border">
-        <input
-          type="color"
-          value={hexForInput(s.borderColor, "#ffffff")}
-          onChange={(e) => onStyle({ borderColor: e.target.value, borderWidth: s.borderWidth ?? 0 })}
-          className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent"
-          aria-label="Border color"
-        />
-        <NumberField
-          value={Math.round((s.borderWidth ?? 0) * canvas.height)}
-          step={1}
-          min={0}
-          max={40}
-          suffix="px"
-          onChange={(px) => onStyle({ borderWidth: px / canvas.height, borderColor: s.borderColor ?? "#ffffff" })}
-        />
-      </Row>
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Elevation</span>
-      {/* Elevation: one slider with labeled None/Low/Med/High stops (ticks), fine
-          values allowed in between. Drives the box's drop shadow for layered depth. */}
-      <Row label="Elevation" hint="Soft drop shadow under this object's box — lifts it above whatever it overlaps. Snaps toward None/Low/Med/High; drag for in-between.">
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={s.boxShadow ?? 0}
-          onChange={(e) => onStyle({ boxShadow: parseFloat(e.target.value) })}
-          list="elevation-stops"
-          className="flex-1 min-w-0 accent-accent"
-          aria-label="Elevation"
-        />
-        <datalist id="elevation-stops">
-          <option value="0" />
-          <option value="0.35" />
-          <option value="0.65" />
-          <option value="1" />
-        </datalist>
-        <span className="w-10 shrink-0 text-caption2 text-fg-muted text-right tabular-nums">{elevationLabel(s.boxShadow ?? 0)}</span>
       </Row>
 
       <Separator />
