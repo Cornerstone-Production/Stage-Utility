@@ -535,6 +535,18 @@ not a mode; it is the style.
       any one can be reverted alone. Roughly twenty: clock, countdown, pp-timer,
       pacing, SPL, people counter/panel, baptism, slide progress, charger, the
       wireless pair, the status pills, section chip.
+- [ ] **Step 3b — THE VALUE MAY WANT TO BE BIGGER.** Approved with this caveat:
+      the mockup puts the value at **0.30 of the widget's height**, and it likely
+      wants raising — a clock especially. It is deliberately unresolved, because
+      a static page at two chosen sizes cannot answer it: the number that matters
+      is how it reads on a real wall from across the room, against a real tile on
+      Home.
+
+      So treat 0.30 as provisional, put the ratio in ONE named constant, and tune
+      it on real screens after the composition lands. Do not tune it in the
+      mockup — that is the trap of making the drawing look right instead of the
+      product.
+
 - [x] **Step 4 — DECIDED: the red fill stays.** It is a see-it-across-the-room
       signal and it works. The card idiom gains a FILLED variant: same
       caption/value/sub composition, painted on a solid ground instead of the
