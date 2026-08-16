@@ -462,7 +462,6 @@ export function onlineFromState(state: StageState): string[] {
  */
 export function HomeCard({
   type,
-  config,
   state,
   pcoLive,
   now,
@@ -471,8 +470,6 @@ export function HomeCard({
   secondsToStart,
 }: {
   type: HomeCardType;
-  /** The object's own config, for the cards that take one. */
-  config?: Record<string, unknown>;
   state: StageState;
   pcoLive: PcoLiveDTO | null;
   now: number;
@@ -485,7 +482,11 @@ export function HomeCard({
     case "home-live-status":
       return <LiveStatusCard pcoLive={pcoLive} now={now} skewMs={skewMs} />;
     case "home-recording":
-      return <RecordingCard recorder={config?.recorder as string | undefined} />;
+      return <RecordingCard />;
+    case "home-recording-obs":
+      return <RecordingCard recorder="OBS" />;
+    case "home-recording-reaper":
+      return <RecordingCard recorder="REAPER" />;
     case "home-spl":
       return <SplCard />;
     case "home-screens":

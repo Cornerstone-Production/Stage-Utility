@@ -81,7 +81,7 @@ export function CardChrome({
             {s.toUpperCase()}
           </button>
         ))}
-        <span className="mx-0.5 h-4 w-px bg-line" />
+                <span className="mx-0.5 h-4 w-px bg-line" />
         <select
           value={when}
           onChange={(e) => onWhen(e.target.value as HomeVisibility)}

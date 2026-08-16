@@ -166,3 +166,4 @@ export function rowFill(cards: readonly LayoutObject[]): number[] {
   }
   return rows;
 }
+

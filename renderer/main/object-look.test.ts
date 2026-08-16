@@ -26,7 +26,7 @@ const BARE = [
   "slots-grid",
   // Home's cards draw their own frame — a default card would double-frame them.
   "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
-  "home-recording", "home-spl", "home-screens",
+  "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl", "home-screens",
   // Retired, and left exactly as it shipped.
   "service-order",
 ] as const;
@@ -51,7 +51,7 @@ describe("a widget you just added", () => {
     // backup with the suite green. When this fails, decide the new type's side
     // and add it here or to BARE — do not bump the number.
     const all = Object.keys(LAYOUT_OBJECTS);
-    assert.equal(all.length, 48);
+    assert.equal(all.length, 50);
     assert.equal(all.filter(hasCard).length, 28);
     assert.equal(all.filter((t) => !hasCard(t)).length, BARE.length);
   });

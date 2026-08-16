@@ -91,6 +91,8 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   "home-next-service": ["readout"],
   "home-live-status": ["readout"],
   "home-recording": ["readout"],
+  "home-recording-obs": ["readout"],
+  "home-recording-reaper": ["readout"],
   "home-spl": ["readout"],
   "home-screens": ["readout"],
   "home-recent-services": ["readout"],

@@ -230,7 +230,9 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // The other two things Home draws. They existed as bespoke panels; making them
   // objects is what lets the Home tab's own editor govern the whole page with
   // one mechanism (Phase 7, Task 6).
-  { type: "home-live-status", label: "Live service status", group: "PCO / service", after: "home-next-service" },
+  // Renamed when it was split: it drew recording and SPL too, and does not any
+  // more. The type id stays so no stored layout has to move.
+  { type: "home-live-status", label: "Service timer", group: "PCO / service", after: "home-next-service" },
   { type: "home-recent-services", label: "Recent services", group: "PCO / service", after: "home-live-status" },
   // The live card's insides, split out so each can be placed on its own once
   // Home became a grid. The card kept the timer; these three kept their look.
@@ -238,6 +240,10 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // cards, so none of them displaces the first entry of a group.
   { type: "home-spl", label: "Sound level", group: "Audio (SPL)", after: "spl-meter" },
   { type: "home-recording", label: "Recording", group: "Status", after: "integration-status" },
+  // One per recorder, so each is found by NAME in the palette rather than behind
+  // a control. The combined one above still answers "are we getting this?".
+  { type: "home-recording-obs", label: "OBS recording", group: "OBS", after: "obs-status" },
+  { type: "home-recording-reaper", label: "REAPER recording", group: "REAPER", after: "reaper-status" },
   { type: "home-screens", label: "Screens online", group: "Status", after: "home-recording" },
 ];
 

@@ -1044,6 +1044,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "home-recent-services":
     case "home-live-status":
     case "home-recording":
+    case "home-recording-obs":
+    case "home-recording-reaper":
     case "home-spl":
     case "home-screens":
       // pointer-events-none, ALWAYS — not gated on ctx.interactive like

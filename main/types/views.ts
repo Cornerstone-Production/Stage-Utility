@@ -238,11 +238,17 @@ export type LayoutObjectConfig =
   // is only the container that goes. Each is integration-agnostic: the recording
   // one answers "are we getting this?" across every recorder at once.
   /**
-   * `recorder` picks which one it watches: a name, or "any" for the combined
-   * answer across all of them. A name rather than a per-recorder object TYPE, so
-   * a new recording integration is an extra option here and not a new widget.
+   * Recording, as three widgets rather than one with a picker.
+   *
+   * `home-recording` answers it across every recorder at once — "are we getting
+   * this?", which is the mid-service question. The other two watch one each, so
+   * they are found by NAME in the palette instead of behind a control somebody
+   * has to know to look for. A new recording integration adds one entry to
+   * `recorders()` (which the combined one picks up for free) and one type here.
    */
-  | { type: "home-recording"; recorder?: string }
+  | { type: "home-recording" }
+  | { type: "home-recording-obs" }
+  | { type: "home-recording-reaper" }
   | { type: "home-spl" }
   | { type: "home-screens" }
   | { type: "home-recent-services" }
