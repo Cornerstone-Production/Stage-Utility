@@ -11,7 +11,7 @@ import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { invoke } from "../lib/api";
 import { BrandLogo } from "../components/brand-logo";
 import { Readout } from "./readout";
-import { IDIOM_TYPES } from "./readout-types";
+import { IDIOM_TYPES } from "@main/types/readout-types";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
@@ -419,6 +419,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       caption={(c as { caption?: string | null }).caption}
       value={value}
       mono={TABULAR_TYPES.has(c.type)}
+      // The object's own alignment, so a custom view can centre one widget
+      // without every other readout following it.
+      align={o.style?.textAlign}
       {...opts}
     />
   );
@@ -701,7 +704,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "charger-battery":
       return <ChargerBattery config={c} all={ctx.state.chargerBays ?? []} H={ctx.H} baseStyle={ts} />;
     case "spl-meter":
-      return <SplMeterValue config={c} spl={ctx.spl} />;
+      return <SplMeterValue config={c} spl={ctx.spl} align={o.style?.textAlign} />;
     case "people-counter": {
       const metric = c.metric ?? "attendance";
       // "min" = lowest in-room during the live service; "serviceAttendance" = entered
@@ -725,7 +728,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "people-panel":
       return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} servicePeak={ctx.servicePeak} servicePeakAttendance={ctx.servicePeakAttendance} ts={ts} H={ctx.H} />;
     case "baptism-timer":
-      return <BaptismTimer state={ctx.baptism} config={c} now={ctx.now} />;
+      return <BaptismTimer state={ctx.baptism} config={c} now={ctx.now} align={o.style?.textAlign} />;
     case "record-status": {
       // "Is anything recording?" — one indicator regardless of which recorder the
       // campus uses, so a layout survives a switch from OBS to REAPER unchanged.
@@ -756,6 +759,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
             // a state rather than a second design language.
             fill={(c.fillWhenRecording ?? true) ? "var(--red-9)" : null}
             valueColor={(c.fillWhenRecording ?? true) ? null : "var(--red-10)"}
+            align={o.style?.textAlign}
           />
         );
       }
@@ -767,6 +771,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           value={connected ? (c.idleText ?? "STANDBY") : (c.offlineText ?? "NO RECORDER")}
           upper
           dim={!connected}
+            align={o.style?.textAlign}
         />
       );
     }
@@ -800,6 +805,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
             mono={false}
             fill={(c.fillWhenRecording ?? true) ? "var(--red-9)" : null}
             valueColor={(c.fillWhenRecording ?? true) ? null : "var(--red-10)"}
+            align={o.style?.textAlign}
           />
         );
       }
@@ -811,6 +817,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           value={connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? "Offline")}
           upper
           dim={!connected}
+            align={o.style?.textAlign}
         />
       );
     }
@@ -835,6 +842,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
             upper
             fill={(c.fillWhenRecording ?? true) ? "var(--red-9)" : null}
             valueColor={(c.fillWhenRecording ?? true) ? null : "var(--red-10)"}
+            align={o.style?.textAlign}
           />
         );
       }
@@ -846,6 +854,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           value={connected ? (c.idleText ?? "Standby") : (c.offlineText ?? "Offline")}
           upper
           dim={!connected}
+            align={o.style?.textAlign}
         />
       );
     }
@@ -913,6 +922,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           upper
           valueColor={color}
           dim={conn === "disconnected"}
+            align={o.style?.textAlign}
         />
       );
     }
@@ -934,6 +944,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           sub={showOnline && showBattery && lowest != null ? `${lowest}% lowest` : null}
           valueColor={!showOnline && lowest != null ? batteryColor(lowest) : null}
           mono
+            align={o.style?.textAlign}
         />
       );
     }
@@ -959,6 +970,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           valueColor={battery && d.battery != null ? batteryColor(d.battery) : null}
           mono
           dim={!d.online}
+            align={o.style?.textAlign}
         />
       );
     }
@@ -1020,9 +1032,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
 function SplMeterValue({
   config,
   spl,
+  align,
 }: {
   config: Extract<LayoutObjectConfig, { type: "spl-meter" }>;
   spl: SplMetricsDTO | null;
+  align: LayoutHAlign | undefined;
 }) {
   const r = resolveSplValue(spl, config.meterId, config.metricKey);
   // Peak hold is a running max over samples, so it has to survive renders — but it
@@ -1035,7 +1049,7 @@ function SplMeterValue({
   if (nextHold !== hold) setHold(nextHold);
 
   const shown = config.peakHold ? nextHold.peak : (r?.value ?? null);
-  if (shown == null) return <Readout caption={config.caption} value="— dB" dim mono />;
+  if (shown == null) return <Readout caption={config.caption} value="— dB" dim mono align={align} />;
   const color = splThresholdColor(shown, config.thresholds);
   // "pk" and the metric name were two inline 0.6em spans trailing the number, so
   // a meter with both read "97 dB pk SPL-A" as one run of text at three sizes.
@@ -1048,6 +1062,7 @@ function SplMeterValue({
       sub={quals.join(" · ") || null}
       valueColor={color}
       mono
+            align={align}
     />
   );
 }
@@ -1505,10 +1520,12 @@ function BaptismTimer({
   state,
   config,
   now,
+  align,
 }: {
   state: BaptismState | null;
   config: Extract<LayoutObjectConfig, { type: "baptism-timer" }>;
   now: number;
+  align: LayoutHAlign | undefined;
 }) {
   const field = config.field ?? "live";
   const sum = summarizeBaptism(state);
@@ -1550,6 +1567,7 @@ function BaptismTimer({
       value={value}
       sub={config.showLabel ? config.label ?? fallback : null}
       mono
+            align={align}
     />
   );
 }

@@ -3,7 +3,7 @@ import { test, describe } from "node:test";
 import { readFileSync } from "node:fs";
 
 import { CAPABILITIES } from "@main/types/object-capabilities";
-import { IDIOM_TYPES } from "./readout-types.js";
+import { IDIOM_TYPES } from "@main/types/readout-types.js";
 
 // What this file can and cannot prove, stated plainly, because a guard that
 // quietly proves nothing is worse than no guard:

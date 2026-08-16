@@ -83,6 +83,7 @@ import {
   typeLabel,
   usesPropInstance,
 } from "../main/layout-objects";
+import { IDIOM_TYPES, DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
 import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect,
@@ -1250,8 +1251,13 @@ export function Inspector({
           <Row label="Color"><input type="color" value={hexForInput(s.color, "#ffffff")} onChange={(e) => onStyle({ color: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" /></Row>
           <Row label="Align">
             <ButtonGroup>
+              {/* Which button reads as active has to be the alignment the object
+                  will actually RENDER at, not a single hard-coded guess. A
+                  readout with nothing stored aligns left; showing "C" lit here
+                  would tell the operator the widget is centred while it sits
+                  left, and the first click would appear to do nothing. */}
               {(["left", "center", "right"] as const).map((a) => (
-                <Button key={a} variant={(s.textAlign ?? "center") === a ? "accent" : "filled"} size="small" onClick={() => onStyle({ textAlign: a })}>{a[0].toUpperCase()}</Button>
+                <Button key={a} variant={(s.textAlign ?? (IDIOM_TYPES.has(c.type) ? DEFAULT_READOUT_ALIGN : "center")) === a ? "accent" : "filled"} size="small" onClick={() => onStyle({ textAlign: a })}>{a[0].toUpperCase()}</Button>
               ))}
             </ButtonGroup>
           </Row>

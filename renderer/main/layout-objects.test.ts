@@ -145,25 +145,48 @@ const RECONFIGURED: Record<string, Record<string, unknown>> = {
  * A stored object carries its own style, so no existing layout moved.
  */
 const RESTYLED: Record<string, Record<string, unknown>> = {
-  "clock": { ...CARD_NEUTRAL, fontSize: 0.06, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle" },
-  "countdown-timer": { ...CARD_NEUTRAL, fontSize: 0.085, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "clock": { ...CARD_NEUTRAL, fontSize: 0.06, fontWeight: 600, color: "#ffffff", vAlign: "middle" },
+  "countdown-timer": { ...CARD_NEUTRAL, fontSize: 0.085, fontWeight: 700, color: "#ffffff", vAlign: "middle" },
   "live-controls": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle" },
   "view-embed": { ...CARD_NEUTRAL, fontSize: 0.016, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
   "plan-attachment": { ...CARD_NEUTRAL },
   "current-slide-text": { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true },
   "next-slide-text": { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true },
   "current-slide-notes": { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true },
-  "section-chip": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, letterSpacing: 0.04 },
-  "pp-timer": { ...CARD_NEUTRAL, fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
-  "slide-progress": { ...CARD_NEUTRAL, fontSize: 0.06, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "section-chip": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", vAlign: "middle", uppercase: true, letterSpacing: 0.04 },
+  "pp-timer": { ...CARD_NEUTRAL, fontSize: 0.1, fontWeight: 700, color: "#ffffff", vAlign: "middle" },
+  "slide-progress": { ...CARD_NEUTRAL, fontSize: 0.06, fontWeight: 600, color: "#ffffff", vAlign: "middle" },
   "charger-battery": { ...CARD_NEUTRAL, fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "middle" },
-  "spl-meter": { ...CARD_NEUTRAL, fontSize: 0.085, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
-  "service-pacing": { ...CARD_NEUTRAL, fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
-  "people-counter": { ...CARD_NEUTRAL, fontSize: 0.12, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "spl-meter": { ...CARD_NEUTRAL, fontSize: 0.085, fontWeight: 700, color: "#ffffff", vAlign: "middle" },
+  "service-pacing": { ...CARD_NEUTRAL, fontSize: 0.1, fontWeight: 700, color: "#ffffff", vAlign: "middle" },
+  "people-counter": { ...CARD_NEUTRAL, fontSize: 0.12, fontWeight: 700, color: "#ffffff", vAlign: "middle" },
   "people-panel": { ...CARD_NEUTRAL, fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
-  "baptism-timer": { ...CARD_NEUTRAL, fontSize: 0.14, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "baptism-timer": { ...CARD_NEUTRAL, fontSize: 0.14, fontWeight: 700, color: "#ffffff", vAlign: "middle" },
   "notes": { ...CARD_NEUTRAL, fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
   "checklist": { ...CARD_NEUTRAL, fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
+
+  // ── The readouts stop shipping an alignment (Phase 7 Task 9) ───────────────
+  //
+  // Every preset above spreads TEXT(), which writes `textAlign: "center"`. So
+  // every readout ever created stored a centre alignment as a side effect of
+  // being created — nobody chose it — and the widget idiom's left-aligned
+  // composition could not be the DEFAULT without ignoring the field entirely.
+  // Ignoring it is what the first cut did, and it broke the alignment control
+  // for every readout on every custom view.
+  //
+  // So readouts ship with no alignment: absent means the idiom's default (left),
+  // and anything stored is a real choice the editor can still make. The entries
+  // above lost their `textAlign` for the same reason; these six had no recorded
+  // restyle before, so the removal is their first.
+  //
+  // readout-align.test.tsx holds the precise version of this: an EXACT walk
+  // asserting no readout type ships one and every non-readout still does.
+  "wireless-summary": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", vAlign: "middle" },
+  "wireless-channel": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", vAlign: "middle" },
+  "record-status": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 700, color: "#ffffff", vAlign: "middle", uppercase: true },
+  "obs-status": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 700, color: "#ffffff", vAlign: "middle", uppercase: true },
+  "reaper-status": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 700, color: "#ffffff", vAlign: "middle", uppercase: true },
+  "integration-status": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", vAlign: "middle" },
 };
 
 /** defaultConfig() as it was, case for case. */

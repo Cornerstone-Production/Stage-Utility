@@ -25,6 +25,8 @@ import {
   CAPTION_SCALE, CAPTION_MIN_PX, SUB_SCALE, SUB_MIN_PX, GAP_SCALE,
   CAPTION_LEADING, VALUE_LEADING, SUB_LEADING, PAD_SCALE, valueSizeFor,
 } from "./readout-size";
+import { DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
+import type { LayoutHAlign } from "@main/types/views";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
 
 /**
@@ -141,6 +143,15 @@ export interface ReadoutProps {
    */
   upper?: boolean;
   /**
+   * How the three lines align against each other.
+   *
+   * Defaults to left, which is what makes the composition read as one object.
+   * Honoured rather than fixed, because a custom view legitimately wants a
+   * centred clock as a centrepiece — the first cut of this idiom hard-coded left
+   * and silently broke the alignment control for every readout.
+   */
+  align?: LayoutHAlign | null;
+  /**
    * Dim the whole composition.
    *
    * For a widget that cannot report — an integration that is unreachable, a
@@ -171,7 +182,13 @@ export function Readout({
   weight,
   upper = false,
   dim = false,
+  align,
 }: ReadoutProps) {
+  const side = align ?? DEFAULT_READOUT_ALIGN;
+  // One value drives BOTH the flex cross-axis and text-align. The lines are
+  // different widths, so aligning the boxes without aligning the text leaves a
+  // centred caption sitting over a left-set value.
+  const items = side === "right" ? "flex-end" : side === "center" ? "center" : "flex-start";
   const [ref, boxH, boxW] = useBoxSize();
   const captionPx = caption ? Math.max(CAPTION_MIN_PX, boxH * CAPTION_SCALE) : 0;
   const subPx = sub ? Math.max(SUB_MIN_PX, boxH * SUB_SCALE) : 0;
@@ -199,6 +216,7 @@ export function Readout({
     textOverflow: "ellipsis",
     flexShrink: 0,
     width: "100%",
+    textAlign: side,
   };
   const subStyle: CSSProperties = {
     fontSize: `${subPx}px`,
@@ -209,6 +227,7 @@ export function Readout({
     textOverflow: "ellipsis",
     flexShrink: 0,
     width: "100%",
+    textAlign: side,
   };
 
   return (
@@ -225,7 +244,7 @@ export function Readout({
         display: "flex",
         flexDirection: "column",
         justifyContent: "center",
-        alignItems: "flex-start",
+        alignItems: items,
         gap: `${boxH * GAP_SCALE}px`,
         overflow: "hidden",
         minHeight: 0,
@@ -248,7 +267,7 @@ export function Readout({
         />
       ) : null}
       {caption ? <span style={{ ...captionStyle, position: "relative" }}>{caption}</span> : null}
-      <div ref={wrapRef} style={{ width: "100%", minHeight: 0, overflow: "hidden", position: "relative" }}>
+      <div ref={wrapRef} style={{ width: "100%", minHeight: 0, overflow: "hidden", position: "relative", textAlign: side }}>
         <span
           ref={elRef}
           style={{

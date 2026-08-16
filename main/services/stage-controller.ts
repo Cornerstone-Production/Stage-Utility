@@ -3,6 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
+import { migrateReadoutAlign, countNeverChosenAlign } from "./readout-align-migration.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { barConfigStore } from "./bar-config-store.js";
@@ -384,7 +385,20 @@ export class StageController {
     // may write views, and two writers racing over the same file is how one of
     // them loses. Seeding first means the surface migration also sees Home.
     const seeded = seedHomeView(views);
-    const result = migrateSurfaces(seeded as View[], outputs);
+    // Readouts shed the centre alignment the registry wrote into every object it
+    // created, so the widget idiom's left-aligned composition can be the DEFAULT
+    // while the alignment control still works. Runs in this same pass for the
+    // same reason Home is seeded here: one writer for views.json, not three.
+    const aligned = migrateReadoutAlign(seeded as View[]);
+    const realigned = countNeverChosenAlign(seeded as View[]);
+    if (realigned > 0) {
+      console.log(
+        `[readout-align] ${realigned} readout${realigned === 1 ? "" : "s"} carried a centre alignment ` +
+          "written by the object registry rather than chosen; cleared so they use the default (left). " +
+          "Alignment is still editable per object in the layout editor.",
+      );
+    }
+    const result = migrateSurfaces(aligned, outputs);
     const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
     const outputsChanged = result.outputs.some((o, i) => o !== outputs[i]);
     if (!viewsChanged && !outputsChanged) return { views, outputs };

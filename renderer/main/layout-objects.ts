@@ -15,6 +15,7 @@
 // exhaustiveness check so a type without a renderer is also a compile error.
 
 import type { HomeCardSize, HomeVisibility } from "@main/types/views";
+import { IDIOM_TYPES } from "@main/types/readout-types";
 
 /** Palette sections, in the order the add-object dropdown shows them. */
 export const PALETTE_GROUP_ORDER = [
@@ -715,7 +716,25 @@ export function isKnownObjectType(t: LayoutObjectType): boolean {
 // answers "no" so nothing tries to configure something it cannot describe.
 export const typeLabel = (t: LayoutObjectType): string => findLayoutObjectSpec(t)?.label ?? `Unsupported object (${t})`;
 export const defaultConfig = (t: LayoutObjectType): LayoutObjectConfig => findLayoutObjectSpec(t)?.config() ?? ({ type: t } as LayoutObjectConfig);
-export const defaultStyle = (t: LayoutObjectType): LayoutStyle => findLayoutObjectSpec(t)?.style() ?? {};
+/**
+ * The style a NEW object of this type starts with.
+ *
+ * Readouts come out with no `textAlign` at all. Every style preset here spreads
+ * TEXT(), which writes `textAlign: "center"` — so every readout ever created
+ * stored a centre alignment nobody chose, and the idiom's left-aligned
+ * composition could not be the default without ignoring the field entirely.
+ *
+ * Stripped HERE because this is the single funnel: adding an object, resetting
+ * an object's style and seeding a Home card all come through it, so a readout
+ * cannot acquire the value by some other door. `readout-align.test.ts` walks
+ * every readout type rather than trusting that.
+ */
+export const defaultStyle = (t: LayoutObjectType): LayoutStyle => {
+  const s = findLayoutObjectSpec(t)?.style() ?? {};
+  if (!IDIOM_TYPES.has(t)) return s;
+  const { textAlign: _neverChosen, ...rest } = s;
+  return rest;
+};
 export const objectIntegration = (t: LayoutObjectType) => findLayoutObjectSpec(t)?.integration;
 export const isStylingOnly = (t: LayoutObjectType): boolean => findLayoutObjectSpec(t)?.stylingOnly === true;
 export const usesPropInstance = (t: LayoutObjectType): boolean => findLayoutObjectSpec(t)?.propInstance === true;
