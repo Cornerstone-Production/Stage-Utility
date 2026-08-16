@@ -423,3 +423,45 @@ other fifteen fields, removed first, had to be reverted (1a21e7e).
 | Home at /screens/home/edit | **Replaced** | Edited in its own tab |
 | Home in the Screens list | **Removed** | It is not a screen |
 | Every style and config control | Unchanged | Restored by 1a21e7e; culled per widget only once variants exist |
+
+---
+
+### Task 8: Home becomes a widget grid
+
+**Agreed after a prototype** (artifact `bbdc77eb`), which is the spec. Replaces the
+show/hide toggles Task 6 shipped.
+
+Home stops being a stack of four fixed cards and becomes an iOS-style grid: add
+any widget in the registry, at one of four preset sizes, drag to arrange.
+
+**The grid, settled by the arithmetic.** Three columns. Sizes are (columns ×
+rows): `S 1×1`, `M 2×1`, `L 2×2`, `XL 3×2`.
+
+- `S + M`, `S + L` and `S + S + S` each fill a row; `XL` is a row of its own.
+- `L` leaves a 1-wide, 2-tall gap that two stacked `S` complete exactly — the
+  block that makes the layout read as composed rather than striped.
+- Small is 1×1, so every leftover slot is fillable. Nothing can strand a gap.
+- **What it gives up:** `M + M` is 4 over a 3-wide row, so two equal halves side
+  by side is not expressible. Thirds and 1/3+2/3 replace it. Decided knowingly.
+
+**Container queries, not viewport.** The prototype first used `@media` and
+collapsed to 2 columns under an 860px WINDOW — which is what Home looks like
+beside the sidebar, so it never showed three columns at all. The grid must query
+its own container: 3 columns down to ~520px of container, then 2, then 1.
+
+**Rendering.** `useLayoutData` and `ObjectContent` are both exported, and the
+render context is one object literal over them — so Home can draw any registry
+widget without a canvas. Text scales off a nominal height derived from the card's
+pixel height, so a default readout lands at roughly a third of its card, which is
+what the canvas already does.
+
+- [ ] **Step 1:** Size on the object, defaults per type, pure grid operations.
+- [ ] **Step 2:** Home renders the grid through the shared renderer.
+- [ ] **Step 3:** The editor: add from the palette, resize, drag, remove.
+- [ ] **Step 4:** Per-widget visibility — *Always / During a service / Rest of the
+      week* — replacing the mood rule Task 6 hid inside the code.
+- [ ] **Step 5:** Guards, each proven. **Step 6:** Browser. **Step 7:** Commit.
+
+**Sequencing note.** I argued for the widget pass (Task 7) first, so the grid has
+designed widgets to arrange. Overruled deliberately — the grid is the more
+interesting problem and the widget work lands inside it either way.
