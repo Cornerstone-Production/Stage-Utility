@@ -244,6 +244,20 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     config: () => ({ type: "home-next-service" }),
     style: BARE,
   },
+  "home-live-status": {
+    label: "Live service status",
+    blurb: "The running service's timer, recording and SPL at a glance",
+    group: "PCO / service",
+    config: () => ({ type: "home-live-status" }),
+    style: BARE,
+  },
+  "home-recent-services": {
+    label: "Recent services",
+    blurb: "Attendance, length and start time, recently averaged",
+    group: "PCO / service",
+    config: () => ({ type: "home-recent-services" }),
+    style: BARE,
+  },
   "service-pacing": {
     label: "Service pacing",
     blurb: "How far ahead or behind the plan the service is",

@@ -210,6 +210,8 @@ export type LayoutObjectConfig =
   // show is the state of this install, and there is nothing to choose.
   | { type: "home-readiness" }
   | { type: "home-next-service" }
+  | { type: "home-live-status" }
+  | { type: "home-recent-services" }
   // A timer running INSIDE ProPresenter (its stage/countdown timers) — distinct from
   // the PCO countdown. `timerName` picks one by name (blank = the first reported);
   // `warnStates` colors the readout when the timer's state reads as overrun/expired.

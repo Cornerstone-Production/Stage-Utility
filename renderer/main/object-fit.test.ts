@@ -21,7 +21,7 @@ import { CAPABILITIES } from "@main/types/object-capabilities";
 const SRC = readFileSync(new URL("./layout-renderer.tsx", import.meta.url), "utf8");
 
 describe("the object type registry", () => {
-  test("holds exactly 43 types", () => {
+  test("holds exactly 45 types", () => {
     // An EXACT count, never a floor. A floor with slack is how three config
     // stores went missing from every backup with the suite green. When this
     // fails, the answer is not to bump the number: it is to run the browser
@@ -29,7 +29,7 @@ describe("the object type registry", () => {
     //
     // The design doc said 38 while the registry held 41 — three types had been
     // added without anyone re-reading it.
-    assert.equal(Object.keys(CAPABILITIES).length, 43);
+    assert.equal(Object.keys(CAPABILITIES).length, 45);
   });
 });
 

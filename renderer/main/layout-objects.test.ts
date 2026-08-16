@@ -166,6 +166,11 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // surface rather than being a bespoke page (Phase 6, carrying a Phase 4 debt).
   { type: "home-readiness", label: "Readiness", group: "PCO / service", after: "view-embed" },
   { type: "home-next-service", label: "Next service", group: "PCO / service", after: "home-readiness" },
+  // The other two things Home draws. They existed as bespoke panels; making them
+  // objects is what lets the Home tab's own editor govern the whole page with
+  // one mechanism (Phase 7, Task 6).
+  { type: "home-live-status", label: "Live service status", group: "PCO / service", after: "home-next-service" },
+  { type: "home-recent-services", label: "Recent services", group: "PCO / service", after: "home-live-status" },
 ];
 
 /**

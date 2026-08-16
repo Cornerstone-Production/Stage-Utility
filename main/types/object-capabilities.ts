@@ -89,6 +89,8 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   // check, so the OBJECT has nowhere separate to drill to.
   "home-readiness": ["readout"],
   "home-next-service": ["readout"],
+  "home-live-status": ["readout"],
+  "home-recent-services": ["readout"],
 };
 
 /**

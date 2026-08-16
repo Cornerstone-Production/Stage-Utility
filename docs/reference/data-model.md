@@ -43,6 +43,37 @@ screens, rather than silently unbinding them.
 Only **custom** views can be consoles: the built-in kinds have no editable layout,
 so there is nowhere to put a control.
 
+### Home
+
+Home is a view too, but a deliberately odd one. It stores which cards the front
+page shows and the order they appear in — and **nothing else about it is read**.
+Every object's position and size is filler the type requires; Home has no canvas,
+because a stack of cards has no geometry to arrange.
+
+So Home is edited in the Home tab itself, with **Edit cards**: a switch per card
+and a drag handle to reorder. It is not listed under Screens, not offered in a
+screen's view picker, and the server refuses to bind it to one.
+
+The cards come from the same object registry every other surface uses, so a Home
+card and a stage-display widget are the same component. Each belongs to one of
+Home's two moods — while a service is running, or the rest of the week:
+
+| Card | Shown |
+|---|---|
+| **Live service status** | while a service is running |
+| **Next service** | the rest of the week |
+| **Readiness** | the rest of the week |
+| **Recent services** | the rest of the week |
+
+A card switched off stays off, including across a restart. A build that adds a
+card gives it to installs that have never edited Home, and leaves an edited Home
+alone.
+
+The plan picker and the commissioning panel below the cards are not cards and are
+not editable: one mutates PCO selection, the other hands out display URLs. They
+are front-door utilities rather than dashboard content, and neither belongs on a
+wall.
+
 ### Upgrading an existing install
 
 Nothing has to be done by hand. On first start, any view containing a button

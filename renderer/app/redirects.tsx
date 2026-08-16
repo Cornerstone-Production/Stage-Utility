@@ -14,6 +14,9 @@ export const MOVED_ROUTES: Record<string, string> = {
   // Views and Displays merged into one Screens surface.
   "/views": "/screens",
   "/displays": "/screens",
+  // NOT here: /screens/home/edit. It would collide with the /screens/$viewId/edit
+  // route, and which one won would come down to TanStack's ranking rather than
+  // intent. ViewEditorRoute sends Home home itself.
 };
 
 export function makeRedirect(to: string) {

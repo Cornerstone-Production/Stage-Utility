@@ -70,6 +70,8 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
   "ndi-video": CastIcon,
   "home-readiness": CheckSquareIcon,
   "home-next-service": ListIcon,
+  "home-live-status": GaugeIcon,
+  "home-recent-services": TrendingUpIcon,
 };
 
 /**

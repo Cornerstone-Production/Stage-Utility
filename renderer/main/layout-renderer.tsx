@@ -1,7 +1,11 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
-import { NextServiceCard, ReadinessCard } from "../app/home/idle-panel";
-import { readinessChecks } from "../app/home/readiness";
+import {
+  NextServiceCard,
+  ReadinessCardFromState,
+  RecentServicesCard,
+  LiveStatusCard,
+} from "../app/home/cards";
 import { fitFor } from "./console-fit";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
@@ -426,19 +430,6 @@ function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign
   );
 }
 
-
-/**
- * Home's readiness card, as a layout object.
- *
- * Renders the same ReadinessCard the fixed Home panel does. The online-output
- * list comes from the state snapshot rather than the live presence hook: an
- * object on a wall display has no business subscribing to presence, and a check
- * that lags by a poll is better than one that only works on the shell.
- */
-function HomeReadinessObject({ ctx }: { ctx: LayoutRenderCtx }) {
-  const online = ctx.state.outputs.filter((o) => o.viewId).map((o) => o.id);
-  return <ReadinessCard checks={readinessChecks(ctx.state, online)} />;
-}
 
 /** Seconds until the next service, or null. Same source as the context bar. */
 function homeSecondsToStart(ctx: LayoutRenderCtx): number | null {
@@ -971,9 +962,24 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     // the editable Home and the built-in one cannot drift into looking like two
     // different products.
     case "home-readiness":
-      return <HomeReadinessObject ctx={ctx} />;
+      return <ReadinessCardFromState state={ctx.state} />;
     case "home-next-service":
       return <NextServiceCard state={ctx.state} secondsToStart={homeSecondsToStart(ctx)} />;
+    case "home-recent-services":
+      return <RecentServicesCard state={ctx.state} />;
+    case "home-live-status":
+      return (
+        <LiveStatusCard
+          pcoLive={ctx.pcoLive}
+          now={ctx.now}
+          skewMs={ctx.skewMs}
+          // From the state snapshot, not a presence hook: an object on a wall
+          // display has no business subscribing to presence, and a count that
+          // lags by a poll beats one that only works inside the shell.
+          onlineOutputIds={(ctx.state.outputs ?? []).filter((o) => o.viewId).map((o) => o.id)}
+          outputCount={(ctx.state.outputs ?? []).length}
+        />
+      );
     default: {
       // Exhaustiveness guard: every LayoutObjectType must have a case above. Add
       // a type to the registry without a renderer here and this assignment stops

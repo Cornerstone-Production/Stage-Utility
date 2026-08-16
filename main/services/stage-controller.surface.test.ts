@@ -94,6 +94,25 @@ describe("binding a view to a screen", () => {
     assert.equal((await stageController.setOutputView("booth", "vd")).outputs[1].viewId, "vd");
   });
 
+  it("refuses Home on any screen, panel or wall", async () => {
+    // Home is the operator's front page, not a screen: it has no geometry — it
+    // reads presence and order only — so on a monitor it renders a stack of
+    // cards sized for a browser column. The Screens picker no longer offers it,
+    // but a Companion button or a restored config still can, which is why the
+    // check is here and not only in the dropdown.
+    ctl.state.views = [
+      ...ctl.state.views,
+      { id: "home", name: "Home", kind: "custom", createdAt: "", surface: "console" } as View,
+    ];
+    for (const screen of ["wall", "booth"]) {
+      await assert.rejects(
+        () => stageController.setOutputView(screen, "home"),
+        /front page/i,
+        `Home was accepted on ${screen}`,
+      );
+    }
+  });
+
   it("still allows unrouting", async () => {
     await stageController.setOutputView("booth", "vc");
     const s = await stageController.setOutputView("booth", null);

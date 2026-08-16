@@ -3,7 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
-import { seedHomeView } from "./home-view";
+import { seedHomeView, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { barConfigStore } from "./bar-config-store.js";
 import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
@@ -2006,6 +2006,15 @@ export class StageController {
     }
     if (viewId !== null && !this.state.views.find((v) => v.id === viewId)) {
       throw new Error(`outputs:setView — view ${viewId} not found`);
+    }
+    // Same reasoning as the console/wall check below: the picker no longer
+    // offers Home, but an API call or a restored config still can. Home has no
+    // geometry — it is a stack of cards sized for a browser column, edited in
+    // its own tab — so on a wall screen it would render as exactly that.
+    if (viewId === HOME_VIEW_ID) {
+      throw new Error(
+        `"Home" is the operator's front page, not a screen. Make a view for this screen instead.`,
+      );
     }
     // THE safety property, and it lives here rather than in the settings
     // dropdown: a dropdown that only offers bindable views makes the mistake

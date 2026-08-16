@@ -29,6 +29,7 @@ import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { viewSurface, outputMode } from "@main/types/views";
+import { screensListViews } from "@main/services/home-view";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -527,7 +528,9 @@ export function OutputsSection({
   // Sorted by name. Manual view ordering used to exist and only ever sorted
   // THIS dropdown - nothing else read the order - so it was dropped in favour of
   // an order that needs no maintaining. See docs/design/app-shell-redesign.md.
-  const views = [...(stageState.views ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  // Home is filtered out: it is the operator's front door, edited in its own
+  // tab, and it has no geometry — see main/services/home-view.ts.
+  const views = screensListViews(stageState.views ?? []).sort((a, b) => a.name.localeCompare(b.name));
 
   // Which output asked for a new view, so the created view can be assigned back
   // to it. "" means the dialog was opened from the unassigned section, where

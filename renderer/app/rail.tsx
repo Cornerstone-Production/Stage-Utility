@@ -29,6 +29,7 @@ import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
 import { useTheme } from "../lib/use-theme";
 import { SlidersHorizontalIcon } from "lucide-react";
 import { viewSurface } from "@main/types/views";
+import { screensListViews } from "@main/services/home-view";
 import { buildLabel } from "../lib/build-label";
 import { withViewTransition } from "../lib/view-transition";
 import { resetCurrentRoute } from "./route-reset";
@@ -84,7 +85,12 @@ export function Rail({
   // A rail entry per console View. Derived from state rather than a fixed table,
   // because consoles are created by the operator — this is the one part of the
   // rail that is theirs.
-  const consoles: Destination[] = (state?.views ?? [])
+  //
+  // Home is filtered out, by the same helper the Screens page uses. It is a
+  // console view, so it qualified — and the rail then carried TWO Home entries,
+  // the real front door at the top and a second one under Consoles that opened
+  // Home's cards on a bare canvas route.
+  const consoles: Destination[] = screensListViews(state?.views ?? [])
     .filter((v) => viewSurface(v) === "console")
     .map((v) => ({
       path: `/consoles/${v.id}`,

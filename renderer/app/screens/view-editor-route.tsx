@@ -9,8 +9,10 @@
 // hidden. A hidden component is one nobody uses and nobody maintains, and this
 // codebase has already orphaned two editors that way.
 
+import { useEffect } from "react";
 import { Loader2Icon, ChevronLeftIcon } from "lucide-react";
-import { useParams } from "@tanstack/react-router";
+import { useParams, useRouter } from "@tanstack/react-router";
+import { HOME_VIEW_ID } from "@main/services/home-view";
 import { AppLink } from "../app-link";
 import { ViewDetail } from "../../settings/sections/view-detail";
 import { useStageSettings } from "../use-stage-settings";
@@ -18,6 +20,18 @@ import { useStageSettings } from "../use-stage-settings";
 export function ViewEditorRoute() {
   const params = useParams({ strict: false }) as { viewId?: string };
   const s = useStageSettings();
+  const router = useRouter();
+
+  // Home is not edited here. Phase 6 pointed at this route and Phase 7 replaced
+  // it with an Edit toggle in Home's own tab — nobody places pixels on a home
+  // dashboard. The URL shipped, so it lands on the page that owns the editor
+  // rather than 404ing. Handled here rather than in MOVED_ROUTES: a static
+  // /screens/home/edit route would collide with this dynamic one.
+  const isHome = params.viewId === HOME_VIEW_ID;
+  useEffect(() => {
+    if (isHome) router.navigate({ to: "/", replace: true });
+  }, [isHome, router]);
+  if (isHome) return null;
 
   if (s.stageLoading || !s.stageState) {
     return (
