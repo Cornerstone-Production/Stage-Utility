@@ -14,8 +14,9 @@ import {
   Grid3x3Icon,
   AlignHorizontalDistributeCenterIcon,
   MonitorSmartphoneIcon,
-  LayoutGridIcon,
   LockOpenIcon,
+  PencilIcon,
+  PlusIcon,
   SaveIcon,
   DownloadIcon,
   
@@ -24,14 +25,12 @@ import {
   
   
   
-  PencilIcon,
   CheckIcon,
   LayoutTemplateIcon,
   CornerLeftUpIcon,
   LockIcon,
   UnlockIcon,
   
-  FilterIcon,
   FilePlusIcon,
 } from "lucide-react";
 import { DropdownMenu, Popover } from "radix-ui";
@@ -39,13 +38,6 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import {
   Button,
   Input,
-  Select,
-  SelectTrigger,
-  SelectContent,
-  SelectItem,
-  SelectGroup,
-  SelectLabel,
-  SelectValue,
   ButtonGroup,
   
   Separator,
@@ -112,6 +104,8 @@ import {
 } from "../main/layout-objects";
 import { invoke } from "../lib/api";
 import { fitFor } from "../main/console-fit";
+import { useInspectorWidth } from "../lib/use-sidebar-width";
+import { cn } from "../lib/cn";
 import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
 import { Palette } from "./palette";
@@ -376,7 +370,7 @@ function EditorCanvas({
   effectiveFit,
   canvas, objects, selectedId, selectedIds, gridOn, alignOn, locked, ctx, ndiSource, interactive,
   onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
-  onContextMenu, onDropType, drawMode = false, onDrawn,
+  onContextMenu, onDropType, onDrawn,
 }: {
   /** What the layout will actually do — a console with no explicit fit is
    *  responsive. Passed in so the canvas and the toolbar cannot disagree. */
@@ -400,9 +394,6 @@ function EditorCanvas({
   /** A widget was dropped from the palette, at this point in canvas fractions.
    *  Optional: the canvas works exactly as before without it. */
   onDropType?: (point: { x: number; y: number }) => void;
-  /** Draw mode: a drag on empty canvas draws a new widget's box instead of a
-   *  marquee. Off by default, so a plain drag still rubber-band-selects. */
-  drawMode?: boolean;
   /** A box was drawn; the caller asks what to put in it. */
   onDrawn?: (rect: FracRect) => void;
   onSelect: (id: string | null, additive?: boolean) => void;
@@ -669,14 +660,22 @@ function EditorCanvas({
     // Draw mode takes the same gesture and means something else by it. Handled
     // by returning early rather than by threading a flag through the marquee
     // below: the marquee is existing behaviour and this phase does not touch it.
-    if (drawMode && onDrawn) {
+    // Shift-drag on EMPTY canvas draws a new widget's box. Shift is free here:
+    // on an object it extends the selection, but there is no selection to extend
+    // on bare canvas. No toolbar mode, so nothing is armed and forgotten.
+    if (e.shiftKey && onDrawn) {
+      let drew = false;
       const drawMove = (ev: globalThis.PointerEvent) => {
+        drew = true;
         setMarquee({ x0, y0, x1: (ev.clientX - rect.left) / boxW, y1: (ev.clientY - rect.top) / boxH });
       };
       const drawUp = (ev: globalThis.PointerEvent) => {
         window.removeEventListener("pointermove", drawMove);
         window.removeEventListener("pointerup", drawUp);
         setMarquee(null);
+        // A click that never moved is a click. Opening the picker on it is how a
+        // stray click on the canvas turned into an add-widget menu.
+        if (!drew) return;
         onDrawn(rectFrom({ x: x0, y: y0 }, {
           x: (ev.clientX - rect.left) / boxW,
           y: (ev.clientY - rect.top) / boxH,
@@ -951,18 +950,23 @@ export function LayoutEditor({
   // puzzle. Per session rather than per view - it is about how you are working
   // right now, not a property of the layout.
   const [layoutLocked, setLayoutLocked] = useState(false);
-  // Draw mode. Off by default, because a plain drag on empty canvas means
-  // marquee selection and that is not changing.
-  const [drawMode, setDrawMode] = useState(false);
+  // Inspector width, dragged from its left edge and remembered. Same hook the
+  // sidebar uses, so there is one resize implementation rather than two that
+  // drift apart.
+  const {
+    width: inspectorWidth,
+    dragging: inspectorDragging,
+    startResize: startInspectorResize,
+    reset: resetInspectorWidth,
+  } = useInspectorWidth();
   // A drawn box waiting to be told what it is. Null when nothing is pending —
   // and dismissing the picker clears it WITHOUT creating anything, so a
   // cancelled draw costs neither an object nor an undo step.
   const [pendingRect, setPendingRect] = useState<FracRect | null>(null);
-  // The palette is a second door beside the Add-object dropdown, which is
-  // unchanged. Open by default in edit mode: browsing is the common case for
-  // someone building a view, and the dropdown is there for anyone who knows
-  // exactly what they want.
-  const [paletteOpen, setPaletteOpen] = useState(true);
+  // Closed until asked for. The palette replaced the Add-object dropdown, so it
+  // is now the ONLY way in and behaves like the dropdown did: nothing on screen
+  // until you go looking for it, and the canvas gets the width in the meantime.
+  const [paletteOpen, setPaletteOpen] = useState(false);
   // The type mid-drag from the palette. A ref as well as state: the drop
   // handler runs from a DOM event and would otherwise read a stale closure.
   const paletteDragType = useRef<LayoutObjectType | null>(null);
@@ -1582,68 +1586,23 @@ export function LayoutEditor({
       {/* Toolbar (edit mode) */}
       {isEditing && (
       <div className="flex flex-wrap items-center gap-2">
-        <Select value="" onValueChange={(t: string) => addObject(t as LayoutObjectType)}>
-          <SelectTrigger className="w-40"><SelectValue placeholder="+ Add object" /></SelectTrigger>
-          <SelectContent>
-            {PALETTE_GROUPS.map((g) => {
-              const types = g.types.filter((t) => {
-                const need = objectIntegration(t);
-                // When the hide toggle is on, drop types whose integration isn't set up.
-                return !(hideUnconfigured && need && !configuredIntegrations.has(need.id));
-              });
-              if (types.length === 0) return null;
-              return (
-                <SelectGroup key={g.label}>
-                  <SelectLabel>{g.label}</SelectLabel>
-                  {types.map((t) => {
-                    const need = objectIntegration(t);
-                    // Dim (but keep selectable) when the backing integration isn't set up.
-                    // Based on "configured", not connection — a set-up-but-offline
-                    // integration's objects stay un-dimmed.
-                    const dim = need && !configuredIntegrations.has(need.id);
-                    return (
-                      <SelectItem key={t} value={t} className={dim ? "opacity-50" : undefined}>
-                        {typeLabel(t)}{dim ? ` · set up ${need!.label}` : ""}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectGroup>
-              );
-            })}
-          </SelectContent>
-        </Select>
-        <Button
-          variant={hideUnconfigured ? "accent" : "filled"}
-          size="small"
-          iconOnly
-          onClick={toggleHideUnconfigured}
-          aria-label={hideUnconfigured ? "Show all objects" : "Hide objects for integrations that aren't set up"}
-          tooltip={hideUnconfigured ? "Show objects for integrations that aren't set up" : "Hide objects for integrations that aren't set up"}
-        >
-          <FilterIcon className="size-3.5" />
-        </Button>
-        <Button variant={gridOn ? "accent" : "filled"} size="small" onClick={() => setGridOn((v) => !v)} aria-label="Toggle snap grid">
-          <Grid3x3Icon className="size-3.5" /> Grid
-        </Button>
+        {/* One button for one job. It replaces a dropdown, a Widgets toggle and
+            a filter icon: three controls that all answered "what can I add?".
+            The palette it opens carries the same set the dropdown listed, and
+            the hide-unconfigured filter now lives in the palette's own header,
+            beside the list it filters. */}
         <Button
           variant={paletteOpen ? "accent" : "filled"}
           size="small"
           onClick={() => setPaletteOpen((v) => !v)}
-          aria-label="Toggle the widget palette"
+          aria-label="Add an object"
           aria-pressed={paletteOpen}
-          tooltip="Browse every widget, with a line on what each one shows. Drag one onto the canvas."
+          tooltip="Every widget, with a line on what each shows. Drag one onto the canvas, or click to add it."
         >
-          <LayoutGridIcon className="size-3.5" /> Widgets
+          <PlusIcon className="size-3.5" /> Add object
         </Button>
-        <Button
-          variant={drawMode ? "accent" : "filled"}
-          size="small"
-          onClick={() => setDrawMode((v) => !v)}
-          aria-label="Draw a widget"
-          aria-pressed={drawMode}
-          tooltip="Draw a box on the canvas, then pick what goes in it. Off: dragging empty canvas selects, as usual."
-        >
-          <PencilIcon className="size-3.5" /> Draw
+        <Button variant={gridOn ? "accent" : "filled"} size="small" onClick={() => setGridOn((v) => !v)} aria-label="Toggle snap grid">
+          <Grid3x3Icon className="size-3.5" /> Grid
         </Button>
         <Button
           variant={layoutLocked ? "accent" : "filled"}
@@ -1856,6 +1815,8 @@ export function LayoutEditor({
             <Palette
               types={paletteTypes}
               dimmed={dimmedTypes}
+              hideUnconfigured={hideUnconfigured}
+              onToggleHideUnconfigured={toggleHideUnconfigured}
               onAdd={addObject}
               onDragStart={(t) => { paletteDragType.current = t; }}
               onDragEnd={() => { paletteDragType.current = null; }}
@@ -1882,7 +1843,6 @@ export function LayoutEditor({
               selectedIds={selectedIds}
               alignOn={alignOn}
               locked={layoutLocked}
-              drawMode={drawMode}
               onDrawn={(rect) => setPendingRect(rect)}
               gridOn={gridOn && isEditing}
               interactive={isEditing}
@@ -1959,8 +1919,24 @@ export function LayoutEditor({
             height (which is measured to reach the viewport bottom) and scrolls
             INTERNALLY, so paging through inspector options never scrolls the whole
             editor and pushes the preview out of view. */}
+        {/* Inspector, draggable from its left edge. Same hook as the sidebar
+            (usePanelWidth) rather than a second implementation, so both get the
+            rAF batching and pointercancel handling that drag needs. */}
         {isEditing && (
-        <div className="w-80 @6xl:w-96 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: (inlineGrid ? canvasH : availH) ?? undefined }}>
+        <div className="relative shrink-0 @max-4xl:w-full" style={{ width: inspectorWidth }}>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize the inspector"
+            onPointerDown={startInspectorResize}
+            onDoubleClick={resetInspectorWidth}
+            className={cn(
+              "absolute inset-y-0 left-0 z-10 w-[7px] cursor-col-resize @max-4xl:hidden",
+              "after:absolute after:inset-y-0 after:left-0 after:w-px after:transition-colors",
+              inspectorDragging ? "after:bg-accent" : "after:bg-transparent hover:after:bg-line-strong",
+            )}
+          />
+        <div className="flex h-full flex-col gap-3 min-h-0 overflow-y-auto pl-2" style={{ maxHeight: (inlineGrid ? canvasH : availH) ?? undefined }}>
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Layers</span>
@@ -2131,6 +2107,7 @@ export function LayoutEditor({
               ))
             )}
           </div>
+        </div>
         </div>
         )}
       </div>

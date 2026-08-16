@@ -128,7 +128,13 @@ export function Rail({
           // than navigating nowhere: TanStack treats a navigate() to the current
           // path as a no-op, so without this, clicking "History" while inside a
           // service did nothing at all.
-          if (d.path === active?.path) {
+          //
+          // EXACTLY on it, though. `active` matches by prefix so a child route
+          // lights its parent up in the rail — which is right — but it also made
+          // clicking Screens from /screens/<id>/edit reset the EDITOR instead of
+          // going back to the grid. From a child route this is a navigation, not
+          // a reset.
+          if (d.path === active?.path && pathname === d.path) {
             resetCurrentRoute();
             return;
           }

@@ -106,9 +106,14 @@ export interface PaletteProps {
   onDragEnd: () => void;
   /** Types whose integration is not set up — dimmed, still usable. */
   dimmed?: Set<LayoutObjectType>;
+  /** Hide types whose integration is not set up. Lives here rather than on the
+   *  toolbar: a filter belongs beside the list it filters, and the toolbar had
+   *  three controls all answering "what can I add?". */
+  hideUnconfigured?: boolean;
+  onToggleHideUnconfigured?: () => void;
 }
 
-export function Palette({ types, onAdd, onDragStart, onDragEnd, dimmed }: PaletteProps) {
+export function Palette({ types, onAdd, onDragStart, onDragEnd, dimmed, hideUnconfigured, onToggleHideUnconfigured }: PaletteProps) {
   const byGroup = PALETTE_GROUP_ORDER.map((g) => ({
     group: g,
     items: types.filter((t) => LAYOUT_OBJECTS[t]?.group === g),
@@ -124,6 +129,17 @@ export function Palette({ types, onAdd, onDragStart, onDragEnd, dimmed }: Palett
 
   return (
     <div className="flex flex-col gap-0.5 p-1">
+      {onToggleHideUnconfigured && (
+        <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-caption2 text-fg-muted">
+          <input
+            type="checkbox"
+            checked={hideUnconfigured ?? false}
+            onChange={onToggleHideUnconfigured}
+            className="size-3.5 accent-[var(--su-accent)]"
+          />
+          Hide widgets whose integration is not set up
+        </label>
+      )}
       {byGroup.map(({ group, items }) => (
         <div key={group}>
           <p className="px-2 pb-1 pt-2 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
