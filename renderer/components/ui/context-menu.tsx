@@ -84,7 +84,11 @@ function MenuList({
             disabled={item.disabled}
             className={cn(
               ITEM_CLS,
-              !item.disabled && (item.danger ? "hover:bg-warn-9 hover:text-white" : "hover:bg-fill-active"),
+              // danger → red, not amber. `warn` is caution ("unsaved changes");
+              // `danger` is destructive ("this deletes something"). Delete was
+              // highlighting amber, which reads as a warning you can proceed
+              // through rather than the last step before losing work.
+              !item.disabled && (item.danger ? "hover:bg-danger-9 hover:text-white" : "hover:bg-fill-active"),
             )}
             onClick={() => {
               if (item.disabled) return;
