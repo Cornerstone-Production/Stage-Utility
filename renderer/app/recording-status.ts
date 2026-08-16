@@ -30,11 +30,14 @@ export interface Recorder {
  */
 export function recorders(
   obs: { connected: boolean; recording: boolean; recordTimecode: string | null } | null,
-  reaper: { connected: boolean; recording: boolean } | null,
+  reaper: { connected: boolean; recording: boolean; positionString?: string | null } | null,
 ): Recorder[] {
   return [
     { name: "OBS", connected: !!obs?.connected, recording: !!obs?.recording, timecode: obs?.recordTimecode ?? null },
-    { name: "REAPER", connected: !!reaper?.connected, recording: !!reaper?.recording },
+    // REAPER reports the transport position rather than a record timer, and while
+    // it is rolling that IS how far into the take you are. Same source the REAPER
+    // status object's `showPosition` uses, so the two cannot disagree.
+    { name: "REAPER", connected: !!reaper?.connected, recording: !!reaper?.recording, timecode: reaper?.positionString ?? null },
   ];
 }
 
@@ -53,11 +56,11 @@ export function recordingStat(
   const rolling = wired.filter((r) => r.recording);
   if (rolling.length === 0) {
     // Connected but not rolling, mid-service, is worth noticing.
-    return { value: "stopped", sub: `${wired.map((r) => r.name).join(" + ")} connected`, tone: "danger" };
+    return { value: "STOPPED", sub: `${wired.map((r) => r.name).join(" + ")} connected`, tone: "danger" };
   }
   return {
     // A timecode from whichever rolling recorder reports one; the word otherwise.
-    value: rolling.find((r) => r.timecode)?.timecode ?? "recording",
+    value: rolling.find((r) => r.timecode)?.timecode ?? "RECORDING",
     sub: rolling.map((r) => r.name).join(" + "),
     tone: "live",
   };
@@ -74,8 +77,8 @@ export function recordingStat(
 export function recorderStat(r: Recorder | undefined): { value: string; sub: string; tone?: "danger" | "live" } {
   if (!r) return { value: "—", sub: "not set up" };
   if (!r.connected) return { value: "—", sub: `${r.name} not connected` };
-  if (!r.recording) return { value: "stopped", sub: `${r.name} connected`, tone: "danger" };
-  return { value: "recording", sub: r.timecode ?? r.name, tone: "live" };
+  if (!r.recording) return { value: "STOPPED", sub: `${r.name} connected`, tone: "danger" };
+  return { value: "RECORDING", sub: r.timecode ?? "no position reported", tone: "live" };
 }
 
 /** The loudest current SPL reading across every meter, which is the number
