@@ -116,6 +116,7 @@ import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
 import { Palette } from "./palette";
 import { rectForDrop, localiseToParent, defaultDropSize } from "./drag-to-place";
+import { rectFrom } from "./draw-to-create";
 import { ShapePreview, PREVIEW_SHAPES, type PreviewShape } from "./preview-shape";
 import { AlignmentGuides } from "./alignment-guides";
 
@@ -375,7 +376,7 @@ function EditorCanvas({
   effectiveFit,
   canvas, objects, selectedId, selectedIds, gridOn, alignOn, locked, ctx, ndiSource, interactive,
   onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
-  onContextMenu, onDropType,
+  onContextMenu, onDropType, drawMode = false, onDrawn,
 }: {
   /** What the layout will actually do — a console with no explicit fit is
    *  responsive. Passed in so the canvas and the toolbar cannot disagree. */
@@ -399,6 +400,11 @@ function EditorCanvas({
   /** A widget was dropped from the palette, at this point in canvas fractions.
    *  Optional: the canvas works exactly as before without it. */
   onDropType?: (point: { x: number; y: number }) => void;
+  /** Draw mode: a drag on empty canvas draws a new widget's box instead of a
+   *  marquee. Off by default, so a plain drag still rubber-band-selects. */
+  drawMode?: boolean;
+  /** A box was drawn; the caller asks what to put in it. */
+  onDrawn?: (rect: FracRect) => void;
   onSelect: (id: string | null, additive?: boolean) => void;
   /** Marquee drag on empty canvas → select all top-level objects it intersects. */
   onMarqueeSelect: (ids: string[], additive: boolean) => void;
@@ -659,6 +665,28 @@ function EditorCanvas({
     const rect = box.getBoundingClientRect();
     const x0 = (e.clientX - rect.left) / boxW;
     const y0 = (e.clientY - rect.top) / boxH;
+
+    // Draw mode takes the same gesture and means something else by it. Handled
+    // by returning early rather than by threading a flag through the marquee
+    // below: the marquee is existing behaviour and this phase does not touch it.
+    if (drawMode && onDrawn) {
+      const drawMove = (ev: globalThis.PointerEvent) => {
+        setMarquee({ x0, y0, x1: (ev.clientX - rect.left) / boxW, y1: (ev.clientY - rect.top) / boxH });
+      };
+      const drawUp = (ev: globalThis.PointerEvent) => {
+        window.removeEventListener("pointermove", drawMove);
+        window.removeEventListener("pointerup", drawUp);
+        setMarquee(null);
+        onDrawn(rectFrom({ x: x0, y: y0 }, {
+          x: (ev.clientX - rect.left) / boxW,
+          y: (ev.clientY - rect.top) / boxH,
+        }));
+      };
+      window.addEventListener("pointermove", drawMove);
+      window.addEventListener("pointerup", drawUp);
+      return;
+    }
+
     let moved = false;
     const move = (ev: globalThis.PointerEvent) => {
       const x1 = (ev.clientX - rect.left) / boxW;
@@ -923,6 +951,13 @@ export function LayoutEditor({
   // puzzle. Per session rather than per view - it is about how you are working
   // right now, not a property of the layout.
   const [layoutLocked, setLayoutLocked] = useState(false);
+  // Draw mode. Off by default, because a plain drag on empty canvas means
+  // marquee selection and that is not changing.
+  const [drawMode, setDrawMode] = useState(false);
+  // A drawn box waiting to be told what it is. Null when nothing is pending —
+  // and dismissing the picker clears it WITHOUT creating anything, so a
+  // cancelled draw costs neither an object nor an undo step.
+  const [pendingRect, setPendingRect] = useState<FracRect | null>(null);
   // The palette is a second door beside the Add-object dropdown, which is
   // unchanged. Open by default in edit mode: browsing is the common case for
   // someone building a view, and the dropdown is there for anyone who knows
@@ -1601,6 +1636,16 @@ export function LayoutEditor({
           <LayoutGridIcon className="size-3.5" /> Widgets
         </Button>
         <Button
+          variant={drawMode ? "accent" : "filled"}
+          size="small"
+          onClick={() => setDrawMode((v) => !v)}
+          aria-label="Draw a widget"
+          aria-pressed={drawMode}
+          tooltip="Draw a box on the canvas, then pick what goes in it. Off: dragging empty canvas selects, as usual."
+        >
+          <PencilIcon className="size-3.5" /> Draw
+        </Button>
+        <Button
           variant={layoutLocked ? "accent" : "filled"}
           size="small"
           onClick={() => setLayoutLocked((v) => !v)}
@@ -1837,6 +1882,8 @@ export function LayoutEditor({
               selectedIds={selectedIds}
               alignOn={alignOn}
               locked={layoutLocked}
+              drawMode={drawMode}
+              onDrawn={(rect) => setPendingRect(rect)}
               gridOn={gridOn && isEditing}
               interactive={isEditing}
               ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
@@ -1864,6 +1911,41 @@ export function LayoutEditor({
 
         {/* Right-click menu. Positioned fixed to the viewport, so it lives outside
             the canvas box rather than inside its ternary. */}
+        {/* What goes in the box you drew. The SAME palette as the sidebar - one
+            list of widgets, not two that could disagree. Dismissing creates
+            nothing and costs no undo step. */}
+        {pendingRect && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+            onClick={() => setPendingRect(null)}
+            role="presentation"
+          >
+            <div
+              className="max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-line-strong bg-popover shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="border-b border-line px-3 py-2 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+                What goes here?
+              </p>
+              <Palette
+                types={paletteTypes}
+                dimmed={dimmedTypes}
+                onAdd={(t) => {
+                  const rect = pendingRect;
+                  setPendingRect(null);
+                  pushHistory();
+                  const o = makeObject(t, zTop + 1, rect);
+                  setObjects((prev) => [...prev, o]);
+                  setSelectedIds(new Set([o.id]));
+                  setDirty(true);
+                }}
+                onDragStart={() => {}}
+                onDragEnd={() => {}}
+              />
+            </div>
+          </div>
+        )}
+
         {menu && (
           <ContextMenu
             x={menu.x}
