@@ -38,11 +38,35 @@ describe("the frame Home draws", () => {
     assert.deepEqual(withGeometry, []);
   });
 
-  test("the object's own COLOUR still comes through", () => {
-    // The fix must not flatten every widget to the same card — a red-preset
-    // status is meant to look different from a neutral one.
+  test("the object's dark GROUND is dropped too", () => {
+    // THE light-mode guard, and the one this file originally got backwards: it
+    // asserted the object's background came through, which is true on a black
+    // wall and catastrophic on an app page that can be light.
+    //
+    // A widget's ground is written for a display — #141414. Home's own cards use
+    // the app's translucent surface token. Put those on a light page together
+    // and the widget is a black slab while Home's cards go fully transparent
+    // with white text on them: measured at about 1.07:1 on a phone. Invisible.
+    //
+    // Home supplies `bg-surface` for every tile instead, so the grid follows the
+    // theme.
+    const ground = defaultStyle("clock" as never).background;
+    assert.ok(ground, "the fixture stopped carrying a ground, so this proves nothing");
+    assert.equal(cardFrame(obj("clock"), 720).background, undefined, "a display ground reached Home");
+  });
+
+  test("no widget type leaks a ground onto Home", () => {
+    const leaking = ["clock", "obs-status", "people-panel", "notes", "spl-meter", "section-chip"]
+      .filter((t) => cardFrame(obj(t), 720).background !== undefined);
+    assert.deepEqual(leaking, []);
+  });
+
+  test("what Home does NOT take from the object is still the object's", () => {
+    // The frame and the ground are Home's; padding, opacity and alignment are
+    // the operator's, and stripping those would flatten every widget into the
+    // same tile whatever they set.
     const frame = cardFrame(obj("clock"), 720);
-    assert.equal(frame.background, defaultStyle("clock" as never).background);
-    assert.ok(frame.background, "the widget lost its ground entirely");
+    assert.ok(frame.padding !== undefined, "padding stopped coming from the object");
+    assert.ok(frame.justifyContent !== undefined, "vertical alignment stopped coming from the object");
   });
 });

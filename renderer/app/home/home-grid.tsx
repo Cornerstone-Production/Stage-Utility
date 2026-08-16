@@ -16,17 +16,35 @@ import type { LayoutRenderCtx } from "../../main/layout-renderer";
 import { SIZES, sizeOf } from "./home-cards";
 
 /**
- * The widget's own styling MINUS the geometry Home supplies itself.
+ * The widget's own styling MINUS everything Home supplies itself: the frame AND
+ * the ground.
  *
- * Radius and hairline are canvas-relative on a display, which is right there and
- * wrong in a dashboard grid: two tiles of the same size ended up with different
- * corners because their styling was measured against a nominal canvas rather
- * than against each other. Home drops both and uses the app's card tokens, so
- * every tile has one edge. Everything else — background, padding, opacity,
- * shadow, alignment — is still the object's.
+ * ON HOME, A WIDGET WEARS HOME'S CARD. A display widget's styling is written for
+ * a black wall — a dark ground, a canvas-relative radius, and white text. Every
+ * one of those is wrong on an app page that can be light:
+ *
+ *  - Radius and hairline are fractions of CANVAS height, so two tiles of the
+ *    same size came out with different corners: 10.656px against Home's 12px.
+ *  - The ground is dark. On a light page that is a black slab in a white grid,
+ *    and Home's own cards — which use the app's translucent surface token —
+ *    went fully transparent with white text on them, about 1.07:1. Invisible.
+ *
+ * So Home supplies radius, hairline and ground from the app's card tokens, and
+ * the widget supplies its content. Padding, opacity, shadow and alignment are
+ * still the object's.
+ *
+ * Colour that carries STATE still comes through: a recording widget's red is
+ * painted by Readout's filled variant, inside the card, not by this background.
+ * Colour that is decoration does not survive onto Home — one grid of tiles that
+ * reads in both themes beats per-widget tinting that only works in one.
  */
 export function cardFrame(o: LayoutObject, H: number): CSSProperties {
-  const { borderRadius: _fromCanvas, border: _alsoFromCanvas, ...rest } = boxStyle(o, H);
+  const {
+    borderRadius: _fromCanvas,
+    border: _alsoFromCanvas,
+    background: _writtenForABlackWall,
+    ...rest
+  } = boxStyle(o, H);
   return rest;
 }
 
@@ -116,14 +134,11 @@ export function HomeGrid({
 
   return (
     <div
-      // kiosk-surface, because these are DISPLAY widgets. Their styling is built
-      // for a black wall — white text on a 4%-white card — and on a themed app
-      // page that came out black-on-black in dark mode and white-on-white in
-      // light, where a clock was literally invisible. This class already exists
-      // for exactly that problem (see its comment in styles.css: "measured at
-      // 1.14:1"), and it makes Home's grid show what a screen would show.
-      // kiosk-seamless: the foreground remapping without the slab — see styles.css.
-      className="kiosk-surface kiosk-seamless"
+      // NO kiosk-surface. Home is an app page, and its widgets wear the app's
+      // colours — see cardFrame below for the whole argument. The class was here
+      // to remap foregrounds for display widgets, and remapping them to WHITE on
+      // a light page is how Home came out invisible: white text on #f7f8fa, about
+      // 1.07:1, over cards that resolved to fully transparent.
       // A CONTAINER query, not a viewport one: Home sits beside the sidebar, so
       // window width is the wrong signal and collapsed the grid to two columns
       // on a laptop that had room for three.
@@ -152,7 +167,7 @@ export function HomeGrid({
                   visible as tiles whose edges do not agree. Colour still comes
                   from the object, so a red-preset widget stays red. */}
               <div
-                className="rounded-xl border border-line"
+                className="rounded-xl border border-line bg-surface"
                 style={{ ...cardFrame(o, NOMINAL_H), width: "100%", height: "100%", overflow: "hidden" }}
               >
                 <ObjectContent o={o} ctx={ctx} />

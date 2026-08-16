@@ -454,17 +454,6 @@
   --color-fg-faint:       rgba(255, 255, 255, 0.34);
 }
 
-/* The same foreground remapping WITHOUT the backdrop.
-   Home embeds display widgets on an app page. It needs their foregrounds
-   remapped — that is the whole reason .kiosk-surface exists — but not the
-   near-black slab, which sat at #0a0a0a on a #0e0e0e page and read as a panel
-   bolted onto the page rather than part of it. Four values apart is exactly far
-   enough to see a seam and not far enough to look deliberate.
-   The cards carry their own frame, so with the slab gone they simply sit on the
-   page. */
-.kiosk-surface.kiosk-seamless {
-  background-color: transparent;
-}
 
 /* Auto-hide scrollbar for the service-order object: no bar at rest, a thin subtle
    bar only while actively scrolling (the component toggles `.scrolling` and clears
@@ -540,4 +529,25 @@
   @page {
     margin: 12mm;
   }
+}
+
+
+/* A status strip that never collides.
+   The context bar is a flex row of independent readings. Letting its items
+   shrink squeezed them past their own content on a phone, so "3 disconnected"
+   and "REC stopped" printed on top of each other — the items overlapped rather
+   than overflowing, which reads as a broken layout rather than a full one.
+   Items keep their width now and the bar wraps on a phone; from sm up it is one
+   row again, and scrolls in the rare case that row still does not fit. Nothing
+   is ever dropped: every reading on it is one somebody put there on purpose. */
+.context-strip {
+  scrollbar-width: none; /* Firefox */
+}
+@media (min-width: 640px) {
+  .context-strip {
+    overflow-x: auto;
+  }
+}
+.context-strip::-webkit-scrollbar {
+  display: none;
 }

@@ -96,13 +96,30 @@ export function ContextBar() {
   return (
     // No bottom rule and no separate surface: it sits on the content background,
     // so the page reads as one plane rather than a stack of bordered strips.
-    <header className="flex items-center gap-3 h-11 shrink-0 px-5 max-sm:px-3">
+    // WRAPS on a phone, one row from sm up.
+    //
+    // Scrolling was the first fix and it was the wrong one: it stopped the items
+    // colliding, but pushed "3 disconnected" and "REC stopped" off the right
+    // edge, and an alert you have to swipe sideways to find is not an alert.
+    // Wrapping shows every reading at once and still cannot overlap.
+    <header
+      className={cn(
+        "context-strip flex flex-wrap items-center gap-x-3 gap-y-0.5 shrink-0 px-5 max-sm:px-3 py-1.5",
+        "sm:h-11 sm:flex-nowrap sm:py-0",
+      )}
+    >
       {rendered.map((x, i) => (
         <span
           key={x.id}
-          // The first live-ish item pushes the rest right, preserving the
+          // shrink-0 on EVERY item, not just the one that pushes right. With
+          // min-w-0 the items squeezed past their own content on a phone and
+          // printed over each other; the strip scrolls now instead.
+          //
+          // The first live-ish item still pushes the rest right, preserving the
           // original bar's shape: context on the left, service state on the right.
-          className={cn("flex items-center gap-2.5 min-w-0", i === RIGHT_FROM(rendered) && "ml-auto shrink-0")}
+          // ml-auto only once the bar is a single row — on a wrapped bar it
+          // would shove one item to the end of whichever line it landed on.
+          className={cn("flex items-center gap-2.5 shrink-0", i === RIGHT_FROM(rendered) && "sm:ml-auto")}
         >
           {x.node}
         </span>
