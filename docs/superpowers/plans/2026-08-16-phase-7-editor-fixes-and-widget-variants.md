@@ -535,10 +535,11 @@ not a mode; it is the style.
       any one can be reverted alone. Roughly twenty: clock, countdown, pp-timer,
       pacing, SPL, people counter/panel, baptism, slide progress, charger, the
       wireless pair, the status pills, section chip.
-- [ ] **Step 4:** Decide `obs-status` / `reaper-status`. Their red fill is
-      deliberate — it is a "you can see this across the room" signal — so either
-      the card idiom gains a filled variant, or these keep the fill and gain the
-      caption/value/sub structure inside it. **Open question, ask.**
+- [x] **Step 4 — DECIDED: the red fill stays.** It is a see-it-across-the-room
+      signal and it works. The card idiom gains a FILLED variant: same
+      caption/value/sub composition, painted on a solid ground instead of the
+      neutral card. So a filled widget is the same widget wearing a state, not a
+      different design language.
 - [ ] **Step 5:** Guards. The composition is structural, so it can be asserted:
       every readout renders a caption, a value and (where it has one) a sub, in
       that order. Prove each by removing a line.
@@ -551,9 +552,10 @@ not a mode; it is the style.
   Home. It is a rendering change, so unlike the default-style pass it moves
   layouts that already exist. That is the point, and it is also why Step 1 is a
   comparison page rather than a description.
-- **Stored fontSize becomes advisory.** Objects carry a hand-tuned `fontSize`
-  (0.0879 = 95px, and so on). Under a proportional composition that number is
-  the VALUE's size, not the whole widget's — decide whether it still governs, or
-  whether the composition derives all three sizes from the box.
+- **DECIDED: size comes from the box.** The composition derives all three line
+  sizes from the widget's own dimensions, so a widget is legible at whatever size
+  it is placed at without anybody tuning a number. A stored `fontSize` therefore
+  stops governing the value — which is a knob becoming genuinely pointless rather
+  than being taken away, the order the standing rule requires.
 - **Do not remove a knob in this pass.** The standing rule: a control comes out
   after its replacement exists and is good, never alongside.
