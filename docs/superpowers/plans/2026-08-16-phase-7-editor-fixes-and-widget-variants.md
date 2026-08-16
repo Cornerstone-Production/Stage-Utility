@@ -524,18 +524,29 @@ not a mode; it is the style.
 
 #### Method
 
-- [ ] **Step 1: the comparison page FIRST.** Generated from the registry like
+- [x] **Step 1: the comparison page FIRST.** Generated from the registry like
       the widget review (artifact `18a02512`), showing every affected widget
       NOW vs PROPOSED, at BOTH a wall size and a dashboard tile — because the
       whole claim is that one composition works at both. Approve by looking.
-- [ ] **Step 2:** A shared `Readout` component — caption, value, sub — that
+- [x] **Step 2:** A shared `Readout` component — caption, value, sub — that
       scales to its box. One implementation; `Stat` becomes its dashboard-sized
       instance rather than a second copy.
-- [ ] **Step 3:** Move readouts onto it one at a time, committing per widget so
+- [x] **Step 3:** Move readouts onto it one at a time, committing per widget so
       any one can be reverted alone. Roughly twenty: clock, countdown, pp-timer,
       pacing, SPL, people counter/panel, baptism, slide progress, charger, the
       wireless pair, the status pills, section chip.
-- [ ] **Step 3b — THE VALUE MAY WANT TO BE BIGGER.** Approved with this caveat:
+- [x] **Step 3b — THE VALUE MAY WANT TO BE BIGGER.** Landed as `VALUE_SCALE` in
+      `readout-size.ts`, still 0.30, still provisional. The budget is DERIVED
+      from it so raising it raises every line count together — tuning is one
+      edit, as required. Not tuned: that happens on real screens.
+
+      One thing the mockup could not show turned up immediately and is fixed:
+      it gave every widget all three lines, and the real objects mostly have
+      none, because captions ship on six types and only on new objects. At a
+      flat 0.30 a caption-less clock was a small value in an empty box. The
+      value now takes whatever the caption and sub do not use.
+
+      Original wording: Approved with this caveat:
       the mockup puts the value at **0.30 of the widget's height**, and it likely
       wants raising — a clock especially. It is deliberately unresolved, because
       a static page at two chosen sizes cannot answer it: the number that matters
@@ -552,11 +563,28 @@ not a mode; it is the style.
       caption/value/sub composition, painted on a solid ground instead of the
       neutral card. So a filled widget is the same widget wearing a state, not a
       different design language.
-- [ ] **Step 5:** Guards. The composition is structural, so it can be asserted:
+- [x] **Step 5:** Guards. The composition is structural, so it can be asserted:
       every readout renders a caption, a value and (where it has one) a sub, in
       that order. Prove each by removing a line.
-- [ ] **Step 6:** Browser, at a real wall size AND a Home tile, against a COPY
-      of the config.
+- [x] **Step 6:** Browser, at a real wall size AND a Home tile, against a COPY
+      of the config. Ran on port 8802 against a copy: `/display-2` at 1920x1080,
+      `/consoles/view-1`, and Home. Found and fixed a clipping bug no mockup
+      would have shown — the object's stored padding is a fraction of the
+      CANVAS, so a 54px status pill had 23px of content space for a 31px
+      composition.
+
+#### Not migrated, on purpose
+
+`charger-battery` and `people-panel` render LISTS — one row per bay, a grid of
+metric tiles. Folding either into caption/value/sub means picking one row and
+dropping the rest. Recorded in `readout-types.ts` beside the set.
+
+#### Still open
+
+The caption line is only available on the six types whose config carries a
+`caption` field, so most readouts are value + sub. Extending it is a separate
+decision — `captions.test.ts` pins the set as exact precisely so a sweep cannot
+quietly caption everything.
 
 #### Risks, stated up front
 

@@ -33,6 +33,7 @@ import { useObsState } from "../../main/use-obs-state";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
 import { recordingStat, recorderStat, recorders, loudestSpl } from "../recording-status";
+import { Readout } from "../../main/readout";
 
 /* ── Shared bits ──────────────────────────────────────────────────────────── */
 
@@ -127,8 +128,24 @@ export const STAT_CARD =
   // in a grid tile that left it floating short of the bottom edge. `block` is
   // load-bearing too — the drill-down variant renders an <a>, which is inline by
   // default, so its card collapsed to a sliver with the text hanging outside it.
-  "flex h-full w-full flex-col justify-center rounded-xl border border-line bg-surface px-4 py-3";
+  //
+  // `relative` is what lets Readout position against the card: the idiom takes
+  // the whole box and supplies its own box-relative padding, so the card's own
+  // px-4 py-3 is the fallback for anything that is not a Readout.
+  "relative flex h-full w-full flex-col justify-center rounded-xl border border-line bg-surface px-4 py-3";
 
+/**
+ * A Home stat — THE dashboard-sized instance of the one widget idiom.
+ *
+ * Not a second copy of it. This composition is where the idiom came from, and
+ * for a while it was also the one thing not rendered by the shared component:
+ * Home's cards sized their value with a fixed type scale while every stage
+ * widget derived its own from its box. Put side by side in the same grid — which
+ * is exactly what Home does, since a stage widget can be added to it — a card
+ * read at a third the size of the widget beside it.
+ *
+ * So it goes through Readout too, and a tile is a tile whatever is in it.
+ */
 export function Stat({
   label,
   value,
@@ -143,24 +160,17 @@ export function Stat({
   tone?: "danger" | "live";
 }) {
   const body = (
-    <>
-      <span className="block text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
-        {label}
-      </span>
-      <span
-        className={cn(
-          // text-fg explicitly, never inherited. These cards render on Home's
-          // kiosk surface as well as on a page, and an inherited colour resolved
-          // to black on black there — measured at 1.06:1.
-          "block text-title2 font-medium font-mono tabular-nums mt-0.5 text-fg",
-          tone === "danger" && "text-danger-11",
-          tone === "live" && "text-live-11",
-        )}
-      >
-        {value}
-      </span>
-      {sub && <span className="block truncate text-caption1 text-fg-subtle" title={sub}>{sub}</span>}
-    </>
+    <Readout
+      caption={label}
+      value={value}
+      sub={sub}
+      // The tone colours are the app's semantic tokens, not the display palette:
+      // a stat on Home is read on Home. Readout leaves the value at the inherited
+      // foreground when this is null, which inside .kiosk-surface is the same
+      // white a display uses.
+      valueColor={tone === "danger" ? "var(--color-danger-11)" : tone === "live" ? "var(--color-live-11)" : null}
+      mono
+    />
   );
   const className = STAT_CARD;
   return to ? (
@@ -386,24 +396,18 @@ export function LiveStatusCard({
   skewMs: number;
 }) {
   const timer = computePcoTimer(pcoLive, now, skewMs);
+  // The idiom, like every other card. This was the last one drawing its own
+  // markup — a clamp()'d timer with its label sitting BESIDE it on the baseline
+  // and the next item below, which is the same three pieces of information the
+  // composition already has places for. The label is what the number is counting
+  // to, so it is the caption; the next item qualifies it, so it is the sub.
   return (
-    <div className={cn(STAT_CARD, "flex h-full flex-col justify-center")}>
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <span
-          className={cn(
-            "text-large-title font-medium font-mono tabular-nums leading-none text-fg",
-            timer?.over && "text-danger-11",
-          )}
-          style={{ fontSize: "clamp(2.25rem, 6vw, 3.25rem)" }}
-        >
-          {timer ? fmtDuration(timer.seconds) : "—"}
-        </span>
-        {timer?.label && <span className="text-headline text-fg">{timer.label}</span>}
-      </div>
-      {pcoLive?.nextItemTitle && (
-        <p className="text-footnote text-fg-subtle mt-2.5">Next · {pcoLive.nextItemTitle}</p>
-      )}
-    </div>
+    <Stat
+      label={timer?.label ?? "Service"}
+      value={timer ? fmtDuration(timer.seconds) : "—"}
+      sub={pcoLive?.nextItemTitle ? `Next · ${pcoLive.nextItemTitle}` : undefined}
+      tone={timer?.over ? "danger" : undefined}
+    />
   );
 }
 

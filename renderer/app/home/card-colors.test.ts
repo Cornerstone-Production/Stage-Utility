@@ -16,6 +16,7 @@ import { describe, test } from "node:test";
 import { readFileSync } from "node:fs";
 
 const SRC = readFileSync(new URL("./cards.tsx", import.meta.url), "utf8");
+const READOUT = readFileSync(new URL("../../main/readout.tsx", import.meta.url), "utf8");
 
 /** Type-scale classes. Anything carrying one is rendering words. */
 const SCALE = /text-(large-title|title[1-3]|headline|subheadline|body|callout|footnote|caption[12])\b/;
@@ -39,11 +40,43 @@ describe("Home's cards on the kiosk surface", () => {
     );
   });
 
-  test("the live timer and the stat value name theirs explicitly", () => {
-    // The two that were actually broken, pinned by name so a refactor that drops
-    // one is caught even if the general rule above is loosened later.
-    assert.match(SRC, /text-large-title[^"]*text-fg/, "the live timer lost its colour");
-    assert.match(SRC, /text-title2[^"]*text-fg/, "the stat value lost its colour");
+  test("the live timer goes through the shared composition", () => {
+    // One of the two spans that were actually broken. It no longer names a
+    // colour because it no longer names anything: it drew its own markup — a
+    // clamp()'d value with the label beside it — and now renders through Stat,
+    // which is Readout. The colour guarantee moved with it, to the test below.
+    //
+    // Pinned so the card cannot quietly go back to hand-rolled markup, which is
+    // where the black-on-black came from in the first place.
+    // Bounded to the function's OWN body. A `[\s\S]*?<Stat` from the function
+    // name would happily cross into the next card and match its Stat — the first
+    // version of this test did exactly that and passed while the timer was back
+    // to a hand-rolled span.
+    const start = SRC.indexOf("export function LiveStatusCard(");
+    assert.notEqual(start, -1, "LiveStatusCard not found — was it renamed?");
+    const rest = SRC.slice(start + 1);
+    const end = rest.search(/\nexport (?:function|const) /);
+    const body = end === -1 ? rest : rest.slice(0, end);
+    assert.match(body, /<Stat\b/, "the live timer draws its own markup again instead of using Stat");
+  });
+
+  test("the stat value takes its colour from a token, not from inheritance", () => {
+    // Where BOTH originally-broken spans ended up. Neither is a Tailwind class
+    // any more: Stat renders through the shared Readout, and the live timer
+    // renders through Stat, so this one assertion covers both.
+    //
+    // A token rather than a literal white is what makes one component correct on
+    // both grounds — inside .kiosk-surface (every display, and Home's widget
+    // grid) --color-fg IS white, and on a themed page it is the theme's
+    // foreground. A literal would be invisible on the second.
+    assert.match(READOUT, /color: filled \? "#ffffff" : valueColor \?\? "var\(--color-fg\)"/,
+      "the readout's value no longer resolves its colour from a token");
+    // The unfilled caption and sub too — those are the lines that would go
+    // black-on-black, since the value usually carries a state colour.
+    assert.match(READOUT, /color: filled \? "rgba\(255,255,255,0\.85\)" : "var\(--color-fg-muted\)"/,
+      "the readout's caption no longer resolves its colour from a token");
+    assert.match(READOUT, /color: filled \? "rgba\(255,255,255,0\.80\)" : "var\(--color-fg-subtle\)"/,
+      "the readout's sub-line no longer resolves its colour from a token");
   });
 
   test("the check finds real class attributes, not nothing", () => {

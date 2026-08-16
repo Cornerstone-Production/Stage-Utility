@@ -186,7 +186,13 @@ export function Readout({
     textTransform: "uppercase",
     // Its own face, never the value's: a caption is words, and the mono a
     // numeric readout uses makes words worse.
-    color: filled ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.55)",
+    //
+    // The theme's token, not a literal white. Inside .kiosk-surface — every
+    // display, and Home's widget grid — it already resolves to white, so a
+    // display looks the same; on a themed page it is legible instead of being
+    // white on white. The filled variant keeps literals: its ground is a
+    // saturated colour, so white is right in either theme.
+    color: filled ? "rgba(255,255,255,0.85)" : "var(--color-fg-muted)",
     lineHeight: CAPTION_LEADING,
     whiteSpace: "nowrap",
     overflow: "hidden",
@@ -196,7 +202,7 @@ export function Readout({
   };
   const subStyle: CSSProperties = {
     fontSize: `${subPx}px`,
-    color: filled ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.45)",
+    color: filled ? "rgba(255,255,255,0.80)" : "var(--color-fg-subtle)",
     lineHeight: SUB_LEADING,
     whiteSpace: "nowrap",
     overflow: "hidden",
@@ -249,10 +255,9 @@ export function Readout({
             display: "inline-block",
             fontSize: `${valuePx * scale}px`,
             fontWeight: weight ?? (filled ? 700 : 600),
-            // Explicit, never inherited: these render on a themed page as well as
-            // on a display, and an inherited colour resolved to black on black
-            // there once — measured at 1.06:1.
-            color: filled ? "#ffffff" : valueColor ?? "rgba(255,255,255,0.92)",
+            // Explicit, never inherited: an inherited colour resolved to black
+            // on black on the kiosk surface once — measured at 1.06:1.
+            color: filled ? "#ffffff" : valueColor ?? "var(--color-fg)",
             lineHeight: VALUE_LEADING,
             whiteSpace: "nowrap",
             ...(upper ? { textTransform: "uppercase" as const } : null),
