@@ -23,7 +23,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode }
 
 import {
   CAPTION_SCALE, CAPTION_MIN_PX, SUB_SCALE, SUB_MIN_PX, GAP_SCALE,
-  CAPTION_LEADING, VALUE_LEADING, SUB_LEADING, valueSizeFor,
+  CAPTION_LEADING, VALUE_LEADING, SUB_LEADING, PAD_SCALE, valueSizeFor,
 } from "./readout-size";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
 
@@ -39,20 +39,24 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
  * are the ones the comparison page was approved at: those are shares of the
  * widget's outer height, padding included.
  */
-function useBoxHeight(): [React.RefObject<HTMLDivElement | null>, number] {
+function useBoxSize(): [React.RefObject<HTMLDivElement | null>, number, number] {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [h, setH] = useState(0);
+  const [size, setSize] = useState({ h: 0, w: 0 });
   useLayoutEffect(() => {
     const box = ref.current?.parentElement;
     if (!box) return;
     const measure = () =>
-      setH((prev) => (Math.abs(box.offsetHeight - prev) > 0.5 ? box.offsetHeight : prev));
+      setSize((prev) =>
+        Math.abs(box.offsetHeight - prev.h) > 0.5 || Math.abs(box.offsetWidth - prev.w) > 0.5
+          ? { h: box.offsetHeight, w: box.offsetWidth }
+          : prev,
+      );
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(box);
     return () => ro.disconnect();
   }, []);
-  return [ref, h];
+  return [ref, size.h, size.w];
 }
 
 /**
@@ -127,6 +131,24 @@ export interface ReadoutProps {
   mono?: boolean;
   /** Weight for the value. Defaults to 600; the filled variant goes to 700. */
   weight?: number;
+  /**
+   * Uppercase the value.
+   *
+   * For values that are WORDS naming a state — RECORDING, STANDBY, ONLINE. A
+   * state reads as a state in caps and as prose in sentence case, and these are
+   * read at a glance from across a room. Never for numbers, where it does
+   * nothing, and never for content the operator wrote as a sentence.
+   */
+  upper?: boolean;
+  /**
+   * Dim the whole composition.
+   *
+   * For a widget that cannot report — an integration that is unreachable, a
+   * recorder that is offline. Dimming the readout rather than showing a
+   * confident neutral value is what stops "not recording" being read off a
+   * device that is merely unplugged.
+   */
+  dim?: boolean;
 }
 
 /**
@@ -147,8 +169,10 @@ export function Readout({
   fill,
   mono = false,
   weight,
+  upper = false,
+  dim = false,
 }: ReadoutProps) {
-  const [ref, boxH] = useBoxHeight();
+  const [ref, boxH, boxW] = useBoxSize();
   const captionPx = caption ? Math.max(CAPTION_MIN_PX, boxH * CAPTION_SCALE) : 0;
   const subPx = sub ? Math.max(SUB_MIN_PX, boxH * SUB_SCALE) : 0;
   const valuePx = valueSizeFor(boxH, captionPx, subPx);
@@ -185,8 +209,13 @@ export function Readout({
     <div
       ref={ref}
       style={{
-        width: "100%",
-        height: "100%",
+        // The WHOLE object box, over the object's own padding — see PAD_SCALE.
+        // Absolute against the object wrapper, which is the nearest positioned
+        // ancestor at every nesting depth.
+        position: "absolute",
+        inset: 0,
+        padding: `${boxH * PAD_SCALE}px ${Math.min(boxH, boxW) * PAD_SCALE}px`,
+        boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
         justifyContent: "center",
@@ -194,6 +223,7 @@ export function Readout({
         gap: `${boxH * GAP_SCALE}px`,
         overflow: "hidden",
         minHeight: 0,
+        opacity: dim ? 0.45 : 1,
         // Inherited so the fill below can inherit it in turn — the ground has to
         // be the same shape as the object or its corners sit proud of them.
         borderRadius: "inherit",
@@ -225,6 +255,7 @@ export function Readout({
             color: filled ? "#ffffff" : valueColor ?? "rgba(255,255,255,0.92)",
             lineHeight: VALUE_LEADING,
             whiteSpace: "nowrap",
+            ...(upper ? { textTransform: "uppercase" as const } : null),
             ...(mono ? { fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" } : null),
           }}
         >

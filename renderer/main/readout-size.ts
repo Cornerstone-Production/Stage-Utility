@@ -32,6 +32,22 @@ export const SUB_MIN_PX = 10;
  *  rather than crowding one end at a wall size. */
 export const GAP_SCALE = 0.03;
 
+/**
+ * The idiom's own padding, as a share of the box.
+ *
+ * The composition supplies this instead of the object's stored `padding`, which
+ * is a fraction of the CANVAS: at 1080 tall a preset pill carries 14.7px on every
+ * side, which is fine in a big widget and catastrophic in a small one. A 54px
+ * status pill was left 23px of content for a 31px composition and clipped its own
+ * value — the size of the padding had nothing to do with the size of the widget.
+ *
+ * That is the same "accident of the box" this task exists to remove, so the
+ * readout draws over the object's padding and applies this instead. Horizontal
+ * padding is capped against the WIDTH: a tall narrow widget would otherwise take
+ * more side padding than it has width.
+ */
+export const PAD_SCALE = 0.11;
+
 /** Line heights. Exported because the budget below counts them, and because the
  *  rendered leading must be the same number the budget spent. */
 export const CAPTION_LEADING = 1.1;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { VALUE_SCALE, valueSizeFor, CONTENT_SCALE } from "./readout-size.js";
+import { VALUE_SCALE, valueSizeFor, CONTENT_SCALE, PAD_SCALE } from "./readout-size.js";
 
 // The composition is caption / value / sub, sized from the widget's own height.
 // These are the proportions the comparison page was approved at, plus the one
@@ -69,6 +69,33 @@ describe("the line counts that actually occur", () => {
         (sub > 0 ? sub * 1.2 + BOX * 0.03 : 0);
       assert.ok(used <= BOX * CONTENT_SCALE + 0.01, `caption=${cap} sub=${sub} used ${used}px`);
     }
+  });
+});
+
+describe("the composition fits the box it paints", () => {
+  test("the budget plus the idiom's own padding stays inside the box", () => {
+    // THE clipping guard. The readout draws over the object's stored padding and
+    // supplies its own, because the stored one is a fraction of the CANVAS: a
+    // 54px status pill carried 14.7px a side, leaving 23px of content for a 31px
+    // composition, and clipped its own value on a real display.
+    //
+    // So the budget and the padding have to be checked against each other. They
+    // are separate constants, and nothing else notices when their sum passes 1.
+    assert.ok(
+      CONTENT_SCALE + 2 * PAD_SCALE <= 1,
+      `composition ${CONTENT_SCALE} + padding ${2 * PAD_SCALE} overflows the box`,
+    );
+  });
+
+  test("a short box still fits", () => {
+    // The pixel floors under the caption and sub do not scale down forever, so
+    // the small end is where the sum actually breaks. 54px is the real status
+    // pill that clipped.
+    const box = 54;
+    const cap = Math.max(9, box * 0.105);
+    const sub = 0;
+    const used = valueSizeFor(box, cap, sub) * 1.05 + cap * 1.1 + box * 0.03 + 2 * box * PAD_SCALE;
+    assert.ok(used <= box + 0.01, `a ${box}px widget renders ${used.toFixed(1)}px of content`);
   });
 });
 
