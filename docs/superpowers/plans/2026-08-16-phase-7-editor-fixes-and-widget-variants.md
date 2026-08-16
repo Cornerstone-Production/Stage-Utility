@@ -79,13 +79,18 @@ displays draw from the same set. A clock is a clock wherever it appears.
 
 ### Task 1: The canvas menu opens on right-click only
 
+**DONE (221ebb4).** The menu was already right-click only; the real cause was
+draw mode — with it armed, a plain click produced the minimum-size fallback rect
+and opened the picker. A click that never moved now opens nothing.
+
+
 **Bug:** left-click on the canvas opens the add-widget context menu. It should be
 right-click only; left-click selects or clears the selection as it always did.
 
 **Files:** `renderer/editor/layout-editor.tsx`
 
-- [ ] **Step 1:** Reproduce in a browser and note which handler fires.
-- [ ] **Step 2:** Write the failing guard — the menu opens from `onContextMenu`
+- [x] **Step 1:** Reproduce in a browser and note which handler fires.
+- [x] **Step 2:** Write the failing guard — the menu opens from `onContextMenu`
       and from no pointer-down path.
 
 ```ts
@@ -98,20 +103,23 @@ test("the canvas menu is bound to contextmenu, not to a click", () => {
 });
 ```
 
-- [ ] **Step 3:** Fix. **Step 4:** Prove the guard. **Step 5:** Browser check —
+- [x] **Step 3:** Fix. **Step 4:** Prove the guard. **Step 5:** Browser check —
       left-click clears the selection, right-click opens the menu.
-- [ ] **Step 6:** Commit.
+- [x] **Step 6:** Commit.
 
 ---
 
 ### Task 2: Shift-drag draws; the Draw button goes
+
+**DONE (221ebb4).** Shift-drag on empty canvas; button and mode removed.
+
 
 **Files:** `renderer/editor/layout-editor.tsx`
 
 Draw mode currently needs a toolbar toggle. Shift is used for additive selection
 on an OBJECT; on empty canvas it means nothing, so it is free there.
 
-- [ ] **Step 1:** Guard first.
+- [x] **Step 1:** Guard first.
 
 ```ts
 test("shift-drag on empty canvas draws; a plain drag still marquees", () => {
@@ -122,16 +130,19 @@ test("shift-drag on empty canvas draws; a plain drag still marquees", () => {
 });
 ```
 
-- [ ] **Step 2:** Route draw mode off `e.shiftKey` at pointer-down instead of the
+- [x] **Step 2:** Route draw mode off `e.shiftKey` at pointer-down instead of the
       `drawMode` state. Remove the toolbar button and the state.
-- [ ] **Step 3:** Prove — remove the shiftKey check, watch it go red.
-- [ ] **Step 4:** Browser: shift-drag draws and opens the picker; plain drag
+- [x] **Step 3:** Prove — remove the shiftKey check, watch it go red.
+- [x] **Step 4:** Browser: shift-drag draws and opens the picker; plain drag
       marquees; shift-click on an object still extends the selection.
-- [ ] **Step 5:** Commit.
+- [x] **Step 5:** Commit.
 
 ---
 
 ### Task 3: One "Add object" button, three buttons gone
+
+**DONE (221ebb4).** Palette starts hidden; hide-unconfigured moved into its header.
+
 
 **Files:** `renderer/editor/layout-editor.tsx`
 
@@ -143,7 +154,7 @@ is hidden until asked for. The dropdown, the Widgets toggle and the filter icon
 all go; the filter's hide-unconfigured behaviour moves into the palette itself as
 a small control in its header.
 
-- [ ] **Step 1:** Guard that nothing is lost.
+- [x] **Step 1:** Guard that nothing is lost.
 
 ```ts
 test("every type the dropdown offered is still reachable from the palette", () => {
@@ -156,23 +167,27 @@ test("hide-unconfigured survived the filter icon's removal", () => {
 });
 ```
 
-- [ ] **Step 2:** Build. **Step 3:** Prove. **Step 4:** Browser: the button opens
+- [x] **Step 2:** Build. **Step 3:** Prove. **Step 4:** Browser: the button opens
       the palette, drag still places, the hide-unconfigured control still works.
-- [ ] **Step 5:** Commit.
+- [x] **Step 5:** Commit.
 
 ---
 
 ### Task 4: The right panel is resizable
+
+**DONE (221ebb4).** `usePanelWidth` generalised from the sidebar's hook;
+`useSidebarWidth` and `useInspectorWidth` are thin wrappers. Verified 320 -> 440px.
+
 
 **Files:** `renderer/editor/layout-editor.tsx`, and whatever the left rail uses
 
 The left sidebar can already be dragged. The inspector cannot, and it is the panel
 that most needs the room.
 
-- [ ] **Step 1:** Find how the rail does it and REUSE that, rather than writing a
+- [x] **Step 1:** Find how the rail does it and REUSE that, rather than writing a
       second resizer. If it is not reusable, extract it so there is one.
-- [ ] **Step 2:** Width persists per session, clamped to a usable range.
-- [ ] **Step 3:** Guard: one resizer implementation, used twice.
+- [x] **Step 2:** Width persists per session, clamped to a usable range.
+- [x] **Step 3:** Guard: one resizer implementation, used twice.
 
 ```ts
 test("there is one resize implementation, not two", () => {
@@ -181,12 +196,15 @@ test("there is one resize implementation, not two", () => {
 });
 ```
 
-- [ ] **Step 4:** Prove. **Step 5:** Browser: drag the divider, reload, width holds.
-- [ ] **Step 6:** Commit.
+- [x] **Step 4:** Prove. **Step 5:** Browser: drag the divider, reload, width holds.
+- [x] **Step 6:** Commit.
 
 ---
 
 ### Task 5: Screens in the rail returns to the grid
+
+**DONE (221ebb4).** The reset branch now requires being exactly on the destination.
+
 
 **Bug:** clicking **Screens** in the rail while editing a layout leaves you in the
 editor. It should return to the grid of screens.
@@ -197,8 +215,8 @@ Likely cause: the rail marks a destination active by path PREFIX, so
 `/screens/<id>/edit` is already "on" Screens and the link is a no-op to the
 router. The fix is for the rail's Screens link to target `/screens` exactly.
 
-- [ ] **Step 1:** Confirm the cause in a browser before changing anything.
-- [ ] **Step 2:** Guard.
+- [x] **Step 1:** Confirm the cause in a browser before changing anything.
+- [x] **Step 2:** Guard.
 
 ```ts
 test("a rail link navigates to its own path, even from a child route", () => {
@@ -208,11 +226,29 @@ test("a rail link navigates to its own path, even from a child route", () => {
 });
 ```
 
-- [ ] **Step 3:** Fix. **Step 4:** Prove. **Step 5:** Browser: from the editor,
+- [x] **Step 3:** Fix. **Step 4:** Prove. **Step 5:** Browser: from the editor,
       click Screens, land on the grid. Check the same from Patch and ScriptView.
-- [ ] **Step 6:** Commit.
+- [x] **Step 6:** Commit.
 
 ---
+
+
+---
+
+### Task 5b: Context menu items fire, and pages get a right gutter
+
+**DONE (9ccb4ba).** Reported after the first five.
+
+- [x] The context menu did nothing on click — not just Delete. Its
+      dismiss-on-outside-click listener runs in the CAPTURE phase, so an
+      unfiltered `close()` fired on the pointerdown of a click on a menu ITEM and
+      unmounted the menu before the click reached the button. Now it ignores
+      pointerdowns from inside the menu.
+- [x] Delete is red, not amber. The fix existed (858b391, merged as #269) but
+      this branch forked before that merge; cherry-picked.
+- [x] The page gutter moved to `<main>`, applied once. Routes were each padding
+      themselves and the recent ones did not. Three local copies removed so
+      nothing doubles. Verified 0 -> 20px, and Home reads 20 not 40.
 
 ### Task 6: Home edits in its own tab
 
