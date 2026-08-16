@@ -2,7 +2,7 @@ import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
 import { HomeCard, onlineFromState } from "../app/home/cards";
 import { fitFor } from "./console-fit";
-import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
 import { advancePeakHold, type PeakHold } from "./peak-hold.js";
@@ -130,6 +130,25 @@ export function boxStyle(o: LayoutObject, H: number, _canvasBg?: string | null):
   return css;
 }
 
+/**
+ * Readouts whose content is a NUMBER that changes while you watch it.
+ *
+ * These get tabular figures in the mono face. Proportional digits are different
+ * widths, so a clock reflows every second and an SPL meter jitters ten times a
+ * second — the text physically moves, which is the one thing a readout on a wall
+ * must not do. Tabular digits all occupy the same width, so only the glyphs
+ * change.
+ *
+ * Decided per type here rather than offered as a switch: there is no version of
+ * "my clock should wobble" worth building a control for. Types whose content is
+ * words (status pills, wireless summaries) are deliberately absent — mono makes
+ * prose worse.
+ */
+const TABULAR_TYPES = new Set<string>([
+  "clock", "countdown-timer", "pp-timer", "baptism-timer",
+  "spl-meter", "people-counter", "service-pacing", "slide-progress", "charger-battery",
+]);
+
 /** Text-level CSS for the inner span. */
 function textStyle(o: LayoutObject, H: number): CSSProperties {
   const s = o.style ?? {};
@@ -141,6 +160,10 @@ function textStyle(o: LayoutObject, H: number): CSSProperties {
     textAlign: s.textAlign ?? "center",
     width: "100%",
   };
+  if (TABULAR_TYPES.has(o.config.type)) {
+    css.fontFamily = "var(--font-mono)";
+    css.fontVariantNumeric = "tabular-nums";
+  }
   if (s.italic) css.fontStyle = "italic";
   if (s.uppercase) css.textTransform = "uppercase";
   if (s.letterSpacing != null) css.letterSpacing = `${s.letterSpacing}em`;
@@ -426,13 +449,71 @@ function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign
 }
 
 
+/**
+ * A caption above a readout — "SERVICE STARTS IN" over a countdown.
+ *
+ * A bare 0:04:12 on a wall does not say what it is counting to, and the operator
+ * who built the layout is not the one reading it on Sunday morning. The caption
+ * is set on NEW objects by the registry and absent on ones that already exist,
+ * so nobody's layout grows a caption it did not ask for.
+ *
+ * Sized and dimmed against the value rather than set in pixels, so it stays in
+ * proportion at a dashboard tile and on a wall alike — the value keeps its own
+ * auto-fit, and the caption simply rides above it.
+ */
+function Captioned({ caption, ts, children }: { caption?: string | null; ts: CSSProperties; children: ReactNode }) {
+  if (!caption) return <>{children}</>;
+  const align = ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center";
+  return (
+    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: align, overflow: "hidden", minHeight: 0 }}>
+      <span
+        style={{
+          color: ts.color,
+          opacity: 0.55,
+          fontSize: "0.32em",
+          fontWeight: 600,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+          lineHeight: 1.2,
+          // Its own font, not the value's: a caption is words, and the mono face
+          // a numeric readout uses makes words worse.
+          fontFamily: "inherit",
+          flexShrink: 0,
+        }}
+      >
+        {caption}
+      </span>
+      <span style={{ minHeight: 0, flex: "1 1 auto", width: "100%", display: "flex", flexDirection: "column", justifyContent: "center" }}>{children}</span>
+    </div>
+  );
+}
+
 /** Seconds until the next service, or null. Same source as the context bar. */
 function homeSecondsToStart(ctx: LayoutRenderCtx): number | null {
   const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
   return t && !t.over ? t.seconds : null;
 }
 
+/**
+ * One object's content, plus its caption if it has one.
+ *
+ * The caption is applied HERE rather than in each readout's case, so it is a
+ * property of the object instead of six near-identical edits inside a switch —
+ * and so a type that grows one later gets it without touching the renderer. Both
+ * call sites (the display renderer and the editor canvas) come through here, so
+ * the editor shows exactly what the wall will.
+ */
 export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
+  const caption = (o.config as { caption?: string | null }).caption;
+  if (!caption) return <ObjectBody o={o} ctx={ctx} />;
+  return (
+    <Captioned caption={caption} ts={textStyle(o, ctx.H)}>
+      <ObjectBody o={o} ctx={ctx} />
+    </Captioned>
+  );
+}
+
+function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   const c = o.config;
   const ts = textStyle(o, ctx.H);
   // Every readout fits its box. This helper backs the plain-text objects

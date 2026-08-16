@@ -436,6 +436,19 @@ export function Inspector({
         />
       )}
 
+      {/* The line above the value. New readouts arrive with one — a bare 0:04:12
+          does not say what it is counting to — and this is how it is changed or
+          cleared. Emptying it removes the caption entirely; a default nobody can
+          switch off would be worse than no default. */}
+      {"caption" in c && (
+        <RowText
+          label="Caption"
+          value={(c as { caption?: string | null }).caption ?? ""}
+          placeholder="none"
+          onChange={(v) => onConfig({ ...c, caption: v.trim() ? v : null } as LayoutObjectConfig)}
+        />
+      )}
+
       {/* Binding */}
       {c.type === "text" && (
         <RowText label="Text" value={c.text} onChange={(v) => onConfig({ type: "text", text: v })} />

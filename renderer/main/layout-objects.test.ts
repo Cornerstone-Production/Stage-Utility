@@ -106,6 +106,29 @@ function originalStyle(type: string): Record<string, unknown> {
 }
 
 
+
+/**
+ * Types whose default CONFIG deliberately changed, and what it became.
+ *
+ * Same bar as RESTYLED below: the originals stay pinned so an accident is still
+ * caught, and a deliberate change is recorded here.
+ *
+ * Six readouts gained a `caption` — the line above the value that says what the
+ * number is. A bare 0:04:12 on a wall does not say what it is counting to, and
+ * the person who built the layout is not the one reading it on Sunday morning.
+ *
+ * Set on NEW objects only: a stored object carries its own config, so no
+ * existing layout grows a caption nobody asked for.
+ */
+const RECONFIGURED: Record<string, Record<string, unknown>> = {
+  "countdown-timer": { type: "countdown-timer", caption: "Service starts in" },
+  "service-pacing": { type: "service-pacing", hideWhenIdle: false, showLabel: false, caption: "Pacing" },
+  "pp-timer": { type: "pp-timer", timerName: null, propresenterInstanceId: null, warnStates: true, hideWhenIdle: false, showLabel: true, caption: "Stage timer" },
+  "spl-meter": { type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null, caption: "SPL dB(A)" },
+  "people-counter": { type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true, caption: "Attendance" },
+  "baptism-timer": { type: "baptism-timer", field: "live", showLabel: true, label: "", caption: "Baptisms" },
+};
+
 /**
  * Types deliberately RESTYLED since the consolidation, and what they became.
  *
@@ -314,9 +337,29 @@ describe("layout-object registry vs. the structures it replaced", () => {
     }
   });
 
-  test("default config is unchanged for every type", () => {
+  test("default config is the original, or a recorded change", () => {
     for (const t of ALL) {
-      assert.deepEqual(defaultConfig(t as never), ORIGINAL_CONFIG[t], `defaultConfig("${t}")`);
+      assert.deepEqual(defaultConfig(t as never), RECONFIGURED[t] ?? ORIGINAL_CONFIG[t], `defaultConfig("${t}")`);
+    }
+  });
+
+  test("every reconfigured type is real, still matches, and actually differs", () => {
+    for (const t of Object.keys(RECONFIGURED)) {
+      assert.ok(t in LAYOUT_OBJECTS, `RECONFIGURED names "${t}", which is not an object type`);
+      assert.deepEqual(RECONFIGURED[t], defaultConfig(t as never), `RECONFIGURED["${t}"] no longer matches the registry`);
+      assert.notDeepEqual(RECONFIGURED[t], ORIGINAL_CONFIG[t], `RECONFIGURED["${t}"] matches the original`);
+    }
+  });
+
+  test("a caption is the ONLY thing those six gained", () => {
+    // The point of the change is one added key. If anything else moved, this is
+    // a different change wearing its name.
+    for (const t of Object.keys(RECONFIGURED)) {
+      const before = { ...(ORIGINAL_CONFIG[t] as Record<string, unknown>) };
+      const after = { ...RECONFIGURED[t] };
+      delete after.caption;
+      assert.deepEqual(after, before, `defaultConfig("${t}") changed more than the caption`);
+      assert.equal(typeof RECONFIGURED[t].caption, "string", `${t} has no caption`);
     }
   });
 

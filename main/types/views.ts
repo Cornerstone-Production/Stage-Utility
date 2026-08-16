@@ -189,12 +189,34 @@ export type LayoutObjectConfig =
   // PCO Live countdown. `hideWhenIdle` renders nothing (instead of "—") when no
   // timer is live; `warnSeconds` turns the readout amber once the remaining time
   // drops to/below that many seconds (it still goes red on overtime).
-  | { type: "countdown-timer"; hideWhenIdle?: boolean; warnSeconds?: number }
+  | {
+      type: "countdown-timer";
+      hideWhenIdle?: boolean;
+      warnSeconds?: number;
+      /**
+       * A caption above the value — "SERVICE STARTS IN" over a countdown.
+       *
+       * A bare 0:04:12 on a wall does not say what it is counting to, and the
+       * operator who built the layout is not the one reading it at 9am on Sunday.
+       * Set on new objects by the registry; ABSENT on objects that already exist, so
+       * no layout anybody built gains a caption it did not ask for. Empty or null
+       * means no caption.
+       */
+      caption?: string | null;
+    }
   // Service pacing — how far ahead/behind the plan we are right now. `scope: "item"`
   // compares the current live item's elapsed time to its planned length (from
   // pco:live); `scope: "service"` sums actual-vs-planned across the recorded service
   // timeline for a running whole-service total. Over plan reads red, under reads green.
-  | { type: "service-pacing"; scope?: "item" | "service"; hideWhenIdle?: boolean; showLabel?: boolean; aheadColor?: string | null; behindColor?: string | null }
+  | {
+      type: "service-pacing";
+      scope?: "item" | "service";
+      hideWhenIdle?: boolean;
+      showLabel?: boolean;
+      aheadColor?: string | null;
+      behindColor?: string | null;
+      caption?: string | null;
+    }
   // ProPresenter-fed objects. `propresenterInstanceId` picks which configured
   // instance to read (omitted / "default" = the primary) — lets separate custom
   // views per auditorium point at different ProPresenter machines.
@@ -215,7 +237,15 @@ export type LayoutObjectConfig =
   // A timer running INSIDE ProPresenter (its stage/countdown timers) — distinct from
   // the PCO countdown. `timerName` picks one by name (blank = the first reported);
   // `warnStates` colors the readout when the timer's state reads as overrun/expired.
-  | { type: "pp-timer"; timerName?: string | null; propresenterInstanceId?: string | null; warnStates?: boolean; hideWhenIdle?: boolean; showLabel?: boolean }
+  | {
+      type: "pp-timer";
+      timerName?: string | null;
+      propresenterInstanceId?: string | null;
+      warnStates?: boolean;
+      hideWhenIdle?: boolean;
+      showLabel?: boolean;
+      caption?: string | null;
+    }
   // ProPresenter slide position within the current presentation. `display`: "fraction"
   // ("3 / 12"), "remaining" ("9 left"), "percent", or a progress "bar".
   | { type: "slide-progress"; propresenterInstanceId?: string | null; display?: "fraction" | "remaining" | "percent" | "bar"; showLabel?: boolean }
@@ -270,6 +300,7 @@ export type LayoutObjectConfig =
   // color the readout amber/red above the given dB levels.
   | {
       type: "spl-meter";
+      caption?: string | null;
       meterId?: string | null;
       metricKey?: string | null;
       showLabel?: boolean;
@@ -382,6 +413,7 @@ export type LayoutObjectConfig =
   // when `showLabel`.
   | {
       type: "people-counter";
+      caption?: string | null;
       // attendance (Σins) / occupancy (in-room now) resolve per-zone or building;
       // peak/min/avg (today, from the space endpoint) are building-only.
       /** "peak"/"avg"/"attendance" are TODAY's building figures, so a second
@@ -442,6 +474,7 @@ export type LayoutObjectConfig =
   // integration required.
   | {
       type: "baptism-timer";
+      caption?: string | null;
       field?: "live" | "count" | "total" | "average" | "last";
       label?: string;
       showLabel?: boolean;
