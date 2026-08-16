@@ -74,7 +74,7 @@ export function CardChrome({
             aria-label={`${label}: ${SIZES[s].label}`}
             title={`${SIZES[s].label} — ${SIZES[s].w}×${SIZES[s].h}`}
             className={cn(
-              "grid h-5 w-6 place-items-center rounded-[5px] text-caption2 font-semibold transition-colors",
+              "grid h-5 min-w-6 place-items-center rounded-[5px] px-1 text-caption2 font-semibold transition-colors",
               s === size ? "bg-accent text-white" : "text-fg-subtle hover:text-fg",
             )}
           >
@@ -86,7 +86,7 @@ export function CardChrome({
           value={when}
           onChange={(e) => onWhen(e.target.value as HomeVisibility)}
           aria-label={`${label}: when to show it`}
-          className="h-5 max-w-24 rounded-[5px] bg-transparent px-1 text-caption2 text-fg-subtle outline-none hover:text-fg"
+          className="h-5 rounded-[5px] bg-transparent px-1 text-caption2 text-fg-subtle outline-none hover:text-fg"
         >
           {(Object.keys(WHEN_LABELS) as HomeVisibility[]).map((w) => (
             <option key={w} value={w}>{WHEN_LABELS[w]}</option>

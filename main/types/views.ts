@@ -237,7 +237,12 @@ export type LayoutObjectConfig =
   // placed, sized and ordered on its own — the card's look is kept exactly, it
   // is only the container that goes. Each is integration-agnostic: the recording
   // one answers "are we getting this?" across every recorder at once.
-  | { type: "home-recording" }
+  /**
+   * `recorder` picks which one it watches: a name, or "any" for the combined
+   * answer across all of them. A name rather than a per-recorder object TYPE, so
+   * a new recording integration is an extra option here and not a new widget.
+   */
+  | { type: "home-recording"; recorder?: string }
   | { type: "home-spl" }
   | { type: "home-screens" }
   | { type: "home-recent-services" }

@@ -598,12 +598,11 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "home-recording": {
     label: "Recording",
-    blurb: "Are we getting this? — across every recorder at once",
+    blurb: "Is a recorder rolling — one of them, or all at once",
     group: "Status",
-    config: () => ({ type: "home-recording" }),
+    config: () => ({ type: "home-recording", recorder: "any" }),
     style: BARE,
     homeSize: "s",
-    stylingOnly: true,
   },
   "home-screens": {
     label: "Screens online",

@@ -63,6 +63,21 @@ export function recordingStat(
   };
 }
 
+/**
+ * One named recorder, on its own.
+ *
+ * The word first and in colour — "recording" green, "stopped" red — because
+ * mid-service the answer is a state, not a duration, and a timecode reads as
+ * fine at a glance whether or not it is moving. The elapsed time goes underneath
+ * where it belongs: confirmation, not the headline.
+ */
+export function recorderStat(r: Recorder | undefined): { value: string; sub: string; tone?: "danger" | "live" } {
+  if (!r) return { value: "—", sub: "not set up" };
+  if (!r.connected) return { value: "—", sub: `${r.name} not connected` };
+  if (!r.recording) return { value: "stopped", sub: `${r.name} connected`, tone: "danger" };
+  return { value: "recording", sub: r.timecode ?? r.name, tone: "live" };
+}
+
 /** The loudest current SPL reading across every meter, which is the number
  *  anyone glancing at Home actually wants. Prefers Smaart's A-weighted slow
  *  metric and falls back to whatever the meter reports, since the metric names

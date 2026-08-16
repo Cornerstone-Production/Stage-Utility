@@ -32,7 +32,7 @@ import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
 import { useObsState } from "../../main/use-obs-state";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
-import { recordingStat, recorders, loudestSpl } from "../recording-status";
+import { recordingStat, recorderStat, recorders, loudestSpl } from "../recording-status";
 
 /* ── Shared bits ──────────────────────────────────────────────────────────── */
 
@@ -119,7 +119,17 @@ function Headline({
   );
 }
 
-function Stat({
+/** The card every Home stat sits in. One string, so the timer and the stats
+ *  cannot end up looking like different species — which is exactly what happened
+ *  when only Stat drew it and the timer came out with no background at all. */
+export const STAT_CARD =
+  // h-full and a flex column, not a plain box: a stat sizes to its CONTENT, and
+  // in a grid tile that left it floating short of the bottom edge. `block` is
+  // load-bearing too — the drill-down variant renders an <a>, which is inline by
+  // default, so its card collapsed to a sliver with the text hanging outside it.
+  "flex h-full w-full flex-col justify-center rounded-xl border border-line bg-surface px-4 py-3";
+
+export function Stat({
   label,
   value,
   sub,
@@ -152,7 +162,7 @@ function Stat({
       {sub && <span className="block truncate text-caption1 text-fg-subtle" title={sub}>{sub}</span>}
     </>
   );
-  const className = "rounded-xl border border-line bg-surface px-4 py-3";
+  const className = STAT_CARD;
   return to ? (
     <Link to={to as never} className={cn(className, "transition-colors hover:border-line-strong")}>
       {body}
@@ -377,7 +387,7 @@ export function LiveStatusCard({
 }) {
   const timer = computePcoTimer(pcoLive, now, skewMs);
   return (
-    <div className="flex h-full flex-col justify-center">
+    <div className={cn(STAT_CARD, "flex h-full flex-col justify-center")}>
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <span
           className={cn(
@@ -405,9 +415,11 @@ export function LiveStatusCard({
  * only OBS would read as reassurance while REAPER sat stopped. A new recording
  * integration joins by being added to `recorders()`; nothing here changes.
  */
-export function RecordingCard() {
-  const rec = recordingStat(recorders(useObsState(), useReaperState()));
-  return <Stat label="Recording" value={rec.value} sub={rec.sub} tone={rec.tone} />;
+export function RecordingCard({ recorder = "any" }: { recorder?: string }) {
+  const list = recorders(useObsState(), useReaperState());
+  const one = recorder !== "any" ? list.find((r) => r.name === recorder) : undefined;
+  const rec = recorder === "any" ? recordingStat(list) : recorderStat(one);
+  return <Stat label={recorder === "any" ? "Recording" : recorder} value={rec.value} sub={rec.sub} tone={rec.tone} />;
 }
 
 /** The loudest meter right now, and which one. */
@@ -450,6 +462,7 @@ export function onlineFromState(state: StageState): string[] {
  */
 export function HomeCard({
   type,
+  config,
   state,
   pcoLive,
   now,
@@ -458,6 +471,8 @@ export function HomeCard({
   secondsToStart,
 }: {
   type: HomeCardType;
+  /** The object's own config, for the cards that take one. */
+  config?: Record<string, unknown>;
   state: StageState;
   pcoLive: PcoLiveDTO | null;
   now: number;
@@ -470,7 +485,7 @@ export function HomeCard({
     case "home-live-status":
       return <LiveStatusCard pcoLive={pcoLive} now={now} skewMs={skewMs} />;
     case "home-recording":
-      return <RecordingCard />;
+      return <RecordingCard recorder={config?.recorder as string | undefined} />;
     case "home-spl":
       return <SplCard />;
     case "home-screens":

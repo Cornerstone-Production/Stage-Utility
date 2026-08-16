@@ -449,6 +449,20 @@ export function Inspector({
         />
       )}
 
+      {c.type === "home-recording" && (
+        <RowToggle
+          label="Recorder"
+          hint="Which recorder this watches. 'Any' answers the question across all of them at once — a widget that reported only OBS would read as reassurance while REAPER sat stopped. Add one per recorder to see them separately."
+          value={c.recorder ?? "any"}
+          options={[
+            { value: "any", label: "Any" },
+            { value: "OBS", label: "OBS" },
+            { value: "REAPER", label: "REAPER" },
+          ]}
+          onChange={(v) => onConfig({ ...c, recorder: v })}
+        />
+      )}
+
       {/* Binding */}
       {c.type === "text" && (
         <RowText label="Text" value={c.text} onChange={(v) => onConfig({ type: "text", text: v })} />
