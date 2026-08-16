@@ -93,6 +93,13 @@ export function HomeGrid({
 
   return (
     <div
+      // kiosk-surface, because these are DISPLAY widgets. Their styling is built
+      // for a black wall — white text on a 4%-white card — and on a themed app
+      // page that came out black-on-black in dark mode and white-on-white in
+      // light, where a clock was literally invisible. This class already exists
+      // for exactly that problem (see its comment in styles.css: "measured at
+      // 1.14:1"), and it makes Home's grid show what a screen would show.
+      className="kiosk-surface rounded-xl p-3"
       // A CONTAINER query, not a viewport one: Home sits beside the sidebar, so
       // window width is the wrong signal and collapsed the grid to two columns
       // on a laptop that had room for three.
