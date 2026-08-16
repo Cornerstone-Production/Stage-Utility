@@ -15,6 +15,7 @@ import {
   AlignHorizontalDistributeCenterIcon,
   MonitorSmartphoneIcon,
   LayoutGridIcon,
+  LockOpenIcon,
   SaveIcon,
   DownloadIcon,
   
@@ -289,7 +290,7 @@ interface DragState {
 // its parent overlay node so nested children resolve correctly. Recurses for a
 // container's children.
 function OverlayNode({
-  o, parentAbs, depth, selectedId, selectedIds, draggingId = null, onStart, parentLocked = false,
+  o, parentAbs, depth, selectedId, selectedIds, draggingId = null, onStart, parentLocked = false, canvasLocked = false,
 }: {
   o: LayoutObject;
   parentAbs: FracRect;
@@ -301,6 +302,9 @@ function OverlayNode({
   onStart: (e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) => void;
   /** True when an ancestor container is locked, so this node is locked too. */
   parentLocked?: boolean;
+  /** The whole canvas is locked. Distinct from the per-object padlock: this one
+   *  is about how you are working right now, not about the layout. */
+  canvasLocked?: boolean;
 }) {
   const sel = o.id === selectedId; // single "primary" → resize handles
   const inSel = selectedIds.has(o.id); // any selected → highlight outline
@@ -336,7 +340,7 @@ function OverlayNode({
         {locked && <LockIcon style={{ width: 9, height: 9 }} />}
         {typeLabel(o.config.type)}
       </span>
-      {sel && !locked &&
+      {sel && !locked && !canvasLocked &&
         HANDLES.map((h) => {
           // Above every sibling overlay node. Nodes render in z order with no
           // z-index of their own, so an object stacked higher than the selected
@@ -361,7 +365,7 @@ function OverlayNode({
           return <div key={h} onPointerDown={(e) => onStart(e, o, h, parentAbs, depth)} style={{ ...pos, cursor: handleCursor(h) }} />;
         })}
       {kids?.map((c) => (
-        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} selectedIds={selectedIds} draggingId={draggingId} onStart={onStart} parentLocked={locked} />
+        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} selectedIds={selectedIds} draggingId={draggingId} onStart={onStart} parentLocked={locked} canvasLocked={canvasLocked} />
       ))}
     </div>
   );
@@ -369,7 +373,7 @@ function OverlayNode({
 
 function EditorCanvas({
   effectiveFit,
-  canvas, objects, selectedId, selectedIds, gridOn, alignOn, ctx, ndiSource, interactive,
+  canvas, objects, selectedId, selectedIds, gridOn, alignOn, locked, ctx, ndiSource, interactive,
   onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
   onContextMenu, onDropType,
 }: {
@@ -384,6 +388,10 @@ function EditorCanvas({
   /** Snap to the other objects' edges, centres and spacing. Independent of the
    *  grid: both can be on, and grid runs first so alignment only refines. */
   alignOn: boolean;
+  /** Nothing on the canvas can be moved or resized. Objects still SELECT and
+   *  the inspector still edits them — this is about not knocking a layout out
+   *  of shape while reaching for the thing next to it. */
+  locked: boolean;
   ctx: Omit<LayoutRenderCtx, "H" | "ndiSource" | "interactive">;
   ndiSource: string | null;
   /** When false the canvas is a read-only preview (no overlay, handles, or drag). */
@@ -593,6 +601,14 @@ function EditorCanvas({
     // selection (so we drag the whole group); otherwise select just this one.
     const inGroup = selectedIds.has(o.id) && selectedIds.size > 1;
     if (!inGroup) onSelect(o.id, false);
+    // Two locks, one decision point. The per-object padlock has always been
+    // here; the canvas-wide lock joins it rather than living somewhere else
+    // where the two could disagree.
+    //
+    // Returning here is what makes the handles INERT rather than merely
+    // hidden. Hiding them and leaving the drag live is the version of this
+    // that looks fixed and is not.
+    if (locked) return;
     // Locked objects (and anything inside a locked container) select but never move.
     if (isLockedInTree(objects, o.id)) return;
     onCommitStart();
@@ -798,6 +814,7 @@ function EditorCanvas({
                   selectedIds={selectedIds}
                   draggingId={drag?.id ?? null}
                   onStart={startDrag}
+                  canvasLocked={locked}
                 />
               ))}
             </div>
@@ -902,6 +919,10 @@ export function LayoutEditor({
   // On by default: lining an object up with its neighbours is the common case,
   // and Alt suppresses it for the drag where it is not.
   const [alignOn, setAlignOn] = useState(true);
+  // Unlocked by default: an editor that does nothing on the first drag is a
+  // puzzle. Per session rather than per view - it is about how you are working
+  // right now, not a property of the layout.
+  const [layoutLocked, setLayoutLocked] = useState(false);
   // The palette is a second door beside the Add-object dropdown, which is
   // unchanged. Open by default in edit mode: browsing is the common case for
   // someone building a view, and the dropdown is there for anyone who knows
@@ -1580,6 +1601,19 @@ export function LayoutEditor({
           <LayoutGridIcon className="size-3.5" /> Widgets
         </Button>
         <Button
+          variant={layoutLocked ? "accent" : "filled"}
+          size="small"
+          onClick={() => setLayoutLocked((v) => !v)}
+          aria-label="Lock the layout"
+          aria-pressed={layoutLocked}
+          tooltip={layoutLocked
+            ? "Locked: nothing can be moved or resized. Objects still select and their settings still edit."
+            : "Lock the layout so reaching for one object cannot resize another."}
+        >
+          {layoutLocked ? <LockIcon className="size-3.5" /> : <LockOpenIcon className="size-3.5" />}
+          {layoutLocked ? "Locked" : "Lock"}
+        </Button>
+        <Button
           variant={alignOn ? "accent" : "filled"}
           size="small"
           onClick={() => setAlignOn((v) => !v)}
@@ -1802,6 +1836,7 @@ export function LayoutEditor({
               selectedId={selectedId}
               selectedIds={selectedIds}
               alignOn={alignOn}
+              locked={layoutLocked}
               gridOn={gridOn && isEditing}
               interactive={isEditing}
               ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
