@@ -10,6 +10,7 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { invoke } from "../lib/api";
 import { BrandLogo } from "../components/brand-logo";
+import { Readout } from "./readout";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
@@ -490,6 +491,18 @@ function Captioned({ caption, ts, children }: { caption?: string | null; ts: CSS
   );
 }
 
+/**
+ * Types that have moved onto the shared Readout.
+ *
+ * A type in this set owns its own caption — Readout draws it as the first line
+ * of the composition — so ObjectContent must not ALSO wrap it in the older
+ * Captioned, which would render the caption twice.
+ *
+ * The set exists only while the move is in progress. When every readout has
+ * moved, it and Captioned both go, and ObjectContent stops branching.
+ */
+const IDIOM_TYPES = new Set<string>(["clock"]);
+
 /** Seconds until the next service, or null. Same source as the context bar. */
 function homeSecondsToStart(ctx: LayoutRenderCtx): number | null {
   const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
@@ -507,7 +520,7 @@ function homeSecondsToStart(ctx: LayoutRenderCtx): number | null {
  */
 export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   const caption = (o.config as { caption?: string | null }).caption;
-  if (!caption) return <ObjectBody o={o} ctx={ctx} />;
+  if (!caption || IDIOM_TYPES.has(o.config.type)) return <ObjectBody o={o} ctx={ctx} />;
   return (
     <Captioned caption={caption} ts={textStyle(o, ctx.H)}>
       <ObjectBody o={o} ctx={ctx} />
@@ -522,21 +535,31 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   // (text, slide text, slide notes), and routing it through FitText is what
   // makes a per-object font size unnecessary rather than merely unfashionable.
   const span = (text: string) => <FitText text={text} ts={ts} vAlign={o.style?.vAlign} />;
+  // The idiom: caption, value, sub — sized from the box. Every readout that has
+  // moved goes through here, so the composition has exactly one implementation
+  // and its caption comes from the object rather than from six edits in a switch.
+  const readout = (
+    value: ReactNode,
+    opts?: { sub?: string | null; valueColor?: string | null; fill?: string | null },
+  ) => (
+    <Readout
+      caption={(c as { caption?: string | null }).caption}
+      value={value}
+      mono={TABULAR_TYPES.has(c.type)}
+      {...opts}
+    />
+  );
 
   switch (c.type) {
     case "text":
       return span(c.text);
     case "clock":
-      // FitText, not a bare span: "2:26:41 PM" is 4px wider than a 257px tile,
-      // and a clock that spills past its own box on a dashboard is the single
-      // most visible version of this bug.
-      return (
-        <FitText
-          text={clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h", c.showMeridiem ?? true)}
-          ts={ts}
-          vAlign={o.style?.vAlign}
-        />
-      );
+      // The idiom, not FitText. The old path grew one string until it ran out of
+      // room, which made the size an accident of the box: "2:26:41 PM" is 4px
+      // wider than a 257px tile, so the same clock was huge on a wall and
+      // microscopic in a column. Readout sizes it from the height and shrinks it
+      // only when the width genuinely cannot take it.
+      return readout(clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h", c.showMeridiem ?? true));
     case "countdown-timer": {
       const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
       if (!t) return (c.hideWhenIdle ?? false) ? null : span("—");

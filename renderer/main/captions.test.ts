@@ -63,8 +63,10 @@ describe("existing layouts", () => {
     );
   });
 
-  test("an object with no caption renders no caption", () => {
-    const src = readFileSync(new URL("./layout-renderer.tsx", import.meta.url), "utf8");
-    assert.match(src, /if \(!caption\) return <ObjectBody/, "a captionless object must render the body alone");
-  });
+  // "an object with no caption renders no caption" used to live here as a match
+  // on the renderer's source text. It is now readout-caption.test.tsx, which
+  // RENDERS the component and reads the result — a source-text guard passes on
+  // any rewrite that keeps the words and fails on any that changes them, which
+  // is the opposite of what it was for. This one broke on a rewrite that
+  // preserved the behaviour exactly.
 });
