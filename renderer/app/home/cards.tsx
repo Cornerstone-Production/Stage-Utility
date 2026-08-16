@@ -139,7 +139,10 @@ function Stat({
       </span>
       <span
         className={cn(
-          "block text-title2 font-medium font-mono tabular-nums mt-0.5",
+          // text-fg explicitly, never inherited. These cards render on Home's
+          // kiosk surface as well as on a page, and an inherited colour resolved
+          // to black on black there — measured at 1.06:1.
+          "block text-title2 font-medium font-mono tabular-nums mt-0.5 text-fg",
           tone === "danger" && "text-danger-11",
           tone === "live" && "text-live-11",
         )}
@@ -348,7 +351,10 @@ export function LiveStatusCard({
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <span
             className={cn(
-              "text-large-title font-medium font-mono tabular-nums leading-none",
+              // text-fg explicitly. Same trap as the stats below: inheriting
+              // looked fine on the old app page and came out black on black the
+              // moment this card moved onto Home's kiosk surface.
+              "text-large-title font-medium font-mono tabular-nums leading-none text-fg",
               timer?.over && "text-danger-11",
             )}
             style={{ fontSize: "clamp(2.25rem, 6vw, 3.25rem)" }}
@@ -362,7 +368,12 @@ export function LiveStatusCard({
         )}
       </section>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+      {/* Three, not four. A widget is a fixed box that does not scroll, and the
+          fourth stat pushed this card past its tile. History went because it was
+          the only one that was not a live reading — it was a link to another
+          page wearing a stat's clothes, and History is one click away in the
+          rail. */}
+      <div className="grid grid-cols-3 gap-2.5">
         <Stat label="Recording" value={rec.value} sub={rec.sub} tone={rec.tone} />
         <Stat label="SPL" value={loud.value} sub={loud.sub} />
         <Stat
@@ -372,7 +383,6 @@ export function LiveStatusCard({
           to="/screens"
           tone={onlineOutputIds.length === outputCount ? undefined : "danger"}
         />
-        <Stat label="History" value="open" sub="timing and attendance" to="/history" />
       </div>
     </div>
   );

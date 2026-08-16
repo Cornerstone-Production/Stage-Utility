@@ -120,7 +120,7 @@ export function HomeGrid({
                   applies it; rendering ObjectContent alone left every Home card
                   transparent and edge-to-edge, which read as "the card look did
                   not ship" rather than "Home forgot the box". */}
-              <div style={{ ...boxStyle(o, NOMINAL_H), width: "100%", height: "100%", overflow: "auto" }}>
+              <div style={{ ...boxStyle(o, NOMINAL_H), width: "100%", height: "100%", overflow: "hidden" }}>
                 <ObjectContent o={o} ctx={ctx} />
               </div>
               {chrome?.(o)}
@@ -129,10 +129,10 @@ export function HomeGrid({
         })}
       </div>
       <style>{`
-        /* A tile is a fixed size, so content taller than it has to go somewhere.
-           Scrolling inside the card is the honest answer: the readiness list
-           says "2 to sort out" and clipping would hide the two it means. */
-        .home-card { scrollbar-width: thin; }
+        /* A widget is a fixed box. It does not scroll — a tile you can scroll
+           is a panel, and a dashboard you have to scroll inside to read is not a
+           glance. Content that does not fit is the WIDGET's problem to solve at
+           that size, not the grid's to paper over. */
         .home-grid {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -142,18 +142,18 @@ export function HomeGrid({
           grid-auto-flow: row dense;
         }
         @container home (max-width: 520px) {
-          /* A tile is a fixed size, so content taller than it has to go somewhere.
-           Scrolling inside the card is the honest answer: the readiness list
-           says "2 to sort out" and clipping would hide the two it means. */
-        .home-card { scrollbar-width: thin; }
+          /* A widget is a fixed box. It does not scroll — a tile you can scroll
+           is a panel, and a dashboard you have to scroll inside to read is not a
+           glance. Content that does not fit is the WIDGET's problem to solve at
+           that size, not the grid's to paper over. */
         .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .home-card { grid-column: span 2 !important; }
         }
         @container home (max-width: 340px) {
-          /* A tile is a fixed size, so content taller than it has to go somewhere.
-           Scrolling inside the card is the honest answer: the readiness list
-           says "2 to sort out" and clipping would hide the two it means. */
-        .home-card { scrollbar-width: thin; }
+          /* A widget is a fixed box. It does not scroll — a tile you can scroll
+           is a panel, and a dashboard you have to scroll inside to read is not a
+           glance. Content that does not fit is the WIDGET's problem to solve at
+           that size, not the grid's to paper over. */
         .home-grid { grid-template-columns: minmax(0, 1fr); }
           .home-card { grid-column: span 1 !important; }
         }

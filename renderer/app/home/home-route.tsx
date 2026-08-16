@@ -9,12 +9,13 @@
 // they could neither move nor remove was furniture. It has its own page at
 // /plan — its original URL — under Services.
 //
-// The cards are Home's View (main/services/home-view.ts), read for presence and
-// ORDER only — Home has no canvas, and editing it happens right here rather than
-// on one. What sits below the cards is not editable and is not meant to be: the
-// plan picker mutates PCO selection and the commissioning panel hands out
-// display URLs. Both are front-door utilities, not dashboard cards, and neither
-// belongs on a wall.
+// The cards are Home's View (main/services/home-view.ts), read for presence,
+// ORDER and grid size — Home has no canvas, and editing happens right here.
+//
+// Nothing else lives on this page any more. The plan picker moved to /plan, and
+// the "use this screen as a display" panel went entirely: Screens already lists
+// every display with its URL, which is the same job done in the place you go to
+// think about screens.
 
 import { useEffect, useRef, useState } from "react";
 import { Loader2Icon, PencilIcon, CheckIcon } from "lucide-react";
@@ -28,7 +29,6 @@ import { HOME_VIEW_ID, defaultHomeLayout } from "@main/services/home-view";
 import type { LayoutObject } from "@main/types/views";
 import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
-import { Commission } from "./commission";
 import { addCard, moveCard, removeCard, setSize, setWhen, visibleCards } from "./home-cards";
 import { HomeGrid } from "./home-grid";
 import { AddWidgetButton, AddWidgetSheet, CardChrome } from "./home-editor";
@@ -202,10 +202,6 @@ export function HomeRoute() {
         }}
       />
 
-      {/* The display picker's actual job. A freshly-pointed monitor lands on
-          Home now, so commissioning has to live somewhere an operator can find
-          it — one extra click, a few times a year. */}
-      <Commission state={state} />
     </div>
   );
 }
