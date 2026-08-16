@@ -47,3 +47,7 @@ sensource-probe*.json
 docs/design-overhaul/
 DESIGN_TOKENS_PROPOSAL.md
 scripts/survival/.survival-*.log
+
+# Playwright screenshots taken while driving the app during development.
+*.playwright.png
+.playwright-mcp/
