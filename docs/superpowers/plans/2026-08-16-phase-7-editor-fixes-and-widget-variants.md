@@ -8,7 +8,15 @@
 
 ---
 
-## Where we are (2026-08-16)
+## Where we are (2026-08-16, end of session)
+
+**Done this session:** the five toolbar/navigation fixes (221ebb4), the context
+menu and page gutter (9ccb4ba), and the Phase 6 revert (1a21e7e). Deployed to
+8799 for review.
+
+**Next:** Task 6 (Home in its own tab), then Task 7 (widgets, one by one).
+
+## Branch and PR state
 
 **Branch:** `feat/phase-6` — Phases 5 and 6 are stacked on it, unmerged.
 **Dev server:** port 8799, running against the LIVE config `~/.stage-utility`.
@@ -251,36 +259,69 @@ test("Home's widgets come from the shared registry", () => {
 
 ---
 
-### Task 7: Widget variants — the long one
+### Task 7: Beautiful widgets, one by one
 
-**Not part of the fixes.** Start only when Tasks 1-6 are merged and reviewed.
+**The next session's work.** Start here in the morning.
 
-Each widget gets a small set of **named variants that answer different jobs**, not
-cosmetic skins. A clock is three widgets sharing a name:
+#### What the maintainer asked for, in his words
 
-| Variant | Job |
-|---|---|
-| Big time | Read at thirty feet from a stage |
-| Time + label | One tile in a dashboard grid |
-| Time + date | A lobby screen |
+> "I want to create a beautifully designed widget for every single widget we
+> have, one-by-one... having to tweak them should only ever be for a reason, the
+> default should work 90% of the time, they shouldn't have to tweak it to be
+> usable at all."
 
-Three designed choices replace ~8 style knobs and produce a better result,
-because each was designed rather than assembled.
+Read that carefully, because it is NOT "remove the options":
 
-**Sequencing, deliberately incremental:**
+- **The default must be usable with zero tweaking.** That is the bar, and it is
+  the bar for every widget, not on average.
+- **Tweaking stays available.** It becomes something you reach for with a reason,
+  not something you must do to make the widget presentable.
+- **Every single widget gets this treatment**, one at a time, deliberately.
 
-- [ ] Do the **ten widgets actually in use** first, one commit each. Find them by
-      reading the real config, not by guessing.
-- [ ] A widget's style section shrinks **only after** it has variants, and shrinks
-      to a variant picker — never to nothing.
-- [ ] Stop whenever it stops being an improvement. This is a per-widget judgement,
-      not a migration.
+#### What this corrects about the Phase 6 cull
 
-**The standing rule, learned the expensive way:** the knobs come out after the
-replacement exists, never before. Auto-sizing then `fontSize` worked. The other
-fifteen fields, removed first, had to be reverted.
+Phase 6 removed the knobs and shipped a bare frame. That was backwards twice
+over: the defaults were not yet good enough to stand alone, and removal was never
+the goal. **Design the default so well that nobody reaches for the knob — then
+leave the knob there anyway.**
 
----
+A refinement learned from seeing the layouts with the controls restored: for some
+widgets the styling IS the design. A container and a shape are structural — their
+fill and border are what they are for, and they should keep full control
+permanently. The widgets that need this work are the ones currently FIGHTING
+their knobs: readouts that look wrong until someone sets a font size.
+
+#### Method, per widget
+
+For each widget, in one commit:
+
+- [ ] **Look at it in the real config first.** How is it actually used, at what
+      sizes, on which surfaces? Do not design for an imagined case.
+- [ ] **Design the default** so it is correct with nothing set — legible at a
+      dashboard tile AND at a wall-sized box, since text now sizes itself.
+- [ ] **Add variants only where the widget does genuinely different jobs.** A
+      clock has three (big time / time with label / time and date). Most widgets
+      have one. A variant is a different JOB, never a skin.
+- [ ] **Leave every existing control in place.** If the default is right, the
+      controls stop being load-bearing on their own.
+- [ ] **Prove it in a browser** at a dashboard tile and at a large box, against
+      the real config.
+- [ ] **Commit per widget**, so any one can be reverted without the others.
+
+#### Order
+
+The ten in real use first — read them out of the config rather than guessing.
+From the current config that means the clock, PCO countdown, current/next item,
+mic slots, plan file, REAPER and OBS status, SPL meter and people counter.
+
+Stop whenever it stops being an improvement. This is a per-widget judgement, not
+a migration with an end state to reach.
+
+#### The standing rule
+
+A knob comes out AFTER its replacement exists, never before, and only if it is
+still pointless once the default is good. Auto-sizing then `fontSize` worked. The
+other fifteen fields, removed first, had to be reverted (1a21e7e).
 
 ## Feature parity inventory
 
