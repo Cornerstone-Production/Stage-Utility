@@ -81,7 +81,7 @@ export function ScriptViewIndex() {
             centering belonged to a standalone page that owned the whole window;
             inside the shell they pushed the list halfway down a screen that
             already has a title and a rail. */}
-        <div className="flex flex-col gap-8 px-5 max-sm:px-3 pb-[50vh] max-sm:pb-24">
+        <div className="flex flex-col gap-8 pb-[50vh] max-sm:pb-24">
         <div className="flex flex-col gap-2 w-full max-w-md">
 
           {error ? (

@@ -572,7 +572,7 @@ export function OutputsSection({
   }
 
   return (
-    <div data-flash-id="displays-list" className="px-5 max-sm:px-3 flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
+    <div data-flash-id="displays-list" className="flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       <p className="text-caption1 text-gray-9">
         Each display is a physical screen at its own URL. Point it at a <span className="font-medium">View</span>{" "}
         to choose what it shows — and many screens can share one View, so you change content in one place.

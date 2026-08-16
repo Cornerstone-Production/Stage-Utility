@@ -67,7 +67,7 @@ export function GettingStarted({
   if (steps.every((s) => s.done)) return null;
 
   return (
-    <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4">
+    <div className="pt-5 max-sm:pt-4">
       <div className="rounded-xl border border-gray-a5 bg-gray-2 p-4">
         <div className="flex items-start gap-2">
           <RocketIcon className="size-4 text-accent mt-0.5 shrink-0" />
