@@ -3,7 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- Installed-app metadata. THIS is the page that gets added to a home
+         screen — the manifest's start_url is "/", which serves this file, not
+         index.html. index.html is the wall-display kiosk and had all of this
+         while the operator app had none of it, so a phone install ran with
+         `viewport-fit=cover` and no status-bar declaration at all: iOS put the
+         web view under the status bar and painted its own translucent treatment
+         over the top ~60px, which is the blur across the header. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- `default`, not `black-translucent`: an opaque status bar ABOVE the web
+         view, tinted by theme-color. No scrim, and the space it occupies stops
+         being ours to pad around. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Stage Utility" />
+    <!-- Per scheme, because unlike the kiosk this app follows the theme. One
+         fixed value tells the browser the app is near-black while it renders
+         light, which casts the wrong colour across the top of the page. -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f8fa" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e0e0e" />
+
     <link rel="icon" type="image/png" href="/app-icon.png" />
+    <link rel="apple-touch-icon" href="/app-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <title>Stage Utility</title>
     <script>
       // Apply the saved theme before paint (no flash). Mirrors THEME_STORAGE_KEY

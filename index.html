@@ -6,12 +6,11 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
     />
-    <!-- Tint the mobile browser chrome to match the page, PER SCHEME.
-         One hardcoded dark value told the browser "this app is near-black" while
-         the app was rendering light, which is what put a dark cast across the top
-         of a light page on a phone. -->
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f8fa" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e0e0e" />
+    <!-- ONE value, dark, on purpose: the kiosk is always dark regardless of
+         system appearance (see the theme script below). The operator app in
+         app.html is the one that follows the theme and declares both.
+         #0a0a0a is --kiosk-bg, and is strictly R=G=B. -->
+    <meta name="theme-color" content="#0a0a0a" />
     <!-- Add to Home Screen → standalone (no browser bars). -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
