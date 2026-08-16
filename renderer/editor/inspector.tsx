@@ -70,9 +70,13 @@ import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
 import {
+  CARD_PRESETS,
   isKnownObjectType,
   isOfferableInEmbedPicker,
   objectRetired,
+  
+  
+  defaultStyle,
   isStylingOnly,
   
   typeLabel,
@@ -81,12 +85,52 @@ import {
 import { invoke } from "../lib/api";
 import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect,
-  ImageConfig, NumberInput, PixelField,
+  ImageConfig, NumberField, NumberInput, PixelField,
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
 
 
+type SurfaceKind = "flat" | "glass" | "elevated" | "solid" | "outline";
+const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
+  flat: { background: null, borderColor: null, borderWidth: 0, boxShadow: 0 },
+  glass: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0 },
+  elevated: { background: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0.6 },
+  solid: { background: "var(--gray-2)", borderColor: null, borderWidth: 0, cornerRadius: 0.0148, boxShadow: 0.35 },
+  outline: { background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015, cornerRadius: 0.0148, boxShadow: 0 },
+};
 
+// One consolidated list of preset "looks" for the Style dropdown — each entry is a
+// complete style patch (surface look, optionally color-tinted), so there's a single
+// control instead of separate color + surface rows with duplicate labels.
+const STYLE_PRESETS: { value: string; label: string; style: LayoutStyle }[] = [
+  { value: "flat", label: "Flat", style: SURFACE_PRESETS.flat },
+  { value: "glass", label: "Glass", style: SURFACE_PRESETS.glass },
+  { value: "glass-green", label: "Glass · Green", style: CARD_PRESETS.green },
+  { value: "glass-red", label: "Glass · Red", style: CARD_PRESETS.red },
+  { value: "glass-amber", label: "Glass · Amber", style: CARD_PRESETS.amber },
+  { value: "elevated", label: "Elevated", style: SURFACE_PRESETS.elevated },
+  { value: "solid", label: "Solid", style: SURFACE_PRESETS.solid },
+  { value: "outline", label: "Outline", style: SURFACE_PRESETS.outline },
+];
+
+// Which preset (if any) the current style matches — so the Style dropdown reflects
+// the applied look and reads as "custom" (placeholder) once fields are hand-tweaked.
+// A preset matches when every field IT sets equals the object's value.
+function matchStylePreset(s: LayoutStyle): string {
+  for (const p of STYLE_PRESETS) {
+    const keys = Object.keys(p.style) as (keyof LayoutStyle)[];
+    if (keys.every((k) => (s[k] ?? null) === (p.style[k] ?? null))) return p.value;
+  }
+  return "";
+}
+
+// Nearest labeled stop for the single Elevation slider (None/Low/Med/High).
+function elevationLabel(v: number): string {
+  if (v <= 0.175) return "None";
+  if (v <= 0.5) return "Low";
+  if (v <= 0.825) return "Med";
+  return "High";
+}
 
 const RECORDED_LATEST = "__latest__";
 
@@ -121,7 +165,10 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
         options={[{ value: "attendance", label: "Attendance" }, { value: "occupancy", label: "In room" }]}
         onChange={(v) => onConfig({ ...c, metric: v })}
       />
-      <RowText label="Label" value={c.label ?? ""} placeholder={c.metric === "attendance" ? "Attendance" : "In room"} onChange={(v) => onConfig({ ...c, label: v })} />
+      <RowSwitch label="Show value" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+      {(c.showLabel ?? true) && (
+        <RowText label="Label" value={c.label ?? ""} placeholder={c.metric === "attendance" ? "Attendance" : "In room"} onChange={(v) => onConfig({ ...c, label: v })} />
+      )}
       <RowToggle
         label="Source"
         value={source}
@@ -147,6 +194,7 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
 
 /** Thin wrappers over the shared themed NumberInput (kept so existing call sites
  *  and PixelField don't change). */
+const WEIGHTS = [300, 400, 500, 600, 700, 800];
 
 /**
  * Binding + framing controls for a plan-attachment object: a filename match (so it
@@ -342,8 +390,10 @@ export function Inspector({
   const integrationsSnap = useIntegrations();
   const captionChannels = Object.keys(useStageState().state?.captionChannelColors ?? {});
   const embedViews = useStageState().state?.views ?? [];
+  const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
+  const pxOf = (frac: number | undefined, dflt: number) => Math.round((frac ?? dflt) * canvas.height * 10) / 10;
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -422,6 +472,7 @@ export function Inspector({
             onChange={(v) => onConfig({ ...c, timerName: v.trim() || null })}
           />
           <RowSwitch label="Color on overrun" checked={c.warnStates ?? true} onChange={(v) => onConfig({ ...c, warnStates: v })} />
+          <RowSwitch label="Show timer name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
           <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
         </>
       )}
@@ -438,6 +489,9 @@ export function Inspector({
             ]}
             onChange={(v) => onConfig({ ...c, display: v })}
           />
+          {(c.display ?? "fraction") !== "bar" && (
+            <RowSwitch label="Show 'slides' label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+          )}
         </>
       )}
       {(() => {
@@ -519,6 +573,14 @@ export function Inspector({
       )}
       {c.type === "service-order" && (
         <>
+          <RowToggle
+            label="Scroll"
+            hint="Follow live: the list auto-scrolls to keep the on-air item in view. Static: the list stays put (the operator scrolls it)."
+            value={c.scroll ?? "auto"}
+            options={[{ value: "auto", label: "Follow live" }, { value: "static", label: "Static" }]}
+            onChange={(v) => onConfig({ ...c, scroll: v })}
+          />
+          <RowSwitch label="Fit to height" checked={c.autoFit ?? true} onChange={(v) => onConfig({ ...c, autoFit: v })} />
           <RowSwitch label="Highlight live" checked={c.highlightLive ?? true} onChange={(v) => onConfig({ ...c, highlightLive: v })} />
           <RowSwitch label="Show length" checked={c.showLength ?? false} onChange={(v) => onConfig({ ...c, showLength: v })} />
           {(() => {
@@ -608,7 +670,10 @@ export function Inspector({
                 </SelectContent>
               </Select>
             </Row>
-            <RowText label="Label" value={c.label ?? ""} placeholder="integration name" onChange={(v) => onConfig({ ...c, label: v })} />
+            <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+            {(c.showLabel ?? true) && (
+              <RowText label="Label" value={c.label ?? ""} placeholder="integration name" onChange={(v) => onConfig({ ...c, label: v })} />
+            )}
           </>
         );
       })()}
@@ -616,7 +681,10 @@ export function Inspector({
         <>
           <RowSwitch label="Online count" checked={c.showOnline ?? true} onChange={(v) => onConfig({ ...c, showOnline: v })} />
           <RowSwitch label="Lowest battery" checked={c.showBattery ?? true} onChange={(v) => onConfig({ ...c, showBattery: v })} />
-          <RowText label="Label" value={c.label ?? ""} placeholder="Mics" onChange={(v) => onConfig({ ...c, label: v })} />
+          <RowSwitch label="Show label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+          {(c.showLabel ?? false) && (
+            <RowText label="Label" value={c.label ?? ""} placeholder="Mics" onChange={(v) => onConfig({ ...c, label: v })} />
+          )}
         </>
       )}
       {c.type === "wireless-channel" && (
@@ -634,6 +702,7 @@ export function Inspector({
           <RowSwitch label="Battery %" checked={c.show?.battery ?? true} onChange={(v) => onConfig({ ...c, show: { ...c.show, battery: v } })} />
           <RowSwitch label="Frequency" checked={c.show?.frequency ?? true} onChange={(v) => onConfig({ ...c, show: { ...c.show, frequency: v } })} />
           <RowSwitch label="Audio level" checked={c.show?.audio ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, audio: v } })} />
+          <RowSwitch label="Show channel name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
         </>
       )}
       {c.type === "service-pacing" && (
@@ -653,6 +722,7 @@ export function Inspector({
               {c.behindColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, behindColor: null })}>Reset</button>}
             </div>
           </Row>
+          <RowSwitch label="Show ahead/behind label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
           <RowSwitch label="Show dash when idle" checked={!(c.hideWhenIdle ?? false)} onChange={(v) => onConfig({ ...c, hideWhenIdle: !v })} />
         </>
       )}
@@ -753,6 +823,7 @@ export function Inspector({
                 </SelectContent>
               </Select>
             </Row>
+            <RowSwitch label="Show metric name" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
             <RowSwitch label="Peak hold" hint="Also show the highest reading seen, held on screen — useful for catching transient peaks during loud moments." checked={c.peakHold ?? false} onChange={(v) => onConfig({ ...c, peakHold: v })} />
             <RowSwitch label="Color thresholds" checked={!!t} onChange={(v) => onConfig({ ...c, thresholds: v ? { amber: 95, red: 100 } : null })} />
             {t && (
@@ -780,6 +851,7 @@ export function Inspector({
           <RowText label="Recording text" value={c.recordingText ?? ""} placeholder="RECORDING" onChange={(v) => onConfig({ ...c, recordingText: v })} />
           <RowText label="Idle text" value={c.idleText ?? ""} placeholder="STANDBY" onChange={(v) => onConfig({ ...c, idleText: v })} />
           <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="NO RECORDER" onChange={(v) => onConfig({ ...c, offlineText: v })} />
+          <RowSwitch label="Fill red while recording" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
           <RowSwitch label="Hide when idle" hint="Pure tally light — nothing on screen unless recording" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
         </>
       )}
@@ -809,6 +881,7 @@ export function Inspector({
             <RowText label="Active text" value={c.recordingText ?? ""} placeholder={activePlaceholder} onChange={(v) => onConfig({ ...c, recordingText: v })} />
             <RowText label="Idle text" value={c.idleText ?? ""} placeholder={idlePlaceholder} onChange={(v) => onConfig({ ...c, idleText: v })} />
             <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="OBS: Offline" onChange={(v) => onConfig({ ...c, offlineText: v })} />
+            <RowSwitch label="Fill red when active" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
             {mode === "recording" && (
               <RowSwitch label="Show timecode" checked={c.showTimecode ?? false} onChange={(v) => onConfig({ ...c, showTimecode: v })} />
             )}
@@ -828,6 +901,7 @@ export function Inspector({
             <RowText label="Recording text" value={c.recordingText ?? ""} placeholder="REAPER: Recording" onChange={(v) => onConfig({ ...c, recordingText: v })} />
             <RowText label="Idle text" value={c.idleText ?? ""} placeholder="REAPER: Standby" onChange={(v) => onConfig({ ...c, idleText: v })} />
             <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="REAPER: Offline" onChange={(v) => onConfig({ ...c, offlineText: v })} />
+            <RowSwitch label="Fill red when recording" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
             <RowSwitch label="Show position" checked={c.showPosition ?? false} onChange={(v) => onConfig({ ...c, showPosition: v })} />
             <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
           </>
@@ -1010,7 +1084,10 @@ export function Inspector({
             ) : (
               <p className="text-caption2 text-fg-muted leading-snug">Peak, low and average are building-wide (today), from the occupancy sensor.</p>
             )}
-            <RowText label="Label" value={c.label ?? ""} placeholder={labelHint[metric]} onChange={(v) => onConfig({ ...c, label: v })} />
+            <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+            {(c.showLabel ?? true) && (
+              <RowText label="Label" value={c.label ?? ""} placeholder={labelHint[metric]} onChange={(v) => onConfig({ ...c, label: v })} />
+            )}
           </>
         );
       })()}
@@ -1044,6 +1121,13 @@ export function Inspector({
             {ORDER.map((k) => (
               <RowSwitch key={k} label={LABEL[k]} hint={HINT[k]} checked={cur.includes(k)} onChange={(v) => toggle(k, v)} />
             ))}
+            <RowToggle
+              label="Layout"
+              value={c.orientation ?? "row"}
+              options={[{ value: "row", label: "Row" }, { value: "column", label: "Stacked" }]}
+              onChange={(v) => onConfig({ ...c, orientation: v as "row" | "column" })}
+            />
+            <RowSwitch label="Show labels" checked={c.showLabels ?? true} onChange={(v) => onConfig({ ...c, showLabels: v })} />
           </>
         );
       })()}
@@ -1061,7 +1145,10 @@ export function Inspector({
               </SelectContent>
             </Select>
           </Row>
-          <RowText label="Label" value={c.label ?? ""} placeholder="(auto)" onChange={(v) => onConfig({ ...c, label: v })} />
+          <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+          {(c.showLabel ?? true) && (
+            <RowText label="Label" value={c.label ?? ""} placeholder="(auto)" onChange={(v) => onConfig({ ...c, label: v })} />
+          )}
           <p className="text-caption2 text-fg-muted leading-snug">Driven by the Baptisms tab. &ldquo;Live&rdquo; ticks the current testimony/baptism; others summarize the session.</p>
         </>
       )}
@@ -1106,34 +1193,122 @@ export function Inspector({
 
       <Separator />
 
-      {/* Colour — the one style field that survived the Phase 6 cull.
-          Everything else the panel used to offer (font size, weight, alignment,
-          fill, opacity, radius, padding, border, elevation, shadow, max lines,
-          uppercase) is now decided by the widget, which sizes its own text and
-          renders in the one app-wide frame. Measured first: of the 17 style
-          fields, three were never used at all, six had a single distinct value
-          across an entire real config, and three only ever moved together as a
-          preset. Colour was the one with genuine variation - a green countdown
-          and a red overrun say something no default can infer.
-
-          Stored values for the removed fields are left untouched in the file, so
-          a rollback restores the old look. They are ignored, not deleted. */}
-      <Row label="Text colour" hint="The colour of this widget's text. Everything else about how it looks is decided by the widget, so it reads correctly at any size.">
-        <input
-          type="color"
-          value={hexForInput(s.color, "#ffffff")}
-          onChange={(e) => onStyle({ color: e.target.value })}
-          className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent"
-          aria-label="Text colour"
-        />
+      {/* Style preset — one dropdown of complete "looks" (surface + optional tint).
+          Applies the shared style fields below; fine-tune with Fill / Border / Elevation. */}
+      <Row label="Style" hint="Apply a preset look — surface (Flat/Glass/Elevated/Solid/Outline) with an optional color tint. Fine-tune with Fill, Border, and Elevation below.">
+        <Select value={matchStylePreset(s)} onValueChange={(v: string) => { const p = STYLE_PRESETS.find((x) => x.value === v); if (p) onStyle(p.style); }}>
+          <SelectTrigger><SelectValue placeholder="Apply a look…" /></SelectTrigger>
+          <SelectContent>
+            {STYLE_PRESETS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </Row>
+      {/* The way back. Every other control here adds to the styling; without this
+          the only route out of a look you have tuned into a corner is to delete
+          the object and start again, which loses its position and settings too. */}
       <Row
         label="Reset"
-        hint="Put this widget's colour back to the default for its type. Its position, size and settings are left alone - and it can be undone."
+        hint="Put this object's look back to the default for its type. Its position, size, settings and behaviour on other window shapes are left alone — and it can be undone."
       >
         <Button variant="filled" size="small" onClick={onResetLook}>
           Reset to default look
         </Button>
+      </Row>
+
+      {/* Style */}
+      {isText && (
+        <>
+          <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Type</span>
+          {/* Fall back to THIS type's own default, not a blanket 0.05. An object
+              whose default differs (an embedded view starts at 0.016) otherwise
+              reported a size it was not rendering at, so the first nudge of the
+              stepper jumped it to a number it had never been. */}
+          <Row label="Font size"><NumberField value={pxOf(s.fontSize, defaultStyle(c.type).fontSize ?? 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
+          <Row label="Weight">
+            <Select value={String(s.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{WEIGHTS.map((w) => <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
+            </Select>
+          </Row>
+          <Row label="Color"><input type="color" value={hexForInput(s.color, "#ffffff")} onChange={(e) => onStyle({ color: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" /></Row>
+          <Row label="Align">
+            <ButtonGroup>
+              {(["left", "center", "right"] as const).map((a) => (
+                <Button key={a} variant={(s.textAlign ?? "center") === a ? "accent" : "filled"} size="small" onClick={() => onStyle({ textAlign: a })}>{a[0].toUpperCase()}</Button>
+              ))}
+            </ButtonGroup>
+          </Row>
+          <Row label="V-align">
+            <ButtonGroup>
+              {(["top", "middle", "bottom"] as const).map((a) => (
+                <Button key={a} variant={(s.vAlign ?? "middle") === a ? "accent" : "filled"} size="small" onClick={() => onStyle({ vAlign: a })}>{a[0].toUpperCase()}</Button>
+              ))}
+            </ButtonGroup>
+          </Row>
+          <Row label="Uppercase"><Switch checked={s.uppercase ?? false} onCheckedChange={(v) => onStyle({ uppercase: v })} /></Row>
+          <Row label="Shadow"><NumberInput value={s.textShadow ?? 0} step={0.1} min={0} max={1} onChange={(v) => onStyle({ textShadow: v })} /></Row>
+          <Row label="Max lines"><NumberInput value={s.lineClamp ?? 0} step={1} min={0} max={10} onChange={(v) => onStyle({ lineClamp: v > 0 ? Math.round(v) : null })} /></Row>
+        </>
+      )}
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Fill</span>
+      <Row label="Fill"><input type="color" value={hexForInput(s.background, "#000000")} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" />
+        <Button variant="transparent" size="small" onClick={() => onStyle({ background: null })}>Clear</Button>
+      </Row>
+      <Row label="Opacity">
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={Math.round((s.opacity ?? 1) * 100)}
+          onChange={(e) => onStyle({ opacity: parseInt(e.target.value, 10) / 100 })}
+          className="flex-1 min-w-0 accent-accent"
+          aria-label="Opacity"
+        />
+        <span className="w-9 shrink-0 text-right tabular-nums text-caption2 text-fg">{Math.round((s.opacity ?? 1) * 100)}%</span>
+      </Row>
+      <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
+      <Row label="Padding"><NumberField value={pxOf(s.padding, 0)} step={1} min={0} max={Math.round(0.3 * canvas.height)} suffix="px" onChange={(px) => onStyle({ padding: px / canvas.height })} /></Row>
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Border</span>
+      <Row label="Border">
+        <input
+          type="color"
+          value={hexForInput(s.borderColor, "#ffffff")}
+          onChange={(e) => onStyle({ borderColor: e.target.value, borderWidth: s.borderWidth ?? 0 })}
+          className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent"
+          aria-label="Border color"
+        />
+        <NumberField
+          value={Math.round((s.borderWidth ?? 0) * canvas.height)}
+          step={1}
+          min={0}
+          max={40}
+          suffix="px"
+          onChange={(px) => onStyle({ borderWidth: px / canvas.height, borderColor: s.borderColor ?? "#ffffff" })}
+        />
+      </Row>
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Elevation</span>
+      {/* Elevation: one slider with labeled None/Low/Med/High stops (ticks), fine
+          values allowed in between. Drives the box's drop shadow for layered depth. */}
+      <Row label="Elevation" hint="Soft drop shadow under this object's box — lifts it above whatever it overlaps. Snaps toward None/Low/Med/High; drag for in-between.">
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={s.boxShadow ?? 0}
+          onChange={(e) => onStyle({ boxShadow: parseFloat(e.target.value) })}
+          list="elevation-stops"
+          className="flex-1 min-w-0 accent-accent"
+          aria-label="Elevation"
+        />
+        <datalist id="elevation-stops">
+          <option value="0" />
+          <option value="0.35" />
+          <option value="0.65" />
+          <option value="1" />
+        </datalist>
+        <span className="w-10 shrink-0 text-caption2 text-fg-muted text-right tabular-nums">{elevationLabel(s.boxShadow ?? 0)}</span>
       </Row>
 
       <Separator />

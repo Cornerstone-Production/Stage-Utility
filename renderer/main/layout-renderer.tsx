@@ -95,70 +95,39 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** The frame every widget renders in.
- *
- * One radius, one padding, one outline weight, app-wide. There is nothing to
- * configure and nothing to get wrong.
- *
- * `--kiosk-radius` etc. are fractions of canvas HEIGHT so the frame scales with
- * the design, exactly as the old per-object values did.
- */
-const FRAME = {
-  /** ~14px on a 1080 canvas. */
-  radius: 0.013,
-  /** ~12px on a 1080 canvas. Enough that text never touches the outline. */
-  padding: 0.011,
-  /** ~1px on a 1080 canvas. */
-  border: 0.001,
-  /** The outline. Neutral, and the only thing separating a widget from the
-   *  canvas — see the Phase 6 plan for why it carries no colour. */
-  line: "rgba(255,255,255,0.22)",
-} as const;
-
 /**
- * Box-level CSS (position handled by caller).
+ * Box-level CSS (position handled by caller): background, border, radius,
+ * padding, opacity, and flex alignment derived from text/vertical alignment.
  *
- * The body is OPAQUE, painted in the canvas's own background colour. On a black
- * canvas that is indistinguishable from transparent — and it also occludes what
- * is underneath, which transparent does not. Objects overlap in real layouts,
- * and a transparent body lets the lower one's text bleed through the upper one's,
- * which reads as a rendering fault rather than a layout mistake.
- *
- * Painted from the canvas colour rather than hardcoded black, so a layout with a
- * non-default background matches it instead of punching holes in itself.
- *
- * No fill as decoration; fill only as state. A widget that needs to shout —
- * recording — paints itself, and owns that decision.
+ * Phase 6 briefly replaced this with a fixed frame and culled the fields that
+ * feed it. Reverted: the cull was right in principle and wrong in sequence —
+ * the knobs came out before the widgets were good enough to not need them, and
+ * the result looked worse than what it replaced. The fields are honoured again
+ * until per-widget variants exist to replace them properly.
  */
-export function boxStyle(o: LayoutObject, H: number, canvasBg?: string | null): CSSProperties {
+export function boxStyle(o: LayoutObject, H: number, _canvasBg?: string | null): CSSProperties {
+  const s = o.style ?? {};
   const css: CSSProperties = {
     display: "flex",
     flexDirection: "column",
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: s.vAlign === "top" ? "flex-start" : s.vAlign === "bottom" ? "flex-end" : "center",
+    alignItems:
+      s.textAlign === "left" ? "flex-start" : s.textAlign === "right" ? "flex-end" : "center",
     overflow: "hidden",
     // Border draws inside the box so it never changes the object's footprint.
     boxSizing: "border-box",
-    background: canvasBg || "var(--kiosk-bg, #0a0a0a)",
-    padding: `${FRAME.padding * H}px`,
-    borderRadius: `${FRAME.radius * H}px`,
-    border: `${Math.max(1, FRAME.border * H)}px solid ${FRAME.line}`,
   };
-  // A shape IS its fill — it is the one object whose whole job is to be a block
-  // of colour, so it keeps its background and loses the outline.
-  if (o.config.type === "shape") {
-    const s = o.style ?? {};
-    if (s.background) css.background = s.background;
-    css.border = "none";
-    css.padding = 0;
-    if (o.config.shape === "ellipse") css.borderRadius = "50%";
+  if (s.background) css.background = s.background;
+  if (s.opacity != null) css.opacity = s.opacity;
+  if (s.padding != null) css.padding = `${s.padding * H}px`;
+  if (s.cornerRadius != null) css.borderRadius = `${s.cornerRadius * H}px`;
+  // Clamp so a stray/legacy width can't swell into a solid fill.
+  if (s.borderColor && s.borderWidth) css.border = `${Math.min(s.borderWidth, 0.04) * H}px solid ${s.borderColor}`;
+  if (s.boxShadow) {
+    const a = Math.min(1, s.boxShadow);
+    css.boxShadow = `0 ${0.006 * a * H}px ${0.02 * a * H}px rgba(0,0,0,${0.45 * a}), 0 ${0.02 * a * H}px ${0.05 * a * H}px rgba(0,0,0,${0.30 * a})`;
   }
-  // A container frames other widgets; a frame around a frame is noise.
-  if (o.config.type === "container") {
-    css.border = "none";
-    css.background = "transparent";
-    css.padding = 0;
-  }
+  if (o.config.type === "shape" && o.config.shape === "ellipse") css.borderRadius = "50%";
   return css;
 }
 
