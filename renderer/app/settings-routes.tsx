@@ -12,6 +12,7 @@ import { Loader2Icon } from "lucide-react";
 import { ConnectSection } from "../settings/sections/connect-section";
 import { BrandingSection } from "../settings/sections/branding-section";
 import { AdvancedSection } from "../settings/sections/advanced-section";
+import { PlanSection } from "../settings/sections/plan-section";
 import { useStageSettings } from "./use-stage-settings";
 import { takeJustUpdated } from "./update-lifecycle";
 
@@ -49,6 +50,30 @@ export function AdvancedRoute() {
       handlers={s.handlers}
       justUpdated={justUpdated}
       onDismissJustUpdated={() => setJustUpdated(null)}
+    />
+  );
+}
+
+/**
+ * The plan picker, on its own page.
+ *
+ * It lived on Home until Home became a widget grid, where a fixed block of PCO
+ * controls was furniture the operator could neither move nor remove. It is a
+ * weekly service task — which service type, which plan — so it sits with History
+ * and Baptisms under Services rather than in Advanced, which is where the system
+ * settings live. `/plan` is its original URL, restored: it shipped in Phase 1b
+ * and has been redirecting to Home ever since.
+ */
+export function PlanRoute() {
+  const s = useStageSettings();
+  if (s.stageLoading || !s.stageState) return <Loading />;
+  return (
+    <PlanSection
+      stageState={s.stageState}
+      serviceTypes={s.serviceTypes}
+      plans={s.plans}
+      isRefreshing={s.isRefreshing}
+      handlers={s.handlers}
     />
   );
 }

@@ -4,10 +4,10 @@
 // whether PCO reports a service running — see home-mode.ts for why "none" is a
 // payload rather than an absence.
 //
-// Plan folds into here: its service-type and plan selection is what the context
-// bar carries on every page anyway, and the rest is what an operator wants on
-// the front door. `/plan` redirects here rather than 404ing, since it shipped
-// as a URL in Phase 1b.
+// The plan picker is NOT here any more. It lived on Home while Home was a fixed
+// page; once Home became a grid the operator arranges, a block of PCO controls
+// they could neither move nor remove was furniture. It has its own page at
+// /plan — its original URL — under Services.
 //
 // The cards are Home's View (main/services/home-view.ts), read for presence and
 // ORDER only — Home has no canvas, and editing it happens right here rather than
@@ -23,7 +23,6 @@ import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useDashboardState } from "../../main/use-dashboard-state";
 import { useStageSettings } from "../use-stage-settings";
 import { GettingStarted } from "../../settings/getting-started";
-import { PlanSection } from "../../settings/sections/plan-section";
 import { flashTarget } from "../flash";
 import { HOME_VIEW_ID, defaultHomeLayout } from "@main/services/home-view";
 import type { LayoutObject } from "@main/types/views";
@@ -201,14 +200,6 @@ export function HomeRoute() {
           setAdding(false);
           save((objs) => setSize(addCard(objs, type, `home-${type}-${objs.length + 1}-${objs.length}`), `home-${type}-${objs.length + 1}-${objs.length}`, size));
         }}
-      />
-
-      <PlanSection
-        stageState={state}
-        serviceTypes={s.serviceTypes}
-        plans={s.plans}
-        isRefreshing={s.isRefreshing}
-        handlers={s.handlers}
       />
 
       {/* The display picker's actual job. A freshly-pointed monitor lands on

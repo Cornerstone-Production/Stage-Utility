@@ -15,6 +15,7 @@ import {
   CableIcon,
   HouseIcon,
   ClockIcon,
+  CalendarIcon,
   DropletIcon,
   ListChecksIcon,
   MonitorIcon,
@@ -42,6 +43,7 @@ import {
   AdvancedRoute,
   BrandingRoute,
   ConnectRoute,
+  PlanRoute,
 } from "./settings-routes";
 
 export interface Destination {
@@ -94,6 +96,13 @@ export const DESTINATIONS: readonly Destination[] = [
     description: "When something happens in Stage, do something to a device.",
     icon: <ZapIcon className="size-4" />,
     Component: AutomationSection,
+  },
+  {
+    path: "/plan",
+    label: "Plan",
+    description: "Which service and plan this machine follows.",
+    icon: <CalendarIcon className="size-4" />,
+    Component: PlanRoute,
   },
   {
     path: "/history",
@@ -177,7 +186,7 @@ export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // What it talks to. Automation rules act ON integrations.
   { label: "Devices", paths: ["/automation"] },
   // A service you ran — one live, one recorded.
-  { label: "Services", paths: ["/history", "/baptism"] },
+  { label: "Services", paths: ["/plan", "/history", "/baptism"] },
 ];
 
 /**

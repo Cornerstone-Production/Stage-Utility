@@ -19,6 +19,9 @@ import { DialogOverlay } from "../../components/ui/dialog";
 import { cn } from "../../lib/cn";
 import { SIZES, SIZE_ORDER, WHEN_LABELS, defaultSize, sizeOf, whenOf } from "./home-cards";
 
+/** Types whose whole purpose is canvas geometry, which Home does not have. */
+const CANVAS_ONLY = new Set(["container", "shape"]);
+
 /** The controls drawn over one card while editing. */
 export function CardChrome({
   card,
@@ -128,6 +131,11 @@ export function AddWidgetSheet({
     group: g,
     items: Object.entries(LAYOUT_OBJECTS)
       .filter(([, s]) => s.group === g && !s.retired)
+      // Canvas-only types. A container groups objects so they move and scale
+      // together and a shape divides up a screen — both are answers to "where do
+      // things sit", which on Home is the grid's job. Offering them here would
+      // be offering a control that does nothing.
+      .filter(([t]) => !CANVAS_ONLY.has(t))
       .filter(([t, s]) =>
         !needle || s.label.toLowerCase().includes(needle) || t.includes(needle) || s.blurb.toLowerCase().includes(needle),
       ),
