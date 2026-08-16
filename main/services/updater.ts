@@ -35,7 +35,7 @@ import { fetchTapVersion, homebrewInstallable, tarballInstallable } from "./upda
 import { FORMULA } from "./update/homebrew-strategy.js";
 import { selectStrategy } from "./update/select-strategy.js";
 import { ApplyWatchdog } from "./update/apply-watchdog.js";
-import { exitForRestart } from "./update/relaunch.js";
+import { exitForRestart, selfRecovers } from "./update/relaunch.js";
 
 import { broadcast } from "./broadcaster.js";
 import { latestOnTrack, newerThan } from "./release-tags.js";
@@ -268,6 +268,10 @@ export class Updater {
     return {
       ...this.status,
       ...this.updatability(),
+      // Reported alongside the version because the UI has to warn BEFORE an
+      // action that exits, not after — by then the server is gone and there is
+      // nothing left to deliver a message with.
+      selfRecovers: selfRecovers(),
       version: this.version(),
       step: this.status.phase === "updating" ? this.status.step : null,
       restartPending: this.isRestartPending(),

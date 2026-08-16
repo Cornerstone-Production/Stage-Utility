@@ -75,7 +75,38 @@ function launchdLabel(kind: InstallKind, appRoot: string): string | null {
  */
 export function exitForRestart(delayMs: number, code = 0): void {
   scheduleRelaunch();
+  // Say so when nothing is coming. A config restore on a hand-run checkout
+  // exited cleanly here and the log simply STOPPED mid-sentence — no error, no
+  // stack, no last word — so the only available reading was "it crashed". It
+  // had not crashed; it had done exactly what it was told, and nothing was
+  // watching. One line is the difference between a mystery and a fact.
+  if (!selfRecovers()) {
+    console.warn(
+      "[relaunch] exiting, and NOTHING will start this server again: no service " +
+        "manager is known for this install kind. Start it again by hand.",
+    );
+  }
   setTimeout(() => process.exit(code), delayMs);
+}
+
+/**
+ * Whether anything is expected to start this server again after it exits.
+ *
+ * True only for the installs we ourselves set up, because those are the only
+ * ones whose supervisor we can name: a tarball install (systemd `Restart=always`
+ * on Linux, NSSM on Windows, launchd on macOS) and a Homebrew install (launchd).
+ * A checkout someone runs by hand — `npm run start` — has nothing behind it, and
+ * neither does an install we do not recognise.
+ *
+ * Deliberately pessimistic. Someone MAY have written their own unit for a
+ * checkout, in which case they see a warning they did not need; the opposite
+ * mistake turned "restarting the server" into "shutting the server off" with no
+ * warning at all.
+ */
+export function selfRecovers(
+  kind: InstallKind = detectInstallKind(process.env, APP_ROOT, fs.existsSync),
+): boolean {
+  return kind === "tarball" || kind === "homebrew";
 }
 
 /** Spawn the detached kickstart helper (survives our exit); a no-op off macOS
