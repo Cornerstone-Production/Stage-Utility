@@ -11,10 +11,17 @@
 ## Where we are (2026-08-16, end of session)
 
 **Done this session:** the five toolbar/navigation fixes (221ebb4), the context
-menu and page gutter (9ccb4ba), and the Phase 6 revert (1a21e7e). Deployed to
-8799 for review.
+menu and page gutter (9ccb4ba), the Phase 6 revert (1a21e7e), the page gutter
+done properly (6470e8c — the first pass fixed 3 of 13 places and doubled the
+other 10), and **Task 6, Home in its own tab (14165c9)**. Deployed to 8799.
 
-**Next:** Task 6 (Home in its own tab), then Task 7 (widgets, one by one).
+**Next: Task 7 — the widgets, one by one.** Tasks 1 through 6 are complete.
+Nothing else in this plan is outstanding.
+
+**One thing to know before Task 7:** there are 45 object types now, not 43. Task 6
+added `home-live-status` and `home-recent-services`, because Home drew four things
+and only two of them were widgets. The three pinned counts are in
+`object-catalog.test.ts`, `object-fit.test.ts` and `object-capabilities.test.ts`.
 
 ## Branch and PR state
 
@@ -247,10 +254,19 @@ test("a rail link navigates to its own path, even from a child route", () => {
 - [x] Delete is red, not amber. The fix existed (858b391, merged as #269) but
       this branch forked before that merge; cherry-picked.
 - [x] The page gutter moved to `<main>`, applied once. Routes were each padding
-      themselves and the recent ones did not. Three local copies removed so
-      nothing doubles. Verified 0 -> 20px, and Home reads 20 not 40.
+      themselves and the recent ones did not.
+- [x] **Finished properly in 6470e8c.** The first pass removed three local copies
+      and there were thirteen, so the ten it missed went from flush to inset
+      TWICE — 40px against 20 everywhere else, with Home showing both in one
+      scroll. This is the "fix every instance of a repeated pattern" rule in
+      CLAUDE.md, missed on exactly the kind of change it was written for.
+      `renderer/app/page-gutter.test.ts` now asserts an EXACT set of files may
+      carry the class pair; proven by putting it back on `plan-section.tsx`.
+      Measured 20/20 on all ten pages in a browser.
 
 ### Task 6: Home edits in its own tab
+
+**DONE (14165c9).**
 
 **Files:** `renderer/app/home/*`, `main/services/home-view.ts`
 
@@ -267,31 +283,41 @@ Home becomes:
 - The widgets are the SAME set as everywhere else (the settled decision), so a
   card added to Home is the same component a stage display would use.
 
-- [ ] **Step 1:** Decide the storage. Home keeps a View record (it already exists
-      and holds the object list), but its geometry is ignored — order and presence
-      are what Home reads. Write this down in the file, because a layout whose x/y
-      is meaningless will otherwise confuse the next person.
-- [ ] **Step 2:** The in-tab editor: toggles and reordering only.
-- [ ] **Step 3:** Guard.
+- [x] **Step 1:** The storage. Home keeps its View record; presence and array
+      order are the only things read from it. Every x/y/w/h is filler the type
+      demands, written down at the top of `main/services/home-view.ts` and in
+      `docs/reference/data-model.md` so nobody tries to fix an overlap nothing
+      draws from.
+- [x] **Step 2:** The in-tab editor (`renderer/app/home/home-editor.tsx`): a
+      switch and a drag handle per card, and nothing else. The rules are pure and
+      separate, in `home-cards.ts`.
+- [x] **Step 3–4:** Guards, in `home-view.test.ts` and `home-cards.test.ts`, each
+      proven by reintroducing its bug in-session.
+- [x] **Step 5:** Browser, against a COPY of the config on :8801. Switched Recent
+      services off and dragged Readiness to the top: both landed on disk
+      (`layoutRev` 1 then 2, object ids preserved), survived a reload, and
+      survived a real server restart.
+- [x] **Step 6:** Committed (14165c9), and 8799 rebuilt on it.
 
-```ts
-test("Home does not appear in the Screens list", () => {
-  assert.ok(!screensListViews().some((v) => v.id === HOME_VIEW_ID));
-});
+**What it turned into, beyond the three bullets above.** Four things the plan did
+not anticipate, each with a reason:
 
-test("hiding a card is remembered, and it stays hidden across a restart", () => {
-  // Same property as the Phase 6 seeding guard: what the operator removed
-  // must not come back.
-});
-
-test("Home's widgets come from the shared registry", () => {
-  // One widget set everywhere. A Home-only card would be the beginning of two.
-  for (const t of homeCardTypes()) assert.ok(t in LAYOUT_OBJECTS);
-});
-```
-
-- [ ] **Step 4:** Prove each. **Step 5:** Browser: toggle a card off, reorder,
-      reload, restart the server. **Step 6:** Commit.
+1. **Two new object types.** Home drew four things and only two were widgets, so
+   `home-live-status` and `home-recent-services` joined the registry and
+   `IdlePanel`/`LivePanel` were deleted. Without this, "Home's cards come from the
+   shared registry" would have been true of half of Home.
+2. **Seeding needed a second condition.** Home shipped with two cards and now has
+   four. Keying purely off "does the view exist" — the Phase 6 rule — would leave
+   every install that ran the older build permanently missing the new ones.
+   `seedHomeView` now also refreshes a Home that has never been SAVED
+   (`layoutRev` unset) and never touches one that has.
+3. **Home was in the rail twice.** It is a console view, so the rail's Consoles
+   group listed it beside the real front door — found in the browser, not by a
+   test. Both lists go through `screensListViews` now.
+4. **Plan and Commission stay put, deliberately.** They sit below the cards and
+   are not editable: one mutates PCO selection, the other hands out display URLs.
+   Front-door utilities, not dashboard content — stated in the code and the docs
+   rather than left as an omission.
 
 ---
 
