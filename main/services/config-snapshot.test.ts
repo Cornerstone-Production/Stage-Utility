@@ -99,6 +99,7 @@ const EXPECTED_CONFIG = [
   "automation-settings.json",
   "bar-config.json",
   "baptism-triggers.json",
+  "kiosk-devices.json",
   "layout-groups.json",
   "layout-templates.json",
   // The operator's own work product typed into notes/checklist objects.
