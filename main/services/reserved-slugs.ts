@@ -31,6 +31,9 @@ export const RESERVED_SLUGS: readonly string[] = [
   "settings",
   "log",
   "photos",
+  // The one URL every kiosk device opens. An output slug of "enroll" would
+  // shadow it and leave every unclaimed screen showing that output instead.
+  "enroll",
   ...OPERATOR_PATHS.map((p) => p.replace(/^\//, "")),
 ];
 
