@@ -45,34 +45,38 @@ so there is nowhere to put a control.
 
 ### Home
 
-Home is a view too, but a deliberately odd one. It stores which cards the front
-page shows and the order they appear in — and **nothing else about it is read**.
-Every object's position and size is filler the type requires; Home has no canvas,
-because a stack of cards has no geometry to arrange.
+Home is a view too, but a deliberately odd one. It stores which widgets the front
+page shows, their order, and each one's size and visibility — and **nothing else
+about it is read**. Every object's position is filler the type requires; Home has
+no canvas, because a grid of tiles has no geometry to arrange.
 
-So Home is edited in the Home tab itself, with **Edit cards**: a switch per card
-and a drag handle to reorder. It is not listed under Screens, not offered in a
-screen's view picker, and the server refuses to bind it to one.
+Home is edited in the Home tab itself, with the pencil in the header. In edit
+mode each tile gains a size picker, a visibility select, a remove button and a
+drag handle, and **Add widget** offers the whole object registry.
 
-The cards come from the same object registry every other surface uses, so a Home
-card and a stage-display widget are the same component. Each belongs to one of
-Home's two moods — while a service is running, or the rest of the week:
+The widgets come from the same registry every other surface uses, so a Home tile
+and a stage-display widget are the same component — anything you can put on a
+wall you can put on Home. Sizes are fixed shapes on a three-column grid:
 
-| Card | Shown |
+| Size | Columns × rows |
 |---|---|
-| **Live service status** | while a service is running |
-| **Next service** | the rest of the week |
-| **Readiness** | the rest of the week |
-| **Recent services** | the rest of the week |
+| **S** | 1 × 1 |
+| **M** | 2 × 1 |
+| **L** | 2 × 2 |
+| **XL** | 3 × 2 |
+| **Tall** | 3 × 4 |
 
-A card switched off stays off, including across a restart. A build that adds a
-card gives it to installs that have never edited Home, and leaves an edited Home
+Each tile also carries when it should appear: always, only while a service is
+running, or only the rest of the week.
+
+On Home a widget wears Home's card — the app's radius, hairline and surface —
+rather than the dark ground and canvas-relative geometry its styling carries for
+a wall. Colour that reports STATE still shows (a recorder's red while recording);
+colour that is decoration does not, so one grid of tiles reads in both themes.
+
+A widget removed stays removed, including across a restart. A build that adds one
+gives it to installs that have never edited Home, and leaves an edited Home
 alone.
-
-The plan picker and the commissioning panel below the cards are not cards and are
-not editable: one mutates PCO selection, the other hands out display URLs. They
-are front-door utilities rather than dashboard content, and neither belongs on a
-wall.
 
 ### Upgrading an existing install
 
