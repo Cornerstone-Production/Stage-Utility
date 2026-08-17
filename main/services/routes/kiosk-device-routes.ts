@@ -14,7 +14,7 @@ import { readFile } from "node:fs/promises";
 
 /** Exactly what may be served from scripts/kiosk. An allowlist rather than a
  *  path join, because this reads a file from disk on request. */
-const KIOSK_INSTALLERS = new Set(["install-linux.sh"]);
+const KIOSK_INSTALLERS = new Set(["install-linux.sh", "install-macos.sh", "install-windows.ps1"]);
 
 /** A device id from a query string is untrusted. Bound like the datagram is. */
 const clean = (v: string | null): string | undefined =>

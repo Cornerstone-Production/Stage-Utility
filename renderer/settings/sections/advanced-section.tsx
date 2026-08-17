@@ -965,9 +965,20 @@ export function AdvancedSection({
                     moves.
                   </FieldDescription>
                 </FieldContent>
-                <code className="block select-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-caption1 text-fg">
-                  curl -fsSL {stageState.lanUrl ?? "http://<server>"}/kiosk/install-linux.sh | sudo sh
-                </code>
+                <div className="flex flex-col gap-1.5">
+                  {[
+                    ["Linux / Raspberry Pi", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-linux.sh | sudo sh`],
+                    ["macOS", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-macos.sh | sudo sh`],
+                    ["Windows (elevated)", `irm ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-windows.ps1 | iex`],
+                  ].map(([os, cmd]) => (
+                    <div key={os}>
+                      <div className="text-caption2 text-fg-subtle">{os}</div>
+                      <code className="block select-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-caption1 text-fg">
+                        {cmd}
+                      </code>
+                    </div>
+                  ))}
+                </div>
               </Field>
             </FieldGroup>
           </FieldSet>
