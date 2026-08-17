@@ -31,6 +31,12 @@ regardless of what that machine can advertise. Only a machine acting as a
 | macOS | `mDNSResponder`, part of the OS | `scutil --set LocalHostName` |
 | Windows | **none** — Windows resolves `.local` but does not answer for itself | deferred; see below |
 
+Linux and macOS are the same trade made two ways, which is why one command covers
+both. `avahi-daemon.conf`'s `host-name` and macOS's `LocalHostName` each set the
+name that is *advertised* and leave the *system* hostname alone — on macOS,
+`ComputerName` is the display name and `HostName` is the system one, and neither
+is touched.
+
 ### Linux
 
 `avahi-daemon.conf` has a `[server] host-name` setting whose documented
@@ -50,7 +56,24 @@ someone else's naming convention to own.
 
 `scutil --set LocalHostName stage-utility` is the OS's supported way to change
 the advertised `.local` name, and is what the Sharing preference pane writes.
-Offered by the installer, not assumed.
+
+**Handled by the installer, not by hand.** `install.sh` runs on macOS — it builds
+and lays out the data directory, then skips the systemd service because there is
+none — so the name prompt belongs there for both platforms. One code path asks;
+a small platform switch decides whether the answer goes to `avahi-daemon.conf`
+or to `scutil`.
+
+The one place a command is unavoidable is a **Homebrew** install, which is the
+documented macOS route for a laptop. Brew deliberately never runs `sudo`, and
+`scutil --set LocalHostName` requires root, so the formula's caveats print a
+single command:
+
+```
+sudo stage-utility-name stage-utility
+```
+
+That is one named command, not a trip through System Settings, and it is the
+same command used to rename later on either platform.
 
 ### Windows — deferred
 
@@ -133,6 +156,11 @@ integration, so that is where the proof goes.
   it prevents is a box that silently answers to a name nobody chose.
 - `stage-utility-name` changes the advertised name and the new one resolves,
   without a reinstall and without touching the system hostname.
+- On macOS: after install, `scutil --get LocalHostName` returns the chosen name,
+  `dns-sd -G v4 <name>.local` resolves it, and **`scutil --get HostName` is still
+  unset** — the parallel to leaving the Linux system hostname alone, and the
+  assertion that proves the installer took the narrow lever rather than the
+  broad one.
 - On a network with multicast blocked, `stage-utility find` still locates the
   server — reusing the discovery tests that already exist for the probe codec.
 - The installer's closing output names an address that actually serves a page,
