@@ -60,11 +60,19 @@ export function CardChrome({
         dragging && "opacity-40",
       )}
     >
-      <span className="absolute left-1.5 top-1.5 text-fg-subtle opacity-0 transition-opacity group-hover/card:opacity-100">
+      {/* Always visible, not hover-revealed. This chrome only renders while
+          editing, so hiding it until hover made edit mode look like it had done
+          nothing — and on a touch screen there IS no hover, so the controls were
+          unreachable on a phone entirely. */}
+      <span className="absolute bottom-1.5 left-1.5 text-fg-subtle">
         <GripVerticalIcon className="size-3.5" />
       </span>
 
-      <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-lg border border-line bg-bg/95 p-0.5 opacity-0 shadow-sm backdrop-blur transition-opacity focus-within:opacity-100 group-hover/card:opacity-100">
+      {/* At the BOTTOM, because the idiom puts a widget's CAPTION first and that
+          caption is how you tell which widget you are editing. Sitting at the
+          top, the control bar covered it on every tile — on a phone, where a
+          tile is the full width, it covered it completely. */}
+      <div className="absolute bottom-1.5 right-1.5 flex flex-wrap items-center justify-end gap-0.5 rounded-lg border border-line bg-bg/95 p-0.5 shadow-sm backdrop-blur">
         {SIZE_ORDER.map((s) => (
           <button
             key={s}

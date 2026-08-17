@@ -14,7 +14,7 @@ import { describe, test } from "node:test";
 
 import { LAYOUT_OBJECTS } from "./layout-objects.js";
 
-/** Content that paints its own box, or is deliberately full-bleed. */
+/** Content whose box is drawn for it, or that is deliberately full-bleed. */
 const BARE = [
   // Media — the picture IS the object.
   "image", "brand-logo", "slide-thumbnail", "ndi-video",
@@ -24,7 +24,10 @@ const BARE = [
   "current-slide-text", "next-slide-text", "current-slide-notes", "transcript-strip",
   // Draws its own grid of tiles; a card around a grid of cards is noise.
   "slots-grid",
-  // Home's cards draw their own frame — a default card would double-frame them.
+  // Home's cards. They used to draw their own frame — hence bare — and now draw
+  // none at all, because Home's GRID draws one tile frame for everything on it.
+  // A card here would be a second box inside that tile, and its padding would
+  // inset a newly added widget further than one added before the change.
   "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl", "home-screens",
   // Retired, and left exactly as it shipped.
@@ -50,6 +53,7 @@ describe("a widget you just added", () => {
     // A floor with slack is how three config stores went missing from every
     // backup with the suite green. When this fails, decide the new type's side
     // and add it here or to BARE — do not bump the number.
+
     const all = Object.keys(LAYOUT_OBJECTS);
     assert.equal(all.length, 50);
     assert.equal(all.filter(hasCard).length, 28);

@@ -133,7 +133,12 @@ export const STAT_CARD =
   // `relative` is what lets Readout position against the card: the idiom takes
   // the whole box and supplies its own box-relative padding, so the card's own
   // px-4 py-3 is the fallback for anything that is not a Readout.
-  "relative flex h-full w-full flex-col justify-center rounded-xl border border-line bg-surface px-4 py-3";
+  // NO frame of its own. Home's grid paints the tile — one radius, one hairline,
+  // one ground for every tile on the page. Painting a second card in here put a
+  // card inside a card, which was invisible while this filled the tile exactly
+  // and obvious the moment one did not: the next-service tile drew a smaller
+  // bordered box with dead space under it.
+  "relative flex h-full w-full flex-col justify-center px-4 py-3";
 
 /**
  * A Home stat — THE dashboard-sized instance of the one widget idiom.
@@ -245,7 +250,10 @@ export function NextServiceCard({
   secondsToStart?: number | null;
 }) {
   return (
-    <section className="rounded-xl border border-line bg-surface px-4 py-3">
+    // h-full, and no frame: the grid draws the tile. Without the height this sized
+    // to its content and left the rest of the tile empty below it — the reported
+    // "card inside a card".
+    <section className="flex h-full w-full flex-col justify-center px-4 py-3">
       <div className="flex items-baseline gap-2">
         <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
           Next service
@@ -283,7 +291,7 @@ export function ReadinessCard({ checks }: { checks: readonly ReadinessCheck[] })
   const hidden = checks.length - shown.length;
 
   return (
-    <section ref={wrapRef} className="flex h-full flex-col overflow-hidden rounded-xl border border-line bg-surface">
+    <section ref={wrapRef} className="flex h-full w-full flex-col overflow-hidden">
       <header className="flex shrink-0 items-baseline gap-2 border-b border-line px-4 py-3">
         <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
           Ready for the next service
@@ -368,7 +376,7 @@ export function RecentServicesCard({ state }: { state: StageState }) {
     // draws rather than a second chart that looks like it. It appears only when
     // the tile is tall enough to hold one: at Small or Medium the figures are
     // the whole widget, which is what those sizes are for.
-    <section className="flex h-full w-full flex-col overflow-hidden rounded-xl border border-line bg-surface">
+    <section className="flex h-full w-full flex-col overflow-hidden">
       <header className="flex shrink-0 items-baseline gap-2 border-b border-line px-4 py-3">
         <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
           Recent {scope.toLowerCase()}
