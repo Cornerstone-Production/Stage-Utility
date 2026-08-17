@@ -36,10 +36,12 @@ DEVICE (installed agent)                    SERVER
 ─────────────────────────                   ──────────────────────────
 read device id from disk
   │
-  ├─ UDP broadcast probe ──────────────────► record device: id, MAC(s),
-  │   {id, macs, hostname, os}                hostname, IP, last seen
-  │                                           │
-  ◄── unicast reply ────────────────────────  {http://host:port}
+  ├─ UDP broadcast probe ──────────────────► bound to me?      → always answer
+  │   {id, macs, hostname, os, boundTo}       bound elsewhere?  → ignore
+  │                                           unbound?          → answer + list,
+  │                                                               but only while
+  │                                                               scanning
+  ◄── unicast reply ────────────────────────  {serverId, name, http://host:port}
   │
   └─ launch browser, kiosk:
        http://<server>/enroll?device=<id>
@@ -118,68 +120,131 @@ network, but not guaranteed, and a network change rotates them. A NIC swap chang
 it. A cloned VM may duplicate it. So a MAC match *suggests*, and a person
 confirms; a MAC never binds anything on its own.
 
+**Both Ethernet and Wi-Fi installs are supported.** On Ethernet the MAC never
+randomises and the hint is dependable. The mic-slot Pis are on Wi-Fi today, where
+Raspberry Pi OS normally connects with the real hardware MAC — but that is a
+default, not a guarantee, and an OS update could change it underneath us. So a
+**Wi-Fi install pins the connection MAC** rather than trusting the default, which
+keeps the hint reliable on exactly the devices that need it most.
+
 Stored per device: `macs: string[]`, `hostname`, `os`, `ip`, `lastSeen`.
 
 ## Data model
 
-A new store, `devices.json`, declared **`"config"`** — it is the operator's work,
-it must be restored — and added to `CONFIG_FILES` **in the same change**, or it is
-silently missing from every backup. That is a standing rule this repo has been
-bitten by before.
+**Two halves, and only one of them is stored.**
+
+- **A bound device is config.** The binding is the operator's work — it must be
+  restored. `devices.json`, declared `"config"`, and added to `CONFIG_FILES` **in
+  the same change** or it is silently missing from every backup.
+- **An unclaimed device is runtime.** It exists only while it is actually probing:
+  in memory, TTL'd, never persisted. Same shape as `display-presence.ts`.
+
+That split is what makes the behaviour below fall out for free. Power a Pi off
+before pairing it and it stops probing, so it ages out of every server's list —
+there was never anything stored to clean up.
 
 ```ts
-interface KioskDevice {
-  /** Generated at install, presented by the agent. Permanent. */
+/** Stored. The operator's work. */
+interface BoundDevice {
   id: string;
-  /** Secret issued on claim. Absent until claimed. */
-  token?: string;
-  /** The Output this device shows. null = unclaimed. */
-  outputId: string | null;
-  /** Operator's name for the physical box. Defaults to its hostname. */
+  /** Issued on claim, presented on every enrolment afterwards. */
+  token: string;
+  outputId: string;
   label?: string;
-  /** Hints, refreshed on every probe. Never used to bind. */
+  /** Hints, refreshed whenever the device is seen. Never used to bind. */
   macs: string[];
   hostname?: string;
   os?: string;
   ip?: string;
-  /** Epoch ms. Runtime-ish, but persisted so Devices can say "last seen
-   *  Tuesday" after a server restart rather than "never". */
   lastSeen?: number;
+}
+
+/** In memory only. Gone when it stops probing, gone on restart. */
+interface SeenDevice {
+  id: string;
+  macs: string[];
+  hostname?: string;
+  os?: string;
+  ip: string;
+  firstSeen: number;
+  lastSeen: number;
+  /** Present when the device says it belongs to a server. Set → this server
+   *  hides it unless the id is its own. */
+  boundTo?: string;
 }
 ```
 
-**Binding is to an existing Output, not a new one.** A replacement Pi is claimed
-as *Left Mic Display* and inherits the slot — the view, the slug, the QR codes,
-everything already pointing at that output id. Creating an output per device would
-leave a dead entry behind on every hardware swap.
-
-An Output may have at most one device bound. Claiming a device to an output that
-already has one asks first, then moves the binding.
+**Binding is to an existing Output.** A replacement is claimed as *Left Mic
+Display* and inherits the slot — its view, slug and QR codes. An output per device
+leaves a dead entry behind on every hardware swap. One device per output; claiming
+over an existing binding asks first, then moves it.
 
 ## Discovery protocol
 
 UDP, `node:dgram`, no dependency. Same broadcast/respond pattern the OSC manager
 and the Sennheiser provider already use.
 
-- **Port:** 8789 (beside the app's 8788).
-- **Probe:** device → `255.255.255.255:8789`
-  `{"stageUtility":"discover","v":1,"id":"…","macs":[…],"hostname":"…","os":"…"}`
+- **Port: 8789 by default, and configurable.** Nothing in the app uses it (the app
+  uses or talks to 2202, 4455, 7788, 8080, 8788, 24480, 26000 and 80), but AV gear
+  is fond of odd UDP ports, so the setting exists to make a collision a
+  five-second fix rather than a rebuild.
+- **Probe:** device → broadcast
+  `{"stageUtility":"discover","v":1,"id":"…","macs":[…],"hostname":"…","os":"…","boundTo":"…"|null}`
 - **Reply:** server → unicast to the probe's source
-  `{"stageUtility":"server","v":1,"url":"http://192.168.16.61","name":"…"}`
+  `{"stageUtility":"server","v":1,"serverId":"…","name":"FOH — Stage Utility","url":"http://…"}`
 - **Retry:** every 2s, backing off to 30s after ten attempts, forever. A Pi that
-  boots before the server — a power cut bringing the whole rack up at once — waits
-  and finds it rather than failing.
+  boots before the server — a power cut bringing the rack up at once — waits and
+  finds it rather than failing.
 - **Re-discovery:** on browser exit, and every 15 minutes, so moving the server
-  does not require touching a single screen.
+  does not mean touching a single screen.
 
-**Manual override.** A `server=` line in a config file beside the device id skips
-discovery entirely, for networks where broadcast does not cross a VLAN.
+**Manual override.** A `server=` line beside the device id skips discovery, for
+networks where broadcast does not cross a VLAN.
 
-**Rate limiting.** Probes from an unknown id are recorded at most once per
-minute, so a misconfigured or malicious device cannot flood the Devices list.
+### Which server answers, and when
 
-A rogue device can announce itself. It appears unclaimed and renders nothing until
-a person claims it, which is the intended gate.
+Two rules, and the distinction matters more than it looks:
+
+1. **A device that says it is bound to THIS server is always answered.** That is
+   how a bound display re-finds its server after an IP change, with nobody
+   present. Turning this off would leave a screen dark until someone opened
+   settings, which is the opposite of what discovery is for.
+2. **An unclaimed device is only recorded and surfaced during a SCAN.** Nothing
+   new appears in the app unless somebody is looking.
+
+A scan runs when:
+
+- **you press Scan for devices** in settings — an explicit window;
+- **the Devices page is open** — continuously, following the house rule of gating
+  work on whether anyone is subscribed;
+- **a periodic lazy scan**, a short window every few minutes, so a Pi plugged in
+  while nobody was watching is waiting for you rather than needing a hunt. On by
+  default, and switchable off.
+
+### Bound elsewhere
+
+**A device carries its own binding, so servers never talk to each other.**
+
+An unclaimed device is fair game: during a scan it shows on *every* server that
+hears it, which is fine — it is not bound to anything. The moment it is claimed on
+one, its probe starts carrying that `serverId`, and every other server sees a
+device that belongs to somebody and leaves it out of its list. Bind it on one
+server and it disappears from all the others, with no coordination protocol,
+no shared database, and nothing to get out of sync.
+
+**When its own server is gone.** A bound device that cannot reach its server keeps
+trying and shows a "cannot reach *name*" screen with its id — it does **not**
+silently re-home, because a display that re-binds itself during an outage is worse
+than a dark one. Other servers may show it in a separate **bound elsewhere,
+unreachable** state, which needs an explicit force-claim. Visible, never automatic,
+and it means recovering a device from a decommissioned server does not need SSH.
+
+### Rate limiting
+
+Probes from an unknown id are recorded at most once per minute, so a
+misconfigured or malicious device cannot flood the list. A rogue device can
+announce itself; it appears unclaimed and renders nothing until a person claims
+it, which is the gate.
 
 ## Server surface
 
@@ -191,7 +256,11 @@ a person claims it, which is the intended gate.
 - **`POST /api/devices/claim`** — `{deviceId, outputId}` → binds, issues the token,
   fires `/api/displays/refresh` for that device.
 - **`POST /api/devices/release`** — unbinds; the device falls back to the holding
-  screen on its next load.
+  screen on its next load and starts advertising as unclaimed again.
+- **`POST /api/devices/scan`** — opens a scan window. The Devices page holds one
+  open while it is on screen.
+- **`GET /api/devices`** — bound devices from config, plus whatever the current
+  scan has heard that is not bound elsewhere.
 
 ## Devices page
 
@@ -273,12 +342,24 @@ loop devices and qemu; the app runs on macOS and on Pis. CI is the right home.
 - **Browser** — the holding screen and the Devices page against a copy of a real
   config, never the live one.
 
-## Open questions
+## Decisions taken
 
-1. **Port 8789** — needs checking against anything else on the production LAN.
-2. **Wi-Fi MAC randomisation** — worth confirming on the actual Pis, since it
-   decides how useful the re-bind hint is in practice.
-3. **Multiple servers on one LAN** (a test instance beside prod) — the reply
-   carries a server name; the device would take the first answer. If that is a real
-   scenario, the config file's `server=` override is the answer, or the probe
-   filters on an expected name.
+The three questions this spec opened with, answered:
+
+1. **Discovery port** — 8789, and adjustable. No known conflict on the production
+   LAN; the setting exists so a future one is a settings change.
+2. **Ethernet and Wi-Fi both.** The Pis are on Wi-Fi today, so a Wi-Fi install pins
+   the connection MAC to keep the re-identification hint dependable.
+3. **A second server on the same LAN** — the reply carries a server name; unclaimed
+   devices surface only during a scan; and a device carries its own binding so
+   claiming it on one server removes it from every other. No server-to-server
+   protocol.
+
+## Still open
+
+- **Scan cadence for the lazy periodic scan.** Every few minutes is the proposal;
+  the right number is easier to pick once the Devices page exists and it is
+  obvious how long "I just plugged it in" should feel.
+- **Force-claim from a decommissioned server.** The *bound elsewhere, unreachable*
+  path is described above but its UI is not designed. It can wait — it is a
+  recovery case, not a setup one.
