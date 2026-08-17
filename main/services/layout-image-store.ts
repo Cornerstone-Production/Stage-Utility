@@ -54,6 +54,39 @@ export async function saveLayoutImage(dataUrl: string): Promise<string> {
   return `/layout-images/${file}`;
 }
 
+/**
+ * Persist image bytes that arrived in an import bundle.
+ *
+ * The filename is content-addressed, so it is VERIFIED rather than trusted: a
+ * bundle is a file off somebody's laptop, and a name that disagrees with its
+ * bytes would either overwrite an unrelated image or plant one under a name a
+ * layout already points at. Returns true when a new file was written, false
+ * when that hash was already here — which is how a shared logo collapses to one
+ * file instead of duplicating.
+ */
+export async function saveLayoutImageBytes(file: string, bytes: Buffer): Promise<boolean> {
+  const m = /^([0-9a-f]{16})\.([a-z0-9]+)$/.exec(file);
+  if (!m) throw new Error(`not a layout image name: ${file}`);
+  if (!Object.values(EXT_BY_MIME).includes(m[2])) throw new Error(`unsupported image type: ${m[2]}`);
+  if (bytes.length === 0) throw new Error("empty image");
+  if (bytes.length > MAX_LAYOUT_IMAGE_BYTES) throw new Error("image too large (max 12 MB)");
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+  if (hash !== m[1]) throw new Error(`image ${file} does not match its contents`);
+
+  const d = dir();
+  await fs.mkdir(d, { recursive: true });
+  const full = path.join(d, file);
+  try {
+    // wx: fail if it exists. Same hash means same bytes, so there is nothing to
+    // write and nothing to overwrite.
+    await fs.writeFile(full, bytes, { flag: "wx" });
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw err;
+  }
+}
+
 // Don't reap a file newer than this — an image can be uploaded and referenced only
 // in the editor draft before the layout is saved, so recent files may not yet appear
 // in any store.
