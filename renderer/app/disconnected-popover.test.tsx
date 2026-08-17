@@ -66,6 +66,19 @@ describe("the disconnected panel escapes the context bar", () => {
     assert.ok(!classes.includes("absolute"), "panel is absolute, so the bar clips it again");
   });
 
+  test("it has a ground of its own, not an overlay meant to sit on one", () => {
+    // `surface-raised` is a 5.5% white overlay in dark mode — correct for a box
+    // lifted off a surface it already sits on, and 94.5% transparent for a panel
+    // floating over arbitrary content. The pencil button and the card text
+    // behind it read straight through. `popover` is the ground every other
+    // floating panel uses; measured in a browser it comes out byte-identical to
+    // ContextMenu's, in both themes.
+    const view = open();
+    const cls = view.getByRole("menu").className;
+    assert.ok(cls.includes("bg-popover"), `panel has no popover ground: "${cls}"`);
+    assert.ok(!cls.includes("bg-surface-raised"), "panel is using the see-through overlay again");
+  });
+
   test("pressing outside still dismisses it", () => {
     // The other half: a panel you can only close from its own trigger gets left
     // open over the thing you were trying to read.

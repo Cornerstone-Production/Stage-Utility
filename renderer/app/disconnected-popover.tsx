@@ -137,7 +137,12 @@ export function DisconnectedPopover({
           style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? "visible" : "hidden" }}
           className={cn(
             "fixed z-[100] w-64 overflow-hidden rounded-lg",
-            "border border-line bg-surface-raised shadow-lg",
+            // The same ground every other floating panel uses — ContextMenu,
+            // tooltips, toasts. `surface-raised` is a 5.5% white OVERLAY meant
+            // to lift a box off a surface it already sits on; as a floating
+            // panel's own ground it is 94.5% transparent, and everything behind
+            // read straight through it.
+            "border border-line-strong bg-popover/95 backdrop-blur-xl shadow-2xl",
           )}
         >
           <p className="border-b border-line px-3 py-2 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
