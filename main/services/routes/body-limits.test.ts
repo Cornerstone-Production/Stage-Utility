@@ -67,6 +67,18 @@ describe("route body limits", () => {
     );
   });
 
+  it("a view export carrying an image is importable", () => {
+    // /api/views/import shares the config ceiling for the same reason: a view
+    // bundle base64s every image its layout references, so the ordinary JSON cap
+    // would refuse a file this app just produced. That the ROUTE passes this
+    // limit rather than the default is proven by a real round trip, not here —
+    // a constant clearing a threshold says nothing about which route reads it.
+    assert.ok(
+      MAX_CONFIG_BODY_BYTES > MAX_LAYOUT_IMAGE_BYTES * BASE64_EXPANSION * 2,
+      "a view bundle with two full-size layout images must be importable",
+    );
+  });
+
   it("keeps the ordinary JSON cap small — it is what bounds an unauthenticated POST", () => {
     // The fix is per-route headroom, NOT a bigger global number. If this ever
     // rises to meet the others, the cap has stopped doing its job.

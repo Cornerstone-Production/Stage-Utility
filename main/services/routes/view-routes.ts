@@ -7,6 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { buildViewBundle } from "../view-export.js";
+import { applyViewBundle } from "../view-import.js";
 import {
   listLayoutTemplates,
   saveLayoutTemplate,
@@ -18,7 +19,7 @@ import {
 } from "../layout-library.js";
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
-import { type RouteCtx, json, error, readBody, isDisplayKind } from "./context.js";
+import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
 import { LayoutConflictError, stageController } from "../stage-controller.js";
 
@@ -157,7 +158,23 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-        // GET /api/views/:id/export — the whole view as one file.
+        // POST /api/views/import — merge a bundle in and report what happened.
+    if (method === "POST" && pathname === "/api/views/import") {
+      try {
+        // A bundle carries base64 images, so the ordinary JSON ceiling would
+        // refuse a file this app exported — the same reason /api/config/import
+        // uses this limit.
+        const report = await applyViewBundle(await readBody(req, MAX_CONFIG_BODY_BYTES));
+        // The view list changed and every open page renders from it.
+        await stageController.refresh();
+        json(res, report);
+      } catch (err) {
+        error(res, errorMessage(err));
+      }
+      return;
+    }
+
+    // GET /api/views/:id/export — the whole view as one file.
     const viewExportMatch = pathname.match(/^\/api\/views\/([^/]+)\/export$/);
     if (method === "GET" && viewExportMatch) {
       try {
