@@ -135,6 +135,22 @@ export function touch(
 }
 
 /**
+ * A bound device with its token removed.
+ *
+ * The token is the ONLY thing separating a claimed display from anything else on
+ * the LAN, and reads on this server are deliberately open (writes are
+ * same-origin; it is a plain-HTTP appliance). Returning tokens from a listing
+ * anyone can GET would hand out the secret and make the check theatre.
+ *
+ * Nothing in the UI needs it: the agent already holds its own.
+ */
+export type PublicDevice = Omit<BoundDevice, "token">;
+
+export function withoutTokens(devices: readonly BoundDevice[]): PublicDevice[] {
+  return devices.map(({ token: _secret, ...rest }) => rest);
+}
+
+/**
  * Devices that look like the same hardware coming back.
  *
  * Used when an unclaimed device appears and a claimed one with the same MAC is

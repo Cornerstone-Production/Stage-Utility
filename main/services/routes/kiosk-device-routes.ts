@@ -5,7 +5,7 @@
 // SD card holds no display number and the server decides what a screen shows.
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
-import { kioskDevicesStore, authorise, claim, release, findByOutput, matchByMac } from "../kiosk-devices-store.js";
+import { kioskDevicesStore, authorise, claim, release, findByOutput, matchByMac, withoutTokens } from "../kiosk-devices-store.js";
 import { seenDevices, startScan, stopScan, scanning, scanEndsAt, forgetSeen } from "../kiosk-presence.js";
 import { holdingScreen } from "../kiosk-holding-screen.js";
 import { stageController } from "../stage-controller.js";
@@ -59,7 +59,9 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     json(res, {
       scanning: scanning(),
       scanEndsAt: scanEndsAt(),
-      bound,
+      // Tokens stripped: reads are open on this server, and a listing that hands
+      // out the secret makes the token check meaningless.
+      bound: withoutTokens(bound),
       // Everything currently heard that we have NOT already bound. A device
       // bound elsewhere only reaches this list when it says it cannot reach the
       // server that owns it — see decideProbe.
@@ -145,7 +147,8 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   if (method === "GET" && pathname.startsWith("/api/devices/for-output/")) {
     const outputId = decodeURIComponent(pathname.slice("/api/devices/for-output/".length));
     const bound = await kioskDevicesStore.load();
-    json(res, { device: findByOutput(bound, outputId) ?? null });
+    const device = findByOutput(bound, outputId);
+    json(res, { device: device ? withoutTokens([device])[0] : null });
     return;
   }
 }

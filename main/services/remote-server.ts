@@ -800,7 +800,16 @@ export class RemoteServer {
 
     // ── Serve renderer static build (standalone mode) ─────────────────────
     // Serves the Vite-built renderer from build/renderer/ when it exists.
-    if (method === "GET" && !pathname.startsWith("/api/") && pathname !== "/photos") {
+    // /enroll is excluded for the same reason /api is: static runs BEFORE the
+    // route modules, and an unknown path falls through to the kiosk shell — so
+    // without this, every unclaimed device was served the display picker instead
+    // of the holding screen, and the route below never ran.
+    if (
+      method === "GET" &&
+      !pathname.startsWith("/api/") &&
+      pathname !== "/photos" &&
+      pathname !== "/enroll"
+    ) {
       const staticServed = await this.tryServeStatic(pathname, res, req.headers["accept-encoding"] as string | undefined);
       if (staticServed) return;
       // Fall through to the phone control page.

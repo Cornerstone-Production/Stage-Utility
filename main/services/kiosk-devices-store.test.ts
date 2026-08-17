@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
-  kioskDevicesStore, authorise, claim, release, touch, matchByMac, newClaimToken,
+  kioskDevicesStore, authorise, claim, release, touch, matchByMac, newClaimToken, withoutTokens,
 } from "./kiosk-devices-store.js";
 import { configFilenames } from "./store-registry.js";
 import type { BoundDevice } from "../types/kiosk.js";
@@ -60,6 +60,26 @@ describe("authorising an enrolment", () => {
     const a = newClaimToken();
     assert.ok(a.length >= 24, `token is only ${a.length} chars`);
     assert.notEqual(a, newClaimToken());
+  });
+});
+
+describe("what a client is allowed to see", () => {
+  test("a listing never carries the token", () => {
+    // THE guard. Reads on this server are deliberately open — it is a plain-HTTP
+    // LAN appliance — so a listing that included the token would hand the secret
+    // to anything that can GET, and the whole check becomes theatre.
+    const listed = withoutTokens([dev(), dev({ id: "d2", token: "tok-2" })]);
+    for (const d of listed) {
+      assert.ok(!("token" in d), `${d.id} was listed with its token`);
+    }
+    assert.equal(JSON.stringify(listed).includes("tok-1"), false, "a token survived serialisation");
+  });
+
+  test("everything else survives, so the page still has what it needs", () => {
+    const [d] = withoutTokens([dev({ hostname: "pi", ip: "1.2.3.4" })]);
+    assert.equal(d.outputId, "display-1");
+    assert.equal(d.hostname, "pi");
+    assert.equal(d.ip, "1.2.3.4");
   });
 });
 
