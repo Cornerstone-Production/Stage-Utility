@@ -58,6 +58,7 @@ import { displaySettingsRoutes } from "./routes/display-settings-routes.js";
 import { kioskDeviceRoutes } from "./routes/kiosk-device-routes.js";
 import { startKioskResponder, stopKioskResponder } from "./kiosk-responder.js";
 import { settingsStore } from "./settings-store.js";
+import { recordDisplayScreen } from "./kiosk-devices-store.js";
 import { randomUUID } from "node:crypto";
 import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
@@ -920,7 +921,15 @@ export class RemoteServer {
       const outputId = typeof body.outputId === "string" ? body.outputId : null;
       if (outputId) {
         if (body.leaving === true) displayLeaving(outputId);
-        else displayHeartbeat(outputId);
+        else {
+          displayHeartbeat(outputId);
+          // Deliberately discarded, with a log: the heartbeat itself succeeded
+          // and a display that could not record its size is still a display
+          // showing the right thing. Nothing reads the size to decide anything.
+          void recordDisplayScreen(outputId, body.deviceId, body.screen).then((failed) => {
+            if (failed) console.warn("[displays] could not record screen size:", failed);
+          });
+        }
       }
       json(res, { ok: outputId != null });
       return;

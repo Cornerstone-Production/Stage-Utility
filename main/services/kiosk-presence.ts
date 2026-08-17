@@ -9,6 +9,7 @@
 // Modelled on display-presence.ts, which does the same job for kiosk pages.
 
 import { broadcast } from "./broadcaster.js";
+import { mergeScreen, sameScreen } from "./kiosk-screen-size.js";
 import type { SeenDevice } from "../types/kiosk.js";
 
 /** Longest gap before a device is considered gone. The agent probes every 2s and
@@ -27,6 +28,22 @@ const RECORD_EVERY_MS = 60_000;
 
 const seen = new Map<string, SeenDevice>();
 const lastRecorded = new Map<string, number>();
+
+/**
+ * Device secrets, kept OUT of the device record on purpose.
+ *
+ * A secret used to be a field on SeenDevice, and SeenDevice is what
+ * `kiosk:devices` broadcasts — so every device secret went out over an SSE that
+ * anything on the LAN can open, which is the one thing separating a claimed
+ * display from any other machine. `/api/devices` stripped it and the broadcast
+ * did not; a field that must be removed on the way out is a field in the wrong
+ * place. Here it cannot be shipped by forgetting to strip it.
+ *
+ * A secret arriving for an unknown device also must not conjure a row on the
+ * Screens page — /enroll is a GET, reachable by anything on the network — so it
+ * is remembered without recording a sighting.
+ */
+const secrets = new Map<string, string>();
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
 let lastSig = "";
 
@@ -45,14 +62,7 @@ export function scanning(now = Date.now()): boolean {
   return false;
 }
 
-/** When the current scan ends, or null. For the "Scanning — 42s left" readout. */
-export function scanEndsAt(now = Date.now()): number | null {
-  let latest: number | null = null;
-  for (const until of scans.values()) if (until > now && (latest === null || until > latest)) latest = until;
-  return latest;
-}
-
-/** Open a scan window. `holder` lets the Devices page hold one open for as long
+/** Open a scan window. `holder` lets the Screens page hold one open for as long
  *  as it is mounted without fighting the button's fixed-length window. */
 export function startScan(holder = "manual", ms = SCAN_WINDOW_MS, now = Date.now()): void {
   scans.set(holder, now + ms);
@@ -84,12 +94,16 @@ export function recordSeen(
   // Known device: refresh cheaply. Only announce when something a person would
   // notice changed — a probe every two seconds must not become an SSE every two
   // seconds, per the house rule about change-driven broadcasts.
+  // Merge the screen rather than replace it — the probe only ever carries the
+  // DRM mode and the holding screen only ever reports CSS pixels.
+  const screen = mergeScreen(existing.screen, d.screen);
   const changed =
     existing.ip !== d.ip ||
     existing.boundTo !== d.boundTo ||
     !!existing.unreachable !== !!d.unreachable ||
-    existing.hostname !== d.hostname;
-  seen.set(d.id, { ...existing, ...d, lastSeen: now });
+    existing.hostname !== d.hostname ||
+    !sameScreen(existing.screen, screen);
+  seen.set(d.id, { ...existing, ...d, screen, lastSeen: now });
   if (changed) announce(now);
   return true;
 }
@@ -103,35 +117,79 @@ export function seenDevices(now = Date.now()): SeenDevice[] {
 /** Record the secret a device presented over HTTP. Never comes from a probe —
  *  a broadcast secret is not a secret. */
 export function rememberSecret(id: string, secret: string): void {
+  secrets.set(id, secret);
+}
+
+/** The secret a device presented, for pinning at claim. */
+export function secretFor(id: string): string | undefined {
+  return secrets.get(id);
+}
+
+/** Record the size a device reported over HTTP from its holding screen. Merged
+ *  rather than replaced, so it does not wipe the physical mode the probe carried.
+ *  A device that has not been heard from over UDP yet is not invented here — an
+ *  unsolicited size for an unknown id would put a row on the page that no probe
+ *  ever backed. */
+export function rememberScreen(id: string, size: { w: number; h: number; dpr?: number }): void {
   const d = seen.get(id);
-  if (d) seen.set(id, { ...d, secret });
-  else seen.set(id, { id, macs: [], ip: "", firstSeen: Date.now(), lastSeen: Date.now(), secret });
+  if (!d) return;
+  const next = mergeScreen(d.screen, size);
+  if (sameScreen(d.screen, next)) return;
+  seen.set(id, { ...d, screen: next });
+  announce();
 }
 
 /** Forget a device immediately — it was just claimed, so it stops being a
  *  candidate the moment the binding exists rather than a minute and a half later. */
 export function forgetSeen(id: string): void {
+  secrets.delete(id);
   if (seen.delete(id)) announce();
 }
 
-function signature(now: number): string {
-  return `${scanning(now) ? "1" : "0"}|${seenDevices(now).map((d) => `${d.id}:${d.boundTo ?? ""}:${d.unreachable ? 1 : 0}`).join(",")}`;
+/**
+ * What a subscriber is shown — and, being the same value, what "did anything
+ * change" is decided on.
+ *
+ * The signature used to be a hand-written list of fields, and it had fallen
+ * behind the payload: a device's ip, hostname and screen size all set the
+ * change flag and were then swallowed here, so a size reported while somebody
+ * had Screens open never reached the page. A dedupe key derived from anything
+ * other than the payload drifts from it; this one cannot.
+ *
+ * `lastSeen` is excluded deliberately — it changes on every probe, and including
+ * it would turn a two-second heartbeat into a two-second broadcast.
+ */
+function payload(now: number): { scanning: boolean; seen: SeenDevice[] } {
+  return { scanning: scanning(now), seen: seenDevices(now) };
+}
+
+/**
+ * Force a `kiosk:devices` frame regardless of the dedupe.
+ *
+ * For changes this module cannot see — a claim, a release, a bound device's size
+ * — which live in the persisted store. Screens refetches the whole listing on
+ * this channel, so one channel serves both halves of the page rather than the
+ * renderer having to subscribe to two.
+ */
+export function announceDevices(): void {
+  lastSig = "";
+  announce();
 }
 
 function announce(now = Date.now()): void {
-  const sig = signature(now);
+  const next = payload(now);
+  const sig = JSON.stringify({
+    scanning: next.scanning,
+    seen: next.seen.map(({ lastSeen: _l, firstSeen: _f, ...rest }) => rest),
+  });
   if (sig === lastSig) return;
   lastSig = sig;
-  broadcast("kiosk:devices", { scanning: scanning(now), scanEndsAt: scanEndsAt(now), seen: seenDevices(now) });
+  broadcast("kiosk:devices", next);
 }
 
 /** Snapshot for a client whose SSE has just opened. */
-export function kioskPresenceSnapshot(): {
-  scanning: boolean;
-  scanEndsAt: number | null;
-  seen: SeenDevice[];
-} {
-  return { scanning: scanning(), scanEndsAt: scanEndsAt(), seen: seenDevices() };
+export function kioskPresenceSnapshot(): { scanning: boolean; seen: SeenDevice[] } {
+  return payload(Date.now());
 }
 
 function ensureSweep(): void {
@@ -152,6 +210,7 @@ function ensureSweep(): void {
 
 /** Tests only: drop all state so cases cannot leak into each other. */
 export function resetKioskPresence(): void {
+  secrets.clear();
   seen.clear();
   lastRecorded.clear();
   scans.clear();

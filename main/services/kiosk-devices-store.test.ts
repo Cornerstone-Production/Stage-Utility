@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
-  kioskDevicesStore, authorise, claim, release, touch, matchByMac, newClaimToken, withoutTokens, pinSecret,
+  kioskDevicesStore, authorise, claim, release, touch, matchByMac, newClaimToken, withoutTokens, pinSecret, recordScreen,
 } from "./kiosk-devices-store.js";
 import { configFilenames } from "./store-registry.js";
 import type { BoundDevice } from "../types/kiosk.js";
@@ -198,5 +198,47 @@ describe("recognising the same hardware coming back", () => {
 
   test("an unknown MAC matches nothing", () => {
     assert.deepEqual(matchByMac(devices, ["00:00:00:00:00:00"]), []);
+  });
+});
+
+describe("what a claim carries across", () => {
+  test("the screen size the device reported while unclaimed survives the claim", () => {
+    // Otherwise the card is blank until the display next sends a heartbeat, and
+    // the operator sets a screen up looking at nothing where a size should be.
+    const { devices } = claim([], "d1", "display-9", {
+      hostname: "bench-pi",
+      screen: { w: 1280, h: 720, dpr: 1.5, mode: "1920x1080" },
+    });
+    assert.deepEqual(devices[0].screen, { w: 1280, h: 720, dpr: 1.5, mode: "1920x1080" });
+  });
+
+  test("re-claiming without a fresh size keeps the one already known", () => {
+    // A hardware swap onto an existing screen re-runs claim() from a page that
+    // may have no seen-record to hand. Wiping the size would be a silent loss.
+    const first = claim([], "d1", "display-9", { screen: { w: 1920, h: 1080 } }).devices;
+    const again = claim(first, "d1", "display-2", { hostname: "renamed" }).devices;
+    assert.deepEqual(again[0].screen, { w: 1920, h: 1080 });
+  });
+});
+
+// Only the machine bound to a screen may say how big that screen is.
+describe("who may report a screen's size", () => {
+  test("a size from the bound device is recorded", () => {
+    const bound = claim([], "d1", "display-3", {}).devices;
+    const next = recordScreen(bound, "display-3", { w: 1920, h: 1080 });
+    assert.deepEqual(next[0].screen, { w: 1920, h: 1080 });
+  });
+
+  test("recordScreen returns the same array when nothing changed", () => {
+    // The identity IS the change signal that updateDevices broadcasts on, and
+    // the reason a heartbeat every twenty seconds is not a disk write every
+    // twenty seconds.
+    const bound = recordScreen(claim([], "d1", "display-3", {}).devices, "display-3", { w: 1920, h: 1080 });
+    assert.equal(recordScreen(bound, "display-3", { w: 1920, h: 1080 }), bound);
+  });
+
+  test("a size for an output with no bound device changes nothing", () => {
+    const bound = claim([], "d1", "display-3", {}).devices;
+    assert.equal(recordScreen(bound, "display-9", { w: 800, h: 600 }), bound);
   });
 });

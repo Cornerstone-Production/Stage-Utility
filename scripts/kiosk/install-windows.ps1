@@ -138,7 +138,7 @@ powercfg /change standby-timeout-ac 0  2>$null
 
 Write-Host ''
 Write-Host "==> Done. This screen is device $(Get-Content $IdFile)"
-Write-Host '    It starts at the next logon. Open Kiosks in Stage Utility, press'
-Write-Host '    Scan for devices, and assign it an output.'
+Write-Host '    It starts at the next logon. Open Screens in Stage Utility and'
+Write-Host '    set it up under "Not set up yet".'
 Write-Host ''
 Write-Host '    Still to do by hand, once: enable automatic login (netplwiz).'

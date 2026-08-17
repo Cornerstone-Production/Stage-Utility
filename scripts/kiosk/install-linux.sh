@@ -12,7 +12,7 @@
 #     dies
 #
 # Nothing here knows which display this is. The server decides that, once, when
-# somebody claims it in Kiosks.
+# somebody sets it up on the Screens page.
 
 set -eu
 
@@ -87,12 +87,28 @@ macs() {
   done | sed 's/,\$//'
 }
 
+# The mode this machine is actually DRIVING, straight from DRM — not what the
+# browser thinks. The browser reports CSS pixels, which is the right number for
+# laying out a view and the wrong one for "what is this TV doing": it cannot see
+# a panel overscanning or negotiating an odd EDID mode. First connected output
+# wins; a kiosk drives one screen.
+mode() {
+  for card in /sys/class/drm/card*-*; do
+    [ -r "\$card/status" ] || continue
+    [ "\$(cat "\$card/status")" = "connected" ] || continue
+    m="\$(head -1 "\$card/modes" 2>/dev/null)"
+    [ -n "\$m" ] && { printf '%s' "\$m"; return; }
+  done
+}
+
 # One probe, and whatever answers within two seconds. The server replies unicast,
 # so this hears its own answer without needing anything open on this machine.
 discover() {
   bound="\$(cat "\$BOUND_FILE" 2>/dev/null || true)"
   unreachable=\$1
   probe="{\"stageUtility\":\"discover\",\"v\":1,\"id\":\"\$ID\",\"macs\":[\$(macs)],\"hostname\":\"\$(hostname)\",\"os\":\"Linux\""
+  m="\$(mode)"
+  [ -n "\$m" ] && probe="\$probe,\"mode\":\"\$m\""
   [ -n "\$bound" ] && probe="\$probe,\"boundTo\":\"\$bound\""
   [ "\$unreachable" = "1" ] && probe="\$probe,\"unreachable\":true"
   probe="\$probe}"
@@ -182,4 +198,4 @@ systemctl enable --now stage-utility-kiosk.service
 
 echo
 echo "==> Done. This screen is device $(cat "$STATE_DIR/device-id")"
-echo "    Open Kiosks in Stage Utility, press Scan for devices, and assign it an output."
+echo "    Open Screens in Stage Utility and set it up under \"Not set up yet\"."

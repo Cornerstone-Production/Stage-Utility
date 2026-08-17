@@ -12,7 +12,7 @@ import { networkInterfaces } from "node:os";
 
 import { decodeProbe, encodeReply, decideProbe } from "./kiosk-discovery.js";
 import { recordSeen, scanning, forgetSeen } from "./kiosk-presence.js";
-import { kioskDevicesStore, findById, touch } from "./kiosk-devices-store.js";
+import { kioskDevicesStore, findById, touch, updateDevices } from "./kiosk-devices-store.js";
 import { DEFAULT_DISCOVERY_PORT } from "../types/kiosk.js";
 
 export interface ResponderOptions {
@@ -70,6 +70,7 @@ export function startKioskResponder(opts: ResponderOptions): void {
         ip: rinfo.address,
         boundTo: probe.boundTo,
         unreachable: probe.unreachable,
+        screen: probe.mode ? { w: 0, h: 0, mode: probe.mode } : undefined,
       });
     }
     if (decision.list === "mine") {
@@ -79,9 +80,10 @@ export function startKioskResponder(opts: ResponderOptions): void {
       // touch() returns the SAME array when nothing changed, so a probe every
       // two seconds does not become a file write every two seconds.
       try {
-        await kioskDevicesStore.update((current) =>
+        await updateDevices((current) =>
           touch(current, probe.id, {
-            macs: probe.macs, hostname: probe.hostname, os: probe.os, ip: rinfo.address, now: Date.now(),
+            macs: probe.macs, hostname: probe.hostname, os: probe.os, ip: rinfo.address,
+            mode: probe.mode, now: Date.now(),
           }),
         );
       } catch (err) {

@@ -18,8 +18,15 @@ const probe = (over: Partial<Parameters<typeof encodeProbe>[0]> = {}) => ({
 
 describe("the wire format survives a broadcast port", () => {
   test("a probe round-trips", () => {
-    const p = probe({ boundTo: "srv-1", unreachable: true });
+    const p = probe({ boundTo: "srv-1", unreachable: true, mode: "1920x1080" });
     assert.deepEqual(decodeProbe(encodeProbe(p)), p);
+  });
+
+  test("a probe from a device that could not read its mode still decodes", () => {
+    // Only Linux can read /sys/class/drm. macOS and Windows send no mode at all
+    // and must not be dropped for it.
+    assert.equal(decodeProbe(encodeProbe(probe()))?.id, "d4f19c2a");
+    assert.equal(decodeProbe(encodeProbe(probe()))?.mode, undefined);
   });
 
   test("a reply round-trips", () => {

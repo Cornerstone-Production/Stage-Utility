@@ -123,8 +123,8 @@ pmset -a displaysleep 0 sleep 0 2>/dev/null || true
 
 echo
 echo "==> Done. This screen is device $(cat "$STATE_DIR/device-id")"
-echo "    It starts at the next login. Open Kiosks in Stage Utility, press"
-echo "    Scan for devices, and assign it an output."
+echo "    It starts at the next login. Open Screens in Stage Utility and set"
+echo "    it up under \"Not set up yet\"."
 echo
 echo "    Still to do by hand, once: enable automatic login, and set the screen"
 echo "    saver to Never. Neither can be set from a script."

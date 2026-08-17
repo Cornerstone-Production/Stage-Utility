@@ -15,7 +15,9 @@
 
 import { randomBytes } from "node:crypto";
 
-import type { BoundDevice } from "../types/kiosk.js";
+import { announceDevices } from "./kiosk-presence.js";
+import { mergeScreen, sameScreen, screenFrom } from "./kiosk-screen-size.js";
+import type { BoundDevice, ScreenSize } from "../types/kiosk.js";
 import { DataStore } from "./data-store.js";
 
 export const kioskDevicesStore = new DataStore<BoundDevice[]>("kiosk-devices.json", [], "config");
@@ -37,7 +39,7 @@ export const findByOutput = (devices: readonly BoundDevice[], outputId: string):
  *
  * A device id alone is self-asserted — anything on the LAN can send one — so a
  * wrong or missing secret is NOT an error, it is a different device. It gets the
- * holding screen and appears in Kiosks as its own entry, rather than silently
+ * holding screen and appears on Screens as its own entry, rather than silently
  * being handed a claimed screen's content.
  *
  * THE SECRET IS THE DEVICE'S, not ours. The installer generates it and the agent
@@ -79,6 +81,10 @@ export interface ClaimDetails {
   hostname?: string;
   os?: string;
   ip?: string;
+  /** What the device said its screen is while it was still unclaimed. Carried
+   *  across so the size is on the card the moment it is set up, rather than
+   *  blank until the display next sends a heartbeat. */
+  screen?: ScreenSize;
   label?: string;
   now?: number;
 }
@@ -117,6 +123,7 @@ export function claim(
     hostname: details.hostname ?? existing?.hostname,
     os: details.os ?? existing?.os,
     ip: details.ip ?? existing?.ip,
+    screen: details.screen ?? existing?.screen,
     lastSeen: details.now ?? existing?.lastSeen,
   };
   const kept = devices.filter((d) => d.id !== id && d.id !== displaced?.id);
@@ -130,6 +137,28 @@ export function release(devices: readonly BoundDevice[], id: string): BoundDevic
 }
 
 /**
+ * Record the size a bound device says it is running at.
+ *
+ * Keyed by OUTPUT, because this arrives on the display heartbeat, which knows
+ * which display it is showing and not which machine is showing it. Returns the
+ * SAME array when nothing changed — a heartbeat every twenty seconds must not be
+ * a file write every twenty seconds.
+ */
+export function recordScreen(
+  devices: readonly BoundDevice[],
+  outputId: string,
+  screen: { w: number; h: number; dpr?: number },
+): BoundDevice[] {
+  const i = devices.findIndex((d) => d.outputId === outputId);
+  if (i === -1) return devices as BoundDevice[];
+  const merged = mergeScreen(devices[i].screen, screen);
+  if (sameScreen(devices[i].screen, merged)) return devices as BoundDevice[];
+  const next = [...devices];
+  next[i] = { ...next[i], screen: merged };
+  return next;
+}
+
+/**
  * Record what a probe told us about hardware we already know.
  *
  * Returns the SAME array when nothing changed, so a device probing every two
@@ -138,13 +167,14 @@ export function release(devices: readonly BoundDevice[], id: string): BoundDevic
 export function touch(
   devices: readonly BoundDevice[],
   id: string,
-  seen: { macs?: string[]; hostname?: string; os?: string; ip?: string; now: number },
+  seen: { macs?: string[]; hostname?: string; os?: string; ip?: string; mode?: string; now: number },
 ): BoundDevice[] {
   const i = devices.findIndex((d) => d.id === id);
   if (i === -1) return devices as BoundDevice[];
   const d = devices[i];
   const macs = seen.macs ?? d.macs;
   const changed =
+    (seen.mode !== undefined && seen.mode !== d.screen?.mode) ||
     d.hostname !== (seen.hostname ?? d.hostname) ||
     d.os !== (seen.os ?? d.os) ||
     d.ip !== (seen.ip ?? d.ip) ||
@@ -154,7 +184,14 @@ export function touch(
   // and nothing reads it precisely enough to be worth the disk churn.
   if (!changed) return devices as BoundDevice[];
   const next = [...devices];
-  next[i] = { ...d, macs, hostname: seen.hostname ?? d.hostname, os: seen.os ?? d.os, ip: seen.ip ?? d.ip, lastSeen: seen.now };
+  next[i] = {
+    ...d, macs,
+    hostname: seen.hostname ?? d.hostname,
+    os: seen.os ?? d.os,
+    ip: seen.ip ?? d.ip,
+    screen: mergeScreen(d.screen, seen.mode === undefined ? undefined : { mode: seen.mode }),
+    lastSeen: seen.now,
+  };
   return next;
 }
 
@@ -172,6 +209,71 @@ export type PublicDevice = Omit<BoundDevice, "token">;
 
 export function withoutTokens(devices: readonly BoundDevice[]): PublicDevice[] {
   return devices.map(({ token: _secret, ...rest }) => rest);
+}
+
+/**
+ * Record what a bound display says its screen is, from its heartbeat.
+ *
+ * Owns the parse as well as the write so the route does not re-derive what a
+ * plausible number is — these arrive in a JSON body off the LAN, exactly like
+ * the holding screen's query string, and both go through `screenFrom`.
+ *
+ * Returns the failure rather than swallowing it. Nothing downstream reads a
+ * screen size to decide anything, so the caller is free to discard it — but that
+ * is the route's call to make explicitly, not this function's to make silently.
+ */
+/**
+ * Write to the bound-device store and tell anybody watching.
+ *
+ * Every mutator here returns the SAME array when nothing changed, which is what
+ * keeps a two-second probe from being a two-second disk write. That identity is
+ * also the change signal, so the broadcast rides on it: no separate "did it
+ * change" check to fall out of step with the mutators.
+ *
+ * Screens refetches the whole listing on this notification, so one channel
+ * covers both halves of the page. Before this existed, five write sites — claim,
+ * release, pinSecret, touch and recordScreen — all reached the disk and none of
+ * them reached an open page.
+ */
+export async function updateDevices(
+  mutate: (current: readonly BoundDevice[]) => BoundDevice[],
+): Promise<boolean> {
+  let changed = false;
+  await kioskDevicesStore.update((current) => {
+    const next = mutate(current);
+    changed = next !== current;
+    return next;
+  });
+  if (changed) announceDevices();
+  return changed;
+}
+
+export async function recordDisplayScreen(
+  outputId: string,
+  deviceId: unknown,
+  reported: unknown,
+): Promise<Error | null> {
+  // Only the bound device may say how big its screen is. Any browser can open a
+  // display URL and heartbeat — a phone checking the wall panel would otherwise
+  // record 390 x 844 as that screen's size, and the two would then fight, each
+  // flip a real disk write.
+  if (typeof deviceId !== "string" || !deviceId) return null;
+  const r = reported as { w?: unknown; h?: unknown; dpr?: unknown } | undefined;
+  const screen = r ? screenFrom(r.w, r.h, r.dpr) : null;
+  if (!screen) return null;
+  try {
+    // recordScreen returns the SAME array when nothing changed, and the store
+    // skips the write for an unchanged value — so a heartbeat every twenty
+    // seconds is not a disk write every twenty seconds.
+    await updateDevices((cur) =>
+      cur.some((d) => d.id === deviceId && d.outputId === outputId)
+        ? recordScreen(cur, outputId, screen)
+        : (cur as BoundDevice[]),
+    );
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err : new Error(String(err));
+  }
 }
 
 /**

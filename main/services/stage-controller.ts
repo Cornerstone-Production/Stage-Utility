@@ -1970,7 +1970,18 @@ export class StageController {
     return [...this.state.outputs];
   }
 
-  async addOutput(name?: string, viewId?: string | null): Promise<StageState> {
+  /**
+   * Returns the created output as well as the state.
+   *
+   * Reading `state.outputs[state.outputs.length - 1]` after this resolves is NOT
+   * a way to find it: `this.state` is mutated synchronously but read back after
+   * an await, so two concurrent adds each see the later one. Two devices then
+   * claim the same screen and the second silently displaces the first.
+   */
+  async addOutput(
+    name?: string,
+    viewId?: string | null,
+  ): Promise<{ state: StageState; output: Output }> {
     const id = this.nextOutputId();
     const num = parseInt(id.replace("display-", ""), 10);
     const output: Output = {
@@ -1984,7 +1995,7 @@ export class StageController {
     await settingsStore.patch({ outputs });
     this.recomputeResolved();
     this.broadcast();
-    return this.state;
+    return { state: this.state, output };
   }
 
   async renameOutput(id: string, name: string): Promise<StageState> {

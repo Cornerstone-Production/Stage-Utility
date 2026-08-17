@@ -14,6 +14,8 @@ export interface HoldingScreenInfo {
   ip?: string;
   hostname?: string;
   mac?: string;
+  /** Already formatted for reading — "1920 × 1080". */
+  screen?: string;
   reason: "unclaimed" | "no-device";
 }
 
@@ -67,13 +69,27 @@ export function holdingScreen(info: HoldingScreenInfo): string {
     ${field("Address", info.ip)}
     ${field("Host", info.hostname)}
     ${field("MAC", info.mac)}
+    ${field("Screen", info.screen)}
   </div>
 </main>
 <script>
   // Reload periodically so claiming it takes effect without anyone touching the
   // screen. The server also pushes a refresh on claim; this is the fallback for
   // when that missed, and it is why an operator never walks to the wall.
-  setTimeout(function () { location.reload(); }, 15000);
+  //
+  // The reload carries this screen's size. That is the ONLY way a Mac or a PC
+  // can report one before it is claimed — reading the physical mode needs
+  // /sys/class/drm, which is Linux only — and it needs no endpoint of its own
+  // beyond the one this page was already served from.
+  setTimeout(function () {
+    try {
+      var u = new URL(location.href);
+      u.searchParams.set("w", String(screen.width));
+      u.searchParams.set("h", String(screen.height));
+      u.searchParams.set("dpr", String(window.devicePixelRatio || 1));
+      location.replace(u.toString());
+    } catch (e) { location.reload(); }
+  }, 15000);
 </script>
 </body></html>`;
 }

@@ -5,8 +5,9 @@
 // SD card holds no display number and the server decides what a screen shows.
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
-import { kioskDevicesStore, authorise, claim, release, findByOutput, matchByMac, withoutTokens, pinSecret } from "../kiosk-devices-store.js";
-import { seenDevices, startScan, stopScan, scanning, scanEndsAt, forgetSeen, rememberSecret } from "../kiosk-presence.js";
+import { kioskDevicesStore, authorise, claim, release, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
+import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen } from "../kiosk-presence.js";
+import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
 import { holdingScreen } from "../kiosk-holding-screen.js";
 import { stageController } from "../stage-controller.js";
 import { errorMessage } from "../errors.js";
@@ -44,16 +45,29 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     if (device) {
       // Claimed before it had ever enrolled — pin what it just showed us.
       if (device.token === "" && token) {
-        await kioskDevicesStore.update((current) => pinSecret(current, id, token));
+        await updateDevices((current) => pinSecret(current, id, token));
       }
       // Bound and proven. Straight to its display — this is the path taken on
       // every boot forever after the one time somebody claimed it.
-      res.writeHead(302, { location: `/${device.outputId}`, "cache-control": "no-store" });
+      //
+      // The device id rides along so its heartbeats are attributable. Without it
+      // ANY browser opening this screen's URL — a phone checking the wall panel —
+      // reports its own size as the screen's, and the card then shows 390 x 844
+      // until the real device next checks in.
+      res.writeHead(302, {
+        location: `/${device.outputId}?device=${encodeURIComponent(device.id)}`,
+        "cache-control": "no-store",
+      });
       res.end();
       return;
     }
     // Unbound, or a token that does not match. Both are the same thing from
     // here: this device is not (yet) allowed to show a display.
+    // The holding screen puts its own size on the reload URL. It is the only
+    // way a Mac or a PC reports one before it is claimed — the physical mode in
+    // the probe comes from /sys/class/drm, which is Linux only.
+    const reported = screenFromQuery(url.searchParams);
+    if (reported) rememberScreen(id, reported);
     const seen = seenDevices().find((d) => d.id === id);
     res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
     res.end(holdingScreen({
@@ -61,6 +75,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       ip: seen?.ip,
       hostname: seen?.hostname,
       mac: seen?.macs[0],
+      screen: describeScreen(seen?.screen),
       reason: "unclaimed",
     }));
     return;
@@ -92,18 +107,16 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     const seen = seenDevices();
     json(res, {
       scanning: scanning(),
-      scanEndsAt: scanEndsAt(),
       // Tokens stripped: reads are open on this server, and a listing that hands
       // out the secret makes the token check meaningless.
       bound: withoutTokens(bound),
       // Everything currently heard that we have NOT already bound. A device
       // bound elsewhere only reaches this list when it says it cannot reach the
       // server that owns it — see decideProbe.
-      // The device's secret is stripped for the same reason a bound token is:
-      // reads are open, and publishing it would undo the check it exists for.
-      seen: seen
-        .filter((s) => !bound.some((b) => b.id === s.id))
-        .map(({ secret: _held, ...rest }) => rest),
+      // No stripping needed: a device's secret is not a field on the record any
+      // more, it lives in its own map. A field that had to be removed on the way
+      // out was removed here and forgotten on the SSE broadcast.
+      seen: seen.filter((s) => !bound.some((b) => b.id === s.id)),
       // For each unclaimed device, which bound devices share a MAC — the
       // "this looks like Left Mic Display" hint. A suggestion, never a binding.
       matches: Object.fromEntries(
@@ -121,26 +134,47 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     const holder = typeof body.holder === "string" ? body.holder.slice(0, 64) : "manual";
     if (body.stop === true) stopScan(holder);
     else startScan(holder);
-    json(res, { scanning: scanning(), scanEndsAt: scanEndsAt() });
+    json(res, { scanning: scanning() });
     return;
   }
 
   if (method === "POST" && pathname === "/api/devices/claim") {
     const body = (await readBody(req)) as Record<string, unknown>;
     const id = typeof body.deviceId === "string" ? body.deviceId : "";
-    const outputId = typeof body.outputId === "string" ? body.outputId : "";
-    if (!id || !outputId) {
-      error(res, "body.deviceId and body.outputId are required");
+    let outputId = typeof body.outputId === "string" ? body.outputId : "";
+    if (!id) {
+      error(res, "body.deviceId is required");
       return;
     }
     const seen = seenDevices().find((d) => d.id === id);
+    // No output named: this is a brand new screen. Creating one HERE rather than
+    // when the device was first heard is deliberate — a spare machine booting
+    // must not mint a screen nobody asked for, and deleting a phantom would not
+    // stick while it kept announcing itself. Creation is the operator pressing
+    // "Set up as a new screen".
+    // Created inside the try, and removed again if the binding fails. Otherwise
+    // an error banner leaves a brand new empty screen behind with nothing bound
+    // to it — the exact phantom the paragraph above says this avoids.
+    let created: string | null = null;
     try {
+      if (!outputId) {
+        const name = typeof body.newName === "string" && body.newName.trim()
+          ? body.newName.trim()
+          : seen?.hostname || "New screen";
+        // The created output, not the last one in the returned state: two
+        // operators pressing this at once would otherwise both read the later
+        // id and claim the same screen.
+        const { output } = await stageController.addOutput(name, null);
+        outputId = output.id;
+        created = output.id;
+      }
       let issued = "";
       let displacedId: string | null = null;
-      await kioskDevicesStore.update((current) => {
+      await updateDevices((current) => {
         const { devices, token, displaced } = claim(current, id, outputId, {
-          secret: seen?.secret,
+          secret: secretFor(id),
           macs: seen?.macs, hostname: seen?.hostname, os: seen?.os, ip: seen?.ip,
+          screen: seen?.screen,
           label: typeof body.label === "string" ? body.label : undefined,
           now: Date.now(),
         });
@@ -163,6 +197,14 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       void issued;
       json(res, { ok: true, displaced: displacedId });
     } catch (err) {
+      if (created) {
+        // Best-effort: if this fails too, say so rather than reporting only the
+        // original error and leaving the operator an empty screen they did not
+        // ask for and no reason for it.
+        await stageController.removeOutput(created).catch((cleanup: unknown) => {
+          console.warn("[devices] could not remove the screen a failed claim created:", cleanup);
+        });
+      }
       error(res, errorMessage(err));
     }
     return;
@@ -176,7 +218,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     try {
-      await kioskDevicesStore.update((current) => release(current, id));
+      await updateDevices((current) => release(current, id));
       stageController.refreshDisplays("all");
       json(res, { ok: true });
     } catch (err) {

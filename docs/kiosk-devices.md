@@ -5,7 +5,12 @@ laptop on a cart, a PC at FOH. You install an agent on it once; it finds the
 server itself and waits to be claimed.
 
 Nothing on the device knows which display it is. The server decides that, once,
-when you assign it an output in **Kiosks**.
+when you set it up on the **Screens** page.
+
+There is no separate page for them. A device that has been heard but not set up
+is a screen you have not finished configuring, so it appears under *Not set up
+yet* at the bottom of Screens, and once it is set up it becomes a line on that
+screen's own card.
 
 ## Setting one up
 
@@ -23,11 +28,39 @@ address already in it, is on that same panel.
 | macOS | `curl -fsSL http://<server>/kiosk/install-macos.sh \| sudo sh` |
 | Windows (elevated) | `irm http://<server>/kiosk/install-windows.ps1 \| iex` |
 
-**3. Claim it.** Open **Kiosks**, press *Scan for devices*, and assign the new
-device an output. The screen redirects itself — you do not have to walk to it.
+**3. Set it up.** Open **Screens** and look under *Not set up yet* — being on
+that page is itself the scan. The new device offers two things:
 
-An unclaimed screen shows its own device id, address, hostname and MAC, large
-enough to read from across a room. That is how you tell four identical Pis apart.
+| | |
+|---|---|
+| **Set up as a new screen** | Creates a screen and binds the device to it in one step. |
+| **Use for an existing screen** | Binds it to a screen that already exists — the hardware-swap case. |
+
+The screen redirects itself; you do not have to walk to it.
+
+Nothing is created just because a device was heard. A spare machine booting
+mid-service would otherwise mint a screen nobody asked for, and deleting it
+would not stick while it kept announcing itself.
+
+A screen that is not set up yet shows its own device id, address, hostname, MAC
+and size, large enough to read from across a room. That is how you tell four
+identical Pis apart.
+
+## Size
+
+Two things say how big a screen is, and they can disagree:
+
+- the **browser** reports CSS pixels on every platform;
+- the **physical mode** is read from `/sys/class/drm` and put on the discovery
+  probe. Linux only.
+
+A disagreement is the useful part — `1280 × 720 (driving 1920 × 1080)` means the
+desktop is scaled, which is the usual reason a 1080p panel renders a 720p layout.
+Both are kept, and both are shown on the card and on the screen itself.
+
+Only the device bound to a screen may report that screen's size. Opening a
+display's URL in a browser to check on it does not overwrite it — otherwise a
+phone held up to the wall would record itself as the screen.
 
 ## What survives what
 
@@ -46,7 +79,7 @@ installer keeps the existing id on purpose.
 
 You have to claim again only after a full OS reinstall or on different hardware —
 which is a different device. Even then, if the MAC matches a screen that is
-claimed but offline, Kiosks offers to re-bind it in one click.
+claimed but offline, Screens says so and offers to re-bind it.
 
 ## Bindings, and more than one server
 
@@ -77,7 +110,8 @@ The port is adjustable, because AV gear is fond of odd ports.
 - A device bound to **this** server is always answered, so a display re-finds its
   server after an IP change with nobody present.
 - An **unclaimed** device is only recorded while a scan is open — pressed in
-  Kiosks, held while that page is on screen, or a short window every few minutes.
+  Screens, held for as long as that page is open, or a short window every few
+  minutes.
 
 Where broadcast does not cross a VLAN, write the server address into a `server`
 file beside the device id and discovery is skipped.
@@ -118,8 +152,9 @@ never carry a credential or a site's server address.
 
 ## Removing one
 
-*Release* in Kiosks unbinds it: the output keeps its view and its slug and simply
-has no machine showing it, and the device returns to the holding screen.
+*Release*, on the screen's card, unbinds it: the screen keeps its view and its
+slug and simply has no machine showing it, and the device returns to the holding
+screen.
 
 Uninstalling the agent leaves the device id in place, so reinstalling on the same
 machine does not orphan the binding.

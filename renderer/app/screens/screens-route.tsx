@@ -24,6 +24,7 @@ import { Loader2Icon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { OutputsSection } from "../../settings/sections/outputs-section";
 import { useStageSettings } from "../use-stage-settings";
+import { UnclaimedScreens } from "./unclaimed-screens";
 
 export function ScreensRoute() {
   const s = useStageSettings();
@@ -49,6 +50,13 @@ export function ScreensRoute() {
           router.navigate({ to: `/screens/${viewId}/edit` as never });
         }}
       />
+      {/* Screens found on the network that are not set up yet. Here rather than
+          on a tab of their own: this page exists BECAUSE Views and Displays used
+          to be separate tabs, and a Kiosks tab recreated that split one level
+          down. */}
+      {/* Claiming may CREATE an output; the page renders from stageState, which
+          the server broadcasts on change, so nothing needs pulling back here. */}
+      <UnclaimedScreens outputs={s.stageState.outputs} />
     </div>
   );
 }

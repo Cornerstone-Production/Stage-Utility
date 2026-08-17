@@ -19,7 +19,6 @@ import {
   DropletIcon,
   ListChecksIcon,
   MonitorIcon,
-  MonitorSmartphoneIcon,
   PaletteIcon,
   PlugIcon,
   QrCodeIcon,
@@ -36,7 +35,6 @@ import { AutomationSection } from "../settings/sections/automation-section";
 import { IntegrationsSection } from "../settings/sections/integrations-section";
 import { PatchSection } from "../settings/sections/patch-section";
 import { HomeRoute } from "./home/home-route";
-import { DevicesRoute } from "./devices-route";
 import { ScreensRoute } from "./screens/screens-route";
 import { ConsoleRoute } from "./console-route";
 import { ViewEditorRoute } from "./screens/view-editor-route";
@@ -75,18 +73,6 @@ export const DESTINATIONS: readonly Destination[] = [
     description: "Every physical screen, what it shows, and whether it is on.",
     icon: <MonitorIcon className="size-4" />,
     Component: ScreensRoute,
-  },
-  {
-    path: "/devices",
-    // "Kiosks", not "Devices": a nav GROUP is already called Devices (it holds
-    // Automation), and a group and an item sharing a name reads as a mistake.
-    // Kiosk is also the app's own word for a screen showing a display — kiosk
-    // pages, kiosk mode, .kiosk-surface — so this borrows vocabulary that is
-    // already here rather than inventing a second one.
-    label: "Kiosks",
-    description: "The machines showing your screens, and which output each one is on.",
-    icon: <MonitorSmartphoneIcon className="size-4" />,
-    Component: DevicesRoute,
   },
   {
     path: "/scriptview",
@@ -196,7 +182,7 @@ export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // "output" in its description is XLR, not a display.
   { label: "Content", paths: ["/scriptview", "/patch"] },
   // Where it shows.
-  { label: "Screens", paths: ["/screens", "/devices"] },
+  { label: "Screens", paths: ["/screens"] },
   // What it talks to. Automation rules act ON integrations.
   { label: "Devices", paths: ["/automation"] },
   // A service you ran — one live, one recorded.

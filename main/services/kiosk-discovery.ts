@@ -38,6 +38,7 @@ export function encodeProbe(p: DiscoveryProbe): string {
     os: p.os,
     boundTo: p.boundTo,
     unreachable: p.unreachable || undefined,
+    mode: p.mode,
   });
 }
 
@@ -65,6 +66,8 @@ export function decodeProbe(buf: Buffer | string): DiscoveryProbe | null {
     os: str(o.os),
     boundTo: str(o.boundTo),
     unreachable: o.unreachable === true,
+    // "1920x1080" — bounded like everything else off the wire.
+    mode: str(o.mode, 32),
   };
 }
 
