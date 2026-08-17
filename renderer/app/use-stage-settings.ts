@@ -40,6 +40,7 @@ import {
   useUpdateStatus,
 } from "./queries";
 import { markUpdatePending } from "./update-lifecycle";
+import { screensListViews } from "@main/services/home-view";
 
 /** Matches settings-view.tsx's local helper, so the moved bodies are identical. */
 function ipc<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -63,7 +64,9 @@ export function useStageSettings() {
 
   useResyncOn([stageState, selectedViewId], () => {
     if (!stageState) return;
-    const views = stageState.views ?? [];
+    // Home excluded: this picks a DEFAULT selection, and Home is not selectable
+    // anywhere — it is edited in its own tab.
+    const views = screensListViews(stageState.views ?? []);
     if (views.length === 0) {
       if (selectedViewId) setSelectedViewId("");
       return;

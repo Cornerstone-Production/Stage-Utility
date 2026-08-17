@@ -29,6 +29,8 @@ import { DataArchivePanel } from "./data-archive-panel";
 import { BarItemsChooser } from "./bar-items-chooser";
 import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
+import { restartConsequence, restartOutcome } from "../../lib/restart-warning";
+import { useUpdateStatus } from "../../app/queries";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const ANY_DAY = "any";
@@ -172,7 +174,7 @@ function UpdatesPanel({
       }
       return;
     }
-    if (await confirm({ title: "Restart the server?", message: "The displays will go blank and reload for a few seconds while the server restarts. No update is installed.", confirmLabel: "Restart" })) {
+    if (await confirm({ title: "Restart the server?", message: `${restartConsequence(s?.selfRecovers)} No update is installed.`, confirmLabel: "Restart" })) {
       doRestart();
     }
   }
@@ -651,6 +653,9 @@ function AutoBackupPanel() {
 
 function ConfigSnapshotPanel() {
   const queryClient = useQueryClient();
+  // Read here rather than threaded down: the warning belongs beside the button
+  // that causes it, and this is the same query the update panel already polls.
+  const selfRecovers = useUpdateStatus().data?.selfRecovers;
   const { data: snapshots } = useQuery({
     queryKey: ["config:listSnapshots"],
     queryFn: () => invoke<SnapshotMeta[]>("config:listSnapshots"),
@@ -683,10 +688,14 @@ function ConfigSnapshotPanel() {
   }
 
   async function recall(id: string, label: string) {
-    if (!(await confirm({ title: `Recall "${label}"?`, message: "This overwrites the current config (views, integrations, branding, etc.) and restarts the server — displays go blank for a few seconds. Secrets (API keys/passwords) are kept as-is.", confirmLabel: "Recall" }))) return;
+    if (!(await confirm({
+      title: `Recall "${label}"?`,
+      message: `This overwrites the current config (views, integrations, branding, etc.). ${restartConsequence(selfRecovers)} Secrets (API keys/passwords) are kept as-is.`,
+      confirmLabel: "Recall",
+    }))) return;
     try {
       await invoke("config:recallSnapshot", { id });
-      toast.success("Restoring… the server is restarting.");
+      toast.success(restartOutcome(selfRecovers, "Restored."));
     } catch (e) {
       toast.error(`Recall failed: ${errorMessage(e)}`);
     }
@@ -707,9 +716,13 @@ function ConfigSnapshotPanel() {
     if (!file) return;
     try {
       const bundle = JSON.parse(await file.text());
-      if (await confirm({ title: `Restore from "${file.name}"?`, message: "This overwrites the current config and restarts the server. Secrets aren't included — you'll re-enter API keys/passwords after.", confirmLabel: "Restore" })) {
+      if (await confirm({
+        title: `Restore from "${file.name}"?`,
+        message: `This overwrites the current config. ${restartConsequence(selfRecovers)} Secrets aren't included — you'll re-enter API keys/passwords after.`,
+        confirmLabel: "Restore",
+      })) {
         await invoke("config:import", { bundle });
-        toast.success("Restoring… the server is restarting.");
+        toast.success(restartOutcome(selfRecovers, "Restored."));
       }
     } catch (err) {
       toast.error(`Import failed: ${errorMessage(err)}`);
@@ -902,7 +915,7 @@ export function AdvancedSection({
   const tw = stageState.taperWindow ?? { preMin: 60, postMin: 60 };
 
   return (
-    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
+    <div className="flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       <UpdatesPanel
         updateStatus={updateStatus}
         autoUpdate={stageState.autoUpdate ?? DEFAULT_AUTO_UPDATE}

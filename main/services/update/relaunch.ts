@@ -75,7 +75,60 @@ function launchdLabel(kind: InstallKind, appRoot: string): string | null {
  */
 export function exitForRestart(delayMs: number, code = 0): void {
   scheduleRelaunch();
+  // Say so when nothing is coming. A config restore on a hand-run checkout
+  // exited cleanly here and the log simply STOPPED mid-sentence — no error, no
+  // stack, no last word — so the only available reading was "it crashed". It
+  // had not crashed; it had done exactly what it was told, and nothing was
+  // watching. One line is the difference between a mystery and a fact.
+  if (!selfRecovers()) {
+    console.warn(
+      "[relaunch] exiting, and NOTHING will start this server again: no service " +
+        "manager is known for this install kind. Start it again by hand.",
+    );
+  }
   setTimeout(() => process.exit(code), delayMs);
+}
+
+/**
+ * Whether anything is expected to start this server again after it exits.
+ *
+ * Two independent ways to be sure, because neither alone is right:
+ *
+ * **Who started us.** systemd sets `INVOCATION_ID` on every unit it runs, and
+ * launchd sets `XPC_SERVICE_NAME` on every job it manages. If one of those is in
+ * the environment, a supervisor is watching whatever the code on disk looks like.
+ *
+ * **How it was installed.** A tarball (systemd / NSSM / launchd) or a Homebrew
+ * install (launchd) is one we set up ourselves, so it is supervised even if the
+ * environment is not passed through to us.
+ *
+ * The install kind ALONE would have been wrong, and wrong in the expensive
+ * direction: the production box is a git checkout run under systemd. Judging by
+ * kind would have told the operator that restoring a config there shuts the
+ * server off permanently — a false alarm on the one machine where a false alarm
+ * costs the most. What makes prod safe is its supervisor, not its file layout,
+ * so that is what this asks about.
+ *
+ * Still pessimistic where it cannot tell: an unrecognised install with no
+ * supervisor in the environment is assumed to have none.
+ */
+export function selfRecovers(
+  kind: InstallKind = detectInstallKind(process.env, APP_ROOT, fs.existsSync),
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (supervisorInEnv(env)) return true;
+  return kind === "tarball" || kind === "homebrew";
+}
+
+/** The fingerprint a service manager leaves on our environment. */
+function supervisorInEnv(env: NodeJS.ProcessEnv): boolean {
+  // systemd, every unit, since v232. JOURNAL_STREAM comes with it when logs go
+  // to the journal, which is the default and what install.sh's unit produces.
+  if (env.INVOCATION_ID || env.JOURNAL_STREAM) return true;
+  // launchd sets this for managed jobs. "0" is what a plain login shell inherits
+  // on macOS, so it means the opposite and must not count.
+  if (env.XPC_SERVICE_NAME && env.XPC_SERVICE_NAME !== "0") return true;
+  return false;
 }
 
 /** Spawn the detached kickstart helper (survives our exit); a no-op off macOS

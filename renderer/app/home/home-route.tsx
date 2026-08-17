@@ -4,32 +4,51 @@
 // whether PCO reports a service running — see home-mode.ts for why "none" is a
 // payload rather than an absence.
 //
-// Plan folds into here: its service-type and plan selection is what the context
-// bar carries on every page anyway, and the rest is what an operator wants on
-// the front door. `/plan` redirects here rather than 404ing, since it shipped
-// as a URL in Phase 1b.
+// The plan picker is NOT here any more. It lived on Home while Home was a fixed
+// page; once Home became a grid the operator arranges, a block of PCO controls
+// they could neither move nor remove was furniture. It has its own page at
+// /plan — its original URL — under Services.
+//
+// The cards are Home's View (main/services/home-view.ts), read for presence,
+// ORDER and grid size — Home has no canvas, and editing happens right here.
+//
+// Nothing else lives on this page any more. The plan picker moved to /plan, and
+// the "use this screen as a display" panel went entirely: Screens already lists
+// every display with its URL, which is the same job done in the place you go to
+// think about screens.
 
-import { useEffect, useState } from "react";
-import { Loader2Icon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Loader2Icon, PencilIcon, CheckIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useDashboardState } from "../../main/use-dashboard-state";
 import { useStageSettings } from "../use-stage-settings";
-import { useOutputPresence } from "./use-output-presence";
 import { GettingStarted } from "../../settings/getting-started";
-import { PlanSection } from "../../settings/sections/plan-section";
+import { usePageActions } from "../page-actions";
+import { Button } from "../../components/ui/button";
+import { PlusIcon } from "lucide-react";
 import { flashTarget } from "../flash";
+import { HOME_VIEW_ID, defaultHomeLayout } from "@main/services/home-view";
+import type { LayoutObject } from "@main/types/views";
 import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
-import { IdlePanel } from "./idle-panel";
-import { LivePanel } from "./live-panel";
-import { Commission } from "./commission";
+import { addCard, moveCard, removeCard, setSize, setWhen, visibleCards } from "./home-cards";
+import { HomeGrid } from "./home-grid";
+import { AddWidgetSheet, CardChrome } from "./home-editor";
 
 export function HomeRoute() {
   const { pcoLive } = useDashboardState();
   const s = useStageSettings();
-  const online = useOutputPresence();
   const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+  /** The card list as the operator has it, ahead of the server. See `save`. */
+  const [pending, setPending] = useState<LayoutObject[] | null>(null);
+  /** The same list, readable synchronously inside one React batch. Written in
+   *  `save` only — never during a render. */
+  const editRef = useRef<LayoutObject[] | null>(null);
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -45,6 +64,50 @@ export function HomeRoute() {
   useResyncOn([pcoLive?.serverNow], () => {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   });
+
+  // The server has caught up — stop preferring the optimistic copy, so an edit
+  // made anywhere else (a restored snapshot, a second tab) is not masked forever.
+  const savedRev = s.stageState?.views?.find((v) => v.id === HOME_VIEW_ID)?.layoutRev ?? 0;
+  useResyncOn([savedRev], () => {
+    setPending(null);
+    editRef.current = null;
+  });
+
+  // ABOVE the loading return, because a hook cannot be called conditionally —
+  // eslint caught this sitting below it. Presence of Home is read straight off
+  // the (possibly absent) state rather than from the derived `home` below, which
+  // does not exist yet at this point in the render.
+  const hasHome = !!s.stageState?.views?.some((v) => v.id === HOME_VIEW_ID);
+  // The controls live in the page HEADER, not on a row of their own — that row
+  // held one link and cost a whole band of the page that most wants the height.
+  // Icon squares, matching the object controls in the custom-view editor.
+  usePageActions(
+    hasHome ? (
+      <>
+        {editing && (
+          <Button
+            variant="filled"
+            size="medium"
+            iconOnly
+            onClick={() => setAdding(true)}
+            aria-label="Add widget"
+          >
+            <PlusIcon className="size-4" />
+          </Button>
+        )}
+        <Button
+          variant={editing ? "accent" : "filled"}
+          size="medium"
+          iconOnly
+          onClick={() => setEditing((e) => !e)}
+          aria-label={editing ? "Done editing widgets" : "Edit widgets"}
+        >
+          {editing ? <CheckIcon className="size-4" /> : <PencilIcon className="size-4" />}
+        </Button>
+      </>
+    ) : null,
+    [hasHome, editing],
+  );
 
   if (s.stageLoading || !s.stageState) {
     return (
@@ -62,8 +125,66 @@ export function HomeRoute() {
   const secondsToStart = timer?.mode === "preservice" ? timer.seconds : null;
   const mode = homeMode(pcoLive, secondsToStart);
 
+  const home = (state.views ?? []).find((v) => v.id === HOME_VIEW_ID);
+  // A Home whose layout was cleared (a hand-edited views.json, a kind change)
+  // gets this build's default rather than an editor whose switches do nothing.
+  const layout = home?.layout ?? defaultHomeLayout();
+  // `pending` is what the operator has done since the last server round-trip.
+  // WITHOUT it, every edit was computed from the server's copy, so two changes
+  // inside one round-trip both built on the pre-edit array: switching two cards
+  // off in quick succession brought the first one back, and a switch followed by
+  // a drag moved the wrong card. Cleared when the server's revision advances.
+  const objects = pending ?? layout.objects;
+
+  /**
+   * Apply a change to the card list and store it.
+   *
+   * Takes an updater, not a finished array, and applies it to the NEWEST list
+   * rather than whatever this render closed over. Two things could make that
+   * stale, and both happened:
+   *
+   *  • across a round-trip — `pending`, the operator's copy, until the server
+   *    catches up. Switching two cards off in succession otherwise brought the
+   *    first one back, and a switch followed by a drag moved the wrong card.
+   *  • within one React batch — `editRef`, written here and never during a
+   *    render, because two handlers can both run before anything re-renders.
+   *
+   * No layoutRev: Home has one editor — this one — so there is nothing to
+   * conflict with, and passing a rev would raise a conflict dialog with itself.
+   */
+  function save(update: (objs: readonly LayoutObject[]) => LayoutObject[]) {
+    const next = update(editRef.current ?? objects);
+    editRef.current = next;
+    setPending(next);
+    s.handlers
+      .handleSetViewLayout(HOME_VIEW_ID, { ...layout, objects: next })
+      // Not a swallowed failure: handleSetViewLayout has already told the
+      // operator. This drops the optimistic copy so the page snaps back to what
+      // was actually stored, rather than showing an edit that did not land.
+      .catch(() => {
+        setPending(null);
+        editRef.current = null;
+      });
+  }
+
+  // Editing shows EVERY card, including ones whose mood is not the current one —
+  // you cannot arrange what the page is hiding from you. Off the editor, Home
+  // shows only what belongs to right now.
+  const cards = editing ? objects : visibleCards(objects, mode);
+
+  /** Reorder by dropping one card on another. Indexes are into the full list. */
+  function drop(targetId: string) {
+    if (!dragId || dragId === targetId) return;
+    const from = objects.findIndex((o) => o.id === dragId);
+    const to = objects.findIndex((o) => o.id === targetId);
+    save((objs) => moveCard(objs, from, to));
+    setDragId(null);
+    setOverId(null);
+  }
+
+
   return (
-    <div className="px-5 max-sm:px-3 pt-1 pb-[50vh] max-sm:pb-24 flex flex-col gap-3">
+    <div className="pt-1 pb-[50vh] max-sm:pb-24 flex flex-col gap-3">
       {!state.onboardingDismissed && (
         <GettingStarted
           stageState={state}
@@ -75,30 +196,38 @@ export function HomeRoute() {
         />
       )}
 
-      {mode === "live" ? (
-        <LivePanel
-          pcoLive={pcoLive}
-          now={now}
-          skewMs={skewMs}
-          onlineOutputIds={online}
-          outputCount={state.outputs?.length ?? 0}
+      {home?.layout && (
+        <HomeGrid
+          layout={{ ...home.layout, objects: cards }}
+          cards={cards}
+          chrome={
+            editing
+              ? (o) => (
+                  <CardChrome
+                    card={o}
+                    dragging={dragId === o.id || overId === o.id}
+                    onSize={(size) => save((objs) => setSize(objs, o.id, size))}
+                    onWhen={(when) => save((objs) => setWhen(objs, o.id, when))}
+                    onRemove={() => save((objs) => removeCard(objs, o.id))}
+                    onDragStart={() => setDragId(o.id)}
+                    onDragOver={() => setOverId(o.id)}
+                    onDrop={() => drop(o.id)}
+                  />
+                )
+              : undefined
+          }
         />
-      ) : (
-        <IdlePanel state={state} onlineOutputIds={online} secondsToStart={secondsToStart} />
       )}
 
-      <PlanSection
-        stageState={state}
-        serviceTypes={s.serviceTypes}
-        plans={s.plans}
-        isRefreshing={s.isRefreshing}
-        handlers={s.handlers}
+      <AddWidgetSheet
+        open={adding}
+        onClose={() => setAdding(false)}
+        onAdd={(type, size) => {
+          setAdding(false);
+          save((objs) => setSize(addCard(objs, type, `home-${type}-${objs.length + 1}-${objs.length}`), `home-${type}-${objs.length + 1}-${objs.length}`, size));
+        }}
       />
 
-      {/* The display picker's actual job. A freshly-pointed monitor lands on
-          Home now, so commissioning has to live somewhere an operator can find
-          it — one extra click, a few times a year. */}
-      <Commission state={state} />
     </div>
   );
 }

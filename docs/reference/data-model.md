@@ -43,6 +43,41 @@ screens, rather than silently unbinding them.
 Only **custom** views can be consoles: the built-in kinds have no editable layout,
 so there is nowhere to put a control.
 
+### Home
+
+Home is a view too, but a deliberately odd one. It stores which widgets the front
+page shows, their order, and each one's size and visibility — and **nothing else
+about it is read**. Every object's position is filler the type requires; Home has
+no canvas, because a grid of tiles has no geometry to arrange.
+
+Home is edited in the Home tab itself, with the pencil in the header. In edit
+mode each tile gains a size picker, a visibility select, a remove button and a
+drag handle, and **Add widget** offers the whole object registry.
+
+The widgets come from the same registry every other surface uses, so a Home tile
+and a stage-display widget are the same component — anything you can put on a
+wall you can put on Home. Sizes are fixed shapes on a three-column grid:
+
+| Size | Columns × rows |
+|---|---|
+| **S** | 1 × 1 |
+| **M** | 2 × 1 |
+| **L** | 2 × 2 |
+| **XL** | 3 × 2 |
+| **Tall** | 3 × 4 |
+
+Each tile also carries when it should appear: always, only while a service is
+running, or only the rest of the week.
+
+On Home a widget wears Home's card — the app's radius, hairline and surface —
+rather than the dark ground and canvas-relative geometry its styling carries for
+a wall. Colour that reports STATE still shows (a recorder's red while recording);
+colour that is decoration does not, so one grid of tiles reads in both themes.
+
+A widget removed stays removed, including across a restart. A build that adds one
+gives it to installs that have never edited Home, and leaves an edited Home
+alone.
+
 ### Upgrading an existing install
 
 Nothing has to be done by hand. On first start, any view containing a button

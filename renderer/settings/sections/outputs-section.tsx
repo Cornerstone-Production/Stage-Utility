@@ -1,9 +1,8 @@
 import { errorMessage } from "@main/services/errors";
-import { useState, useEffect, type ChangeEvent, type CSSProperties } from "react";
+import { useState, useEffect, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
-import { SortableContext, useSortable, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
 import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
@@ -29,9 +28,11 @@ import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { viewSurface, outputMode } from "@main/types/views";
+import { screensListViews } from "@main/services/home-view";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useSortableRow } from "../../lib/use-sortable-row";
 
 /**
  * The Views a given screen may actually be pointed at.
@@ -99,15 +100,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
       setEditSlug(output.slug ?? "");
     }
   }
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: output.id,
-  });
-  const { role: _dragRole, tabIndex: _dragTabIndex, ...dragA11y } = attributes;
-  const style: CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
+  const { setNodeRef, style, dragA11y, listeners } = useSortableRow(output.id);
 
   useResyncOn([output.name], () => {
     setEditName(output.name);
@@ -527,7 +520,9 @@ export function OutputsSection({
   // Sorted by name. Manual view ordering used to exist and only ever sorted
   // THIS dropdown - nothing else read the order - so it was dropped in favour of
   // an order that needs no maintaining. See docs/design/app-shell-redesign.md.
-  const views = [...(stageState.views ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  // Home is filtered out: it is the operator's front door, edited in its own
+  // tab, and it has no geometry — see main/services/home-view.ts.
+  const views = screensListViews(stageState.views ?? []).sort((a, b) => a.name.localeCompare(b.name));
 
   // Which output asked for a new view, so the created view can be assigned back
   // to it. "" means the dialog was opened from the unassigned section, where
@@ -572,7 +567,7 @@ export function OutputsSection({
   }
 
   return (
-    <div data-flash-id="displays-list" className="px-5 max-sm:px-3 flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
+    <div data-flash-id="displays-list" className="flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       <p className="text-caption1 text-gray-9">
         Each display is a physical screen at its own URL. Point it at a <span className="font-medium">View</span>{" "}
         to choose what it shows — and many screens can share one View, so you change content in one place.

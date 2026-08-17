@@ -1,7 +1,8 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
+import { HomeCard, onlineFromState } from "../app/home/cards";
 import { fitFor } from "./console-fit";
-import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
 import { advancePeakHold, type PeakHold } from "./peak-hold.js";
@@ -9,6 +10,8 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { invoke } from "../lib/api";
 import { BrandLogo } from "../components/brand-logo";
+import { Readout } from "./readout";
+import { IDIOM_TYPES } from "@main/types/readout-types";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
@@ -77,6 +80,9 @@ export interface LayoutRenderCtx {
   skewMs: number;
   ndiSource: string | null;
   /** Canvas height in design px — basis for fraction→px font/spacing sizing. */
+  /** The canvas's own background colour, so a widget's opaque body matches it
+   *  rather than hardcoding black. */
+  canvasBg?: string | null;
   H: number;
   /** True only on a real display route. Interactive objects (live controls)
    *  only fire their commands when true — never in the editor or preview iframe. */
@@ -90,9 +96,17 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** Box-level CSS (position handled by caller): background, border, radius, padding,
- *  opacity, and flex alignment derived from text/vertical alignment. */
-export function boxStyle(o: LayoutObject, H: number): CSSProperties {
+/**
+ * Box-level CSS (position handled by caller): background, border, radius,
+ * padding, opacity, and flex alignment derived from text/vertical alignment.
+ *
+ * Phase 6 briefly replaced this with a fixed frame and culled the fields that
+ * feed it. Reverted: the cull was right in principle and wrong in sequence —
+ * the knobs came out before the widgets were good enough to not need them, and
+ * the result looked worse than what it replaced. The fields are honoured again
+ * until per-widget variants exist to replace them properly.
+ */
+export function boxStyle(o: LayoutObject, H: number, _canvasBg?: string | null): CSSProperties {
   const s = o.style ?? {};
   const css: CSSProperties = {
     display: "flex",
@@ -110,9 +124,6 @@ export function boxStyle(o: LayoutObject, H: number): CSSProperties {
   if (s.cornerRadius != null) css.borderRadius = `${s.cornerRadius * H}px`;
   // Clamp so a stray/legacy width can't swell into a solid fill.
   if (s.borderColor && s.borderWidth) css.border = `${Math.min(s.borderWidth, 0.04) * H}px solid ${s.borderColor}`;
-  // Box elevation: a soft two-layer drop shadow scaled by strength + canvas height,
-  // so stacked cards read as layered. Mirrors the textShadow approach; drawn outside
-  // the border-box so it never affects layout.
   if (s.boxShadow) {
     const a = Math.min(1, s.boxShadow);
     css.boxShadow = `0 ${0.006 * a * H}px ${0.02 * a * H}px rgba(0,0,0,${0.45 * a}), 0 ${0.02 * a * H}px ${0.05 * a * H}px rgba(0,0,0,${0.30 * a})`;
@@ -120,6 +131,25 @@ export function boxStyle(o: LayoutObject, H: number): CSSProperties {
   if (o.config.type === "shape" && o.config.shape === "ellipse") css.borderRadius = "50%";
   return css;
 }
+
+/**
+ * Readouts whose content is a NUMBER that changes while you watch it.
+ *
+ * These get tabular figures in the mono face. Proportional digits are different
+ * widths, so a clock reflows every second and an SPL meter jitters ten times a
+ * second — the text physically moves, which is the one thing a readout on a wall
+ * must not do. Tabular digits all occupy the same width, so only the glyphs
+ * change.
+ *
+ * Decided per type here rather than offered as a switch: there is no version of
+ * "my clock should wobble" worth building a control for. Types whose content is
+ * words (status pills, wireless summaries) are deliberately absent — mono makes
+ * prose worse.
+ */
+const TABULAR_TYPES = new Set<string>([
+  "clock", "countdown-timer", "pp-timer", "baptism-timer",
+  "spl-meter", "people-counter", "service-pacing", "slide-progress", "charger-battery",
+]);
 
 /** Text-level CSS for the inner span. */
 function textStyle(o: LayoutObject, H: number): CSSProperties {
@@ -132,6 +162,10 @@ function textStyle(o: LayoutObject, H: number): CSSProperties {
     textAlign: s.textAlign ?? "center",
     width: "100%",
   };
+  if (TABULAR_TYPES.has(o.config.type)) {
+    css.fontFamily = "var(--font-mono)";
+    css.fontVariantNumeric = "tabular-nums";
+  }
   if (s.italic) css.fontStyle = "italic";
   if (s.uppercase) css.textTransform = "uppercase";
   if (s.letterSpacing != null) css.letterSpacing = `${s.letterSpacing}em`;
@@ -193,7 +227,7 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
       style={{
         position: "absolute",
         ...geometry,
-        ...boxStyle(o, ctx.H),
+        ...boxStyle(o, ctx.H, ctx.canvasBg),
       }}
     >
       {kids ? kids.map((c) => <RenderObject key={c.id} o={c} ctx={ctx} />) : <ObjectContent o={o} ctx={ctx} />}
@@ -201,18 +235,6 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
   );
 }
 
-/**
- * The "recording" fill state — a solid red block covering the whole object.
- *
- * ABSOLUTE, not width/height 100%. A normal child sized to 100% resolves against
- * the CONTENT box, so on an object with padding the red stopped short of its own
- * edges: the object's background and border went on drawing a ring around it, and
- * `borderRadius: inherit` gave the inner block the same absolute radius at a
- * smaller size, so the corners were not concentric either. How wrong it looked
- * therefore depended on the object's style, which is why a flat one looked right
- * and a padded one did not. Positioned this way it covers the padding too, and
- * the fill is the same shape as the object at any style.
- */
 /**
  * Shrink whatever is inside so it fits the box, instead of spilling out of it.
  *
@@ -226,6 +248,9 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
  * scroll size at the current scale. Floor of 0.3 so it degrades to "small" and
  * never to "invisible".
  */
+/** How far a readout may grow beyond its designed size to fill its box. */
+const FIT_MAX_GROWTH = 3;
+
 function useFitScale<T extends HTMLElement = HTMLSpanElement>(deps: unknown[]): {
   wrapRef: React.RefObject<HTMLDivElement | null>;
   elRef: React.RefObject<T | null>;
@@ -249,7 +274,15 @@ function useFitScale<T extends HTMLElement = HTMLSpanElement>(deps: unknown[]): 
       const natW = el.scrollWidth / cur;
       const natH = el.scrollHeight / cur;
       if (natW <= 0 || natH <= 0) return;
-      const desired = clamp(Math.min(availW / natW, availH / natH), 0.3, 1);
+      // Grows as well as shrinks. The base size is a fraction of the CANVAS, so
+      // capping at 1 meant a widget made twice as tall kept the same text and an
+      // operator reached for the font-size field to fix it — which is precisely
+      // the field this phase removes. Sizing from the widget's own box is what
+      // makes that field unnecessary rather than merely unavailable.
+      //
+      // The ceiling stops a two-character readout in a large tile becoming
+      // absurd, and the floor keeps a long string legible rather than vanishing.
+      const desired = clamp(Math.min(availW / natW, availH / natH), 0.3, FIT_MAX_GROWTH);
       if (Math.abs(desired - cur) > 0.01) setScale(desired);
     };
     measure();
@@ -259,71 +292,6 @@ function useFitScale<T extends HTMLElement = HTMLSpanElement>(deps: unknown[]): 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, scaleRef]);
   return { wrapRef, elRef, scale };
-}
-
-/**
- * The wrapper half of the fit: the box that is measured AGAINST.
- *
- * StatusDot and BaptismTimer carried byte-identical copies of this markup, which
- * is how a fix to the way things fit lands in one readout and misses the other.
- *
- * The wrapper and the scaled node must be different elements — measuring the
- * same node that shrinks makes it chase its own tail.
- */
-function FitBox({
-  ts,
-  wrapRef,
-  children,
-}: {
-  ts: CSSProperties;
-  wrapRef: React.RefObject<HTMLDivElement | null>;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      ref={wrapRef}
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent:
-          ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center",
-        overflow: "hidden",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function RecordingFill({ label, ts }: { label: string; ts: CSSProperties }) {
-  const basePx = parseFloat(String(ts.fontSize)) || 16;
-  const { wrapRef, elRef, scale } = useFitScale([label, basePx, ts.fontWeight]);
-  return (
-    <div
-      ref={wrapRef}
-      style={{
-        position: "absolute",
-        inset: 0,
-        background: "var(--red-9)",
-        borderRadius: "inherit",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        // A long label (a record timecode pushes it wider) shrinks to fit; the
-        // clip stays as the backstop for the pathological case.
-        overflow: "hidden",
-      }}
-    >
-      <span
-        ref={elRef}
-        style={{ ...ts, color: "#ffffff", width: undefined, maxWidth: "100%", fontSize: `${basePx * scale}px` }}
-      >
-        {label}
-      </span>
-    </div>
-  );
 }
 
 /** Render one object's inner content (the positioned box wraps this). */
@@ -340,52 +308,13 @@ function rfBarsGlyph(bars: number): string {
   return "▮".repeat(n) + "▯".repeat(5 - n);
 }
 
-/** The neutral dot: an integration that is not connected, a recorder that is idle. */
-const DOT_IDLE = "rgba(255,255,255,0.35)";
-
-/**
- * A status dot with its label, sized in em so it tracks the object's font.
- *
- * Shared so the connection objects and the recording objects cannot drift into
- * looking like two different conventions — a dot on a stage display means one
- * thing, and it should be the same shape and size wherever it appears.
- */
-function StatusDot({
-  color,
-  label,
-  ts,
-  dimmed = false,
-}: {
-  color: string;
-  label?: string | null;
-  ts: CSSProperties;
-  dimmed?: boolean;
-}) {
-  const basePx = parseFloat(String(ts.fontSize)) || 16;
-  const { wrapRef, elRef, scale } = useFitScale([label, basePx, ts.fontWeight]);
-  return (
-    <FitBox ts={ts} wrapRef={wrapRef}>
-      <span
-        ref={elRef}
-        style={{
-          ...ts,
-          width: "auto",
-          maxWidth: "100%",
-          fontSize: `${basePx * scale}px`,
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "0.4em",
-          opacity: dimmed ? 0.4 : 1,
-        }}
-      >
-        <span
-          style={{ width: "0.6em", height: "0.6em", borderRadius: "50%", background: color, flexShrink: 0 }}
-        />
-        {label ? <span>{label}</span> : null}
-      </span>
-    </FitBox>
-  );
-}
+// The status DOT is gone, with StatusDot and DOT_IDLE.
+//
+// It was a coloured circle beside a name: it said what the widget was watching
+// but never what it found, so reading it meant knowing the colour code. The
+// replacement says more, not less — the state is spelled out as a word AND
+// carries the colour, so "PCO / ONLINE" in green reads at a glance and still
+// reads without the green.
 
 // Shrinks the font so `text` fits its box (width + height) instead of clipping —
 // used by single-value text objects (current/next item) where a long title would
@@ -405,36 +334,117 @@ function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign
   );
 }
 
+
+/**
+ * A caption above a readout — "SERVICE STARTS IN" over a countdown.
+ *
+ * A bare 0:04:12 on a wall does not say what it is counting to, and the operator
+ * who built the layout is not the one reading it on Sunday morning. The caption
+ * is set on NEW objects by the registry and absent on ones that already exist,
+ * so nobody's layout grows a caption it did not ask for.
+ *
+ * Sized and dimmed against the value rather than set in pixels, so it stays in
+ * proportion at a dashboard tile and on a wall alike — the value keeps its own
+ * auto-fit, and the caption simply rides above it.
+ */
+function Captioned({ caption, ts, children }: { caption?: string | null; ts: CSSProperties; children: ReactNode }) {
+  if (!caption) return <>{children}</>;
+  const align = ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center";
+  return (
+    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: align, overflow: "hidden", minHeight: 0 }}>
+      <span
+        style={{
+          color: ts.color,
+          // 0.32em at 55% was unreadable at a dashboard tile — reported off a
+          // real screen. A caption has to be legible or it is decoration.
+          opacity: 0.75,
+          fontSize: "0.46em",
+          fontWeight: 600,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          lineHeight: 1.2,
+          // Its own font, not the value's: a caption is words, and the mono face
+          // a numeric readout uses makes words worse.
+          fontFamily: "inherit",
+          flexShrink: 0,
+        }}
+      >
+        {caption}
+      </span>
+      <span style={{ minHeight: 0, flex: "1 1 auto", width: "100%", display: "flex", flexDirection: "column", justifyContent: "center" }}>{children}</span>
+    </div>
+  );
+}
+
+/** Seconds until the next service, or null. Same source as the context bar. */
+function homeSecondsToStart(ctx: LayoutRenderCtx): number | null {
+  const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
+  return t && !t.over ? t.seconds : null;
+}
+
+/**
+ * One object's content, plus its caption if it has one.
+ *
+ * The caption is applied HERE rather than in each readout's case, so it is a
+ * property of the object instead of six near-identical edits inside a switch —
+ * and so a type that grows one later gets it without touching the renderer. Both
+ * call sites (the display renderer and the editor canvas) come through here, so
+ * the editor shows exactly what the wall will.
+ */
 export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
+  const caption = (o.config as { caption?: string | null }).caption;
+  if (!caption || IDIOM_TYPES.has(o.config.type)) return <ObjectBody o={o} ctx={ctx} />;
+  return (
+    <Captioned caption={caption} ts={textStyle(o, ctx.H)}>
+      <ObjectBody o={o} ctx={ctx} />
+    </Captioned>
+  );
+}
+
+function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   const c = o.config;
   const ts = textStyle(o, ctx.H);
-  const span = (text: string) => <span style={ts}>{text}</span>;
+  // Every readout fits its box. This helper backs the plain-text objects
+  // (text, slide text, slide notes), and routing it through FitText is what
+  // makes a per-object font size unnecessary rather than merely unfashionable.
+  const span = (text: string) => <FitText text={text} ts={ts} vAlign={o.style?.vAlign} />;
+  // The idiom: caption, value, sub — sized from the box. Every readout that has
+  // moved goes through here, so the composition has exactly one implementation
+  // and its caption comes from the object rather than from six edits in a switch.
+  const readout = (
+    value: ReactNode,
+    opts?: { sub?: string | null; valueColor?: string | null; fill?: string | null },
+  ) => (
+    <Readout
+      caption={(c as { caption?: string | null }).caption}
+      value={value}
+      mono={TABULAR_TYPES.has(c.type)}
+      // The object's own alignment, so a custom view can centre one widget
+      // without every other readout following it.
+      align={o.style?.textAlign}
+      {...opts}
+    />
+  );
 
   switch (c.type) {
     case "text":
       return span(c.text);
     case "clock":
-      // FitText, not a bare span: "2:26:41 PM" is 4px wider than a 257px tile,
-      // and a clock that spills past its own box on a dashboard is the single
-      // most visible version of this bug.
-      return (
-        <FitText
-          text={clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h", c.showMeridiem ?? true)}
-          ts={ts}
-          vAlign={o.style?.vAlign}
-        />
-      );
+      // The idiom, not FitText. The old path grew one string until it ran out of
+      // room, which made the size an accident of the box: "2:26:41 PM" is 4px
+      // wider than a 257px tile, so the same clock was huge on a wall and
+      // microscopic in a column. Readout sizes it from the height and shrinks it
+      // only when the width genuinely cannot take it.
+      return readout(clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h", c.showMeridiem ?? true));
     case "countdown-timer": {
       const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
-      if (!t) return (c.hideWhenIdle ?? false) ? null : span("—");
+      if (!t) return (c.hideWhenIdle ?? false) ? null : readout("—");
       // Red once the timer goes negative (item or service ran over), like the
       // dashboard; amber once it drops to/below the configured warning; else keep
-      // the object's configured color.
+      // the idiom's own value colour.
       const warning = c.warnSeconds != null && !t.over && t.seconds <= c.warnSeconds;
       const color = t.over ? "var(--red-10)" : warning ? "var(--yellow-10)" : null;
-      return (
-        <FitText text={fmtDuration(t.seconds)} ts={color ? { ...ts, color } : ts} vAlign={o.style?.vAlign} />
-      );
+      return readout(fmtDuration(t.seconds), { valueColor: color });
     }
     case "service-pacing": {
       // Live cumulative drift: how far ahead/behind the whole schedule we are
@@ -467,17 +477,18 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
           deltaSec = (serverNow - startMs) / 1000 - plannedElapsed;
         }
       }
-      if (deltaSec == null) return (c.hideWhenIdle ?? false) ? null : <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      if (deltaSec == null) return (c.hideWhenIdle ?? false) ? null : readout("—");
       const behind = deltaSec > tol;
       const ahead = deltaSec < -tol;
       const color = behind ? c.behindColor ?? "var(--red-10)" : ahead ? c.aheadColor ?? "var(--green-10)" : null;
       const text = !behind && !ahead ? "0:00" : fmtSignedDuration(deltaSec);
-      return (
-        <span style={color ? { ...ts, color } : ts}>
-          {text}
-          {(c.showLabel ?? false) && (behind || ahead) && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{behind ? " behind" : " ahead"}</span>}
-        </span>
-      );
+      // "behind" / "ahead" moves to the sub-line. It was an inline 0.6em span
+      // riding on the number, which is the composition the idiom replaces: a
+      // qualifier belongs under the value, not welded to the end of it.
+      return readout(text, {
+        valueColor: color,
+        sub: (c.showLabel ?? false) && (behind || ahead) ? (behind ? "behind" : "ahead") : null,
+      });
     }
     case "current-slide-text": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
@@ -515,36 +526,28 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
             ? pro?.nextArrangementSection
             : pro?.currentSection;
       if (!sec) return null;
-      return (
-        <span
-          style={{
-            ...ts,
-            width: "auto",
-            background: sec.colorHex,
-            color: "#fff",
-            padding: `${0.01 * ctx.H}px ${0.025 * ctx.H}px`,
-            borderRadius: `${0.5 * (o.style?.fontSize ?? 0.05) * ctx.H}px`,
-          }}
-        >
-          {sec.name}
-        </span>
-      );
+      // The section's own colour becomes the FILLED variant's ground rather than
+      // a pill floating inside the box. Same caption/value/sub composition,
+      // painted on a solid ground — a filled widget is the same widget wearing a
+      // state, not a second design language.
+      return readout(sec.name, { fill: sec.colorHex });
     }
     case "pp-timer": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
       const timers = pro?.timers ?? [];
       const timer = c.timerName ? timers.find((t) => t.name === c.timerName) : timers[0];
-      if (!timer) return (c.hideWhenIdle ?? false) ? null : <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      if (!timer) return (c.hideWhenIdle ?? false) ? null : readout("—");
       // Color only on clearly-expired states; unknown/other states stay neutral.
       const state = (timer.state ?? "").toLowerCase();
       const danger = state.includes("over") || state.includes("expire");
       const color = (c.warnStates ?? true) && danger ? "var(--red-10)" : null;
-      return (
-        <span style={color ? { ...ts, color } : ts}>
-          {(c.showLabel ?? true) && timer.name && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{`${timer.name} `}</span>}
-          {timer.time}
-        </span>
-      );
+      // The timer's NAME goes on the sub-line. It was an inline 0.6em span in
+      // front of the time — so a timer called "Sermon" pushed the number off
+      // centre and shrank with it. Under the value it stays a label.
+      return readout(timer.time, {
+        valueColor: color,
+        sub: (c.showLabel ?? true) ? timer.name : null,
+      });
     }
     case "slide-progress": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
@@ -568,12 +571,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       else if (display === "percent") text = count && count > 0 && idx != null ? `${Math.round((idx / count) * 100)}%` : "—";
       else text = idx != null && count != null ? `${idx} / ${count}` : "—";
       const dim = text === "—";
-      return (
-        <span style={dim ? { ...ts, opacity: 0.4 } : ts}>
-          {text}
-          {(c.showLabel ?? false) && !dim && <span style={{ opacity: 0.6, fontSize: "0.6em" }}> slides</span>}
-        </span>
-      );
+      return readout(text, { sub: (c.showLabel ?? false) && !dim ? "slides" : null });
     }
     case "slide-thumbnail": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
@@ -706,7 +704,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "charger-battery":
       return <ChargerBattery config={c} all={ctx.state.chargerBays ?? []} H={ctx.H} baseStyle={ts} />;
     case "spl-meter":
-      return <SplMeterValue config={c} spl={ctx.spl} ts={ts} />;
+      return <SplMeterValue config={c} spl={ctx.spl} align={o.style?.textAlign} />;
     case "people-counter": {
       const metric = c.metric ?? "attendance";
       // "min" = lowest in-room during the live service; "serviceAttendance" = entered
@@ -718,26 +716,19 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         : metric === "servicePeak" ? ctx.servicePeak
         : metric === "servicePeakAttendance" ? ctx.servicePeakAttendance
         : resolvePeopleValue(ctx.peopleCount, metric, c.zoneId);
-      if (value == null) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      if (value == null) return readout("—");
       const fallbackLabel =
         metric === "occupancy" ? "in room" : metric === "peak" ? "peak att." : metric === "min" ? "low" : metric === "avg" ? "avg att." : metric === "serviceAttendance" ? "svc entries" : metric === "servicePeak" ? "svc peak" : metric === "servicePeakAttendance" ? "svc peak att." : "entries";
-      return (
-        <span style={ts}>
-          {value.toLocaleString()}
-          {c.showLabel && (
-            <span style={{ opacity: 0.6, fontSize: "0.6em" }}>
-              {` ${c.label ?? fallbackLabel}`}
-            </span>
-          )}
-        </span>
-      );
+      return readout(value.toLocaleString(), {
+        sub: c.showLabel ? c.label ?? fallbackLabel : null,
+      });
     }
     case "people-graph":
       return <PeopleGraphObject ctx={ctx} config={c} ts={ts} />;
     case "people-panel":
       return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} servicePeak={ctx.servicePeak} servicePeakAttendance={ctx.servicePeakAttendance} ts={ts} H={ctx.H} />;
     case "baptism-timer":
-      return <BaptismTimer state={ctx.baptism} config={c} ts={ts} now={ctx.now} />;
+      return <BaptismTimer state={ctx.baptism} config={c} now={ctx.now} align={o.style?.textAlign} />;
     case "record-status": {
       // "Is anything recording?" — one indicator regardless of which recorder the
       // campus uses, so a layout survives a switch from OBS to REAPER unchanged.
@@ -753,24 +744,34 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
 
       if (!active && (c.hideWhenIdle ?? false)) return null;
 
+      // Which recorder this is watching becomes the caption; the state becomes
+      // the value. "any" has no single source to name, so it says what it is.
+      const caption = src === "obs" ? "OBS" : src === "reaper" ? "REAPER" : "Recorder";
       if (active) {
-        const label = c.recordingText ?? "RECORDING";
-        // Same fill as the OBS and REAPER objects — a child sized 100% resolves
-        // against the content box, so on a padded object the red stopped short of
-        // its own edges.
-        if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
-        // Not filling the box: same dot convention as the connection objects, so
-        // a red dot always means the same thing wherever it appears on a display.
-        return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
+        return (
+          <Readout
+            caption={caption}
+            value={c.recordingText ?? "RECORDING"}
+            upper
+            // The fill stays — it is a see-it-across-the-room signal and it
+            // works. What changes is that it now carries the same composition as
+            // every other widget, so a filled widget is the same widget wearing
+            // a state rather than a second design language.
+            fill={(c.fillWhenRecording ?? true) ? "var(--red-9)" : null}
+            valueColor={(c.fillWhenRecording ?? true) ? null : "var(--red-10)"}
+            align={o.style?.textAlign}
+          />
+        );
       }
-      // Idle: dim when offline so a neutral badge is never mistaken for "not
+      // Idle: dim when offline so a neutral value is never mistaken for "not
       // recording" when no recorder is reachable at all.
       return (
-        <StatusDot
-          color={DOT_IDLE}
-          label={connected ? (c.idleText ?? "STANDBY") : (c.offlineText ?? "NO RECORDER")}
-          ts={ts}
-          dimmed={!connected}
+        <Readout
+          caption={caption}
+          value={connected ? (c.idleText ?? "STANDBY") : (c.offlineText ?? "NO RECORDER")}
+          upper
+          dim={!connected}
+            align={o.style?.textAlign}
         />
       );
     }
@@ -784,27 +785,39 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         : (obs?.recording ?? false);
       // Pure tally-light mode: nothing on screen unless the chosen output is active.
       if (!active && (c.hideWhenIdle ?? false)) return null;
-      // Per-mode default labels (overridable via the *Text fields).
-      const activeDefault = mode === "streaming" ? "OBS: Streaming" : mode === "virtualcam" ? "OBS: Virtual Cam" : "OBS: Recording";
-      const idleDefault = mode === "streaming" ? "OBS: Stream off" : mode === "virtualcam" ? "OBS: Cam off" : "OBS: Standby";
+      // Per-mode default labels (overridable via the *Text fields). BARE now —
+      // "OBS" is the caption, so the old "OBS: Recording" would have read
+      // "OBS / OBS: RECORDING". A label an operator typed themselves is left
+      // exactly as they typed it.
+      const activeDefault = mode === "streaming" ? "Streaming" : mode === "virtualcam" ? "Virtual cam" : "Recording";
+      const idleDefault = mode === "streaming" ? "Stream off" : mode === "virtualcam" ? "Cam off" : "Standby";
       if (active) {
         // Timecode is the record duration — only meaningful in recording mode.
-        const tc = mode === "recording" && c.showTimecode && obs?.recordTimecode ? ` ${obs.recordTimecode}` : "";
-        const label = `${c.recordingText ?? activeDefault}${tc}`;
-        // Fill the whole box red (a strong room cue) or just color the text.
-        if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
-        // Not filling the box: same dot convention as the connection objects, so
-        // a red dot always means the same thing wherever it appears on a display.
-        return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
+        // It moves to the SUB-LINE: welded onto the end of the label it made the
+        // string long enough to shrink the state word it was qualifying.
+        const tc = mode === "recording" && c.showTimecode ? obs?.recordTimecode ?? null : null;
+        return (
+          <Readout
+            caption="OBS"
+            value={c.recordingText ?? activeDefault}
+            sub={tc}
+            upper
+            mono={false}
+            fill={(c.fillWhenRecording ?? true) ? "var(--red-9)" : null}
+            valueColor={(c.fillWhenRecording ?? true) ? null : "var(--red-10)"}
+            align={o.style?.textAlign}
+          />
+        );
       }
-      // Idle: dim when offline so a neutral badge is never mistaken for "not
+      // Idle: dim when offline so a neutral value is never mistaken for "not
       // active" when OBS is merely unreachable.
       return (
-        <StatusDot
-          color={DOT_IDLE}
-          label={connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? "OBS: Offline")}
-          ts={ts}
-          dimmed={!connected}
+        <Readout
+          caption="OBS"
+          value={connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? "Offline")}
+          upper
+          dim={!connected}
+            align={o.style?.textAlign}
         />
       );
     }
@@ -816,24 +829,32 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       if (!recording && (c.hideWhenIdle ?? false)) return null;
       if (recording) {
         // Position ticks while recording — trim REAPER's ".mmm" to whole seconds.
+        // It is the sub-line, matching OBS's timecode: the two recorders say the
+        // same kind of thing and should say it in the same place.
         const posRaw = reaper?.positionString ?? "";
         const dot = posRaw.indexOf(".");
-        const pos = c.showPosition && posRaw ? ` ${dot === -1 ? posRaw : posRaw.slice(0, dot)}` : "";
-        const label = `${c.recordingText ?? "REAPER: Recording"}${pos}`;
-        // Fill the whole box red (a strong room cue) or just color the text.
-        if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
-        // Not filling the box: same dot convention as the connection objects, so
-        // a red dot always means the same thing wherever it appears on a display.
-        return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
+        const pos = c.showPosition && posRaw ? (dot === -1 ? posRaw : posRaw.slice(0, dot)) : null;
+        return (
+          <Readout
+            caption="REAPER"
+            value={c.recordingText ?? "Recording"}
+            sub={pos}
+            upper
+            fill={(c.fillWhenRecording ?? true) ? "var(--red-9)" : null}
+            valueColor={(c.fillWhenRecording ?? true) ? null : "var(--red-10)"}
+            align={o.style?.textAlign}
+          />
+        );
       }
-      // Idle: dim when offline so a neutral badge is never mistaken for "not
+      // Idle: dim when offline so a neutral value is never mistaken for "not
       // recording" when REAPER is merely unreachable.
       return (
-        <StatusDot
-          color={DOT_IDLE}
-          label={connected ? (c.idleText ?? "REAPER: Standby") : (c.offlineText ?? "REAPER: Offline")}
-          ts={ts}
-          dimmed={!connected}
+        <Readout
+          caption="REAPER"
+          value={connected ? (c.idleText ?? "Standby") : (c.offlineText ?? "Offline")}
+          upper
+          dim={!connected}
+            align={o.style?.textAlign}
         />
       );
     }
@@ -880,49 +901,118 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "integration-status": {
       const st = c.integrationId ? ctx.integrations.find((i) => i.id === c.integrationId) : ctx.integrations[0];
       const conn = st?.connection ?? "disconnected";
-      const dot =
+      const color =
         conn === "connected" ? "var(--green-10)"
         : conn === "error" ? "var(--red-10)"
         : conn === "connecting" ? "var(--yellow-10)"
-        : DOT_IDLE;
+        : null;
       const name = c.label ?? (st ? (ctx.integrationLabels[st.id] ?? st.id) : "—");
-      return <StatusDot color={dot} label={(c.showLabel ?? true) ? name : null} ts={ts} />;
+      // WHICH integration is the caption; whether it is up is the value. The old
+      // shape was a coloured dot beside a name, which said what it was watching
+      // but never what it found — you had to know the colour code to read it.
+      const word =
+        conn === "connected" ? "Online"
+        : conn === "error" ? "Error"
+        : conn === "connecting" ? "Connecting"
+        : "Offline";
+      return (
+        <Readout
+          caption={(c.showLabel ?? true) ? name : null}
+          value={word}
+          upper
+          valueColor={color}
+          dim={conn === "disconnected"}
+            align={o.style?.textAlign}
+        />
+      );
     }
     case "wireless-summary": {
       const ch = ctx.wireless;
-      if (ch.length === 0) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      if (ch.length === 0) return <Readout value="—" dim />;
       const online = ch.filter((d) => d.online).length;
       const batteries = ch.filter((d) => d.online && d.battery != null).map((d) => d.battery as number);
       const lowest = batteries.length ? Math.min(...batteries) : null;
       const showOnline = c.showOnline ?? true;
       const showBattery = c.showBattery ?? true;
-      const prefix = (c.showLabel ?? false) && c.label ? `${c.label} ` : "";
+      // The count is the value; the lowest battery is what qualifies it. They
+      // were two figures side by side in different colours, which reads as two
+      // separate readouts sharing a box.
       return (
-        <span style={{ ...ts, width: "auto", display: "inline-flex", alignItems: "baseline", gap: "0.4em" }}>
-          {prefix && <span>{prefix.trim()}</span>}
-          {showOnline && <span>{online}/{ch.length}</span>}
-          {showBattery && lowest != null && (
-            <span style={{ color: batteryColor(lowest) }}>{lowest}%</span>
-          )}
-        </span>
+        <Readout
+          caption={(c.showLabel ?? false) && c.label ? c.label : null}
+          value={showOnline ? `${online}/${ch.length}` : `${lowest ?? "—"}%`}
+          sub={showOnline && showBattery && lowest != null ? `${lowest}% lowest` : null}
+          valueColor={!showOnline && lowest != null ? batteryColor(lowest) : null}
+          mono
+            align={o.style?.textAlign}
+        />
       );
     }
     case "wireless-channel": {
       const d = c.channelId ? ctx.wireless.find((x) => x.channelId === c.channelId) : ctx.wireless[0];
-      if (!d) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      if (!d) return <Readout value="—" dim />;
       const show = c.show ?? { rf: true, battery: true, frequency: true };
+      // The channel already had this composition — a small dim name over a row of
+      // figures — hand-rolled at 0.55em. It is the idiom, so it uses the idiom:
+      // the mic's name is the caption, its battery the value it is checked for,
+      // and RF and frequency the qualifiers under it.
+      const quals = [
+        show.rf && d.rfBars != null ? rfBarsGlyph(d.rfBars) : null,
+        show.frequency && d.frequencyLabel ? d.frequencyLabel : null,
+        show.audio && d.audioLevel != null ? `${Math.round(d.audioLevel * 100)}%` : null,
+      ].filter(Boolean);
+      const battery = show.battery && d.battery != null ? `${d.battery}%` : null;
       return (
-        <div style={{ ...ts, opacity: d.online ? 1 : 0.4, display: "flex", flexDirection: "column", justifyContent: "center", width: "100%", height: "100%" }}>
-          {(c.showLabel ?? true) && <span style={{ fontSize: "0.55em", opacity: 0.65 }}>{d.name ?? d.channelId}</span>}
-          <span style={{ display: "inline-flex", gap: "0.5em", alignItems: "baseline", flexWrap: "wrap" }}>
-            {show.rf && d.rfBars != null && <span>{rfBarsGlyph(d.rfBars)}</span>}
-            {show.battery && d.battery != null && <span style={{ color: batteryColor(d.battery) }}>{d.battery}%</span>}
-            {show.frequency && d.frequencyLabel && <span style={{ opacity: 0.7 }}>{d.frequencyLabel}</span>}
-            {show.audio && d.audioLevel != null && <span style={{ opacity: 0.7 }}>{Math.round(d.audioLevel * 100)}%</span>}
-          </span>
-        </div>
+        <Readout
+          caption={(c.showLabel ?? true) ? d.name ?? d.channelId : null}
+          value={battery ?? quals[0] ?? "—"}
+          sub={(battery ? quals : quals.slice(1)).join("  ") || null}
+          valueColor={battery && d.battery != null ? batteryColor(d.battery) : null}
+          mono
+          dim={!d.online}
+            align={o.style?.textAlign}
+        />
       );
     }
+    // Home's cards. They render the SAME components Home's fixed panel does, so
+    // the editable Home and the built-in one cannot drift into looking like two
+    // different products.
+    case "home-readiness":
+    case "home-next-service":
+    case "home-recent-services":
+    case "home-live-status":
+    case "home-recording":
+    case "home-recording-obs":
+    case "home-recording-reaper":
+    case "home-spl":
+    case "home-screens":
+      // pointer-events-none, ALWAYS — not gated on ctx.interactive like
+      // live-controls is.
+      //
+      // Three of these four cards contain in-app links (/screens, /history) put
+      // there for Home, which runs in the operator shell. Every OTHER surface
+      // that renders them — a wall display, a panel, the editor preview — is on
+      // the kiosk router, whose whole route table is "/". A touch on the SPL
+      // stat took a display to a "Route not found" page and left it there until
+      // somebody walked over and reloaded it.
+      //
+      // Their capability is ["readout"], with no drill-down, so a link that does
+      // nothing off the shell is what the model already says they are. Home
+      // renders them directly, not through here, and keeps its links.
+      return (
+        <div className="w-full h-full pointer-events-none">
+          <HomeCard
+            type={c.type}
+            state={ctx.state}
+            pcoLive={ctx.pcoLive}
+            now={ctx.now}
+            skewMs={ctx.skewMs}
+            // From the state snapshot, not a presence hook — see onlineFromState.
+            onlineOutputIds={onlineFromState(ctx.state)}
+            secondsToStart={homeSecondsToStart(ctx)}
+          />
+        </div>
+      );
     default: {
       // Exhaustiveness guard: every LayoutObjectType must have a case above. Add
       // a type to the registry without a renderer here and this assignment stops
@@ -942,11 +1032,11 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
 function SplMeterValue({
   config,
   spl,
-  ts,
+  align,
 }: {
   config: Extract<LayoutObjectConfig, { type: "spl-meter" }>;
   spl: SplMetricsDTO | null;
-  ts: CSSProperties;
+  align: LayoutHAlign | undefined;
 }) {
   const r = resolveSplValue(spl, config.meterId, config.metricKey);
   // Peak hold is a running max over samples, so it has to survive renders — but it
@@ -959,14 +1049,21 @@ function SplMeterValue({
   if (nextHold !== hold) setHold(nextHold);
 
   const shown = config.peakHold ? nextHold.peak : (r?.value ?? null);
-  if (shown == null) return <span style={{ ...ts, opacity: 0.4 }}>— dB</span>;
+  if (shown == null) return <Readout caption={config.caption} value="— dB" dim mono align={align} />;
   const color = splThresholdColor(shown, config.thresholds);
+  // "pk" and the metric name were two inline 0.6em spans trailing the number, so
+  // a meter with both read "97 dB pk SPL-A" as one run of text at three sizes.
+  // They are one sub-line now, which is what they always were.
+  const quals = [config.peakHold ? "peak hold" : null, config.showLabel && r ? r.metricKey : null].filter(Boolean);
   return (
-    <span style={color ? { ...ts, color } : ts}>
-      {`${Math.round(shown)} dB`}
-      {config.peakHold && <span style={{ opacity: 0.6, fontSize: "0.6em" }}> pk</span>}
-      {config.showLabel && r && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{` ${r.metricKey}`}</span>}
-    </span>
+    <Readout
+      caption={config.caption}
+      value={`${Math.round(shown)} dB`}
+      sub={quals.join(" · ") || null}
+      valueColor={color}
+      mono
+            align={align}
+    />
   );
 }
 
@@ -1422,13 +1519,13 @@ function PeoplePanel({
 function BaptismTimer({
   state,
   config,
-  ts,
   now,
+  align,
 }: {
   state: BaptismState | null;
   config: Extract<LayoutObjectConfig, { type: "baptism-timer" }>;
-  ts: CSSProperties;
   now: number;
+  align: LayoutHAlign | undefined;
 }) {
   const field = config.field ?? "live";
   const sum = summarizeBaptism(state);
@@ -1459,18 +1556,19 @@ function BaptismTimer({
     value = last ? fmtClock(last.testimonyMs + last.baptizeMs) : "—";
     fallback = "last person";
   }
-  // "0:00 avg per person" on a narrow tile is wider than the tile — 49px over in
-  // the measured sweep. Same fit-to-box treatment as every other readout.
-  const label = config.showLabel ? ` ${config.label ?? fallback}` : "";
-  const basePx = parseFloat(String(ts.fontSize)) || 16;
-  const { wrapRef, elRef, scale } = useFitScale([value, label, basePx, ts.fontWeight]);
+  // "0:00 avg per person" on a narrow tile was 49px wider than the tile in the
+  // measured sweep, because the label rode on the end of the value and the pair
+  // was fitted as one string. Under the value it is a line of its own, and the
+  // value is sized from the box rather than from how long the label happens
+  // to be.
   return (
-    <FitBox ts={ts} wrapRef={wrapRef}>
-      <span ref={elRef} style={{ ...ts, width: undefined, maxWidth: "100%", fontSize: `${basePx * scale}px`, whiteSpace: "nowrap" }}>
-        {value}
-        {label ? <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{label}</span> : null}
-      </span>
-    </FitBox>
+    <Readout
+      caption={config.caption}
+      value={value}
+      sub={config.showLabel ? config.label ?? fallback : null}
+      mono
+            align={align}
+    />
   );
 }
 
@@ -2136,14 +2234,14 @@ export function LayoutRenderer({
     ? [...placed.values()].reduce((m, o) => Math.max(m, o.top + o.height), 0)
     : 0;
   const overflows = responsive && dims.h > 0 && contentBottom > dims.h + 1;
-  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
-  const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
-
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom
   // layouts match every other view; only an explicit non-default solid overrides.
   const bg = canvas.background;
   const inheritSurface =
     bg == null || bg === "#000" || bg === "#000000" || bg === "#080810" || bg === "#0a0a0a";
+
+  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed, canvasBg: inheritSurface ? null : bg };
+  const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (
     <div

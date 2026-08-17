@@ -3,6 +3,7 @@ import { test, describe } from "node:test";
 import { readFileSync } from "node:fs";
 
 import { CAPABILITIES } from "@main/types/object-capabilities";
+import { IDIOM_TYPES } from "@main/types/readout-types.js";
 
 // What this file can and cannot prove, stated plainly, because a guard that
 // quietly proves nothing is worse than no guard:
@@ -19,9 +20,10 @@ import { CAPABILITIES } from "@main/types/object-capabilities";
 // go through the shared fit-to-box measurement rather than each rolling its own.
 
 const SRC = readFileSync(new URL("./layout-renderer.tsx", import.meta.url), "utf8");
+const READOUT_SRC = readFileSync(new URL("./readout.tsx", import.meta.url), "utf8");
 
 describe("the object type registry", () => {
-  test("holds exactly 41 types", () => {
+  test("holds exactly 50 types", () => {
     // An EXACT count, never a floor. A floor with slack is how three config
     // stores went missing from every backup with the suite green. When this
     // fails, the answer is not to bump the number: it is to run the browser
@@ -29,43 +31,51 @@ describe("the object type registry", () => {
     //
     // The design doc said 38 while the registry held 41 — three types had been
     // added without anyone re-reading it.
-    assert.equal(Object.keys(CAPABILITIES).length, 41);
+    assert.equal(Object.keys(CAPABILITIES).length, 50);
   });
 });
 
 describe("readouts fit their box through one shared measurement", () => {
   // Each of these overflowed its box at a normal dashboard tile size (257x159)
-  // in the browser sweep. They are listed by the component that renders them, so
-  // the assertion is about the code that had the bug, not about prose.
-  const MUST_FIT = [
-    "FitText",       // current/next service item
-    "StatusDot",     // obs, reaper, record, integration, wireless status
-    "RecordingFill", // the full-bleed red recording state
-    "BaptismTimer",  // value plus its sub-label
-    "PeoplePanel",   // wrapping metric tiles
-  ];
+  // in the browser sweep — the status objects by up to 48px, because a dot plus
+  // "OBS: Recording 00:12:34" is simply wider than a narrow tile.
+  //
+  // This used to name the COMPONENTS that rendered them and grep each one's body
+  // for `useFitScale`. Those components are gone: they were StatusDot,
+  // RecordingFill and FitBox, and every readout now goes through Readout
+  // instead. A source-text guard cannot survive that, and worse, could not tell
+  // it apart from the components quietly losing their measurement.
+  //
+  // So the assertion is on the routing itself. IDIOM_TYPES is the set the
+  // renderer branches on, so membership is a fact about the running code rather
+  // than words in a file — and it is keyed by object TYPE, which is what the
+  // browser sweep actually measured.
+  const OVERFLOWED = [
+    "obs-status", "reaper-status", "record-status", "integration-status",
+    "wireless-summary", "wireless-channel", "baptism-timer",
+  ] as const;
 
-  for (const component of MUST_FIT) {
-    test(`${component} measures itself with useFitScale`, () => {
-      // Match the component's body, not the whole file: every one of these could
-      // be found "somewhere in the file" while the call sits in a different
-      // function entirely.
-      const start = SRC.indexOf(`function ${component}(`);
-      assert.notEqual(start, -1, `${component} not found — was it renamed?`);
-      const next = SRC.slice(start + 1).search(/\nfunction \w+\(/);
-      const body = next === -1 ? SRC.slice(start) : SRC.slice(start, start + 1 + next);
-      assert.match(
-        body,
-        /useFitScale[<(]/,
-        `${component} must fit its box through the shared hook, not its own maths`,
-      );
+  for (const type of OVERFLOWED) {
+    test(`${type} renders through the shared Readout`, () => {
+      assert.ok(IDIOM_TYPES.has(type), `${type} left the idiom and is fitting its box alone again`);
     });
   }
 
   test("there is exactly one implementation of the measurement", () => {
-    // Two copies is how a fix lands in one readout and misses four others.
+    // Two copies is how a fix lands in one readout and misses four others. The
+    // idiom's own shrink-to-width lives in readout.tsx; useFitScale remains for
+    // the objects that are not readouts (plain text, slide text, service items).
     const defs = SRC.match(/function useFitScale\b/g) ?? [];
     assert.equal(defs.length, 1, "useFitScale must be defined once");
+    const shrink = READOUT_SRC.match(/function useShrinkToWidth\b/g) ?? [];
+    assert.equal(shrink.length, 1, "useShrinkToWidth must be defined once");
+  });
+
+  test("the idiom is applied by the renderer, not just declared", () => {
+    // A set nothing reads is a list of intentions. The branch that consumes it
+    // is what stops a migrated type being wrapped in the old caption path as
+    // well, which would render its caption twice.
+    assert.match(SRC, /IDIOM_TYPES\.has\(o\.config\.type\)/, "the renderer no longer consults the set");
   });
 });
 

@@ -5,7 +5,7 @@ import { useStageState } from "../main/use-stage-state";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useState, useEffect, useCallback, type ChangeEvent, type ReactNode } from "react";
-import { REVEAL_EVENT, pendingFlashTarget, type RevealDetail } from "../app/flash";
+import { useRevealNonce } from "../app/flash";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { OscTargetsPanel } from "./osc-targets-panel";
@@ -268,7 +268,7 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
     // Getting-started sends "Connect Planning Center" straight at this card's form.
     <div
       className="flex flex-col gap-3"
-      data-flash-id={FLASH_IDS[descriptor.id]}
+      data-flash-id={integrationFlashId(descriptor.id)}
     >
       {/* Schema-driven form */}
       <FieldSet flat>
@@ -911,6 +911,19 @@ const FLASH_IDS: Record<string, string | undefined> = {
   "planning-center": "pco-credentials",
 };
 
+/**
+ * The `data-flash-id` for one integration's card.
+ *
+ * Every integration needs one, not just the two something happened to point at:
+ * the context bar's "N disconnected" now sends you straight at whichever is
+ * down, and that is any of them. Exported so the sender and the target derive
+ * the same string from the same function — a hand-written id on one side is how
+ * a highlight silently lands nowhere.
+ */
+export function integrationFlashId(id: string): string {
+  return FLASH_IDS[id] ?? `integration-${id}`;
+}
+
 const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
   { title: "Service & plan", ids: ["planning-center", "prodcom"] },
   { title: "Presentation", ids: ["propresenter"] },
@@ -983,9 +996,15 @@ function IntegrationEntry({
   toggling: boolean;
   onToggle: (enabled: boolean) => void;
 }) {
+  // A CONFIGURED integration is collapsed, so the card the context bar's
+  // "N disconnected" aims a highlight at is not in the DOM — the highlight had
+  // nothing to land on and did nothing at all. Remounting with defaultOpen
+  // reveals it, and the operator can still close it again afterwards.
+  const revealNonce = useRevealNonce((id) => id === integrationFlashId(descriptor.id));
   return (
     <Collapsible
-      defaultOpen={!state.configured}
+      key={revealNonce}
+      defaultOpen={!state.configured || revealNonce > 0}
       label={<span className="text-callout font-semibold text-fg truncate">{descriptor.label}</span>}
       afterLabel={descriptor.description ? <InfoHint>{descriptor.description}</InfoHint> : undefined}
       right={
@@ -1064,20 +1083,10 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   // the operator can still close it afterwards, and there is no setState in an
   // effect to cascade renders. Declared here, above every early return, because
   // hooks must run in the same order on every render.
-  const isOurs = (flashId: string | null | undefined) =>
-    !!flashId && Object.values(FLASH_IDS).includes(flashId);
-  // Seeded from the pending target: flashTarget runs on the page being LEFT, so
-  // its event fires before this panel exists. The listener below covers the
-  // other order, when the panel is already mounted.
-  const [revealNonce, setRevealNonce] = useState(() => (isOurs(pendingFlashTarget()) ? 1 : 0));
-  useEffect(() => {
-    const onReveal = (e: Event) => {
-      const flashId = (e as CustomEvent<RevealDetail>).detail?.flashId;
-      if (isOurs(flashId)) setRevealNonce((n) => n + 1);
-    };
-    window.addEventListener(REVEAL_EVENT, onReveal);
-    return () => window.removeEventListener(REVEAL_EVENT, onReveal);
-  }, []);
+  // The "Not set up" group opens when the target is one of the cards inside it.
+  // Same hook the rows use — this was the only copy of the pattern until the
+  // rows needed it too.
+  const revealNonce = useRevealNonce((flashId) => Object.values(FLASH_IDS).includes(flashId));
 
   const queryClient = useQueryClient();
   const { state: stageState } = useStageState();

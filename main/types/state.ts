@@ -173,6 +173,17 @@ export interface UpdateStatus {
   canUpdate?: boolean;
   /** Why in-app updates are unavailable, when `canUpdate` is false. */
   updateBlockedReason?: string | null;
+  /**
+   * Whether anything will start the server again after it deliberately exits.
+   *
+   * False on a checkout somebody runs by hand, which has no service manager
+   * behind it. Every "restart" in this app is really `exit(0)` plus a supervisor
+   * — so where there is no supervisor, restarting a config restore, a recall, an
+   * update or the Restart button shuts the server OFF. Surfaced so the UI can
+   * say that in the confirm dialog rather than promising a restart it cannot
+   * deliver. See main/services/update/relaunch.ts.
+   */
+  selfRecovers?: boolean;
   branch: string | null;
   /**
    * Where `branch` came from. A packaged install has no branch to read, so the

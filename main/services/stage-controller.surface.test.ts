@@ -94,6 +94,42 @@ describe("binding a view to a screen", () => {
     assert.equal((await stageController.setOutputView("booth", "vd")).outputs[1].viewId, "vd");
   });
 
+  it("refuses Home on any screen, panel or wall", async () => {
+    // Home is the operator's front page, not a screen: it has no geometry — it
+    // reads presence and order only — so on a monitor it renders a stack of
+    // cards sized for a browser column. The Screens picker no longer offers it,
+    // but a Companion button or a restored config still can, which is why the
+    // check is here and not only in the dropdown.
+    ctl.state.views = [
+      ...ctl.state.views,
+      { id: "home", name: "Home", kind: "custom", createdAt: "", surface: "console" } as View,
+    ];
+    for (const screen of ["wall", "booth"]) {
+      await assert.rejects(
+        () => stageController.setOutputView(screen, "home"),
+        /front page/i,
+        `Home was accepted on ${screen}`,
+      );
+    }
+  });
+
+  it("does not let Home stand in for the operator's last view", async () => {
+    // "You cannot delete your last view" counted Home, which is seeded on every
+    // install and shown in no list. A fresh box read as 2 views, so deleting the
+    // real one was allowed and left an operator with nothing but Home and an
+    // empty Screens page.
+    ctl.state.views = [
+      { id: "only", name: "Stage", kind: "custom", createdAt: "", surface: "display" } as View,
+      { id: "home", name: "Home", kind: "custom", createdAt: "", surface: "console" } as View,
+    ];
+    ctl.state.outputs = [];
+    await assert.rejects(
+      () => stageController.deleteView("only"),
+      /last view/i,
+      "the operator's last real view was deleted because Home padded the count",
+    );
+  });
+
   it("still allows unrouting", async () => {
     await stageController.setOutputView("booth", "vc");
     const s = await stageController.setOutputView("booth", null);

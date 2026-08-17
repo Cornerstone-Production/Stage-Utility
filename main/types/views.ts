@@ -189,12 +189,34 @@ export type LayoutObjectConfig =
   // PCO Live countdown. `hideWhenIdle` renders nothing (instead of "—") when no
   // timer is live; `warnSeconds` turns the readout amber once the remaining time
   // drops to/below that many seconds (it still goes red on overtime).
-  | { type: "countdown-timer"; hideWhenIdle?: boolean; warnSeconds?: number }
+  | {
+      type: "countdown-timer";
+      hideWhenIdle?: boolean;
+      warnSeconds?: number;
+      /**
+       * A caption above the value — "SERVICE STARTS IN" over a countdown.
+       *
+       * A bare 0:04:12 on a wall does not say what it is counting to, and the
+       * operator who built the layout is not the one reading it at 9am on Sunday.
+       * Set on new objects by the registry; ABSENT on objects that already exist, so
+       * no layout anybody built gains a caption it did not ask for. Empty or null
+       * means no caption.
+       */
+      caption?: string | null;
+    }
   // Service pacing — how far ahead/behind the plan we are right now. `scope: "item"`
   // compares the current live item's elapsed time to its planned length (from
   // pco:live); `scope: "service"` sums actual-vs-planned across the recorded service
   // timeline for a running whole-service total. Over plan reads red, under reads green.
-  | { type: "service-pacing"; scope?: "item" | "service"; hideWhenIdle?: boolean; showLabel?: boolean; aheadColor?: string | null; behindColor?: string | null }
+  | {
+      type: "service-pacing";
+      scope?: "item" | "service";
+      hideWhenIdle?: boolean;
+      showLabel?: boolean;
+      aheadColor?: string | null;
+      behindColor?: string | null;
+      caption?: string | null;
+    }
   // ProPresenter-fed objects. `propresenterInstanceId` picks which configured
   // instance to read (omitted / "default" = the primary) — lets separate custom
   // views per auditorium point at different ProPresenter machines.
@@ -205,10 +227,43 @@ export type LayoutObjectConfig =
   | { type: "current-slide-notes"; propresenterInstanceId?: string | null }
   | { type: "slide-thumbnail"; propresenterInstanceId?: string | null }
   | { type: "section-chip"; which: "current" | "next" | "nextArrangement"; propresenterInstanceId?: string | null }
+  // Home's own cards, so Home is built from the same widget set as every other
+  // surface rather than being a bespoke page. Neither takes options: what they
+  // show is the state of this install, and there is nothing to choose.
+  | { type: "home-readiness" }
+  | { type: "home-next-service" }
+  | { type: "home-live-status" }
+  // The stats that used to live INSIDE the live card. Split out so each can be
+  // placed, sized and ordered on its own — the card's look is kept exactly, it
+  // is only the container that goes. Each is integration-agnostic: the recording
+  // one answers "are we getting this?" across every recorder at once.
+  /**
+   * Recording, as three widgets rather than one with a picker.
+   *
+   * `home-recording` answers it across every recorder at once — "are we getting
+   * this?", which is the mid-service question. The other two watch one each, so
+   * they are found by NAME in the palette instead of behind a control somebody
+   * has to know to look for. A new recording integration adds one entry to
+   * `recorders()` (which the combined one picks up for free) and one type here.
+   */
+  | { type: "home-recording" }
+  | { type: "home-recording-obs" }
+  | { type: "home-recording-reaper" }
+  | { type: "home-spl" }
+  | { type: "home-screens" }
+  | { type: "home-recent-services" }
   // A timer running INSIDE ProPresenter (its stage/countdown timers) — distinct from
   // the PCO countdown. `timerName` picks one by name (blank = the first reported);
   // `warnStates` colors the readout when the timer's state reads as overrun/expired.
-  | { type: "pp-timer"; timerName?: string | null; propresenterInstanceId?: string | null; warnStates?: boolean; hideWhenIdle?: boolean; showLabel?: boolean }
+  | {
+      type: "pp-timer";
+      timerName?: string | null;
+      propresenterInstanceId?: string | null;
+      warnStates?: boolean;
+      hideWhenIdle?: boolean;
+      showLabel?: boolean;
+      caption?: string | null;
+    }
   // ProPresenter slide position within the current presentation. `display`: "fraction"
   // ("3 / 12"), "remaining" ("9 left"), "percent", or a progress "bar".
   | { type: "slide-progress"; propresenterInstanceId?: string | null; display?: "fraction" | "remaining" | "percent" | "bar"; showLabel?: boolean }
@@ -263,6 +318,7 @@ export type LayoutObjectConfig =
   // color the readout amber/red above the given dB levels.
   | {
       type: "spl-meter";
+      caption?: string | null;
       meterId?: string | null;
       metricKey?: string | null;
       showLabel?: boolean;
@@ -375,6 +431,7 @@ export type LayoutObjectConfig =
   // when `showLabel`.
   | {
       type: "people-counter";
+      caption?: string | null;
       // attendance (Σins) / occupancy (in-room now) resolve per-zone or building;
       // peak/min/avg (today, from the space endpoint) are building-only.
       /** "peak"/"avg"/"attendance" are TODAY's building figures, so a second
@@ -435,6 +492,7 @@ export type LayoutObjectConfig =
   // integration required.
   | {
       type: "baptism-timer";
+      caption?: string | null;
       field?: "live" | "count" | "total" | "average" | "last";
       label?: string;
       showLabel?: boolean;
@@ -470,8 +528,47 @@ export type LayoutObjectConfig =
 
 export type LayoutObjectType = LayoutObjectConfig["type"];
 
+/**
+ * Which tile a widget fills on Home's grid — columns × rows.
+ *
+ * Five preset shapes on a three-column grid, chosen so they tile: `S 1×1`,
+ * `M 2×1`, `L 2×2`, `XL 3×2`, `Tall 3×4`. `S + M`, `S + L` and `S + S + S` each fill a row,
+ * and a Large leaves a 1-wide, 2-tall gap that two stacked Smalls complete
+ * exactly. Small is 1×1, so every leftover slot is fillable and nothing can
+ * strand a gap.
+ *
+ * Deliberately NOT a width and a height: a size is a choice from four, which is
+ * what keeps Home free of a canvas.
+ */
+export type HomeCardSize = "s" | "m" | "l" | "xl" | "tall";
+
+/**
+ * When a Home card is on the page.
+ *
+ * Home has two moods — a service is running, or it is the rest of the week — and
+ * this used to be a rule hidden in the code: the timer simply belonged to "live"
+ * and vanished for six days. Once an operator places widgets themselves, a card
+ * that disappears without being asked to looks broken, so the rule becomes a
+ * setting they can see and change.
+ */
+export type HomeVisibility = "always" | "live" | "idle";
+
+/** Where a widget sits on Home. Absent on objects that live on a canvas. */
+export interface HomePlacement {
+  size?: HomeCardSize;
+  when?: HomeVisibility;
+}
+
 export interface LayoutObject {
   id: string;
+  /**
+   * Home only: the grid tile and when to show it.
+   *
+   * Home reads this INSTEAD of x/y/w/h — it has no canvas, so the geometry below
+   * is filler the type requires. On every other surface this is absent and the
+   * geometry is the real thing. See main/services/home-view.ts.
+   */
+  home?: HomePlacement;
   /** Position/size as fractions of the PARENT (the canvas for top-level objects,
    *  or the containing container's box for nested children) — all 0..1. */
   x: number;

@@ -3,6 +3,8 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
+import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-defaults.js";
+import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { barConfigStore } from "./bar-config-store.js";
 import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
@@ -379,8 +381,26 @@ export class StageController {
     views: View[],
     outputs: Output[],
   ): Promise<{ views: View[]; outputs: Output[] }> {
-    const result = migrateSurfaces(views, outputs);
-    const viewsChanged = result.views.some((v, i) => v !== views[i]);
+    // Home is seeded here rather than in its own pass: both run on load, both
+    // may write views, and two writers racing over the same file is how one of
+    // them loses. Seeding first means the surface migration also sees Home.
+    const seeded = seedHomeView(views);
+    // Objects shed the styling the registry wrote into them at creation and
+    // nobody ever chose: readouts' centre alignment, and every card's
+    // translucent ground. Runs in this same pass for the same reason Home is
+    // seeded here: one writer for views.json, not three.
+    const aligned = migrateNeverChosenDefaults(seeded as View[]);
+    const realigned = countNeverChosen(seeded as View[]);
+    if (realigned > 0) {
+      console.log(
+        `[layout-defaults] ${realigned} object${realigned === 1 ? "" : "s"} carried styling written by the ` +
+          "object registry rather than chosen — a centre alignment on readouts, a translucent card ground, " +
+          "or both. Replaced with the current defaults: readouts align left, and cards are opaque so they " +
+          "cover what is behind them. Both are still editable per object in the layout editor.",
+      );
+    }
+    const result = migrateSurfaces(aligned, outputs);
+    const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
     const outputsChanged = result.outputs.some((o, i) => o !== outputs[i]);
     if (!viewsChanged && !outputsChanged) return { views, outputs };
 
@@ -1854,7 +1874,11 @@ export class StageController {
     if (!this.state.views.find((v) => v.id === id)) {
       throw new Error(`views:delete — view ${id} not found`);
     }
-    if (this.state.views.length <= 1) {
+    // Home does not count. It is seeded on every install and invisible in every
+    // list, so counting it turned "you cannot delete your last view" into "you
+    // cannot delete Home" — a fresh install reads as 2 views, and deleting the
+    // real one left the operator with nothing and an empty Screens page.
+    if (screensListViews(this.state.views).length <= 1) {
       throw new Error("views:delete — cannot remove the last view");
     }
     console.log(`[stage-controller] deleteView id=${id}`);
@@ -2001,6 +2025,15 @@ export class StageController {
     }
     if (viewId !== null && !this.state.views.find((v) => v.id === viewId)) {
       throw new Error(`outputs:setView — view ${viewId} not found`);
+    }
+    // Same reasoning as the console/wall check below: the picker no longer
+    // offers Home, but an API call or a restored config still can. Home has no
+    // geometry — it is a stack of cards sized for a browser column, edited in
+    // its own tab — so on a wall screen it would render as exactly that.
+    if (viewId === HOME_VIEW_ID) {
+      throw new Error(
+        `"Home" is the operator's front page, not a screen. Make a view for this screen instead.`,
+      );
     }
     // THE safety property, and it lives here rather than in the settings
     // dropdown: a dropdown that only offers bindable views makes the mistake

@@ -37,9 +37,13 @@ describe("operator destinations", () => {
       ALL_DESTINATIONS.filter((d) => d.path !== "/").map((d) => `/${d.path.split("/")[1]}`),
     );
     // Retired paths are routed for their REDIRECTS (see redirects.tsx) and
-    // deliberately have no rail entry: /plan's content is Home's, and /views
-    // and /displays merged into /screens. They stay routed so bookmarks land.
-    const retired = new Set(["/plan", "/views", "/displays"]);
+    // deliberately have no rail entry: /views and /displays merged into
+    // /screens. They stay routed so bookmarks land.
+    //
+    // /plan is NOT among them any more. It folded into Home in Phase 2 and came
+    // back out when Home became a grid — a fixed block of PCO controls is
+    // furniture on a page whose whole point is that the operator arranges it.
+    const retired = new Set(["/views", "/displays"]);
     // /consoles has no STATIC destination: its rail entries are one per console
     // the operator built, derived from state in rail.tsx. The server must still
     // claim the path or a direct load serves the kiosk bundle — which is exactly
@@ -170,7 +174,7 @@ describe("retired paths still land somewhere", () => {
     // Both a redirect and a destination for one path is ambiguous, and which
     // wins depends on route order rather than intent.
     const known = new Set(ALL_DESTINATIONS.map((d) => d.path));
-    for (const from of ["/plan", "/views", "/displays"]) {
+    for (const from of ["/views", "/displays"]) {
       assert.equal(known.has(from), false, `${from} is retired but still a destination`);
     }
   });

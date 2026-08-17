@@ -22,18 +22,21 @@ export function clampSidebarWidth(px: number): number {
   return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(px)));
 }
 
-function storedWidth(): number {
-  try {
-    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
-    if (raw === null) return DEFAULT_SIDEBAR_WIDTH;
-    // A stored value out of range is clamped rather than trusted: the bounds can
-    // change between releases, and a rail restored at 900px is unusable with no
-    // obvious way back.
-    return clampSidebarWidth(Number(raw));
-  } catch {
-    // localStorage unavailable (private mode etc.) — fall back to the default.
-    return DEFAULT_SIDEBAR_WIDTH;
-  }
+
+export interface PanelWidthOptions {
+  /** localStorage key. Two panels must not share one. */
+  storageKey: string;
+  defaultWidth: number;
+  min: number;
+  max: number;
+  /**
+   * Which edge the handle sits on.
+   *
+   * "left" grows rightward as the pointer moves right — the sidebar. "right"
+   * grows LEFTWARD, which is what an inspector on the right side needs: dragging
+   * its left edge toward the middle should make it wider, not narrower.
+   */
+  edge?: "left" | "right";
 }
 
 export interface SidebarWidth {
@@ -46,8 +49,27 @@ export interface SidebarWidth {
   reset: () => void;
 }
 
-export function useSidebarWidth(): SidebarWidth {
-  const [width, setWidth] = useState<number>(storedWidth);
+/**
+ * A draggable, persisted panel width.
+ *
+ * One implementation, used by the sidebar and the editor's inspector. A second
+ * copy is how the two drift into behaving differently — one with rAF batching
+ * and pointercancel handling, the other without.
+ */
+export function usePanelWidth(opts: PanelWidthOptions): SidebarWidth {
+  const { storageKey, defaultWidth, min, max, edge = "left" } = opts;
+  const clamp = useCallback(
+    (px: number) => (!Number.isFinite(px) ? defaultWidth : Math.min(max, Math.max(min, Math.round(px)))),
+    [defaultWidth, min, max],
+  );
+  const [width, setWidth] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      return raw === null ? defaultWidth : clamp(Number(raw));
+    } catch {
+      return defaultWidth;
+    }
+  });
   const [dragging, setDragging] = useState(false);
 
   // The live width during a drag lives in a ref and is written to state once per
@@ -58,11 +80,11 @@ export function useSidebarWidth(): SidebarWidth {
 
   const persist = useCallback((px: number) => {
     try {
-      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(px));
+      localStorage.setItem(storageKey, String(px));
     } catch {
       // Width still applies for this session; it just will not survive a reload.
     }
-  }, []);
+  }, [storageKey]);
 
   // A drag that ends while the component is unmounting must not leave a frame
   // queued against a dead component.
@@ -84,7 +106,8 @@ export function useSidebarWidth(): SidebarWidth {
       setDragging(true);
 
       const onMove = (ev: PointerEvent) => {
-        pending.current = clampSidebarWidth(startWidth + (ev.clientX - startX));
+        const delta = ev.clientX - startX;
+        pending.current = clamp(startWidth + (edge === "right" ? -delta : delta));
         if (frame.current !== null) return;
         frame.current = requestAnimationFrame(() => {
           frame.current = null;
@@ -114,13 +137,39 @@ export function useSidebarWidth(): SidebarWidth {
       // mid-drag, and without this the rail stays stuck in dragging state.
       handle.addEventListener("pointercancel", onUp);
     },
-    [width, persist],
+    [width, persist, clamp, edge],
   );
 
   const reset = useCallback(() => {
-    setWidth(DEFAULT_SIDEBAR_WIDTH);
-    persist(DEFAULT_SIDEBAR_WIDTH);
-  }, [persist]);
+    setWidth(defaultWidth);
+    persist(defaultWidth);
+  }, [persist, defaultWidth]);
 
   return { width, dragging, startResize, reset };
+}
+
+/** The sidebar, as a thin wrapper — same drag, its own key and bounds. */
+export function useSidebarWidth(): SidebarWidth {
+  return usePanelWidth({
+    storageKey: SIDEBAR_WIDTH_KEY,
+    defaultWidth: DEFAULT_SIDEBAR_WIDTH,
+    min: MIN_SIDEBAR_WIDTH,
+    max: MAX_SIDEBAR_WIDTH,
+  });
+}
+
+/** The layout editor's inspector. Grows leftward: its handle is on its left edge. */
+export const INSPECTOR_WIDTH_KEY = "stage-inspector-width";
+export const DEFAULT_INSPECTOR_WIDTH = 320;
+export const MIN_INSPECTOR_WIDTH = 260;
+export const MAX_INSPECTOR_WIDTH = 640;
+
+export function useInspectorWidth(): SidebarWidth {
+  return usePanelWidth({
+    storageKey: INSPECTOR_WIDTH_KEY,
+    defaultWidth: DEFAULT_INSPECTOR_WIDTH,
+    min: MIN_INSPECTOR_WIDTH,
+    max: MAX_INSPECTOR_WIDTH,
+    edge: "right",
+  });
 }

@@ -23,10 +23,11 @@ import { computePcoTimer, fmtDuration } from "../main/pco-timer";
 import { cn } from "../lib/cn";
 import type { ReactNode } from "react";
 import { visibleBarItems, type BarItemId } from "./bar-items";
-import { recordingStat } from "./recording-status";
+import { recordingStat, recorders } from "./recording-status";
 import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
 import { useIntegrations } from "../main/use-integration-states";
+import { DisconnectedPopover } from "./disconnected-popover";
 
 export interface ContextBarState {
   isLive: boolean;
@@ -52,7 +53,12 @@ export function contextBarState(
   const timer = computePcoTimer(pcoLive, now, skewMs);
   if (!timer) return { isLive: false, isOver: false, itemTitle: null, timerText: null };
   return {
-    isLive: true,
+    // LIVE means an ITEM is running, not merely that there is something to count.
+    // This was `true` for any timer at all, so a service two days away — which
+    // produces a perfectly good pre-service countdown — lit the green LIVE badge
+    // above every page. The bar was simultaneously saying "starts in 2d 0h" and
+    // "live", and only one of those can be true.
+    isLive: timer.mode === "item",
     isOver: timer.over,
     itemTitle: timer.label,
     timerText: fmtDuration(timer.seconds),
@@ -95,13 +101,30 @@ export function ContextBar() {
   return (
     // No bottom rule and no separate surface: it sits on the content background,
     // so the page reads as one plane rather than a stack of bordered strips.
-    <header className="flex items-center gap-3 h-11 shrink-0 px-5 max-sm:px-3">
+    // WRAPS on a phone, one row from sm up.
+    //
+    // Scrolling was the first fix and it was the wrong one: it stopped the items
+    // colliding, but pushed "3 disconnected" and "REC stopped" off the right
+    // edge, and an alert you have to swipe sideways to find is not an alert.
+    // Wrapping shows every reading at once and still cannot overlap.
+    <header
+      className={cn(
+        "context-strip flex flex-wrap items-center gap-x-3 gap-y-0.5 shrink-0 px-5 max-sm:px-3 py-1.5",
+        "sm:h-11 sm:flex-nowrap sm:py-0",
+      )}
+    >
       {rendered.map((x, i) => (
         <span
           key={x.id}
-          // The first live-ish item pushes the rest right, preserving the
+          // shrink-0 on EVERY item, not just the one that pushes right. With
+          // min-w-0 the items squeezed past their own content on a phone and
+          // printed over each other; the strip scrolls now instead.
+          //
+          // The first live-ish item still pushes the rest right, preserving the
           // original bar's shape: context on the left, service state on the right.
-          className={cn("flex items-center gap-2.5 min-w-0", i === RIGHT_FROM(rendered) && "ml-auto shrink-0")}
+          // ml-auto only once the bar is a single row — on a wrapped bar it
+          // would shove one item to the end of whichever line it landed on.
+          className={cn("flex items-center gap-2.5 shrink-0", i === RIGHT_FROM(rendered) && "sm:ml-auto")}
         >
           {x.node}
         </span>
@@ -156,6 +179,11 @@ function renderBarItem(
         : null;
 
     case "live-timer":
+      // The countdown shows whenever there IS one; the green badge only when a
+      // service is actually running. Before a service the same countdown is
+      // still worth having — it is how far out the next one is — it just is not
+      // "live", so it reads as its own label instead.
+      if (!bar.timerText) return null;
       return bar.isLive ? (
         <>
           <span className="size-1.5 rounded-full bg-live-9" aria-hidden="true" />
@@ -164,7 +192,16 @@ function renderBarItem(
             {bar.timerText}
           </span>
         </>
-      ) : null;
+      ) : (
+        <>
+          {bar.itemTitle && (
+            <span className="text-footnote text-fg-muted truncate">{bar.itemTitle}</span>
+          )}
+          <span className={cn("text-footnote font-mono tabular-nums", bar.isOver ? "text-danger-11" : "text-fg-muted")}>
+            {bar.timerText}
+          </span>
+        </>
+      );
 
     case "integration-health": {
       // Counts what is DISCONNECTED. Nothing when all is well: a bar item that
@@ -176,17 +213,16 @@ function renderBarItem(
         (i) => i.enabled && i.configured !== false && (i.connection === "error" || i.connection === "disconnected"),
       );
       if (down.length === 0) return null;
-      return (
-        <span className="text-footnote text-warn-11 truncate">
-          {down.length} disconnected
-        </span>
-      );
+      // A count on its own is the least useful place to stop: it says something
+      // is wrong mid-service and leaves you to open Integrations and read every
+      // card to find out what. Clicking it names them and takes you there.
+      return <DisconnectedPopover down={down} labels={integrations?.labels ?? {}} />;
     }
 
     case "recording": {
       // The same judgement Home makes, from the same function - including
       // "connected but stopped", which is the state worth surfacing.
-      const rec = recordingStat(obs, reaper);
+      const rec = recordingStat(recorders(obs, reaper));
       if (rec.value === "—") return null;
       return (
         <span className={cn("text-footnote font-mono tabular-nums", rec.tone === "danger" ? "text-danger-11" : "text-live-11")}>

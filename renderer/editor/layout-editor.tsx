@@ -14,6 +14,9 @@ import {
   Grid3x3Icon,
   AlignHorizontalDistributeCenterIcon,
   MonitorSmartphoneIcon,
+  LockOpenIcon,
+  PencilIcon,
+  PlusIcon,
   SaveIcon,
   DownloadIcon,
   
@@ -22,14 +25,12 @@ import {
   
   
   
-  PencilIcon,
   CheckIcon,
   LayoutTemplateIcon,
   CornerLeftUpIcon,
   LockIcon,
   UnlockIcon,
   
-  FilterIcon,
   FilePlusIcon,
 } from "lucide-react";
 import { DropdownMenu, Popover } from "radix-ui";
@@ -37,13 +38,6 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import {
   Button,
   Input,
-  Select,
-  SelectTrigger,
-  SelectContent,
-  SelectItem,
-  SelectGroup,
-  SelectLabel,
-  SelectValue,
   ButtonGroup,
   
   Separator,
@@ -110,8 +104,13 @@ import {
 } from "../main/layout-objects";
 import { invoke } from "../lib/api";
 import { fitFor } from "../main/console-fit";
+import { useInspectorWidth } from "../lib/use-sidebar-width";
+import { cn } from "../lib/cn";
 import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
+import { Palette } from "./palette";
+import { rectForDrop, localiseToParent, defaultDropSize } from "./drag-to-place";
+import { rectFrom } from "./draw-to-create";
 import { ShapePreview, PREVIEW_SHAPES, type PreviewShape } from "./preview-shape";
 import { AlignmentGuides } from "./alignment-guides";
 
@@ -286,7 +285,7 @@ interface DragState {
 // its parent overlay node so nested children resolve correctly. Recurses for a
 // container's children.
 function OverlayNode({
-  o, parentAbs, depth, selectedId, selectedIds, draggingId = null, onStart, parentLocked = false,
+  o, parentAbs, depth, selectedId, selectedIds, draggingId = null, onStart, parentLocked = false, canvasLocked = false,
 }: {
   o: LayoutObject;
   parentAbs: FracRect;
@@ -298,6 +297,9 @@ function OverlayNode({
   onStart: (e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) => void;
   /** True when an ancestor container is locked, so this node is locked too. */
   parentLocked?: boolean;
+  /** The whole canvas is locked. Distinct from the per-object padlock: this one
+   *  is about how you are working right now, not about the layout. */
+  canvasLocked?: boolean;
 }) {
   const sel = o.id === selectedId; // single "primary" → resize handles
   const inSel = selectedIds.has(o.id); // any selected → highlight outline
@@ -333,7 +335,7 @@ function OverlayNode({
         {locked && <LockIcon style={{ width: 9, height: 9 }} />}
         {typeLabel(o.config.type)}
       </span>
-      {sel && !locked &&
+      {sel && !locked && !canvasLocked &&
         HANDLES.map((h) => {
           // Above every sibling overlay node. Nodes render in z order with no
           // z-index of their own, so an object stacked higher than the selected
@@ -358,7 +360,7 @@ function OverlayNode({
           return <div key={h} onPointerDown={(e) => onStart(e, o, h, parentAbs, depth)} style={{ ...pos, cursor: handleCursor(h) }} />;
         })}
       {kids?.map((c) => (
-        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} selectedIds={selectedIds} draggingId={draggingId} onStart={onStart} parentLocked={locked} />
+        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} selectedIds={selectedIds} draggingId={draggingId} onStart={onStart} parentLocked={locked} canvasLocked={canvasLocked} />
       ))}
     </div>
   );
@@ -366,9 +368,9 @@ function OverlayNode({
 
 function EditorCanvas({
   effectiveFit,
-  canvas, objects, selectedId, selectedIds, gridOn, alignOn, ctx, ndiSource, interactive,
+  canvas, objects, selectedId, selectedIds, gridOn, alignOn, locked, ctx, ndiSource, interactive,
   onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
-  onContextMenu,
+  onContextMenu, onDropType, onDrawn,
 }: {
   /** What the layout will actually do — a console with no explicit fit is
    *  responsive. Passed in so the canvas and the toolbar cannot disagree. */
@@ -381,10 +383,19 @@ function EditorCanvas({
   /** Snap to the other objects' edges, centres and spacing. Independent of the
    *  grid: both can be on, and grid runs first so alignment only refines. */
   alignOn: boolean;
+  /** Nothing on the canvas can be moved or resized. Objects still SELECT and
+   *  the inspector still edits them — this is about not knocking a layout out
+   *  of shape while reaching for the thing next to it. */
+  locked: boolean;
   ctx: Omit<LayoutRenderCtx, "H" | "ndiSource" | "interactive">;
   ndiSource: string | null;
   /** When false the canvas is a read-only preview (no overlay, handles, or drag). */
   interactive: boolean;
+  /** A widget was dropped from the palette, at this point in canvas fractions.
+   *  Optional: the canvas works exactly as before without it. */
+  onDropType?: (point: { x: number; y: number }) => void;
+  /** A box was drawn; the caller asks what to put in it. */
+  onDrawn?: (rect: FracRect) => void;
   onSelect: (id: string | null, additive?: boolean) => void;
   /** Marquee drag on empty canvas → select all top-level objects it intersects. */
   onMarqueeSelect: (ids: string[], additive: boolean) => void;
@@ -587,6 +598,14 @@ function EditorCanvas({
     // selection (so we drag the whole group); otherwise select just this one.
     const inGroup = selectedIds.has(o.id) && selectedIds.size > 1;
     if (!inGroup) onSelect(o.id, false);
+    // Two locks, one decision point. The per-object padlock has always been
+    // here; the canvas-wide lock joins it rather than living somewhere else
+    // where the two could disagree.
+    //
+    // Returning here is what makes the handles INERT rather than merely
+    // hidden. Hiding them and leaving the drag live is the version of this
+    // that looks fixed and is not.
+    if (locked) return;
     // Locked objects (and anything inside a locked container) select but never move.
     if (isLockedInTree(objects, o.id)) return;
     onCommitStart();
@@ -637,6 +656,36 @@ function EditorCanvas({
     const rect = box.getBoundingClientRect();
     const x0 = (e.clientX - rect.left) / boxW;
     const y0 = (e.clientY - rect.top) / boxH;
+
+    // Draw mode takes the same gesture and means something else by it. Handled
+    // by returning early rather than by threading a flag through the marquee
+    // below: the marquee is existing behaviour and this phase does not touch it.
+    // Shift-drag on EMPTY canvas draws a new widget's box. Shift is free here:
+    // on an object it extends the selection, but there is no selection to extend
+    // on bare canvas. No toolbar mode, so nothing is armed and forgotten.
+    if (e.shiftKey && onDrawn) {
+      let drew = false;
+      const drawMove = (ev: globalThis.PointerEvent) => {
+        drew = true;
+        setMarquee({ x0, y0, x1: (ev.clientX - rect.left) / boxW, y1: (ev.clientY - rect.top) / boxH });
+      };
+      const drawUp = (ev: globalThis.PointerEvent) => {
+        window.removeEventListener("pointermove", drawMove);
+        window.removeEventListener("pointerup", drawUp);
+        setMarquee(null);
+        // A click that never moved is a click. Opening the picker on it is how a
+        // stray click on the canvas turned into an add-widget menu.
+        if (!drew) return;
+        onDrawn(rectFrom({ x: x0, y: y0 }, {
+          x: (ev.clientX - rect.left) / boxW,
+          y: (ev.clientY - rect.top) / boxH,
+        }));
+      };
+      window.addEventListener("pointermove", drawMove);
+      window.addEventListener("pointerup", drawUp);
+      return;
+    }
+
     let moved = false;
     const move = (ev: globalThis.PointerEvent) => {
       const x1 = (ev.clientX - rect.left) / boxW;
@@ -718,6 +767,16 @@ function EditorCanvas({
           }}
           onPointerDown={interactive ? startMarquee : undefined}
           onContextMenu={interactive && onContextMenu ? onContextMenu : undefined}
+          // Palette drops. dragover must preventDefault or the browser refuses
+          // the drop entirely. Nothing else about the canvas changes: pointer
+          // drags, resizing and marquee selection are untouched.
+          onDragOver={interactive && onDropType ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } : undefined}
+          onDrop={interactive && onDropType ? (e) => {
+            e.preventDefault();
+            const r = e.currentTarget.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) return;
+            onDropType({ x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height });
+          } : undefined}
         >
           {/* Content layer (visual only). Letterbox: design dims scaled. Fill: the
               layer IS the box (objects positioned by % of the live box). The grid
@@ -782,6 +841,7 @@ function EditorCanvas({
                   selectedIds={selectedIds}
                   draggingId={drag?.id ?? null}
                   onStart={startDrag}
+                  canvasLocked={locked}
                 />
               ))}
             </div>
@@ -886,6 +946,30 @@ export function LayoutEditor({
   // On by default: lining an object up with its neighbours is the common case,
   // and Alt suppresses it for the drag where it is not.
   const [alignOn, setAlignOn] = useState(true);
+  // Unlocked by default: an editor that does nothing on the first drag is a
+  // puzzle. Per session rather than per view - it is about how you are working
+  // right now, not a property of the layout.
+  const [layoutLocked, setLayoutLocked] = useState(false);
+  // Inspector width, dragged from its left edge and remembered. Same hook the
+  // sidebar uses, so there is one resize implementation rather than two that
+  // drift apart.
+  const {
+    width: inspectorWidth,
+    dragging: inspectorDragging,
+    startResize: startInspectorResize,
+    reset: resetInspectorWidth,
+  } = useInspectorWidth();
+  // A drawn box waiting to be told what it is. Null when nothing is pending —
+  // and dismissing the picker clears it WITHOUT creating anything, so a
+  // cancelled draw costs neither an object nor an undo step.
+  const [pendingRect, setPendingRect] = useState<FracRect | null>(null);
+  // Closed until asked for. The palette replaced the Add-object dropdown, so it
+  // is now the ONLY way in and behaves like the dropdown did: nothing on screen
+  // until you go looking for it, and the canvas gets the width in the meantime.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // The type mid-drag from the palette. A ref as well as state: the drop
+  // handler runs from a DOM event and would otherwise read a stale closure.
+  const paletteDragType = useRef<LayoutObjectType | null>(null);
   const [saving, setSaving] = useState(false);
   const [tplName, setTplName] = useState("");
   // Rendered canvas box size (reported by EditorCanvas) — so the Snap actions use
@@ -917,6 +1001,23 @@ export function LayoutEditor({
   // Opt-in: hide palette objects whose integration isn't set up (default off).
   const [hideUnconfigured, setHideUnconfigured] = useState(
     () => localStorage.getItem(HIDE_UNCONFIGURED_KEY) === "1",
+  );
+
+  // The palette and the Add-object dropdown offer the SAME set, filtered by the
+  // same rule. Two lists that could disagree about which objects exist is how an
+  // operator finds a widget in one place and not the other.
+  const paletteTypes = PALETTE_GROUPS.flatMap((g) =>
+    g.types.filter((t) => {
+      const need = objectIntegration(t);
+      return !(hideUnconfigured && need && !configuredIntegrations.has(need.id));
+    }),
+  );
+  // Dimmed, not hidden: the object works, its data source just is not set up yet.
+  const dimmedTypes = new Set(
+    paletteTypes.filter((t) => {
+      const need = objectIntegration(t);
+      return !!need && !configuredIntegrations.has(need.id);
+    }),
   );
   const toggleHideUnconfigured = useCallback(() => {
     setHideUnconfigured((v) => {
@@ -1130,6 +1231,42 @@ export function LayoutEditor({
     setObjects((prev) => updates.reduce((tree, u) => mapById(tree, u.id, (o) => ({ ...o, ...u.geom })), prev));
     setDirty(true);
   }, []);
+
+  /**
+   * A widget dropped from the palette, at a point in canvas fractions.
+   *
+   * Deliberately NOT routed through addObject: that function places at a fixed
+   * default spot and, when a container is selected, nests into it. A drop says
+   * where it goes, and nesting follows the pointer rather than the selection —
+   * dropping onto a container puts it in that container, dropping on open canvas
+   * does not, regardless of what happened to be selected.
+   */
+  function dropObject(type: LayoutObjectType, point: { x: number; y: number }) {
+    const isContainer = type === "container";
+    const abs = rectForDrop(point, defaultDropSize(isContainer));
+
+    // Which container, if any, is under the drop point. Same rule the drag path
+    // uses, so dropping and dragging agree about where things land.
+    const targets: { id: string; abs: FracRect; depth: number }[] = [];
+    forEachWithRect(objects, (n) => {
+      if (n.o.config.type === "container" && !isLockedInTree(objects, n.o.id)) {
+        targets.push({ id: n.o.id, abs: n.abs, depth: n.depth });
+      }
+    });
+    const intoId = findDropContainer(targets, isContainer, point.x, point.y);
+    const into = intoId ? targets.find((t) => t.id === intoId) : null;
+
+    pushHistory();
+    const geom = into ? localiseToParent(abs, into.abs) : abs;
+    const o = makeObject(type, zTop + 1, geom);
+    if (into) {
+      setObjects((prev) => insertChild(prev, into.id, o));
+    } else {
+      setObjects((prev) => [...prev, o]);
+    }
+    setSelectedIds(new Set([o.id]));
+    setDirty(true);
+  }
 
   function addObject(type: LayoutObjectType) {
     pushHistory();
@@ -1449,48 +1586,36 @@ export function LayoutEditor({
       {/* Toolbar (edit mode) */}
       {isEditing && (
       <div className="flex flex-wrap items-center gap-2">
-        <Select value="" onValueChange={(t: string) => addObject(t as LayoutObjectType)}>
-          <SelectTrigger className="w-40"><SelectValue placeholder="+ Add object" /></SelectTrigger>
-          <SelectContent>
-            {PALETTE_GROUPS.map((g) => {
-              const types = g.types.filter((t) => {
-                const need = objectIntegration(t);
-                // When the hide toggle is on, drop types whose integration isn't set up.
-                return !(hideUnconfigured && need && !configuredIntegrations.has(need.id));
-              });
-              if (types.length === 0) return null;
-              return (
-                <SelectGroup key={g.label}>
-                  <SelectLabel>{g.label}</SelectLabel>
-                  {types.map((t) => {
-                    const need = objectIntegration(t);
-                    // Dim (but keep selectable) when the backing integration isn't set up.
-                    // Based on "configured", not connection — a set-up-but-offline
-                    // integration's objects stay un-dimmed.
-                    const dim = need && !configuredIntegrations.has(need.id);
-                    return (
-                      <SelectItem key={t} value={t} className={dim ? "opacity-50" : undefined}>
-                        {typeLabel(t)}{dim ? ` · set up ${need!.label}` : ""}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectGroup>
-              );
-            })}
-          </SelectContent>
-        </Select>
+        {/* One button for one job. It replaces a dropdown, a Widgets toggle and
+            a filter icon: three controls that all answered "what can I add?".
+            The palette it opens carries the same set the dropdown listed, and
+            the hide-unconfigured filter now lives in the palette's own header,
+            beside the list it filters. */}
         <Button
-          variant={hideUnconfigured ? "accent" : "filled"}
+          variant={paletteOpen ? "accent" : "filled"}
           size="small"
-          iconOnly
-          onClick={toggleHideUnconfigured}
-          aria-label={hideUnconfigured ? "Show all objects" : "Hide objects for integrations that aren't set up"}
-          tooltip={hideUnconfigured ? "Show objects for integrations that aren't set up" : "Hide objects for integrations that aren't set up"}
+          onClick={() => setPaletteOpen((v) => !v)}
+          aria-label="Add an object"
+          aria-pressed={paletteOpen}
+          tooltip="Every widget, with a line on what each shows. Drag one onto the canvas, or click to add it."
         >
-          <FilterIcon className="size-3.5" />
+          <PlusIcon className="size-3.5" /> Add object
         </Button>
         <Button variant={gridOn ? "accent" : "filled"} size="small" onClick={() => setGridOn((v) => !v)} aria-label="Toggle snap grid">
           <Grid3x3Icon className="size-3.5" /> Grid
+        </Button>
+        <Button
+          variant={layoutLocked ? "accent" : "filled"}
+          size="small"
+          onClick={() => setLayoutLocked((v) => !v)}
+          aria-label="Lock the layout"
+          aria-pressed={layoutLocked}
+          tooltip={layoutLocked
+            ? "Locked: nothing can be moved or resized. Objects still select and their settings still edit."
+            : "Lock the layout so reaching for one object cannot resize another."}
+        >
+          {layoutLocked ? <LockIcon className="size-3.5" /> : <LockOpenIcon className="size-3.5" />}
+          {layoutLocked ? "Locked" : "Lock"}
         </Button>
         <Button
           variant={alignOn ? "accent" : "filled"}
@@ -1679,6 +1804,25 @@ export function LayoutEditor({
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
+        {/* Palette — a second door beside the Add-object dropdown, which is
+            unchanged. Hidden outside edit mode, and collapsible for anyone who
+            wants the canvas wider. */}
+        {isEditing && paletteOpen && (
+          <div
+            className="w-56 shrink-0 overflow-y-auto rounded-xl border border-line bg-surface @max-4xl:w-full @max-4xl:max-h-64"
+            style={{ maxHeight: canvasH ?? undefined }}
+          >
+            <Palette
+              types={paletteTypes}
+              dimmed={dimmedTypes}
+              hideUnconfigured={hideUnconfigured}
+              onToggleHideUnconfigured={toggleHideUnconfigured}
+              onAdd={addObject}
+              onDragStart={(t) => { paletteDragType.current = t; }}
+              onDragEnd={() => { paletteDragType.current = null; }}
+            />
+          </div>
+        )}
         <div ref={canvasCellRef} className="flex-1 min-w-0 @max-4xl:flex-none" style={{ height: canvasH ?? undefined }}>
           {previewShape.vp ? (
             // The live edit state, not the saved view: the point is to check the
@@ -1698,6 +1842,8 @@ export function LayoutEditor({
               selectedId={selectedId}
               selectedIds={selectedIds}
               alignOn={alignOn}
+              locked={layoutLocked}
+              onDrawn={(rect) => setPendingRect(rect)}
               gridOn={gridOn && isEditing}
               interactive={isEditing}
               ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
@@ -1710,6 +1856,11 @@ export function LayoutEditor({
               onReparent={reparentIntoContainer}
               onBoxSize={handleBoxSize}
               onContextMenu={isEditing ? openContextMenu : undefined}
+              onDropType={isEditing ? (point) => {
+                const t = paletteDragType.current;
+                paletteDragType.current = null;
+                if (t) dropObject(t, point);
+              } : undefined}
             />
           ) : (
             <div className="w-full h-full rounded-xl border border-line flex items-center justify-center text-fg-subtle">
@@ -1720,6 +1871,41 @@ export function LayoutEditor({
 
         {/* Right-click menu. Positioned fixed to the viewport, so it lives outside
             the canvas box rather than inside its ternary. */}
+        {/* What goes in the box you drew. The SAME palette as the sidebar - one
+            list of widgets, not two that could disagree. Dismissing creates
+            nothing and costs no undo step. */}
+        {pendingRect && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+            onClick={() => setPendingRect(null)}
+            role="presentation"
+          >
+            <div
+              className="max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-line-strong bg-popover shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="border-b border-line px-3 py-2 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+                What goes here?
+              </p>
+              <Palette
+                types={paletteTypes}
+                dimmed={dimmedTypes}
+                onAdd={(t) => {
+                  const rect = pendingRect;
+                  setPendingRect(null);
+                  pushHistory();
+                  const o = makeObject(t, zTop + 1, rect);
+                  setObjects((prev) => [...prev, o]);
+                  setSelectedIds(new Set([o.id]));
+                  setDirty(true);
+                }}
+                onDragStart={() => {}}
+                onDragEnd={() => {}}
+              />
+            </div>
+          </div>
+        )}
+
         {menu && (
           <ContextMenu
             x={menu.x}
@@ -1733,8 +1919,24 @@ export function LayoutEditor({
             height (which is measured to reach the viewport bottom) and scrolls
             INTERNALLY, so paging through inspector options never scrolls the whole
             editor and pushes the preview out of view. */}
+        {/* Inspector, draggable from its left edge. Same hook as the sidebar
+            (usePanelWidth) rather than a second implementation, so both get the
+            rAF batching and pointercancel handling that drag needs. */}
         {isEditing && (
-        <div className="w-80 @6xl:w-96 shrink-0 flex flex-col gap-3 min-h-0 overflow-y-auto @max-4xl:w-full" style={{ maxHeight: (inlineGrid ? canvasH : availH) ?? undefined }}>
+        <div className="relative shrink-0 @max-4xl:w-full" style={{ width: inspectorWidth }}>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize the inspector"
+            onPointerDown={startInspectorResize}
+            onDoubleClick={resetInspectorWidth}
+            className={cn(
+              "absolute inset-y-0 left-0 z-10 w-[7px] cursor-col-resize @max-4xl:hidden",
+              "after:absolute after:inset-y-0 after:left-0 after:w-px after:transition-colors",
+              inspectorDragging ? "after:bg-accent" : "after:bg-transparent hover:after:bg-line-strong",
+            )}
+          />
+        <div className="flex h-full flex-col gap-3 min-h-0 overflow-y-auto pl-2" style={{ maxHeight: (inlineGrid ? canvasH : availH) ?? undefined }}>
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Layers</span>
@@ -1905,6 +2107,7 @@ export function LayoutEditor({
               ))
             )}
           </div>
+        </div>
         </div>
         )}
       </div>

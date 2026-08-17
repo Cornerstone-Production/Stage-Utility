@@ -8,9 +8,10 @@
 // is what a panel shows. The only difference is the context: `shell` means
 // controls fire, drill-down works, and the layout can be edited in place.
 
-import { useState } from "react";
-import { useParams } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "@tanstack/react-router";
 import { PencilIcon } from "lucide-react";
+import { HOME_VIEW_ID } from "@main/services/home-view";
 import { LayoutRenderer } from "../main/layout-renderer";
 import { useStageSettings } from "./use-stage-settings";
 import { capabilityLive } from "../main/render-context";
@@ -22,6 +23,7 @@ import { AppLink } from "./app-link";
 export function ConsoleRoute() {
   const { viewId } = useParams({ strict: false }) as { viewId?: string };
   const s = useStageSettings();
+  const router = useRouter();
   // Editing lives in component state, NOT the URL: entering edit mode must not
   // create a history entry, or Back would step through edit toggles instead of
   // leaving the console.
@@ -30,6 +32,15 @@ export function ConsoleRoute() {
   const [editorEpoch, setEditorEpoch] = useState(0);
 
   const view = s.stageState?.views?.find((v) => v.id === viewId) ?? null;
+
+  // Home is a console view, so it matched this route and /consoles/home rendered
+  // its cards on a canvas — the exact editor Phase 7 replaced. It has its own
+  // tab, and this URL was never advertised, so it goes there.
+  const isHome = viewId === HOME_VIEW_ID;
+  useEffect(() => {
+    if (isHome) router.navigate({ to: "/", replace: true });
+  }, [isHome, router]);
+  if (isHome) return null;
 
   if (!s.stageState) return null;
   if (!view) {
@@ -55,7 +66,7 @@ export function ConsoleRoute() {
     // overwriting their work. Remounting on editorEpoch restarts the canvas when
     // a conflict is resolved by keeping the other version.
     return (
-      <div className="h-full min-h-0 px-5 max-sm:px-3 pt-3">
+      <div className="h-full min-h-0 pt-3">
         <LayoutEditor
           key={`${view.id}:${editorEpoch}`}
           view={view}
@@ -78,7 +89,7 @@ export function ConsoleRoute() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {editable && (
-        <div className="flex shrink-0 items-center justify-end gap-2 px-5 max-sm:px-3 py-2">
+        <div className="flex shrink-0 items-center justify-end gap-2 py-2">
           <Button variant="filled" size="small" onClick={() => setEditing(true)}>
             <PencilIcon className="size-3.5 text-fg-muted" />
             Edit this console

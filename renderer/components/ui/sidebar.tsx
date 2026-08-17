@@ -59,7 +59,13 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {}
 export function Sidebar({ className, children, ...props }: SidebarProps) {
   return (
     <div
-      className={cn("flex flex-col h-full bg-rail", className)}
+      // min-h-full, not h-full. Inside a SCROLLER — which is what the mobile
+      // drawer is — h-full sizes this box to the scroller's visible height, so
+      // the grey stopped exactly one viewport down and everything below it
+      // scrolled onto the drawer's own white. min-h-full still fills a short
+      // container (the footer's mt-auto keeps working) and grows to the content
+      // when there is more of it.
+      className={cn("flex flex-col min-h-full bg-rail", className)}
       {...props}
     >
       {children}

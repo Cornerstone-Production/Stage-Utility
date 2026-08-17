@@ -69,6 +69,7 @@ import { useStageState } from "../main/use-stage-state";
 import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
+import { screensListViews } from "@main/services/home-view";
 import {
   CARD_PRESETS,
   isKnownObjectType,
@@ -82,6 +83,7 @@ import {
   typeLabel,
   usesPropInstance,
 } from "../main/layout-objects";
+import { IDIOM_TYPES, DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
 import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect,
@@ -93,8 +95,19 @@ import { ResponsiveControls } from "./responsive-controls";
 type SurfaceKind = "flat" | "glass" | "elevated" | "solid" | "outline";
 const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
   flat: { background: null, borderColor: null, borderWidth: 0, boxShadow: 0 },
+  // GLASS STAYS TRANSLUCENT. It is the one look whose whole point is that the
+  // canvas shows through, so making it opaque would leave no way to ask for
+  // that at all. Everything else went opaque because nothing else was asking.
+  //
+  // Its ground is the same string the old default card used, so the one-time
+  // migration cannot tell a deliberate Glass from a card that was simply never
+  // restyled, and turns both opaque. Re-applying Glass to a specific widget is
+  // one click, and it is the only way round an ambiguity in the stored data.
   glass: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0 },
-  elevated: { background: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0.6 },
+  // Opaque, like the card presets — an elevated surface that you can read the
+  // page through is a contradiction, and it bled exactly as badly as the rest.
+  // #191919 is the blend of the rgba it replaces over the kiosk black.
+  elevated: { background: "#191919", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0.6 },
   solid: { background: "var(--gray-2)", borderColor: null, borderWidth: 0, cornerRadius: 0.0148, boxShadow: 0.35 },
   outline: { background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015, cornerRadius: 0.0148, boxShadow: 0 },
 };
@@ -389,7 +402,10 @@ export function Inspector({
   const propInstances = usePropInstances();
   const integrationsSnap = useIntegrations();
   const captionChannels = Object.keys(useStageState().state?.captionChannelColors ?? {});
-  const embedViews = useStageState().state?.views ?? [];
+  // Home excluded: its stored geometry is meaningless (it is a card list, not a
+  // canvas), so embedding it would draw four cards stacked at whatever filler
+  // coordinates happen to be in the file.
+  const embedViews = screensListViews(useStageState().state?.views ?? []);
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
@@ -429,6 +445,19 @@ export function Inspector({
           value={(c as { propresenterInstanceId?: string | null }).propresenterInstanceId ?? "default"}
           options={propInstances.list.map((i) => ({ value: i.id, label: i.name }))}
           onChange={(v) => onConfig({ ...c, propresenterInstanceId: v === "default" ? null : v } as LayoutObjectConfig)}
+        />
+      )}
+
+      {/* The line above the value. New readouts arrive with one — a bare 0:04:12
+          does not say what it is counting to — and this is how it is changed or
+          cleared. Emptying it removes the caption entirely; a default nobody can
+          switch off would be worse than no default. */}
+      {"caption" in c && (
+        <RowText
+          label="Caption"
+          value={(c as { caption?: string | null }).caption ?? ""}
+          placeholder="none"
+          onChange={(v) => onConfig({ ...c, caption: v.trim() ? v : null } as LayoutObjectConfig)}
         />
       )}
 
@@ -1233,8 +1262,13 @@ export function Inspector({
           <Row label="Color"><input type="color" value={hexForInput(s.color, "#ffffff")} onChange={(e) => onStyle({ color: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" /></Row>
           <Row label="Align">
             <ButtonGroup>
+              {/* Which button reads as active has to be the alignment the object
+                  will actually RENDER at, not a single hard-coded guess. A
+                  readout with nothing stored aligns left; showing "C" lit here
+                  would tell the operator the widget is centred while it sits
+                  left, and the first click would appear to do nothing. */}
               {(["left", "center", "right"] as const).map((a) => (
-                <Button key={a} variant={(s.textAlign ?? "center") === a ? "accent" : "filled"} size="small" onClick={() => onStyle({ textAlign: a })}>{a[0].toUpperCase()}</Button>
+                <Button key={a} variant={(s.textAlign ?? (IDIOM_TYPES.has(c.type) ? DEFAULT_READOUT_ALIGN : "center")) === a ? "accent" : "filled"} size="small" onClick={() => onStyle({ textAlign: a })}>{a[0].toUpperCase()}</Button>
               ))}
             </ButtonGroup>
           </Row>

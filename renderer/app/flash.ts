@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 // Point at the control that actually does the job, after arriving at its page.
 //
 // Landing on the right page still leaves you hunting for the field, which on a
@@ -108,4 +110,42 @@ export function flashTarget(flashId: string): void {
   // Two frames before the first look, as the original did: one for React to
   // commit, one for layout to settle so scrollIntoView lands somewhere real.
   requestAnimationFrame(() => requestAnimationFrame(attempt));
+}
+
+/**
+ * A counter that ticks whenever a flash target THIS surface can reveal is
+ * requested.
+ *
+ * Use it as a `key` to remount a collapsed thing with `defaultOpen`, which is
+ * why it is a nonce rather than a boolean: remounting lets the operator close
+ * the thing again afterwards, and it avoids a setState inside an effect.
+ *
+ * Seeded from the pending target because `flashTarget` runs on the page being
+ * LEFT — its event fires before the destination has mounted. The listener covers
+ * the other order, when the surface is already on screen.
+ *
+ * Extracted from IntegrationsPanel, which had the only copy, when the
+ * integration ROWS needed exactly the same behaviour: a configured integration
+ * is collapsed, so the card a highlight is aimed at is not in the DOM at all.
+ */
+export function useRevealNonce(matches: (flashId: string) => boolean): number {
+  // Held in a ref so the listener is subscribed once and still sees the newest
+  // predicate — `matches` is a fresh closure on every render.
+  const matchRef = useRef(matches);
+  useEffect(() => {
+    matchRef.current = matches;
+  });
+  const [nonce, setNonce] = useState(() => {
+    const pending = pendingFlashTarget();
+    return pending && matches(pending) ? 1 : 0;
+  });
+  useEffect(() => {
+    const onReveal = (e: Event) => {
+      const flashId = (e as CustomEvent<RevealDetail>).detail?.flashId;
+      if (flashId && matchRef.current(flashId)) setNonce((n) => n + 1);
+    };
+    window.addEventListener(REVEAL_EVENT, onReveal);
+    return () => window.removeEventListener(REVEAL_EVENT, onReveal);
+  }, []);
+  return nonce;
 }

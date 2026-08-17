@@ -73,6 +73,34 @@ itself mounts, read-only, at that exact viewport — so what you see is what the
 screen will do. A caption says which of letterboxing, reflowing or stacking is
 happening and why.
 
+## How a readout looks
+
+Every widget that shows a value — clocks, countdowns, timers, SPL, counters, the
+status and wireless objects — draws the same three lines:
+
+```
+OBS              caption: what this is
+RECORDING        value: the reading itself
+00:35:09         sub-line: the qualifier
+```
+
+All three sizes come from the **widget's own height**, so a readout is legible at
+whatever size you place it — a dashboard tile and a wall both work without
+setting a font size. The stored font size no longer governs the value.
+
+Only the caption and sub-line a widget actually has are drawn; a clock with
+neither gets a value that fills the box.
+
+**Alignment** defaults to left, because three stacked lines of different widths
+read as one object when they share an edge. It is still yours to change per
+object under **Align** — a centred clock as a centrepiece is a normal thing to
+want.
+
+**Filled** is the same composition on a solid ground, used where a state has to
+carry across a room: a recorder painting itself red while recording, a section
+chip in its own colour. A filled widget is the same widget wearing a state, not a
+different design.
+
 ## Reset to default look
 
 In the inspector, under **Style**. Puts the object's look back to the default for
@@ -81,6 +109,23 @@ its type.
 It replaces the style rather than merging into it, so hand-tuned fields are
 genuinely cleared. Position, size, configuration and the responsive settings are
 left alone, and it can be undone.
+
+Cards are **opaque**. They used to be a few percent white, which looks the same on
+a bare canvas but does not cover anything — a widget over a transcript let the
+text read straight through it, which looks exactly like a broken layer order.
+**Glass**, under Style, is the deliberate see-through look if you want one.
+
+## What changed on your existing layouts
+
+Two things the object registry wrote into every object it ever created, which
+nobody chose, are replaced once on first start after upgrading:
+
+- **Readouts lose a centre alignment** they were given at creation, so they take
+  the left default above. An alignment you set yourself is untouched.
+- **Card grounds become opaque**, as described above.
+
+The server logs what it changed, under `[layout-defaults]`. Both are ordinary
+style fields afterwards: change either on any object and it stays changed.
 
 ## Checking object types at extreme sizes
 
