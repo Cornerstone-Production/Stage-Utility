@@ -6,6 +6,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
+import { buildViewBundle } from "../view-export.js";
 import {
   listLayoutTemplates,
   saveLayoutTemplate,
@@ -44,6 +45,19 @@ function isLayoutShape(v: unknown): v is LayoutDTO {
     typeof c.width === "number" && Number.isFinite(c.width) &&
     typeof c.height === "number" && Number.isFinite(c.height)
   );
+}
+
+/**
+ * `stage-utility-view-left-mic-display-2026-08-17.json`.
+ *
+ * The name is operator-supplied text going into a quoted header value, so the
+ * slug keeps only [a-z0-9-] — a quote or a path separator surviving here would
+ * be a header injection, not a cosmetic problem. Bounded because some
+ * filesystems cap a path component at 255 bytes.
+ */
+export function exportFilename(name: string, now: Date): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return `stage-utility-view-${slug ? `${slug}-` : ""}${now.toISOString().slice(0, 10)}.json`;
 }
 
 export async function viewRoutes(c: RouteCtx): Promise<void> {
@@ -143,7 +157,25 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    // POST /api/views/:id/duplicate — { name? }
+        // GET /api/views/:id/export — the whole view as one file.
+    const viewExportMatch = pathname.match(/^\/api\/views\/([^/]+)\/export$/);
+    if (method === "GET" && viewExportMatch) {
+      try {
+        const bundle = await buildViewBundle(decodeURIComponent(viewExportMatch[1]));
+        const filename = exportFilename(bundle.views[0]?.name ?? "view", new Date());
+        res.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "content-disposition": `attachment; filename="${filename}"`,
+          "cache-control": "no-store",
+        });
+        res.end(JSON.stringify(bundle, null, 2));
+      } catch (err) {
+        error(res, errorMessage(err), 404);
+      }
+      return;
+    }
+
+// POST /api/views/:id/duplicate — { name? }
     const viewDuplicateMatch = pathname.match(/^\/api\/views\/([^/]+)\/duplicate$/);
     if (method === "POST" && viewDuplicateMatch) {
       const body = await readBody(req) as Record<string, unknown>;
