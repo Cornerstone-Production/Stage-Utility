@@ -320,7 +320,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const body = await readBody(req) as Record<string, unknown>;
       const name = typeof body.name === "string" ? body.name : undefined;
       const viewId = typeof body.viewId === "string" ? body.viewId : null;
-      const state = await stageController.addOutput(name, viewId);
+      const { state } = await stageController.addOutput(name, viewId);
       json(res, state, 201);
       return;
     }

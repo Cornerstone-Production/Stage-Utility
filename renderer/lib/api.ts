@@ -359,6 +359,19 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "displays:refresh":
       return post<T>("/api/displays/refresh", p);
 
+    // ── Kiosk devices ─────────────────────────────────────────────────────
+    case "stage:setKioskDiscovery":
+      return post<T>("/api/kiosk-discovery", p);
+
+    case "devices:list":
+      return apiFetch<T>("/api/devices");
+    case "devices:scan":
+      return post<T>("/api/devices/scan", p);
+    case "devices:claim":
+      return post<T>("/api/devices/claim", p);
+    case "devices:release":
+      return post<T>("/api/devices/release", p);
+
     case "stage:setBranding":
       return post<T>("/api/branding", p);
 

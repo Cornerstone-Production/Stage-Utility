@@ -938,6 +938,54 @@ export function AdvancedSection({
       </FieldSet>
 
       <FieldSet>
+        <Collapsible label="Kiosk devices" summary="Let screens find this server and be claimed" headerClassName="px-4 py-2.5">
+          <FieldSet flat>
+            <FieldGroup>
+              <Field orientation="horizontal">
+                <FieldContent>
+                  <FieldLabel>Answer devices looking for a server</FieldLabel>
+                  <FieldDescription>
+                    Off by default so a test instance on the same network cannot claim a screen
+                    meant for this one. Screens already claimed keep working either way — this only
+                    controls whether NEW ones can find you. Takes effect when the server restarts.
+                  </FieldDescription>
+                </FieldContent>
+                <Switch
+                  checked={stageState.kioskDiscovery ?? false}
+                  onCheckedChange={(on: boolean) => void invoke("stage:setKioskDiscovery", { enabled: on })}
+                  aria-label="Answer kiosk devices looking for a server"
+                />
+              </Field>
+              <Field orientation="vertical">
+                <FieldContent>
+                  <FieldLabel>Setting up a screen</FieldLabel>
+                  <FieldDescription>
+                    On the machine that will show the display, run this once. It finds this server
+                    on its own — there is no address to type, and nothing to change if the server
+                    moves.
+                  </FieldDescription>
+                </FieldContent>
+                <div className="flex flex-col gap-1.5">
+                  {[
+                    ["Linux / Raspberry Pi", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-linux.sh | sudo sh`],
+                    ["macOS", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-macos.sh | sudo sh`],
+                    ["Windows (elevated)", `irm ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-windows.ps1 | iex`],
+                  ].map(([os, cmd]) => (
+                    <div key={os}>
+                      <div className="text-caption2 text-fg-subtle">{os}</div>
+                      <code className="block select-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-caption1 text-fg">
+                        {cmd}
+                      </code>
+                    </div>
+                  ))}
+                </div>
+              </Field>
+            </FieldGroup>
+          </FieldSet>
+        </Collapsible>
+      </FieldSet>
+
+      <FieldSet>
         <Collapsible label="Network & behavior" summary="Public address, reconnects, attendance" headerClassName="px-4 py-2.5">
           <FieldSet flat>
         <FieldGroup>

@@ -55,6 +55,11 @@ import { integrationRoutes } from "./routes/integration-routes.js";
 import { rosstalkRoutes } from "./routes/rosstalk-routes.js";
 import { automationRoutes } from "./routes/automation-routes.js";
 import { displaySettingsRoutes } from "./routes/display-settings-routes.js";
+import { kioskDeviceRoutes } from "./routes/kiosk-device-routes.js";
+import { startKioskResponder, stopKioskResponder } from "./kiosk-responder.js";
+import { settingsStore } from "./settings-store.js";
+import { recordDisplayScreen } from "./kiosk-devices-store.js";
+import { randomUUID } from "node:crypto";
 import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
@@ -82,6 +87,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   rosstalkRoutes,
   automationRoutes,
   displaySettingsRoutes,
+  kioskDeviceRoutes,
   systemRoutes,
   brandingRoutes,
   presetRoutes,
@@ -409,6 +415,36 @@ export class RemoteServer {
   }
 
   /**
+   * Bring up the kiosk discovery responder, if it is switched on.
+   *
+   * Off by default — see kioskDiscovery in settings-store.ts for why a fresh
+   * install must not answer. The server id is minted on first use and then never
+   * rewritten: every binding on every device refers to it, so changing it would
+   * orphan the lot.
+   */
+  private async startDiscovery(): Promise<void> {
+    try {
+      const settings = await settingsStore.load();
+      if (!settings.kioskDiscovery) return;
+      let serverId = settings.serverId;
+      if (!serverId) {
+        serverId = randomUUID();
+        await settingsStore.patch({ serverId });
+      }
+      startKioskResponder({
+        serverId,
+        serverName: settings.appName || "Stage Utility",
+        url: () => this.getLanUrl(),
+        port: settings.kioskDiscoveryPort,
+      });
+    } catch (err) {
+      // Reported, never fatal: a server that cannot answer discovery still runs
+      // every display already bound to it.
+      console.warn("[remote-server] kiosk discovery did not start:", err);
+    }
+  }
+
+  /**
    * Best-effort "who is holding this port", for the log only.
    *
    * Fixed argument vectors, no shell, no interpolation of anything a request can
@@ -463,6 +499,7 @@ export class RemoteServer {
           const onListening = () => {
             this.server!.removeListener("error", onError);
             console.log(`[remote-server] listening on 0.0.0.0:${PORT} (LAN: ${this.getLanUrl()})`);
+            void this.startDiscovery();
             resolve();
           };
           const onError = (err: NodeJS.ErrnoException) => {
@@ -653,6 +690,7 @@ export class RemoteServer {
 
   async stop(): Promise<void> {
     console.log("[remote-server] stopping");
+    stopKioskResponder();
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
@@ -763,7 +801,16 @@ export class RemoteServer {
 
     // ── Serve renderer static build (standalone mode) ─────────────────────
     // Serves the Vite-built renderer from build/renderer/ when it exists.
-    if (method === "GET" && !pathname.startsWith("/api/") && pathname !== "/photos") {
+    // /enroll is excluded for the same reason /api is: static runs BEFORE the
+    // route modules, and an unknown path falls through to the kiosk shell — so
+    // without this, every unclaimed device was served the display picker instead
+    // of the holding screen, and the route below never ran.
+    if (
+      method === "GET" &&
+      !pathname.startsWith("/api/") &&
+      pathname !== "/photos" &&
+      pathname !== "/enroll"
+    ) {
       const staticServed = await this.tryServeStatic(pathname, res, req.headers["accept-encoding"] as string | undefined);
       if (staticServed) return;
       // Fall through to the phone control page.
@@ -874,7 +921,15 @@ export class RemoteServer {
       const outputId = typeof body.outputId === "string" ? body.outputId : null;
       if (outputId) {
         if (body.leaving === true) displayLeaving(outputId);
-        else displayHeartbeat(outputId);
+        else {
+          displayHeartbeat(outputId);
+          // Deliberately discarded, with a log: the heartbeat itself succeeded
+          // and a display that could not record its size is still a display
+          // showing the right thing. Nothing reads the size to decide anything.
+          void recordDisplayScreen(outputId, body.deviceId, body.screen).then((failed) => {
+            if (failed) console.warn("[displays] could not record screen size:", failed);
+          });
+        }
       }
       json(res, { ok: outputId != null });
       return;

@@ -380,7 +380,19 @@ export function StageView() {
       void fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ outputId: displayId }),
+        // The size this screen is actually running at, so Screens can show it
+        // without anybody walking to the wall with a laptop. CSS pixels plus the
+        // ratio: that is what a layout is measured in, so it is the number that
+        // answers "will my view fit".
+        //
+        // `device` comes from the /enroll redirect and is only present on a
+        // kiosk device. A browser opened by hand has none, so its size is
+        // reported by nobody and cannot overwrite the screen's.
+        body: JSON.stringify({
+          outputId: displayId,
+          deviceId: new URLSearchParams(window.location.search).get("device") ?? undefined,
+          screen: { w: window.screen.width, h: window.screen.height, dpr: window.devicePixelRatio },
+        }),
         keepalive: true,
       }).catch(() => {});
     };

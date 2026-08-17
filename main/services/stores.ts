@@ -31,6 +31,7 @@ import "./scriptview-config-store.js";
 import "./scriptview-layouts-store.js";
 import "./scriptview-roles-store.js";
 import "./service-timeline-store.js";
+import "./kiosk-devices-store.js";
 import "./settings-store.js";
 import "./signal-store.js";
 import "./slots-store.js";

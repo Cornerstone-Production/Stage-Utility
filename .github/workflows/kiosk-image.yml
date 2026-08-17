@@ -1,0 +1,127 @@
+# Build the flash-and-boot Raspberry Pi image.
+#
+# Phase 2 of kiosk enrolment. Phase 1 — the installer — already works on a Pi
+# running stock Raspberry Pi OS, and on the Pis that already exist without
+# reflashing. All this adds is skipping the one SSH step.
+#
+# NOT run on every release. The image changes rarely, because what is on screen
+# is a web page from the server: the payload updates itself and only the OS and
+# kiosk layer live here. Building a 1-2 GB artifact on every release would be
+# 20-40 minutes of CI for a file nobody downloads.
+#
+# NOTHING SITE-SPECIFIC IS BAKED IN. This repository is public, and a released
+# image must never carry a Wi-Fi password or a server address. Raspberry Pi
+# Imager's own customisation already sets SSID, password, hostname and SSH keys,
+# and it applies to any Raspberry Pi OS-based image including this one — so the
+# credentials go in at flash time, on the machine doing the flashing.
+
+name: Kiosk image
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Attach the image to this release tag (blank = artifact only)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pi-gen dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            coreutils quilt parted qemu-user-static debootstrap zerofree zip \
+            dosfstools libarchive-tools libcap2-bin grep rsync xz-utils file \
+            git curl bc gpg pigz arch-test
+
+      - name: Fetch pi-gen
+        run: |
+          git clone --depth 1 --branch arm64 https://github.com/RPi-Distro/pi-gen.git
+          # Lite only: a kiosk needs a browser and X, not a desktop suite.
+          touch pi-gen/stage3/SKIP pi-gen/stage4/SKIP pi-gen/stage5/SKIP
+          touch pi-gen/stage4/SKIP_IMAGES pi-gen/stage5/SKIP_IMAGES
+
+      - name: Add the kiosk stage
+        run: |
+          STAGE=pi-gen/stage-kiosk
+          mkdir -p "$STAGE/00-install/files"
+          echo "stage-kiosk" > "$STAGE/EXPORT_IMAGE"
+          cp scripts/kiosk/install-linux.sh "$STAGE/00-install/files/install-kiosk.sh"
+
+          # The installer is the SAME file Phase 1 serves — one script, one set of
+          # behaviours, so the image cannot drift from what an SSH install does.
+          # It runs on FIRST BOOT rather than during the build: the device id and
+          # secret must be unique per SD card, and generating them here would put
+          # one identity on every card ever flashed.
+          cat > "$STAGE/00-install/00-run.sh" <<'RUN'
+          #!/bin/bash -e
+          install -m 755 files/install-kiosk.sh "${ROOTFS_DIR}/usr/local/sbin/stage-utility-first-boot"
+          install -m 644 files/firstboot.service "${ROOTFS_DIR}/etc/systemd/system/stage-utility-firstboot.service"
+          on_chroot << EOF
+          systemctl enable stage-utility-firstboot.service
+          EOF
+          RUN
+          chmod +x "$STAGE/00-install/00-run.sh"
+
+          cat > "$STAGE/00-install/files/firstboot.service" <<'UNIT'
+          [Unit]
+          Description=Stage Utility kiosk first-boot setup
+          After=network-online.target
+          Wants=network-online.target
+          ConditionPathExists=!/var/lib/stage-utility-display/device-id
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/stage-utility-first-boot
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          cat > pi-gen/config <<'CONF'
+          IMG_NAME=stage-utility-kiosk
+          RELEASE=bookworm
+          TARGET_HOSTNAME=stage-display
+          DEPLOY_COMPRESSION=xz
+          LOCALE_DEFAULT=en_GB.UTF-8
+          # No default user and no password: Raspberry Pi Imager sets those at
+          # flash time, and a published image with a known login is a published
+          # image with a known login.
+          DISABLE_FIRST_BOOT_USER_RENAME=0
+          CONF
+
+      - name: Build
+        run: cd pi-gen && sudo ./build.sh
+
+      - name: Name it after the commit that built it
+        id: img
+        run: |
+          IMG=$(find pi-gen/deploy -name '*.img.xz' | head -1)
+          test -n "$IMG" || { echo "::error title=No image::pi-gen produced nothing"; exit 1; }
+          OUT="stage-utility-kiosk-$(git rev-parse --short HEAD).img.xz"
+          mv "$IMG" "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          ls -lh "$OUT"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kiosk-image
+          path: ${{ steps.img.outputs.path }}
+          retention-days: 14
+
+      - name: Attach to a release
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.release_tag }}" "${{ steps.img.outputs.path }}" --clobber
