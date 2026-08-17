@@ -87,6 +87,13 @@ export interface SnapshotMeta {
   fileCount: number;
 }
 
+/** This build's version, for stamping a bundle. Exported so a view export
+ *  carries the same value a config snapshot does rather than reading
+ *  package.json a second way. */
+export function appVersion(): string {
+  return pkgVersion();
+}
+
 function pkgVersion(): string {
   try {
     return JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version ?? "0.0.0";
