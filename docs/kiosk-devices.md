@@ -99,6 +99,23 @@ The installers set what they can and print what is left. On macOS, automatic
 login and the screen saver are not scriptable; on Windows, automatic login is set
 in `netplwiz`.
 
+## The prebuilt Pi image
+
+Flash and boot, with no SSH step. Built by the **Kiosk image** workflow on
+demand, not on every release — the image changes rarely, because what is on
+screen is a web page from the server, so the payload updates itself and only the
+OS and kiosk layer live in the image.
+
+It runs the SAME `install-linux.sh` this server hands out, on first boot rather
+than during the build: the device id and secret must be unique per SD card, and
+generating them at build time would put one identity on every card ever flashed.
+
+**Wi-Fi credentials are not in the image.** Raspberry Pi Imager already sets
+SSID, password, hostname and SSH keys, and its customisation applies to this
+image like any other Raspberry Pi OS one — so they go in at flash time, on the
+machine doing the flashing. This repository is public; a released image must
+never carry a credential or a site's server address.
+
 ## Removing one
 
 *Release* in Kiosks unbinds it: the output keeps its view and its slug and simply
