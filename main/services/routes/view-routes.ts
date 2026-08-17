@@ -165,8 +165,9 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         // refuse a file this app exported — the same reason /api/config/import
         // uses this limit.
         const report = await applyViewBundle(await readBody(req, MAX_CONFIG_BODY_BYTES));
-        // The view list changed and every open page renders from it.
-        await stageController.refresh();
+        // The importer writes to several stores directly, so the controller's
+        // in-memory views are stale — refresh() would broadcast the OLD list.
+        await stageController.reloadViews();
         json(res, report);
       } catch (err) {
         error(res, errorMessage(err));

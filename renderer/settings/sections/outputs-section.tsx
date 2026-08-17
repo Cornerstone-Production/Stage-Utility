@@ -1,4 +1,5 @@
 import { errorMessage } from "@main/services/errors";
+import { ImportLayout } from "../../app/screens/import-layout";
 import { useState, useEffect, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
@@ -705,6 +706,9 @@ export function OutputsSection({
           <PlusIcon className="size-3.5 text-gray-9" />
           New view
         </Button>
+        {/* Beside New view because an imported view IS a new view — it arrives
+            where you would look for one. */}
+        <ImportLayout />
         {outputs.length > 0 && (
           <Button
             variant="transparent"

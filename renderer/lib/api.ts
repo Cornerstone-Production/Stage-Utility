@@ -462,6 +462,10 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>(`/api/views/${encodeURIComponent(id)}/duplicate`, { name: p.name });
     }
 
+    // The bundle IS the payload — a view export file, posted verbatim.
+    case "views:import":
+      return post<T>("/api/views/import", p.bundle);
+
     case "views:reorder":
       return post<T>("/api/views/reorder", { ids: p.ids });
 

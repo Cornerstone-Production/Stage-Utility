@@ -2187,6 +2187,33 @@ export class StageController {
 
   // ── Refresh ───────────────────────────────────────────────────────────
 
+  /**
+   * Re-read views from disk into the in-memory state, and broadcast.
+   *
+   * For a writer that legitimately bypasses this controller — the view importer
+   * merges a bundle into several stores at once, which is not a shape any
+   * controller method has. Without this the file on disk is right and every open
+   * page still shows the old list, because `broadcast()` sends `this.state`.
+   */
+  async reloadViews(): Promise<StageState> {
+    const views = await viewsStore.load();
+    this.state = { ...this.state, views };
+    // Same inline-slots sync saveViewLayout does: an imported layout may contain
+    // slots-grid objects whose rows are on disk but not yet in memory.
+    const inlineIds = new Set<string>();
+    forEachInlineSlotsGrid(this.state.views, (oid) => inlineIds.add(oid));
+    if (this.state.serviceTypeId) {
+      for (const oid of inlineIds) {
+        if (!this.rawSlotsByObject.has(oid)) {
+          this.rawSlotsByObject.set(oid, await slotsStore.getSlots(oid, this.state.serviceTypeId));
+        }
+      }
+    }
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
   async refresh(full = true): Promise<StageState> {
     console.log(`[stage-controller] refresh (${full ? "full" : "targeted"})`);
     // Manual "Refresh now" (full) drops the whole cache for a clean re-pull. The
