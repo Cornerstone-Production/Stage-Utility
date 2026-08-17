@@ -28,20 +28,41 @@ kinds of thing outside the view, and the design turns on which of those travel.
 | OSC and RossTalk target definitions | `osc-targets.json`, `rosstalk-targets.json` | target id |
 | Views this one embeds | `views.json` | `view-embed.viewId`, `slots-grid.sourceViewId` |
 
-**Stays behind, deliberately:** wireless connections, integration configs,
-ProPresenter instances, SenSource zones and Smaart meters. These are the
-building's rig rather than the layout's content, several carry credentials, and
-all are system-wide rather than per-view.
+**Stays behind:** wireless connections, integration configs, ProPresenter
+instances, SenSource zones and Smaart meters.
 
-The line is credentials and scope. An OSC target is a name, an address and a
-port that belongs to the button pointing at it — without the definition the
-button is an opaque id nobody can read or repair. A wireless connection is the
-racked receiver it talks to.
+The reason is that the destination has **different hardware**, not that these are
+somehow less portable. A mobile deployment runs a duplicate set of gear — its own
+ProPresenter machine, its own Smaart machine, its own wireless rack — so shipping
+the source building's connection definitions would point the mobile rig at
+receivers that are not in the room. That is worse than an unbound object, because
+it looks configured.
 
-An object whose binding is not present on the destination keeps that binding and
-renders as unconfigured. Nothing is silently stripped, so importing into a
-matching rig just works, and importing anywhere else leaves a visible list of
-what to rebind.
+An OSC or RossTalk target travels because it is an address the button owns and
+the button is unreadable without it. A wireless connection is a different physical
+receiver at the other end.
+
+An object whose binding is not present keeps that binding and renders as
+unconfigured. Nothing is silently stripped.
+
+### What resolves anyway
+
+Two kinds of reference survive the trip because their ids are not machine-specific:
+
+- **Integration status** — `obs`, `reaper` and the rest are fixed constants, so
+  the object works wherever that integration is configured.
+- **The primary ProPresenter instance** — bindings are `"default"`, meaning
+  whichever ProPresenter this server talks to. A different machine, the same id.
+
+Everything device-level needs rebinding, because it names hardware:
+wireless channels and charger bays (a `randomUUID()` connection id), Smaart
+meters (`deviceName::channelName`), SenSource zones, and any extra ProPresenter
+instance beyond the primary.
+
+Smaart is the one worth a note in the docs: because its id is built from names
+rather than a generated id, naming the mobile machine's device and channels to
+match the building's makes those objects resolve on import with nothing to
+rebind. The same trick cannot work for wireless.
 
 ## The file
 
@@ -128,9 +149,16 @@ it:
 
 - views added, by name
 - targets added, and targets already present that were left alone
-- objects referencing something not on this system, grouped by kind
-  ("4 objects reference wireless channels that are not on this system")
+- **bindings to rebind, grouped by kind and named individually** — not a count.
+  Rebinding is the expected path, since the destination is a different rig, so
+  this is a work list rather than a warning: "Handheld 3, Handheld 4 — need a
+  wireless channel." Each entry links into the layout editor with that object
+  selected.
 - images that could not be written
+
+Offering the rebind inline on this screen — a picker per entry — is the intended
+follow-up. It needs one picker per binding kind, which is five small components
+rather than one, and the grouped work list is useful without them.
 
 A partial import is possible — a view can land while one of its images fails.
 The caller is told which, and nothing is rolled back, because a layout missing
