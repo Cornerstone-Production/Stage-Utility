@@ -173,6 +173,7 @@ export class StageController {
     remoteUrl: null,
     lanUrl: null,
     showQr: true,
+    kioskDiscovery: false,
     allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
     appName: "Stage Utility",
     accentColor: null,
@@ -258,6 +259,7 @@ export class StageController {
     }
 
     const showQr = settings.showQr ?? true;
+    const kioskDiscovery = settings.kioskDiscovery ?? false;
 
     const { views, outputs } = await this.loadOrMigrateViewsAndOutputs(settings);
 
@@ -282,6 +284,7 @@ export class StageController {
       views,
       outputs,
       showQr,
+      kioskDiscovery,
       allowedServiceTypeIds,
       appName: settings.appName ?? "Stage Utility",
       accentColor: settings.accentColor ?? null,
@@ -313,6 +316,7 @@ export class StageController {
       planId: this.state.planId,
       planMode: this.state.planMode,
       showQr: this.state.showQr,
+      kioskDiscovery: this.state.kioskDiscovery,
       views: views.length,
       outputs: outputs.length,
       allowedServiceTypeIds: this.state.allowedServiceTypeIds,
@@ -1181,6 +1185,22 @@ export class StageController {
     console.log(`[stage-controller] setShowQr → ${scrub(show)}`);
     this.state = { ...this.state, showQr: show };
     await settingsStore.patch({ showQr: show });
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * Turn kiosk discovery on or off.
+   *
+   * Takes effect on the next start rather than immediately: binding a UDP socket
+   * is not something to do and undo from a settings toggle mid-service, and the
+   * screens already bound keep working either way — a bound device is answered
+   * by a running responder and unaffected by this until the server restarts.
+   */
+  async setKioskDiscovery(on: boolean): Promise<StageState> {
+    console.log(`[stage-controller] setKioskDiscovery → ${scrub(on)}`);
+    this.state = { ...this.state, kioskDiscovery: on };
+    await settingsStore.patch({ kioskDiscovery: on });
     this.broadcast();
     return this.state;
   }

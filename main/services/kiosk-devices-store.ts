@@ -36,21 +36,45 @@ export const findByOutput = (devices: readonly BoundDevice[], outputId: string):
  * Is this enrolment allowed to be served the display it claims?
  *
  * A device id alone is self-asserted — anything on the LAN can send one — so a
- * wrong or missing token is NOT an error, it is a different device. It gets the
- * holding screen and shows up in Devices as its own entry, rather than silently
+ * wrong or missing secret is NOT an error, it is a different device. It gets the
+ * holding screen and appears in Kiosks as its own entry, rather than silently
  * being handed a claimed screen's content.
+ *
+ * THE SECRET IS THE DEVICE'S, not ours. The installer generates it and the agent
+ * presents it; we pin whatever the device showed us at the moment it was
+ * claimed. Issuing one from here looked right until the installer was written
+ * and there was nowhere to send it — the agent is a shell script and a browser,
+ * with no channel back from a claim that happens in somebody else's browser.
  */
 export function authorise(
   devices: readonly BoundDevice[],
   id: string,
-  token: string | undefined,
+  secret: string | undefined,
 ): BoundDevice | null {
   const device = findById(devices, id);
-  if (!device || !token || token !== device.token) return null;
-  return device;
+  if (!device || !secret) return null;
+  // Unpinned: claimed before this device had ever enrolled, so trust the first
+  // secret presented and pin it. The window is between claiming and the screen's
+  // next load, on a LAN this server already trusts for reads.
+  if (device.token === "") return device;
+  return secret === device.token ? device : null;
+}
+
+/** Pin the secret a device presented, if it has not got one yet. Returns the
+ *  SAME array when there is nothing to pin. */
+export function pinSecret(devices: readonly BoundDevice[], id: string, secret: string): BoundDevice[] {
+  const i = devices.findIndex((d) => d.id === id && d.token === "");
+  if (i === -1) return devices as BoundDevice[];
+  const next = [...devices];
+  next[i] = { ...next[i], token: secret };
+  return next;
 }
 
 export interface ClaimDetails {
+  /** The secret this device presented when it last enrolled. Absent when it has
+   *  never reached us over HTTP — then the binding is left unpinned and takes
+   *  the first secret it shows. */
+  secret?: string;
   macs?: string[];
   hostname?: string;
   os?: string;
@@ -80,9 +104,9 @@ export function claim(
 ): { devices: BoundDevice[]; token: string; displaced: BoundDevice | null } {
   const displaced = devices.find((d) => d.outputId === outputId && d.id !== id) ?? null;
   const existing = findById(devices, id);
-  // A re-claim of the same device keeps its token, so the agent already holding
-  // it is not locked out of the screen it is currently showing.
-  const token = existing?.token ?? newClaimToken();
+  // A re-claim keeps whatever is already pinned, so the agent currently serving
+  // that screen is not locked out by an operator adjusting its binding.
+  const token = existing?.token || details.secret || "";
   const device: BoundDevice = {
     ...existing,
     id,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
-  kioskDevicesStore, authorise, claim, release, touch, matchByMac, newClaimToken, withoutTokens,
+  kioskDevicesStore, authorise, claim, release, touch, matchByMac, newClaimToken, withoutTokens, pinSecret,
 } from "./kiosk-devices-store.js";
 import { configFilenames } from "./store-registry.js";
 import type { BoundDevice } from "../types/kiosk.js";
@@ -56,10 +56,20 @@ describe("authorising an enrolment", () => {
     assert.equal(authorise(devices, "nobody", "tok-1"), null);
   });
 
-  test("tokens are not guessable", () => {
+  test("a generated secret is not guessable", () => {
+    // Still used by the installers to mint the device's own secret.
     const a = newClaimToken();
-    assert.ok(a.length >= 24, `token is only ${a.length} chars`);
+    assert.ok(a.length >= 24, `secret is only ${a.length} chars`);
     assert.notEqual(a, newClaimToken());
+  });
+
+  test("an UNPINNED device takes the first secret it presents", () => {
+    const unpinned = [dev({ token: "" })];
+    assert.equal(authorise(unpinned, "d1", "whatever-it-says")?.outputId, "display-1");
+    const pinned = pinSecret(unpinned, "d1", "whatever-it-says");
+    assert.equal(pinned[0].token, "whatever-it-says");
+    // ...and from then on, only that one.
+    assert.equal(authorise(pinned, "d1", "something-else"), null);
   });
 });
 
@@ -84,12 +94,20 @@ describe("what a client is allowed to see", () => {
 });
 
 describe("claiming", () => {
-  test("binds to an existing output and issues a token", () => {
-    const { devices, token } = claim([], "d9", "display-2", { hostname: "stage-pi-2" });
+  test("binds to an existing output and pins the device's own secret", () => {
+    const { devices } = claim([], "d9", "display-2", { hostname: "stage-pi-2", secret: "from-the-pi" });
     assert.equal(devices.length, 1);
     assert.equal(devices[0].outputId, "display-2");
-    assert.equal(devices[0].token, token);
+    assert.equal(devices[0].token, "from-the-pi", "the device's secret was not pinned");
     assert.equal(devices[0].label, "stage-pi-2", "the hostname should name it until renamed");
+  });
+
+  test("claiming a device that has never enrolled leaves it UNPINNED", () => {
+    // There is nowhere to send a server-issued token: the agent is a shell
+    // script and a browser, and the claim happens in somebody else's browser.
+    // So an unseen device is pinned by the first secret it presents.
+    const { devices } = claim([], "never-seen", "display-2");
+    assert.equal(devices[0].token, "");
   });
 
   test("claiming an output that already has a device MOVES the binding", () => {
@@ -100,11 +118,11 @@ describe("claiming", () => {
     assert.deepEqual(devices.map((d) => d.id), ["new"], "the old device is still bound");
   });
 
-  test("re-claiming the same device keeps its token", () => {
+  test("re-claiming the same device keeps what is already pinned", () => {
     // Otherwise the agent currently showing that screen is locked out of it by an
     // operator adjusting the very binding it is serving.
     const before = [dev()];
-    const { devices, token } = claim(before, "d1", "display-3");
+    const { devices, token } = claim(before, "d1", "display-3", { secret: "a-different-one" });
     assert.equal(token, "tok-1");
     assert.equal(devices[0].outputId, "display-3");
   });

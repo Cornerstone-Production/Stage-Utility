@@ -49,6 +49,10 @@ export interface SeenDevice {
   lastSeen: number;
   /** The server this device says owns it, if any. */
   boundTo?: string;
+  /** The secret this device presented when it last loaded /enroll. Kept in
+   *  memory only and never broadcast — it arrives over unicast HTTP, not in the
+   *  probe, so it is not shouted at the whole LAN. */
+  secret?: string;
   /** The device cannot reach the server that owns it. Only then does another
    *  server show it at all, and only behind an explicit force-claim. */
   unreachable?: boolean;

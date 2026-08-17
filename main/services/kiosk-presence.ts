@@ -100,6 +100,14 @@ export function seenDevices(now = Date.now()): SeenDevice[] {
   return [...seen.values()].filter((d) => d.lastSeen >= cutoff).sort((a, b) => b.lastSeen - a.lastSeen);
 }
 
+/** Record the secret a device presented over HTTP. Never comes from a probe —
+ *  a broadcast secret is not a secret. */
+export function rememberSecret(id: string, secret: string): void {
+  const d = seen.get(id);
+  if (d) seen.set(id, { ...d, secret });
+  else seen.set(id, { id, macs: [], ip: "", firstSeen: Date.now(), lastSeen: Date.now(), secret });
+}
+
 /** Forget a device immediately — it was just claimed, so it stops being a
  *  candidate the moment the binding exists rather than a minute and a half later. */
 export function forgetSeen(id: string): void {

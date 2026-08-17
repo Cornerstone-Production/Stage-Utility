@@ -47,6 +47,9 @@ export interface StageState {
    *  resolve DNS, so this is shown regardless of publicUrl. */
   lanUrl: string | null;
   showQr: boolean;
+  /** Answer kiosk devices looking for a server. Off until switched on, so a test
+   *  instance on the same LAN cannot claim a screen meant for the real one. */
+  kioskDiscovery: boolean;
   /** Allowlisted service type IDs for auto mode. Empty array = all allowed. */
   allowedServiceTypeIds: string[];
   /** Customizable brand name shown in the sidebar header and on the kiosk. */

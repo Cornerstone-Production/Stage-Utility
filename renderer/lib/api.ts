@@ -360,6 +360,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/displays/refresh", p);
 
     // ── Kiosk devices ─────────────────────────────────────────────────────
+    case "stage:setKioskDiscovery":
+      return post<T>("/api/kiosk-discovery", p);
+
     case "devices:list":
       return apiFetch<T>("/api/devices");
     case "devices:scan":
