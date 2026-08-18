@@ -1,4 +1,5 @@
 import { errorMessage } from "@main/services/errors";
+import { availableCount } from "@main/services/update/availability";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon } from "lucide-react";
@@ -103,10 +104,8 @@ function UpdatesPanel({
   // ignore the banner. Falls back to `behind` for a server too old to send the
   // narrower count.
   const behindNews = s?.behindUserFacing ?? behind;
-  // Releases, not commits, once the server follows tags. A release is the unit an
-  // operator acts on; the commit count behind it is detail.
-  const releasesBehind = s?.tagBased ? (s.releasesBehind ?? 0) : 0;
-  const available = s?.tagBased ? releasesBehind : behindNews;
+  // One definition, shared with the toast and the nav dot.
+  const available = availableCount(s);
   // Merged but not yet released — CI still running, or red. Only worth saying when
   // there is nothing to install, otherwise it competes with the update itself.
   const unreleased = s?.tagBased ? (s.unreleasedCommits ?? 0) : 0;

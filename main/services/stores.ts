@@ -34,6 +34,7 @@ import "./service-timeline-store.js";
 import "./kiosk-devices-store.js";
 import "./settings-store.js";
 import "./signal-store.js";
+import "./update-notices-store.js";
 import "./slots-store.js";
 import "./spl-history-store.js";
 import "./views-store.js";
