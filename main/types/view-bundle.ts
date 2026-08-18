@@ -54,6 +54,10 @@ export interface ViewBundle {
   targets: { osc: OscTargetConfig[]; rosstalk: RossTalkTargetConfig[] };
   /** `<dir>/<file>` -> base64, matching ConfigSnapshot.images. */
   images: Record<string, string>;
+  /** Images the layout references that the EXPORT could not read. Carried so the
+   *  import can say so — otherwise neither end ever tells a human that the
+   *  layout points at a picture which did not travel. */
+  missingImages?: string[];
 }
 
 export interface ImportReport {

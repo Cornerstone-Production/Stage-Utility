@@ -64,7 +64,10 @@ export function collectRefs(all: readonly View[], rootId: string): ViewRefs {
       // `/layout-images/<file>` on the wire; `<dir>/<file>` in the bundle, which
       // is the shape ConfigSnapshot.images already uses.
       if (type === "image") {
-        const m = /^\/layout-images\/(.+)$/.exec(str(c.src));
+        // Same shape layout-image-store matches: a query or fragment is not
+        // part of the filename, and taking it as one yields a ref the reader
+        // then refuses — an image that vanishes with nobody told.
+        const m = /\/layout-images\/([^/?#]+)/.exec(str(c.src));
         if (m) imageFiles.push(`layout-images/${m[1]}`);
       }
 

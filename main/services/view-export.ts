@@ -60,12 +60,15 @@ export async function buildViewBundle(rootId: string): Promise<ViewBundle> {
   const osc = (await oscStore.load()).filter((t) => refs.oscTargetIds.includes(t.id));
   const rosstalk = (await rosstalkStore.loadTargets()).filter((t) => refs.rosstalkTargetIds.includes(t.id));
 
-  // A missing image is reported by its absence from the map, not by refusing to
-  // export. An export that fails because one logo was deleted is worse.
+  // A missing image does not refuse the export — one deleted logo should not
+  // block the other twenty objects — but it IS named, so the import can tell
+  // somebody. An export is a plain download with no report of its own.
   const images: Record<string, string> = {};
+  const missingImages: string[] = [];
   for (const ref of refs.imageFiles) {
     const img = await readLayoutImage(ref.slice("layout-images/".length));
     if (img) images[ref] = img.data.toString("base64");
+    else missingImages.push(ref);
   }
 
   const settings = await settingsStore.load();
@@ -79,5 +82,6 @@ export async function buildViewBundle(rootId: string): Promise<ViewBundle> {
     sideData: { slots, notes, scriptviewLayouts },
     targets: { osc, rosstalk },
     images,
+    ...(missingImages.length ? { missingImages } : {}),
   };
 }

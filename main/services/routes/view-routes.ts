@@ -181,7 +181,10 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         });
         res.end(JSON.stringify(bundle, null, 2));
       } catch (err) {
-        error(res, errorMessage(err), 404);
+        // 404 only for an unknown view. A read error is not "not found", and
+        // answering 404 for it sends somebody looking for a missing view.
+        const msg = errorMessage(err);
+        error(res, msg, /unknown view/.test(msg) ? 404 : 500);
       }
       return;
     }

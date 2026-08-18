@@ -150,6 +150,15 @@ describe("importing a bundle", () => {
     assert.equal(report.targetsAdded.length, 0);
   });
 
+  test("two incoming targets sharing an id do not both land", async () => {
+    const t = { id: "osc-dup", name: "One", enabled: true, config: { host: "10.0.0.1", port: 8000 } };
+    const report = await applyViewBundle(bundle({
+      targets: { osc: [t, { ...t, name: "Two" }], rosstalk: [] },
+    }));
+    assert.equal((await oscStore.load()).length, 1, "a duplicate id landed in the store");
+    assert.equal(report.targetsAdded.length, 1);
+  });
+
   test("a target that is not here is added", async () => {
     const report = await applyViewBundle(bundle({
       targets: { osc: [{ id: "osc-b", name: "Lighting", enabled: true, config: { host: "192.168.1.50", port: 8000 } }], rosstalk: [] },

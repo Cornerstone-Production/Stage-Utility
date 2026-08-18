@@ -29,6 +29,21 @@ beforeEach(async () => {
 });
 
 describe("building a view bundle", () => {
+  test("an image the layout points at but that is gone is NAMED, not dropped", async () => {
+    // An export is a plain download with no report of its own, so if the bundle
+    // does not carry the fact, nobody ever learns the picture did not travel.
+    await viewsStore.save([{
+      ...custom("view-1", [{
+        id: "img", x: 0, y: 0, w: 1, h: 1, z: 0, style: {},
+        config: { type: "image", src: "/layout-images/deadbeefdeadbeef.png" },
+      }]),
+    }] as never);
+    const b = await buildViewBundle("view-1");
+    assert.deepEqual(Object.keys(b.images), []);
+    assert.deepEqual(b.missingImages, ["layout-images/deadbeefdeadbeef.png"]);
+  });
+
+
   test("carries the chosen view and what it embeds, and nothing else", async () => {
     const b = await buildViewBundle("view-1");
     assert.deepEqual(b.views.map((v) => v.id), ["view-1", "view-2"]);

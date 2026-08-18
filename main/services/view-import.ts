@@ -135,11 +135,27 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
   }
 
   const svIncoming = bundle.sideData?.scriptviewLayouts ?? [];
+  const svAfter = await scriptViewLayoutsStore.load();
+  const svHave = new Set(svAfter.map((l) => l.id));
   if (svIncoming.length) {
-    const cur = await scriptViewLayoutsStore.load();
-    const have = new Set(cur.map((l) => l.id));
-    const add = svIncoming.filter((l) => !have.has(l.id));
-    if (add.length) await scriptViewLayoutsStore.save([...cur, ...add]);
+    const add = svIncoming.filter((l) => !svHave.has(l.id));
+    for (const l of svIncoming) {
+      // A local preset of the same id wins, like a target does — but say so,
+      // because the imported view then renders with the LOCAL columns.
+      if (svHave.has(l.id)) skipped.push(`ScriptView preset "${l.name ?? l.id}" — kept the one already here`);
+      else svHave.add(l.id);
+    }
+    if (add.length) await scriptViewLayoutsStore.save([...svAfter, ...add]);
+  }
+
+  // A view can point at a preset that was already missing at the source: export
+  // ships only presets it can find. An unknown id renders as ALL columns, which
+  // looks like a working display showing the wrong thing — the same reason
+  // setViewScriptViewLayout refuses one.
+  for (const v of named) {
+    if (v.scriptViewLayoutId && !svHave.has(v.scriptViewLayoutId)) {
+      skipped.push(`"${v.name}" points at a ScriptView preset that is not in the file or here`);
+    }
   }
 
   // Targets: add what is missing, never touch what is here. A local definition
@@ -153,12 +169,14 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
     incoming: T[],
     save: (next: T[]) => Promise<void>,
   ): Promise<void> {
+    // `have` grows as we go: two incoming targets sharing an id would otherwise
+    // both be appended, leaving a duplicate id in the store.
     const have = new Set(cur.map((t) => t.id));
     const add: T[] = [];
     for (const t of incoming) {
       const row = { kind, id: t.id, name: t.name };
       if (have.has(t.id)) targetsKept.push(row);
-      else { add.push(t); targetsAdded.push(row); }
+      else { have.add(t.id); add.push(t); targetsAdded.push(row); }
     }
     if (add.length) await save([...cur, ...add]);
   }
@@ -211,6 +229,10 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
       // is told which.
       images.failed.push(`${ref}: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  for (const ref of bundle.missingImages ?? []) {
+    skipped.push(`${ref} — the layout points at it, but it was missing when exported`);
   }
 
   // The rebind list, from the same walk — and computed the same way the review

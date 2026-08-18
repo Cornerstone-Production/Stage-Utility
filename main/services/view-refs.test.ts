@@ -45,6 +45,13 @@ describe("what a view points at", () => {
     assert.ok(r.objectIds.includes("deep"), "a child object was not collected");
   });
 
+  test("an image src with a query is not taken as part of the filename", () => {
+    // Taking it as one yields a ref the image reader then refuses, so the image
+    // silently does not travel.
+    const v = view("view-1", [obj("o1", { type: "image", src: "/layout-images/abc.png?v=2" })]);
+    assert.deepEqual(collectRefs([v], "view-1").imageFiles, ["layout-images/abc.png"]);
+  });
+
   test("targets are collected by id", () => {
     const v = view("view-1", [
       obj("o1", { type: "osc-button", targetId: "osc-a", address: "/x", args: [] }),
