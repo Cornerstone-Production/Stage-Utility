@@ -121,6 +121,22 @@ describe("importing a bundle", () => {
     assert.notEqual(report.rebind[0].objectId, "o1");
   });
 
+  test("a prototype-reaching key in the file is dropped and named, not fatal", async () => {
+    // The store refuses such a key by throwing. Mid-import that would abort
+    // having ALREADY written the views, so the operator would be told it failed
+    // when it half-succeeded. JSON.parse is used because an object LITERAL with
+    // "__proto__" sets the prototype instead of making an own key — the bug
+    // does not reproduce without it.
+    const raw = JSON.parse(JSON.stringify(bundle()));
+    raw.sideData.slots = JSON.parse('{"view-1": {"__proto__": [], "st-1": []}}');
+
+    const report = await applyViewBundle(raw);
+    assert.equal(report.views.length, 1, "the import did not complete");
+    assert.equal(report.skipped.length, 1, "the bad key was not reported");
+    assert.match(report.skipped[0], /__proto__/);
+    assert.equal(({} as Record<string, unknown>).st1, undefined, "prototype was polluted");
+  });
+
   test("an image whose bytes disagree with its name is reported, not written", async () => {
     // A bundle is a file off somebody's laptop. A name that does not match its
     // contents would plant bytes under a name a layout already points at.

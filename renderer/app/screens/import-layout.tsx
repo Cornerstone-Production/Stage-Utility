@@ -305,6 +305,12 @@ function ImportResult({ report, onClose }: { report: ImportReport; onClose: () =
           </Group>
         )}
 
+        {report.skipped.length > 0 && (
+          <Group title="Skipped">
+            {report.skipped.map((k) => <Row key={k} label={k} sub="the file used a name that cannot be stored" warn />)}
+          </Group>
+        )}
+
         {report.rebind.length > 0 && <RebindList list={report.rebind} />}
       </div>
       <footer className="flex justify-end border-t border-line bg-fill/40 px-4 py-3">

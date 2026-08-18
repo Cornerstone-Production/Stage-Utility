@@ -57,6 +57,9 @@ export interface ImportReport {
   targetsAdded: { kind: "osc" | "rosstalk"; id: string; name: string }[];
   targetsKept: { kind: "osc" | "rosstalk"; id: string; name: string }[];
   images: { written: number; shared: number; failed: string[] };
+  /** Keys in the file that could not be used — a hostile or corrupt bundle.
+   *  Dropped rather than fatal, and named rather than swallowed. */
+  skipped: string[];
   /** The work list. Objects whose bindings name absent hardware. */
   rebind: UnresolvableRef[];
 }

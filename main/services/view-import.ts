@@ -16,6 +16,7 @@ import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
 import { oscStore } from "./osc-store.js";
 import { rosstalkStore } from "./rosstalk-store.js";
 import { saveLayoutImageBytes } from "./layout-image-store.js";
+import { isSafeKey } from "./safe-key.js";
 import type { ViewBundle, ImportReport } from "../types/view-bundle.js";
 import type { View } from "../types/views.js";
 import type { Slot } from "../types/pco.js";
@@ -71,11 +72,21 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
   // Side data, re-keyed. A key may be a layout OBJECT id (an inline slots-grid)
   // or a VIEW id (a slots view); the view map is by position, which remapBundle
   // preserves.
+  const skipped: string[] = [];
   const viewKeyMap = new Map(bundle.views.map((v, i) => [(v as View).id, named[i].id]));
   for (const [oldKey, byServiceType] of Object.entries(bundle.sideData.slots ?? {})) {
     const newKey = objectIdMap.get(oldKey) ?? viewKeyMap.get(oldKey);
     if (!newKey) continue;
     for (const [serviceTypeId, rows] of Object.entries(byServiceType ?? {})) {
+      // A service type id is a KEY in the file, so it is whatever the file says.
+      // slotsStore refuses a prototype-reaching key by throwing, which mid-import
+      // would abort having already written the views — the operator would be told
+      // it failed when it half-succeeded. Dropped and named instead, which is
+      // what safe-key.ts prescribes for a bundle.
+      if (!isSafeKey(serviceTypeId)) {
+        skipped.push(`slot rows for service type "${serviceTypeId}"`);
+        continue;
+      }
       // Fresh slot ids, matching what duplicateView does: two views must never
       // share a slot row identity.
       const fresh = (rows as Slot[]).map((r) => ({ ...r, id: randomUUID() }));
@@ -160,5 +171,5 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
   // because export built the bundle by walking from the root.
   const rebind = collectRefs(named, named[0].id).unresolvable;
 
-  return { views: reportViews, targetsAdded, targetsKept, images, rebind };
+  return { views: reportViews, targetsAdded, targetsKept, images, rebind, skipped };
 }
