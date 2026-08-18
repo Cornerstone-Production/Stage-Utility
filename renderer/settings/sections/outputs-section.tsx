@@ -1,4 +1,3 @@
-import { errorMessage } from "@main/services/errors";
 import { ScreenDevice } from "../../app/screens/screen-device";
 import { useState, useEffect, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
@@ -28,6 +27,7 @@ import {
 import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
+import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { viewSurface, outputMode } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { invoke, onNotification } from "../../lib/api";
@@ -83,32 +83,11 @@ interface OutputRowProps {
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
 function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onSetSlug, onSetView, onSetLocked, onSetMode, onOpenWindow, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
-  const [editSlug, setEditSlug] = useState(output.slug ?? "");
-  const [slugError, setSlugError] = useState<string | null>(null);
 
-  // The server is the authority on what a slug may be — a reserved page like
-  // "history" wouldn't error at request time, it would silently render that page
-  // instead of the display. So save, and show whatever reason comes back.
-  async function handleSlugBlur() {
-    const next = editSlug.trim().toLowerCase();
-    if (next === (output.slug ?? "")) { setSlugError(null); return; }
-    try {
-      await onSetSlug(next);
-      setSlugError(null);
-      setEditSlug(next);
-    } catch (err) {
-      setSlugError(errorMessage(err));
-      setEditSlug(output.slug ?? "");
-    }
-  }
   const { setNodeRef, style, dragA11y, listeners } = useSortableRow(output.id);
 
   useResyncOn([output.name], () => {
     setEditName(output.name);
-  });
-
-  useResyncOn([output.slug], () => {
-    setEditSlug(output.slug ?? "");
   });
 
   function handleBlur() {
@@ -127,7 +106,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
   // permanent rows of mono URL per card buried the thing the card is FOR — what
   // that screen is showing.
   const [nameFocused, setNameFocused] = useState(false);
-  const [showSlug, setShowSlug] = useState(false);
+  const [urlsOpen, setUrlsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -269,11 +248,11 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
                 Copy URL
               </DropdownMenu.Item>
               <DropdownMenu.Item
-                onSelect={(e) => { e.preventDefault(); setShowSlug((v) => !v); }}
+                onSelect={() => setUrlsOpen(true)}
                 className={MENU_ITEM}
               >
                 <LinkIcon className="size-3.5 text-fg-subtle" />
-                {showSlug ? "Hide URLs" : "URLs & friendly link"}
+                URLs and friendly link
               </DropdownMenu.Item>
               <DropdownMenu.Separator className="my-1 h-px bg-line" />
               <DropdownMenu.Item onSelect={onRefresh} className={MENU_ITEM}>
@@ -368,32 +347,15 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
 
       {/* Revealed from the menu. The permanent address never changes, so a Pi, a
           bookmark or a printed QR keeps working whatever is typed here. */}
-      {showSlug && (
-        <div className="border-t border-line px-3 py-2 flex flex-col gap-1.5">
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 text-left"
-            onClick={async () => { if (await copyText(outputUrl)) toast.success("URL copied"); }}
-            aria-label="Copy URL"
-          >
-            <span className="min-w-0 flex-1 truncate font-mono text-caption2 text-fg-subtle">{outputUrl}</span>
-            <CopyIcon className="size-3.5 shrink-0 text-fg-subtle" />
-          </button>
-          <div className="flex items-center gap-2">
-            <span className="shrink-0 font-mono text-caption2 text-fg-faint">Also at {baseUrl}/</span>
-            <Input
-              value={editSlug}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setEditSlug(e.target.value)}
-              onBlur={handleSlugBlur}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-              placeholder="optional"
-              aria-label={`Custom URL for ${output.name}`}
-              className="h-7 min-w-0 flex-1 font-mono text-caption2"
-            />
-          </div>
-          {slugError && <span className="text-caption2 text-red-10" role="alert">{slugError}</span>}
-        </div>
-      )}
+      <ScreenUrlsDialog
+        open={urlsOpen}
+        onOpenChange={setUrlsOpen}
+        outputName={output.name}
+        outputUrl={outputUrl}
+        baseUrl={baseUrl}
+        slug={output.slug ?? ""}
+        onSave={onSetSlug}
+      />
 
       {/* The machine showing this screen, when one is bound. Nothing when it is
           a browser tab somebody opened. */}
