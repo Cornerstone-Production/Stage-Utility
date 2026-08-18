@@ -39,6 +39,8 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | PATCH | `/api/views/:id` | Update name / kind / `ndiSource` / `layout` / `surface`. Converting a bound view is refused, naming the screens |
 | POST | `/api/views/:id/slots` | Save a slots-view's slots |
 | POST | `/api/views/:id/duplicate` | Duplicate a view |
+| GET | `/api/views/:id/export` | Download the view and anything it embeds as one file |
+| POST | `/api/views/import` | Merge an exported view in; returns what landed and what needs rebinding |
 | POST | `/api/views/:id/copy-slots` | Copy slots from another view |
 | POST | `/api/views/reorder` | Reorder views |
 | DELETE | `/api/views/:id` | Delete a view |
