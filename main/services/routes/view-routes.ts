@@ -21,6 +21,8 @@ import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { isLayoutShape } from "../../types/views.js";
+import { oscManager } from "../osc-manager.js";
+import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
 import { LayoutConflictError, stageController } from "../stage-controller.js";
 
@@ -155,6 +157,35 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         // refuse a file this app exported — the same reason /api/config/import
         // uses this limit.
         const report = await applyViewBundle(await readBody(req, MAX_CONFIG_BODY_BYTES));
+
+        // Telling the managers is the ROUTE's job, not the merge service's.
+        // Both hold their targets in memory and write that array back on the
+        // next edit, so a store written without telling them leaves the imported
+        // target not live AND erased the first time any target is touched.
+        //
+        // It lives here because reloadTargets opens sockets, and a service whose
+        // job is "merge this data" must not: doing it inside applyViewBundle
+        // left three UDP handles open in every unit test that imported a target,
+        // which hung the whole suite on CI while passing locally, where
+        // something already held the port.
+        //
+        // A reload that fails does not fail the import — the data is already
+        // correct on disk — but it is reported rather than logged.
+        for (const [kind, reload] of [
+          ["osc", () => oscManager.reloadTargets()],
+          ["rosstalk", () => rosstalkManager.reloadTargets()],
+        ] as const) {
+          if (!report.targetsAdded.some((t) => t.kind === kind)) continue;
+          try {
+            await reload();
+          } catch (reloadErr) {
+            report.skipped.push(
+              `${kind.toUpperCase()} targets were saved but are not live until a restart: ` +
+              `${errorMessage(reloadErr)}`,
+            );
+          }
+        }
+
         json(res, report);
       } catch (err) {
         error(res, errorMessage(err));

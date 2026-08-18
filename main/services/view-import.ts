@@ -15,8 +15,6 @@ import { notesStore } from "./notes-store.js";
 import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
 import { oscStore } from "./osc-store.js";
 import { rosstalkStore } from "./rosstalk-store.js";
-import { oscManager } from "./osc-manager.js";
-import { rosstalkManager } from "./rosstalk-manager.js";
 import { saveLayoutImageBytes } from "./layout-image-store.js";
 import { isSafeKey } from "./safe-key.js";
 import { isLayoutShape } from "../types/views.js";
@@ -185,28 +183,6 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
     (next) => oscStore.save(next));
   await mergeTargets("rosstalk", await rosstalkStore.loadTargets(), bundle.targets?.rosstalk ?? [],
     (next) => rosstalkStore.saveTargets(next));
-
-  // Both managers hold their targets in memory and write that array back on the
-  // next edit. Writing the store without telling them means the imported target
-  // is not live AND is erased the first time the operator touches any target.
-  //
-  // A reload that fails does NOT fail the import: the data is already correctly
-  // on disk, and the only cost is that the target is not live until a restart.
-  // Returned rather than logged, so the operator hears it either way.
-  for (const [kind, reload] of [
-    ["osc", () => oscManager.reloadTargets()],
-    ["rosstalk", () => rosstalkManager.reloadTargets()],
-  ] as const) {
-    if (!targetsAdded.some((t) => t.kind === kind)) continue;
-    try {
-      await reload();
-    } catch (err) {
-      skipped.push(
-        `${kind.toUpperCase()} targets were saved but are not live until a restart: ` +
-        `${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
 
   // Images. Content-addressed, so a logo already here collapses to the same file
   // rather than duplicating.
