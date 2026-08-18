@@ -35,6 +35,7 @@ export function collectRefs(all: readonly View[], rootId: string): ViewRefs {
   while (queue.length) {
     const v = byId.get(queue.shift() as string);
     if (!v?.layout) continue;
+    const viewId = v.id;
 
     walk(v.layout.objects, (o) => {
       objectIds.push(o.id);
@@ -64,7 +65,7 @@ export function collectRefs(all: readonly View[], rootId: string): ViewRefs {
       // Hardware. Named individually because the import report is a work list,
       // not a count — the operator has to find these objects to fix them.
       const push = (kind: UnresolvableRef["kind"], value: string, label: string): void => {
-        if (value) unresolvable.push({ kind, objectId: o.id, label: label || o.id, value });
+        if (value) unresolvable.push({ kind, viewId, objectId: o.id, label: label || o.id, value });
       };
       if (type === "wireless-channel") push("wireless", str(c.channelId), str(c.label));
       if (type === "spl-meter") push("spl", str(c.meterId), str(c.meterId));

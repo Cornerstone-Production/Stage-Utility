@@ -9,7 +9,10 @@ import type { View } from "./views.js";
 /** A binding that names hardware the destination will not have. */
 export interface UnresolvableRef {
   kind: "wireless" | "charger" | "spl" | "sensource" | "propresenter";
-  /** The layout object holding it, so the UI can select it in the editor. */
+  /** The view whose layout holds it — without this the rebind list cannot link
+   *  anywhere, since an object id alone does not say which editor to open. */
+  viewId: string;
+  /** The layout object holding it. */
   objectId: string;
   /** What to call it in the rebind list, e.g. "Handheld 3". */
   label: string;

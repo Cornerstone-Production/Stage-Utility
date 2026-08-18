@@ -154,10 +154,11 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
     }
   }
 
-  // The rebind list, from the same walk export uses — so what the review screen
-  // promised and what landed cannot disagree.
-  const rebind = named.flatMap((v) => collectRefs(named, v.id).unresolvable)
-    .filter((u, i, all) => all.findIndex((o) => o.objectId === u.objectId && o.value === u.value) === i);
+  // The rebind list, from the same walk — and computed the same way the review
+  // sheet computes it, from the root, so what was promised and what landed
+  // cannot disagree. Walking from the root covers every view in the bundle,
+  // because export built the bundle by walking from the root.
+  const rebind = collectRefs(named, named[0].id).unresolvable;
 
   return { views: reportViews, targetsAdded, targetsKept, images, rebind };
 }

@@ -8,6 +8,7 @@
 // drift apart.
 
 import { useRef, useState } from "react";
+import { useRouter } from "@tanstack/react-router";
 
 import { invoke } from "../../lib/api";
 import { Button } from "../../components/ui";
@@ -162,7 +163,7 @@ export function ImportLayout() {
                 {Object.entries(groupByKind(pending.rebind)).map(([kind, list]) => (
                   <Row
                     key={kind}
-                    label={`${list.length} object${list.length === 1 ? "" : "s"} need ${KIND_LABEL[kind as UnresolvableRef["kind"]]}`}
+                    label={needLine(kind as UnresolvableRef["kind"], list.length)}
                     sub={list.map((u) => u.label).join(", ")}
                     warn
                   />
@@ -190,6 +191,14 @@ export function ImportLayout() {
   );
 }
 
+/** "2 objects need a wireless channel" / "1 object needs an SPL meter".
+ *  One place, because the review sheet and the report both say it. */
+function needLine(kind: UnresolvableRef["kind"], count: number): string {
+  return count === 1
+    ? `1 object needs ${KIND_LABEL[kind]}`
+    : `${count} objects need ${KIND_LABEL[kind]}`;
+}
+
 function groupByKind(list: UnresolvableRef[]): Record<string, UnresolvableRef[]> {
   const out: Record<string, UnresolvableRef[]> = {};
   for (const u of list) (out[u.kind] ??= []).push(u);
@@ -215,6 +224,49 @@ function Row({ label, sub, tag, warn }: { label: string; sub?: string; tag?: str
       </span>
       {tag && <span className="shrink-0 rounded-full border border-line-strong px-2 py-0.5 text-caption2 text-fg-subtle">{tag}</span>}
     </div>
+  );
+}
+
+/**
+ * The work list.
+ *
+ * Named individually rather than counted, because the destination is a
+ * different rig and rebinding is the expected path — a count tells you there is
+ * work but not where. Each entry opens the editor for the view that holds it;
+ * selecting the object itself needs an editor change and rides with the inline
+ * pickers in the follow-up.
+ */
+function RebindList({ list }: { list: UnresolvableRef[] }) {
+  const router = useRouter();
+  const groups = groupByKind(list);
+  return (
+    <>
+      {Object.entries(groups).map(([kind, entries]) => (
+        <Group
+          key={kind}
+          title={needLine(kind as UnresolvableRef["kind"], entries.length)}
+        >
+          {entries.map((u) => (
+            <button
+              key={`${u.viewId}:${u.objectId}`}
+              type="button"
+              className="flex w-full items-start gap-2.5 border-b border-line px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-fill"
+              onClick={() => router.navigate({ to: `/screens/${u.viewId}/edit` as never })}
+            >
+              <span aria-hidden="true" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-warn-9" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-footnote text-fg">{u.label}</span>
+                <span className="block truncate font-mono text-caption2 text-fg-subtle">{u.value}</span>
+              </span>
+              <span className="shrink-0 text-caption2 text-accent">Open editor</span>
+            </button>
+          ))}
+        </Group>
+      ))}
+      <p className="text-caption1 text-warn-11">
+        These kept their bindings and render as unconfigured. Nothing was cleared.
+      </p>
+    </>
   );
 }
 
@@ -252,6 +304,8 @@ function ImportResult({ report, onClose }: { report: ImportReport; onClose: () =
             {report.images.failed.map((f) => <Row key={f} label={f} warn />)}
           </Group>
         )}
+
+        {report.rebind.length > 0 && <RebindList list={report.rebind} />}
       </div>
       <footer className="flex justify-end border-t border-line bg-fill/40 px-4 py-3">
         <Button variant="transparent" size="small" onClick={onClose}>Close</Button>

@@ -64,6 +64,18 @@ describe("what a view points at", () => {
     assert.deepEqual(kinds, ["spl", "wireless"]);
   });
 
+  test("a rebind entry names the view its object lives in", () => {
+    // Not the root: an embedded view's object needs ITS editor opened, and an
+    // object id alone does not say which one that is.
+    const a = view("view-1", [obj("o1", { type: "view-embed", viewId: "view-2" })]);
+    const b = view("view-2", [
+      obj("o2", { type: "wireless-channel", channelId: "conn-1::1", label: "Deep" }),
+    ]);
+    const u = collectRefs([a, b], "view-1").unresolvable;
+    assert.equal(u.length, 1);
+    assert.equal(u[0].viewId, "view-2", "the entry points at the wrong editor");
+  });
+
   test("integration status and the primary ProPresenter are NOT rebind work", () => {
     // Their ids are fixed constants and "default" — they resolve on any install
     // that has the integration configured, so listing them would be noise.
