@@ -96,6 +96,7 @@ export type PackagedAvailability = Required<
     | "awaitingPackage"
   >
 >;
+import { parseReleaseSections } from "./release-notes.js";
 
 /** One cap for every "What's new" list — updater.ts imports this, so the git
  *  and packaged paths cannot drift apart. */
@@ -103,46 +104,19 @@ export const CHANGELOG_CAP = 20;
 
 /** Availability for a packaged install: current version vs the published releases. */
 /**
- * Sections of the generated release notes that list what changed. Everything
- * else in the body is prose an operator does not need in a status panel: the
- * upgrade notice (a blockquote), the Highlights paragraphs, and the Install
- * section's commands.
- */
-const CHANGE_SECTIONS = /^##\s+(new|fixed|changed|improved|breaking)\b/i;
-
-/** "…and 12 more", the notes generator's own truncation marker. */
-const TRUNCATION_MARKER = /^(?:…|\.\.\.)and \d+ more$/;
-
-/**
- * The change lines out of a release's notes.
+ * The change lines out of a release's notes, flattened.
  *
- * scripts/release-notes.mjs writes `- **scope** — subject` under `## New` and
- * `## Fixed`, so the subject is recoverable without re-deriving it from git —
- * which a packaged install cannot do, having no repository.
+ * Delegates to parseReleaseSections so there is ONE definition of what counts
+ * as a change and how a line is cleaned up. The status panel wants a flat list;
+ * the post-update dialog wants the sections. Two parsers would eventually
+ * disagree about which is which.
  *
  * The commit TYPE is deliberately not reconstructed. `## Fixed` holds both
  * `fix` and `perf`, so labelling every line `fix(...)` to match a checkout's
- * display exactly would mean stating something false about perf commits. The
- * scope lead-in carries the useful part either way.
+ * display exactly would mean stating something false about perf commits.
  */
 export function changeLinesFrom(body: string | null): string[] {
-  if (!body) return [];
-  const out: string[] = [];
-  let inChangeSection = false;
-  for (const raw of body.split("\n")) {
-    const line = raw.trim();
-    if (line.startsWith("##")) {
-      inChangeSection = CHANGE_SECTIONS.test(line);
-      continue;
-    }
-    // A blockquote is the upgrade notice, which is prose and often long.
-    if (!inChangeSection || !line.startsWith("- ")) continue;
-    const text = line.slice(2).trim();
-    if (!text || TRUNCATION_MARKER.test(text)) continue;
-    // Markdown emphasis and code ticks are noise in a plain-text panel.
-    out.push(text.replace(/\*\*/g, "").replace(/`/g, ""));
-  }
-  return out;
+  return parseReleaseSections(body, CHANGELOG_CAP).flatMap((s) => s.lines);
 }
 
 export function packagedUpdateStatus(

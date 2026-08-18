@@ -1,0 +1,87 @@
+// What changed in a release, grouped by the kind of change.
+//
+// The flat list this replaces was fine for a status panel you glance at. It is
+// not fine for a dialog shown once after an update: "your displays will break"
+// and "we renamed a button" arrived as adjacent bullets with nothing to tell
+// them apart.
+//
+// `changeLinesFrom` in release-check.ts now flattens this, so there is one
+// parser rather than two that can disagree about what counts as a change.
+
+/**
+ * The sections worth showing, most consequential first.
+ *
+ * Order is FIXED rather than taken from the body. A release body is written in
+ * whatever order suited its author; a dialog read once is not, and Breaking is
+ * the thing an operator must not scroll past. It also decides what survives the
+ * cap — truncating in body order could drop Breaking entirely.
+ */
+export const SECTION_ORDER = ["Breaking", "New", "Changed", "Improved", "Fixed"] as const;
+
+export type SectionName = (typeof SECTION_ORDER)[number];
+
+export interface ReleaseSection {
+  section: SectionName;
+  lines: string[];
+}
+
+/** Heading -> canonical name, so `## BREAKING` and `## breaking` render alike. */
+const CANONICAL = new Map<string, SectionName>(
+  SECTION_ORDER.map((s) => [s.toLowerCase(), s]),
+);
+
+/** "…and 12 more", the notes generator's own truncation marker. */
+const TRUNCATION_MARKER = /^(?:…|\.\.\.)and \d+ more$/;
+
+/** One `## Heading` line, if it names a section we show. */
+function sectionOf(line: string): SectionName | null {
+  const m = /^##\s+([a-z]+)\b/i.exec(line);
+  return m ? CANONICAL.get(m[1].toLowerCase()) ?? null : null;
+}
+
+/**
+ * Group a release body's change lines by section.
+ *
+ * Total lines are capped, not lines per section, and the cap is spent in
+ * SECTION_ORDER — so a release with thirty fixes and one breaking change still
+ * leads with the breaking change.
+ *
+ * A body with no recognised sections returns nothing rather than one unlabelled
+ * group: the prose in a release body is an upgrade notice, a Highlights
+ * paragraph and shell commands, none of which is a list of what changed.
+ */
+export function parseReleaseSections(body: string | null | undefined, cap = 40): ReleaseSection[] {
+  if (!body) return [];
+
+  // Collected by section first, so a heading used twice merges instead of
+  // rendering as two identical headings.
+  const bySection = new Map<SectionName, string[]>();
+  let current: SectionName | null = null;
+
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("#")) {
+      current = sectionOf(line);
+      continue;
+    }
+    if (!current || !line.startsWith("- ")) continue;
+
+    const text = line.slice(2).trim().replace(/\*\*/g, "").replace(/`/g, "").trim();
+    if (!text || TRUNCATION_MARKER.test(text)) continue;
+
+    const lines = bySection.get(current);
+    if (lines) lines.push(text);
+    else bySection.set(current, [text]);
+  }
+
+  const out: ReleaseSection[] = [];
+  let budget = Math.max(0, cap);
+  for (const section of SECTION_ORDER) {
+    if (budget === 0) break;
+    const lines = bySection.get(section);
+    if (!lines?.length) continue;
+    out.push({ section, lines: lines.slice(0, budget) });
+    budget -= Math.min(lines.length, budget);
+  }
+  return out;
+}
