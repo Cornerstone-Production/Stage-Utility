@@ -15,12 +15,23 @@ import { notesStore } from "./notes-store.js";
 import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
 import { oscStore } from "./osc-store.js";
 import { rosstalkStore } from "./rosstalk-store.js";
+import { oscManager } from "./osc-manager.js";
+import { rosstalkManager } from "./rosstalk-manager.js";
 import { saveLayoutImageBytes } from "./layout-image-store.js";
 import { isSafeKey } from "./safe-key.js";
+import { isLayoutShape } from "../types/views.js";
 import type { ViewBundle, ImportReport } from "../types/view-bundle.js";
 import type { View } from "../types/views.js";
-import type { Slot } from "../types/pco.js";
+import type { NotesContent } from "./notes-store.js";
 
+/**
+ * Everything checked BEFORE anything is written.
+ *
+ * A throw partway through leaves views on disk that the controller does not know
+ * about, and the next thing to save the view list would erase them. So the file
+ * is either good enough to apply whole or refused whole, and the shapes the app
+ * would otherwise reject on its own write path are rejected here too.
+ */
 function assertBundle(b: unknown): asserts b is ViewBundle {
   const o = b as Record<string, unknown> | null;
   if (!o || typeof o !== "object" || Array.isArray(o)) throw new Error("import — not a JSON object");
@@ -31,6 +42,31 @@ function assertBundle(b: unknown): asserts b is ViewBundle {
   }
   if (o.version !== 1) throw new Error(`import — unsupported version ${String(o.version)}`);
   if (!Array.isArray(o.views) || o.views.length === 0) throw new Error("import — no views in the file");
+
+  const seenIds = new Set<string>();
+  for (const raw of o.views as unknown[]) {
+    const v = raw as Record<string, unknown> | null;
+    if (!v || typeof v !== "object") throw new Error("import — a view in the file is not an object");
+    if (typeof v.id !== "string" || !v.id) throw new Error("import — a view in the file has no id");
+    if (typeof v.name !== "string" || !v.name) throw new Error(`import — view ${v.id} has no name`);
+    if (typeof v.kind !== "string" || !v.kind) throw new Error(`import — view ${v.id} has no kind`);
+    // Two views sharing an id would collapse to one minted id, so both would be
+    // stored under it and deleting either would remove both.
+    if (seenIds.has(v.id)) throw new Error(`import — the file has two views with id ${v.id}`);
+    seenIds.add(v.id);
+    // null is legitimate — only a custom view has a layout at all.
+    if (v.layout != null && !isLayoutShape(v.layout)) {
+      throw new Error(`import — view "${v.name}" has a layout the renderer cannot draw`);
+    }
+  }
+
+  const sd = o.sideData as Record<string, unknown> | undefined;
+  if (sd != null && typeof sd !== "object") throw new Error("import — sideData is not an object");
+  for (const [key, byServiceType] of Object.entries((sd?.slots ?? {}) as Record<string, unknown>)) {
+    for (const [st, rows] of Object.entries((byServiceType ?? {}) as Record<string, unknown>)) {
+      if (!Array.isArray(rows)) throw new Error(`import — slot rows for ${key}/${st} are not a list`);
+    }
+  }
 }
 
 /** `Left Display` -> `Left Display (imported)` when taken. */
@@ -56,7 +92,7 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
     return id;
   };
 
-  const { views, objectIdMap } = remapBundle(bundle.views as View[], () => mintViewId());
+  const { views, viewIdMap, objectIdMap } = remapBundle(bundle.views as View[], mintViewId);
 
   const takenNames = new Set(existing.map((v) => v.name));
   const reportViews: ImportReport["views"] = [];
@@ -70,12 +106,10 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
   await viewsStore.save([...existing, ...named]);
 
   // Side data, re-keyed. A key may be a layout OBJECT id (an inline slots-grid)
-  // or a VIEW id (a slots view); the view map is by position, which remapBundle
-  // preserves.
+  // or a VIEW id (a slots view), so both maps are consulted.
   const skipped: string[] = [];
-  const viewKeyMap = new Map(bundle.views.map((v, i) => [(v as View).id, named[i].id]));
-  for (const [oldKey, byServiceType] of Object.entries(bundle.sideData.slots ?? {})) {
-    const newKey = objectIdMap.get(oldKey) ?? viewKeyMap.get(oldKey);
+  for (const [oldKey, byServiceType] of Object.entries(bundle.sideData?.slots ?? {})) {
+    const newKey = objectIdMap.get(oldKey) ?? viewIdMap.get(oldKey);
     if (!newKey) continue;
     for (const [serviceTypeId, rows] of Object.entries(byServiceType ?? {})) {
       // A service type id is a KEY in the file, so it is whatever the file says.
@@ -89,23 +123,23 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
       }
       // Fresh slot ids, matching what duplicateView does: two views must never
       // share a slot row identity.
-      const fresh = (rows as Slot[]).map((r) => ({ ...r, id: randomUUID() }));
+      const fresh = rows.map((r) => ({ ...r, id: randomUUID() }));
       await slotsStore.setSlots(newKey, serviceTypeId, fresh);
     }
   }
 
   await notesStore.init();
-  for (const [oldId, content] of Object.entries(bundle.sideData.notes ?? {})) {
+  for (const [oldId, content] of Object.entries(bundle.sideData?.notes ?? {})) {
     const newId = objectIdMap.get(oldId);
-    if (newId) await notesStore.set(newId, content as never);
+    if (newId) await notesStore.set(newId, content as NotesContent);
   }
 
-  const svIncoming = bundle.sideData.scriptviewLayouts ?? [];
+  const svIncoming = bundle.sideData?.scriptviewLayouts ?? [];
   if (svIncoming.length) {
     const cur = await scriptViewLayoutsStore.load();
     const have = new Set(cur.map((l) => l.id));
-    const add = svIncoming.filter((l) => !have.has((l as { id: string }).id));
-    if (add.length) await scriptViewLayoutsStore.save([...cur, ...add] as never);
+    const add = svIncoming.filter((l) => !have.has(l.id));
+    if (add.length) await scriptViewLayoutsStore.save([...cur, ...add]);
   }
 
   // Targets: add what is missing, never touch what is here. A local definition
@@ -113,34 +147,48 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
   const targetsAdded: ImportReport["targetsAdded"] = [];
   const targetsKept: ImportReport["targetsKept"] = [];
 
-  const mergeTargets = async (
+  async function mergeTargets<T extends { id: string; name: string }>(
     kind: "osc" | "rosstalk",
-    cur: { id: string; name?: string }[],
-    incoming: { id: string; name?: string }[],
-    save: (next: unknown[]) => Promise<void>,
-  ): Promise<void> => {
+    cur: T[],
+    incoming: T[],
+    save: (next: T[]) => Promise<void>,
+  ): Promise<void> {
     const have = new Set(cur.map((t) => t.id));
-    const add: unknown[] = [];
+    const add: T[] = [];
     for (const t of incoming) {
-      const row = { kind, id: t.id, name: t.name ?? t.id };
+      const row = { kind, id: t.id, name: t.name };
       if (have.has(t.id)) targetsKept.push(row);
       else { add.push(t); targetsAdded.push(row); }
     }
     if (add.length) await save([...cur, ...add]);
-  };
+  }
 
-  await mergeTargets(
-    "osc",
-    (await oscStore.load()) as unknown as { id: string; name?: string }[],
-    (bundle.targets?.osc ?? []) as { id: string; name?: string }[],
-    (next) => oscStore.save(next as never),
-  );
-  await mergeTargets(
-    "rosstalk",
-    (await rosstalkStore.loadTargets()) as unknown as { id: string; name?: string }[],
-    (bundle.targets?.rosstalk ?? []) as { id: string; name?: string }[],
-    (next) => rosstalkStore.saveTargets(next as never),
-  );
+  await mergeTargets("osc", await oscStore.load(), bundle.targets?.osc ?? [],
+    (next) => oscStore.save(next));
+  await mergeTargets("rosstalk", await rosstalkStore.loadTargets(), bundle.targets?.rosstalk ?? [],
+    (next) => rosstalkStore.saveTargets(next));
+
+  // Both managers hold their targets in memory and write that array back on the
+  // next edit. Writing the store without telling them means the imported target
+  // is not live AND is erased the first time the operator touches any target.
+  //
+  // A reload that fails does NOT fail the import: the data is already correctly
+  // on disk, and the only cost is that the target is not live until a restart.
+  // Returned rather than logged, so the operator hears it either way.
+  for (const [kind, reload] of [
+    ["osc", () => oscManager.reloadTargets()],
+    ["rosstalk", () => rosstalkManager.reloadTargets()],
+  ] as const) {
+    if (!targetsAdded.some((t) => t.kind === kind)) continue;
+    try {
+      await reload();
+    } catch (err) {
+      skipped.push(
+        `${kind.toUpperCase()} targets were saved but are not live until a restart: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   // Images. Content-addressed, so a logo already here collapses to the same file
   // rather than duplicating.

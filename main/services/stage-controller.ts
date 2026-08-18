@@ -2207,6 +2207,17 @@ export class StageController {
   async reloadViews(): Promise<StageState> {
     const views = await viewsStore.load();
     this.state = { ...this.state, views };
+    // Slot rows for a slots-KIND view. recomputeResolved reads rawSlotsByView,
+    // so without this an imported slots view resolves to nothing though its rows
+    // are on disk. duplicateView does this; the first version of reloadViews did
+    // not, and export is offered for every view kind.
+    if (this.state.serviceTypeId) {
+      for (const v of views) {
+        if (v.kind === "slots" && !this.rawSlotsByView.has(v.id)) {
+          this.rawSlotsByView.set(v.id, await slotsStore.getSlots(v.id, this.state.serviceTypeId));
+        }
+      }
+    }
     // Same inline-slots sync saveViewLayout does: an imported layout may contain
     // slots-grid objects whose rows are on disk but not yet in memory.
     const inlineIds = new Set<string>();

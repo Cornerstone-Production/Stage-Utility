@@ -115,6 +115,15 @@ class RossTalkManager {
     this.reapply();
   }
 
+  /** Re-read targets from disk and reapply. Same reason as the OSC manager's:
+   *  the view importer merges targets in behind this manager's back, and a
+   *  stale in-memory array would be written back over them. */
+  async reloadTargets(): Promise<void> {
+    const saved = await rosstalkStore.loadTargets();
+    this.targets = saved.map((t) => ({ ...t, connection: "disconnected", message: null }));
+    this.reapply();
+  }
+
   listTargets(): RossTalkTarget[] {
     return this.targets.map((t) => ({ ...t }));
   }

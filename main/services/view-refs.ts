@@ -8,11 +8,20 @@
 import type { View, LayoutObject } from "../types/views.js";
 import type { ViewRefs, UnresolvableRef } from "../types/view-bundle.js";
 
-/** Walk an object and its children. Containers nest arbitrarily deep. */
-function walk(objects: LayoutObject[], visit: (o: LayoutObject) => void): void {
+/**
+ * Walk an object tree, parent before children. Containers nest arbitrarily deep.
+ *
+ * Exported because the remapper needs the same traversal, and this repository
+ * already carries several hand-rolled copies of it. Two more would have been
+ * two more places for a container's children to get forgotten.
+ */
+export function walkLayoutObjects(
+  objects: readonly LayoutObject[],
+  visit: (o: LayoutObject) => void,
+): void {
   for (const o of objects) {
     visit(o);
-    if (o.children?.length) walk(o.children, visit);
+    if (o.children?.length) walkLayoutObjects(o.children, visit);
   }
 }
 
@@ -37,7 +46,7 @@ export function collectRefs(all: readonly View[], rootId: string): ViewRefs {
     if (!v?.layout) continue;
     const viewId = v.id;
 
-    walk(v.layout.objects, (o) => {
+    walkLayoutObjects(v.layout.objects, (o) => {
       objectIds.push(o.id);
       const c = o.config as unknown as Record<string, unknown>;
       const type = str(c.type);

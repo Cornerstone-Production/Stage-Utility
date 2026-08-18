@@ -20,6 +20,7 @@ import {
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
+import { isLayoutShape } from "../../types/views.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
 import { LayoutConflictError, stageController } from "../stage-controller.js";
 
@@ -36,17 +37,6 @@ import { LayoutConflictError, stageController } from "../stage-controller.js";
  * Deliberately shallow — it checks what the renderer and the log actually
  * require, not every optional field of a LayoutObject.
  */
-function isLayoutShape(v: unknown): v is LayoutDTO {
-  if (!v || typeof v !== "object") return false;
-  const l = v as { objects?: unknown; canvas?: unknown };
-  if (!Array.isArray(l.objects)) return false;
-  if (!l.canvas || typeof l.canvas !== "object") return false;
-  const c = l.canvas as { width?: unknown; height?: unknown };
-  return (
-    typeof c.width === "number" && Number.isFinite(c.width) &&
-    typeof c.height === "number" && Number.isFinite(c.height)
-  );
-}
 
 /**
  * `stage-utility-view-left-mic-display-2026-08-17.json`.
@@ -158,19 +148,22 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-        // POST /api/views/import — merge a bundle in and report what happened.
+    // POST /api/views/import — merge a bundle in and report what happened.
     if (method === "POST" && pathname === "/api/views/import") {
       try {
         // A bundle carries base64 images, so the ordinary JSON ceiling would
         // refuse a file this app exported — the same reason /api/config/import
         // uses this limit.
         const report = await applyViewBundle(await readBody(req, MAX_CONFIG_BODY_BYTES));
-        // The importer writes to several stores directly, so the controller's
-        // in-memory views are stale — refresh() would broadcast the OLD list.
-        await stageController.reloadViews();
         json(res, report);
       } catch (err) {
         error(res, errorMessage(err));
+      } finally {
+        // ALWAYS, including on failure. The importer writes to several stores
+        // directly, so the controller's in-memory views are stale either way —
+        // and a stale list is not merely wrong on screen, it is what the next
+        // rename or delete writes back, erasing whatever did land.
+        await stageController.reloadViews();
       }
       return;
     }
@@ -180,7 +173,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     if (method === "GET" && viewExportMatch) {
       try {
         const bundle = await buildViewBundle(decodeURIComponent(viewExportMatch[1]));
-        const filename = exportFilename(bundle.views[0]?.name ?? "view", new Date());
+        const filename = exportFilename(bundle.views[0].name, new Date());
         res.writeHead(200, {
           "content-type": "application/json; charset=utf-8",
           "content-disposition": `attachment; filename="${filename}"`,
@@ -193,7 +186,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-// POST /api/views/:id/duplicate — { name? }
+    // POST /api/views/:id/duplicate — { name? }
     const viewDuplicateMatch = pathname.match(/^\/api\/views\/([^/]+)\/duplicate$/);
     if (method === "POST" && viewDuplicateMatch) {
       const body = await readBody(req) as Record<string, unknown>;

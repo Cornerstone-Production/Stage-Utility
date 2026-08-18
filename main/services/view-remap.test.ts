@@ -7,11 +7,18 @@ import type { View } from "../types/views.js";
 const v = (id: string, objects: unknown[]): View =>
   ({
     id, name: id, kind: "custom", createdAt: 0,
-    layout: { version: 1, canvas: { w: 1920, h: 1080 }, objects },
+    layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects },
   }) as unknown as View;
 
 const o = (id: string, config: Record<string, unknown>) =>
   ({ id, x: 0, y: 0, w: 1, h: 1, z: 0, style: {}, config });
+
+/** Fresh ids, the way the importer mints them. Closed over rather than passed an
+ *  index, so the production signature carries nothing only a test uses. */
+function mint(): () => string {
+  let n = 0;
+  return () => `view-new-${n++}`;
+}
 
 describe("remapping an imported bundle", () => {
   test("an embed points at the NEW id of the view that came with it", () => {
@@ -20,7 +27,7 @@ describe("remapping an imported bundle", () => {
     const out = remapBundle([
       v("view-1", [o("o1", { type: "view-embed", viewId: "view-2" })]),
       v("view-2", []),
-    ], (i) => `view-new-${i}`);
+    ], mint());
 
     const embed = out.views[0].layout!.objects[0].config as unknown as Record<string, unknown>;
     assert.equal(embed.viewId, out.views[1].id);
@@ -31,7 +38,7 @@ describe("remapping an imported bundle", () => {
     const out = remapBundle([
       v("view-1", [o("o1", { type: "slots-grid", source: "view", sourceViewId: "view-2" })]),
       v("view-2", []),
-    ], (i) => `view-new-${i}`);
+    ], mint());
     const cfg = out.views[0].layout!.objects[0].config as unknown as Record<string, unknown>;
     assert.equal(cfg.sourceViewId, out.views[1].id);
   });
@@ -41,7 +48,7 @@ describe("remapping an imported bundle", () => {
     // that would otherwise have worked.
     const out = remapBundle([
       v("view-1", [o("o1", { type: "view-embed", viewId: "view-elsewhere" })]),
-    ], (i) => `view-new-${i}`);
+    ], mint());
     const cfg = out.views[0].layout!.objects[0].config as unknown as Record<string, unknown>;
     assert.equal(cfg.viewId, "view-elsewhere");
   });
@@ -51,13 +58,13 @@ describe("remapping an imported bundle", () => {
     // an embed.
     const child = o("deep", { type: "view-embed", viewId: "view-2" });
     const parent = { ...o("box", { type: "container" }), children: [child] };
-    const out = remapBundle([v("view-1", [parent]), v("view-2", [])], (i) => `view-new-${i}`);
+    const out = remapBundle([v("view-1", [parent]), v("view-2", [])], mint());
     const nested = out.views[0].layout!.objects[0].children![0].config as unknown as Record<string, unknown>;
     assert.equal(nested.viewId, out.views[1].id);
   });
 
   test("every object gets a fresh id, and the map records it", () => {
-    const out = remapBundle([v("view-1", [o("o1", { type: "clock" })])], (i) => `view-new-${i}`);
+    const out = remapBundle([v("view-1", [o("o1", { type: "clock" })])], mint());
     const fresh = out.views[0].layout!.objects[0].id;
     assert.notEqual(fresh, "o1");
     assert.equal(out.objectIdMap.get("o1"), fresh);
@@ -68,7 +75,7 @@ describe("remapping an imported bundle", () => {
     // silently cleared.
     const out = remapBundle([
       v("view-1", [o("o1", { type: "wireless-channel", channelId: "conn-7::3" })]),
-    ], (i) => `view-new-${i}`);
+    ], mint());
     const cfg = out.views[0].layout!.objects[0].config as unknown as Record<string, unknown>;
     assert.equal(cfg.channelId, "conn-7::3");
   });
@@ -77,7 +84,7 @@ describe("remapping an imported bundle", () => {
     // Import may be retried after a failure, and a walk that edited its input
     // would make the second attempt operate on already-rewritten data.
     const src = [v("view-1", [o("o1", { type: "view-embed", viewId: "view-2" })]), v("view-2", [])];
-    remapBundle(src, (i) => `view-new-${i}`);
+    remapBundle(src, mint());
     const cfg = src[0].layout!.objects[0].config as unknown as Record<string, unknown>;
     assert.equal(cfg.viewId, "view-2", "remapBundle rewrote its own input");
   });

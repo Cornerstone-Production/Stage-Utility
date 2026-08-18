@@ -40,9 +40,9 @@ export async function buildViewBundle(rootId: string): Promise<ViewBundle> {
   // inline slots-grid). Both are collected, for EVERY service type: the
   // destination may run different ones, and dropping them loses real work.
   const slotsFile = await slotsStore.all();
-  const slots: Record<string, Record<string, unknown[]>> = {};
+  const slots: ViewBundle["sideData"]["slots"] = {};
   for (const key of [...views.map((v) => v.id), ...refs.objectIds]) {
-    if (slotsFile[key]) slots[key] = slotsFile[key] as Record<string, unknown[]>;
+    if (slotsFile[key]) slots[key] = slotsFile[key];
   }
 
   await notesStore.init();

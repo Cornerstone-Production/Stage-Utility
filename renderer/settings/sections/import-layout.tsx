@@ -158,21 +158,7 @@ export function ImportLayout() {
               </Group>
             )}
 
-            {pending.rebind.length > 0 && (
-              <Group title="Will not resolve here">
-                {Object.entries(groupByKind(pending.rebind)).map(([kind, list]) => (
-                  <Row
-                    key={kind}
-                    label={needLine(kind as UnresolvableRef["kind"], list.length)}
-                    sub={list.map((u) => u.label).join(", ")}
-                    warn
-                  />
-                ))}
-                <p className="px-3 py-2 text-caption1 text-warn-11">
-                  These keep their bindings and render as unconfigured. Rebind the ones you need after importing.
-                </p>
-              </Group>
-            )}
+            {pending.rebind.length > 0 && <RebindList list={pending.rebind} />}
           </div>
 
           <footer className="flex justify-end gap-2 border-t border-line bg-fill/40 px-4 py-3">
@@ -214,17 +200,25 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-function Row({ label, sub, tag, warn }: { label: string; sub?: string; tag?: string; warn?: boolean }) {
-  return (
-    <div className="flex items-start gap-2.5 border-b border-line px-3 py-2 last:border-b-0">
+function Row({ label, sub, tag, warn, mono, action, onClick }: {
+  label: string; sub?: string; tag?: string; warn?: boolean; mono?: boolean;
+  action?: string; onClick?: () => void;
+}) {
+  const inner = (
+    <>
       <span aria-hidden="true" className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", warn ? "bg-warn-9" : "bg-accent")} />
       <span className="min-w-0 flex-1">
         <span className="block text-footnote text-fg">{label}</span>
-        {sub && <span className="block truncate text-caption2 text-fg-subtle">{sub}</span>}
+        {sub && <span className={cn("block truncate text-caption2 text-fg-subtle", mono && "font-mono")}>{sub}</span>}
       </span>
       {tag && <span className="shrink-0 rounded-full border border-line-strong px-2 py-0.5 text-caption2 text-fg-subtle">{tag}</span>}
-    </div>
+      {action && <span className="shrink-0 text-caption2 text-accent">{action}</span>}
+    </>
   );
+  const shared = "flex w-full items-start gap-2.5 border-b border-line px-3 py-2 text-left last:border-b-0";
+  return onClick
+    ? <button type="button" onClick={onClick} className={cn(shared, "transition-colors hover:bg-fill")}>{inner}</button>
+    : <div className={shared}>{inner}</div>;
 }
 
 /**
@@ -236,35 +230,26 @@ function Row({ label, sub, tag, warn }: { label: string; sub?: string; tag?: str
  * selecting the object itself needs an editor change and rides with the inline
  * pickers in the follow-up.
  */
-function RebindList({ list }: { list: UnresolvableRef[] }) {
-  const router = useRouter();
-  const groups = groupByKind(list);
+function RebindList({ list, onOpen }: { list: UnresolvableRef[]; onOpen?: (u: UnresolvableRef) => void }) {
   return (
     <>
-      {Object.entries(groups).map(([kind, entries]) => (
-        <Group
-          key={kind}
-          title={needLine(kind as UnresolvableRef["kind"], entries.length)}
-        >
+      {Object.entries(groupByKind(list)).map(([kind, entries]) => (
+        <Group key={kind} title={needLine(kind as UnresolvableRef["kind"], entries.length)}>
           {entries.map((u) => (
-            <button
+            <Row
               key={`${u.viewId}:${u.objectId}`}
-              type="button"
-              className="flex w-full items-start gap-2.5 border-b border-line px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-fill"
-              onClick={() => router.navigate({ to: `/screens/${u.viewId}/edit` as never })}
-            >
-              <span aria-hidden="true" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-warn-9" />
-              <span className="min-w-0 flex-1">
-                <span className="block text-footnote text-fg">{u.label}</span>
-                <span className="block truncate font-mono text-caption2 text-fg-subtle">{u.value}</span>
-              </span>
-              <span className="shrink-0 text-caption2 text-accent">Open editor</span>
-            </button>
+              label={u.label}
+              sub={u.value}
+              mono
+              warn
+              action={onOpen && "Open editor"}
+              onClick={onOpen && (() => onOpen(u))}
+            />
           ))}
         </Group>
       ))}
       <p className="text-caption1 text-warn-11">
-        These kept their bindings and render as unconfigured. Nothing was cleared.
+        These keep their bindings and render as unconfigured. Nothing is cleared.
       </p>
     </>
   );
@@ -272,6 +257,7 @@ function RebindList({ list }: { list: UnresolvableRef[] }) {
 
 /** What landed, and what is left to do. */
 function ImportResult({ report, onClose }: { report: ImportReport; onClose: () => void }) {
+  const router = useRouter();
   return (
     <section className="mt-3 basis-full overflow-hidden rounded-xl border border-line-strong bg-surface">
       <header className="border-b border-line px-4 py-3">
@@ -311,7 +297,9 @@ function ImportResult({ report, onClose }: { report: ImportReport; onClose: () =
           </Group>
         )}
 
-        {report.rebind.length > 0 && <RebindList list={report.rebind} />}
+        {report.rebind.length > 0 && (
+          <RebindList list={report.rebind} onOpen={(u) => router.navigate({ to: `/screens/${u.viewId}/edit` as never })} />
+        )}
       </div>
       <footer className="flex justify-end border-t border-line bg-fill/40 px-4 py-3">
         <Button variant="transparent" size="small" onClick={onClose}>Close</Button>

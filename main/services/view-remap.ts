@@ -8,11 +8,12 @@
 // is somebody else's view or nothing at all.
 
 import { cloneLayoutWithMap } from "./layout-clone.js";
+import { walkLayoutObjects } from "./view-refs.js";
 import type { View, LayoutObject } from "../types/views.js";
 
 /** Rewrite embed references in place, on the CLONE. */
 function rewrite(objects: LayoutObject[], viewIdMap: Map<string, string>): void {
-  for (const o of objects) {
+  walkLayoutObjects(objects, (o) => {
     const c = o.config as unknown as Record<string, unknown>;
     for (const key of ["viewId", "sourceViewId"] as const) {
       const cur = c[key];
@@ -20,16 +21,15 @@ function rewrite(objects: LayoutObject[], viewIdMap: Map<string, string>): void 
       // resolve locally, and rewriting it would break a working link.
       if (typeof cur === "string" && viewIdMap.has(cur)) c[key] = viewIdMap.get(cur);
     }
-    if (o.children?.length) rewrite(o.children, viewIdMap);
-  }
+  });
 }
 
 export function remapBundle(
   views: readonly View[],
-  newViewId: (index: number) => string,
+  newViewId: () => string,
 ): { views: View[]; viewIdMap: Map<string, string>; objectIdMap: Map<string, string> } {
   const viewIdMap = new Map<string, string>();
-  views.forEach((v, i) => viewIdMap.set(v.id, newViewId(i)));
+  for (const v of views) viewIdMap.set(v.id, newViewId());
 
   const objectIdMap = new Map<string, string>();
   const out = views.map((v) => {

@@ -14,7 +14,7 @@ const { buildViewBundle } = await import("./view-export.js");
 
 const custom = (id: string, objects: unknown[]) => ({
   id, name: id, kind: "custom", createdAt: 0,
-  layout: { version: 1, canvas: { w: 1920, h: 1080 }, objects },
+  layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects },
 });
 
 beforeEach(async () => {

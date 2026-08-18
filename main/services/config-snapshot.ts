@@ -91,10 +91,6 @@ export interface SnapshotMeta {
  *  carries the same value a config snapshot does rather than reading
  *  package.json a second way. */
 export function appVersion(): string {
-  return pkgVersion();
-}
-
-function pkgVersion(): string {
   try {
     return JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version ?? "0.0.0";
   } catch {
@@ -180,7 +176,7 @@ class ConfigSnapshotService {
       ...(Object.keys(images).length ? { images } : {}),
       kind: SNAPSHOT_KIND,
       version: SNAPSHOT_VERSION,
-      appVersion: pkgVersion(),
+      appVersion: appVersion(),
       createdAt: new Date().toISOString(),
       ...(name ? { name } : {}),
       files,

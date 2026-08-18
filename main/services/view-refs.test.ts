@@ -13,7 +13,7 @@ const obj = (id: string, config: Record<string, unknown>): LayoutObject =>
 const view = (id: string, objects: LayoutObject[]): View =>
   ({
     id, name: id, kind: "custom", createdAt: 0,
-    layout: { version: 1, canvas: { w: 1920, h: 1080 }, objects },
+    layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects },
   }) as unknown as View;
 
 describe("what a view points at", () => {

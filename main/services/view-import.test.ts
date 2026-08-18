@@ -17,7 +17,7 @@ const bundle = (over: Record<string, unknown> = {}) => ({
   createdAt: "2026-08-17T00:00:00.000Z", source: { server: "Elsewhere" },
   views: [{
     id: "view-1", name: "Left Display", kind: "custom", createdAt: 0,
-    layout: { version: 1, canvas: { w: 1920, h: 1080 }, objects: [] },
+    layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects: [] },
   }],
   sideData: { slots: {}, notes: {}, scriptviewLayouts: [] },
   targets: { osc: [], rosstalk: [] },
@@ -44,6 +44,62 @@ describe("importing a bundle", () => {
     for (const junk of [null, "a string", 42, [], {}]) {
       await assert.rejects(() => applyViewBundle(junk), /import/i, `accepted ${JSON.stringify(junk)}`);
     }
+  });
+
+  // Everything below is refused BEFORE anything is written. A throw partway
+  // leaves views on disk the controller does not know about, and the next thing
+  // to save the view list erases them.
+  test("a layout the renderer cannot draw is refused, and nothing is written", async () => {
+    // canvas.width is read unguarded in the renderer, so this crashes the display
+    // it is saved to. The app's own PATCH path has always refused it.
+    await assert.rejects(
+      () => applyViewBundle(bundle({
+        views: [{ id: "v", name: "Bad", kind: "custom", createdAt: 0,
+                  layout: { version: 1, canvas: {}, objects: [] } }],
+      })),
+      /cannot draw/,
+    );
+    assert.deepEqual(await viewsStore.load(), [], "a view was written despite the refusal");
+  });
+
+  test("two views sharing an id are refused, and nothing is written", async () => {
+    // Both would collapse onto one minted id, so deleting either would remove
+    // both and their slot rows would land on top of each other.
+    await assert.rejects(
+      () => applyViewBundle(bundle({
+        views: [
+          { id: "same", name: "A", kind: "custom", createdAt: 0, layout: null },
+          { id: "same", name: "B", kind: "custom", createdAt: 0, layout: null },
+        ],
+      })),
+      /two views with id same/,
+    );
+    assert.deepEqual(await viewsStore.load(), []);
+  });
+
+  test("a view with no name or kind is refused", async () => {
+    await assert.rejects(
+      () => applyViewBundle(bundle({ views: [{ id: "x" }] })),
+      /has no name/,
+    );
+    assert.deepEqual(await viewsStore.load(), []);
+  });
+
+  test("a file with no sideData at all imports rather than throwing mid-write", async () => {
+    // The review sheet previews such a file happily, so the server must not
+    // crash on it after the views are already saved.
+    const raw = bundle() as Record<string, unknown>;
+    delete raw.sideData;
+    const report = await applyViewBundle(raw);
+    assert.equal(report.views.length, 1);
+  });
+
+  test("slot rows that are not a list are refused before any write", async () => {
+    await assert.rejects(
+      () => applyViewBundle(bundle({ sideData: { slots: { "view-1": { "st": "nope" } }, notes: {}, scriptviewLayouts: [] } })),
+      /not a list/,
+    );
+    assert.deepEqual(await viewsStore.load(), []);
   });
 
   test("adds the view without touching what is already there", async () => {
@@ -84,9 +140,9 @@ describe("importing a bundle", () => {
   });
 
   test("a local target of the same id is never overwritten", async () => {
-    await oscStore.save([{ id: "osc-a", name: "MINE", host: "10.0.0.1", port: 8000 }] as never);
+    await oscStore.save([{ id: "osc-a", name: "MINE", enabled: true, config: { host: "10.0.0.1", port: 8000 } }] as never);
     const report = await applyViewBundle(bundle({
-      targets: { osc: [{ id: "osc-a", name: "THEIRS", host: "192.168.1.1", port: 9000 }], rosstalk: [] },
+      targets: { osc: [{ id: "osc-a", name: "THEIRS", enabled: true, config: { host: "192.168.1.1", port: 9000 } }], rosstalk: [] },
     }));
     const t = (await oscStore.load())[0] as unknown as { name: string };
     assert.equal(t.name, "MINE", "the imported target overwrote a local one");
@@ -96,7 +152,7 @@ describe("importing a bundle", () => {
 
   test("a target that is not here is added", async () => {
     const report = await applyViewBundle(bundle({
-      targets: { osc: [{ id: "osc-b", name: "Lighting", host: "192.168.1.50", port: 8000 }], rosstalk: [] },
+      targets: { osc: [{ id: "osc-b", name: "Lighting", enabled: true, config: { host: "192.168.1.50", port: 8000 } }], rosstalk: [] },
     }));
     assert.equal(report.targetsAdded.length, 1);
     assert.equal((await oscStore.load()).length, 1);
@@ -107,7 +163,7 @@ describe("importing a bundle", () => {
       views: [{
         id: "view-1", name: "L", kind: "custom", createdAt: 0,
         layout: {
-          version: 1, canvas: { w: 1920, h: 1080 },
+          version: 1, canvas: { width: 1920, height: 1080 },
           objects: [{
             id: "o1", x: 0, y: 0, w: 1, h: 1, z: 0, style: {},
             config: { type: "wireless-channel", channelId: "conn-7::3", label: "Handheld 3" },

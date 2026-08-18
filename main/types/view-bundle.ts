@@ -5,6 +5,9 @@
 // resolves anyway, needs rebinding — so no caller has to re-derive them.
 
 import type { View } from "./views.js";
+import type { Slot, ScriptViewLayout } from "./pco.js";
+import type { OscTargetConfig } from "./osc.js";
+import type { RossTalkTargetConfig } from "./rosstalk.js";
 
 /** A binding that names hardware the destination will not have. */
 export interface UnresolvableRef {
@@ -42,12 +45,13 @@ export interface ViewBundle {
   views: View[];
   sideData: {
     /** slots.json key -> serviceTypeId -> rows. Key is a view id or object id. */
-    slots: Record<string, Record<string, unknown[]>>;
-    /** layout object id -> notes content. */
+    slots: Record<string, Record<string, Slot[]>>;
+    /** layout object id -> notes content. Left loose because NotesContent lives
+     *  in a service module, and this type is imported by the renderer. */
     notes: Record<string, unknown>;
-    scriptviewLayouts: unknown[];
+    scriptviewLayouts: ScriptViewLayout[];
   };
-  targets: { osc: unknown[]; rosstalk: unknown[] };
+  targets: { osc: OscTargetConfig[]; rosstalk: RossTalkTargetConfig[] };
   /** `<dir>/<file>` -> base64, matching ConfigSnapshot.images. */
   images: Record<string, string>;
 }

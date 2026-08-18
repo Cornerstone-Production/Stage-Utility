@@ -46,6 +46,21 @@ class OscManager {
 
   // ── Public API ─────────────────────────────────────────────────────────
 
+  /**
+   * Re-read targets from disk and reapply.
+   *
+   * For a writer that legitimately bypasses this manager — the view importer
+   * merges targets in as part of a bundle. Without this the manager keeps its
+   * stale in-memory array, so an imported target is not live AND the next
+   * persist() writes that array back over the file, erasing it.
+   */
+  async reloadTargets(): Promise<void> {
+    const cfgs = await oscStore.load();
+    this.targets = cfgs.map((c) => ({ ...c, connection: "disconnected" as const, message: null }));
+    this.reapply();
+    this.bindFeedback();
+  }
+
   listTargets(): OscTarget[] {
     return this.targets.map((t) => ({ ...t }));
   }

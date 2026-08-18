@@ -1,5 +1,4 @@
 import { errorMessage } from "@main/services/errors";
-import { ImportLayout } from "../../app/screens/import-layout";
 import { useState, useEffect, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
@@ -28,6 +27,7 @@ import {
 import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
+import { ImportLayout } from "./import-layout";
 import { viewSurface, outputMode } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { invoke, onNotification } from "../../lib/api";
