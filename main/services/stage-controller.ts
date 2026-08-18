@@ -1820,13 +1820,22 @@ export class StageController {
     // Deep-clone the layout, recording old→new object ids so inline mic-slots can
     // be carried over to the copy.
     const cloned = src.layout ? cloneLayoutWithMap(src.layout) : null;
+    // SPREAD the source, then override only what must differ. Listing the
+    // fields to keep is how this silently dropped `surface`, `slotsLayout` and
+    // `scriptViewLayoutId` — a duplicated console became a display, its buttons
+    // rendering and doing nothing. A list of what to keep goes stale every time
+    // View grows a field; a list of what to change does not.
     const copy: View = {
+      ...src,
       id: newId,
       name: name?.trim() || `${src.name} copy`,
-      kind: src.kind,
       ndiSource: src.ndiSource ?? null,
       createdAt: new Date().toISOString(),
       layout: cloned?.layout ?? null,
+      // Deliberately NOT inherited: it is an optimistic-concurrency token, and a
+      // fresh view starts at its own revision. Carrying the source's would make
+      // the next save compare against a number that means nothing here.
+      layoutRev: undefined,
     };
     console.log(`[stage-controller] duplicateView ${scrub(id)} → ${scrub(newId)} "${scrub(copy.name)}"`);
     const views = [...this.state.views, copy];
