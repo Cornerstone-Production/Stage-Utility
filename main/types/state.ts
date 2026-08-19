@@ -1,3 +1,4 @@
+import type { ReleaseSection } from "../services/update/release-notes.js";
 // state.ts — StageState and the settings that shape it.
 //
 // The single object every display and panel renders from, and the operator
@@ -234,6 +235,9 @@ export interface UpdateStatus {
   latestDate: string | null;
   /** Commit subjects between current and latest (newest first), capped. */
   changelog: string[];
+  /** The same changes, grouped. Empty on a git checkout, whose changelog is
+   *  commit subjects and has no sections to preserve. */
+  changelogSections?: ReleaseSection[];
   lastCheckedAt: string | null;
   /** "idle" normally; "checking" during a fetch; "updating" while the script runs. */
   phase: "idle" | "checking" | "updating";

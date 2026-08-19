@@ -40,6 +40,26 @@ function sectionOf(line: string): SectionName | null {
 }
 
 /**
+ * Emit sections in SECTION_ORDER, spending the cap as it goes.
+ *
+ * The cap is on TOTAL lines and is spent most-important-first, so a release with
+ * thirty fixes and one breaking change still leads with the breaking change
+ * rather than truncating it away.
+ */
+function takeInOrder(bySection: Map<SectionName, string[]>, cap: number): ReleaseSection[] {
+  const out: ReleaseSection[] = [];
+  let budget = Math.max(0, cap);
+  for (const section of SECTION_ORDER) {
+    if (budget === 0) break;
+    const lines = bySection.get(section);
+    if (!lines?.length) continue;
+    out.push({ section, lines: lines.slice(0, budget) });
+    budget -= Math.min(lines.length, budget);
+  }
+  return out;
+}
+
+/**
  * Group a release body's change lines by section.
  *
  * Total lines are capped, not lines per section, and the cap is spent in
@@ -74,14 +94,25 @@ export function parseReleaseSections(body: string | null | undefined, cap = 40):
     else bySection.set(current, [text]);
   }
 
-  const out: ReleaseSection[] = [];
-  let budget = Math.max(0, cap);
-  for (const section of SECTION_ORDER) {
-    if (budget === 0) break;
-    const lines = bySection.get(section);
-    if (!lines?.length) continue;
-    out.push({ section, lines: lines.slice(0, budget) });
-    budget -= Math.min(lines.length, budget);
+  return takeInOrder(bySection, cap);
+}
+
+/**
+ * Fold several releases' sections into one list.
+ *
+ * A box three releases behind installs all three at once, so the dialog after
+ * that update has to describe all three — merged by section, in release order
+ * within each, rather than three repeats of the same four headings.
+ */
+export function mergeReleaseSections(lists: ReleaseSection[][], cap = 40): ReleaseSection[] {
+  const bySection = new Map<SectionName, string[]>();
+  for (const list of lists) {
+    for (const { section, lines } of list) {
+      const at = bySection.get(section);
+      if (at) at.push(...lines);
+      else bySection.set(section, [...lines]);
+    }
   }
-  return out;
+
+  return takeInOrder(bySection, cap);
 }

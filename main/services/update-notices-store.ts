@@ -19,6 +19,9 @@ export interface JustUpdated {
   /** Captured BEFORE the update ran — afterwards the live status describes the
    *  NEXT pending release, not this one. */
   notes: ReleaseSection[];
+  /** The flat changelog, used only when `notes` is empty — a git checkout's
+   *  changelog is commit subjects, which carry no sections. */
+  lines: string[];
   at: string;
 }
 

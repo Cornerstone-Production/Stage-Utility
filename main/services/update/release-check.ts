@@ -13,6 +13,7 @@
 
 import type { UpdateStatus } from "../../types/stage.js";
 import { compareTags, latestOnTrack, newerThan, parseTag, type ParsedTag } from "../release-tags.js";
+import { parseReleaseSections, mergeReleaseSections, type ReleaseSection } from "./release-notes.js";
 
 const REPO = "Cornerstone-Production/Stage-Utility";
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
@@ -93,14 +94,18 @@ export type PackagedAvailability = Required<
   | "latestSha"
     | "latestDate"
     | "changelog"
+    | "changelogSections"
     | "awaitingPackage"
   >
 >;
-import { parseReleaseSections } from "./release-notes.js";
 
 /** One cap for every "What's new" list — updater.ts imports this, so the git
  *  and packaged paths cannot drift apart. */
 export const CHANGELOG_CAP = 20;
+
+/** The dialog after an update is read once, not glanced at, so it is allowed
+ *  more than the status panel's twenty lines. */
+export const NOTES_CAP = 60;
 
 /** Availability for a packaged install: current version vs the published releases. */
 /**
@@ -164,9 +169,14 @@ export function packagedUpdateStatus(
   // sibling showed the real subjects. The release notes carry those lines, so
   // read them from there and the two panels say the same thing.
   const changelog: string[] = [];
+  // The same changes, grouped. A box three releases behind installs all three,
+  // so the dialog afterwards has to describe all three.
+  const sectionLists: ReleaseSection[][] = [];
   for (const t of newer) {
     if (changelog.length >= CHANGELOG_CAP) break;
     const rel = byTag.get(t.tag);
+    const sections = parseReleaseSections(rel?.body ?? null, NOTES_CAP);
+    if (sections.length) sectionLists.push(sections);
     const lines = changeLinesFrom(rel?.body ?? null);
     if (lines.length) changelog.push(...lines);
     // No notes, or notes with no change list (a hand-written release): the tag
@@ -177,6 +187,7 @@ export function packagedUpdateStatus(
 
   return {
     tagBased: true,
+    changelogSections: mergeReleaseSections(sectionLists, NOTES_CAP),
     currentTag,
     targetTag: target?.tag ?? null,
     releasesBehind: newer.length,

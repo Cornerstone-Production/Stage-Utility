@@ -54,3 +54,52 @@ describe("what counts as available", () => {
     assert.equal(isUpdateAvailable(status({ tagBased: false })), false);
   });
 });
+
+describe("what an update leaves behind for the operator", () => {
+  test("the notice survives being written and read back from disk", async () => {
+    // The whole point: it is written before the process restarts, and read by a
+    // DIFFERENT process afterwards. "It looked saved until the next restart" is
+    // a failure this repository has already had, so this reads through the file
+    // rather than trusting an in-memory value.
+    const { updateNoticesStore } = await import("./update-notices-store.js");
+    await updateNoticesStore.update((cur) => ({
+      ...cur,
+      justUpdated: {
+        version: "v1.12.0",
+        fromVersion: "1.11.0",
+        notes: [{ section: "Breaking", lines: ["displays without a slug redirect"] }],
+        lines: [],
+        at: "2026-08-18T00:00:00.000Z",
+      },
+    }));
+
+    await updateNoticesStore.reload();
+    const after = await updateNoticesStore.load();
+    assert.equal(after.justUpdated?.version, "v1.12.0");
+    assert.equal(after.justUpdated?.fromVersion, "1.11.0");
+    assert.deepEqual(after.justUpdated?.notes, [
+      { section: "Breaking", lines: ["displays without a slug redirect"] },
+    ]);
+  });
+
+  test("dismissing clears it, and that survives a reload too", async () => {
+    const { updateNoticesStore } = await import("./update-notices-store.js");
+    await updateNoticesStore.update((cur) => ({ ...cur, justUpdated: null }));
+    await updateNoticesStore.reload();
+    assert.equal((await updateNoticesStore.load()).justUpdated, null);
+  });
+
+  test("an announced tag is independent of the just-updated notice", async () => {
+    // Dismissing the release dialog must not un-announce a pending version, and
+    // announcing must not clear a dialog waiting to be read.
+    const { updateNoticesStore } = await import("./update-notices-store.js");
+    await updateNoticesStore.update((cur) => ({ ...cur, announcedTag: "v1.13.0" }));
+    await updateNoticesStore.update((cur) => ({
+      ...cur,
+      justUpdated: { version: "v1.12.0", fromVersion: null, notes: [], lines: [], at: "x" },
+    }));
+    const s = await updateNoticesStore.load();
+    assert.equal(s.announcedTag, "v1.13.0");
+    assert.equal(s.justUpdated?.version, "v1.12.0");
+  });
+});
