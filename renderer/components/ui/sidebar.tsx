@@ -158,6 +158,15 @@ interface SidebarListItemProps extends Omit<React.ButtonHTMLAttributes<HTMLButto
    * itself is decoration a screen reader cannot describe.
    */
   ariaLabel?: string;
+  /**
+   * A status mark on the row, positioned BY the row.
+   *
+   * Where it belongs depends on the rail state, which only the row knows:
+   * centred on the right beside the label when expanded, and tucked into the
+   * corner when collapsed — where the row is 40x32 and anything centred on the
+   * right lands on top of the icon.
+   */
+  badge?: React.ReactNode;
 }
 
 export function SidebarListItem({
@@ -167,6 +176,7 @@ export function SidebarListItem({
   label,
   isActive: isActiveProp,
   ariaLabel,
+  badge,
   className,
   onClick,
   children,
@@ -221,6 +231,17 @@ export function SidebarListItem({
         </span>
       )}
       {displayLabel && <span className={cn("truncate", railed && "sr-only")}>{displayLabel}</span>}
+      {badge && (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute",
+            railed ? "right-1 top-1" : "right-2 top-1/2 -translate-y-1/2",
+          )}
+        >
+          {badge}
+        </span>
+      )}
       {children}
     </button>
   );
