@@ -480,6 +480,10 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "update:dismissNotice":
       return post<T>("/api/update/notices/dismiss", p);
 
+    // The bundle IS the payload — a view export file, posted verbatim.
+    case "views:import":
+      return post<T>("/api/views/import", p.bundle);
+
     case "views:reorder":
       return post<T>("/api/views/reorder", { ids: p.ids });
 

@@ -699,3 +699,23 @@ export interface ResolvedOutput {
  * always counts DOWN: to the service start before service ("preservice"), then
  * each item's length while live ("item"). "none" = nothing to count down to.
  */
+
+/**
+ * Is this a layout the renderer can actually draw?
+ *
+ * `canvas.width` is read unguarded in the renderer, so a layout without one
+ * crashes the display it was saved to. Lives here rather than in a route
+ * module because more than one writer needs it: the PATCH path has always
+ * checked, and an imported bundle is a file off somebody's laptop.
+ */
+export function isLayoutShape(v: unknown): v is LayoutDTO {
+  if (!v || typeof v !== "object") return false;
+  const l = v as { objects?: unknown; canvas?: unknown };
+  if (!Array.isArray(l.objects)) return false;
+  if (!l.canvas || typeof l.canvas !== "object") return false;
+  const c = l.canvas as { width?: unknown; height?: unknown };
+  return (
+    typeof c.width === "number" && Number.isFinite(c.width) &&
+    typeof c.height === "number" && Number.isFinite(c.height)
+  );
+}

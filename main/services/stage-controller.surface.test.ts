@@ -235,3 +235,40 @@ describe("deleting a view", () => {
     assert.equal(notesStore.get("other").text, "belongs to another view", "and nothing else may be touched");
   });
 });
+
+// Duplicating a view must produce the SAME KIND of thing.
+//
+// The copy literal listed six fields and the View type has more, so everything
+// it forgot was silently dropped. A duplicated console became a display: its
+// buttons rendered and did nothing, with no error anywhere.
+describe("duplicating a view", () => {
+  it("a console duplicates as a console", async () => {
+    await stageController.duplicateView("vc");
+    const copy = ctl.state.views.find((v) => v.id !== "vc" && v.name.includes("FOH Console"));
+    assert.ok(copy, "no copy was made");
+    assert.equal(viewSurface(copy), "console", "a duplicated control surface became a display");
+  });
+
+  it("carries the ScriptView layout the source was using", async () => {
+    ctl.state.views = [
+      ...ctl.state.views,
+      { id: "vs", name: "Script", kind: "script", createdAt: "", scriptViewLayoutId: "svl-1" },
+    ] as View[];
+    await stageController.duplicateView("vs");
+    const copy = ctl.state.views.find((v) => v.id !== "vs" && v.name.includes("Script"));
+    assert.equal(copy?.scriptViewLayoutId, "svl-1", "the copy lost its ScriptView layout");
+  });
+
+  it("does NOT carry layoutRev", async () => {
+    // Deliberate: layoutRev is an optimistic-concurrency token. A fresh view
+    // starts at its own revision, and inheriting the source's would make the
+    // next save compare against a number that means nothing here.
+    ctl.state.views = [
+      ...ctl.state.views,
+      { id: "vr", name: "Revved", kind: "custom", createdAt: "", surface: "display", layoutRev: 42 },
+    ] as View[];
+    await stageController.duplicateView("vr");
+    const copy = ctl.state.views.find((v) => v.id !== "vr" && v.name.includes("Revved"));
+    assert.notEqual(copy?.layoutRev, 42, "the copy inherited the source's revision token");
+  });
+});
