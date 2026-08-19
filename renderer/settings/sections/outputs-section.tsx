@@ -4,7 +4,7 @@ import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, DownloadIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
@@ -28,6 +28,7 @@ import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { ScreenUrlsDialog } from "./screen-urls-dialog";
+import { ImportLayout } from "./import-layout";
 import { viewSurface, outputMode } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { invoke, onNotification } from "../../lib/api";
@@ -194,6 +195,14 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
                 <ExternalLinkIcon className="size-3.5 text-fg-subtle" />
                 Open display
               </DropdownMenu.Item>
+              {output.viewId && (
+                <DropdownMenu.Item asChild className={MENU_ITEM}>
+                  <a href={`/api/views/${encodeURIComponent(output.viewId)}/export`} download>
+                    <DownloadIcon className="size-3.5 text-fg-subtle" />
+                    Export layout
+                  </a>
+                </DropdownMenu.Item>
+              )}
               <DropdownMenu.Item
                 // Confirmed, and the confirm says what actually changes. Turning
                 // a screen into a panel makes its controls live to anyone
@@ -424,6 +433,14 @@ function UnassignedViewCard({
               <DropdownMenu.Item onSelect={onDuplicate} className={MENU_ITEM}>
                 <CopyIcon className="size-3.5 text-fg-subtle" />
                 Duplicate view
+              </DropdownMenu.Item>
+              {/* An anchor, not a fetch-and-blob: the browser takes the filename
+                  from Content-Disposition and middle-click behaves. */}
+              <DropdownMenu.Item asChild className={MENU_ITEM}>
+                <a href={`/api/views/${encodeURIComponent(view.id)}/export`} download>
+                  <DownloadIcon className="size-3.5 text-fg-subtle" />
+                  Export layout
+                </a>
               </DropdownMenu.Item>
               <DropdownMenu.Item
                 // Confirmed, because deleting a view cannot be undone and this
@@ -656,6 +673,9 @@ export function OutputsSection({
           <PlusIcon className="size-3.5 text-gray-9" />
           New view
         </Button>
+        {/* Beside New view because an imported view IS a new view — it arrives
+            where you would look for one. */}
+        <ImportLayout />
         {outputs.length > 0 && (
           <Button
             variant="transparent"

@@ -26,6 +26,7 @@ screens, the settings UI and a phone remote from one port.
 | [Layout editor](docs/reference/layout-editor.md) | placing objects, other window shapes, motion |
 | [Display URLs](docs/display-urls.md) | addressing screens |
 | [Slots](docs/slots.md) | matching people and devices to positions |
+| [Moving a view](docs/moving-a-view.md) | taking one layout to another install |
 | [Attendance and service history](docs/features/attendance-and-history.md) | what a service records, and reading it back |
 | [ScriptView and Baptisms](docs/features/scriptview-and-baptisms.md) | two operator surfaces on the plan |
 | [Patch sheet](docs/patch-sheet/README.md) | the stage patch sheet |

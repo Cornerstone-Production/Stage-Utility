@@ -1840,13 +1840,22 @@ export class StageController {
     // Deep-clone the layout, recording old→new object ids so inline mic-slots can
     // be carried over to the copy.
     const cloned = src.layout ? cloneLayoutWithMap(src.layout) : null;
+    // SPREAD the source, then override only what must differ. Listing the
+    // fields to keep is how this silently dropped `surface`, `slotsLayout` and
+    // `scriptViewLayoutId` — a duplicated console became a display, its buttons
+    // rendering and doing nothing. A list of what to keep goes stale every time
+    // View grows a field; a list of what to change does not.
     const copy: View = {
+      ...src,
       id: newId,
       name: name?.trim() || `${src.name} copy`,
-      kind: src.kind,
       ndiSource: src.ndiSource ?? null,
       createdAt: new Date().toISOString(),
       layout: cloned?.layout ?? null,
+      // Deliberately NOT inherited: it is an optimistic-concurrency token, and a
+      // fresh view starts at its own revision. Carrying the source's would make
+      // the next save compare against a number that means nothing here.
+      layoutRev: undefined,
     };
     console.log(`[stage-controller] duplicateView ${scrub(id)} → ${scrub(newId)} "${scrub(copy.name)}"`);
     const views = [...this.state.views, copy];
@@ -2217,6 +2226,44 @@ export class StageController {
 
 
   // ── Refresh ───────────────────────────────────────────────────────────
+
+  /**
+   * Re-read views from disk into the in-memory state, and broadcast.
+   *
+   * For a writer that legitimately bypasses this controller — the view importer
+   * merges a bundle into several stores at once, which is not a shape any
+   * controller method has. Without this the file on disk is right and every open
+   * page still shows the old list, because `broadcast()` sends `this.state`.
+   */
+  async reloadViews(): Promise<StageState> {
+    const views = await viewsStore.load();
+    this.state = { ...this.state, views };
+    // Slot rows for a slots-KIND view. recomputeResolved reads rawSlotsByView,
+    // so without this an imported slots view resolves to nothing though its rows
+    // are on disk. duplicateView does this; the first version of reloadViews did
+    // not, and export is offered for every view kind.
+    if (this.state.serviceTypeId) {
+      for (const v of views) {
+        if (v.kind === "slots" && !this.rawSlotsByView.has(v.id)) {
+          this.rawSlotsByView.set(v.id, await slotsStore.getSlots(v.id, this.state.serviceTypeId));
+        }
+      }
+    }
+    // Same inline-slots sync saveViewLayout does: an imported layout may contain
+    // slots-grid objects whose rows are on disk but not yet in memory.
+    const inlineIds = new Set<string>();
+    forEachInlineSlotsGrid(this.state.views, (oid) => inlineIds.add(oid));
+    if (this.state.serviceTypeId) {
+      for (const oid of inlineIds) {
+        if (!this.rawSlotsByObject.has(oid)) {
+          this.rawSlotsByObject.set(oid, await slotsStore.getSlots(oid, this.state.serviceTypeId));
+        }
+      }
+    }
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
 
   async refresh(full = true): Promise<StageState> {
     console.log(`[stage-controller] refresh (${full ? "full" : "targeted"})`);
