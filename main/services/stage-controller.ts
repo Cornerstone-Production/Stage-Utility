@@ -27,6 +27,7 @@ import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
 import { scriptViewConfigStore } from "./scriptview-config-store.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 import { updater } from "./updater.js";
+import { announceIfNew } from "./update/announce.js";
 import { validateSlug } from "./reserved-slugs.js";
 import { scriptViewRolesStore, seedRoles } from "./scriptview-roles-store.js";
 import type { CategoryRole } from "../types/scriptview-roles.js";
@@ -1350,6 +1351,8 @@ export class StageController {
   private async updateCheckTick(): Promise<void> {
     try {
       const status = await updater.checkForUpdate();
+    // Once per available release, and only if somebody is connected to hear it.
+    await announceIfNew(updater.getStatus());
       if (this.shouldAutoApply(status.behind, new Date())) {
         console.log("[stage-controller] auto-update window — applying update");
         // auto-install applies the build but leaves the restart to the operator,

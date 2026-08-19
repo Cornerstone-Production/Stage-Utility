@@ -15,6 +15,10 @@
  * to change, which on a quiet channel can be many minutes — a countdown that is
  * simply blank on a display someone just opened.
  */
+// `update:notice` is deliberately NOT here. It is an EVENT — "a new version
+// appeared" — and replaying it on every connect would toast on every page load,
+// which is the hounding the once-per-version rule exists to prevent. The fact
+// that survives is stored server-side as `announcedTag`, not replayed.
 export const HYDRATED_CHANNELS = [
   "server:hello",
   "stage:state-changed",

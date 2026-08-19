@@ -12,7 +12,7 @@
 // SplitView needs the same values to size the panel and to decide between the
 // inline rail and the mobile drawer.
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment } from "react";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import {
@@ -34,8 +34,9 @@ import { buildLabel } from "../lib/build-label";
 import { withViewTransition } from "../lib/view-transition";
 import { resetCurrentRoute } from "./route-reset";
 import { useStageState } from "../main/use-stage-state";
-import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
+import { isUpdateAvailable } from "@main/services/update/availability";
+import { useUpdateStatus } from "./queries";
 import {
   ALL_DESTINATIONS,
   DESTINATIONS,
@@ -72,15 +73,12 @@ export function Rail({
   // but it is not swallowed either: the reason is kept and shown in the tooltip,
   // so an operator can tell "still loading" from "the check failed" instead of
   // reading the same empty label for both.
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const [versionError, setVersionError] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    invoke<UpdateStatus>("update:status")
-      .then((s) => { if (!cancelled) setUpdateStatus(s); })
-      .catch((e: unknown) => { if (!cancelled) setVersionError(errorMessage(e)); });
-    return () => { cancelled = true; };
-  }, []);
+  // The LIVE status, not a one-shot fetch. This was invoked once on mount, so
+  // both the dot below and the version label at the foot of the rail went stale
+  // the moment anything changed and stayed stale until a reload.
+  const { data: updateStatus, error: updateError } = useUpdateStatus();
+  const versionError = updateError ? errorMessage(updateError) : null;
+  const updateAvailable = isUpdateAvailable(updateStatus);
 
   // A rail entry per console View. Derived from state rather than a fixed table,
   // because consoles are created by the operator — this is the one part of the
@@ -185,9 +183,29 @@ export function Rail({
           );
         })}
         <SidebarGroupLabel>Settings</SidebarGroupLabel>
-        {SETTINGS_DESTINATIONS.map((d) => (
-          <SidebarListItem key={d.path} item={d} icon={d.icon} title={d.label} />
-        ))}
+        {SETTINGS_DESTINATIONS.map((d) => {
+          // Advanced is where an update is installed, so it is where the dot
+          // goes. It follows AVAILABILITY, not whether the toast fired: dismiss
+          // a toast and the dot stays until the update is actually taken.
+          const flagged = updateAvailable && d.path === "/settings/advanced";
+          return (
+            <SidebarListItem
+              key={d.path}
+              item={d}
+              icon={d.icon}
+              title={d.label}
+              ariaLabel={flagged ? `${d.label}, update available` : undefined}
+            >
+              {flagged && (
+                <span
+                  aria-hidden="true"
+                  title="Update available"
+                  className="absolute right-2 top-2 size-1.5 rounded-full bg-accent"
+                />
+              )}
+            </SidebarListItem>
+          );
+        })}
       </SidebarList>
 
       <div className="mt-auto">

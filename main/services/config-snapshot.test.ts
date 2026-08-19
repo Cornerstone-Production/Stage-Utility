@@ -125,6 +125,7 @@ const EXPECTED_RUNTIME = [
   "service-timeline.json",
   "signals.json",
   "spl-history.json",
+  "update-notices.json",
 ].sort();
 
 describe("store classification", () => {

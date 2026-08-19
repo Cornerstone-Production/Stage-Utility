@@ -152,6 +152,12 @@ interface SidebarListItemProps extends Omit<React.ButtonHTMLAttributes<HTMLButto
   label?: string;
   /** Override active state (bypasses context). */
   isActive?: boolean;
+  /**
+   * Accessible name, when the visible label does not carry the whole meaning —
+   * a row with a badge reads as "Advanced, update available", because the dot
+   * itself is decoration a screen reader cannot describe.
+   */
+  ariaLabel?: string;
 }
 
 export function SidebarListItem({
@@ -160,6 +166,7 @@ export function SidebarListItem({
   title,
   label,
   isActive: isActiveProp,
+  ariaLabel,
   className,
   onClick,
   children,
@@ -195,7 +202,7 @@ export function SidebarListItem({
     <button
       type="button"
       className={cn(
-        "flex items-center gap-2.5 w-full rounded-lg px-2.5 py-2 text-left",
+        "relative flex items-center gap-2.5 w-full rounded-lg px-2.5 py-2 text-left",
         "text-[13.5px] font-medium transition-colors",
         railed && "justify-center px-0",
         isActive
@@ -204,7 +211,7 @@ export function SidebarListItem({
         className,
       )}
       aria-current={isActive ? "page" : undefined}
-      aria-label={railed ? displayLabel : undefined}
+      aria-label={ariaLabel ?? (railed ? displayLabel : undefined)}
       onClick={handleClick}
       {...props}
     >
