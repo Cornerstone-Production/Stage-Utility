@@ -6,6 +6,12 @@ import { Button } from "./button";
 
 // ── Low-level Radix primitives (re-exported for advanced use) ─────────────────
 
+/** The raw Root, for a dialog that owns its own footer.
+ *
+ * The `Dialog` wrapper below always closes on confirm, which suits a
+ * confirmation and cannot suit a dialog whose action can fail or whose only
+ * button is a dismissal. Such a dialog composes Root + DialogContent itself. */
+export const DialogRoot = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
 export const DialogPortal = DialogPrimitive.Portal;
 export const DialogClose = DialogPrimitive.Close;

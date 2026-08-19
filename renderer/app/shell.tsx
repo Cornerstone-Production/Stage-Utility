@@ -15,6 +15,7 @@ import { PageActionsProvider, PageActionsSlot, usePageActionsSlot } from "./page
 import { ContextBar } from "./context-bar";
 import { ALL_DESTINATIONS } from "./destinations";
 import { useStageLiveWiring } from "./live-wiring";
+import { UpdateNotices } from "./update-notices";
 import { useStageStateQuery } from "./queries";
 import { useSidebarCollapsed } from "../lib/use-sidebar-collapsed";
 import { useSidebarWidth, RAIL_WIDTH } from "../lib/use-sidebar-width";
@@ -71,6 +72,10 @@ export function Shell() {
     // No divider rules between the rail, the context bar and the content: the
     // surfaces already separate them, and 1px lines everywhere read as seams.
     <div className="h-[100dvh] overflow-hidden bg-bg">
+      {/* Here rather than on Advanced: both notices are things you should hear
+          about while doing something else. Advanced is where you go to ACT on an
+          update, not where you find out there is one. */}
+      <UpdateNotices />
       <PageActionsProvider>
       <SplitView
         collapsed={collapsed}

@@ -19,6 +19,7 @@ export { Separator } from "./separator";
 export { Collapsible } from "./collapsible";
 export {
   Dialog,
+  DialogRoot,
   DialogTrigger,
   DialogPortal,
   DialogClose,

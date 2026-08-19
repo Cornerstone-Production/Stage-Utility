@@ -475,6 +475,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>(`/api/views/${encodeURIComponent(id)}/duplicate`, { name: p.name });
     }
 
+    case "update:notices":
+      return apiFetch<T>("/api/update/notices");
+    case "update:dismissNotice":
+      return post<T>("/api/update/notices/dismiss", p);
+
     case "views:reorder":
       return post<T>("/api/views/reorder", { ids: p.ids });
 
