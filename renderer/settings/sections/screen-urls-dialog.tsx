@@ -96,17 +96,20 @@ export function ScreenUrlsDialog({
             >
               Friendly link — optional
             </label>
-            <div className="flex items-center gap-2">
-              <span className="shrink-0 font-mono text-caption2 text-fg-faint">{baseUrl}/</span>
-              <Input
-                id="screen-slug"
-                value={value}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
-                placeholder="optional"
-                autoComplete="off"
-                className="h-8 min-w-0 flex-1 font-mono text-caption2"
-              />
-            </div>
+            {/* Stacked, not inline. The prefix is a full origin — on a phone it
+                took the whole row and squeezed the field down to about four
+                characters, which is not a field you can type a word into. */}
+            <span className="mb-1 block truncate font-mono text-caption2 text-fg-faint">
+              {baseUrl}/
+            </span>
+            <Input
+              id="screen-slug"
+              value={value}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
+              placeholder="optional"
+              autoComplete="off"
+              className="h-9 w-full font-mono text-caption2"
+            />
           </div>
 
           {error && (
