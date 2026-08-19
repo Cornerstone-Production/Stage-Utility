@@ -24,6 +24,7 @@ import {
 
 import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, type PaletteGroup } from "../main/layout-objects";
 import { cn } from "../lib/cn";
+import { Checkbox } from "../components/ui/checkbox";
 
 /** Icon per type. A full Record so a new object cannot appear as a blank tile. */
 const ICONS: Record<LayoutObjectType, LucideIcon> = {
@@ -138,11 +139,10 @@ export function Palette({ types, onAdd, onDragStart, onDragEnd, dimmed, hideUnco
     <div className="flex flex-col gap-0.5 p-1">
       {onToggleHideUnconfigured && (
         <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-caption2 text-fg-muted">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={hideUnconfigured ?? false}
-            onChange={onToggleHideUnconfigured}
-            className="size-3.5 accent-[var(--su-accent)]"
+            onCheckedChange={() => onToggleHideUnconfigured()}
+            className="size-3.5"
           />
           Hide widgets whose integration is not set up
         </label>

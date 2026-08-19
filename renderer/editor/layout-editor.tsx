@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef, useCallback, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useBlocker } from "@tanstack/react-router";
 import { Tooltip } from "../components/ui/tooltip";
+import { toast } from "../components/ui/toast";
+import { errorMessage } from "@main/services/errors";
+import { UnsavedChangesDialog } from "./unsaved-changes-dialog";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
 import {
   UndoIcon,
@@ -986,6 +990,18 @@ export function LayoutEditor({
   // again is the same button twice for one intent.
   const [isEditing, setIsEditing] = useState(startEditing);
   const [confirmLeave, setConfirmLeave] = useState(false);
+
+  // Navigating away with unsaved work — the rail, a link, the browser's own Back
+  // button. Leaving EDIT MODE already asked; this did not, and a layout could be
+  // lost by pressing Back out of habit.
+  //
+  // enableBeforeUnload covers closing the tab as well, which no in-app dialog
+  // can: the browser's own prompt is the only thing that fires there.
+  const leaveBlocker = useBlocker({
+    shouldBlockFn: () => dirty,
+    enableBeforeUnload: () => dirty,
+    withResolver: true,
+  });
   // Reusable object/container groups (loaded from the global library).
   const [groups, setGroups] = useState<LayoutGroup[]>([]);
   const [groupDlgOpen, setGroupDlgOpen] = useState(false);
@@ -1544,6 +1560,22 @@ export function LayoutEditor({
       setHistory([]);
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * Save, and only then do the thing that was waiting on it.
+   *
+   * A save that fails must not close the editor or navigate away — that would
+   * throw the work away while appearing to keep it. The dialog stays open with
+   * the reason, which is the only way the operator can act on it.
+   */
+  async function saveThen(after: () => void): Promise<void> {
+    try {
+      await save();
+      after();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
   }
 
@@ -2129,33 +2161,27 @@ export function LayoutEditor({
       )}
 
       {/* Leaving edit mode with unsaved changes. */}
-      <DialogPrimitive.Root open={confirmLeave} onOpenChange={setConfirmLeave}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Unsaved changes</DialogTitle>
-            <DialogDescription>
-              This layout has unsaved changes. Save them before leaving edit mode?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="transparent"
-              size="small"
-              onClick={() => { discardChanges(); setConfirmLeave(false); setIsEditing(false); }}
-            >
-              Discard
-            </Button>
-            <Button
-              variant="accent"
-              size="small"
-              disabled={saving}
-              onClick={async () => { await save(); setConfirmLeave(false); setIsEditing(false); }}
-            >
-              {saving ? "Saving…" : "Save & close"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </DialogPrimitive.Root>
+      <UnsavedChangesDialog
+        open={confirmLeave}
+        saving={saving}
+        description="This layout has unsaved changes. Save them before leaving edit mode?"
+        saveLabel="Save & close"
+        onCancel={() => setConfirmLeave(false)}
+        onDiscard={() => { discardChanges(); setConfirmLeave(false); setIsEditing(false); }}
+        onSave={() => void saveThen(() => { setConfirmLeave(false); setIsEditing(false); })}
+      />
+
+      {/* Navigating away with unsaved changes — the same question, so the same
+          dialog. proceed() is only called once the work is safe. */}
+      <UnsavedChangesDialog
+        open={leaveBlocker.status === "blocked"}
+        saving={saving}
+        description="This layout has unsaved changes. Save them before leaving?"
+        saveLabel="Save & leave"
+        onCancel={() => leaveBlocker.reset?.()}
+        onDiscard={() => { discardChanges(); leaveBlocker.proceed?.(); }}
+        onSave={() => void saveThen(() => leaveBlocker.proceed?.())}
+      />
 
       {/* Save the selected container as a reusable group. */}
       <DialogPrimitive.Root open={groupDlgOpen} onOpenChange={setGroupDlgOpen}>
