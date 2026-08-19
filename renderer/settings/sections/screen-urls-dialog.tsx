@@ -10,7 +10,7 @@
 // reserved word like "history" does not error, it silently serves that page
 // instead of the display — so the refusal has to stay on screen.
 
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { CopyIcon } from "lucide-react";
 
 import { Button, DialogRoot, DialogContent, DialogHeader, DialogTitle, DialogDescription, Input, toast } from "../../components/ui";
@@ -37,6 +37,14 @@ export function ScreenUrlsDialog({
   /** Rejects with the server's reason, which is shown without closing. */
   onSave: (slug: string) => Promise<void>;
 }) {
+  // The dialog's own element, for copyText's fallback path.
+  //
+  // Prod is plain HTTP, so navigator.clipboard does not exist and copyText falls
+  // back to a textarea plus execCommand. A Radix dialog traps focus, so a
+  // textarea mounted on document.body loses focus and its selection before the
+  // copy runs — and copies nothing, silently. Mounting it INSIDE the dialog is
+  // what keeps both, which is why copyText takes a container at all.
+  const contentRef = useRef<HTMLDivElement>(null);
   const [value, setValue] = useState(slug);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -66,7 +74,7 @@ export function ScreenUrlsDialog({
 
   return (
     <DialogRoot open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent ref={contentRef} className="max-w-md">
         <DialogHeader>
           <DialogTitle>URLs for {outputName}</DialogTitle>
           <DialogDescription>Where this screen can be reached.</DialogDescription>
@@ -81,7 +89,10 @@ export function ScreenUrlsDialog({
             <button
               type="button"
               className="flex w-full items-center gap-2 rounded-lg border border-line bg-fill px-3 py-2 text-left"
-              onClick={async () => { if (await copyText(outputUrl)) toast.success("URL copied"); }}
+              onClick={async () => {
+                if (await copyText(outputUrl, contentRef.current)) toast.success("URL copied");
+                else toast.error("Could not copy — select the URL and copy it by hand");
+              }}
               aria-label="Copy URL"
             >
               <span className="min-w-0 flex-1 truncate font-mono text-caption2 text-fg-muted">{outputUrl}</span>
