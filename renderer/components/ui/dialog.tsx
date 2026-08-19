@@ -8,9 +8,11 @@ import { Button } from "./button";
 
 /** The raw Root, for a dialog that owns its own footer.
  *
- * The `Dialog` wrapper below always closes on confirm, which suits a
- * confirmation and cannot suit a dialog whose action can fail or whose only
- * button is a dismissal. Such a dialog composes Root + DialogContent itself. */
+ * The `Dialog` wrapper below always closes on confirm. That suits a
+ * confirmation and nothing else, so two dialogs compose Root + DialogContent
+ * themselves: the screen-URL editor, whose save the server may refuse and whose
+ * refusal has to stay on screen, and the release notice, whose only button is a
+ * dismissal. */
 export const DialogRoot = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
 export const DialogPortal = DialogPrimitive.Portal;
