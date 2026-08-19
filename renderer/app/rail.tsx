@@ -195,15 +195,8 @@ export function Rail({
               icon={d.icon}
               title={d.label}
               ariaLabel={flagged ? `${d.label}, update available` : undefined}
-            >
-              {flagged && (
-                <span
-                  aria-hidden="true"
-                  title="Update available"
-                  className="absolute right-2 top-2 size-1.5 rounded-full bg-accent"
-                />
-              )}
-            </SidebarListItem>
+              badge={flagged ? <span title="Update available" className="block size-1.5 rounded-full bg-accent" /> : undefined}
+            />
           );
         })}
       </SidebarList>

@@ -23,28 +23,30 @@ afterEach(() => cleanup());
 after(() => teardown());
 
 describe("a nav row with a badge", () => {
-  test("renders the badge as a child of the row", () => {
-    const view = render(
-      <SidebarListItem title="Advanced">
-        <span data-testid="dot" />
-      </SidebarListItem>,
-    );
-    const row = view.getByRole("button");
-    assert.ok(row.querySelector('[data-testid="dot"]'), "the badge is not inside the row");
+  test("renders the badge inside the row", () => {
+    const view = render(<SidebarListItem title="Advanced" badge={<span data-testid="dot" />} />);
+    assert.ok(view.getByRole("button").querySelector('[data-testid="dot"]'), "the badge is not inside the row");
   });
 
-  test("the row is positioned, so a badge can pin to its corner", () => {
-    // Without this the dot lands wherever flex puts it, which in a collapsed
-    // rail is on top of the icon.
-    const view = render(<SidebarListItem title="Advanced"><span /></SidebarListItem>);
+  test("the ROW positions the badge, not the caller", () => {
+    // Where it belongs depends on the rail state, which only the row knows: a
+    // right-centred dot lands ON the icon in the collapsed rail, where the row
+    // is 40x32. Measured in a browser; asserted here as the row owning the
+    // positioning classes rather than passing them through.
+    const view = render(<SidebarListItem title="Advanced" badge={<span data-testid="dot" />} />);
+    const wrapper = view.getByRole("button").querySelector('[data-testid="dot"]')!.parentElement!;
+    assert.match(wrapper.className, /absolute/);
+    assert.match(wrapper.className, /-translate-y-1\/2/, "expanded rows centre the badge vertically");
+  });
+
+  test("the row is positioned, so a badge can pin to it", () => {
+    const view = render(<SidebarListItem title="Advanced" badge={<span />} />);
     assert.match(view.getByRole("button").className, /\brelative\b/);
   });
 
   test("the accessible name can say why the badge is there", () => {
     const view = render(
-      <SidebarListItem title="Advanced" ariaLabel="Advanced, update available">
-        <span />
-      </SidebarListItem>,
+      <SidebarListItem title="Advanced" ariaLabel="Advanced, update available" badge={<span />} />,
     );
     assert.ok(view.getByRole("button", { name: "Advanced, update available" }));
   });
