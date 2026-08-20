@@ -143,12 +143,15 @@ export function BarSpacerEl({ className }: { className?: string }) {
 /**
  * A fixed gap: a deliberate break between two groups.
  *
- * Unlike the flexible spacer this DOES show on a wrapped phone bar. It is 32px
+ * Unlike the flexible spacer this DOES show on a wrapped phone bar. It is 16px
  * whatever the width, so it separates on a narrow screen exactly as it does on
  * a wide one — which is the whole reason to reach for it instead.
+ *
+ * 16px against the strip's own 12px gap: enough that the break reads as put
+ * there on purpose, little enough that two items either side still group.
  */
 export function BarSpaceEl({ className }: { className?: string }) {
-  return <span aria-hidden="true" className={cn("block w-8 shrink-0", className)} />;
+  return <span aria-hidden="true" className={cn("block w-4 shrink-0", className)} />;
 }
 
 export function ContextBar() {
