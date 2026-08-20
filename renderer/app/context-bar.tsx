@@ -12,9 +12,8 @@
 // display use the same pair; a third copy would be a third place for the same
 // bug.
 //
-// The item set is fixed in Phase 1a. It becomes a configurable registry in
-// Phase 3, alongside integration health and recording status; generalising now
-// would produce a registry with one consumer and nothing to generalise from.
+// WHICH items appear, in what order, and where the left/right split falls are
+// all the operator's, and all live in bar-items.ts. This file renders them.
 
 import { useEffect, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -22,7 +21,7 @@ import { useDashboardState } from "../main/use-dashboard-state";
 import { computePcoTimer, fmtDuration } from "../main/pco-timer";
 import { cn } from "../lib/cn";
 import type { ReactNode } from "react";
-import { visibleBarItems, type BarItemId } from "./bar-items";
+import { barRows, visibleBarItems, type BarItemId } from "./bar-items";
 import { recordingStat, recorders } from "./recording-status";
 import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
@@ -90,13 +89,16 @@ export function ContextBar() {
 
   const bar = contextBarState(pcoLive, now, skewMs);
 
-  const items = visibleBarItems(state?.barItems);
-  // Rendered once each, in the operator's order. Items that have nothing to say
-  // right now return null and take no space, so the bar stays quiet rather than
-  // filling with em dashes.
-  const rendered = items
-    .map((id) => ({ id, node: renderBarItem(id, { state, bar, now, obs, reaper, integrations }) }))
-    .filter((x) => x.node !== null);
+  // Rendered once each, in the operator's order, and EVERY item renders — an
+  // item with nothing to report says so rather than vanishing.
+  //
+  // Items used to return null when idle, which was quieter and wrong: the bar
+  // reflowed as the state changed. Integration health appeared only once
+  // something broke, so its arrival moved everything beside it; between services
+  // the whole right-hand group was absent and the bar packed left. An operator
+  // cannot learn where to look on a strip that rearranges itself.
+  const ctx = { state, bar, now, obs, reaper, integrations };
+  const { ids, splitAt } = barRows(visibleBarItems(state?.barItems));
 
   return (
     // No bottom rule and no separate surface: it sits on the content background,
@@ -113,34 +115,45 @@ export function ContextBar() {
         "sm:h-11 sm:flex-nowrap sm:py-0",
       )}
     >
-      {rendered.map((x, i) => (
+      {ids.map((id, i) => (
         <span
-          key={x.id}
+          key={id}
           // shrink-0 on EVERY item, not just the one that pushes right. With
           // min-w-0 the items squeezed past their own content on a phone and
           // printed over each other; the strip scrolls now instead.
           //
-          // The first live-ish item still pushes the rest right, preserving the
-          // original bar's shape: context on the left, service state on the right.
-          // ml-auto only once the bar is a single row — on a wrapped bar it
-          // would shove one item to the end of whichever line it landed on.
-          className={cn("flex items-center gap-2.5 shrink-0", i === RIGHT_FROM(rendered) && "sm:ml-auto")}
+          // The item at the split takes the slack, which pushes it and
+          // everything after it to the right edge. ml-auto only once the bar is
+          // a single row — on a wrapped bar it would shove one item to the end
+          // of whichever line it landed on.
+          className={cn("flex items-center gap-2.5 shrink-0", i === splitAt && "sm:ml-auto")}
         >
-          {x.node}
+          {renderBarItem(id, ctx)}
         </span>
       ))}
     </header>
   );
 }
 
-/** Where the right-hand group starts: the first of the "service state" items
- *  present. Keeps the shipped bar's left/right split without hard-coding it. */
-const RIGHT_ITEMS = new Set<BarItemId>(["live-timer", "current-item", "integration-health", "recording"]);
-function RIGHT_FROM(rendered: { id: BarItemId }[]): number {
-  return rendered.findIndex((x) => RIGHT_ITEMS.has(x.id));
+/**
+ * An item with nothing to report.
+ *
+ * One component so the resting treatment is stated once. It is the thing most
+ * likely to be revisited — whether idle should be grey at all was the question
+ * this change turned on — and three hand-written copies is three chances for it
+ * to end up meaning three different things.
+ */
+function Idle({ children }: { children: ReactNode }) {
+  return <span className="text-footnote text-fg-subtle truncate">{children}</span>;
 }
 
-function renderBarItem(
+/**
+ * One item's contents. NEVER null: see the loop above.
+ *
+ * Exported for the guard that holds that promise — the idle branches are easy
+ * to drop, and dropping one brings back a bar that rearranges itself.
+ */
+export function renderBarItem(
   id: BarItemId,
   ctx: {
     state: StageState | null | undefined;
@@ -173,57 +186,83 @@ function renderBarItem(
       );
 
     case "current-item":
-      // Only while live, and only when PCO actually names an item.
-      return bar.isLive && bar.itemTitle
-        ? <span className="text-footnote text-fg-muted truncate max-w-56">{bar.itemTitle}</span>
-        : null;
+      // What PCO says is happening NOW, so between services the honest reading
+      // is that nothing is — not an absent item.
+      return bar.isLive && bar.itemTitle ? (
+        <span className="text-footnote text-fg-muted truncate max-w-56">{bar.itemTitle}</span>
+      ) : (
+        <Idle>No item</Idle>
+      );
 
     case "live-timer":
-      // The countdown shows whenever there IS one; the green badge only when a
-      // service is actually running. Before a service the same countdown is
-      // still worth having — it is how far out the next one is — it just is not
-      // "live", so it reads as its own label instead.
-      if (!bar.timerText) return null;
-      return bar.isLive ? (
+      // Always the same three parts — dot, word, time — so the item keeps its
+      // shape and only its COLOUR changes. Grey is the resting state; green
+      // means a service is running.
+      //
+      // Idle is deliberately not red. Red on this bar means "act now", and it
+      // is already spent on an overrun and on a recorder that has stopped
+      // mid-service. Lit every day for a state that is entirely normal, it
+      // would stop reading as an alarm on the one morning it is.
+      return (
         <>
-          <span className="size-1.5 rounded-full bg-live-9" aria-hidden="true" />
-          <span className="text-caption2 font-medium uppercase tracking-wider text-live-11">Live</span>
-          <span className={cn("text-footnote font-mono tabular-nums", bar.isOver ? "text-danger-11" : "text-fg")}>
-            {bar.timerText}
+          <span
+            className={cn("size-1.5 rounded-full", bar.isLive ? "bg-live-9" : "bg-fg-faint")}
+            aria-hidden="true"
+          />
+          <span
+            aria-hidden="true"
+            className={cn(
+              "text-caption2 font-medium uppercase tracking-wider",
+              bar.isLive ? "text-live-11" : "text-fg-subtle",
+            )}
+          >
+            Live
           </span>
-        </>
-      ) : (
-        <>
-          {bar.itemTitle && (
-            <span className="text-footnote text-fg-muted truncate">{bar.itemTitle}</span>
+          {/* The word stays "Live" either way and only its COLOUR changes,
+              which a screen reader cannot see. So the visible word is hidden
+              from it and the state is spelled out instead — not an aria-label
+              on the span above, which has no role to hang one off. */}
+          <span className="sr-only">{bar.isLive ? "Live" : "Not live"}</span>
+          {/* Pre-service, the timer's own label says what it is counting to. */}
+          {!bar.isLive && bar.itemTitle && (
+            <span className="text-footnote text-fg-subtle truncate">{bar.itemTitle}</span>
           )}
-          <span className={cn("text-footnote font-mono tabular-nums", bar.isOver ? "text-danger-11" : "text-fg-muted")}>
-            {bar.timerText}
+          <span
+            className={cn(
+              "text-footnote font-mono tabular-nums",
+              // Overrun stays red whether or not an item is running: a start
+              // time that has passed with nothing begun is worth the same look.
+              bar.isOver ? "text-danger-11" : bar.isLive ? "text-fg" : "text-fg-subtle",
+            )}
+          >
+            {bar.timerText ?? "—"}
           </span>
         </>
       );
 
     case "integration-health": {
-      // Counts what is DISCONNECTED. Nothing when all is well: a bar item that
-      // is permanently green is noise, and noise is what gets ignored.
       // Only ones the operator has actually SET UP: an integration nobody
       // configured is not "disconnected", it is absent, and counting it would
       // make the bar permanently complain about gear this church does not own.
-      const down = (integrations?.states ?? []).filter(
-        (i) => i.enabled && i.configured !== false && (i.connection === "error" || i.connection === "disconnected"),
-      );
-      if (down.length === 0) return null;
+      const setUp = (integrations?.states ?? []).filter((i) => i.enabled && i.configured !== false);
+      const down = setUp.filter((i) => i.connection === "error" || i.connection === "disconnected");
       // A count on its own is the least useful place to stop: it says something
       // is wrong mid-service and leaves you to open Integrations and read every
       // card to find out what. Clicking it names them and takes you there.
-      return <DisconnectedPopover down={down} labels={integrations?.labels ?? {}} />;
+      if (down.length > 0) return <DisconnectedPopover down={down} labels={integrations?.labels ?? {}} />;
+      // Healthy reads grey, not green: the reassurance is that the item is
+      // there and NOT red, which is legible at a glance without adding a
+      // second colour to a strip whose colours all mean "look here".
+      return <Idle>{setUp.length === 0 ? "No integrations" : "All connected"}</Idle>;
     }
 
     case "recording": {
       // The same judgement Home makes, from the same function - including
       // "connected but stopped", which is the state worth surfacing.
       const rec = recordingStat(recorders(obs, reaper));
-      if (rec.value === "—") return null;
+      // No tone is recordingStat's "nothing is even connected" — the one
+      // recording state that is not worth a colour.
+      if (!rec.tone) return <Idle>No recorder</Idle>;
       return (
         <span className={cn("text-footnote font-mono tabular-nums", rec.tone === "danger" ? "text-danger-11" : "text-live-11")}>
           {rec.tone === "danger" ? "REC stopped" : rec.value}
