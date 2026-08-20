@@ -164,6 +164,24 @@ export function BrandingSection({
 
       <FieldSet>
         <FieldGroup>
+          {/* Moved here when the Connect tab went. It is not a "connect"
+              setting — it decides whether a QR and the LAN URL appear in the
+              top bar of every stage display, which is a decision about how the
+              displays LOOK, and that is this page.
+              Kept rather than deleted with the rest of that tab: four view
+              renderers read it, so removing it would take a shipped display
+              feature with it. */}
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Show connect QR on displays</FieldLabel>
+              <FieldDescription>
+                Puts a QR code and this server&apos;s address in the top bar of every stage
+                display, so anyone on the network can scan it and open the app.
+              </FieldDescription>
+            </FieldContent>
+            <Switch checked={stageState.showQr ?? false} onCheckedChange={handlers.handleShowQrChange} />
+          </Field>
+
           <Field orientation="horizontal">
             <FieldContent>
               <FieldLabel>App name</FieldLabel>

@@ -64,8 +64,8 @@ physical screen shows.
 
 ## Icon colors
 
-Every display and tool icon can be retinted by clicking it, on either the Displays
-or Connect tab. Colors are keyed to the display id or tool path, so a color set on
-one tab shows everywhere including the picker.
+Every display icon can be retinted by clicking it on the Screens page. Colors are
+keyed to the display id, so a colour set in one place shows everywhere including
+the picker.
 
 Untinted icons use the theme accent. Clearing a color returns it to that default.

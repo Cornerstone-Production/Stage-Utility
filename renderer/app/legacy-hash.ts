@@ -38,7 +38,13 @@ const ROUTES: Record<(typeof LEGACY_SECTION_IDS)[number], string> = {
   baptisms: "/baptism",
   // Configuration lives under /settings.
   integrations: "/settings/integrations",
-  connect: "/settings/connect",
+  // The Connect tab is gone: its QR toggle moved to Branding, its Companion
+  // panel to Integrations, and the rest was links the rail already carries.
+  // An old #connect bookmark lands on Integrations — Companion is the thing
+  // people were most often going there for, and it is still a "connect this to
+  // that" page. Kept rather than dropped: the entry IS the promise that an old
+  // bookmark still works.
+  connect: "/settings/integrations",
   branding: "/settings/branding",
   advanced: "/settings/advanced",
 };

@@ -9,7 +9,6 @@
 
 import { useState } from "react";
 import { Loader2Icon } from "lucide-react";
-import { ConnectSection } from "../settings/sections/connect-section";
 import { BrandingSection } from "../settings/sections/branding-section";
 import { AdvancedSection } from "../settings/sections/advanced-section";
 import { PlanSection } from "../settings/sections/plan-section";
@@ -25,11 +24,6 @@ function Loading() {
   );
 }
 
-export function ConnectRoute() {
-  const s = useStageSettings();
-  if (s.stageLoading || !s.stageState) return <Loading />;
-  return <ConnectSection stageState={s.stageState} handlers={s.handlers} />;
-}
 
 export function BrandingRoute() {
   const s = useStageSettings();
