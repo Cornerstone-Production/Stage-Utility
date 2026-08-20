@@ -25,6 +25,7 @@ import {
   ListIcon,
   PlugZapIcon,
   CircleDotIcon,
+  MoveHorizontalIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -37,22 +38,28 @@ export type BarItemId =
   | "recording";
 
 /**
- * The alignment split, as a position in the saved order.
+ * A flexible space, as a position in the saved order.
  *
- * The bar has one left group and one right group, and this is where the cut
- * falls: everything before it sits left, everything from it on sits right.
+ * It draws nothing and takes all the room going, which is what pushes whatever
+ * follows it away from whatever precedes it. macOS's toolbar editor calls the
+ * same thing "Flexible Space", and it behaves the same way here — including that
+ * you can use more than one. Two of them share the slack equally, which is the
+ * only way to centre a group.
  *
- * It is a saved position rather than a per-item `side` property because the two
- * groups are contiguous by construction — there is no left, right, left — and a
- * `side` field would let an operator ask for one. It is NOT in BAR_ITEMS: it
- * shows no reading, so it is not an item, and keeping it out is what stops the
- * renderer having to special-case a row that draws nothing.
+ * It is a position in the order rather than a per-item `side` property because
+ * `side` cannot express "centred", and because a spacer is a thing you can see
+ * and drag in the configurator where a boolean on an item is not.
+ *
+ * It is NOT in BAR_ITEMS: it shows no reading, so it is not an item.
  */
-export const BAR_SPLIT = "split" as const;
-export type BarSplit = typeof BAR_SPLIT;
+export const BAR_SPACER = "spacer" as const;
+export type BarSpacer = typeof BAR_SPACER;
 
-/** A row of the saved order: an item, or the split. */
-export type BarRowId = BarItemId | BarSplit;
+/** What the spacer was called before it could repeat. Read, never written. */
+const LEGACY_SPACER = "split";
+
+/** A row of the saved order: an item, or a spacer. */
+export type BarRowId = BarItemId | BarSpacer;
 
 export interface BarItem {
   id: BarItemId;
@@ -110,23 +117,36 @@ export const BAR_ITEMS: Record<BarItemId, BarItem> = {
 };
 
 /**
- * What a bar nobody has configured shows.
+ * How the spacer presents itself in the configurator.
  *
- * The four the bar shipped with, in the order it shipped them, so an install
- * that never opens the chooser looks exactly as it does today. The two new items
- * are opt-in rather than added to everyone's bar without asking.
+ * Beside BAR_ITEMS rather than in it: the palette needs a label and an icon for
+ * it, but nothing else does, and putting it in the registry would oblige the
+ * renderer to handle an "item" that shows no reading.
  */
-export const DEFAULT_BAR_ORDER: BarItemId[] = ["plan", "current-item", "live-timer"];
+export const BAR_SPACER_ITEM: Omit<BarItem, "id"> = {
+  label: "Flexible space",
+  icon: MoveHorizontalIcon,
+  hint: "Pushes what follows it away from what comes before. Use two to centre a group.",
+};
 
 /**
- * Where the split goes in a bar saved before the split existed.
+ * What a bar nobody has configured shows.
  *
- * Until now the side was INFERRED at render time: the first of these present,
- * and everything after it, was pushed right. That rule is gone from rendering —
- * it survives here only to place the divider where an existing bar already had
- * its cut, so no install's bar moves when it upgrades.
+ * The arrangement the bar shipped with: the plan on the left, service state on
+ * the right. Integration health and recording are opt-in rather than added to
+ * everyone's bar without asking.
+ */
+export const DEFAULT_BAR_ORDER: BarRowId[] = ["plan", BAR_SPACER, "current-item", "live-timer"];
+
+/**
+ * Where the spacer goes in a bar saved before spacers existed.
  *
- * Do not add to this. A new item's side is wherever the operator drags it.
+ * The side used to be INFERRED at render time: the first of these present, and
+ * everything after it, was pushed right. The rule is gone from rendering — it
+ * survives here only to place a spacer where an existing bar already had its
+ * cut, so no install's bar moves when it upgrades.
+ *
+ * Do not add to this. A new item's position is wherever the operator drags it.
  */
 const LEGACY_RIGHT: ReadonlySet<string> = new Set([
   "live-timer",
@@ -135,60 +155,56 @@ const LEGACY_RIGHT: ReadonlySet<string> = new Set([
   "recording",
 ]);
 
-/** Put the split where the inferred rule used to cut. No service-state item
- *  means the old bar packed everything left, so the split goes on the end. */
-function withLegacySplit(items: readonly BarItemId[]): BarRowId[] {
+/** Put a spacer where the inferred rule used to cut. No service-state item means
+ *  the old bar packed everything left, so the spacer goes on the end. */
+function withLegacySpacer(items: readonly BarItemId[]): BarRowId[] {
   const at = items.findIndex((id) => LEGACY_RIGHT.has(id));
   const cut = at === -1 ? items.length : at;
-  return [...items.slice(0, cut), BAR_SPLIT, ...items.slice(cut)];
+  return [...items.slice(0, cut), BAR_SPACER, ...items.slice(cut)];
 }
 
-/** Valid rows from a saved config, in the saved order, with exactly one split.
- *
- *  Unknown ids are SKIPPED rather than rendered blank: a downgrade, or an
- *  integration removed, can leave a saved order naming something this build does
- *  not have, and a hole in the bar is worse than a shorter bar.
- *
- *  An empty or entirely-unknown result falls back to the default, because a bar
- *  that renders nothing reads as broken rather than as configured.
- *
- *  Exactly one split, always — a config with none predates it, and one with two
- *  was hand-edited. Both would otherwise render a bar whose alignment depends on
- *  which split the renderer happened to see last. */
-export function visibleBarItems(saved: readonly string[] | undefined): BarRowId[] {
-  const rows = (saved ?? []).filter(
-    (id): id is BarRowId => id === BAR_SPLIT || id in BAR_ITEMS,
-  );
-  const items = rows.filter((id): id is BarItemId => id !== BAR_SPLIT);
-  if (items.length === 0) return withLegacySplit(DEFAULT_BAR_ORDER);
-  if (!rows.includes(BAR_SPLIT)) return withLegacySplit(items);
-
-  let kept = false;
-  return rows.filter((id) => {
-    if (id !== BAR_SPLIT) return true;
-    if (kept) return false;
-    kept = true;
-    return true;
-  });
+/** Adjacent spacers collapse: two in a row split the slack between two points
+ *  that are the same point, so the second one only pads the saved order. */
+function collapseSpacers(rows: readonly BarRowId[]): BarRowId[] {
+  return rows.filter((id, i) => id !== BAR_SPACER || rows[i - 1] !== BAR_SPACER);
 }
 
 /**
- * The items to render, and the index the right-hand group starts at.
+ * Valid rows from a saved config, in the saved order.
  *
- * Pure and separate from the bar so the alignment is testable without rendering
- * React — the split's whole job is which side things land on, and a rule nobody
- * can assert on is how the inferred one drifted out of anyone's understanding.
+ * Unknown ids are SKIPPED rather than rendered blank: a downgrade, or an
+ * integration removed, can leave a saved order naming something this build does
+ * not have, and a hole in the bar is worse than a shorter bar.
  *
- * `splitAt` of -1, or of `ids.length`, both mean everything sits left.
+ * An empty or entirely-unknown result falls back to the default, because a bar
+ * that renders nothing reads as broken rather than as configured.
+ *
+ * A saved order with NO spacer predates them, and gets one where the old rule
+ * cut. That inference is safe only because `normalizeBarRows` — which is what
+ * the configurator saves through — always writes at least one: an operator who
+ * wants everything hard left gets a trailing spacer, which looks identical and
+ * keeps "no spacer" meaning "not yet migrated" for good.
  */
-export function barRows(rows: readonly BarRowId[]): { ids: BarItemId[]; splitAt: number } {
-  const ids: BarItemId[] = [];
-  let splitAt = -1;
-  for (const id of rows) {
-    if (id === BAR_SPLIT) splitAt = ids.length;
-    else ids.push(id);
-  }
-  return { ids, splitAt };
+export function visibleBarItems(saved: readonly string[] | undefined): BarRowId[] {
+  const rows = (saved ?? []).flatMap((id): BarRowId[] => {
+    if (id === BAR_SPACER || id === LEGACY_SPACER) return [BAR_SPACER];
+    return id in BAR_ITEMS ? [id as BarItemId] : [];
+  });
+  const items = rows.filter((id): id is BarItemId => id !== BAR_SPACER);
+  if (items.length === 0) return DEFAULT_BAR_ORDER;
+  if (!rows.includes(BAR_SPACER)) return withLegacySpacer(items);
+  return collapseSpacers(rows);
+}
+
+/**
+ * What the configurator saves.
+ *
+ * Collapses adjacent spacers, and guarantees at least one — see
+ * `visibleBarItems` for why that last part is load-bearing rather than tidiness.
+ */
+export function normalizeBarRows(rows: readonly BarRowId[]): BarRowId[] {
+  const out = collapseSpacers(rows);
+  return out.includes(BAR_SPACER) ? out : [...out, BAR_SPACER];
 }
 
 /** Type-safe helper so callers do not index BAR_ITEMS with a bare string. */

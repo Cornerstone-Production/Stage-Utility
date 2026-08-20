@@ -27,7 +27,8 @@ import {
 } from "../../components/ui";
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { DataArchivePanel } from "./data-archive-panel";
-import { BarItemsChooser } from "./bar-items-chooser";
+import { BarConfigurator } from "../../app/bar-configurator";
+import { visibleBarItems } from "../../app/bar-items";
 import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
 import { restartConsequence, restartOutcome } from "../../lib/restart-warning";
@@ -901,6 +902,7 @@ export function AdvancedSection({
 }) {
   // Local field state so typing doesn't fight the live store; commit on blur.
   const [publicUrl, setPublicUrl] = useState(stageState.publicUrl ?? "");
+  const [configuringBar, setConfiguringBar] = useState(false);
 
   function commitPublicUrl() {
     const trimmed = publicUrl.trim();
@@ -924,17 +926,27 @@ export function AdvancedSection({
       />
 
       <FieldSet>
-        <Collapsible
-          label="Context bar"
-          summary="Which items appear above every page"
-          headerClassName="px-4 py-2.5"
-        >
-          <BarItemsChooser
-            selected={stageState.barItems ?? []}
-            onChange={(items) => handlers.handleSetBarItems(items)}
-          />
-        </Collapsible>
+        <FieldGroup>
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Context bar</FieldLabel>
+              <FieldDescription>
+                Which readings appear above every page, and where they sit. Right-clicking the bar
+                itself opens the same thing.
+              </FieldDescription>
+            </FieldContent>
+            <Button variant="filled" size="small" onClick={() => setConfiguringBar(true)}>
+              Configure…
+            </Button>
+          </Field>
+        </FieldGroup>
       </FieldSet>
+
+      <BarConfigurator
+        open={configuringBar}
+        onOpenChange={setConfiguringBar}
+        rows={visibleBarItems(stageState.barItems)}
+      />
 
       <FieldSet>
         <Collapsible label="Kiosk devices" summary="Let screens find this server and be claimed" headerClassName="px-4 py-2.5">

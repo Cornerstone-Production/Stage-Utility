@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { BAR_ITEMS, BAR_SPLIT, DEFAULT_BAR_ORDER, barRows, visibleBarItems } from "./bar-items.js";
+import {
+  BAR_ITEMS,
+  BAR_SPACER,
+  BAR_SPACER_ITEM,
+  DEFAULT_BAR_ORDER,
+  normalizeBarRows,
+  visibleBarItems,
+} from "./bar-items.js";
 
 // Exhaustiveness is the COMPILER's job: BAR_ITEMS is Record<BarItemId, BarItem>,
 // so a new id without an entry fails tsc. The design doc singles that out
@@ -12,8 +19,8 @@ import { BAR_ITEMS, BAR_SPLIT, DEFAULT_BAR_ORDER, barRows, visibleBarItems } fro
 // build cannot produce a broken bar.
 
 describe("the bar registry", () => {
-  test("every item describes itself for the chooser", () => {
-    // A chooser row with no hint is a choice made blind.
+  test("every item describes itself for the configurator", () => {
+    // A palette tile with no hint is a choice made blind.
     for (const [id, item] of Object.entries(BAR_ITEMS)) {
       assert.equal(item.id, id, `${id} disagrees with its key`);
       assert.ok(item.label.length > 0, `${id} has no label`);
@@ -21,131 +28,133 @@ describe("the bar registry", () => {
     }
   });
 
+  test("the spacer describes itself too", () => {
+    // It is not in BAR_ITEMS, so the loop above cannot cover it — and it is the
+    // one palette tile whose purpose is not obvious from its name.
+    assert.ok(BAR_SPACER_ITEM.label.length > 0);
+    assert.ok(BAR_SPACER_ITEM.hint.length > 10);
+  });
+
   test("the default is the bar as it shipped", () => {
-    // An install that never opens the chooser must look exactly as it does
-    // today. The two new items are opt-in, not added to everyone's bar.
-    assert.deepEqual(DEFAULT_BAR_ORDER, ["plan", "current-item", "live-timer"]);
-    assert.ok(!DEFAULT_BAR_ORDER.includes("recording" as never));
-    assert.ok(!DEFAULT_BAR_ORDER.includes("integration-health" as never));
+    // plan on the left; the current item and the timer on the right.
+    assert.deepEqual(DEFAULT_BAR_ORDER, ["plan", "spacer", "current-item", "live-timer"]);
+    assert.ok(!DEFAULT_BAR_ORDER.includes("recording"), "recording is opt-in");
+    assert.ok(!DEFAULT_BAR_ORDER.includes("integration-health"), "health is opt-in");
   });
 
   test("every default item exists in the registry", () => {
     for (const id of DEFAULT_BAR_ORDER) {
+      if (id === BAR_SPACER) continue;
       assert.ok(BAR_ITEMS[id], `default names ${id}, which is not a registered item`);
     }
   });
 });
 
 describe("visibleBarItems", () => {
-  test("keeps the operator's order, and their split", () => {
-    assert.deepEqual(visibleBarItems(["clock", BAR_SPLIT, "recording"]), ["clock", "split", "recording"]);
+  test("keeps the operator's order and their spacers", () => {
+    assert.deepEqual(
+      visibleBarItems(["clock", BAR_SPACER, "recording"]),
+      ["clock", "spacer", "recording"],
+    );
   });
 
-  test("honours a split the inferred rule could never have produced", () => {
-    // The whole point of making it explicit. Under the old rule `recording` was
-    // a right-hand item, so it and everything after it went right and the clock
-    // could not follow it on the left. Now the operator decides.
+  test("keeps TWO spacers, which is how a group gets centred", () => {
+    // The arrangement the single-split model could not express at all: slack
+    // shared equally either side of the clock.
     assert.deepEqual(
-      visibleBarItems(["recording", "clock", BAR_SPLIT, "plan"]),
-      ["recording", "clock", "split", "plan"],
+      visibleBarItems(["plan", BAR_SPACER, "clock", BAR_SPACER, "recording"]),
+      ["plan", "spacer", "clock", "spacer", "recording"],
     );
+  });
+
+  test("collapses adjacent spacers", () => {
+    // Two in a row divide the slack between two points that are the same point,
+    // so the second only pads the saved order.
+    assert.deepEqual(
+      visibleBarItems(["clock", BAR_SPACER, BAR_SPACER, "recording"]),
+      ["clock", "spacer", "recording"],
+    );
+  });
+
+  test("reads the name the spacer had before it could repeat", () => {
+    // Written by an earlier build of this branch. Dropping it would silently
+    // left-align a bar its operator had arranged.
+    assert.deepEqual(visibleBarItems(["clock", "split", "recording"]), ["clock", "spacer", "recording"]);
   });
 
   test("skips an id this build does not have", () => {
     // A downgrade, or an integration removed. A hole in the bar is worse than a
     // shorter bar, and rendering an unknown id would be a hole.
     assert.deepEqual(
-      visibleBarItems(["clock", "stream-status", BAR_SPLIT, "recording"]),
-      ["clock", "split", "recording"],
+      visibleBarItems(["clock", "stream-status", BAR_SPACER, "recording"]),
+      ["clock", "spacer", "recording"],
     );
   });
 
   test("falls back to the default rather than rendering an empty bar", () => {
     // A bar showing nothing reads as broken, not as configured.
-    const def = ["plan", "split", "current-item", "live-timer"];
-    assert.deepEqual(visibleBarItems([]), def);
-    assert.deepEqual(visibleBarItems(undefined), def);
-    // A saved order that is nothing BUT a split is still an empty bar.
-    assert.deepEqual(visibleBarItems([BAR_SPLIT]), def);
+    assert.deepEqual(visibleBarItems([]), DEFAULT_BAR_ORDER);
+    assert.deepEqual(visibleBarItems(undefined), DEFAULT_BAR_ORDER);
+    // A saved order that is nothing BUT spacers is still an empty bar.
+    assert.deepEqual(visibleBarItems([BAR_SPACER, BAR_SPACER]), DEFAULT_BAR_ORDER);
   });
 
   test("falls back when every saved id is unknown", () => {
     // The realistic downgrade: a config written by a much newer build.
-    assert.deepEqual(visibleBarItems(["nope", "also-nope"]), ["plan", "split", "current-item", "live-timer"]);
-  });
-
-  test("does not invent duplicates", () => {
-    const out = visibleBarItems(["clock", "clock", BAR_SPLIT]);
-    assert.deepEqual(out, ["clock", "clock", "split"], "dedupe is the chooser's job, not the renderer's");
-  });
-
-  test("keeps only the FIRST of two splits", () => {
-    // A hand-edited bar-config.json. Two splits would give two items ml-auto,
-    // and the bar's alignment would depend on which the renderer saw last.
-    assert.deepEqual(
-      visibleBarItems(["clock", BAR_SPLIT, "plan", BAR_SPLIT, "recording"]),
-      ["clock", "split", "plan", "recording"],
-    );
+    assert.deepEqual(visibleBarItems(["nope", "also-nope"]), DEFAULT_BAR_ORDER);
   });
 });
 
-describe("which side an item lands on", () => {
-  // The bar gives ONE item `sm:ml-auto`, and that margin eats the slack — so
-  // that item and everything after it sits at the right edge. barRows says
-  // which one, and these are the cases that decide the bar's whole shape.
-  test("the split's index is the first RIGHT-aligned item", () => {
-    const { ids, splitAt } = barRows(["clock", "plan", BAR_SPLIT, "live-timer", "recording"]);
-    assert.deepEqual(ids, ["clock", "plan", "live-timer", "recording"]);
-    assert.equal(splitAt, 2, "live-timer should start the right-hand group");
-    assert.equal(ids[splitAt], "live-timer");
-  });
-
-  test("a split at the front right-aligns the whole bar", () => {
-    assert.equal(barRows([BAR_SPLIT, "clock", "plan"]).splitAt, 0);
-  });
-
-  test("a split at the end leaves everything left", () => {
-    // No item's index can equal ids.length, so nothing takes the margin.
-    const { ids, splitAt } = barRows(["clock", "plan", BAR_SPLIT]);
-    assert.equal(splitAt, ids.length);
-    assert.ok(!ids.some((_, i) => i === splitAt), "an item was pushed right by a trailing split");
-  });
-
-  test("no split at all leaves everything left", () => {
-    assert.equal(barRows(["clock", "plan"]).splitAt, -1);
-  });
-
-  test("the split is not itself rendered as an item", () => {
-    // It draws nothing. A split leaking into `ids` would render an empty span
-    // and take a gap's worth of width.
-    assert.ok(!barRows([BAR_SPLIT, "clock"]).ids.includes(BAR_SPLIT as never));
-  });
-});
-
-describe("a bar saved before the split existed", () => {
+describe("a bar saved before spacers existed", () => {
   // Every install upgrading into this change has one. Its bar must not move.
-  test("gets its split where the inferred rule used to cut", () => {
+  test("gets a spacer where the inferred rule used to cut", () => {
     // Old rule: the first of live-timer/current-item/integration-health/
     // recording, and everything after it, was pushed right.
     assert.deepEqual(
       visibleBarItems(["clock", "plan", "live-timer", "recording"]),
-      ["clock", "plan", "split", "live-timer", "recording"],
+      ["clock", "plan", "spacer", "live-timer", "recording"],
     );
   });
 
   test("splits at the front when a service item came first", () => {
-    // The old rule gave this item index 0 the auto-margin, which shoved the
-    // WHOLE bar right. Preserved rather than quietly corrected.
-    assert.deepEqual(visibleBarItems(["recording", "clock"]), ["split", "recording", "clock"]);
+    // The old rule gave this item the auto-margin, which shoved the WHOLE bar
+    // right. Preserved rather than quietly corrected.
+    assert.deepEqual(visibleBarItems(["recording", "clock"]), ["spacer", "recording", "clock"]);
   });
 
   test("splits at the end when the bar had no service item at all", () => {
     // Nothing matched, so nothing took the margin and everything packed left.
-    assert.deepEqual(visibleBarItems(["clock", "plan"]), ["clock", "plan", "split"]);
+    assert.deepEqual(visibleBarItems(["clock", "plan"]), ["clock", "plan", "spacer"]);
+  });
+});
+
+describe("normalizeBarRows", () => {
+  // What the configurator saves. Its contract with visibleBarItems is that a
+  // saved order ALWAYS contains a spacer — which is what lets "no spacer" keep
+  // meaning "saved before spacers existed" for good.
+  test("an arrangement with no spacer gets a trailing one", () => {
+    // Everything hard left. A trailing spacer looks identical and cannot be
+    // mistaken for a config that predates them.
+    assert.deepEqual(normalizeBarRows(["clock", "plan"]), ["clock", "plan", "spacer"]);
   });
 
-  test("the shipped default keeps the shape it shipped with", () => {
-    // plan on the left; the current item and the timer on the right.
-    assert.deepEqual(visibleBarItems(DEFAULT_BAR_ORDER), ["plan", "split", "current-item", "live-timer"]);
+  test("dragging every spacer out still round-trips as left-aligned", () => {
+    // THE case the invariant exists for. Without the trailing spacer this saves
+    // as ["clock","plan"], which visibleBarItems reads as a pre-spacer config
+    // and "migrates" — silently re-splitting a bar the operator just flattened.
+    const saved = normalizeBarRows(["clock", "live-timer"]);
+    assert.deepEqual(visibleBarItems(saved), ["clock", "live-timer", "spacer"]);
+  });
+
+  test("collapses adjacent spacers rather than saving padding", () => {
+    assert.deepEqual(
+      normalizeBarRows(["clock", BAR_SPACER, BAR_SPACER, "plan"]),
+      ["clock", "spacer", "plan"],
+    );
+  });
+
+  test("leaves a deliberate arrangement alone", () => {
+    const rows = ["plan", BAR_SPACER, "clock", BAR_SPACER, "recording"] as const;
+    assert.deepEqual(normalizeBarRows(rows), [...rows]);
   });
 });

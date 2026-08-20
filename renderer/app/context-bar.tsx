@@ -20,13 +20,25 @@ import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useDashboardState } from "../main/use-dashboard-state";
 import { computePcoTimer, fmtDuration } from "../main/pco-timer";
 import { cn } from "../lib/cn";
-import type { ReactNode } from "react";
-import { barRows, visibleBarItems, type BarItemId } from "./bar-items";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
+import { BarConfigurator } from "./bar-configurator";
+import { BAR_SPACER, visibleBarItems, type BarItemId } from "./bar-items";
 import { recordingStat, recorders } from "./recording-status";
 import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
 import { useIntegrations } from "../main/use-integration-states";
 import { DisconnectedPopover } from "./disconnected-popover";
+
+/** Everything an item needs to render. Gathered by `useBarContext`. */
+export interface BarItemContext {
+  state: StageState | null | undefined;
+  bar: ContextBarState;
+  now: number;
+  obs: ReturnType<typeof useObsState>;
+  reaper: ReturnType<typeof useReaperState>;
+  integrations: ReturnType<typeof useIntegrations>;
+}
 
 export interface ContextBarState {
   isLive: boolean;
@@ -64,7 +76,12 @@ export function contextBarState(
   };
 }
 
-export function ContextBar() {
+/** Everything the items read, gathered once.
+ *
+ *  A hook rather than props so the configurator's preview can render the SAME
+ *  items from the SAME live data — a preview fed placeholder values would not be
+ *  a preview of anything. */
+export function useBarContext(): BarItemContext {
   const { state, pcoLive } = useDashboardState();
   // Shared with the layout objects that show the same facts - hooks, not
   // components, so a compact strip and a canvas box stay separate presentations.
@@ -88,6 +105,44 @@ export function ContextBar() {
   });
 
   const bar = contextBarState(pcoLive, now, skewMs);
+  return { state, bar, now, obs, reaper, integrations };
+}
+
+/** The strip's own layout. Shared with the configurator's preview, so a bar that
+ *  looks right there looks right above the page.
+ *
+ *  No bottom rule and no separate surface: it sits on the content background, so
+ *  the page reads as one plane rather than a stack of bordered strips. WRAPS on
+ *  a phone, one row from sm up.
+ *
+ *  Scrolling was the first fix and it was the wrong one: it stopped the items
+ *  colliding, but pushed "3 disconnected" and "REC stopped" off the right edge,
+ *  and an alert you have to swipe sideways to find is not an alert. Wrapping
+ *  shows every reading at once and still cannot overlap. */
+export const BAR_STRIP_CLASS =
+  "flex flex-wrap items-center gap-x-3 gap-y-0.5 px-5 max-sm:px-3 py-1.5 sm:h-11 sm:flex-nowrap sm:py-0";
+
+/** One item's box in the strip.
+ *
+ *  shrink-0 on EVERY item. With min-w-0 they squeezed past their own content on
+ *  a phone and printed over each other. */
+export const BAR_ITEM_CLASS = "flex items-center gap-2.5 shrink-0";
+
+/**
+ * A flexible space: it draws nothing and eats the slack.
+ *
+ * flex-1 only once the bar is a single row. On a wrapped bar it would claim the
+ * whole remainder of whatever line it landed on and push the next item onto a
+ * line of its own, so on a phone the items simply pack and wrap.
+ */
+export function BarSpacerEl({ className }: { className?: string }) {
+  return <span aria-hidden="true" className={cn("hidden sm:block sm:flex-1", className)} />;
+}
+
+export function ContextBar() {
+  const ctx = useBarContext();
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [configuring, setConfiguring] = useState(false);
 
   // Rendered once each, in the operator's order, and EVERY item renders — an
   // item with nothing to report says so rather than vanishing.
@@ -97,41 +152,34 @@ export function ContextBar() {
   // something broke, so its arrival moved everything beside it; between services
   // the whole right-hand group was absent and the bar packed left. An operator
   // cannot learn where to look on a strip that rearranges itself.
-  const ctx = { state, bar, now, obs, reaper, integrations };
-  const { ids, splitAt } = barRows(visibleBarItems(state?.barItems));
+  const rows = visibleBarItems(ctx.state?.barItems);
+
+  const menuItems: ContextMenuItem[] = [
+    { label: "Configure bar…", onSelect: () => setConfiguring(true) },
+  ];
+
+  function openMenu(e: ReactMouseEvent) {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY });
+  }
 
   return (
-    // No bottom rule and no separate surface: it sits on the content background,
-    // so the page reads as one plane rather than a stack of bordered strips.
-    // WRAPS on a phone, one row from sm up.
-    //
-    // Scrolling was the first fix and it was the wrong one: it stopped the items
-    // colliding, but pushed "3 disconnected" and "REC stopped" off the right
-    // edge, and an alert you have to swipe sideways to find is not an alert.
-    // Wrapping shows every reading at once and still cannot overlap.
-    <header
-      className={cn(
-        "context-strip flex flex-wrap items-center gap-x-3 gap-y-0.5 shrink-0 px-5 max-sm:px-3 py-1.5",
-        "sm:h-11 sm:flex-nowrap sm:py-0",
-      )}
-    >
-      {ids.map((id, i) => (
-        <span
-          key={id}
-          // shrink-0 on EVERY item, not just the one that pushes right. With
-          // min-w-0 the items squeezed past their own content on a phone and
-          // printed over each other; the strip scrolls now instead.
-          //
-          // The item at the split takes the slack, which pushes it and
-          // everything after it to the right edge. ml-auto only once the bar is
-          // a single row — on a wrapped bar it would shove one item to the end
-          // of whichever line it landed on.
-          className={cn("flex items-center gap-2.5 shrink-0", i === splitAt && "sm:ml-auto")}
-        >
-          {renderBarItem(id, ctx)}
-        </span>
-      ))}
-    </header>
+    <>
+      <header className={cn("context-strip shrink-0", BAR_STRIP_CLASS)} onContextMenu={openMenu}>
+        {rows.map((id, i) =>
+          id === BAR_SPACER ? (
+            <BarSpacerEl key={`${id}-${i}`} />
+          ) : (
+            <span key={id} className={BAR_ITEM_CLASS}>
+              {renderBarItem(id, ctx)}
+            </span>
+          ),
+        )}
+      </header>
+
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
+      <BarConfigurator open={configuring} onOpenChange={setConfiguring} rows={rows} />
+    </>
   );
 }
 
@@ -153,17 +201,7 @@ function Idle({ children }: { children: ReactNode }) {
  * Exported for the guard that holds that promise — the idle branches are easy
  * to drop, and dropping one brings back a bar that rearranges itself.
  */
-export function renderBarItem(
-  id: BarItemId,
-  ctx: {
-    state: StageState | null | undefined;
-    bar: ContextBarState;
-    now: number;
-    obs: ReturnType<typeof useObsState>;
-    reaper: ReturnType<typeof useReaperState>;
-    integrations: ReturnType<typeof useIntegrations>;
-  },
-): ReactNode {
+export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
   const { state, bar, now, obs, reaper, integrations } = ctx;
   switch (id) {
     case "clock":

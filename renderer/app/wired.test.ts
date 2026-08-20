@@ -44,6 +44,11 @@ const WIRING: { what: string; helper: string; usedBy: string }[] = [
     helper: "applyAccentVar",
     usedBy: "app/live-wiring.ts",
   },
+  {
+    what: "the context bar's arrangement is saved",
+    helper: "setBarItems",
+    usedBy: "app/bar-configurator.tsx",
+  },
 ];
 
 /**
@@ -59,7 +64,6 @@ const WIRING: { what: string; helper: string; usedBy: string }[] = [
 const REACHABLE_HANDLERS = [
   "handleSetViewSurface",
   "handleSetOutputMode",
-  "handleSetBarItems",
   "handleAddView",
   "handleRemoveView",
 ];
