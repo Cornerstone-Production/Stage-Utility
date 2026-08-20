@@ -57,8 +57,6 @@ import {
   type BarRowId,
 } from "./bar-items";
 import {
-  BAR_ITEM_CLASS,
-  BAR_SPACE_CLASS,
   BAR_STRIP_CLASS,
   renderBarItem,
   useBarContext,
@@ -173,13 +171,23 @@ function PaletteTile({
   );
 }
 
-/** One row inside the bar being edited. */
+/**
+ * One row inside the bar being edited.
+ *
+ * The hover state is an absolutely-positioned pill BEHIND the content, not a
+ * background on the row itself. A background on the row is the row's exact
+ * bounds, which for a text reading is a rectangle hugging the glyphs and for a
+ * stretched gap was a slab taller than everything beside it — the two never
+ * lined up. Sitting behind, it can have its own uniform height and a little
+ * breathing room without moving anything.
+ */
 function BarRow({ row, ctx, onRemove }: { row: Row; ctx: BarItemContext; onRemove: () => void }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: row.key,
     data: { from: "bar" },
   });
   const label = presentation(row.id).label;
+  const gap = isBarGap(row.id);
 
   return (
     <span
@@ -191,35 +199,54 @@ function BarRow({ row, ctx, onRemove }: { row: Row; ctx: BarItemContext; onRemov
       // what you are aiming at stays where you saw it.
       data-row-key={row.key}
       className={cn(
-        "group relative cursor-grab rounded-md outline-none active:cursor-grabbing",
-        "ring-offset-2 ring-offset-bg focus-visible:ring-2 focus-visible:ring-accent",
-        "hover:bg-fill touch-pan-y",
+        "group relative flex cursor-grab items-center outline-none active:cursor-grabbing",
+        "touch-pan-y",
         NO_SELECT,
         // A gap has no content, so it needs a width of its own to be grabbable
-        // at all. The flexible one grows from there like the real one does; the
-        // fixed one is shown at exactly the width it will be.
-        row.id === BAR_SPACER ? "min-w-10 flex-1 self-stretch"
-          : row.id === BAR_SPACE ? cn(BAR_SPACE_CLASS, "self-stretch")
-          : BAR_ITEM_CLASS,
+        // at all. The flexible one grows, as the real one does.
+        //
+        // The fixed one is shown at its true 24px WITHOUT the negative margins
+        // it carries in the bar. Those exist so the width is the whitespace
+        // between two readings; in here they dragged the marker into the
+        // neighbouring gap and left it flush against the text next to it, with
+        // nothing to separate them. The block you see is the size you get.
+        row.id === BAR_SPACER ? "min-w-10 flex-1" : row.id === BAR_SPACE ? "w-6 shrink-0" : "shrink-0",
         isDragging && "opacity-40",
       )}
       aria-label={`${label} — drag to move`}
     >
-      {isBarGap(row.id) ? (
-        // Visible only in here. In the bar itself a gap is nothing at all.
-        <span className="pointer-events-none flex h-full items-center justify-center">
+      {/* One shape and one height for every row, so a strip of them reads as a
+          row of chips rather than as rectangles of assorted sizes. */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute -inset-y-1 -inset-x-1 rounded-md bg-fill",
+          "opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100",
+        )}
+      />
+      <span
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute -inset-y-1 -inset-x-1 rounded-md ring-accent",
+          "group-focus-visible:ring-2",
+        )}
+      />
+
+      <span className={cn("relative flex h-5 w-full items-center", !gap && "gap-2.5")}>
+        {gap ? (
+          // Visible only in here. In the bar itself a gap is nothing at all.
           <span
             className={cn(
-              "h-4 w-full rounded-[3px] border border-dashed border-line-strong",
+              "h-3.5 w-full rounded-[3px] border border-dashed border-line-strong",
               // Solid for the fixed one: it is a fixed thing, and the two have
               // to be told apart at a glance once both are in the bar.
               row.id === BAR_SPACE && "border-solid bg-fill",
             )}
           />
-        </span>
-      ) : (
-        renderBarItem(row.id, ctx)
-      )}
+        ) : (
+          renderBarItem(row.id as BarItemId, ctx)
+        )}
+      </span>
 
       <button
         type="button"
@@ -229,9 +256,9 @@ function BarRow({ row, ctx, onRemove }: { row: Row; ctx: BarItemContext; onRemov
         onClick={onRemove}
         aria-label={`Remove ${label}`}
         className={cn(
-          "absolute -right-1.5 -top-1.5 hidden size-4 items-center justify-center rounded-full",
-          "border border-line-strong bg-bg text-fg-muted",
-          "group-hover:flex group-focus-within:flex hover:text-danger-11",
+          "absolute -right-2 -top-2 z-10 hidden size-4 items-center justify-center rounded-full",
+          "border border-line-strong bg-bg text-fg-muted shadow-sm",
+          "group-hover:flex group-focus-within:flex hover:text-danger-11 hover:border-danger-11",
         )}
       >
         <XIcon className="size-2.5" />
@@ -362,7 +389,7 @@ export function BarConfigurator({
 
   return (
     <DialogRoot open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-5xl">
         <DialogHeader>
           <DialogTitle>Configure the context bar</DialogTitle>
           <DialogDescription>
@@ -405,7 +432,11 @@ export function BarConfigurator({
             className={cn(
               "mt-1.5 rounded-xl border border-line-strong bg-bg",
               BAR_STRIP_CLASS,
-              "min-h-11 sm:h-auto sm:min-h-11",
+              // gap-x-5, not the bar's own gap-x-3: the hover pills reach 4px
+              // past each row, so at 12px two of them touched and the strip
+              // read as one continuous block. Wider here ONLY — the real bar
+              // is unchanged.
+              "min-h-11 gap-x-5 sm:h-auto sm:min-h-11",
               NO_SELECT,
             )}
           >
