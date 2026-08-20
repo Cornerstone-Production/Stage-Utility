@@ -6,10 +6,16 @@ import { installDom } from "../../test-dom.js";
 const teardown = installDom();
 const { bindableViews } = await import("./outputs-section.js");
 
-// What the picker OFFERS. This is convenience, not the safety property — the
-// server refuses an invalid binding regardless, and that refusal is tested
-// separately by attempting it. This exists so the operator does not reach for
-// something that will be refused.
+// What the picker OFFERS. Still convenience, not the safety property — the
+// server refuses a console view on a display screen regardless, and that
+// refusal is tested separately by attempting it.
+//
+// It used to HIDE console views from a display screen, which meant the only
+// route to a control surface was to know to flip the screen's mode first, in a
+// different menu, before the view you wanted appeared at all. Everything is
+// offered now; picking a console view offers to switch the screen, and the
+// switch is awaited before the binding is sent so the server never sees the
+// pair in the order it refuses.
 //
 // Asserted on the offered SET rather than on markup: which options render is
 // the behaviour, and a markup assertion breaks every time the pill is restyled.
@@ -24,15 +30,17 @@ const VIEWS = [
 ];
 
 describe("bindableViews", () => {
-  test("a display screen is not offered a console", () => {
+  test("a display screen IS offered a console, so the switch can be offered", () => {
+    // This asserted the opposite, and that was the friction: the view you were
+    // reaching for was missing until you had already found a second switch.
     const offered = bindableViews(VIEWS, { id: "o", name: "Lobby", viewId: null } as Output);
-    assert.deepEqual(offered.map((v) => v.id), ["wall", "legacy"]);
+    assert.deepEqual(offered.map((v) => v.id), ["wall", "legacy", "foh"]);
   });
 
-  test("a screen with no mode field is treated as a display", () => {
+  test("a screen with no mode field is offered everything too", () => {
     // The default that matters: an Output written before this field existed.
     const offered = bindableViews(VIEWS, {} as Output);
-    assert.ok(!offered.some((v) => v.id === "foh"));
+    assert.ok(offered.some((v) => v.id === "foh"));
   });
 
   test("a panel is offered everything", () => {
