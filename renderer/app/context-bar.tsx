@@ -143,16 +143,33 @@ export function BarSpacerEl({ className }: { className?: string }) {
 /**
  * A fixed gap: a deliberate break between two groups.
  *
- * Unlike the flexible spacer this DOES show on a wrapped phone bar. It is 16px
- * whatever the width, so it separates on a narrow screen exactly as it does on
- * a wide one — which is the whole reason to reach for it instead.
+ * 15px, and 15px is what you can measure on screen. The strip lays out with a
+ * 12px column gap, so a bare 15px element would actually separate its
+ * neighbours by 12 + 28 + 12 — the width in the code would name nothing you
+ * could see, which is exactly the confusion that got this changed twice. The
+ * negative margin eats the gap either side so the declared width IS the
+ * whitespace.
  *
- * 16px against the strip's own 12px gap: enough that the break reads as put
- * there on purpose, little enough that two items either side still group.
+ * (Two of them adjacent come to 2w − 12 rather than 2w, because only the outer
+ * gaps get cancelled. Still wider, which is all "use two for a bigger one"
+ * promises.)
+ *
+ * Unlike the flexible spacer this DOES show on a wrapped phone bar: it is the
+ * same 15px at any width, which is the whole reason to reach for it instead.
+ *
+ * Off the spacing scale on purpose — this is a measured gap somebody asked for
+ * by number, not a rhythm value, and rounding it to w-4 would put the code back
+ * to naming something other than what is on screen.
  */
+const BAR_SPACE_WIDTH = "w-[15px] -mx-3 shrink-0";
+
 export function BarSpaceEl({ className }: { className?: string }) {
-  return <span aria-hidden="true" className={cn("block w-4 shrink-0", className)} />;
+  return <span aria-hidden="true" className={cn("block", BAR_SPACE_WIDTH, className)} />;
 }
+
+/** The fixed gap's geometry, so the configurator's preview cannot drift from
+ *  the real bar — it has already had to be changed in two places once. */
+export const BAR_SPACE_CLASS = BAR_SPACE_WIDTH;
 
 export function ContextBar() {
   const ctx = useBarContext();

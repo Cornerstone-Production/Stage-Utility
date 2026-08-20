@@ -58,6 +58,7 @@ import {
 } from "./bar-items";
 import {
   BAR_ITEM_CLASS,
+  BAR_SPACE_CLASS,
   BAR_STRIP_CLASS,
   renderBarItem,
   useBarContext,
@@ -198,7 +199,7 @@ function BarRow({ row, ctx, onRemove }: { row: Row; ctx: BarItemContext; onRemov
         // at all. The flexible one grows from there like the real one does; the
         // fixed one is shown at exactly the width it will be.
         row.id === BAR_SPACER ? "min-w-10 flex-1 self-stretch"
-          : row.id === BAR_SPACE ? "w-4 shrink-0 self-stretch"
+          : row.id === BAR_SPACE ? cn(BAR_SPACE_CLASS, "self-stretch")
           : BAR_ITEM_CLASS,
         isDragging && "opacity-40",
       )}
