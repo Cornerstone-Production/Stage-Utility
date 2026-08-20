@@ -137,22 +137,18 @@ type TintKind = "none" | "neutral" | "green" | "red" | "amber";
  * still could not express most of them: a red Solid was simply unreachable.
  *
  * A tint is a DARK WASH, not a colour. Every one of these is a near-black with
- * a hue in it — #0d1a15 is the green — because they are made for a stage
- * canvas that is itself near-black. So the swatch is drawn as a miniature of
- * the object rather than as a paint chip: the real fill, ringed in the tint's
- * own hue. Showing the hue alone said "bright green" and delivered #0d1a15,
- * which is the complaint that got this rewritten.
- *
- * `edge` IS the tint's borderColor hue, at an alpha you can see at 20px. The
- * real border sits at 0.13-0.25 over a dark canvas; at this size that composites
- * to nothing, and a swatch you cannot tell from its neighbour is not a swatch.
+ * a hue in it — #0d1a15 is the green — because they are made for a stage canvas
+ * that is itself near-black. The swatch IS that colour, filled edge to edge, so
+ * what you pick is what lands on the object. They read as dark and only subtly
+ * apart, which is honest: that is how they differ on the canvas too. The label
+ * on each names it, and the selected one takes an accent ring.
  */
-const TINTS: { value: TintKind; label: string; fill: string | null; edge: string; style: LayoutStyle }[] = [
-  { value: "none", label: "No tint", fill: null, edge: "var(--color-line-strong)", style: { background: null, borderColor: null } },
-  { value: "neutral", label: "Black", fill: "#141414", edge: "rgba(255,255,255,0.45)", style: CARD_PRESETS.neutral },
-  { value: "green", label: "Green", fill: "#0d1a15", edge: "#2dd496", style: CARD_PRESETS.green },
-  { value: "red", label: "Red", fill: "#201011", edge: "#e5484d", style: CARD_PRESETS.red },
-  { value: "amber", label: "Amber", fill: "#1e190e", edge: "#ffc53d", style: CARD_PRESETS.amber },
+const TINTS: { value: TintKind; label: string; fill: string | null; style: LayoutStyle }[] = [
+  { value: "none", label: "No tint", fill: null, style: { background: null, borderColor: null } },
+  { value: "neutral", label: "Black", fill: "#141414", style: CARD_PRESETS.neutral },
+  { value: "green", label: "Green", fill: "#0d1a15", style: CARD_PRESETS.green },
+  { value: "red", label: "Red", fill: "#201011", style: CARD_PRESETS.red },
+  { value: "amber", label: "Amber", fill: "#1e190e", style: CARD_PRESETS.amber },
 ];
 
 /** Which surface the current style is wearing, or "" for a hand-tuned one. */
@@ -1319,13 +1315,14 @@ export function Inspector({
                   ? { background: SURFACE_PRESETS[(matchSurface(s) || "flat") as SurfaceKind].background ?? null }
                   : { background: t.style.background })}
                 className={cn(
-                  "flex size-5 items-center justify-center rounded-full border-2 transition-transform",
+                  // A hairline, not a coloured ring: these are near-blacks, and
+                  // on a dark panel an unbordered one has no edge at all. It is
+                  // neutral so the circle still reads as one colour.
+                  "flex size-6 items-center justify-center rounded-full border border-line-strong transition-transform",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
                   on ? "ring-2 ring-accent ring-offset-1 ring-offset-bg" : "hover:scale-110",
                 )}
-                // The real fill, ringed in the tint's own hue — a miniature of
-                // the object, not a paint chip.
-                style={{ background: t.fill ?? "transparent", borderColor: t.edge }}
+                style={{ background: t.fill ?? "transparent" }}
               >
                 {/* "No tint" is a slash rather than an empty circle, which would
                     read as a colour nobody could name. */}
