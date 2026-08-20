@@ -70,6 +70,7 @@ import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
 import { screensListViews } from "@main/services/home-view";
+import { formatClock } from "../lib/clock-format";
 import {
   CARD_PRESETS,
   isKnownObjectType,
@@ -162,7 +163,7 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
             .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
             .map((s) => {
               const d = new Date(s.startedAt);
-              const when = `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+              const when = `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${formatClock(d)}`;
               return { value: s.serviceKey, label: s.serviceTypeName ? `${when} — ${s.serviceTypeName}` : when };
             }),
         ),

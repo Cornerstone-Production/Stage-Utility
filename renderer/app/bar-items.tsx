@@ -25,6 +25,8 @@ import {
   ListIcon,
   PlugZapIcon,
   CircleDotIcon,
+  MoveHorizontalIcon,
+  SquareIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -35,6 +37,49 @@ export type BarItemId =
   | "current-item"
   | "integration-health"
   | "recording";
+
+/**
+ * A flexible space, as a position in the saved order.
+ *
+ * It draws nothing and takes all the room going, which is what pushes whatever
+ * follows it away from whatever precedes it. macOS's toolbar editor calls the
+ * same thing "Flexible Space", and it behaves the same way here — including that
+ * you can use more than one. Two of them share the slack equally, which is the
+ * only way to centre a group.
+ *
+ * It is a position in the order rather than a per-item `side` property because
+ * `side` cannot express "centred", and because a spacer is a thing you can see
+ * and drag in the configurator where a boolean on an item is not.
+ *
+ * It is NOT in BAR_ITEMS: it shows no reading, so it is not an item.
+ */
+export const BAR_SPACER = "spacer" as const;
+export type BarSpacer = typeof BAR_SPACER;
+
+/** What the spacer was called before it could repeat. Read, never written. */
+const LEGACY_SPACER = "split";
+
+/**
+ * A fixed gap.
+ *
+ * The flexible spacer decides ALIGNMENT — it eats the slack, which is what
+ * pushes a group to an edge. This decides DISTANCE, and the two are not
+ * substitutes: capping the flexible one so a group sits closer would leave the
+ * uneaten slack after that group, so it would no longer reach the edge at all.
+ *
+ * One width, and repeatable, exactly as macOS does it. A size control would be
+ * a number to tune on a strip whose whole job is to be glanced at.
+ */
+export const BAR_SPACE = "space" as const;
+export type BarSpace = typeof BAR_SPACE;
+
+/** A row of the saved order: an item, a flexible spacer, or a fixed gap. */
+export type BarRowId = BarItemId | BarSpacer | BarSpace;
+
+/** The two things in the palette that show no reading. */
+export function isBarGap(id: BarRowId): id is BarSpacer | BarSpace {
+  return id === BAR_SPACER || id === BAR_SPACE;
+}
 
 export interface BarItem {
   id: BarItemId;
@@ -81,7 +126,7 @@ export const BAR_ITEMS: Record<BarItemId, BarItem> = {
     id: "integration-health",
     label: "Integration health",
     icon: PlugZapIcon,
-    hint: "Counts what is disconnected. Shows nothing when everything is fine.",
+    hint: "Counts what is disconnected. Click it to see which.",
   },
   recording: {
     id: "recording",
@@ -92,25 +137,105 @@ export const BAR_ITEMS: Record<BarItemId, BarItem> = {
 };
 
 /**
+ * How the spacer presents itself in the configurator.
+ *
+ * Beside BAR_ITEMS rather than in it: the palette needs a label and an icon for
+ * it, but nothing else does, and putting it in the registry would oblige the
+ * renderer to handle an "item" that shows no reading.
+ */
+export const BAR_SPACER_ITEM: Omit<BarItem, "id"> = {
+  label: "Flexible space",
+  icon: MoveHorizontalIcon,
+  hint: "Pushes what follows it away from what comes before. Use two to centre a group.",
+};
+
+/** How the fixed gap presents itself in the configurator. */
+export const BAR_SPACE_ITEM: Omit<BarItem, "id"> = {
+  label: "Space",
+  icon: SquareIcon,
+  hint: "A fixed gap, for holding two groups apart without pushing either to an edge. Use two for a wider one.",
+};
+
+/**
  * What a bar nobody has configured shows.
  *
- * The four the bar shipped with, in the order it shipped them, so an install
- * that never opens the chooser looks exactly as it does today. The two new items
- * are opt-in rather than added to everyone's bar without asking.
+ * The arrangement the bar shipped with: the plan on the left, service state on
+ * the right. Integration health and recording are opt-in rather than added to
+ * everyone's bar without asking.
  */
-export const DEFAULT_BAR_ORDER: BarItemId[] = ["plan", "current-item", "live-timer"];
+export const DEFAULT_BAR_ORDER: BarRowId[] = ["plan", BAR_SPACER, "current-item", "live-timer"];
 
-/** Valid ids from a saved config, in the saved order.
+/**
+ * Where the spacer goes in a bar saved before spacers existed.
  *
- *  Unknown ids are SKIPPED rather than rendered blank: a downgrade, or an
- *  integration removed, can leave a saved order naming something this build does
- *  not have, and a hole in the bar is worse than a shorter bar.
+ * The side used to be INFERRED at render time: the first of these present, and
+ * everything after it, was pushed right. The rule is gone from rendering — it
+ * survives here only to place a spacer where an existing bar already had its
+ * cut, so no install's bar moves when it upgrades.
  *
- *  An empty or entirely-unknown result falls back to the default, because a bar
- *  that renders nothing reads as broken rather than as configured. */
-export function visibleBarItems(saved: readonly string[] | undefined): BarItemId[] {
-  const known = (saved ?? []).filter((id): id is BarItemId => id in BAR_ITEMS);
-  return known.length > 0 ? known : DEFAULT_BAR_ORDER;
+ * Do not add to this. A new item's position is wherever the operator drags it.
+ */
+const LEGACY_RIGHT: ReadonlySet<string> = new Set([
+  "live-timer",
+  "current-item",
+  "integration-health",
+  "recording",
+]);
+
+/** Put a spacer where the inferred rule used to cut. No service-state item means
+ *  the old bar packed everything left, so the spacer goes on the end. */
+function withLegacySpacer(rows: readonly BarRowId[]): BarRowId[] {
+  const at = rows.findIndex((id) => LEGACY_RIGHT.has(id));
+  const cut = at === -1 ? rows.length : at;
+  return [...rows.slice(0, cut), BAR_SPACER, ...rows.slice(cut)];
+}
+
+/** Adjacent FLEXIBLE spacers collapse: two in a row split the slack between two
+ *  points that are the same point, so the second only pads the saved order.
+ *
+ *  Fixed gaps are left alone — two of them in a row is a wider gap, which is
+ *  the only way to ask for one. */
+function collapseSpacers(rows: readonly BarRowId[]): BarRowId[] {
+  return rows.filter((id, i) => id !== BAR_SPACER || rows[i - 1] !== BAR_SPACER);
+}
+
+/**
+ * Valid rows from a saved config, in the saved order.
+ *
+ * Unknown ids are SKIPPED rather than rendered blank: a downgrade, or an
+ * integration removed, can leave a saved order naming something this build does
+ * not have, and a hole in the bar is worse than a shorter bar.
+ *
+ * An empty or entirely-unknown result falls back to the default, because a bar
+ * that renders nothing reads as broken rather than as configured.
+ *
+ * A saved order with NO spacer predates them, and gets one where the old rule
+ * cut. That inference is safe only because `normalizeBarRows` — which is what
+ * the configurator saves through — always writes at least one: an operator who
+ * wants everything hard left gets a trailing spacer, which looks identical and
+ * keeps "no spacer" meaning "not yet migrated" for good.
+ */
+export function visibleBarItems(saved: readonly string[] | undefined): BarRowId[] {
+  const rows = (saved ?? []).flatMap((id): BarRowId[] => {
+    if (id === BAR_SPACER || id === LEGACY_SPACER) return [BAR_SPACER];
+    if (id === BAR_SPACE) return [BAR_SPACE];
+    return id in BAR_ITEMS ? [id as BarItemId] : [];
+  });
+  // Gaps are not readings. A bar of nothing but spacing is an empty bar.
+  if (!rows.some((id) => !isBarGap(id))) return DEFAULT_BAR_ORDER;
+  if (!rows.includes(BAR_SPACER)) return withLegacySpacer(rows);
+  return collapseSpacers(rows);
+}
+
+/**
+ * What the configurator saves.
+ *
+ * Collapses adjacent spacers, and guarantees at least one — see
+ * `visibleBarItems` for why that last part is load-bearing rather than tidiness.
+ */
+export function normalizeBarRows(rows: readonly BarRowId[]): BarRowId[] {
+  const out = collapseSpacers(rows);
+  return out.includes(BAR_SPACER) ? out : [...out, BAR_SPACER];
 }
 
 /** Type-safe helper so callers do not index BAR_ITEMS with a bare string. */

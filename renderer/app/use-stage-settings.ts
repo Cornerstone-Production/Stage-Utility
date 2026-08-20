@@ -294,6 +294,16 @@ export function useStageSettings() {
     }
   }
 
+  /** How the app displays a time of day. Global, like the time zone. */
+  async function handleSetHourCycle(cycle: "12h" | "24h") {
+    try {
+      const next = await ipc<StageState>("settings:setHourCycle", { hourCycle: cycle });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to set the clock format: ${String(err)}`);
+    }
+  }
+
   async function handleSetAllowedServiceTypes(ids: string[]) {
     try {
       const next = await ipc<StageState>("stage:setAllowedServiceTypes", { ids });
@@ -752,21 +762,6 @@ export function useStageSettings() {
     }
   }
 
-  /** Which context-bar items appear, and in what order. Global config. */
-  async function handleSetBarItems(items: string[]) {
-    const prev = queryClient.getQueryData<StageState>(["stage:getState"]);
-    if (prev) queryClient.setQueryData(["stage:getState"], { ...prev, barItems: items });
-    try {
-      const next = await ipc<StageState>("barItems:set", { items });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      // Put the old order back rather than leaving the UI showing a bar the
-      // server does not have.
-      if (prev) queryClient.setQueryData(["stage:getState"], prev);
-      toast.error(errorMessage(err));
-    }
-  }
-
   async function handleRemoveOutput(id: string) {
     try {
       const next = await ipc<StageState>("outputs:remove", { id });
@@ -821,6 +816,7 @@ export function useStageSettings() {
     handleSetReconnectSchedule,
     handleSetTaperWindow,
     handleSetTimezone,
+    handleSetHourCycle,
     handleSetAllowedServiceTypes,
     handleSetBranding,
     updateSlot,
@@ -853,7 +849,6 @@ export function useStageSettings() {
     handleSetOutputView,
     handleSetOutputLocked,
     handleSetOutputMode,
-    handleSetBarItems,
     handleSetViewSurface,
     handleRemoveOutput,
     handleReorderOutputs,

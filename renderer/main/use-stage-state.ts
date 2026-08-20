@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke, onNotification } from "../lib/api";
 import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { applyAccentVar } from "../lib/apply-accent";
+import { setDisplayHourCycle } from "../lib/clock-format";
 
 interface UseStageStateResult {
   state: StageState | null;
@@ -26,7 +27,13 @@ export function useStageState(): UseStageStateResult {
     let cancelled = false;
     invoke<StageState>("stage:getState")
       .then((s: StageState) => {
-        if (!cancelled) setState(s);
+        if (!cancelled) {
+          // Before the first render that could show a clock. Set HERE because
+          // every surface — operator app and stage display alike — hydrates
+          // through this hook, so there is exactly one place to keep in sync.
+          setDisplayHourCycle(s.hourCycle);
+          setState(s);
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -45,7 +52,11 @@ export function useStageState(): UseStageStateResult {
   // Subscribe to live updates.
   useEffect(() => {
     return onNotification("stage:state-changed", (payload: unknown) => {
-      setState(payload as StageState);
+      const next = payload as StageState;
+      // Kept in step with the state that carries it, so a toggle in Advanced
+      // reaches every open surface on the same broadcast that re-renders them.
+      setDisplayHourCycle(next.hourCycle);
+      setState(next);
     });
   }, []);
 

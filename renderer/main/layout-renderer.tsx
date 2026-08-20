@@ -36,6 +36,7 @@ import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
 import { LiveControls } from "./live-controls";
 import { Loader2Icon, ZapIcon } from "lucide-react";
+import { displayHourCycle, formatClock } from "../lib/clock-format";
 
 // Render context shared by every object renderer.
 export interface LayoutRenderCtx {
@@ -435,7 +436,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // wider than a 257px tile, so the same clock was huge on a wall and
       // microscopic in a column. Readout sizes it from the height and shrinks it
       // only when the width genuinely cannot take it.
-      return readout(clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h", c.showMeridiem ?? true));
+      // `format` unset means the object never expressed a preference, so it
+      // follows the app-wide setting. An object that DID set one keeps it — a
+      // clock deliberately put on a wall in 24h must not flip because someone
+      // changed a preference for the operator app.
+      return readout(clockText(ctx.now, c.showSeconds ?? true, c.format ?? displayHourCycle(), c.showMeridiem ?? true));
     case "countdown-timer": {
       const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
       if (!t) return (c.hideWhenIdle ?? false) ? null : readout("—");
@@ -1068,8 +1073,7 @@ function SplMeterValue({
 }
 
 function hhmm(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  return formatClock(iso);
 }
 
 /** A "nice" integer axis step (1 / 2 / 5 × 10ⁿ, minimum 1) for a target interval

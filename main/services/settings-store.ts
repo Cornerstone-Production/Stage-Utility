@@ -100,6 +100,9 @@ export interface SettingsData {
    *  follow the host clock — fine on a machine set to local time, wrong on the
    *  UTC default most servers and containers ship with. */
   timezone?: string | null;
+  /** How a time of DAY is displayed — "12h" or "24h". Display only: it changes
+   *  nothing the server decides, because 12h and 24h are the same instant. */
+  hourCycle?: "12h" | "24h";
   /** Local UDP port the OSC integration listens on for device feedback. */
   oscFeedbackPort: number;
   /** Smaart metric keys to surface in the SPL History tab (empty = auto default). */

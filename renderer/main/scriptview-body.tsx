@@ -32,10 +32,10 @@ import {
   totalLengthSec,
 } from "./scriptview-columns";
 import type { CategoryRole } from "../../main/types/scriptview-roles.js";
+import { formatClock } from "../lib/clock-format";
 
 export function fmtSvcTime(iso: string, timeZone?: string | null): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", ...(timeZone ? { timeZone } : {}) });
+  return formatClock(iso, { timeZone });
 }
 
 /**

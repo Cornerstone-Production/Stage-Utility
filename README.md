@@ -25,6 +25,7 @@ screens, the settings UI and a phone remote from one port.
 | [Data model](docs/reference/data-model.md) | Views, Outputs and Slots — the nouns |
 | [Layout editor](docs/reference/layout-editor.md) | placing objects, other window shapes, motion |
 | [Display URLs](docs/display-urls.md) | addressing screens |
+| [The context bar](docs/features/context-bar.md) | the live strip above every operator page |
 | [Slots](docs/slots.md) | matching people and devices to positions |
 | [Moving a view](docs/moving-a-view.md) | taking one layout to another install |
 | [Attendance and service history](docs/features/attendance-and-history.md) | what a service records, and reading it back |

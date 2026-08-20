@@ -15,6 +15,7 @@ import {
   Switch,
   toast,
 } from "../../components/ui";
+import { formatClock } from "../../lib/clock-format";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
 
@@ -288,7 +289,7 @@ function ActivityLog() {
           entries.slice(0, 60).map((e, i) => (
             <div key={`${e.at}-${i}`} className="flex items-baseline gap-2 text-caption1">
               <span className="shrink-0 font-mono text-caption2 text-fg-subtle">
-                {new Date(e.at).toLocaleTimeString()}
+                {formatClock(e.at, { seconds: true })}
               </span>
               <span className="shrink-0 font-medium text-fg-muted">{e.ruleName}</span>
               <span className={`min-w-0 flex-1 truncate ${OUTCOME_STYLE[e.outcome]}`}>

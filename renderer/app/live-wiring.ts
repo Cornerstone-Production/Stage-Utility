@@ -14,6 +14,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { onNotification } from "../lib/api";
 import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { applyAccentVar } from "../lib/apply-accent";
+import { setDisplayHourCycle } from "../lib/clock-format";
 import { QUERY_KEYS } from "./queries";
 import {
   clearUpdatePending,
@@ -40,7 +41,13 @@ export function useStageLiveWiring(accentColor: string | null | undefined): void
   // Live state changes from the backend, plus device telemetry.
   useEffect(() => {
     const unsub = onNotification("stage:state-changed", (payload: unknown) => {
-      queryClient.setQueryData(QUERY_KEYS.stageState, payload as StageState);
+      const next = payload as StageState;
+      // Also set in use-stage-state, which the context bar keeps mounted. Set
+      // here TOO because the settings surfaces render from this cache: if the
+      // cache updated first, one render would format with the old cycle. Both
+      // listeners fire on the same broadcast, so whichever runs first is right.
+      setDisplayHourCycle(next.hourCycle);
+      queryClient.setQueryData(QUERY_KEYS.stageState, next);
     });
     // Telemetry rides its own channel so a meter twitch does not re-send the
     // whole state document; merge it back so the slots editor's RF bars stay

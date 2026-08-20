@@ -36,6 +36,7 @@ import {
 } from "../components/ui";
 import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
+import { formatClock } from "../lib/clock-format";
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -154,7 +155,7 @@ function fmtSynced(iso: string | null | undefined): string {
   if (!iso) return "Never synced";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "Never synced";
-  return `Synced ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  return `Synced ${formatClock(d)}`;
 }
 
 /** The form's starting values for an integration — the saved config, with password

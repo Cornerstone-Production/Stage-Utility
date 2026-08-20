@@ -7,7 +7,8 @@ import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
-const { contextBarState } = await import("./context-bar.js");
+const { contextBarState, renderBarItem } = await import("./context-bar.js");
+const { BAR_ITEMS } = await import("./bar-items.js");
 
 after(() => {
   teardown();
@@ -117,5 +118,58 @@ describe("context bar state", () => {
     // just a different bug.
     const s = contextBarState(LIVE_ITEM, Date.parse("2026-08-14T14:05:00.000Z"), 0);
     assert.equal(s.isLive, true);
+  });
+});
+
+describe("nothing appears or disappears", () => {
+  // Items used to return null when they had nothing to say, so the bar reflowed
+  // as the state changed: integration health arrived only once something broke,
+  // and between services the right-hand group was absent entirely. An operator
+  // cannot learn where to look on a strip that rearranges itself.
+  //
+  // This walks the REAL renderer over every registered id, so an idle branch
+  // deleted from any one of them fails here by name.
+  const NOW = Date.parse("2026-08-14T14:05:00.000Z");
+  const ALL = Object.keys(BAR_ITEMS) as (keyof typeof BAR_ITEMS)[];
+
+  /** The deadest state the app has: no service, no recorder, no integrations. */
+  const idle = {
+    state: null,
+    bar: contextBarState(null, NOW, 0),
+    now: NOW,
+    obs: null,
+    reaper: null,
+    integrations: { states: [], labels: {} },
+  };
+
+  test("every item renders with no service, no recorder and no integrations", () => {
+    for (const id of ALL) {
+      assert.notEqual(renderBarItem(id, idle), null, `${id} vanishes when there is nothing to report`);
+    }
+  });
+
+  test("every item still renders mid-service", () => {
+    // The other half. An item that only renders when idle is the same bug.
+    const live = { ...idle, bar: contextBarState(LIVE_ITEM, NOW, 0) };
+    for (const id of ALL) {
+      assert.notEqual(renderBarItem(id, live), null, `${id} vanishes during a live service`);
+    }
+  });
+
+  test("every item renders while a recorder is connected but stopped", () => {
+    // The state the bar exists to surface, and the one that reaches the
+    // branches an idle-only fixture never touches.
+    const rolling = {
+      ...idle,
+      bar: contextBarState(LIVE_ITEM, NOW, 0),
+      obs: { connected: true, recording: false, recordTimecode: null },
+      integrations: {
+        states: [{ id: "obs", enabled: true, configured: true, connection: "disconnected" }],
+        labels: { obs: "OBS" },
+      },
+    };
+    for (const id of ALL) {
+      assert.notEqual(renderBarItem(id, rolling as never), null, `${id} vanishes with a recorder stopped`);
+    }
   });
 });

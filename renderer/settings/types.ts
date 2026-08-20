@@ -44,6 +44,7 @@ export interface SectionHandlers {
   handleSetReconnectSchedule: (partial: { enabled?: boolean; leadMin?: number; tailMin?: number; dormantMin?: number }) => Promise<void>;
   handleSetTaperWindow: (partial: { preMin?: number; postMin?: number }) => Promise<void>;
   handleSetTimezone: (tz: string | null) => Promise<void>;
+  handleSetHourCycle: (cycle: "12h" | "24h") => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {
     name?: string;
@@ -104,7 +105,6 @@ export interface SectionHandlers {
   handleSetOutputView: (id: string, viewId: string | null) => Promise<void>;
   handleSetOutputLocked: (id: string, locked: boolean) => Promise<void>;
   handleSetOutputMode: (id: string, mode: "display" | "panel") => Promise<void>;
-  handleSetBarItems: (items: string[]) => Promise<void>;
   handleSetViewSurface: (id: string, surface: "display" | "console") => Promise<void>;
   handleRemoveOutput: (id: string) => Promise<void>;
   handleReorderOutputs: (ids: string[]) => Promise<void>;

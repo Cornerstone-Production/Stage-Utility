@@ -189,6 +189,7 @@ export class StageController {
     reconnectSchedule: { ...DEFAULT_RECONNECT_SCHEDULE },
     taperWindow: { ...DEFAULT_TAPER_WINDOW },
     timezone: null,
+    hourCycle: "24h",
     hostTimezone: hostTimeZone(),
     baptismAutoStart: { enabled: false, testimonyKeyword: "baptism stories" },
     onboardingDismissed: false,
@@ -300,6 +301,7 @@ export class StageController {
       reconnectSchedule: settings.reconnectSchedule ?? { ...DEFAULT_RECONNECT_SCHEDULE },
       taperWindow: settings.taperWindow ?? { ...DEFAULT_TAPER_WINDOW },
       timezone: settings.timezone ?? null,
+      hourCycle: settings.hourCycle ?? "24h",
       hostTimezone: hostTimeZone(),
       baptismAutoStart: settings.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" },
       onboardingDismissed: settings.onboardingDismissed ?? false,
@@ -1300,6 +1302,21 @@ export class StageController {
     setAppTimeZone(next);
     this.state = { ...this.state, timezone: next, hostTimezone: hostTimeZone() };
     await settingsStore.patch({ timezone: next });
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * Set how the app displays a time of day.
+   *
+   * Display only. Nothing the server decides by the clock reads this — 8pm and
+   * 20:00 are the same instant, and a schedule that changed with a display
+   * preference would be a bug, not a feature.
+   */
+  async setHourCycle(cycle: "12h" | "24h"): Promise<StageState> {
+    if (cycle !== "12h" && cycle !== "24h") throw new Error(`Unknown hour cycle: ${String(cycle)}`);
+    this.state = { ...this.state, hourCycle: cycle };
+    await settingsStore.patch({ hourCycle: cycle });
     this.broadcast();
     return this.state;
   }
