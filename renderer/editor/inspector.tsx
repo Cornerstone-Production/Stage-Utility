@@ -87,55 +87,81 @@ import {
 import { IDIOM_TYPES, DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
 import {
-  Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect,
+  Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad,
   ImageConfig, NumberField, NumberInput, PixelField,
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
+import { cn } from "../lib/cn";
 
 
-type SurfaceKind = "flat" | "glass" | "elevated" | "solid" | "outline";
+type SurfaceKind = "flat" | "glass" | "solid" | "outline";
+
+/**
+ * The four SURFACES. Elevated is gone: it was a fifth entry that differed from
+ * Solid by a shadow, and the dropdown was already too long to read.
+ *
+ * Removing it changes no saved layout — these are style patches, not a stored
+ * enum, so an object given Elevated keeps every field it was given. It matches
+ * Solid below so it still names itself rather than reading as "custom".
+ */
 const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
   flat: { background: null, borderColor: null, borderWidth: 0, boxShadow: 0 },
   // GLASS STAYS TRANSLUCENT. It is the one look whose whole point is that the
   // canvas shows through, so making it opaque would leave no way to ask for
   // that at all. Everything else went opaque because nothing else was asking.
-  //
-  // Its ground is the same string the old default card used, so the one-time
-  // migration cannot tell a deliberate Glass from a card that was simply never
-  // restyled, and turns both opaque. Re-applying Glass to a specific widget is
-  // one click, and it is the only way round an ambiguity in the stored data.
   glass: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0 },
-  // Opaque, like the card presets — an elevated surface that you can read the
-  // page through is a contradiction, and it bled exactly as badly as the rest.
-  // #191919 is the blend of the rgba it replaces over the kiosk black.
-  elevated: { background: "#191919", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0.6 },
   solid: { background: "var(--gray-2)", borderColor: null, borderWidth: 0, cornerRadius: 0.0148, boxShadow: 0.35 },
   outline: { background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015, cornerRadius: 0.0148, boxShadow: 0 },
 };
 
-// One consolidated list of preset "looks" for the Style dropdown — each entry is a
-// complete style patch (surface look, optionally color-tinted), so there's a single
-// control instead of separate color + surface rows with duplicate labels.
-const STYLE_PRESETS: { value: string; label: string; style: LayoutStyle }[] = [
-  { value: "flat", label: "Flat", style: SURFACE_PRESETS.flat },
-  { value: "glass", label: "Glass", style: SURFACE_PRESETS.glass },
-  { value: "glass-green", label: "Glass · Green", style: CARD_PRESETS.green },
-  { value: "glass-red", label: "Glass · Red", style: CARD_PRESETS.red },
-  { value: "glass-amber", label: "Glass · Amber", style: CARD_PRESETS.amber },
-  { value: "elevated", label: "Elevated", style: SURFACE_PRESETS.elevated },
-  { value: "solid", label: "Solid", style: SURFACE_PRESETS.solid },
-  { value: "outline", label: "Outline", style: SURFACE_PRESETS.outline },
+const SURFACES: { value: SurfaceKind; label: string }[] = [
+  { value: "flat", label: "Flat" },
+  { value: "glass", label: "Glass" },
+  { value: "solid", label: "Solid" },
+  { value: "outline", label: "Outline" },
 ];
 
-// Which preset (if any) the current style matches — so the Style dropdown reflects
-// the applied look and reads as "custom" (placeholder) once fields are hand-tweaked.
-// A preset matches when every field IT sets equals the object's value.
-function matchStylePreset(s: LayoutStyle): string {
-  for (const p of STYLE_PRESETS) {
-    const keys = Object.keys(p.style) as (keyof LayoutStyle)[];
-    if (keys.every((k) => (s[k] ?? null) === (p.style[k] ?? null))) return p.value;
+/** What Elevated used to be, kept ONLY so an object already wearing it still
+ *  matches a named surface instead of reading as "custom". Never offered. */
+const LEGACY_ELEVATED: LayoutStyle = {
+  background: "#191919", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0.6,
+};
+
+type TintKind = "none" | "green" | "red" | "amber";
+
+/**
+ * The TINTS, which are a separate question from the surface.
+ *
+ * They used to be baked into the same list — Glass, Glass·Green, Glass·Red,
+ * Glass·Amber — which mixed two independent choices into eight entries and
+ * still could not express most of them: a red Solid was simply unreachable.
+ * Four surfaces and four tints replace eight entries and cover more ground.
+ */
+const TINTS: { value: TintKind; label: string; swatch: string; style: LayoutStyle }[] = [
+  { value: "none", label: "No tint", swatch: "transparent", style: { background: null, borderColor: null } },
+  { value: "green", label: "Green", swatch: "#2dd496", style: CARD_PRESETS.green },
+  { value: "red", label: "Red", swatch: "#e5484d", style: CARD_PRESETS.red },
+  { value: "amber", label: "Amber", swatch: "#ffc53d", style: CARD_PRESETS.amber },
+];
+
+/** Which surface the current style is wearing, or "" for a hand-tuned one. */
+function matchSurface(s: LayoutStyle): string {
+  const named: [string, LayoutStyle][] = [...SURFACES.map((x) => [x.value, SURFACE_PRESETS[x.value]] as [string, LayoutStyle]), ["solid", LEGACY_ELEVATED]];
+  for (const [value, style] of named) {
+    const keys = Object.keys(style) as (keyof LayoutStyle)[];
+    if (keys.every((k) => (s[k] ?? null) === (style[k] ?? null))) return value;
   }
   return "";
+}
+
+/** Which tint, matched on the BACKGROUND alone — the surface owns the rest, and
+ *  a tint applied over Outline leaves the border where the surface put it. */
+function matchTint(s: LayoutStyle): TintKind {
+  for (const t of TINTS) {
+    if (t.value === "none") continue;
+    if ((s.background ?? null) === (t.style.background ?? null)) return t.value;
+  }
+  return "none";
 }
 
 // Nearest labeled stop for the single Elevation slider (None/Low/Med/High).
@@ -322,11 +348,19 @@ function PlanAttachmentConfig({
         <Switch checked={c.trim ?? false} onCheckedChange={(v) => onConfig({ ...c, trim: v })} />
       </Row>
       <Row label="Background">
-        <ButtonGroup>
-          <Button variant={(c.background ?? "keep") === "keep" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, background: "keep" })}>Keep</Button>
-          <Button variant={c.background === "black" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, background: "black" })}>Black</Button>
-          <Button variant={c.background === "transparent" ? "accent" : "filled"} size="small" onClick={() => onConfig({ ...c, background: "transparent" })}>Clear</Button>
-        </ButtonGroup>
+        {/* Hand-rolled, so it sat outside the two-or-fewer rule and truncated
+            in a narrow panel like every other three-word group did. */}
+        <Select
+          value={c.background ?? "keep"}
+          onValueChange={(v: string) => onConfig({ ...c, background: v as typeof c.background })}
+        >
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="keep">Keep</SelectItem>
+            <SelectItem value="black">Black</SelectItem>
+            <SelectItem value="transparent">Clear</SelectItem>
+          </SelectContent>
+        </Select>
       </Row>
       <Row label="Crop %">
         <div className="grid grid-cols-2 gap-1 flex-1">
@@ -1223,15 +1257,55 @@ export function Inspector({
 
       <Separator />
 
-      {/* Style preset — one dropdown of complete "looks" (surface + optional tint).
-          Applies the shared style fields below; fine-tune with Fill / Border / Elevation. */}
-      <Row label="Style" hint="Apply a preset look — surface (Flat/Glass/Elevated/Solid/Outline) with an optional color tint. Fine-tune with Fill, Border, and Elevation below.">
-        <Select value={matchStylePreset(s)} onValueChange={(v: string) => { const p = STYLE_PRESETS.find((x) => x.value === v); if (p) onStyle(p.style); }}>
-          <SelectTrigger><SelectValue placeholder="Apply a look…" /></SelectTrigger>
+      {/* SURFACE and TINT, separately — they are independent questions, and the
+          single list that mixed them (Glass, Glass·Green, Glass·Red, …) was both
+          longer and less capable: it had no way to ask for a tinted Solid. */}
+      <Row label="Surface" hint="The material: Flat, Glass (the canvas shows through), Solid, or Outline. Fine-tune with Fill, Border and Elevation below.">
+        <Select
+          value={matchSurface(s)}
+          onValueChange={(v: string) => {
+            const preset = SURFACE_PRESETS[v as SurfaceKind];
+            if (!preset) return;
+            // Re-apply the tint on top, so changing the material does not
+            // silently discard a colour that was already chosen.
+            const tint = TINTS.find((t) => t.value === matchTint(s));
+            onStyle(tint && tint.value !== "none" ? { ...preset, background: tint.style.background } : preset);
+          }}
+        >
+          <SelectTrigger><SelectValue placeholder="Custom" /></SelectTrigger>
           <SelectContent>
-            {STYLE_PRESETS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+            {SURFACES.map((x) => <SelectItem key={x.value} value={x.value}>{x.label}</SelectItem>)}
           </SelectContent>
         </Select>
+      </Row>
+      <Row label="Tint" hint="A colour wash over the surface. Independent of the material, so any surface can carry any tint.">
+        <div role="group" aria-label="Tint" className="flex items-center gap-1.5">
+          {TINTS.map((t) => {
+            const on = matchTint(s) === t.value;
+            return (
+              <button
+                key={t.value}
+                type="button"
+                aria-label={t.label}
+                aria-pressed={on}
+                title={t.label}
+                onClick={() => onStyle(t.value === "none"
+                  ? { background: SURFACE_PRESETS[(matchSurface(s) || "flat") as SurfaceKind].background ?? null }
+                  : { background: t.style.background })}
+                className={cn(
+                  "size-5 rounded-full border transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+                  on ? "border-accent ring-2 ring-accent/40" : "border-line-strong hover:border-fg-subtle",
+                )}
+                style={{ background: t.swatch === "transparent" ? undefined : t.swatch }}
+              >
+                {/* "No tint" is a slash rather than an empty circle, which would
+                    read as a colour nobody could name. */}
+                {t.value === "none" && <span aria-hidden="true" className="block h-px w-full rotate-45 bg-fg-subtle" />}
+              </button>
+            );
+          })}
+        </div>
       </Row>
       {/* The way back. Every other control here adds to the styling; without this
           the only route out of a look you have tuned into a corner is to delete
@@ -1261,24 +1335,17 @@ export function Inspector({
             </Select>
           </Row>
           <Row label="Color"><input type="color" value={hexForInput(s.color, "#ffffff")} onChange={(e) => onStyle({ color: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" /></Row>
+          {/* One pad, not two rows of lettered buttons. What reads as active has
+              to be the alignment the object will actually RENDER at, not a
+              hard-coded guess: a readout with nothing stored aligns left, and
+              lighting centre would say it is centred while it sits left — the
+              first click would then appear to do nothing. */}
           <Row label="Align">
-            <ButtonGroup>
-              {/* Which button reads as active has to be the alignment the object
-                  will actually RENDER at, not a single hard-coded guess. A
-                  readout with nothing stored aligns left; showing "C" lit here
-                  would tell the operator the widget is centred while it sits
-                  left, and the first click would appear to do nothing. */}
-              {(["left", "center", "right"] as const).map((a) => (
-                <Button key={a} variant={(s.textAlign ?? (IDIOM_TYPES.has(c.type) ? DEFAULT_READOUT_ALIGN : "center")) === a ? "accent" : "filled"} size="small" onClick={() => onStyle({ textAlign: a })}>{a[0].toUpperCase()}</Button>
-              ))}
-            </ButtonGroup>
-          </Row>
-          <Row label="V-align">
-            <ButtonGroup>
-              {(["top", "middle", "bottom"] as const).map((a) => (
-                <Button key={a} variant={(s.vAlign ?? "middle") === a ? "accent" : "filled"} size="small" onClick={() => onStyle({ vAlign: a })}>{a[0].toUpperCase()}</Button>
-              ))}
-            </ButtonGroup>
+            <AlignPad
+              h={s.textAlign ?? (IDIOM_TYPES.has(c.type) ? DEFAULT_READOUT_ALIGN : "center")}
+              v={s.vAlign ?? "middle"}
+              onChange={onStyle}
+            />
           </Row>
           <Row label="Uppercase"><Switch checked={s.uppercase ?? false} onCheckedChange={(v) => onStyle({ uppercase: v })} /></Row>
           <Row label="Shadow"><NumberInput value={s.textShadow ?? 0} step={0.1} min={0} max={1} onChange={(v) => onStyle({ textShadow: v })} /></Row>

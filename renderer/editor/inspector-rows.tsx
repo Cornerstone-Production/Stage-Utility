@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "../components/ui";
 import { invoke } from "../lib/api";
+import { cn } from "../lib/cn";
 
 export function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -32,6 +33,60 @@ export function Row({ label, hint, children }: { label: string; hint?: string; c
         {hint && <InfoHint className="shrink-0">{hint}</InfoHint>}
       </span>
       <div className="flex-1 min-w-0 flex items-center gap-1">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Horizontal and vertical alignment, as one 3x3 pad.
+ *
+ * Two rows of three lettered buttons — L C R and T M B — asked the operator to
+ * read the result off two controls and hold the combination in their head. The
+ * pad is the shape of the answer, which is how every design tool does it and
+ * why it needs no label at all.
+ */
+export function AlignPad({
+  h,
+  v,
+  onChange,
+}: {
+  h: "left" | "center" | "right";
+  v: "top" | "middle" | "bottom";
+  onChange: (next: { textAlign?: "left" | "center" | "right"; vAlign?: "top" | "middle" | "bottom" }) => void;
+}) {
+  const HS = ["left", "center", "right"] as const;
+  const VS = ["top", "middle", "bottom"] as const;
+  return (
+    <div
+      role="group"
+      aria-label="Alignment"
+      className="grid w-[4.5rem] grid-cols-3 gap-px overflow-hidden rounded-md border border-line-strong bg-line-strong"
+    >
+      {VS.map((vv) =>
+        HS.map((hh) => {
+          const on = h === hh && v === vv;
+          return (
+            <button
+              key={`${vv}-${hh}`}
+              type="button"
+              aria-label={`Align ${vv} ${hh}`}
+              aria-pressed={on}
+              onClick={() => onChange({ textAlign: hh, vAlign: vv })}
+              // cn(), not string concat: `bg-fill` and `bg-accent` are the same
+              // Tailwind group, so concatenating both leaves which one wins to
+              // stylesheet order — and the active cell rendered grey.
+              className={cn(
+                "flex h-5 items-center justify-center transition-colors",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+                on ? "bg-accent" : "bg-fill hover:bg-fill-hover",
+              )}
+            >
+              {/* A bar showing where the text would sit, not a letter. */}
+              <span className={cn("block h-0.5 w-2.5 rounded-full", on ? "bg-white" : "bg-fg-subtle")} />
+            </button>
+          );
+        }),
+      )}
     </div>
   );
 }
@@ -118,6 +173,25 @@ export function RowToggle<T extends string>({
   options: { value: T; label: string }[];
   onChange: (v: T) => void;
 }) {
+  // TWO options stay a toggle; three or more become a dropdown.
+  //
+  // A binary choice reads better shown than hidden — Rect / Ellipse is one
+  // glance. Past two, a row of word buttons squeezes each label until it
+  // truncates, and it does it worst in a narrow panel, which is where the
+  // inspector spends most of its life. The rule lives HERE rather than at each
+  // of the seven call sites, so they cannot drift into disagreeing about it.
+  if (options.length > 2) {
+    return (
+      <Row label={label} hint={hint}>
+        <Select value={String(value)} onValueChange={(v: string) => onChange(v as T)}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {options.map((o) => <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </Row>
+    );
+  }
   return (
     <Row label={label} hint={hint}>
       <ButtonGroup>
