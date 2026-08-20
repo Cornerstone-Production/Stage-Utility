@@ -2170,10 +2170,20 @@ export function LayoutRenderer({
   ndiSource,
   interactive = false,
   surface,
+  ground = "stage",
 }: {
   layout: LayoutDTO;
   ndiSource: string | null;
   interactive?: boolean;
+  /**
+   * Which ground this is drawn on.
+   *
+   * "stage" is the near-black kiosk surface every wall screen uses. "app" is
+   * the operator shell's own surface — for a console opened INSIDE the app,
+   * where a slab of stage-black inside a themed page read as an embedded
+   * viewer bolted into the layout rather than a page of it.
+   */
+  ground?: "stage" | "app";
   /** The View's surface, so a console can respond to the window while a display
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
@@ -2250,9 +2260,9 @@ export function LayoutRenderer({
   return (
     <div
       ref={setBox}
-      className={`relative w-full h-full kiosk-surface flex items-center justify-center ${
-        overflows ? "overflow-y-auto overflow-x-hidden" : "overflow-hidden"
-      }`}
+      className={`relative w-full h-full flex items-center justify-center ${
+        ground === "app" ? "bg-bg" : "kiosk-surface"
+      } ${overflows ? "overflow-y-auto overflow-x-hidden" : "overflow-hidden"}`}
     >
       <div
         style={
