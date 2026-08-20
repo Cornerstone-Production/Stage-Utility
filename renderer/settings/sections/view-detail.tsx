@@ -109,7 +109,16 @@ export function ViewDetail({
           value={editName}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
           onBlur={handleNameBlur}
-          className="flex-1 min-w-0 max-sm:basis-full text-headline font-semibold text-fg"
+          // basis + min-w, not flex-1 alone. The row wraps, but the name was the
+          // only flexible thing in it, so it absorbed every shortfall on behalf
+          // of two fixed-width selects and two buttons — at a narrow window
+          // "Booth Console" rendered as "Booth Co" while everything beside it
+          // kept its full size. With a floor it wraps to its own line instead,
+          // which is what the flex-wrap was for.
+          //
+          // A width, not a breakpoint: this row is inside a resizable content
+          // area, so what matters is the room actually left, not the window.
+          className="flex-1 basis-64 min-w-48 text-headline font-semibold text-fg"
           aria-label="View name"
         />
         <Select value={view.kind} onValueChange={(k: string) => handlers.handleSetViewKind(view.id, k as ViewKind)}>
