@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { dropPoint, droppedOnBar, insertionGap, type Box } from "./bar-drop.js";
-import { arrayMove } from "@dnd-kit/sortable";
+import { dropPoint, droppedOnBar, gapFromMidpoints, type Box } from "./bar-drop.js";
 
 // The bar as it actually is: full width, and only 44px tall.
 const BAR: Box = { left: 240, right: 1400, top: 516, bottom: 560 };
@@ -79,52 +78,52 @@ describe("whether that counts as on the bar", () => {
 });
 
 describe("where the caret goes", () => {
-  const KEYS = ["a", "b", "c", "d"];
+  // Four rows, each 100 wide, laid out from x=200: midpoints 250/350/450/550.
+  const MIDS = [250, 350, 450, 550];
 
-  test("from the palette, the item lands BEFORE the row you are over", () => {
-    assert.equal(insertionGap(KEYS, "palette:clock", "c"), 2);
+  test("left of everything is the first gap", () => {
+    assert.equal(gapFromMidpoints(MIDS, 205), 0);
   });
 
-  test("dropped on the strip itself, it goes on the end", () => {
-    assert.equal(insertionGap(KEYS, "palette:clock", "bar"), KEYS.length);
+  test("right of everything is the last gap", () => {
+    assert.equal(gapFromMidpoints(MIDS, 900), MIDS.length);
   });
 
-  test("over nothing means nothing is inserted", () => {
-    assert.equal(insertionGap(KEYS, "a", null), null);
+  test("the LEFT half of a row means before it", () => {
+    assert.equal(gapFromMidpoints(MIDS, 320), 1);
   });
 
-  test("an unknown row inserts nothing rather than guessing", () => {
-    assert.equal(insertionGap(KEYS, "a", "gone"), null);
+  test("the RIGHT half of the same row means after it", () => {
+    // THE bug this replaced. An over-based rule saw one row either side of the
+    // midpoint and inserted before it both times, so every drop drifted left
+    // and a wide item could not be dropped after at all.
+    assert.equal(gapFromMidpoints(MIDS, 380), 2);
   });
 
-  // The asymmetry, and the reason this is not just `indexOf(over)`.
-  test("moving a row RIGHT lands after the row you are over", () => {
-    assert.equal(insertionGap(KEYS, "a", "c"), 3);
+  test("dead on a midpoint goes before, not after", () => {
+    // Arbitrary, but it has to be one of them and it has to be stable — a
+    // caret that flickers between two gaps on a pixel is worse than either.
+    assert.equal(gapFromMidpoints(MIDS, 350), 1);
   });
 
-  test("moving a row LEFT lands before it", () => {
-    assert.equal(insertionGap(KEYS, "d", "b"), 1);
+  test("an empty bar has exactly one gap", () => {
+    assert.equal(gapFromMidpoints([], 400), 0);
   });
 
-  // THE invariant. The caret is drawn from insertionGap; the drop is arrayMove.
-  // They are different code, so a test that only checked insertionGap against
-  // hand-written numbers would let them drift and the caret would quietly lie.
-  test("the caret marks where arrayMove actually puts the row, every pair", () => {
-    for (let from = 0; from < KEYS.length; from++) {
-      for (let to = 0; to < KEYS.length; to++) {
-        if (from === to) continue;
-        const gap = insertionGap(KEYS, KEYS[from], KEYS[to]);
-        assert.notEqual(gap, null, `no gap for ${from} -> ${to}`);
-        // The caret sits in a gap of the CURRENT list; removing the dragged row
-        // shifts every gap after it left by one.
-        const landsAt = gap! > from ? gap! - 1 : gap!;
-        const moved = arrayMove([...KEYS], from, to);
-        assert.equal(
-          moved[landsAt],
-          KEYS[from],
-          `caret at gap ${gap} for ${KEYS[from]} (${from} -> ${to}) but arrayMove put it at ${moved.indexOf(KEYS[from])}`,
-        );
-      }
+  test("every pointer position lands in a gap that exists", () => {
+    for (let x = 150; x < 700; x += 7) {
+      const g = gapFromMidpoints(MIDS, x);
+      assert.ok(g >= 0 && g <= MIDS.length, `x=${x} gave gap ${g}`);
+    }
+  });
+
+  test("the gap only ever grows as the pointer moves right", () => {
+    // Monotonic, so dragging one way never walks the caret backwards.
+    let prev = -1;
+    for (let x = 150; x < 700; x += 3) {
+      const g = gapFromMidpoints(MIDS, x);
+      assert.ok(g >= prev, `gap went backwards at x=${x}`);
+      prev = g;
     }
   });
 });

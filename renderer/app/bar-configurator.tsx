@@ -1,7 +1,7 @@
 // Arranging the context bar, the way macOS lets you arrange a toolbar.
 //
 // The list-with-checkboxes this replaces could describe an arrangement but never
-// show one: you dragged rows in a column and inferred a horizontal strip from
+// show one: you dragged rows in a COLUMN and inferred a horizontal strip from
 // them, and the row that set the left/right split had to explain itself in prose
 // because there was nothing to look at.
 //
@@ -9,6 +9,16 @@
 // bar — same layout constants, same items, rendered from the same live data by
 // the same function — and you drag items into it, along it, and out of it. What
 // you are looking at is what will be above every page.
+//
+// THE DRAG IS GEOMETRY, NOT DROPPABLES. No SortableContext, no collision
+// detection, no `over`. Everything comes from the pointer and the rows' own
+// midpoints, because the droppable-based version was wrong three ways at once:
+// `over` is never null under closestCenter, so nothing could be dropped OUT;
+// sortable rows shifted under the pointer while it was trying to aim at them;
+// and "the row you are over" cannot tell the left half of a wide item from the
+// right half, so every drop landed before it and the whole thing read as a
+// stubborn leftward bias. Rows hold still now, the caret says where the thing
+// will land, and the maths lives in bar-drop.ts where it can be tested.
 //
 // Deliberately unlike macOS in two places. There is no fixed-width Space, only
 // the flexible one: our items already carry their own gap, and a second kind of
@@ -23,16 +33,13 @@ import {
   DragOverlay,
   MouseSensor,
   TouchSensor,
-  closestCenter,
   useDraggable,
-  useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
   type DragMoveEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { SortableContext, arrayMove, horizontalListSortingStrategy } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
 import { XIcon } from "lucide-react";
 
@@ -53,7 +60,7 @@ import {
   useBarContext,
   type BarItemContext,
 } from "./context-bar";
-import { droppedOnBar, insertionGap } from "./bar-drop";
+import { dropPoint, droppedOnBar, gapFromMidpoints } from "./bar-drop";
 import { setBarItems } from "./set-bar-items";
 import {
   Button,
@@ -64,13 +71,11 @@ import {
   DialogDescription,
 } from "../components/ui";
 import { cn } from "../lib/cn";
-import { useSortableRow } from "../lib/use-sortable-row";
 
 const ALL_IDS = Object.keys(BAR_ITEMS) as BarItemId[];
 
 /** A row being edited. Spacers repeat, so a row needs an identity of its own —
- *  dnd-kit addresses everything by id, and two rows sharing one swap places with
- *  themselves. */
+ *  drags are addressed by id, and two rows sharing one swap with themselves. */
 interface Row {
   key: string;
   id: BarRowId;
@@ -87,6 +92,22 @@ function makeKeyer(): () => string {
 
 function presentation(id: BarRowId): Omit<BarItem, "id"> {
   return id === BAR_SPACER ? BAR_SPACER_ITEM : BAR_ITEMS[id];
+}
+
+/**
+ * Nothing in here may be selectable.
+ *
+ * A drag that crosses text starts a native selection, and the browser gives the
+ * mouseup to THAT rather than to the drag — so releasing over the palette left
+ * the ghost stuck to the pointer with no way to put it down.
+ */
+const NO_SELECT = "select-none";
+
+/** Where the thing you are dragging will land. */
+function Caret() {
+  return (
+    <span aria-hidden="true" className="-mx-1 h-6 w-0.5 shrink-0 self-center rounded-full bg-accent" />
+  );
 }
 
 /** A tile in the palette. Drag it into the bar, or click to append it. */
@@ -117,12 +138,18 @@ function PaletteTile({
       // Click is the accessible path to the same thing. Dragging is a mouse
       // gesture; adding an item must not require one.
       onClick={used ? undefined : onAdd}
-      disabled={used}
+      // aria-disabled, NOT disabled. A disabled button computes
+      // `pointer-events: none`, which makes it a hole the pointer falls
+      // through — and a drag released over a hole has nothing to release
+      // onto. It also keeps the tile focusable, so a keyboard user can still
+      // read why it is unavailable.
+      aria-disabled={used || undefined}
       title={item.hint}
       aria-label={used ? `${item.label} — already in the bar` : `Add ${item.label}`}
       className={cn(
         "group flex w-[104px] flex-col items-center gap-1.5 rounded-lg p-2 text-center",
         "outline-none focus-visible:ring-2 focus-visible:ring-accent",
+        NO_SELECT,
         used ? "cursor-default opacity-45" : "cursor-grab active:cursor-grabbing hover:bg-fill",
         isDragging && "opacity-30",
       )}
@@ -141,30 +168,29 @@ function PaletteTile({
 }
 
 /** One row inside the bar being edited. */
-function BarRow({
-  row,
-  ctx,
-  onRemove,
-}: {
-  row: Row;
-  ctx: BarItemContext;
-  onRemove: () => void;
-}) {
-  const { setNodeRef, style, attributes, listeners, isDragging } = useSortableRow(row.key);
+function BarRow({ row, ctx, onRemove }: { row: Row; ctx: BarItemContext; onRemove: () => void }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: row.key,
+    data: { from: "bar" },
+  });
   const label = presentation(row.id).label;
 
   return (
     <span
       ref={setNodeRef}
-      style={style}
       {...attributes}
       {...listeners}
-      // A spacer has no content, so it needs a width of its own to be grabbable
-      // at all — it grows from there like the real one does.
+      // Measured by key while a drag is running. The row does NOT move under the
+      // pointer — the overlay is the feedback and the caret is the target, so
+      // what you are aiming at stays where you saw it.
+      data-row-key={row.key}
       className={cn(
         "group relative cursor-grab rounded-md outline-none active:cursor-grabbing",
         "ring-offset-2 ring-offset-bg focus-visible:ring-2 focus-visible:ring-accent",
-        "hover:bg-fill",
+        "hover:bg-fill touch-pan-y",
+        NO_SELECT,
+        // A spacer has no content, so it needs a width of its own to be
+        // grabbable at all — it grows from there like the real one does.
         row.id === BAR_SPACER ? "min-w-10 flex-1 self-stretch" : BAR_ITEM_CLASS,
         isDragging && "opacity-40",
       )}
@@ -198,16 +224,6 @@ function BarRow({
   );
 }
 
-/** Where the thing you are dragging will land. */
-function Caret() {
-  return (
-    <span
-      aria-hidden="true"
-      className="-mx-1 h-6 w-0.5 shrink-0 self-center rounded-full bg-accent"
-    />
-  );
-}
-
 export function BarConfigurator({
   open,
   onOpenChange,
@@ -221,11 +237,21 @@ export function BarConfigurator({
   const queryClient = useQueryClient();
   const ctx = useBarContext();
   const nextKey = useRef(makeKeyer());
+  const barRef = useRef<HTMLDivElement | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [dragging, setDragging] = useState<BarRowId | null>(null);
-  // The gap the dragged thing would land in — the caret is drawn before
-  // rows[gap]. null while the pointer is somewhere that would not insert.
-  const [gap, setGap] = useState<number | null>(null);
+
+  // The rows staying put during this drag, measured once at drag start. Safe to
+  // cache precisely because nothing shifts mid-drag.
+  const still = useRef<{ keys: string[]; mids: number[] }>({ keys: [], mids: [] });
+  // Where the caret is drawn: a row key, "end", or null for "releasing here
+  // places nothing". Held as the RESOLVED target rather than a gap index so
+  // rendering never has to read `still`, which is a ref.
+  const [caret, setCaret] = useState<string | null>(null);
+  // Whether the last pointer position was a place. Deliberately NOT cleared by
+  // handleDragEnd: the overlay reads its drop animation as it unmounts, and by
+  // then the caret is already gone. Reset at the start of the next drag.
+  const [wasPlaceable, setWasPlaceable] = useState(false);
 
   // Seeded when the dialog opens, not on every change to `saved` — otherwise the
   // save this dialog just made would flow back in and re-seed mid-edit.
@@ -242,21 +268,13 @@ export function BarConfigurator({
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
   );
 
-  const { setNodeRef: setDroppableRef, isOver } = useDroppable({ id: "bar" });
-  const barRef = useRef<HTMLDivElement | null>(null);
   const used = new Set(rows.map((r) => r.id));
-
-  function setBarRef(el: HTMLDivElement | null) {
-    barRef.current = el;
-    setDroppableRef(el);
-  }
 
   /** Every change goes through here, so nothing reaches the server unnormalised
    *  and the preview shows what was actually saved. */
   function commit(next: Row[]) {
     setRows(next);
-    const ids = normalizeBarRows(next.map((r) => r.id));
-    void setBarItems(queryClient, ids);
+    void setBarItems(queryClient, normalizeBarRows(next.map((r) => r.id)));
   }
 
   function add(id: BarRowId, at = rows.length) {
@@ -265,47 +283,65 @@ export function BarConfigurator({
     commit(next);
   }
 
-  // onDragMove, not onDragOver: the caret has to vanish the moment the pointer
-  // leaves the bar, and `over` does not change when it does — closestCenter is
-  // still happily reporting the nearest row. No caret is the honest signal that
-  // letting go here removes rather than places.
-  function handleDragMove(e: DragMoveEvent) {
-    if (!droppedOnBar(e, barRef.current?.getBoundingClientRect() ?? null)) {
-      setGap(null);
-      return;
-    }
-    setGap(insertionGap(rows.map((r) => r.key), String(e.active.id), e.over ? String(e.over.id) : null));
+  /** The gap this pointer position means, or null for "not a place".
+   *
+   *  ONE function, used by both the caret and the drop, so the caret cannot
+   *  promise a position the drop does not honour. */
+  function gapFor(e: DragMoveEvent | DragEndEvent): number | null {
+    if (!droppedOnBar(e, barRef.current?.getBoundingClientRect() ?? null)) return null;
+    const p = dropPoint(e);
+    return p ? gapFromMidpoints(still.current.mids, p.x) : null;
   }
 
   function handleDragStart(e: DragStartEvent) {
     const data = e.active.data.current;
+    const activeKey = data?.from === "bar" ? String(e.active.id) : null;
+    // Measure the rows that are STAYING, in display order. The dragged row is
+    // excluded because it is leaving its slot — which is what lets one gap rule
+    // serve a reorder and an insert alike, with no off-by-one between them.
+    const keys: string[] = [];
+    const mids: number[] = [];
+    for (const n of barRef.current?.querySelectorAll<HTMLElement>("[data-row-key]") ?? []) {
+      const k = n.dataset.rowKey;
+      if (!k || k === activeKey) continue;
+      const r = n.getBoundingClientRect();
+      keys.push(k);
+      mids.push(r.left + r.width / 2);
+    }
+    still.current = { keys, mids };
+    setWasPlaceable(false);
     setDragging((data?.id as BarRowId | undefined) ?? rows.find((r) => r.key === e.active.id)?.id ?? null);
   }
 
+  function handleDragMove(e: DragMoveEvent) {
+    const g = gapFor(e);
+    setWasPlaceable(g !== null);
+    setCaret(g === null ? null : (still.current.keys[g] ?? "end"));
+  }
+
   function handleDragEnd(e: DragEndEvent) {
+    const g = gapFor(e);
     setDragging(null);
-    setGap(null);
-    const { active, over } = e;
-    const onBar = droppedOnBar(e, barRef.current?.getBoundingClientRect() ?? null);
+    setCaret(null);
 
-    if (active.data.current?.from === "palette") {
-      // Let go somewhere else in the dialog: nothing was asked for.
-      if (!onBar) return;
-      const at = over && over.id !== "bar" ? rows.findIndex((r) => r.key === over.id) : -1;
-      add(active.data.current.id as BarRowId, at === -1 ? rows.length : at);
+    const fromPalette = e.active.data.current?.from === "palette";
+    if (g === null) {
+      // Not a place. A row dragged out of the bar goes; a tile flies home.
+      if (!fromPalette) commit(rows.filter((r) => r.key !== e.active.id));
       return;
     }
 
-    // Dragged out of the bar — macOS's "poof".
-    if (!onBar) {
-      commit(rows.filter((r) => r.key !== active.id));
-      return;
-    }
-    if (!over || over.id === active.id || over.id === "bar") return;
-    const oldIndex = rows.findIndex((r) => r.key === active.id);
-    const newIndex = rows.findIndex((r) => r.key === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-    commit(arrayMove(rows, oldIndex, newIndex));
+    const staying = still.current.keys
+      .map((k) => rows.find((r) => r.key === k))
+      .filter((r): r is Row => r !== undefined);
+    const moved: Row | undefined = fromPalette
+      ? { key: nextKey.current(), id: e.active.data.current?.id as BarRowId }
+      : rows.find((r) => r.key === e.active.id);
+    if (!moved) return;
+
+    const next = [...staying];
+    next.splice(g, 0, moved);
+    commit(next);
   }
 
   return (
@@ -320,13 +356,21 @@ export function BarConfigurator({
 
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCenter}
           onDragStart={handleDragStart}
           onDragMove={handleDragMove}
           onDragEnd={handleDragEnd}
-          onDragCancel={() => { setDragging(null); setGap(null); }}
+          onDragCancel={() => {
+            setDragging(null);
+            setCaret(null);
+            setWasPlaceable(false);
+          }}
         >
-          <div className="mt-4 flex flex-wrap justify-center gap-1 rounded-xl border border-line bg-surface p-3">
+          <div
+            className={cn(
+              "mt-4 flex flex-wrap justify-center gap-1 rounded-xl border border-line bg-surface p-3",
+              NO_SELECT,
+            )}
+          >
             {[...ALL_IDS, BAR_SPACER].map((id) => (
               <PaletteTile
                 key={id}
@@ -340,41 +384,44 @@ export function BarConfigurator({
           </div>
 
           <p className="mt-5 text-caption1 text-fg-subtle">The bar, as it will appear:</p>
-          <SortableContext items={rows.map((r) => r.key)} strategy={horizontalListSortingStrategy}>
-            <div
-              ref={setBarRef}
-              className={cn(
-                "mt-1.5 rounded-xl border bg-bg",
-                BAR_STRIP_CLASS,
-                "min-h-11 sm:h-auto sm:min-h-11",
-                isOver ? "border-accent" : "border-line-strong",
-              )}
-            >
-              {rows.length === 0 && (
-                <span className="text-footnote text-fg-subtle">Drag something in.</span>
-              )}
-              {rows.map((row, i) => (
-                <Fragment key={row.key}>
-                  {gap === i && <Caret />}
-                  <BarRow
-                    row={row}
-                    ctx={ctx}
-                    onRemove={() => commit(rows.filter((r) => r.key !== row.key))}
-                  />
-                </Fragment>
-              ))}
-              {gap === rows.length && <Caret />}
-            </div>
-          </SortableContext>
+          <div
+            ref={barRef}
+            className={cn(
+              "mt-1.5 rounded-xl border border-line-strong bg-bg",
+              BAR_STRIP_CLASS,
+              "min-h-11 sm:h-auto sm:min-h-11",
+              NO_SELECT,
+            )}
+          >
+            {rows.length === 0 && !dragging && (
+              <span className="text-footnote text-fg-subtle">Drag something in.</span>
+            )}
+            {rows.map((row) => (
+              <Fragment key={row.key}>
+                {caret === row.key && <Caret />}
+                <BarRow
+                  row={row}
+                  ctx={ctx}
+                  onRemove={() => commit(rows.filter((r) => r.key !== row.key))}
+                />
+              </Fragment>
+            ))}
+            {caret === "end" && <Caret />}
+          </div>
 
           {/* Portalled to the body, NOT left inside the dialog.
               DragOverlay positions itself `fixed`, and the dialog is centred
               with Tailwind's `translate` utilities — which, exactly like
               `transform`, make a containing block for fixed descendants. Left
               in place the ghost was offset by half the dialog, appearing far
-              below the pointer and making the tile impossible to aim. */}
+              below the pointer and impossible to aim with.
+
+              dropAnimation ONLY when the drop was not a place: the ghost flies
+              back where it came from, which is what "that did not take" looks
+              like. On a real drop it would instead animate towards a slot the
+              item already occupies. */}
           {createPortal(
-            <DragOverlay dropAnimation={null}>
+            <DragOverlay dropAnimation={wasPlaceable ? null : undefined}>
               {dragging && (
                 // w-max and nowrap, and NOT an inline span: dnd-kit sizes the
                 // overlay wrapper to the node the drag started from — 104px for

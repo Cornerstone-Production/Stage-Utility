@@ -60,28 +60,21 @@ export function droppedOnBar(e: DragEndGeometry, bar: Box | null, pad = 16): boo
 }
 
 /**
- * Which gap a drag would land in: a caret drawn before `keys[gap]`.
+ * Which gap the pointer sits in, given the midpoints of the rows STAYING PUT.
  *
- * A reorder is not the same as an insert, and one rule for both lies half the
- * time. Dropping onto a row from the palette puts the new item BEFORE it.
- * Dragging a row rightwards past another lands AFTER it, because the dragged
- * row leaves its own slot first — the same off-by-one `arrayMove` already has,
- * stated once here so the caret and the drop cannot disagree.
+ * Midpoints, not "the row you are over": hovering the right half of a wide item
+ * means you want to be after it, and an over-based rule cannot tell the two
+ * halves apart — it inserted before the row every time, which read as a stubborn
+ * bias to the left. It also removes the reorder/insert asymmetry entirely: the
+ * dragged row is excluded from `mids`, so there is one rule and no off-by-one.
  *
- * `null` means nothing would be inserted.
+ * `mids` must be in display order. Returns 0..mids.length.
  */
-export function insertionGap(
-  keys: readonly string[],
-  activeId: string,
-  overId: string | null,
-): number | null {
-  if (overId === null) return null;
-  // The strip itself rather than a row in it: past the end.
-  if (overId === "bar") return keys.length;
-  const to = keys.indexOf(overId);
-  if (to === -1) return null;
-  const from = keys.indexOf(activeId);
-  // Not in the bar yet, so it comes from the palette.
-  if (from === -1) return to;
-  return from < to ? to + 1 : to;
+export function gapFromMidpoints(mids: readonly number[], x: number): number {
+  let gap = 0;
+  for (const m of mids) {
+    if (x <= m) break;
+    gap++;
+  }
+  return gap;
 }
