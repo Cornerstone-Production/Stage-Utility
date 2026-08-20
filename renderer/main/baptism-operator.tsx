@@ -8,11 +8,12 @@ import { invoke } from "../lib/api";
 import { Button, confirm, toast } from "../components/ui";
 import { cn } from "../lib/cn";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
+import { formatClock } from "../lib/clock-format";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) + " · " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) + " · " + formatClock(d);
 }
 
 /**

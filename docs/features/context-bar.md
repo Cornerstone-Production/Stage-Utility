@@ -13,7 +13,7 @@ and every operator sees it.
 
 | Item | Shows |
 |---|---|
-| **Clock** | The current time, 24-hour. |
+| **Clock** | The current time, with seconds. |
 | **Service type and plan** | Which service, and which plan is active. |
 | **Live state and timer** | Whether a service is running, and the countdown. |
 | **Current plan item** | What Planning Center says is happening now. |
@@ -64,6 +64,21 @@ item, as a tile; below it is the bar itself, live, showing real readings.
 - **Use the default set** puts the bar back to how it ships.
 
 Every change saves as you make it. There is nothing to apply.
+
+## 12-hour or 24-hour
+
+**Settings → Advanced → Network & behavior → Clock format**, beside the time
+zone. It sets how *every* clock in the app reads — the context bar, service
+times in History and the Overview, the rundown, the automation log, and stage
+displays.
+
+A **clock object** in a custom layout that has been set to 12h or 24h explicitly
+keeps its own choice; one that never was follows this setting.
+
+It is a display preference only. Nothing the server decides by the clock changes
+with it — which day a service files under, the update window and the automation
+time conditions all read the **time zone**, because 8pm and 20:00 are the same
+instant.
 
 ## Spacing
 

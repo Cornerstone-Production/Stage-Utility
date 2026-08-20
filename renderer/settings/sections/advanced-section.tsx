@@ -29,6 +29,7 @@ import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon
 import { DataArchivePanel } from "./data-archive-panel";
 import { BarConfigurator } from "../../app/bar-configurator";
 import { visibleBarItems } from "../../app/bar-items";
+import { clockOptions, formatClock } from "../../lib/clock-format";
 import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
 import { restartConsequence, restartOutcome } from "../../lib/restart-warning";
@@ -842,10 +843,7 @@ function TimezoneField({
       return new Intl.DateTimeFormat(undefined, {
         timeZone: effective,
         weekday: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
+        ...clockOptions({ seconds: true }),
       }).format(new Date(now));
     } catch {
       return "—";
@@ -889,6 +887,47 @@ function TimezoneField({
     </Field>
   );
 }
+
+/**
+ * 12-hour or 24-hour, everywhere the app shows a time of day.
+ *
+ * Beside the time zone because they are the same question asked twice — which
+ * clock am I reading — and because this one changes nothing else. The zone
+ * moves what the server DECIDES; this moves only what it prints.
+ */
+function HourCycleField({
+  hourCycle,
+  onChange,
+}: {
+  hourCycle: "12h" | "24h";
+  onChange: (cycle: "12h" | "24h") => Promise<void>;
+}) {
+  return (
+    <Field orientation="horizontal">
+      <FieldContent>
+        <FieldLabel>Clock format</FieldLabel>
+        <FieldDescription>
+          How every clock in the app reads — the context bar, service times, the rundown and
+          stage displays. A clock object in a custom layout that has been set to one or the
+          other keeps its own choice.
+        </FieldDescription>
+      </FieldContent>
+      <Select value={hourCycle} onValueChange={(v: string) => void onChange(v as "12h" | "24h")}>
+        <SelectTrigger className="w-64" aria-label="Clock format">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="24h">24-hour ({formatClock(SAMPLE_EVENING, { seconds: true, hourCycle: "24h" })})</SelectItem>
+          <SelectItem value="12h">12-hour ({formatClock(SAMPLE_EVENING, { seconds: true, hourCycle: "12h" })})</SelectItem>
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+/** A fixed evening instant, so each option shows the difference rather than
+ *  describing it. Evening because that is where 12h and 24h diverge. */
+const SAMPLE_EVENING = new Date(2026, 0, 1, 20, 45, 30).getTime();
 
 export function AdvancedSection({
   stageState,
@@ -1090,6 +1129,10 @@ export function AdvancedSection({
             timezone={stageState.timezone ?? null}
             hostTimezone={stageState.hostTimezone ?? "UTC"}
             onChange={handlers.handleSetTimezone}
+          />
+          <HourCycleField
+            hourCycle={stageState.hourCycle ?? "24h"}
+            onChange={handlers.handleSetHourCycle}
           />
         </FieldGroup>
       </FieldSet>

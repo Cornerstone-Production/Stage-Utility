@@ -44,6 +44,7 @@ export interface SectionHandlers {
   handleSetReconnectSchedule: (partial: { enabled?: boolean; leadMin?: number; tailMin?: number; dormantMin?: number }) => Promise<void>;
   handleSetTaperWindow: (partial: { preMin?: number; postMin?: number }) => Promise<void>;
   handleSetTimezone: (tz: string | null) => Promise<void>;
+  handleSetHourCycle: (cycle: "12h" | "24h") => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {
     name?: string;

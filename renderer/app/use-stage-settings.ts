@@ -294,6 +294,16 @@ export function useStageSettings() {
     }
   }
 
+  /** How the app displays a time of day. Global, like the time zone. */
+  async function handleSetHourCycle(cycle: "12h" | "24h") {
+    try {
+      const next = await ipc<StageState>("settings:setHourCycle", { hourCycle: cycle });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to set the clock format: ${String(err)}`);
+    }
+  }
+
   async function handleSetAllowedServiceTypes(ids: string[]) {
     try {
       const next = await ipc<StageState>("stage:setAllowedServiceTypes", { ids });
@@ -806,6 +816,7 @@ export function useStageSettings() {
     handleSetReconnectSchedule,
     handleSetTaperWindow,
     handleSetTimezone,
+    handleSetHourCycle,
     handleSetAllowedServiceTypes,
     handleSetBranding,
     updateSlot,

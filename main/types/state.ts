@@ -86,6 +86,9 @@ export interface StageState {
   /** IANA zone the server makes wall-clock decisions in, or null to follow its
    *  own clock. See `hostTimezone` for what that clock currently reads. */
   timezone: string | null;
+  /** How every clock in the app renders a time of day. Display only — see
+   *  `timezone` for the zone the server actually reasons in. */
+  hourCycle: "12h" | "24h";
   /** The zone the SERVER's clock is set to — shown so an operator can see when it
    *  is UTC (the default on most servers) and override it. */
   hostTimezone: string;

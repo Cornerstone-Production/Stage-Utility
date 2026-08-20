@@ -29,6 +29,7 @@ import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
 import { useIntegrations } from "../main/use-integration-states";
 import { DisconnectedPopover } from "./disconnected-popover";
+import { formatClock } from "../lib/clock-format";
 
 /** Everything an item needs to render. Gathered by `useBarContext`. */
 export interface BarItemContext {
@@ -207,7 +208,7 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
     case "clock":
       return (
         <span className="text-footnote font-mono tabular-nums text-fg-muted">
-          {new Date(now).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })}
+          {formatClock(now, { seconds: true })}
         </span>
       );
 

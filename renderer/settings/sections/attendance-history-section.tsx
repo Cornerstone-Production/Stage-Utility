@@ -1,12 +1,10 @@
 import { clamp } from "@main/services/clamp";
 import { useRef, useState } from "react";
+import { formatClock } from "../../lib/clock-format";
 
 
 function fmtTime(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  return formatClock(iso);
 }
 
 // Which chart series/overlays and summary cards to surface, mirroring the SPL

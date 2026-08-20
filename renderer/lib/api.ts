@@ -320,6 +320,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>("/api/taper-window", p);
     case "settings:setTimezone":
       return post<T>("/api/timezone", p);
+    case "settings:setHourCycle":
+      return post<T>("/api/hour-cycle", p);
 
     case "update:setTrack":
       return post<T>("/api/update/track", p);

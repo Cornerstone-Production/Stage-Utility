@@ -150,6 +150,16 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    if (method === "POST" && pathname === "/api/hour-cycle") {
+      const body = await readBody(req) as Record<string, unknown>;
+      try {
+        json(res, await stageController.setHourCycle(body.hourCycle as "12h" | "24h"));
+      } catch (err) {
+        json(res, { error: errorMessage(err) }, 400);
+      }
+      return;
+    }
+
     // ── Config snapshot (backup / restore) ──────────────────────────────────
     // Download the full config (secrets excluded) as a .json file.
     if (method === "GET" && pathname === "/api/config/export") {
