@@ -9,9 +9,27 @@
 
 import { useState, type ChangeEvent, type ReactNode } from "react";
 
-import { Dialog, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "../../components/ui";
+import { Dialog, Input, Radio, RadioGroup, Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "../../components/ui";
+import { cn } from "../../lib/cn";
 import { dashboardTemplate, confidenceMonitorTemplate } from "../../editor/layout-editor";
 import type { SectionHandlers } from "../types";
+import type { ViewSurface } from "@main/types/views";
+
+/** What a custom view is FOR, in the operator's words rather than the schema's.
+ *  Data rather than two hand-written blocks: they had drifted to differing
+ *  markup for the same control. */
+const SURFACE_CHOICES: { value: ViewSurface; title: string; hint: string }[] = [
+  {
+    value: "display",
+    title: "A wall screen anyone can see",
+    hint: "Read-only. Controls never fire, whatever you put on it.",
+  },
+  {
+    value: "console",
+    title: "A control surface you operate",
+    hint: "Buttons work. Opens in the app, or pinned to a control surface.",
+  },
+];
 
 // Copied verbatim from the list this replaces. Retyping it from memory dropped
 // "stage" and "spl-rundown" - two view kinds that would then have been
@@ -103,36 +121,30 @@ export function NewViewDialog({
         {kind === "custom" && (
           <fieldset className="flex flex-col gap-1.5 border-0 p-0 m-0">
             <legend className="text-caption2 text-fg-subtle p-0">What is it for</legend>
-            <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-line p-2.5 hover:bg-fill">
-              <input
-                type="radio"
-                name="view-surface"
-                className="mt-0.5"
-                checked={surface === "display"}
-                onChange={() => setSurface("display")}
-              />
-              <span className="min-w-0">
-                <span className="block text-footnote font-medium text-fg">A wall screen anyone can see</span>
-                <span className="block text-caption2 text-fg-subtle">
-                  Read-only. Controls never fire, whatever you put on it.
-                </span>
-              </span>
-            </label>
-            <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-line p-2.5 hover:bg-fill">
-              <input
-                type="radio"
-                name="view-surface"
-                className="mt-0.5"
-                checked={surface === "console"}
-                onChange={() => setSurface("console")}
-              />
-              <span className="min-w-0">
-                <span className="block text-footnote font-medium text-fg">A control surface you operate</span>
-                <span className="block text-caption2 text-fg-subtle">
-                  Buttons work. Opens in the app, or pinned to a control surface.
-                </span>
-              </span>
-            </label>
+            {/* A themed RadioGroup, not bare `input type="radio"`. Those drew the
+                operating system's control — its own blue, ignoring the theme —
+                and in dark mode did not read as enabled at all. */}
+            <RadioGroup
+              value={surface}
+              onValueChange={(v: string) => setSurface(v as ViewSurface)}
+              className="flex flex-col gap-1.5"
+            >
+              {SURFACE_CHOICES.map((c) => (
+                <label
+                  key={c.value}
+                  className={cn(
+                    "flex cursor-pointer items-start gap-2.5 rounded-lg border p-2.5 transition-colors",
+                    surface === c.value ? "border-accent bg-fill" : "border-line hover:bg-fill",
+                  )}
+                >
+                  <Radio value={c.value} className="mt-0.5" aria-label={c.title} />
+                  <span className="min-w-0">
+                    <span className="block text-footnote font-medium text-fg">{c.title}</span>
+                    <span className="block text-caption2 text-fg-subtle">{c.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </RadioGroup>
           </fieldset>
         )}
         {kind === "custom" && (
