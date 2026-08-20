@@ -23,7 +23,7 @@ import { cn } from "../lib/cn";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
 import { BarConfigurator } from "./bar-configurator";
-import { BAR_SPACER, visibleBarItems, type BarItemId } from "./bar-items";
+import { BAR_SPACE, BAR_SPACER, visibleBarItems, type BarItemId } from "./bar-items";
 import { recordingStat, recorders } from "./recording-status";
 import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
@@ -140,6 +140,17 @@ export function BarSpacerEl({ className }: { className?: string }) {
   return <span aria-hidden="true" className={cn("hidden sm:block sm:flex-1", className)} />;
 }
 
+/**
+ * A fixed gap: a deliberate break between two groups.
+ *
+ * Unlike the flexible spacer this DOES show on a wrapped phone bar. It is 32px
+ * whatever the width, so it separates on a narrow screen exactly as it does on
+ * a wide one — which is the whole reason to reach for it instead.
+ */
+export function BarSpaceEl({ className }: { className?: string }) {
+  return <span aria-hidden="true" className={cn("block w-8 shrink-0", className)} />;
+}
+
 export function ContextBar() {
   const ctx = useBarContext();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -167,15 +178,15 @@ export function ContextBar() {
   return (
     <>
       <header className={cn("context-strip shrink-0", BAR_STRIP_CLASS)} onContextMenu={openMenu}>
-        {rows.map((id, i) =>
-          id === BAR_SPACER ? (
-            <BarSpacerEl key={`${id}-${i}`} />
-          ) : (
+        {rows.map((id, i) => {
+          if (id === BAR_SPACER) return <BarSpacerEl key={`${id}-${i}`} />;
+          if (id === BAR_SPACE) return <BarSpaceEl key={`${id}-${i}`} />;
+          return (
             <span key={id} className={BAR_ITEM_CLASS}>
               {renderBarItem(id, ctx)}
             </span>
-          ),
-        )}
+          );
+        })}
       </header>
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}

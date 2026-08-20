@@ -26,6 +26,7 @@ import {
   PlugZapIcon,
   CircleDotIcon,
   MoveHorizontalIcon,
+  SquareIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -58,8 +59,27 @@ export type BarSpacer = typeof BAR_SPACER;
 /** What the spacer was called before it could repeat. Read, never written. */
 const LEGACY_SPACER = "split";
 
-/** A row of the saved order: an item, or a spacer. */
-export type BarRowId = BarItemId | BarSpacer;
+/**
+ * A fixed gap.
+ *
+ * The flexible spacer decides ALIGNMENT — it eats the slack, which is what
+ * pushes a group to an edge. This decides DISTANCE, and the two are not
+ * substitutes: capping the flexible one so a group sits closer would leave the
+ * uneaten slack after that group, so it would no longer reach the edge at all.
+ *
+ * One width, and repeatable, exactly as macOS does it. A size control would be
+ * a number to tune on a strip whose whole job is to be glanced at.
+ */
+export const BAR_SPACE = "space" as const;
+export type BarSpace = typeof BAR_SPACE;
+
+/** A row of the saved order: an item, a flexible spacer, or a fixed gap. */
+export type BarRowId = BarItemId | BarSpacer | BarSpace;
+
+/** The two things in the palette that show no reading. */
+export function isBarGap(id: BarRowId): id is BarSpacer | BarSpace {
+  return id === BAR_SPACER || id === BAR_SPACE;
+}
 
 export interface BarItem {
   id: BarItemId;
@@ -129,6 +149,13 @@ export const BAR_SPACER_ITEM: Omit<BarItem, "id"> = {
   hint: "Pushes what follows it away from what comes before. Use two to centre a group.",
 };
 
+/** How the fixed gap presents itself in the configurator. */
+export const BAR_SPACE_ITEM: Omit<BarItem, "id"> = {
+  label: "Space",
+  icon: SquareIcon,
+  hint: "A fixed gap, for holding two groups apart without pushing either to an edge. Use two for a wider one.",
+};
+
 /**
  * What a bar nobody has configured shows.
  *
@@ -157,14 +184,17 @@ const LEGACY_RIGHT: ReadonlySet<string> = new Set([
 
 /** Put a spacer where the inferred rule used to cut. No service-state item means
  *  the old bar packed everything left, so the spacer goes on the end. */
-function withLegacySpacer(items: readonly BarItemId[]): BarRowId[] {
-  const at = items.findIndex((id) => LEGACY_RIGHT.has(id));
-  const cut = at === -1 ? items.length : at;
-  return [...items.slice(0, cut), BAR_SPACER, ...items.slice(cut)];
+function withLegacySpacer(rows: readonly BarRowId[]): BarRowId[] {
+  const at = rows.findIndex((id) => LEGACY_RIGHT.has(id));
+  const cut = at === -1 ? rows.length : at;
+  return [...rows.slice(0, cut), BAR_SPACER, ...rows.slice(cut)];
 }
 
-/** Adjacent spacers collapse: two in a row split the slack between two points
- *  that are the same point, so the second one only pads the saved order. */
+/** Adjacent FLEXIBLE spacers collapse: two in a row split the slack between two
+ *  points that are the same point, so the second only pads the saved order.
+ *
+ *  Fixed gaps are left alone — two of them in a row is a wider gap, which is
+ *  the only way to ask for one. */
 function collapseSpacers(rows: readonly BarRowId[]): BarRowId[] {
   return rows.filter((id, i) => id !== BAR_SPACER || rows[i - 1] !== BAR_SPACER);
 }
@@ -188,11 +218,12 @@ function collapseSpacers(rows: readonly BarRowId[]): BarRowId[] {
 export function visibleBarItems(saved: readonly string[] | undefined): BarRowId[] {
   const rows = (saved ?? []).flatMap((id): BarRowId[] => {
     if (id === BAR_SPACER || id === LEGACY_SPACER) return [BAR_SPACER];
+    if (id === BAR_SPACE) return [BAR_SPACE];
     return id in BAR_ITEMS ? [id as BarItemId] : [];
   });
-  const items = rows.filter((id): id is BarItemId => id !== BAR_SPACER);
-  if (items.length === 0) return DEFAULT_BAR_ORDER;
-  if (!rows.includes(BAR_SPACER)) return withLegacySpacer(items);
+  // Gaps are not readings. A bar of nothing but spacing is an empty bar.
+  if (!rows.some((id) => !isBarGap(id))) return DEFAULT_BAR_ORDER;
+  if (!rows.includes(BAR_SPACER)) return withLegacySpacer(rows);
   return collapseSpacers(rows);
 }
 

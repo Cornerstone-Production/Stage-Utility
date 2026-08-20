@@ -45,8 +45,11 @@ import { XIcon } from "lucide-react";
 
 import {
   BAR_ITEMS,
+  BAR_SPACE,
+  BAR_SPACE_ITEM,
   BAR_SPACER,
   BAR_SPACER_ITEM,
+  isBarGap,
   DEFAULT_BAR_ORDER,
   normalizeBarRows,
   type BarItem,
@@ -91,7 +94,9 @@ function makeKeyer(): () => string {
 }
 
 function presentation(id: BarRowId): Omit<BarItem, "id"> {
-  return id === BAR_SPACER ? BAR_SPACER_ITEM : BAR_ITEMS[id];
+  if (id === BAR_SPACER) return BAR_SPACER_ITEM;
+  if (id === BAR_SPACE) return BAR_SPACE_ITEM;
+  return BAR_ITEMS[id];
 }
 
 /**
@@ -189,17 +194,27 @@ function BarRow({ row, ctx, onRemove }: { row: Row; ctx: BarItemContext; onRemov
         "ring-offset-2 ring-offset-bg focus-visible:ring-2 focus-visible:ring-accent",
         "hover:bg-fill touch-pan-y",
         NO_SELECT,
-        // A spacer has no content, so it needs a width of its own to be
-        // grabbable at all — it grows from there like the real one does.
-        row.id === BAR_SPACER ? "min-w-10 flex-1 self-stretch" : BAR_ITEM_CLASS,
+        // A gap has no content, so it needs a width of its own to be grabbable
+        // at all. The flexible one grows from there like the real one does; the
+        // fixed one is shown at exactly the width it will be.
+        row.id === BAR_SPACER ? "min-w-10 flex-1 self-stretch"
+          : row.id === BAR_SPACE ? "w-8 shrink-0 self-stretch"
+          : BAR_ITEM_CLASS,
         isDragging && "opacity-40",
       )}
       aria-label={`${label} — drag to move`}
     >
-      {row.id === BAR_SPACER ? (
-        // Visible only in here. In the bar itself a spacer is nothing at all.
+      {isBarGap(row.id) ? (
+        // Visible only in here. In the bar itself a gap is nothing at all.
         <span className="pointer-events-none flex h-full items-center justify-center">
-          <span className="h-4 w-full rounded-[3px] border border-dashed border-line-strong" />
+          <span
+            className={cn(
+              "h-4 w-full rounded-[3px] border border-dashed border-line-strong",
+              // Solid for the fixed one: it is a fixed thing, and the two have
+              // to be told apart at a glance once both are in the bar.
+              row.id === BAR_SPACE && "border-solid bg-fill",
+            )}
+          />
         </span>
       ) : (
         renderBarItem(row.id, ctx)
@@ -371,13 +386,13 @@ export function BarConfigurator({
               NO_SELECT,
             )}
           >
-            {[...ALL_IDS, BAR_SPACER].map((id) => (
+            {[...ALL_IDS, BAR_SPACE, BAR_SPACER].map((id) => (
               <PaletteTile
                 key={id}
                 id={id}
-                // A spacer is never "used up" — the whole point is having more
-                // than one.
-                used={id !== BAR_SPACER && used.has(id)}
+                // Neither gap is ever "used up" — the whole point of both is
+                // being able to place more than one.
+                used={!isBarGap(id) && used.has(id)}
                 onAdd={() => add(id)}
               />
             ))}

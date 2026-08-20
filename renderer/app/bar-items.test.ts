@@ -3,9 +3,12 @@ import { test, describe } from "node:test";
 
 import {
   BAR_ITEMS,
+  BAR_SPACE,
+  BAR_SPACE_ITEM,
   BAR_SPACER,
   BAR_SPACER_ITEM,
   DEFAULT_BAR_ORDER,
+  isBarGap,
   normalizeBarRows,
   visibleBarItems,
 } from "./bar-items.js";
@@ -28,11 +31,14 @@ describe("the bar registry", () => {
     }
   });
 
-  test("the spacer describes itself too", () => {
-    // It is not in BAR_ITEMS, so the loop above cannot cover it — and it is the
-    // one palette tile whose purpose is not obvious from its name.
-    assert.ok(BAR_SPACER_ITEM.label.length > 0);
-    assert.ok(BAR_SPACER_ITEM.hint.length > 10);
+  test("both gaps describe themselves too", () => {
+    // Neither is in BAR_ITEMS, so the loop above cannot cover them — and they
+    // are the palette tiles whose purpose is least obvious from the name.
+    for (const gap of [BAR_SPACER_ITEM, BAR_SPACE_ITEM]) {
+      assert.ok(gap.label.length > 0);
+      assert.ok(gap.hint.length > 10);
+    }
+    assert.notEqual(BAR_SPACER_ITEM.label, BAR_SPACE_ITEM.label, "two tiles named the same");
   });
 
   test("the default is the bar as it shipped", () => {
@@ -44,7 +50,7 @@ describe("the bar registry", () => {
 
   test("every default item exists in the registry", () => {
     for (const id of DEFAULT_BAR_ORDER) {
-      if (id === BAR_SPACER) continue;
+      if (isBarGap(id)) continue;
       assert.ok(BAR_ITEMS[id], `default names ${id}, which is not a registered item`);
     }
   });
@@ -102,6 +108,54 @@ describe("visibleBarItems", () => {
   test("falls back when every saved id is unknown", () => {
     // The realistic downgrade: a config written by a much newer build.
     assert.deepEqual(visibleBarItems(["nope", "also-nope"]), DEFAULT_BAR_ORDER);
+  });
+});
+
+describe("the fixed gap", () => {
+  test("survives a round trip like any other row", () => {
+    assert.deepEqual(
+      visibleBarItems(["clock", BAR_SPACE, "plan", BAR_SPACER, "recording"]),
+      ["clock", "space", "plan", "spacer", "recording"],
+    );
+  });
+
+  test("two in a row are KEPT — that is how you ask for a wider gap", () => {
+    // The flexible one collapses because two of it divide the slack at one
+    // point. Two fixed gaps are twice the distance, which is a real request.
+    assert.deepEqual(
+      visibleBarItems(["clock", BAR_SPACE, BAR_SPACE, "plan", BAR_SPACER]),
+      ["clock", "space", "space", "plan", "spacer"],
+    );
+  });
+
+  test("collapsing still applies to the flexible one beside it", () => {
+    assert.deepEqual(
+      visibleBarItems(["clock", BAR_SPACER, BAR_SPACER, BAR_SPACE, "plan"]),
+      ["clock", "spacer", "space", "plan"],
+    );
+  });
+
+  test("a bar of nothing but gaps is still an empty bar", () => {
+    // Spacing is not a reading. Falling back beats rendering a strip that is
+    // 100% gap and looks broken.
+    assert.deepEqual(visibleBarItems([BAR_SPACE, BAR_SPACER, BAR_SPACE]), DEFAULT_BAR_ORDER);
+  });
+
+  test("normalizing keeps fixed gaps and still guarantees a flexible one", () => {
+    assert.deepEqual(
+      normalizeBarRows(["clock", BAR_SPACE, "plan"]),
+      ["clock", "space", "plan", "spacer"],
+    );
+  });
+
+  test("a pre-spacer bar that somehow carries a fixed gap keeps it", () => {
+    // Cannot happen from a real config — fixed gaps postdate the migration —
+    // but the migration used to rebuild the row list from ITEMS only, which
+    // would have silently dropped anything that was not one.
+    assert.deepEqual(
+      visibleBarItems(["clock", BAR_SPACE, "live-timer"]),
+      ["clock", "space", "spacer", "live-timer"],
+    );
   });
 });
 

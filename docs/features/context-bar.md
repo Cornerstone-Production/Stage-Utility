@@ -59,8 +59,8 @@ item, as a tile; below it is the bar itself, live, showing real readings.
   drop on the left half of an item to go before it, the right half to go after.
   No line means letting go there places nothing: a bar item is removed, and a
   palette tile springs back.
-- A tile already in the bar is dimmed. **Flexible space** never dims, because
-  you can use more than one.
+- A tile already in the bar is dimmed. **Space** and **Flexible space** never
+  dim, because you can use as many of either as you like.
 - **Use the default set** puts the bar back to how it ships.
 
 Every change saves as you make it. There is nothing to apply.
@@ -82,18 +82,29 @@ instant.
 
 ## Spacing
 
+Two kinds, doing different jobs.
+
 **Flexible space** draws nothing and takes all the room going, which pushes what
-follows it away from what comes before. It is how you decide where things sit.
+follows it away from what comes before. It decides **alignment**.
 
 | Arrangement | Result |
 |---|---|
-| No spacer, or one at the end | Everything packs to the left |
-| A spacer in the middle | A left group and a right group |
-| A spacer at the very start | Everything packs to the right |
-| Two spacers | The items between them are centred |
+| None, or one at the end | Everything packs to the left |
+| One in the middle | A left group and a right group |
+| One at the very start | Everything packs to the right |
+| Two | The items between them are centred |
 
-On a phone the bar wraps onto as many lines as it needs and spacers are ignored
-— there is no slack to distribute, and a spacer would push the next item onto a
-line of its own.
+**Space** is a fixed gap — a deliberate break between two groups that does not
+push either to an edge. It decides **distance**. Use two side by side for a
+wider one.
+
+Reach for a Space when you want a reading set slightly apart from its
+neighbours; reach for a Flexible space when you want a group pinned to an edge
+or centred.
+
+On a phone the bar wraps onto as many lines as it needs. Flexible spaces are
+ignored there — there is no slack to distribute, and one would push the next
+item onto a line of its own — but a Space still separates, at the same width it
+has anywhere else.
 
 A bar arranged before spacers existed keeps the left/right split it already had.
