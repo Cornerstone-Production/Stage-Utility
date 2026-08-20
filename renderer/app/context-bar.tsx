@@ -143,33 +143,18 @@ export function BarSpacerEl({ className }: { className?: string }) {
 /**
  * A fixed gap: a deliberate break between two groups.
  *
- * 15px, and 15px is what you can measure on screen. The strip lays out with a
- * 12px column gap, so a bare 15px element would actually separate its
- * neighbours by 12 + 28 + 12 — the width in the code would name nothing you
- * could see, which is exactly the confusion that got this changed twice. The
- * negative margin eats the gap either side so the declared width IS the
- * whitespace.
- *
- * (Two of them adjacent come to 2w − 12 rather than 2w, because only the outer
- * gaps get cancelled. Still wider, which is all "use two for a bigger one"
- * promises.)
+ * Geometry lives in styles.css under `.bar-space`, because it needs a sibling
+ * selector that a utility class cannot express — see the comment there for why
+ * two of them in a row would otherwise fail to add up.
  *
  * Unlike the flexible spacer this DOES show on a wrapped phone bar: it is the
- * same 15px at any width, which is the whole reason to reach for it instead.
- *
- * Off the spacing scale on purpose — this is a measured gap somebody asked for
- * by number, not a rhythm value, and rounding it to w-4 would put the code back
- * to naming something other than what is on screen.
+ * same width at any screen size, which is the whole reason to reach for it.
  */
-const BAR_SPACE_WIDTH = "w-[15px] -mx-3 shrink-0";
+export const BAR_SPACE_CLASS = "bar-space";
 
 export function BarSpaceEl({ className }: { className?: string }) {
-  return <span aria-hidden="true" className={cn("block", BAR_SPACE_WIDTH, className)} />;
+  return <span aria-hidden="true" className={cn("block", BAR_SPACE_CLASS, className)} />;
 }
-
-/** The fixed gap's geometry, so the configurator's preview cannot drift from
- *  the real bar — it has already had to be changed in two places once. */
-export const BAR_SPACE_CLASS = BAR_SPACE_WIDTH;
 
 export function ContextBar() {
   const ctx = useBarContext();

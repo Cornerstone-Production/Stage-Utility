@@ -548,6 +548,26 @@ body {
   color: var(--su-fg);
 }
 
+/* A fixed Space in the context bar.
+   The strip lays out with a 12px column gap, so a bare element would separate
+   its neighbours by 12 + width + 12 — the number in the code would name nothing
+   anyone could measure on screen, which is what made it impossible to agree on
+   a size. The negative margins eat the gap either side, so the declared width
+   IS the whitespace between the items it sits between.
+   The sibling rule is load-bearing. Two in a row each cancel the ONE gap
+   between them, so it comes off twice and n spaces came to n×width − (n−1)×12
+   — two 24px spaces measured 36px, not 48. A Space that follows a Space keeps
+   its left margin, letting its predecessor's cancellation stand alone, and n
+   of them now come to exactly n × width. */
+.bar-space {
+  width: 24px;
+  margin-inline: -12px;
+  flex-shrink: 0;
+}
+.bar-space + .bar-space {
+  margin-left: 0;
+}
+
 /* A status strip that never collides.
    The context bar is a flex row of independent readings. Letting its items
    shrink squeezed them past their own content on a phone, so "3 disconnected"

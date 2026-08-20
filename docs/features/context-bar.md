@@ -94,10 +94,10 @@ follows it away from what comes before. It decides **alignment**.
 | One at the very start | Everything packs to the right |
 | Two | The items between them are centred |
 
-**Space** is a fixed 15px gap — a deliberate break between two groups that does
-not push either to an edge. It decides **distance**. Use two side by side for a
-wider one. (Items already sit 12px apart, so one Space is a small nudge; two is
-a clear break.)
+**Space** is a fixed 24px gap — a deliberate break between two groups that does
+not push either to an edge. It decides **distance**. Put several side by side
+for a wider one; the gap is the number of Spaces times 24px. (Items sit 12px
+apart without one.)
 
 Reach for a Space when you want a reading set slightly apart from its
 neighbours; reach for a Flexible space when you want a group pinned to an edge
