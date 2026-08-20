@@ -17,6 +17,7 @@
 // toolbar, which is what a button does, more obviously and from a keyboard.
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   DndContext,
   DragOverlay,
@@ -121,7 +122,7 @@ function PaletteTile({
       className={cn(
         "group flex w-[104px] flex-col items-center gap-1.5 rounded-lg p-2 text-center",
         "outline-none focus-visible:ring-2 focus-visible:ring-accent",
-        used ? "cursor-default opacity-35" : "cursor-grab active:cursor-grabbing hover:bg-fill",
+        used ? "cursor-default opacity-45" : "cursor-grab active:cursor-grabbing hover:bg-fill",
         isDragging && "opacity-30",
       )}
     >
@@ -335,13 +336,22 @@ export function BarConfigurator({
             </div>
           </SortableContext>
 
-          <DragOverlay>
-            {dragging && (
-              <span className="rounded-md border border-accent bg-popover px-2 py-1 text-caption2 text-fg shadow-xl">
-                {presentation(dragging).label}
-              </span>
-            )}
-          </DragOverlay>
+          {/* Portalled to the body, NOT left inside the dialog.
+              DragOverlay positions itself `fixed`, and the dialog is centred
+              with Tailwind's `translate` utilities — which, exactly like
+              `transform`, make a containing block for fixed descendants. Left
+              in place the ghost was offset by half the dialog, appearing far
+              below the pointer and making the tile impossible to aim. */}
+          {createPortal(
+            <DragOverlay dropAnimation={null}>
+              {dragging && (
+                <span className="rounded-md border border-accent bg-popover px-2 py-1 text-caption2 text-fg shadow-xl">
+                  {presentation(dragging).label}
+                </span>
+              )}
+            </DragOverlay>,
+            document.body,
+          )}
         </DndContext>
 
         <div className="mt-5 flex items-center justify-between gap-3">

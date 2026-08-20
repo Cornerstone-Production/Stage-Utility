@@ -532,6 +532,22 @@
 }
 
 
+/* The document's own ink.
+   Without this, `color` on <body> is the user agent's black, and anything that
+   does not set a colour of its own inherits it. Every component here happened
+   to set text-fg or text-fg-muted explicitly, which hid that completely — until
+   one did not, and a palette of icons rendered pure black on a near-black
+   dialog in dark mode. An icon's colour is currentColor by default, so the
+   default has to be right rather than merely always overridden.
+   Set on body rather than a component so it holds for portalled content too:
+   dialogs, menus and tooltips render outside the app's own tree. `--su-fg` is
+   scoped, so a stage display under `.kiosk` gets its own ink from the same rule.
+   Colour only: the operator shell and the stage root already paint their own
+   backgrounds, and this is a fix, not a redecoration. */
+body {
+  color: var(--su-fg);
+}
+
 /* A status strip that never collides.
    The context bar is a flex row of independent readings. Letting its items
    shrink squeezed them past their own content on a phone, so "3 disconnected"
