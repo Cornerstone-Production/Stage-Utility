@@ -4,7 +4,7 @@ import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, DownloadIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
@@ -22,8 +22,7 @@ import {
   SelectItem,
   SelectValue,
   toast,
-  confirm,
-} from "../../components/ui";
+  confirm, Dialog} from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
@@ -43,11 +42,22 @@ import { useSortableRow } from "../../lib/use-sortable-row";
  * regardless (stage-controller's setOutputView). This only stops the operator
  * reaching for something that will be refused.
  */
-export function bindableViews(views: readonly View[], output: Pick<Output, "mode">): View[] {
-  // A panel accepts either; a display accepts display views only.
-  return outputMode(output) === "panel"
-    ? [...views]
-    : views.filter((v) => viewSurface(v) === "display");
+/**
+ * Every view a screen can be given.
+ *
+ * This used to hide console views from a display screen, which is what made
+ * "use a control surface" a two-step job: you had to know to flip the screen's
+ * mode FIRST, because until you did, the view you wanted was not in the list.
+ * Nothing was unsafe about the hidden state — a display renders controls inert
+ * either way — so hiding it only removed the obvious route to the thing you
+ * were trying to do.
+ *
+ * Everything is offered now, and picking a console view for a display OFFERS to
+ * switch the screen. The safety property is unchanged: making a screen live to
+ * whoever stands at it is still an explicit yes.
+ */
+export function bindableViews(views: readonly View[], _output: Pick<Output, "mode">): View[] {
+  return [...views];
 }
 
 const UNROUTED = "__none__";
@@ -68,8 +78,12 @@ interface OutputRowProps {
   /** Save the friendly URL slug ("" clears it). Rejects with a reason the card shows. */
   onSetSlug: (slug: string) => Promise<void>;
   onSetView: (viewId: string | null) => void;
+  /** Rename the view this screen is showing (not the screen). */
+  onRenameView: (viewId: string, name: string) => void;
   onSetLocked: (locked: boolean) => void;
-  onSetMode: (mode: "display" | "panel") => void;
+  /** Awaited: switching a screen to a panel must LAND before a console view
+   *  is assigned to it, because the server refuses the pair in the wrong order. */
+  onSetMode: (mode: "display" | "panel") => Promise<void>;
   onOpenWindow: () => void;
   onRefresh: () => void;
   onRemove: () => void;
@@ -82,14 +96,50 @@ interface OutputRowProps {
 // One card per display: the name reads as a title, the View it shows is the one
 // prominent control, Open + Lock stay in reach, and the URL sits quietly in the
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
-function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onSetSlug, onSetView, onSetLocked, onSetMode, onOpenWindow, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetMode, onOpenWindow, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
+  const assignedView = views.find((v) => v.id === output.viewId) ?? null;
+  const [renamingView, setRenamingView] = useState(false);
+  const [viewName, setViewName] = useState("");
 
   const { setNodeRef, style, dragA11y, listeners } = useSortableRow(output.id);
 
   useResyncOn([output.name], () => {
     setEditName(output.name);
   });
+
+  /**
+   * Assign a view, offering to make the screen match what that view IS.
+   *
+   * A control surface used to have to be declared twice — once on the view and
+   * again on the screen — and in a fixed order, because the SERVER refuses a
+   * console view on a display screen. That refusal is the safety property and
+   * it stays exactly as it is: a wall screen must not be able to render a live
+   * control. What was wrong is that the operator had to know the order, and
+   * find the second switch in a different menu, before the view they wanted
+   * even appeared in the list.
+   *
+   * So the offer comes FIRST and the mode change is awaited. Decline it and
+   * nothing is assigned, because the server would refuse that binding anyway —
+   * an assignment that silently failed would be worse than one that did not
+   * happen.
+   */
+  async function assignView(viewId: string | null): Promise<void> {
+    if (!viewId) { onSetView(null); return; }
+    const picked = views.find((v) => v.id === viewId);
+    const needsPanel = picked && viewSurface(picked) === "console" && outputMode(output) !== "panel";
+    if (needsPanel) {
+      const ok = await confirm({
+        title: `Use "${output.name}" as a control surface?`,
+        message: `"${picked.name}" has live controls, so it can only go on a control surface. Its buttons will work for anyone standing at this screen.`,
+        confirmLabel: "Use as a control surface",
+        cancelLabel: "Cancel",
+      });
+      if (!ok) return;
+      await onSetMode("panel");
+    }
+    onSetView(viewId);
+  }
 
   function handleBlur() {
     const trimmed = editName.trim();
@@ -195,12 +245,14 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
                 <ExternalLinkIcon className="size-3.5 text-fg-subtle" />
                 Open display
               </DropdownMenu.Item>
-              {output.viewId && (
-                <DropdownMenu.Item asChild className={MENU_ITEM}>
-                  <a href={`/api/views/${encodeURIComponent(output.viewId)}/export`} download>
-                    <DownloadIcon className="size-3.5 text-fg-subtle" />
-                    Export layout
-                  </a>
+              {/* Renaming the VIEW, from the screen showing it. Rename only
+                  ever lived on the view's own card, and a view loses that card
+                  the moment it is assigned — so the name you look at every week
+                  was the one name you could not change. */}
+              {assignedView && (
+                <DropdownMenu.Item onSelect={() => setRenamingView(true)} className={MENU_ITEM}>
+                  <PencilIcon className="size-3.5 text-fg-subtle" />
+                  Rename view
                 </DropdownMenu.Item>
               )}
               <DropdownMenu.Item
@@ -216,7 +268,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
                       : "This screen becomes read-only. Its buttons will render but do nothing.",
                     confirmLabel: toPanel ? "Use as a control surface" : "Make it a display",
                   });
-                  if (ok) onSetMode(toPanel ? "panel" : "display");
+                  if (ok) await onSetMode(toPanel ? "panel" : "display");
                 }}
                 className={MENU_ITEM}
               >
@@ -309,6 +361,24 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
       <div className="flex items-center justify-between gap-2 px-3 py-2.5">
         {/* A pill, not a full-width field. The card is a thing you glance at;
             a form control spanning it made every card read as a form. */}
+        {/* Controlled, because it is opened from a menu item: Radix closes the
+            menu on select, which would unmount an inline trigger mid-click. */}
+        {assignedView && (
+          <Dialog
+            open={renamingView}
+            onOpenChange={(o: boolean) => { setRenamingView(o); if (o) setViewName(assignedView.name); }}
+            title={`Rename "${assignedView.name}"`}
+            description="This renames the view itself, so it changes everywhere the view is used."
+            confirmLabel="Rename"
+            confirmDisabled={viewName.trim().length === 0}
+            onConfirm={() => {
+              const next = viewName.trim();
+              if (next && next !== assignedView.name) onRenameView(assignedView.id, next);
+            }}
+          >
+            <Input value={viewName} onChange={(e) => setViewName(e.target.value)} autoFocus />
+          </Dialog>
+        )}
         <Select
           value={output.viewId ?? UNROUTED}
           onValueChange={(v: string) => {
@@ -317,7 +387,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
             // dialog and the new view is assigned here on the way back, rather
             // than sending a sentinel id to the server as a real value.
             if (v === NEW_VIEW) { onRequestNewView(); return; }
-            onSetView(v === UNROUTED ? null : v);
+            void assignView(v === UNROUTED ? null : v);
           }}
         >
           <SelectTrigger
@@ -332,7 +402,9 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
             <SelectItem value={UNROUTED}>— Unrouted —</SelectItem>
             {bindableViews(views, output).map((v) => (
               <SelectItem key={v.id} value={v.id}>
-                {v.name}
+                {/* Say which ones are control surfaces, so choosing one is an
+                    informed choice rather than a surprise confirm. */}
+                {viewSurface(v) === "console" ? `${v.name} — control surface` : v.name}
               </SelectItem>
             ))}
             <SelectItem value={NEW_VIEW}>+ New view…</SelectItem>
@@ -433,14 +505,6 @@ function UnassignedViewCard({
               <DropdownMenu.Item onSelect={onDuplicate} className={MENU_ITEM}>
                 <CopyIcon className="size-3.5 text-fg-subtle" />
                 Duplicate view
-              </DropdownMenu.Item>
-              {/* An anchor, not a fetch-and-blob: the browser takes the filename
-                  from Content-Disposition and middle-click behaves. */}
-              <DropdownMenu.Item asChild className={MENU_ITEM}>
-                <a href={`/api/views/${encodeURIComponent(view.id)}/export`} download>
-                  <DownloadIcon className="size-3.5 text-fg-subtle" />
-                  Export layout
-                </a>
               </DropdownMenu.Item>
               <DropdownMenu.Item
                 // Confirmed, because deleting a view cannot be undone and this
@@ -575,6 +639,7 @@ export function OutputsSection({
                 canRemove={outputs.length > 1}
                 iconColor={stageState.iconColors?.[output.id]}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
+                onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
                 onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}

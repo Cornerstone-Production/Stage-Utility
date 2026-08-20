@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Slot } from "radix-ui";
 import { cn } from "../../lib/cn";
 import { Tooltip } from "./tooltip";
 
@@ -12,12 +13,23 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
    * an explicit string to override, or `""` to suppress.
    */
   tooltip?: string;
+  /**
+   * Render the child element instead of a <button>, keeping every style.
+   *
+   * For the cases where the thing must genuinely be something else — a download
+   * is an <a href download> so the browser takes the filename from
+   * Content-Disposition and middle-click works. The alternative was copying the
+   * class list onto an anchor, which is how two controls that should look
+   * identical stop being identical.
+   */
+  asChild?: boolean;
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = "transparent", size = "medium", iconOnly, tooltip, children, ...props }, ref) => {
+  ({ className, variant = "transparent", size = "medium", iconOnly, tooltip, asChild, children, ...props }, ref) => {
+    const Comp = asChild ? Slot.Root : "button";
     const btn = (
-      <button
+      <Comp
         ref={ref}
         className={cn(
           // Base
@@ -47,7 +59,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         {...props}
       >
         {children}
-      </button>
+      </Comp>
     );
 
     // Tooltip text: explicit `tooltip`, else the icon button's aria-label, so a

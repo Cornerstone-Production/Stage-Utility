@@ -116,7 +116,8 @@ export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLD
 
 interface DialogProps {
   /** Element that opens the dialog when clicked. */
-  trigger: React.ReactNode;
+  /** Optional: a controlled dialog opened from a menu item has no trigger. */
+  trigger?: React.ReactNode;
   title: string;
   description?: string;
   /** Label on the primary action button. Defaults to "Confirm". */
@@ -152,9 +153,11 @@ export function Dialog({
 
   return (
     <DialogPrimitive.Root open={isOpen} onOpenChange={setOpen}>
-      <DialogPrimitive.Trigger asChild>
-        {trigger}
-      </DialogPrimitive.Trigger>
+      {trigger && (
+        <DialogPrimitive.Trigger asChild>
+          {trigger}
+        </DialogPrimitive.Trigger>
+      )}
 
       <DialogPortal>
         <DialogOverlay />
