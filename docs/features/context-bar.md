@@ -55,7 +55,8 @@ item, as a tile; below it is the bar itself, live, showing real readings.
   tile appends it to the end, which is the same thing without a mouse.
 - **Drag an item out of the bar** and let go anywhere else to remove it. The
   small × on an item does the same.
-- **Drag an item along the bar** to move it.
+- **Drag an item along the bar** to move it. A line shows where it will land;
+  no line means letting go there removes it instead.
 - A tile already in the bar is dimmed. **Flexible space** never dims, because
   you can use more than one.
 - **Use the default set** puts the bar back to how it ships.

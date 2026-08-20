@@ -58,3 +58,30 @@ export function droppedOnBar(e: DragEndGeometry, bar: Box | null, pad = 16): boo
   return p.x >= bar.left - pad && p.x <= bar.right + pad
     && p.y >= bar.top - pad && p.y <= bar.bottom + pad;
 }
+
+/**
+ * Which gap a drag would land in: a caret drawn before `keys[gap]`.
+ *
+ * A reorder is not the same as an insert, and one rule for both lies half the
+ * time. Dropping onto a row from the palette puts the new item BEFORE it.
+ * Dragging a row rightwards past another lands AFTER it, because the dragged
+ * row leaves its own slot first — the same off-by-one `arrayMove` already has,
+ * stated once here so the caret and the drop cannot disagree.
+ *
+ * `null` means nothing would be inserted.
+ */
+export function insertionGap(
+  keys: readonly string[],
+  activeId: string,
+  overId: string | null,
+): number | null {
+  if (overId === null) return null;
+  // The strip itself rather than a row in it: past the end.
+  if (overId === "bar") return keys.length;
+  const to = keys.indexOf(overId);
+  if (to === -1) return null;
+  const from = keys.indexOf(activeId);
+  // Not in the bar yet, so it comes from the palette.
+  if (from === -1) return to;
+  return from < to ? to + 1 : to;
+}

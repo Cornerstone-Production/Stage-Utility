@@ -16,7 +16,7 @@
 // rather than a draggable block — dragging it in macOS replaces the whole
 // toolbar, which is what a button does, more obviously and from a keyboard.
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   DndContext,
@@ -29,6 +29,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragMoveEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { SortableContext, arrayMove, horizontalListSortingStrategy } from "@dnd-kit/sortable";
@@ -52,7 +53,7 @@ import {
   useBarContext,
   type BarItemContext,
 } from "./context-bar";
-import { droppedOnBar } from "./bar-drop";
+import { droppedOnBar, insertionGap } from "./bar-drop";
 import { setBarItems } from "./set-bar-items";
 import {
   Button,
@@ -197,6 +198,16 @@ function BarRow({
   );
 }
 
+/** Where the thing you are dragging will land. */
+function Caret() {
+  return (
+    <span
+      aria-hidden="true"
+      className="-mx-1 h-6 w-0.5 shrink-0 self-center rounded-full bg-accent"
+    />
+  );
+}
+
 export function BarConfigurator({
   open,
   onOpenChange,
@@ -212,6 +223,9 @@ export function BarConfigurator({
   const nextKey = useRef(makeKeyer());
   const [rows, setRows] = useState<Row[]>([]);
   const [dragging, setDragging] = useState<BarRowId | null>(null);
+  // The gap the dragged thing would land in — the caret is drawn before
+  // rows[gap]. null while the pointer is somewhere that would not insert.
+  const [gap, setGap] = useState<number | null>(null);
 
   // Seeded when the dialog opens, not on every change to `saved` — otherwise the
   // save this dialog just made would flow back in and re-seed mid-edit.
@@ -251,6 +265,18 @@ export function BarConfigurator({
     commit(next);
   }
 
+  // onDragMove, not onDragOver: the caret has to vanish the moment the pointer
+  // leaves the bar, and `over` does not change when it does — closestCenter is
+  // still happily reporting the nearest row. No caret is the honest signal that
+  // letting go here removes rather than places.
+  function handleDragMove(e: DragMoveEvent) {
+    if (!droppedOnBar(e, barRef.current?.getBoundingClientRect() ?? null)) {
+      setGap(null);
+      return;
+    }
+    setGap(insertionGap(rows.map((r) => r.key), String(e.active.id), e.over ? String(e.over.id) : null));
+  }
+
   function handleDragStart(e: DragStartEvent) {
     const data = e.active.data.current;
     setDragging((data?.id as BarRowId | undefined) ?? rows.find((r) => r.key === e.active.id)?.id ?? null);
@@ -258,6 +284,7 @@ export function BarConfigurator({
 
   function handleDragEnd(e: DragEndEvent) {
     setDragging(null);
+    setGap(null);
     const { active, over } = e;
     const onBar = droppedOnBar(e, barRef.current?.getBoundingClientRect() ?? null);
 
@@ -295,8 +322,9 @@ export function BarConfigurator({
           sensors={sensors}
           collisionDetection={closestCenter}
           onDragStart={handleDragStart}
+          onDragMove={handleDragMove}
           onDragEnd={handleDragEnd}
-          onDragCancel={() => setDragging(null)}
+          onDragCancel={() => { setDragging(null); setGap(null); }}
         >
           <div className="mt-4 flex flex-wrap justify-center gap-1 rounded-xl border border-line bg-surface p-3">
             {[...ALL_IDS, BAR_SPACER].map((id) => (
@@ -325,14 +353,17 @@ export function BarConfigurator({
               {rows.length === 0 && (
                 <span className="text-footnote text-fg-subtle">Drag something in.</span>
               )}
-              {rows.map((row) => (
-                <BarRow
-                  key={row.key}
-                  row={row}
-                  ctx={ctx}
-                  onRemove={() => commit(rows.filter((r) => r.key !== row.key))}
-                />
+              {rows.map((row, i) => (
+                <Fragment key={row.key}>
+                  {gap === i && <Caret />}
+                  <BarRow
+                    row={row}
+                    ctx={ctx}
+                    onRemove={() => commit(rows.filter((r) => r.key !== row.key))}
+                  />
+                </Fragment>
               ))}
+              {gap === rows.length && <Caret />}
             </div>
           </SortableContext>
 
@@ -345,7 +376,12 @@ export function BarConfigurator({
           {createPortal(
             <DragOverlay dropAnimation={null}>
               {dragging && (
-                <span className="rounded-md border border-accent bg-popover px-2 py-1 text-caption2 text-fg shadow-xl">
+                // w-max and nowrap, and NOT an inline span: dnd-kit sizes the
+                // overlay wrapper to the node the drag started from — 104px for
+                // a palette tile — so a longer label wrapped, and an inline
+                // box's border breaks across lines. The pill fragmented into
+                // two half-bordered pieces mid-drag.
+                <span className="inline-flex w-max items-center whitespace-nowrap rounded-md border border-accent bg-popover px-2 py-1 text-caption2 text-fg shadow-xl">
                   {presentation(dragging).label}
                 </span>
               )}
