@@ -205,7 +205,8 @@ export function HomeRoute() {
               ? (o) => (
                   <CardChrome
                     card={o}
-                    dragging={dragId === o.id || overId === o.id}
+                    dragging={dragId === o.id}
+                    dropTarget={!!dragId && overId === o.id && dragId !== o.id}
                     onSize={(size) => save((objs) => setSize(objs, o.id, size))}
                     onWhen={(when) => save((objs) => setWhen(objs, o.id, when))}
                     onRemove={() => save((objs) => removeCard(objs, o.id))}

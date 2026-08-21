@@ -32,6 +32,7 @@ export function CardChrome({
   onDragOver,
   onDrop,
   dragging,
+  dropTarget = false,
 }: {
   card: LayoutObject;
   onSize: (s: HomeCardSize) => void;
@@ -40,7 +41,10 @@ export function CardChrome({
   onDragStart: () => void;
   onDragOver: () => void;
   onDrop: () => void;
+  /** This card is the one being dragged. */
   dragging: boolean;
+  /** The pointer is over this card, so it is where the drag would land. */
+  dropTarget?: boolean;
 }) {
   const label = LAYOUT_OBJECTS[card.config.type as keyof typeof LAYOUT_OBJECTS]?.label ?? card.config.type;
   const when = whenOf(card);
@@ -57,7 +61,14 @@ export function CardChrome({
       className={cn(
         "absolute inset-0 cursor-grab rounded-xl ring-1 ring-inset ring-transparent transition-colors",
         "hover:ring-accent/60 focus-within:ring-accent/60 active:cursor-grabbing",
-        dragging && "opacity-40",
+        // The card being dragged reads as lifted, not as barely there. At 40%
+        // — on top of the browser's own translucent drag image — the widget you
+        // were holding was the hardest thing on the page to see.
+        dragging && "opacity-75",
+        // Where it would land is marked rather than dimmed: dimming the target
+        // said "this one is going away", which is the opposite of what a drop
+        // does to it.
+        dropTarget && "ring-2 ring-accent",
       )}
     >
       {/* Always visible, not hover-revealed. This chrome only renders while
