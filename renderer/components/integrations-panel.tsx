@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { OscTargetsPanel } from "./osc-targets-panel";
 import { RossTalkTargetsPanel } from "./rosstalk-targets-panel";
+import { CompanionInfoPanel } from "./companion-info-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
 import {
   Button,
@@ -1150,8 +1151,14 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
 
   const { descriptors: allDescriptors, states } = data;
   const stateMap = new Map(states.map((s) => [s.id, s]));
-  // Companion lives on the Advanced tab — there's nothing to configure here.
-  const descriptors = allDescriptors.filter((d) => d.id !== "companion");
+  // Companion is listed here like everything else.
+  //
+  // It used to be filtered OUT, on the grounds that there is nothing to
+  // configure — it dials in to us rather than the other way round. But "nothing
+  // to configure" is not the same as "should not appear": this is the one page
+  // whose job is to answer "what can this talk to", and the one integration
+  // people go looking for was the one it did not mention.
+  const descriptors = allDescriptors;
   const byId = new Map(descriptors.map((d) => [d.id, d]));
 
   // The body content for one integration: a bespoke panel (wireless/osc) or the
@@ -1160,6 +1167,9 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
     if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
     if (descriptor.id === "osc") return <OscTargetsPanel />;
     if (descriptor.id === "rosstalk") return <RossTalkTargetsPanel />;
+    // Its own panel: what Companion needs is an address to dial and the module
+    // to dial it with, not a form.
+    if (descriptor.id === "companion") return <CompanionInfoPanel state={state} />;
     return (
       <>
         <IntegrationCard

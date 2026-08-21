@@ -966,6 +966,25 @@ export function AdvancedSection({
 
       <FieldSet>
         <FieldGroup>
+          {/* The one thing worth keeping from the Connect tab's Tools list.
+              Every other entry there — ScriptView, Patch, History, Baptisms —
+              is in the rail; the raw log is not, and it was the only route to
+              it. Advanced is where the rest of the diagnostics already live. */}
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Server log</FieldLabel>
+              <FieldDescription>
+                The raw log, for diagnosing a problem. Not something to hand to a volunteer.
+              </FieldDescription>
+            </FieldContent>
+            <Button
+              variant="filled"
+              size="small"
+              onClick={() => window.open("/log", "_blank", "noreferrer")}
+            >
+              Open log
+            </Button>
+          </Field>
           <Field orientation="horizontal">
             <FieldContent>
               <FieldLabel>Context bar</FieldLabel>

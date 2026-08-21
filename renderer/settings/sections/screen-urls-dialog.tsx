@@ -10,11 +10,12 @@
 // reserved word like "history" does not error, it silently serves that page
 // instead of the display — so the refusal has to stay on screen.
 
-import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { CopyIcon } from "lucide-react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { CheckIcon, CopyIcon } from "lucide-react";
 
 import { Button, DialogRoot, DialogContent, DialogHeader, DialogTitle, DialogDescription, Input, toast } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
+import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
 import { useResyncOn } from "../../lib/use-resync-on";
 
@@ -48,6 +49,14 @@ export function ScreenUrlsDialog({
   const [value, setValue] = useState(slug);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The button confirms for itself as well as raising a toast: the toast is
+  // across the screen, and the thing you clicked should say it worked.
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = setTimeout(() => setCopied(false), 1400);
+    return () => clearTimeout(id);
+  }, [copied]);
 
   // Reopening after a discard, or another client renaming it, must not leave the
   // field holding an edit that was never saved.
@@ -88,15 +97,33 @@ export function ScreenUrlsDialog({
             </span>
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded-lg border border-line bg-fill px-3 py-2 text-left"
+              className={cn(
+                "group flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
+                // It had no hover and no press state at all, so the one control
+                // on the row did not read as a control.
+                "border-line bg-fill hover:border-line-strong hover:bg-fill-active",
+                "active:scale-[0.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+              )}
               onClick={async () => {
-                if (await copyText(outputUrl, contentRef.current)) toast.success("URL copied");
-                else toast.error("Could not copy — select the URL and copy it by hand");
+                if (await copyText(outputUrl, contentRef.current)) {
+                  setCopied(true);
+                  toast.success("URL copied");
+                } else {
+                  toast.error("Could not copy — select the URL and copy it by hand");
+                }
               }}
               aria-label="Copy URL"
             >
-              <span className="min-w-0 flex-1 truncate font-mono text-caption2 text-fg-muted">{outputUrl}</span>
-              <CopyIcon className="size-3.5 shrink-0 text-fg-subtle" />
+              {/* WRAPS. This was `truncate`, which hid the end of exactly the
+                  string the row exists to show — a long slug or a DNS name
+                  disappeared mid-word, and it is the one thing here that must
+                  never be abbreviated. */}
+              <span className="min-w-0 flex-1 break-all font-mono text-caption2 text-fg-muted">{outputUrl}</span>
+              {copied ? (
+                <CheckIcon className="size-3.5 shrink-0 text-live-11" />
+              ) : (
+                <CopyIcon className="size-3.5 shrink-0 text-fg-subtle group-hover:text-fg-muted" />
+              )}
             </button>
           </div>
 

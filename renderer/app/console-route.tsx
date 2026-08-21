@@ -87,16 +87,14 @@ export function ConsoleRoute() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {editable && (
-        <div className="flex shrink-0 items-center justify-end gap-2 py-2">
-          <Button variant="filled" size="small" onClick={() => setEditing(true)}>
-            <PencilIcon className="size-3.5 text-fg-muted" />
-            Edit this console
-          </Button>
-        </div>
-      )}
-      {/* The live console. `shell` context: controls fire, drill-down works. */}
+    // FULL BLEED. The shell gutters its content, so the console sat inset with a
+    // hard edge on all four sides — a slab of stage-black in the middle of a
+    // themed page, which is what made it read as an embedded viewer rather than
+    // a page of the app. The negative margins cancel that gutter so the console
+    // simply IS the content area.
+    <div className="group relative flex h-full min-h-0 flex-col -mx-5 max-sm:-mx-3">
+      {/* The live console. `shell` context: controls fire, drill-down works.
+          `ground="app"` so the canvas is the same material as the page. */}
       <div className="min-h-0 flex-1">
         {view.layout ? (
           <LayoutRenderer
@@ -104,6 +102,7 @@ export function ConsoleRoute() {
             ndiSource={view.ndiSource ?? null}
             interactive={capabilityLive("shell", "control")}
             surface="console"
+            ground="app"
           />
         ) : (
           <EmptyState
@@ -112,6 +111,23 @@ export function ConsoleRoute() {
           />
         )}
       </div>
+
+      {/* Over the canvas, not above it. A row of its own pushed the console down
+          and framed it, which is the framing this page was trying to lose. It is
+          quiet until the pointer is here, because a console is a thing you
+          operate far more often than a thing you edit. */}
+      {editable && (
+        // group-hover, from the CONSOLE, not hover on the button's own wrapper:
+        // that only revealed it while pointing at something invisible, so the
+        // button could never be found in the first place. Always visible where
+        // there is no hover at all.
+        <div className="absolute right-3 top-3 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+          <Button variant="filled" size="small" onClick={() => setEditing(true)}>
+            <PencilIcon className="size-3.5 text-fg-muted" />
+            Edit
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

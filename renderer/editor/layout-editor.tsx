@@ -1802,6 +1802,17 @@ export function LayoutEditor({
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
+        {/* Export lives HERE, with the layout it exports, rather than in a menu
+            on the Screens page two clicks away from the thing being exported.
+            An anchor, not a fetch-and-blob: the browser takes the filename from
+            Content-Disposition and middle-click behaves.
+            (Import stays on Screens. It CREATES a view, so there is no editor
+            to put it in — the asymmetry is real, not an oversight.) */}
+        <Button variant="filled" size="small" asChild>
+          <a href={`/api/views/${encodeURIComponent(view.id)}/export`} download>
+            <DownloadIcon className="size-3.5" /> Export
+          </a>
+        </Button>
         <Dialog
           trigger={<Button variant="filled" size="small"><SaveIcon className="size-3.5" /> Save as layout</Button>}
           title="Save layout to library"

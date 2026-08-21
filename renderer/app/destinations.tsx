@@ -21,7 +21,6 @@ import {
   MonitorIcon,
   PaletteIcon,
   PlugIcon,
-  QrCodeIcon,
   SlidersHorizontalIcon,
   ZapIcon,
 } from "lucide-react";
@@ -42,7 +41,6 @@ import { ScriptViewSection } from "../settings/sections/scriptview-section";
 import {
   AdvancedRoute,
   BrandingRoute,
-  ConnectRoute,
   PlanRoute,
 } from "./settings-routes";
 
@@ -135,13 +133,6 @@ export const SETTINGS_DESTINATIONS: readonly Destination[] = [
     description: "Connect the gear and services that run your service.",
     icon: <PlugIcon className="size-4" />,
     Component: IntegrationsSection,
-  },
-  {
-    path: "/settings/connect",
-    label: "Connect",
-    description: "Share the display link and QR for phones on the network.",
-    icon: <QrCodeIcon className="size-4" />,
-    Component: ConnectRoute,
   },
   {
     path: "/settings/branding",
