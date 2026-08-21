@@ -308,6 +308,14 @@ function OverlayNode({
   const sel = o.id === selectedId; // single "primary" → resize handles
   const inSel = selectedIds.has(o.id); // any selected → highlight outline
   const dragging = o.id === draggingId;
+  // Hovered, so an object can still be FOUND without every object being boxed.
+  // Outlining them all turned a design canvas into a wireframe of itself: the
+  // layout you were building was never visible while you built it. But an
+  // object showing nothing — a readout with no data, an empty shape — has no
+  // edges of its own, so with nothing at all it becomes a thing you can only
+  // find by clicking where you remember leaving it.
+  const [hovered, setHovered] = useState(false);
+  const shown = inSel || dragging || hovered;
   const locked = parentLocked || !!o.locked;
   const abs = depth === 0 ? { x: o.x, y: o.y, w: o.w, h: o.h } : composeRect(parentAbs, o);
   const kids = o.children?.length ? [...o.children].sort((a, b) => a.z - b.z) : null;
@@ -320,25 +328,38 @@ function OverlayNode({
         left: `${o.x * 100}%`, top: `${o.y * 100}%`,
         width: `${o.w * 100}%`, height: `${o.h * 100}%`,
         cursor: locked ? "default" : "move",
-        outline: dragging ? "2px dashed #3b82f6" : inSel ? "2px solid #3b82f6" : "1px solid rgba(125,170,255,0.55)",
+        outline: dragging
+          ? "2px dashed #3b82f6"
+          : inSel
+            ? "2px solid #3b82f6"
+            : hovered
+              ? "1px solid rgba(125,170,255,0.55)"
+              : "none",
         outlineOffset: 0,
         opacity: dragging ? 0.7 : 1,
-        boxShadow: inSel ? "0 0 0 1px rgba(0,0,0,0.4)" : "0 0 0 1px rgba(0,0,0,0.35)",
+        boxShadow: inSel ? "0 0 0 1px rgba(0,0,0,0.4)" : "none",
       }}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
     >
-      <span
-        style={{
-          position: "absolute", top: 0, left: 0, transform: "translateY(-100%)",
-          display: "inline-flex", alignItems: "center", gap: 3,
-          fontSize: 10, lineHeight: "14px", padding: "0 5px", maxWidth: "100%",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          background: inSel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
-          borderRadius: "4px 4px 0 0", pointerEvents: "none",
-        }}
-      >
-        {locked && <LockIcon style={{ width: 9, height: 9 }} />}
-        {typeLabel(o.config.type)}
-      </span>
+      {/* The name rides with the outline. On its own it was the louder half of
+          the same problem: a row of blue tags across the top of the canvas, over
+          the layout, none of them about what you were working on. */}
+      {shown && (
+        <span
+          style={{
+            position: "absolute", top: 0, left: 0, transform: "translateY(-100%)",
+            display: "inline-flex", alignItems: "center", gap: 3,
+            fontSize: 10, lineHeight: "14px", padding: "0 5px", maxWidth: "100%",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            background: inSel ? "#3b82f6" : "rgba(125,170,255,0.55)", color: "#fff",
+            borderRadius: "4px 4px 0 0", pointerEvents: "none",
+          }}
+        >
+          {locked && <LockIcon style={{ width: 9, height: 9 }} />}
+          {typeLabel(o.config.type)}
+        </span>
+      )}
       {sel && !locked && !canvasLocked &&
         HANDLES.map((h) => {
           // Above every sibling overlay node. Nodes render in z order with no

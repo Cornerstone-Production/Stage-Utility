@@ -101,6 +101,33 @@ carry across a room: a recorder painting itself red while recording, a section
 chip in its own colour. A filled widget is the same widget wearing a state, not a
 different design.
 
+## Look: surface and tint
+
+Two independent questions, in that order.
+
+**Surface** is the material — Flat, Glass, Solid or Outline. It owns the border,
+the corner radius and the shadow.
+
+**Tint** is the colour on it, and owns only the background. Any surface can wear
+any tint, so a red Solid and a green Glass are both reachable. The row is called
+**Fill** on a Solid, because a solid *is* its colour rather than being washed
+with one.
+
+A tint is resolved against the surface it lands on: translucent over Glass, so
+tinted glass is still glass and the canvas still shows through, and opaque
+everywhere else. The swatch shows the hue; the surface decides the strength.
+
+The last dot in the row is a colour wheel — any colour you like. Picking one
+makes the surface read **Custom**, which is honest: the object is no longer
+wearing a look the list can name. Picking a surface again is always possible from
+there, and keeps whatever colour is on.
+
+## Selection
+
+Only the selected object is outlined and named. Hovering shows a faint outline
+so an object with nothing to draw — a readout with no data, an empty shape — can
+still be found without clicking blindly.
+
 ## Reset to default look
 
 In the inspector, under **Style**. Puts the object's look back to the default for
