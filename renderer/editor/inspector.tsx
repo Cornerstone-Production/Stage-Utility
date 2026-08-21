@@ -72,7 +72,6 @@ import { useIntegrations } from "../main/use-integration-states";
 import { screensListViews } from "@main/services/home-view";
 import { formatClock } from "../lib/clock-format";
 import {
-  CARD_PRESETS,
   isKnownObjectType,
   isOfferableInEmbedPicker,
   objectRetired,
@@ -92,84 +91,11 @@ import {
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
 import { cn } from "../lib/cn";
+import {
+  SURFACES, TINTS, applySurface, applyTint, isCustomFill, matchSurface, matchTint,
+  type SurfaceKind,
+} from "./object-surface";
 
-
-type SurfaceKind = "flat" | "glass" | "solid" | "outline";
-
-/**
- * The four SURFACES. Elevated is gone: it was a fifth entry that differed from
- * Solid by a shadow, and the dropdown was already too long to read.
- *
- * Removing it changes no saved layout — these are style patches, not a stored
- * enum, so an object given Elevated keeps every field it was given. It matches
- * Solid below so it still names itself rather than reading as "custom".
- */
-const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
-  flat: { background: null, borderColor: null, borderWidth: 0, boxShadow: 0 },
-  // GLASS STAYS TRANSLUCENT. It is the one look whose whole point is that the
-  // canvas shows through, so making it opaque would leave no way to ask for
-  // that at all. Everything else went opaque because nothing else was asking.
-  glass: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0 },
-  solid: { background: "var(--gray-2)", borderColor: null, borderWidth: 0, cornerRadius: 0.0148, boxShadow: 0.35 },
-  outline: { background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015, cornerRadius: 0.0148, boxShadow: 0 },
-};
-
-const SURFACES: { value: SurfaceKind; label: string }[] = [
-  { value: "flat", label: "Flat" },
-  { value: "glass", label: "Glass" },
-  { value: "solid", label: "Solid" },
-  { value: "outline", label: "Outline" },
-];
-
-/** What Elevated used to be, kept ONLY so an object already wearing it still
- *  matches a named surface instead of reading as "custom". Never offered. */
-const LEGACY_ELEVATED: LayoutStyle = {
-  background: "#191919", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0.6,
-};
-
-type TintKind = "none" | "neutral" | "green" | "red" | "amber";
-
-/**
- * The TINTS, which are a separate question from the surface.
- *
- * They used to be baked into the same list — Glass, Glass·Green, Glass·Red,
- * Glass·Amber — which mixed two independent choices into eight entries and
- * still could not express most of them: a red Solid was simply unreachable.
- *
- * A tint is a DARK WASH, not a colour. Every one of these is a near-black with
- * a hue in it — #0d1a15 is the green — because they are made for a stage canvas
- * that is itself near-black. The swatch IS that colour, filled edge to edge, so
- * what you pick is what lands on the object. They read as dark and only subtly
- * apart, which is honest: that is how they differ on the canvas too. The label
- * on each names it, and the selected one takes an accent ring.
- */
-const TINTS: { value: TintKind; label: string; fill: string | null; style: LayoutStyle }[] = [
-  { value: "none", label: "No tint", fill: null, style: { background: null, borderColor: null } },
-  { value: "neutral", label: "Black", fill: "#141414", style: CARD_PRESETS.neutral },
-  { value: "green", label: "Green", fill: "#0d1a15", style: CARD_PRESETS.green },
-  { value: "red", label: "Red", fill: "#201011", style: CARD_PRESETS.red },
-  { value: "amber", label: "Amber", fill: "#1e190e", style: CARD_PRESETS.amber },
-];
-
-/** Which surface the current style is wearing, or "" for a hand-tuned one. */
-function matchSurface(s: LayoutStyle): string {
-  const named: [string, LayoutStyle][] = [...SURFACES.map((x) => [x.value, SURFACE_PRESETS[x.value]] as [string, LayoutStyle]), ["solid", LEGACY_ELEVATED]];
-  for (const [value, style] of named) {
-    const keys = Object.keys(style) as (keyof LayoutStyle)[];
-    if (keys.every((k) => (s[k] ?? null) === (style[k] ?? null))) return value;
-  }
-  return "";
-}
-
-/** Which tint, matched on the BACKGROUND alone — the surface owns the rest, and
- *  a tint applied over Outline leaves the border where the surface put it. */
-function matchTint(s: LayoutStyle): TintKind {
-  for (const t of TINTS) {
-    if (t.value === "none") continue;
-    if ((s.background ?? null) === (t.style.background ?? null)) return t.value;
-  }
-  return "none";
-}
 
 // Nearest labeled stop for the single Elevation slider (None/Low/Med/High).
 function elevationLabel(v: number): string {
@@ -1303,17 +1229,10 @@ export function Inspector({
       {/* SURFACE and TINT, separately — they are independent questions, and the
           single list that mixed them (Glass, Glass·Green, Glass·Red, …) was both
           longer and less capable: it had no way to ask for a tinted Solid. */}
-      <Row label="Surface" hint="The material: Flat, Glass (the canvas shows through), Solid, or Outline. Fine-tune with Fill, Border and Elevation below.">
+      <Row label="Surface" hint="The material: Flat, Glass (the canvas shows through), Solid, or Outline. Fine-tune with Border and Elevation below.">
         <Select
           value={matchSurface(s)}
-          onValueChange={(v: string) => {
-            const preset = SURFACE_PRESETS[v as SurfaceKind];
-            if (!preset) return;
-            // Re-apply the tint on top, so changing the material does not
-            // silently discard a colour that was already chosen.
-            const tint = TINTS.find((t) => t.value === matchTint(s));
-            onStyle(tint && tint.value !== "none" ? { ...preset, background: tint.style.background } : preset);
-          }}
+          onValueChange={(v: string) => onStyle(applySurface(s, v as SurfaceKind))}
         >
           <SelectTrigger><SelectValue placeholder="Custom" /></SelectTrigger>
           <SelectContent>
@@ -1321,10 +1240,20 @@ export function Inspector({
           </SelectContent>
         </Select>
       </Row>
-      <Row label="Tint" hint="A colour wash over the surface. Independent of the material, so any surface can carry any tint.">
+      {/* ONE colour row, not a Tint row and a Fill row that both wrote the same
+          field and disagreed about it. The swatches are the quick answers and
+          the picker is any other, so what an object is filled with is asked and
+          shown in one place. Named for what it does on THIS surface: Solid IS
+          its colour, the others are washed with one. */}
+      <Row
+        label={matchSurface(s) === "solid" ? "Fill" : "Tint"}
+        hint="The colour on this surface. The swatches are washes made for a dark stage canvas; the picker takes any colour. On Glass they stay see-through, so tinted glass is still glass."
+      >
         <div role="group" aria-label="Tint" className="flex items-center gap-1.5">
           {TINTS.map((t) => {
-            const on = matchTint(s) === t.value;
+            // "No tint" is not lit by a hand-picked colour: that is a colour,
+            // and the slash would be claiming the object has none.
+            const on = matchTint(s) === t.value && !(t.value === "none" && isCustomFill(s));
             return (
               <button
                 key={t.value}
@@ -1332,9 +1261,7 @@ export function Inspector({
                 aria-label={t.label}
                 aria-pressed={on}
                 title={t.label}
-                onClick={() => onStyle(t.value === "none"
-                  ? { background: SURFACE_PRESETS[(matchSurface(s) || "flat") as SurfaceKind].background ?? null }
-                  : { background: t.style.background })}
+                onClick={() => onStyle(applyTint(s, t.value))}
                 className={cn(
                   // A hairline, not a coloured ring: these are near-blacks, and
                   // on a dark panel an unbordered one has no edge at all. It is
@@ -1343,7 +1270,7 @@ export function Inspector({
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
                   on ? "ring-2 ring-accent ring-offset-1 ring-offset-bg" : "hover:scale-110",
                 )}
-                style={{ background: t.fill ?? "transparent" }}
+                style={{ background: t.swatch ?? "transparent" }}
               >
                 {/* "No tint" is a slash rather than an empty circle, which would
                     read as a colour nobody could name. */}
@@ -1353,6 +1280,33 @@ export function Inspector({
               </button>
             );
           })}
+          {/* Any other colour, in the same row and the same size as the presets
+              — it is the same question. Drawn as a colour wheel rather than a
+              sixth swatch: a native colour input shows its current value, and
+              mirroring the tint made a subtle wash look like a neon dot sitting
+              among the near-blacks. It shows a colour only once one is chosen. */}
+          <span className="relative inline-flex size-6">
+            <span
+              aria-hidden="true"
+              className={cn(
+                "pointer-events-none absolute inset-0 rounded-full border",
+                isCustomFill(s) ? "border-accent ring-2 ring-accent ring-offset-1 ring-offset-bg" : "border-line-strong",
+              )}
+              style={
+                isCustomFill(s)
+                  ? { background: s.background ?? "transparent" }
+                  : { background: "conic-gradient(#ef4444,#f59e0b,#84cc16,#22d3ee,#6366f1,#ec4899,#ef4444)", opacity: 0.55 }
+              }
+            />
+            <input
+              type="color"
+              aria-label="Custom colour"
+              title="Custom colour"
+              value={hexForInput(s.background, "#000000")}
+              onChange={(e) => onStyle({ background: e.target.value })}
+              className="absolute inset-0 size-6 cursor-pointer opacity-0"
+            />
+          </span>
         </div>
       </Row>
 
@@ -1387,9 +1341,6 @@ export function Inspector({
         </>
       )}
 
-      <Row label="Fill"><input type="color" value={hexForInput(s.background, "#000000")} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" />
-        <Button variant="transparent" size="small" onClick={() => onStyle({ background: null })}>Clear</Button>
-      </Row>
       <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
       <Row label="Border">
         <input
