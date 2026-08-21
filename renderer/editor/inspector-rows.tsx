@@ -22,8 +22,59 @@ import {
   SelectItem,
   SelectValue,
 } from "../components/ui";
+import { ChevronRightIcon } from "lucide-react";
 import { invoke } from "../lib/api";
 import { cn } from "../lib/cn";
+
+/**
+ * A group heading in the inspector.
+ *
+ * The panel was one flat column of thirty-odd rows: what the object shows, how
+ * it looks, and where it sits, all at the same level and in no stated order.
+ * Three headings — Content, Look, Place — answer "what am I looking at" before
+ * you read a single control, and they are a component rather than a repeated
+ * span so a fourth cannot arrive styled differently.
+ */
+export function Section({ label, className }: { label: string; className?: string }) {
+  return (
+    <span className={cn("text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1", className)}>
+      {label}
+    </span>
+  );
+}
+
+/**
+ * The controls almost nobody touches, folded away.
+ *
+ * Which ones those are is not a guess: across a production install's layouts,
+ * `background` is set on 29 objects and `fontSize`/`color`/`border` on 24-26,
+ * while `lineClamp` is set on 3, `opacity` on 6 and `uppercase` on 7. The long
+ * tail was taking the same space as the things every object needs.
+ *
+ * Folded, not removed — a control you cannot reach is worse than one you scroll
+ * past, and these are exactly the fields somebody eventually needs on one
+ * object out of forty.
+ */
+export function MoreControls({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={
+          "flex items-center gap-1 self-start rounded text-caption2 text-fg-subtle " +
+          "transition-colors hover:text-fg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        }
+      >
+        <ChevronRightIcon className={"size-3 transition-transform " + (open ? "rotate-90" : "")} />
+        {open ? "Fewer options" : "More options"}
+      </button>
+      {open && <div className="flex flex-col gap-2.5">{children}</div>}
+    </>
+  );
+}
 
 export function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (

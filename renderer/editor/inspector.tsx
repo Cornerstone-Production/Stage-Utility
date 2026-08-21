@@ -87,7 +87,7 @@ import {
 import { IDIOM_TYPES, DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
 import {
-  Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad,
+  Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls,
   ImageConfig, NumberField, NumberInput, PixelField,
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
@@ -127,7 +127,7 @@ const LEGACY_ELEVATED: LayoutStyle = {
   background: "#191919", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0.6,
 };
 
-type TintKind = "none" | "green" | "red" | "amber";
+type TintKind = "none" | "neutral" | "green" | "red" | "amber";
 
 /**
  * The TINTS, which are a separate question from the surface.
@@ -135,13 +135,20 @@ type TintKind = "none" | "green" | "red" | "amber";
  * They used to be baked into the same list — Glass, Glass·Green, Glass·Red,
  * Glass·Amber — which mixed two independent choices into eight entries and
  * still could not express most of them: a red Solid was simply unreachable.
- * Four surfaces and four tints replace eight entries and cover more ground.
+ *
+ * A tint is a DARK WASH, not a colour. Every one of these is a near-black with
+ * a hue in it — #0d1a15 is the green — because they are made for a stage canvas
+ * that is itself near-black. The swatch IS that colour, filled edge to edge, so
+ * what you pick is what lands on the object. They read as dark and only subtly
+ * apart, which is honest: that is how they differ on the canvas too. The label
+ * on each names it, and the selected one takes an accent ring.
  */
-const TINTS: { value: TintKind; label: string; swatch: string; style: LayoutStyle }[] = [
-  { value: "none", label: "No tint", swatch: "transparent", style: { background: null, borderColor: null } },
-  { value: "green", label: "Green", swatch: "#2dd496", style: CARD_PRESETS.green },
-  { value: "red", label: "Red", swatch: "#e5484d", style: CARD_PRESETS.red },
-  { value: "amber", label: "Amber", swatch: "#ffc53d", style: CARD_PRESETS.amber },
+const TINTS: { value: TintKind; label: string; fill: string | null; style: LayoutStyle }[] = [
+  { value: "none", label: "No tint", fill: null, style: { background: null, borderColor: null } },
+  { value: "neutral", label: "Black", fill: "#141414", style: CARD_PRESETS.neutral },
+  { value: "green", label: "Green", fill: "#0d1a15", style: CARD_PRESETS.green },
+  { value: "red", label: "Red", fill: "#201011", style: CARD_PRESETS.red },
+  { value: "amber", label: "Amber", fill: "#1e190e", style: CARD_PRESETS.amber },
 ];
 
 /** Which surface the current style is wearing, or "" for a hand-tuned one. */
@@ -482,6 +489,18 @@ export function Inspector({
           onChange={(v) => onConfig({ ...c, propresenterInstanceId: v === "default" ? null : v } as LayoutObjectConfig)}
         />
       )}
+
+      {/* WHAT THIS OBJECT SHOWS. Everything from here to the Look separator is
+          the object's own settings — its caption, what it is bound to, how it
+          reads. It was the top of one flat column with no heading at all, which
+          is why "which of these thirty rows is about the data" was a question
+          you had to answer by reading them. */}
+      <Section label="Content" className="[&:has(+div:empty)]:hidden" />
+      {/* Wrapped so the heading above can hide itself when this is empty.
+          20 of the 50 object types carry no settings of their own — a bare
+          CONTENT heading with nothing under it says an object has settings it
+          does not have. :empty is exact here: a false branch renders no node. */}
+      <div className="flex flex-col gap-2.5 empty:hidden">
 
       {/* The line above the value. New readouts arrive with one — a bare 0:04:12
           does not say what it is counting to — and this is how it is changed or
@@ -1254,8 +1273,11 @@ export function Inspector({
           </span>
         </div>
       )}
+      </div>
 
       <Separator />
+
+      <Section label="Look" />
 
       {/* SURFACE and TINT, separately — they are independent questions, and the
           single list that mixed them (Glass, Glass·Green, Glass·Red, …) was both
@@ -1293,36 +1315,30 @@ export function Inspector({
                   ? { background: SURFACE_PRESETS[(matchSurface(s) || "flat") as SurfaceKind].background ?? null }
                   : { background: t.style.background })}
                 className={cn(
-                  "size-5 rounded-full border transition-colors",
+                  // A hairline, not a coloured ring: these are near-blacks, and
+                  // on a dark panel an unbordered one has no edge at all. It is
+                  // neutral so the circle still reads as one colour.
+                  "flex size-6 items-center justify-center rounded-full border border-line-strong transition-transform",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
-                  on ? "border-accent ring-2 ring-accent/40" : "border-line-strong hover:border-fg-subtle",
+                  on ? "ring-2 ring-accent ring-offset-1 ring-offset-bg" : "hover:scale-110",
                 )}
-                style={{ background: t.swatch === "transparent" ? undefined : t.swatch }}
+                style={{ background: t.fill ?? "transparent" }}
               >
                 {/* "No tint" is a slash rather than an empty circle, which would
                     read as a colour nobody could name. */}
-                {t.value === "none" && <span aria-hidden="true" className="block h-px w-full rotate-45 bg-fg-subtle" />}
+                {t.value === "none" && (
+                  <span aria-hidden="true" className="block h-px w-full rotate-45 bg-fg-subtle" />
+                )}
               </button>
             );
           })}
         </div>
       </Row>
-      {/* The way back. Every other control here adds to the styling; without this
-          the only route out of a look you have tuned into a corner is to delete
-          the object and start again, which loses its position and settings too. */}
-      <Row
-        label="Reset"
-        hint="Put this object's look back to the default for its type. Its position, size, settings and behaviour on other window shapes are left alone — and it can be undone."
-      >
-        <Button variant="filled" size="small" onClick={onResetLook}>
-          Reset to default look
-        </Button>
-      </Row>
 
       {/* Style */}
       {isText && (
         <>
-          <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Type</span>
+
           {/* Fall back to THIS type's own default, not a blanket 0.05. An object
               whose default differs (an embedded view starts at 0.016) otherwise
               reported a size it was not rendering at, so the first nudge of the
@@ -1347,31 +1363,13 @@ export function Inspector({
               onChange={onStyle}
             />
           </Row>
-          <Row label="Uppercase"><Switch checked={s.uppercase ?? false} onCheckedChange={(v) => onStyle({ uppercase: v })} /></Row>
-          <Row label="Shadow"><NumberInput value={s.textShadow ?? 0} step={0.1} min={0} max={1} onChange={(v) => onStyle({ textShadow: v })} /></Row>
-          <Row label="Max lines"><NumberInput value={s.lineClamp ?? 0} step={1} min={0} max={10} onChange={(v) => onStyle({ lineClamp: v > 0 ? Math.round(v) : null })} /></Row>
         </>
       )}
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Fill</span>
+
       <Row label="Fill"><input type="color" value={hexForInput(s.background, "#000000")} onChange={(e) => onStyle({ background: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" />
         <Button variant="transparent" size="small" onClick={() => onStyle({ background: null })}>Clear</Button>
       </Row>
-      <Row label="Opacity">
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={Math.round((s.opacity ?? 1) * 100)}
-          onChange={(e) => onStyle({ opacity: parseInt(e.target.value, 10) / 100 })}
-          className="flex-1 min-w-0 accent-accent"
-          aria-label="Opacity"
-        />
-        <span className="w-9 shrink-0 text-right tabular-nums text-caption2 text-fg">{Math.round((s.opacity ?? 1) * 100)}%</span>
-      </Row>
       <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
-      <Row label="Padding"><NumberField value={pxOf(s.padding, 0)} step={1} min={0} max={Math.round(0.3 * canvas.height)} suffix="px" onChange={(px) => onStyle({ padding: px / canvas.height })} /></Row>
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Border</span>
       <Row label="Border">
         <input
           type="color"
@@ -1389,9 +1387,25 @@ export function Inspector({
           onChange={(px) => onStyle({ borderWidth: px / canvas.height, borderColor: s.borderColor ?? "#ffffff" })}
         />
       </Row>
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mt-1">Elevation</span>
+
       {/* Elevation: one slider with labeled None/Low/Med/High stops (ticks), fine
           values allowed in between. Drives the box's drop shadow for layered depth. */}
+      {/* Rare by measurement, not by feel — see MoreControls. */}
+      <MoreControls>
+      <Row label="Opacity">
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={Math.round((s.opacity ?? 1) * 100)}
+          onChange={(e) => onStyle({ opacity: parseInt(e.target.value, 10) / 100 })}
+          className="flex-1 min-w-0 accent-accent"
+          aria-label="Opacity"
+        />
+        <span className="w-9 shrink-0 text-right tabular-nums text-caption2 text-fg">{Math.round((s.opacity ?? 1) * 100)}%</span>
+      </Row>
+      <Row label="Padding"><NumberField value={pxOf(s.padding, 0)} step={1} min={0} max={Math.round(0.3 * canvas.height)} suffix="px" onChange={(px) => onStyle({ padding: px / canvas.height })} /></Row>
       <Row label="Elevation" hint="Soft drop shadow under this object's box — lifts it above whatever it overlaps. Snaps toward None/Low/Med/High; drag for in-between.">
         <input
           type="range"
@@ -1412,8 +1426,30 @@ export function Inspector({
         </datalist>
         <span className="w-10 shrink-0 text-caption2 text-fg-muted text-right tabular-nums">{elevationLabel(s.boxShadow ?? 0)}</span>
       </Row>
+        {isText && (
+          <>
+            <Row label="Uppercase"><Switch checked={s.uppercase ?? false} onCheckedChange={(v) => onStyle({ uppercase: v })} /></Row>
+            <Row label="Text shadow"><NumberInput value={s.textShadow ?? 0} step={0.1} min={0} max={1} onChange={(v) => onStyle({ textShadow: v })} /></Row>
+            <Row label="Max lines"><NumberInput value={s.lineClamp ?? 0} step={1} min={0} max={10} onChange={(v) => onStyle({ lineClamp: v > 0 ? Math.round(v) : null })} /></Row>
+          </>
+        )}
+      </MoreControls>
+
+      {/* The way back. Every other control here adds to the styling; without this
+          the only route out of a look you have tuned into a corner is to delete
+          the object and start again, which loses its position and settings too. */}
+      <Row
+        label="Reset"
+        hint="Put this object's look back to the default for its type. Its position, size, settings and behaviour on other window shapes are left alone — and it can be undone."
+      >
+        <Button variant="filled" size="small" onClick={onResetLook}>
+          Reset to default look
+        </Button>
+      </Row>
 
       <Separator />
+
+      <Section label="Place" />
 
       {/* Align within the parent (canvas for top-level, container box if nested) */}
       <Row label="Align">
