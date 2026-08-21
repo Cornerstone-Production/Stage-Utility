@@ -664,10 +664,14 @@ class IntegrationManager {
 
     if (id === "reaper") {
       await this.applyReaper();
+    }
+
+    if (id === "resi") {
       await this.applyResi();
+    }
+
+    if (id === "youtube") {
       await this.applyYouTube();
-    await this.applyResi();
-    await this.applyYouTube();
     }
 
     if (id === "sensource") {
@@ -723,10 +727,14 @@ class IntegrationManager {
 
     if (id === "reaper") {
       await this.applyReaper();
+    }
+
+    if (id === "resi") {
       await this.applyResi();
+    }
+
+    if (id === "youtube") {
       await this.applyYouTube();
-    await this.applyResi();
-    await this.applyYouTube();
     }
 
     if (id === "sensource") {
