@@ -23,6 +23,8 @@ import { signalStore } from "./signal-store.js";
 import { smaartService } from "./smaart-service.js";
 import { sensourceService } from "./sensource-service.js";
 import { obsService } from "./obs-service.js";
+import { resiService } from "./resi-service.js";
+import { youtubeService } from "./youtube-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, triggersForChannel } from "./automation-triggers.js";
@@ -242,6 +244,8 @@ class AutomationEngine {
       integrations,
       obsRecording: obsService.getLatest().recording === true,
       reaperRecording: reaperService.getLatest().recording === true,
+      resiStreaming: resiService.getLatest().live === true,
+      youtubeStreaming: youtubeService.getLatest().live === true,
       baptismPhase: baptismTimerService.getState()?.phase ?? null,
     };
   }

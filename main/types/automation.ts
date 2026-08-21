@@ -52,6 +52,9 @@ export interface ConditionCtx {
   /** Whether each recorder is rolling right now, for the `is-recording` conditions. */
   obsRecording: boolean;
   reaperRecording: boolean;
+  /** Whether each streaming platform is on air right now. */
+  resiStreaming: boolean;
+  youtubeStreaming: boolean;
   /** Current baptism-timer phase, or null when the timer has never run. */
   baptismPhase: string | null;
 }

@@ -15,10 +15,10 @@ import { INTEGRATION_IDS } from "./integration-ids.js";
 /**
  * Channels something actually broadcasts.
  *
- * Most are `broadcast("...")` call sites; the four integration channels
- * (`obs:status`, `reaper:status`, `spl:metrics`, `people:count`) are passed to
- * the IntegrationBase constructor and published from there, so grepping for a
- * literal will not find them.
+ * Most are `broadcast("...")` call sites; the integration channels
+ * (`obs:status`, `reaper:status`, `resi:status`, `youtube:status`,
+ * `spl:metrics`, `people:count`) are passed to the IntegrationBase constructor
+ * and published from there, so grepping for a literal will not find them.
  */
 const BROADCAST_CHANNELS = new Set([
   "attendance:history",
@@ -33,12 +33,14 @@ const BROADCAST_CHANNELS = new Set([
   "prodcom:transcript",
   "propresenter:instances",
   "reaper:status",
+  "resi:status",
   "service-timeline:history",
   "slots:devices",
   "spl:history",
   "spl:metrics",
   "stage:state-changed",
   "update:status",
+  "youtube:status",
 ]);
 
 describe("automation coverage", () => {

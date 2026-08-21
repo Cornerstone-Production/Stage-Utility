@@ -16,6 +16,8 @@ const ctx = (over: Partial<ConditionCtx> = {}): ConditionCtx => ({
   integrations: {},
   obsRecording: false,
   reaperRecording: false,
+  resiStreaming: false,
+  youtubeStreaming: false,
   baptismPhase: null,
   ...over,
 });

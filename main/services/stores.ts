@@ -26,6 +26,7 @@ import "./patch-store.js";
 import "./presets-store.js";
 import "./rosstalk-store.js";
 import "./bar-config-store.js";
+import "./stream-start-store.js";
 import "./notes-store.js";
 import "./scriptview-config-store.js";
 import "./scriptview-layouts-store.js";

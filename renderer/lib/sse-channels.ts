@@ -32,6 +32,8 @@ export const HYDRATED_CHANNELS = [
   "baptism:state",
   "obs:status",
   "reaper:status",
+  "resi:status",
+  "youtube:status",
   "update:status",
   "osc:feedback",
   "companion:signals",

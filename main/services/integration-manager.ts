@@ -8,6 +8,8 @@ import { scrub } from "./scrub.js";
 import type { PeopleCountDTO } from "../types/stage.js";
 import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
+import { resiService } from "./resi-service.js";
+import { youtubeService } from "./youtube-service.js";
 import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
 import { rosstalkManager } from "./rosstalk-manager.js";
@@ -273,6 +275,54 @@ const REAPER_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+/**
+ * Resi — is the encoder streaming, and since when.
+ *
+ * Account credentials rather than a scoped key because the endpoint that can
+ * answer this is Resi's INTERNAL one. Their published Go Live API cannot see a
+ * stream it did not start, which rules it out for anyone whose Resi goes live
+ * on a schedule. The description says so plainly: an operator handing over a
+ * full login deserves to know why, and that it may stop working.
+ */
+const RESI_DESCRIPTOR: IntegrationDescriptor = {
+  id: "resi",
+  kind: "control",
+  label: "Resi",
+  description:
+    "Shows whether Resi is streaming, wherever the recording widgets appear. Uses your Resi account sign-in, because Resi's published API can only report on streams it started itself — it cannot see one that began on a Resi schedule. That means this rides an endpoint Resi does not document and could change without notice; if it stops working, nothing else is affected.",
+  configSchema: [
+    { key: "username", label: "Resi Email", type: "text", placeholder: "you@church.org" },
+    { key: "password", label: "Resi Password", type: "password" },
+    {
+      key: "encoderIds",
+      label: "Encoders to watch",
+      type: "text",
+      placeholder: "leave blank for all",
+    },
+  ],
+};
+
+/**
+ * YouTube — the one source that reports both halves itself.
+ *
+ * OAuth, not an API key: "are MY broadcasts live" is a question about the
+ * authenticated channel and a key cannot answer it. The setup is the heaviest
+ * of any integration here, so the description is a walkthrough rather than a
+ * sentence.
+ */
+const YOUTUBE_DESCRIPTOR: IntegrationDescriptor = {
+  id: "youtube",
+  kind: "control",
+  label: "YouTube",
+  description:
+    "Shows whether you are live on YouTube and for how long — YouTube reports the real start time, so the clock is not a guess. Setup is a one-off: make a project at console.cloud.google.com, enable the YouTube Data API v3, create an OAuth client (Desktop app), then use it once to grant the youtube.readonly scope and paste the refresh token below. If Resi restreams to YouTube, this reports that same broadcast.",
+  configSchema: [
+    { key: "clientId", label: "OAuth Client ID", type: "text" },
+    { key: "clientSecret", label: "OAuth Client Secret", type: "password" },
+    { key: "refreshToken", label: "Refresh Token", type: "password" },
+  ],
+};
+
 // OSC integration — sends OSC to LAN gear from custom-layout buttons and reflects
 // device state back. Targets are managed as a separate list (like wireless), so
 // the descriptor itself carries no config fields.
@@ -374,6 +424,8 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   SMAART_DESCRIPTOR,
   OBS_DESCRIPTOR,
   REAPER_DESCRIPTOR,
+  RESI_DESCRIPTOR,
+  YOUTUBE_DESCRIPTOR,
   OSC_DESCRIPTOR,
   ROSSTALK_DESCRIPTOR,
   SENSOURCE_DESCRIPTOR,
@@ -390,6 +442,8 @@ const SECRET_KEYS: Record<string, string[]> = {
   smaart: ["password"],
   obs: ["password"],
   reaper: [],
+  resi: ["password"],
+  youtube: ["clientSecret", "refreshToken"],
   sensource: ["clientSecret", "apiToken"],
   "ross-tsl": [],
 };
@@ -454,6 +508,8 @@ class IntegrationManager {
     await this.applyObs();
     // Start the REAPER web-interface poller if enabled + configured.
     await this.applyReaper();
+    await this.applyResi();
+    await this.applyYouTube();
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
     await oscManager.init();
     this.refreshOscSummary();
@@ -608,6 +664,10 @@ class IntegrationManager {
 
     if (id === "reaper") {
       await this.applyReaper();
+      await this.applyResi();
+      await this.applyYouTube();
+    await this.applyResi();
+    await this.applyYouTube();
     }
 
     if (id === "sensource") {
@@ -663,6 +723,10 @@ class IntegrationManager {
 
     if (id === "reaper") {
       await this.applyReaper();
+      await this.applyResi();
+      await this.applyYouTube();
+    await this.applyResi();
+    await this.applyYouTube();
     }
 
     if (id === "sensource") {
@@ -778,6 +842,31 @@ class IntegrationManager {
         }
         const result = await reaperService.test(host, port);
         this.setConnectionState("reaper", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "resi") {
+        const cfg = this.states.get("resi")?.config ?? {};
+        const username = String(cfg.username ?? "").trim();
+        const password = String(cfg.password ?? "");
+        if (!username || !password) return { ok: false, message: "Resi email and password are required" };
+        const result = await resiService.test(username, password);
+        this.setConnectionState("resi", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "youtube") {
+        const cfg = this.states.get("youtube")?.config ?? {};
+        const clientId = String(cfg.clientId ?? "").trim();
+        const clientSecret = String(cfg.clientSecret ?? "");
+        const refreshToken = String(cfg.refreshToken ?? "").trim();
+        if (!clientId || !clientSecret || !refreshToken) {
+          return { ok: false, message: "Client ID, client secret and refresh token are all required" };
+        }
+        const result = await youtubeService.test(clientId, clientSecret, refreshToken);
+        this.setConnectionState("youtube", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
         return result;
       }
@@ -992,6 +1081,50 @@ class IntegrationManager {
     } else {
       reaperService.stop();
       this.setConnectionState("reaper", "disconnected", null);
+    }
+  }
+
+  /** Start/stop the Resi encoder-status poll to match enabled + configured state. */
+  private async applyResi(): Promise<void> {
+    resiService.setConnectionListener((state, message) => {
+      this.setConnectionState("resi", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("resi")?.enabled ?? false;
+    const cfg = this.states.get("resi")?.config ?? {};
+    const username = String(cfg.username ?? "").trim();
+    const password = String(cfg.password ?? "");
+    // Comma or whitespace separated, because it is a text field an operator
+    // pastes ids into, not a picker.
+    const encoderIds = String(cfg.encoderIds ?? "").split(/[\s,]+/).filter(Boolean);
+    if (enabled && username && password) {
+      this.setConnectionState("resi", "connecting", "Signing in to Resi");
+      resiService.configure(username, password, encoderIds);
+    } else {
+      resiService.stop();
+      this.setConnectionState("resi", "disconnected", null);
+    }
+  }
+
+  /** Start/stop the YouTube broadcast poll to match enabled + configured state. */
+  private async applyYouTube(): Promise<void> {
+    youtubeService.setConnectionListener((state, message) => {
+      this.setConnectionState("youtube", state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get("youtube")?.enabled ?? false;
+    const cfg = this.states.get("youtube")?.config ?? {};
+    const clientId = String(cfg.clientId ?? "").trim();
+    const clientSecret = String(cfg.clientSecret ?? "");
+    const refreshToken = String(cfg.refreshToken ?? "").trim();
+    if (enabled && clientId && clientSecret && refreshToken) {
+      this.setConnectionState("youtube", "connecting", "Connecting to YouTube");
+      youtubeService.configure(clientId, clientSecret, refreshToken);
+    } else {
+      youtubeService.stop();
+      this.setConnectionState("youtube", "disconnected", null);
     }
   }
 

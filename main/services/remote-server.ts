@@ -29,6 +29,8 @@ import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { readImage } from "./image-files.js";
 import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
+import { resiService } from "./resi-service.js";
+import { youtubeService } from "./youtube-service.js";
 import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
 import { signalStore } from "./signal-store.js";
@@ -868,6 +870,11 @@ export class RemoteServer {
       sseWrite(res, "baptism:state", baptismTimerService.getState());
       sseWrite(res, "obs:status", obsService.getLatest());
       sseWrite(res, "reaper:status", reaperService.getLatest());
+      // Streaming state hydrates for the same reason recording does: a display
+      // that loads mid-service must show the truth immediately, not wait for
+      // the next poll to notice nothing has changed.
+      sseWrite(res, "resi:status", resiService.getLatest());
+      sseWrite(res, "youtube:status", youtubeService.getLatest());
       // Update status must hydrate on (re)connect: every update ends by restarting
       // the server, which drops+reconnects this socket. Without this, the settings
       // Updates panel never learns the post-restart state and stays stuck on its
