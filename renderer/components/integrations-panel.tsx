@@ -277,6 +277,12 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
         <FieldGroup>
           {descriptor.configSchema.map((field) => {
             const value = localConfig[field.key];
+            // A field that belongs to the other way of connecting. Hidden rather
+            // than disabled: it is not a control you could use, it is one this
+            // setup has no question for. Its saved value is untouched.
+            if (field.showIf && String(localConfig[field.showIf.key] ?? "") !== field.showIf.equals) {
+              return null;
+            }
 
             return (
               <Field key={field.key} orientation="horizontal">
@@ -932,6 +938,7 @@ const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
   { title: "Audio", ids: ["smaart"] },
   { title: "People", ids: ["sensource"] },
   { title: "Wireless", ids: ["wireless"] },
+  { title: "Streaming", ids: ["resi", "youtube"] },
   { title: "Control & output", ids: ["obs", "reaper", "osc", "rosstalk", "ross-tsl"] },
 ];
 

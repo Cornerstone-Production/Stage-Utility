@@ -13,6 +13,14 @@ export interface ConfigField {
   /** Value pre-filled in the setup form when nothing is saved yet (so e.g. a poll
    *  interval shows 45 instead of 0/blank). Does not override a saved value. */
   default?: string | number;
+  /**
+   * Show this field only while another field in the same card holds this value.
+   *
+   * For an integration with two ways to connect, where showing both sets at once
+   * means five fields of which three are noise. Presentation only: a hidden
+   * field keeps whatever value it had, so switching back does not lose it.
+   */
+  showIf?: { key: string; equals: string };
 }
 
 export interface IntegrationDescriptor {

@@ -16,10 +16,12 @@ export const INTEGRATION_IDS = [
   "prodcom",
   "propresenter",
   "reaper",
+  "resi",
   "ross-tsl",
   "rosstalk",
   "sensource",
   "smaart",
+  "youtube",
   "wireless",
 ] as const;
 

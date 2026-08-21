@@ -36,6 +36,8 @@ poll after.
 | Recording starts | OBS or REAPER begins recording |
 | Recording stops | stops. A recorder going offline does not count — that is unknown, not stopped |
 | *X* connects / disconnects | any integration's link comes up or drops. One pair per integration, named for it — "OBS connects", "Smaart disconnects" |
+| Resi goes live / stops streaming | a watched Resi encoder starts or stops. Unreachable does not count |
+| YouTube goes live / stops streaming | a broadcast on your channel reaches `live`, or leaves it |
 | OBS starts / stops streaming | the stream output starts or stops |
 | OBS starts / stops the virtual camera | the virtual camera output starts or stops |
 | A phrase is said on ProdCom | a **new** transcript line contains your text, optionally on one channel only |
@@ -64,8 +66,9 @@ disconnect.
 ## Conditions
 
 **A service is live**, **service type is**, **day of week**, **time is between**,
-**baptism phase is**, **OBS is recording**, **REAPER is recording**, and *X* **is
-connected** for each integration. All selected conditions must hold.
+**baptism phase is**, **OBS is recording**, **REAPER is recording**, **Resi is
+streaming**, **YouTube is streaming**, and *X* **is connected** for each
+integration. All selected conditions must hold.
 
 They keep triggers simple: "when occupancy rises above 50" would also fire for a
 Tuesday meeting, so you add "and a service is live".

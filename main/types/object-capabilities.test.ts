@@ -17,8 +17,8 @@ describe("capability registry", () => {
     // backup while the suite stayed green.
     assert.equal(
       Object.keys(CAPABILITIES).length,
-      50,
-      "50 object types exist — if this number changed, decide the new type's capabilities deliberately",
+      54,
+      "54 object types exist — if this number changed, decide the new type's capabilities deliberately",
     );
   });
 

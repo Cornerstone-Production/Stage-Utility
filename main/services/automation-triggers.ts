@@ -64,10 +64,12 @@ export const INTEGRATIONS: { id: string; label: string }[] = [
   { id: "prodcom", label: "ProdCom" },
   { id: "propresenter", label: "ProPresenter" },
   { id: "reaper", label: "REAPER" },
+  { id: "resi", label: "Resi" },
   { id: "ross-tsl", label: "Ross TSL" },
   { id: "rosstalk", label: "RossTalk" },
   { id: "sensource", label: "SenSource" },
   { id: "smaart", label: "Smaart" },
+  { id: "youtube", label: "YouTube" },
   { id: "wireless", label: "Wireless" },
 ];
 
@@ -141,6 +143,44 @@ function obsOutputTriggers(
         const n = asObs(next);
         if (n.connected === false) return false;
         return asObs(prev)[key] === true && n[key] === false;
+      },
+    }),
+  };
+}
+
+/**
+ * Went-live / went-offline for one streaming platform.
+ *
+ * Same shape and the same refusal as the OBS output pair: a platform that has
+ * gone unreachable reports `live: false`, and treating that as "the stream
+ * stopped" would fire a stop rule because an API call timed out. On a Sunday
+ * that could kill a recording or drop a scene while the service is still going
+ * out. Unknown is not a value.
+ */
+function streamTriggers(platform: string, channel: string, label: string): Record<string, TriggerDef> {
+  const asStream = (v: unknown) => (v ?? {}) as { connected?: boolean; live?: boolean };
+  return {
+    [`${platform}.went-live`]: def({
+      id: `${platform}.went-live`,
+      label: `${label} goes live`,
+      channel,
+      params: [],
+      didFire: (prev, next) => {
+        if (prev === null) return false;
+        return asStream(prev).live !== true && asStream(next).live === true;
+      },
+    }),
+    [`${platform}.went-offline`]: def({
+      id: `${platform}.went-offline`,
+      label: `${label} stops streaming`,
+      channel,
+      params: [],
+      help: `Does not fire when ${label} simply becomes unreachable — unreachable is unknown, not stopped.`,
+      didFire: (prev, next) => {
+        if (prev === null) return false;
+        const n = asStream(next);
+        if (n.connected === false) return false;
+        return asStream(prev).live === true && n.live === false;
       },
     }),
   };
@@ -276,6 +316,9 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
   ...Object.assign({}, ...INTEGRATIONS.map((i) => connectionTriggers(i.id, i.label))),
   ...obsOutputTriggers("streaming", "streaming", "streaming"),
   ...obsOutputTriggers("virtualCam", "virtualcam", "the virtual camera"),
+
+  ...streamTriggers("resi", "resi:status", "Resi"),
+  ...streamTriggers("youtube", "youtube:status", "YouTube"),
 
   "pco.before-plan-time": def({
     id: "pco.before-plan-time",

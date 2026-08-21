@@ -124,6 +124,7 @@ const EXPECTED_RUNTIME = [
   "baptism.json",
   "service-timeline.json",
   "signals.json",
+  "stream-starts.json",
   "spl-history.json",
   "update-notices.json",
 ].sort();

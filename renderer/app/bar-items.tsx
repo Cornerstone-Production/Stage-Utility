@@ -25,6 +25,7 @@ import {
   ListIcon,
   PlugZapIcon,
   CircleDotIcon,
+  RadioTowerIcon,
   MoveHorizontalIcon,
   SquareIcon,
   type LucideIcon,
@@ -36,7 +37,8 @@ export type BarItemId =
   | "live-timer"
   | "current-item"
   | "integration-health"
-  | "recording";
+  | "recording"
+  | "streaming";
 
 /**
  * A flexible space, as a position in the saved order.
@@ -127,6 +129,12 @@ export const BAR_ITEMS: Record<BarItemId, BarItem> = {
     label: "Integration health",
     icon: PlugZapIcon,
     hint: "Counts what is disconnected. Click it to see which.",
+  },
+  streaming: {
+    id: "streaming",
+    label: "Streaming",
+    icon: RadioTowerIcon,
+    hint: "Whether Resi, YouTube or OBS is live — and for how long.",
   },
   recording: {
     id: "recording",

@@ -33,7 +33,8 @@ import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
 import { useObsState } from "../../main/use-obs-state";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
-import { recordingStat, recorderStat, recorders, loudestSpl } from "../recording-status";
+import { recordingStat, recorderStat, recorders, streamers, streamingStat, loudestSpl } from "../recording-status";
+import { useResiState, useYouTubeState } from "../../main/use-stream-state";
 import { Readout } from "../../main/readout";
 
 /* ── Shared bits ──────────────────────────────────────────────────────────── */
@@ -433,6 +434,27 @@ export function LiveStatusCard({
 }
 
 /**
+ * Every platform at once, or one of them.
+ *
+ * Same shape as RecordingCard and for the same reason: "are we going out?" is a
+ * question about every destination, and a widget that reported only YouTube
+ * would read as reassurance while Resi sat off air. A new platform joins by
+ * being added to `streamers()`; nothing here changes.
+ */
+export function StreamingCard({ platform = "any" }: { platform?: string }) {
+  const list = streamers(useResiState(), useYouTubeState(), useObsState());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    // The elapsed time is computed here, so it needs a tick to advance.
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const chosen = platform === "any" ? list : list.filter((s) => s.name === platform);
+  const st = streamingStat(chosen, now);
+  return <Stat label={platform === "any" ? "Streaming" : platform} value={st.value} sub={st.sub} tone={st.tone} />;
+}
+
+/**
  * Are we getting this?
  *
  * Every recorder at once, not one widget per integration — the question
@@ -512,6 +534,12 @@ export function HomeCard({
       return <RecordingCard recorder="OBS" />;
     case "home-recording-reaper":
       return <RecordingCard recorder="REAPER" />;
+    case "home-streaming":
+      return <StreamingCard />;
+    case "home-streaming-resi":
+      return <StreamingCard platform="Resi" />;
+    case "home-streaming-youtube":
+      return <StreamingCard platform="YouTube" />;
     case "home-spl":
       return <SplCard />;
     case "home-screens":

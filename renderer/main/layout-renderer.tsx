@@ -16,6 +16,8 @@ import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
+import { useResiState, useYouTubeState } from "./use-stream-state";
+import { streamers, streamingStat } from "../app/recording-status";
 import { useReaperState } from "./use-reaper-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
@@ -52,6 +54,8 @@ export interface LayoutRenderCtx {
   spl: SplMetricsDTO | null;
   obs: ObsStatusDTO | null;
   reaper: ReaperStatusDTO | null;
+  resi: StreamStatusDTO | null;
+  youtube: StreamStatusDTO | null;
   osc: OscFeedbackDTO | null;
   /** Global RossTalk simulate mode, so a button can show it is not really sending.
    *  Defaults to TRUE when unknown — the direction that cannot cause a stray send. */
@@ -826,6 +830,37 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         />
       );
     }
+    case "stream-status": {
+      // Every platform at once by default. `streamers()` is the same function
+      // Home and the context bar ask, so the three cannot disagree about what
+      // "live" means.
+      const all = streamers(ctx.resi, ctx.youtube, ctx.obs);
+      const chosen = !c.platform || c.platform === "any"
+        ? all
+        : all.filter((x: { name: string }) => x.name.toLowerCase() === c.platform);
+      const st = streamingStat(chosen, ctx.now);
+      // Nothing connected is not worth a slab of colour on a wall — it is a
+      // platform nobody has set up, not a stream that dropped.
+      if (!st.tone) return readout("—", { sub: st.sub });
+      const liveNow = st.tone === "live";
+      return readout(liveNow && c.showElapsed === false ? "LIVE" : st.value, {
+        sub: st.sub,
+        valueColor: liveNow ? "var(--green-10)" : "var(--red-10)",
+      });
+    }
+
+    case "home-streaming":
+    case "home-streaming-resi":
+    case "home-streaming-youtube": {
+      const only = c.type === "home-streaming-resi" ? "Resi" : c.type === "home-streaming-youtube" ? "YouTube" : null;
+      const all = streamers(ctx.resi, ctx.youtube, ctx.obs);
+      const st = streamingStat(only ? all.filter((x: { name: string }) => x.name === only) : all, ctx.now);
+      return readout(st.value, {
+        sub: st.sub,
+        valueColor: st.tone === "live" ? "var(--green-10)" : st.tone === "danger" ? "var(--red-10)" : null,
+      });
+    }
+
     case "reaper-status": {
       const reaper = ctx.reaper;
       const connected = reaper?.connected ?? false;
@@ -2136,6 +2171,11 @@ export function useLayoutData(layout?: LayoutDTO) {
   const spl = useSplState(want(["spl-meter"]));
   const obs = useObsState(want(["obs-status"]));
   const reaper = useReaperState(want(["reaper-status"]));
+  // Both gated on the streaming objects: a clock-only wall screen must not hold
+  // a poll open against two cloud APIs, one of which has a daily quota.
+  const streamWanted = want(["stream-status", "home-streaming", "home-streaming-resi", "home-streaming-youtube"]);
+  const resi = useResiState(streamWanted);
+  const youtube = useYouTubeState(streamWanted);
   const osc = useOscState(want(["osc-button"]));
   const peopleCount = usePeopleCountState(peopleWanted);
   const serviceLow = useLiveServiceLow(peopleWanted);
@@ -2158,7 +2198,7 @@ export function useLayoutData(layout?: LayoutDTO) {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   });
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -2188,7 +2228,7 @@ export function LayoutRenderer({
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -2254,7 +2294,7 @@ export function LayoutRenderer({
   const inheritSurface =
     bg == null || bg === "#000" || bg === "#000000" || bg === "#080810" || bg === "#0a0a0a";
 
-  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed, canvasBg: inheritSurface ? null : bg };
+  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed, canvasBg: inheritSurface ? null : bg };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

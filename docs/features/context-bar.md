@@ -19,6 +19,7 @@ and every operator sees it.
 | **Current plan item** | What Planning Center says is happening now. |
 | **Integration health** | How many set-up integrations are disconnected. |
 | **Recording** | Whether OBS or REAPER is rolling. |
+| **Streaming** | Whether Resi, YouTube or OBS is live, and for how long. |
 
 An unconfigured bar shows the service type and plan, the current item, and the
 live state and timer.
@@ -26,7 +27,8 @@ live state and timer.
 ## Nothing appears or disappears
 
 Every item you turn on is always on screen. An item with nothing to report says
-so — `No item`, `All connected`, `No recorder` — rather than vanishing and
+so — `No item`, `All connected`, `No recorder`, `No stream` — rather than
+vanishing and
 letting its neighbours slide across. The bar keeps one shape, so you learn where
 to look once.
 

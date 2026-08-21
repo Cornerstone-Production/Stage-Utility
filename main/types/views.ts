@@ -249,6 +249,15 @@ export type LayoutObjectConfig =
   | { type: "home-recording" }
   | { type: "home-recording-obs" }
   | { type: "home-recording-reaper" }
+  /**
+   * Streaming, the twin of the recording trio above. "home-streaming" answers
+   * every platform at once through `streamers()`; the per-platform ones exist
+   * for the same reason the per-recorder ones do — a combined widget reading
+   * LIVE while one destination sits off air is reassurance nobody asked for.
+   */
+  | { type: "home-streaming" }
+  | { type: "home-streaming-resi" }
+  | { type: "home-streaming-youtube" }
   | { type: "home-spl" }
   | { type: "home-screens" }
   | { type: "home-recent-services" }
@@ -357,6 +366,9 @@ export type LayoutObjectConfig =
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
     }
+  /** Live streaming indicator. `platform` "any" answers every platform at once
+   *  through streamers(); a named one reports just that platform. */
+  | { type: "stream-status"; platform?: "any" | "resi" | "youtube"; showElapsed?: boolean }
   // Live REAPER recording indicator (from the REAPER integration, `reaper:status`
   // channel). Turns red while REAPER is recording. Label texts override the
   // defaults ("REAPER: Recording" / "REAPER: Standby" / "REAPER: Offline");

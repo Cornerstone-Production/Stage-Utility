@@ -53,6 +53,20 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
     holds: (ctx) => ctx.reaperRecording === true,
   },
 
+  "resi.is-streaming": {
+    id: "resi.is-streaming",
+    label: "Resi is streaming",
+    params: [],
+    holds: (ctx) => ctx.resiStreaming === true,
+  },
+
+  "youtube.is-streaming": {
+    id: "youtube.is-streaming",
+    label: "YouTube is streaming",
+    params: [],
+    holds: (ctx) => ctx.youtubeStreaming === true,
+  },
+
   "baptism.phase-is": {
     id: "baptism.phase-is",
     label: "Baptism phase is",

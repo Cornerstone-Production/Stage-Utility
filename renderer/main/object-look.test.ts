@@ -30,6 +30,7 @@ const BARE = [
   // inset a newly added widget further than one added before the change.
   "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl", "home-screens",
+  "home-streaming", "home-streaming-resi", "home-streaming-youtube",
   // Retired, and left exactly as it shipped.
   "service-order",
 ] as const;
@@ -55,8 +56,8 @@ describe("a widget you just added", () => {
     // and add it here or to BARE — do not bump the number.
 
     const all = Object.keys(LAYOUT_OBJECTS);
-    assert.equal(all.length, 50);
-    assert.equal(all.filter(hasCard).length, 28);
+    assert.equal(all.length, 54);
+    assert.equal(all.filter(hasCard).length, 29);
     assert.equal(all.filter((t) => !hasCard(t)).length, BARE.length);
   });
 

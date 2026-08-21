@@ -301,6 +301,15 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "home-recording-obs", label: "OBS recording", group: "OBS", after: "obs-status" },
   { type: "home-recording-reaper", label: "REAPER recording", group: "REAPER", after: "reaper-status" },
   { type: "home-screens", label: "Screens online", group: "Status", after: "home-recording" },
+  // Streaming, added alongside the Resi and YouTube integrations. Same shape as
+  // the recording trio: one combined answer plus a per-platform each, because a
+  // widget reading LIVE while one destination sits off air is reassurance
+  // nobody asked for.
+  { type: "home-streaming", label: "Streaming", group: "Status", after: "home-screens" },
+  { type: "stream-status", label: "Streaming status", group: "Status", after: "home-streaming" },
+  // `after: null` — each leads its own group, because each platform gets one.
+  { type: "home-streaming-resi", label: "Resi streaming", group: "Resi", after: null },
+  { type: "home-streaming-youtube", label: "YouTube streaming", group: "YouTube", after: null },
 ];
 
 /**

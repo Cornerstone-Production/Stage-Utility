@@ -65,6 +65,9 @@ import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";
 import { backupScheduler } from "./main/services/backup-scheduler.js";
 import { integrationManager } from "./main/services/integration-manager.js";
+import { resiService } from "./main/services/resi-service.js";
+import { youtubeService } from "./main/services/youtube-service.js";
+import { streamStartStore } from "./main/services/stream-start-store.js";
 import { livePoller } from "./main/services/live-poller.js";
 import { prodcomService } from "./main/services/prodcom-service.js";
 import { propresenterService } from "./main/services/propresenter-service.js";
@@ -87,6 +90,7 @@ console.log(`[server] data directory: ${DATA_DIR}`);
 // ── Init services ─────────────────────────────────────────────────────────────
 
 console.log("[server] initialising services...");
+await streamStartStore.init();
 await stageController.init();
 await integrationManager.init();
 await baptismTimerService.init();
@@ -132,6 +136,8 @@ async function shutdown(signal: string): Promise<void> {
   livePoller.stop();
   cacheMaintenance.stop();
   propresenterService.stop();
+  resiService.stop();
+  youtubeService.stop();
   prodcomService.stop();
   sensourceService.stop();
   tslService.stop();
