@@ -173,6 +173,40 @@ export function streamingStat(
   };
 }
 
+/**
+ * What a streaming INDICATOR shows — the wall/widget answer, not the dashboard's.
+ *
+ * Deliberately the same three states, in the same words, that obs-status and
+ * reaper-status have always shown: offline dimmed, an idle word, and the active
+ * word with the ticking number underneath. Those two are usually sitting right
+ * beside these on the same wall, and a widget that answered the same kind of
+ * question in a different shape read as a different app.
+ *
+ * Pure, so the words cannot drift without a test noticing. The caller decides
+ * the colour, because that is a style question the object's own config answers.
+ */
+export function streamIndicator(
+  list: readonly Streamer[],
+  now: number,
+  opts: { showElapsed?: boolean } = {},
+): { value: string; sub: string | null; live: boolean; dim: boolean } {
+  const st = streamingStat(list, now);
+  // No tone is streamingStat's "nothing is even connected". That is a platform
+  // nobody has set up, not a stream that dropped, so it dims rather than taking
+  // a colour — exactly what OBS does when it cannot be reached.
+  if (!st.tone) return { value: "Offline", sub: null, live: false, dim: true };
+  if (st.tone !== "live") return { value: "Off air", sub: null, live: false, dim: false };
+  // Live: the word, with the elapsed time as the sub-line. streamingStat's value
+  // IS the elapsed reading, or "LIVE" when the platform will not say since when.
+  const elapsed = st.value === "LIVE" ? null : st.value;
+  return {
+    value: "Live",
+    sub: opts.showElapsed === false ? null : elapsed,
+    live: true,
+    dim: false,
+  };
+}
+
 /** The loudest current SPL reading across every meter, which is the number
  *  anyone glancing at Home actually wants. Prefers Smaart's A-weighted slow
  *  metric and falls back to whatever the meter reports, since the metric names

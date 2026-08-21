@@ -17,7 +17,7 @@ import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
-import { streamers, streamingStat } from "../app/recording-status";
+import { streamers, streamIndicator } from "../app/recording-status";
 import { useReaperState } from "./use-reaper-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
@@ -418,7 +418,16 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   // and its caption comes from the object rather than from six edits in a switch.
   const readout = (
     value: ReactNode,
-    opts?: { sub?: string | null; valueColor?: string | null; fill?: string | null },
+    opts?: {
+      sub?: string | null;
+      valueColor?: string | null;
+      fill?: string | null;
+      /** Overrides the object's own caption — for a widget whose caption names
+       *  the source rather than being typed by the operator. */
+      caption?: string | null;
+      upper?: boolean;
+      dim?: boolean;
+    },
   ) => (
     <Readout
       caption={(c as { caption?: string | null }).caption}
@@ -830,34 +839,35 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         />
       );
     }
-    case "stream-status": {
-      // Every platform at once by default. `streamers()` is the same function
-      // Home and the context bar ask, so the three cannot disagree about what
-      // "live" means.
-      const all = streamers(ctx.resi, ctx.youtube, ctx.obs);
-      const chosen = !c.platform || c.platform === "any"
-        ? all
-        : all.filter((x: { name: string }) => x.name.toLowerCase() === c.platform);
-      const st = streamingStat(chosen, ctx.now);
-      // Nothing connected is not worth a slab of colour on a wall — it is a
-      // platform nobody has set up, not a stream that dropped.
-      if (!st.tone) return readout("—", { sub: st.sub });
-      const liveNow = st.tone === "live";
-      return readout(liveNow && c.showElapsed === false ? "LIVE" : st.value, {
-        sub: st.sub,
-        valueColor: liveNow ? "var(--green-10)" : "var(--red-10)",
-      });
-    }
-
+    case "stream-status":
     case "home-streaming":
     case "home-streaming-resi":
     case "home-streaming-youtube": {
-      const only = c.type === "home-streaming-resi" ? "Resi" : c.type === "home-streaming-youtube" ? "YouTube" : null;
+      // ONE render for all four, and deliberately the same composition as
+      // obs-status and reaper-status above: caption, the state as a word, and
+      // the ticking number underneath. They answer the same kind of question on
+      // the same wall, and reading differently made the streaming ones look like
+      // a different app — a duration where its neighbour had a word.
+      const only =
+        c.type === "home-streaming-resi" ? "Resi"
+        : c.type === "home-streaming-youtube" ? "YouTube"
+        : c.type === "stream-status" && c.platform && c.platform !== "any"
+          ? (c.platform === "resi" ? "Resi" : "YouTube")
+          : null;
       const all = streamers(ctx.resi, ctx.youtube, ctx.obs);
-      const st = streamingStat(only ? all.filter((x: { name: string }) => x.name === only) : all, ctx.now);
-      return readout(st.value, {
-        sub: st.sub,
-        valueColor: st.tone === "live" ? "var(--green-10)" : st.tone === "danger" ? "var(--red-10)" : null,
+      const chosen = only ? all.filter((x) => x.name === only) : all;
+      const ind = streamIndicator(chosen, ctx.now, { showElapsed: c.showElapsed });
+      const fill = c.fillWhenLive ?? true;
+      // Tally-light mode: nothing on screen unless something is going out.
+      if (!ind.live && (c.hideWhenIdle ?? false)) return null;
+
+      return readout(ind.value, {
+        caption: only ?? "Streaming",
+        sub: ind.sub,
+        upper: true,
+        dim: ind.dim,
+        fill: ind.live && fill ? "var(--red-9)" : null,
+        valueColor: ind.live && !fill ? "var(--red-10)" : null,
       });
     }
 

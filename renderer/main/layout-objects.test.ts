@@ -308,8 +308,8 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "home-streaming", label: "Streaming", group: "Status", after: "home-screens" },
   { type: "stream-status", label: "Streaming status", group: "Status", after: "home-streaming" },
   // `after: null` — each leads its own group, because each platform gets one.
-  { type: "home-streaming-resi", label: "Resi streaming", group: "Resi", after: null },
-  { type: "home-streaming-youtube", label: "YouTube streaming", group: "YouTube", after: null },
+  { type: "home-streaming-resi", label: "Resi status", group: "Resi", after: null },
+  { type: "home-streaming-youtube", label: "YouTube status", group: "YouTube", after: null },
 ];
 
 /**

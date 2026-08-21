@@ -664,7 +664,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     stylingOnly: true,
   },
   "home-streaming-resi": {
-    label: "Resi streaming",
+    label: "Resi status",
     blurb: "Live or off air, with the elapsed time",
     group: "Resi",
     config: () => ({ type: "home-streaming-resi" }),
@@ -674,7 +674,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     integration: { id: "resi", label: "Resi" },
   },
   "home-streaming-youtube": {
-    label: "YouTube streaming",
+    label: "YouTube status",
     blurb: "Live or off air, with the elapsed time",
     group: "YouTube",
     config: () => ({ type: "home-streaming-youtube" }),

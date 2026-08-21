@@ -72,6 +72,25 @@ budget.
 If the quota does run out, the integration says so and waits half an hour rather
 than retrying into a door that stays shut until midnight Pacific.
 
+## On a screen
+
+**YouTube status** is a layout object, and the twin of **OBS status** and **REAPER
+status** — the same three states in the same words, so a wall carrying more than
+one of them reads as one design:
+
+| | |
+|---|---|
+| Offline | dimmed. YouTube is not set up, or cannot be reached |
+| Off air | reachable, nothing going out |
+| Live | the word, with the elapsed time underneath |
+
+Live fills the widget red by default, the way a recording OBS does. **Fill red
+when live** turns that off and colours the word instead; **Hide when idle**
+makes it a tally light, drawing nothing at all until something is going out.
+
+**Streaming status** is the same widget asking about every platform at once, or
+about one you pick.
+
 ## Automation
 
 - **Triggers:** YouTube goes live · YouTube stops streaming
