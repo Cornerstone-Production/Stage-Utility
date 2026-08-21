@@ -81,6 +81,98 @@ export function recorderStat(r: Recorder | undefined): { value: string; sub: str
   return { value: "RECORDING", sub: r.timecode ?? "no position reported", tone: "live" };
 }
 
+/**
+ * One thing that can be streaming.
+ *
+ * The twin of `Recorder`, and deliberately the same shape of idea: a LIST, so
+ * "are we live?" is one question about every platform at once and adding a
+ * third is one entry in `streamers()` rather than a new argument threaded
+ * through every surface that asks.
+ */
+export interface Streamer {
+  /** How it is named to the operator: "Resi", "YouTube", "OBS". */
+  name: string;
+  /** The link to the platform. Not the same as being live. */
+  connected: boolean;
+  live: boolean;
+  /** ISO start, or null when the platform will not say since when. */
+  startedAt?: string | null;
+}
+
+/**
+ * Every platform the app can see streaming, from the live state.
+ *
+ * THE place a new streaming integration is added. OBS is here because it
+ * already reports `streaming` alongside `recording` — the same connection that
+ * tells us it is recording tells us it is live, and leaving that out would mean
+ * the app knew and did not say.
+ */
+export function streamers(
+  resi: { connected: boolean; live: boolean; startedAt: string | null } | null,
+  youtube: { connected: boolean; live: boolean; startedAt: string | null } | null,
+  obs: { connected: boolean; streaming: boolean } | null,
+): Streamer[] {
+  return [
+    { name: "Resi", connected: !!resi?.connected, live: !!resi?.live, startedAt: resi?.startedAt ?? null },
+    { name: "YouTube", connected: !!youtube?.connected, live: !!youtube?.live, startedAt: youtube?.startedAt ?? null },
+    // OBS has no start time for its stream — obs-websocket reports the output
+    // is active, not when it began — so elapsed comes from whoever else is live,
+    // or is absent.
+    { name: "OBS", connected: !!obs?.connected, streaming: !!obs?.streaming, live: !!obs?.streaming, startedAt: null } as Streamer,
+  ];
+}
+
+/** "HH:MM:SS" (or "MM:SS" under an hour) since `startedAt`. */
+export function elapsedSince(startedAt: string | null | undefined, now: number): string | null {
+  if (!startedAt) return null;
+  const t = Date.parse(startedAt);
+  if (!Number.isFinite(t)) return null;
+  // A start in the future is a clock disagreement between us and the platform,
+  // not a negative duration. Show it as just-started rather than "-0:03".
+  const sec = Math.max(0, Math.floor((now - t) / 1000));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const ss = String(sec % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
+/**
+ * Are we live, and what should it say?
+ *
+ * The streaming twin of `recordingStat`, and it makes the same distinction:
+ * connected-but-not-live is its own state, reported rather than folded into
+ * "no". Mid-service "Resi is reachable and is NOT streaming" is the single most
+ * useful thing this can tell you, and it is the one a boolean would lose.
+ *
+ * `now` is passed in because elapsed is computed here rather than reported by
+ * the platform — a caller that ticks a clock already has one, and a function
+ * that reads the clock itself cannot be tested.
+ */
+export function streamingStat(
+  list: readonly Streamer[],
+  now: number,
+): { value: string; sub: string; tone?: "danger" | "live" } {
+  const wired = list.filter((s) => s.connected);
+  if (wired.length === 0) return { value: "—", sub: "no streaming platform connected" };
+
+  const live = wired.filter((s) => s.live);
+  if (live.length === 0) {
+    // Connected and not live. Amber rather than red: outside a service this is
+    // simply the truth, and the surfaces decide whether the moment makes it
+    // worth shouting about.
+    return { value: "OFFLINE", sub: `${wired.map((s) => s.name).join(" + ")} connected`, tone: "danger" };
+  }
+  // The longest-running start, so two platforms that went live a minute apart
+  // report the stream rather than the most recent button press.
+  const starts = live.map((s) => s.startedAt).filter((x): x is string => !!x).map((x) => Date.parse(x)).filter(Number.isFinite);
+  const since = starts.length ? new Date(Math.min(...starts)).toISOString() : null;
+  return {
+    value: elapsedSince(since, now) ?? "LIVE",
+    sub: live.map((s) => s.name).join(" + "),
+    tone: "live",
+  };
+}
+
 /** The loudest current SPL reading across every meter, which is the number
  *  anyone glancing at Home actually wants. Prefers Smaart's A-weighted slow
  *  metric and falls back to whatever the meter reports, since the metric names

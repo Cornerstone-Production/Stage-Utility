@@ -173,6 +173,31 @@ export interface ReaperStatusDTO {
   positionString: string | null;
 }
 
+/**
+ * Live state of one streaming platform (pushed on "resi:status" / "youtube:status").
+ *
+ * `connected` is the link to the platform's API; `live` is whether it is
+ * actually broadcasting. The two are separate for the same reason they are on
+ * the recorders: "we cannot reach Resi" and "Resi is not streaming" are
+ * different problems and only one of them is yours to fix mid-service.
+ *
+ * `startedAt` is null when a platform says it is live without saying since
+ * when. Resi's encoder payload may not carry a start time at all, in which case
+ * the service supplies the moment it FIRST observed the stream, persisted so a
+ * restart mid-service does not reset the clock. A null here means the elapsed
+ * time is genuinely unknown, and the surfaces show the state without a duration
+ * rather than inventing 0:00.
+ */
+export interface StreamStatusDTO {
+  connected: boolean;
+  live: boolean;
+  startedAt: string | null;
+  /** What it is streaming — the encoder or broadcast name, for the sub-line. */
+  detail: string | null;
+  /** Why it is not connected, when that is known and worth showing. */
+  error?: string | null;
+}
+
 /** Live people counts from the SenSource Vea integration (pushed on
  *  "people:count"). Counts are polled (SenSource has no real-time endpoint) and
  *  computed from today's traffic: attendance = Σins, occupancy = Σins − Σouts
