@@ -245,16 +245,27 @@ export function HomeRoute() {
    */
   function startDrag(e: ReactPointerEvent<HTMLElement>, id: string) {
     if (e.button !== 0) return;
+    // The chrome carries the size buttons, the visibility select and the remove
+    // X. A press on one of those is a press on a CONTROL, and the drag gesture
+    // must not touch it — capturing the pointer here retargets the rest of the
+    // sequence to the card, so the button never saw its own pointerup and the
+    // click never happened. Delete stopped working the day dragging moved to
+    // pointer events.
+    if ((e.target as HTMLElement).closest("button, select, input, [role='combobox']")) return;
+
     const el = e.currentTarget;
     const startX = e.clientX;
     const startY = e.clientY;
     let moved = false;
-    el.setPointerCapture(e.pointerId);
 
     const move = (ev: PointerEvent) => {
       if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
       if (!moved) {
         moved = true;
+        // Captured only once this IS a drag, for the same reason: until the
+        // pointer has travelled, everything under it must keep behaving
+        // normally.
+        el.setPointerCapture(ev.pointerId);
         setDragId(id);
       }
       const cell = cellAt(ev.clientX, ev.clientY);
