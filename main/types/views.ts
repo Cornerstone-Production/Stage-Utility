@@ -575,6 +575,21 @@ export type HomeVisibility = "always" | "live" | "idle";
 export interface HomePlacement {
   size?: HomeCardSize;
   when?: HomeVisibility;
+  /**
+   * Where the operator put this card, as 1-based grid cells.
+   *
+   * Absent means "flow" — the packed behaviour Home has always had, and what
+   * every card on disk carries until somebody drags one. Present means exactly
+   * here, gaps included: leaving space between two widgets is a thing you can
+   * ask for, and a packing grid has no way to express it.
+   *
+   * Dropped below about 520px, where the grid narrows to two columns and then
+   * one. A column chosen on a three-wide page is not a column on a phone, and
+   * honouring it there would leave holes down a screen that has no room for
+   * them.
+   */
+  col?: number;
+  row?: number;
 }
 
 export interface LayoutObject {
