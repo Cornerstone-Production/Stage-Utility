@@ -22,9 +22,21 @@ import { AppLink } from "../app-link";
 import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { readinessChecks, outstanding, type ReadinessCheck } from "./readiness";
 import type { LayoutObjectConfig } from "@main/types/views";
-/** The four cards Home draws with its own markup. Derived from the config union
- *  so a fifth home-* type cannot be silently left out of the switch below. */
-type HomeCardType = Extract<LayoutObjectConfig, { type: `home-${string}` }>["type"];
+/**
+ * The cards Home draws with its own markup. Derived from the config union so a
+ * new home-* type cannot be silently left out of the switch below.
+ *
+ * The streaming trio is excluded deliberately. They render through the shared
+ * streaming case in layout-renderer instead — the same composition as obs-status
+ * and reaper-status, on Home and on a wall alike — so that a widget cannot say
+ * one thing in the editor and another on the dashboard. A card here as well
+ * would be a second answer to the same question, which is how they came to
+ * disagree in the first place.
+ */
+type HomeCardType = Exclude<
+  Extract<LayoutObjectConfig, { type: `home-${string}` }>["type"],
+  "home-streaming" | "home-streaming-resi" | "home-streaming-youtube"
+>;
 import { flashTarget } from "../flash";
 import { cn } from "../../lib/cn";
 import { invoke, onNotification } from "../../lib/api";
@@ -33,8 +45,7 @@ import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
 import { useObsState } from "../../main/use-obs-state";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
-import { recordingStat, recorderStat, recorders, streamers, streamingStat, loudestSpl } from "../recording-status";
-import { useResiState, useYouTubeState } from "../../main/use-stream-state";
+import { recordingStat, recorderStat, recorders, loudestSpl } from "../recording-status";
 import { Readout } from "../../main/readout";
 
 /* ── Shared bits ──────────────────────────────────────────────────────────── */
@@ -434,27 +445,6 @@ export function LiveStatusCard({
 }
 
 /**
- * Every platform at once, or one of them.
- *
- * Same shape as RecordingCard and for the same reason: "are we going out?" is a
- * question about every destination, and a widget that reported only YouTube
- * would read as reassurance while Resi sat off air. A new platform joins by
- * being added to `streamers()`; nothing here changes.
- */
-export function StreamingCard({ platform = "any" }: { platform?: string }) {
-  const list = streamers(useResiState(), useYouTubeState(), useObsState());
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    // The elapsed time is computed here, so it needs a tick to advance.
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const chosen = platform === "any" ? list : list.filter((s) => s.name === platform);
-  const st = streamingStat(chosen, now);
-  return <Stat label={platform === "any" ? "Streaming" : platform} value={st.value} sub={st.sub} tone={st.tone} />;
-}
-
-/**
  * Are we getting this?
  *
  * Every recorder at once, not one widget per integration — the question
@@ -534,12 +524,6 @@ export function HomeCard({
       return <RecordingCard recorder="OBS" />;
     case "home-recording-reaper":
       return <RecordingCard recorder="REAPER" />;
-    case "home-streaming":
-      return <StreamingCard />;
-    case "home-streaming-resi":
-      return <StreamingCard platform="Resi" />;
-    case "home-streaming-youtube":
-      return <StreamingCard platform="YouTube" />;
     case "home-spl":
       return <SplCard />;
     case "home-screens":

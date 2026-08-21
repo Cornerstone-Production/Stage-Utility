@@ -898,24 +898,40 @@ export function Inspector({
           </>
         );
       })()}
-      {c.type === "stream-status" && (
+      {(c.type === "stream-status" || c.type === "home-streaming" || c.type === "home-streaming-resi" || c.type === "home-streaming-youtube") && (
         <>
-          <RowSelect
-            label="Platform"
-            hint="Which platform to report. Any answers every one at once — live if anything is going out."
-            value={c.platform ?? "any"}
-            options={[
-              { value: "any", label: "Any platform" },
-              { value: "resi", label: "Resi" },
-              { value: "youtube", label: "YouTube" },
-            ]}
-            onChange={(v) => onConfig({ ...c, platform: v as "any" | "resi" | "youtube" })}
+          {/* The same three switches obs-status offers, because these are the
+              same widget pointed at a different source. Only the general one
+              asks WHICH platform — the per-platform objects already answered. */}
+          {c.type === "stream-status" && (
+            <RowSelect
+              label="Platform"
+              hint="Which platform to report. Any answers every one at once — live if anything is going out."
+              value={c.platform ?? "any"}
+              options={[
+                { value: "any", label: "Any platform" },
+                { value: "resi", label: "Resi" },
+                { value: "youtube", label: "YouTube" },
+              ]}
+              onChange={(v) => onConfig({ ...c, platform: v as "any" | "resi" | "youtube" })}
+            />
+          )}
+          <RowSwitch
+            label="Fill red when live"
+            checked={c.fillWhenLive ?? true}
+            onChange={(v) => onConfig({ ...c, fillWhenLive: v })}
           />
           <RowSwitch
             label="Show elapsed"
             hint="Off shows just LIVE. Some platforms cannot say when a stream started, and there the elapsed time is measured from when this app first saw it."
             checked={c.showElapsed ?? true}
             onChange={(v) => onConfig({ ...c, showElapsed: v })}
+          />
+          <RowSwitch
+            label="Hide when idle"
+            hint="A tally light: nothing on screen at all unless something is going out."
+            checked={c.hideWhenIdle ?? false}
+            onChange={(v) => onConfig({ ...c, hideWhenIdle: v })}
           />
         </>
       )}

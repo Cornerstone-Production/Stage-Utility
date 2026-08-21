@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { elapsedSince, streamers, streamingStat, type Streamer } from "./recording-status.js";
+import { elapsedSince, streamIndicator, streamers, streamingStat, type Streamer } from "./recording-status.js";
 
 // The streaming twin of the recording judgement. What matters here is the same
 // thing that mattered there: that "connected but NOT live" is its own answer.
@@ -112,5 +112,57 @@ describe("who counts as a streamer", () => {
     // The surfaces render from this; a platform that vanished when unconfigured
     // would make the widget change shape as gear is set up.
     assert.deepEqual(streamers(null, null, null).map((x) => x.name), ["Resi", "YouTube", "OBS"]);
+  });
+});
+
+
+describe("the indicator on a wall", () => {
+  // These are the words obs-status and reaper-status use for the same three
+  // states. A streaming widget beside one of those has to read the same way,
+  // which is the whole reason this function exists rather than each widget
+  // phrasing it for itself.
+  test("nothing connected reads Offline, dimmed, with no second line", () => {
+    const ind = streamIndicator([s({ connected: false })], NOW);
+    assert.equal(ind.value, "Offline");
+    assert.equal(ind.dim, true);
+    assert.equal(ind.live, false);
+    assert.equal(ind.sub, null, "an unset platform has nothing to put underneath");
+  });
+
+  test("connected and not streaming reads Off air, undimmed", () => {
+    const ind = streamIndicator([s({ connected: true, live: false })], NOW);
+    assert.equal(ind.value, "Off air");
+    assert.equal(ind.dim, false);
+    assert.equal(ind.live, false);
+  });
+
+  test("live reads Live, with the clock underneath", () => {
+    const ind = streamIndicator([s({ live: true, startedAt: at(90) })], NOW);
+    assert.equal(ind.value, "Live");
+    assert.equal(ind.sub, "1:30:00");
+    assert.equal(ind.live, true);
+  });
+
+  test("show-elapsed off keeps the word and drops the clock", () => {
+    const ind = streamIndicator([s({ live: true, startedAt: at(5) })], NOW, { showElapsed: false });
+    assert.equal(ind.value, "Live");
+    assert.equal(ind.sub, null);
+  });
+
+  test("live with no start time shows the word alone rather than 0:00", () => {
+    // streamingStat says "LIVE" when a platform will not say since when. That is
+    // the value there and must not arrive here as a sub-line reading "LIVE".
+    const ind = streamIndicator([s({ live: true, startedAt: null })], NOW);
+    assert.equal(ind.value, "Live");
+    assert.equal(ind.sub, null);
+  });
+
+  test("one platform live is live, whatever the others are doing", () => {
+    const ind = streamIndicator(
+      [s({ name: "Resi", live: false }), s({ name: "YouTube", live: true, startedAt: at(2) })],
+      NOW,
+    );
+    assert.equal(ind.value, "Live");
+    assert.equal(ind.sub, "2:00");
   });
 });
