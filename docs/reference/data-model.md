@@ -46,9 +46,26 @@ so there is nowhere to put a control.
 ### Home
 
 Home is a view too, but a deliberately odd one. It stores which widgets the front
-page shows, their order, and each one's size and visibility — and **nothing else
-about it is read**. Every object's position is filler the type requires; Home has
+page shows, each one's size and visibility, and — once you have moved one — which
+grid cell it sits in. Every object's x/y/w/h is filler the type requires; Home has
 no canvas, because a grid of tiles has no geometry to arrange.
+
+**Placement.** A widget with no cell of its own flows: it falls into the first
+gap that fits, which is how every Home behaved before this and how one that has
+never been rearranged behaves still. Drag a widget and it takes a cell, and so
+does everything else on the page at once — freezing what was on screen, so a
+move stays local instead of rearranging the page behind it.
+
+That is what makes a **gap** possible: nothing re-packs afterwards, so space you
+leave between two widgets stays there. Dropping onto an occupied cell pushes what
+was there downward, cascading, so a drop never covers a widget. The pencil's
+neighbour in the header — **Pack tight** — throws every cell away and lets the
+page flow again.
+
+Cells are for the full-width page. Below about 520px the grid narrows to two
+columns and then one, and placements are ignored: a column chosen on a
+three-wide page is not a column on a phone, and honouring it there would leave
+holes down a screen with no room for them.
 
 Home is edited in the Home tab itself, with the pencil in the header. In edit
 mode each tile gains a size picker, a visibility select, a remove button and a

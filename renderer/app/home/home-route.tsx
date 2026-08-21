@@ -17,7 +17,7 @@
 // every display with its URL, which is the same job done in the place you go to
 // think about screens.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Loader2Icon, PencilIcon, CheckIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -26,13 +26,18 @@ import { useStageSettings } from "../use-stage-settings";
 import { GettingStarted } from "../../settings/getting-started";
 import { usePageActions } from "../page-actions";
 import { Button } from "../../components/ui/button";
-import { PlusIcon } from "lucide-react";
+import { PlusIcon, LayoutGridIcon } from "lucide-react";
 import { flashTarget } from "../flash";
 import { HOME_VIEW_ID, defaultHomeLayout } from "@main/services/home-view";
 import type { LayoutObject } from "@main/types/views";
 import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
-import { addCard, moveCard, removeCard, setSize, setWhen, visibleCards } from "./home-cards";
+import { addCard, removeCard, setSize, setWhen, visibleCards } from "./home-cards";
+import { ROW_PX, GRID_GAP_PX } from "./home-grid";
+import { COLUMNS } from "./home-cards";
+import {
+  boxesOf, clampCol, isPlaced, placeAt, placeNewCard, pushAway, resetPlacement, type Box,
+} from "./home-placement";
 import { HomeGrid } from "./home-grid";
 import { AddWidgetSheet, CardChrome } from "./home-editor";
 
@@ -43,7 +48,10 @@ export function HomeRoute() {
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
+  /** The cell the drag is currently over, so the page can show what dropping
+   *  here would do before the operator commits to it. */
+  const [dropCell, setDropCell] = useState<{ col: number; row: number } | null>(null);
+  const gridEl = useRef<HTMLDivElement | null>(null);
   /** The card list as the operator has it, ahead of the server. See `save`. */
   const [pending, setPending] = useState<LayoutObject[] | null>(null);
   /** The same list, readable synchronously inside one React batch. Written in
@@ -78,6 +86,11 @@ export function HomeRoute() {
   // the (possibly absent) state rather than from the derived `home` below, which
   // does not exist yet at this point in the render.
   const hasHome = !!s.stageState?.views?.some((v) => v.id === HOME_VIEW_ID);
+  // Has anything been placed by hand? Read off the state rather than the derived
+  // list below, which does not exist yet at this point in the render.
+  const arranged = (
+    s.stageState?.views?.find((v) => v.id === HOME_VIEW_ID)?.layout?.objects ?? []
+  ).some((o) => isPlaced(o));
   // The controls live in the page HEADER, not on a row of their own — that row
   // held one link and cost a whole band of the page that most wants the height.
   // Icon squares, matching the object controls in the custom-view editor.
@@ -95,6 +108,21 @@ export function HomeRoute() {
             <PlusIcon className="size-4" />
           </Button>
         )}
+        {/* The way back from an arrangement that got away from you: drop every
+            hand placement and let the page pack itself again. Only offered once
+            something HAS been placed, so it is never a button that does nothing. */}
+        {editing && arranged && (
+          <Button
+            variant="filled"
+            size="medium"
+            iconOnly
+            onClick={() => save((objs) => resetPlacement(objs))}
+            aria-label="Pack widgets tight, clearing any gaps"
+            tooltip="Pack tight — clears the gaps"
+          >
+            <LayoutGridIcon className="size-4" />
+          </Button>
+        )}
         <Button
           variant={editing ? "accent" : "filled"}
           size="medium"
@@ -106,7 +134,7 @@ export function HomeRoute() {
         </Button>
       </>
     ) : null,
-    [hasHome, editing],
+    [hasHome, editing, arranged],
   );
 
   if (s.stageLoading || !s.stageState) {
@@ -172,14 +200,104 @@ export function HomeRoute() {
   // shows only what belongs to right now.
   const cards = editing ? objects : visibleCards(objects, mode);
 
-  /** Reorder by dropping one card on another. Indexes are into the full list. */
-  function drop(targetId: string) {
-    if (!dragId || dragId === targetId) return;
-    const from = objects.findIndex((o) => o.id === dragId);
-    const to = objects.findIndex((o) => o.id === targetId);
-    save((objs) => moveCard(objs, from, to));
+  /**
+   * The grid cell under a pointer.
+   *
+   * Column and row are read off the grid's own box rather than from the element
+   * underneath, so the empty space between and below the cards is a place you
+   * can drop into — which is the entire point of being able to leave a gap.
+   */
+  function cellAt(clientX: number, clientY: number): { col: number; row: number } | null {
+    const el = gridEl.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const colW = (r.width - GRID_GAP_PX * (COLUMNS - 1)) / COLUMNS;
+    const col = Math.floor((clientX - r.left) / (colW + GRID_GAP_PX)) + 1;
+    const row = Math.floor((clientY - r.top) / (ROW_PX + GRID_GAP_PX)) + 1;
+    return {
+      col: Math.max(1, Math.min(col, COLUMNS)),
+      row: Math.max(1, row),
+    };
+  }
+
+  /** The layout as it would be if the drag landed here — what the page draws
+   *  while dragging, so the cards move out of the way before the drop rather
+   *  than after it. */
+  const previewBoxes: Box[] | undefined = (() => {
+    if (!dragId || !dropCell) return undefined;
+    const boxes = boxesOf(cards);
+    const moving = boxes.find((b) => b.id === dragId);
+    if (!moving) return undefined;
+    return pushAway(boxes, {
+      ...moving,
+      col: clampCol(dropCell.col, moving.w),
+      row: dropCell.row,
+    });
+  })();
+
+  /**
+   * Press, move, drop — the whole gesture, in pointer events.
+   *
+   * A drag only begins once the pointer has actually travelled: the chrome
+   * carries the size and remove controls, and a press that never moves has to
+   * stay a click on those. The pointer is captured, so a drag that leaves the
+   * grid still reports where it went and still ends.
+   */
+  function startDrag(e: ReactPointerEvent<HTMLElement>, id: string) {
+    if (e.button !== 0) return;
+    const el = e.currentTarget;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let moved = false;
+    el.setPointerCapture(e.pointerId);
+
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
+      if (!moved) {
+        moved = true;
+        setDragId(id);
+      }
+      const cell = cellAt(ev.clientX, ev.clientY);
+      if (cell) setDropCell((prev) => (prev && prev.col === cell.col && prev.row === cell.row ? prev : cell));
+    };
+    const finish = (ev: PointerEvent) => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", finish);
+      el.removeEventListener("pointercancel", cancel);
+      if (el.hasPointerCapture(ev.pointerId)) el.releasePointerCapture(ev.pointerId);
+      if (moved) dropOnGrid(id, ev.clientX, ev.clientY);
+      else endDrag();
+    };
+    // A cancelled pointer (a system gesture, a lost capture) must not leave the
+    // page frozen mid-drag with a card half-moved.
+    const cancel = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", finish);
+      el.removeEventListener("pointercancel", cancel);
+      endDrag();
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", finish);
+    el.addEventListener("pointercancel", cancel);
+  }
+
+  function endDrag() {
     setDragId(null);
-    setOverId(null);
+    setDropCell(null);
+  }
+
+  /**
+   * Drop where the pointer is, gaps and all.
+   *
+   * The id is an ARGUMENT, not read from state. The gesture's handlers are
+   * created on pointerdown, so they close over the render where nothing was
+   * being dragged yet — reading `dragId` there gave null, and every drop
+   * silently did nothing while the preview had been moving the whole time.
+   */
+  function dropOnGrid(id: string, clientX: number, clientY: number) {
+    const cell = cellAt(clientX, clientY);
+    if (cell) save((objs) => placeAt(objs, id, cell.col, cell.row));
+    endDrag();
   }
 
 
@@ -200,18 +318,19 @@ export function HomeRoute() {
         <HomeGrid
           layout={{ ...home.layout, objects: cards }}
           cards={cards}
+          gridRef={(el) => { gridEl.current = el; }}
+          boxes={previewBoxes}
+          animate={!!dragId}
           chrome={
             editing
               ? (o) => (
                   <CardChrome
                     card={o}
-                    dragging={dragId === o.id || overId === o.id}
+                    dragging={dragId === o.id}
                     onSize={(size) => save((objs) => setSize(objs, o.id, size))}
                     onWhen={(when) => save((objs) => setWhen(objs, o.id, when))}
                     onRemove={() => save((objs) => removeCard(objs, o.id))}
-                    onDragStart={() => setDragId(o.id)}
-                    onDragOver={() => setOverId(o.id)}
-                    onDrop={() => drop(o.id)}
+                    onDragPointerDown={(e) => startDrag(e, o.id)}
                   />
                 )
               : undefined
@@ -224,7 +343,12 @@ export function HomeRoute() {
         onClose={() => setAdding(false)}
         onAdd={(type, size) => {
           setAdding(false);
-          save((objs) => setSize(addCard(objs, type, `home-${type}-${objs.length + 1}-${objs.length}`), `home-${type}-${objs.length + 1}-${objs.length}`, size));
+          save((objs) => {
+            const id = `home-${type}-${objs.length + 1}-${objs.length}`;
+            // Below everything on a page that has been arranged, rather than into
+            // the first free cell — which is often a gap somebody left on purpose.
+            return placeNewCard(setSize(addCard(objs, type, id), id, size), id);
+          });
         }}
       />
 

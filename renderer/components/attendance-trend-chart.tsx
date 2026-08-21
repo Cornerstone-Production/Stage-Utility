@@ -6,7 +6,7 @@
 // implementation is a promise to keep them matching, and this repo has enough
 // evidence about how those go.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { clamp } from "@main/services/clamp";
 import { shortDay, type TrendPoint } from "../settings/sections/overview-data";
@@ -15,7 +15,32 @@ import { shortDay, type TrendPoint } from "../settings/sections/overview-data";
  *  latest point marked, and first/last date labels. The hero of the blend — not
  *  decorative. Falls back to a quiet note when there isn't enough to plot. */
 export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
-  const W = 640;
+  /**
+   * The viewBox is the chart's REAL pixel width, measured.
+   *
+   * It used to be a fixed 640 stretched to fit with `preserveAspectRatio="none"`,
+   * which is fine for the polyline — it has a non-scaling stroke — and wrong for
+   * everything else in the drawing. On History, where the chart is about 640
+   * wide, the scale was near 1 and nobody noticed. On Home's widest tile it is
+   * three times that: the date labels came out three times too wide, and the dot
+   * marking the latest service was an ellipse.
+   *
+   * Measuring instead of stretching means one user unit is one pixel, so a
+   * circle is a circle at any width, and the same component keeps drawing the
+   * same chart on both pages — which is why it is one component.
+   */
+  const box = useRef<HTMLDivElement>(null);
+  const [W, setW] = useState(640);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      // A floor, so a card mid-mount at zero width cannot divide by nothing.
+      setW(Math.max(240, Math.round(entry.contentRect.width)));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const H = 130;
   const padTop = 16;
   const padBottom = 26;
@@ -43,12 +68,16 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   const hx = hover != null ? x(hover) : 0;
   const hy = hp ? y(hp.value) : 0;
   return (
-    <div className="relative">
+    <div className="relative" ref={box}>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
         width="100%"
         height={H}
+        // The viewBox matches the measured width, so this scales nothing. It
+        // stays "none" only to keep a frame mid-resize — where the measurement
+        // is one tick stale — stretched rather than letterboxed, which is the
+        // less visible of the two.
         preserveAspectRatio="none"
         onPointerMove={(e) => {
           const svg = svgRef.current;

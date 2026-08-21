@@ -16,6 +16,7 @@ import { XIcon, GripVerticalIcon } from "lucide-react";
 import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER } from "../../main/layout-objects";
 import type { HomeCardSize, HomeVisibility, LayoutObject } from "@main/types/views";
 import { DialogOverlay } from "../../components/ui/dialog";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { cn } from "../../lib/cn";
 import { SIZES, SIZE_ORDER, WHEN_LABELS, defaultSize, sizeOf, whenOf } from "./home-cards";
 
@@ -28,18 +29,17 @@ export function CardChrome({
   onSize,
   onWhen,
   onRemove,
-  onDragStart,
-  onDragOver,
-  onDrop,
+  onDragPointerDown,
   dragging,
 }: {
   card: LayoutObject;
   onSize: (s: HomeCardSize) => void;
   onWhen: (w: HomeVisibility) => void;
   onRemove: () => void;
-  onDragStart: () => void;
-  onDragOver: () => void;
-  onDrop: () => void;
+  /** Pointer went down on the card. The route decides whether that becomes a
+   *  drag — a press that never moves is a click on the controls. */
+  onDragPointerDown: (e: ReactPointerEvent<HTMLElement>) => void;
+  /** This card is the one being dragged. */
   dragging: boolean;
 }) {
   const label = LAYOUT_OBJECTS[card.config.type as keyof typeof LAYOUT_OBJECTS]?.label ?? card.config.type;
@@ -47,17 +47,22 @@ export function CardChrome({
   const size = sizeOf(card);
   return (
     <div
-      // The whole card is the drag handle and the drop target, so a drag can
-      // start and land anywhere on it rather than only on a grip the size of a
-      // thumbnail.
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={(e) => { e.preventDefault(); onDragOver(); }}
-      onDrop={(e) => { e.preventDefault(); onDrop(); }}
+      // The whole card is the drag handle, so a drag can start anywhere on it
+      // rather than only on a grip the size of a thumbnail.
+      //
+      // POINTER EVENTS, not HTML5 drag-and-drop. Native DnD gives no drag at all
+      // on a touch screen — Home is a page an operator uses on a tablet — and
+      // its drag image is a translucent snapshot the page cannot style, which is
+      // most of why the widget being dragged was the hardest thing to see.
+      onPointerDown={onDragPointerDown}
       className={cn(
         "absolute inset-0 cursor-grab rounded-xl ring-1 ring-inset ring-transparent transition-colors",
         "hover:ring-accent/60 focus-within:ring-accent/60 active:cursor-grabbing",
-        dragging && "opacity-40",
+        // Lifted, not faded. It follows the pointer cell by cell while the rest
+        // of the page moves out of its way, so it needs to stay readable.
+        dragging && "opacity-90 ring-2 ring-accent shadow-xl",
+        // Nothing marks the card under the pointer: the page itself is already
+        // showing what the drop will do, with everything in the way moved aside.
       )}
     >
       {/* Always visible, not hover-revealed. This chrome only renders while

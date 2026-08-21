@@ -8,12 +8,78 @@
 // what makes "add any widget to Home" a real sentence rather than a promise
 // about a second widget set.
 
-import type { CSSProperties, ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import type { LayoutDTO, LayoutObject } from "@main/types/views";
 
 import { ObjectContent, boxStyle, useLayoutData } from "../../main/layout-renderer";
 import type { LayoutRenderCtx } from "../../main/layout-renderer";
-import { SIZES, sizeOf } from "./home-cards";
+import { COLUMNS, SIZES, sizeOf } from "./home-cards";
+import { boxesOf, rowsNeeded, type Box } from "./home-placement";
+
+export const GRID_GAP_PX = 12;
+
+/**
+ * Slide every card that moved, from where it was to where it now is.
+ *
+ * Grid lines do not animate — a card that changes cells jumps. This is the
+ * standard FLIP: measure before the paint, apply the inverse as a transform so
+ * the card appears not to have moved, then release it on the next frame and let
+ * a transition carry it across. Without it, "the other widgets move out of the
+ * way" is a teleport, which reads as the page glitching rather than as the page
+ * making room.
+ */
+function useSlideOnMove(deps: unknown, enabled: boolean) {
+  const host = useRef<HTMLDivElement | null>(null);
+  const last = useRef(new Map<string, DOMRect>());
+
+  useLayoutEffect(() => {
+    const el = host.current;
+    if (!el) return;
+    const cards = [...el.querySelectorAll<HTMLElement>("[data-card-id]")];
+    const now = new Map<string, DOMRect>();
+    for (const card of cards) {
+      const id = card.dataset.cardId!;
+      const rect = card.getBoundingClientRect();
+      now.set(id, rect);
+      const before = last.current.get(id);
+      if (!enabled || !before) continue;
+      const dx = before.left - rect.left;
+      const dy = before.top - rect.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+      card.style.transition = "none";
+      card.style.transform = `translate(${dx}px, ${dy}px)`;
+      // Two frames: one to let the browser take the inverted position as the
+      // start, one to release it. A single frame is sometimes coalesced with the
+      // style write above, and the card jumps anyway.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          card.style.transition = "transform 180ms cubic-bezier(0.2, 0, 0, 1)";
+          card.style.transform = "";
+        });
+      });
+    }
+    last.current = now;
+  }, [deps, enabled]);
+
+  // Nothing half-animated survives the end of a drag.
+  useEffect(() => {
+    if (enabled) return;
+    const el = host.current;
+    if (!el) return;
+    for (const card of el.querySelectorAll<HTMLElement>("[data-card-id]")) {
+      card.style.transition = "";
+      card.style.transform = "";
+    }
+  }, [enabled]);
+
+  // A setter rather than the ref itself: the grid also hands its element to the
+  // caller, and assigning to a hook's ref from outside it is exactly what the
+  // immutability rule is there to stop.
+  const setHost = useCallback((el: HTMLDivElement | null) => {
+    host.current = el;
+  }, []);
+  return setHost;
+}
 
 /**
  * The widget's own styling MINUS everything Home supplies itself: the frame AND
@@ -124,14 +190,30 @@ export function HomeGrid({
   layout,
   cards,
   chrome,
+  boxes: boxesOverride,
+  animate = false,
+  gridRef,
 }: {
   layout: LayoutDTO;
   /** The cards to draw, already filtered and ordered by the caller. */
   cards: readonly LayoutObject[];
   /** Per-card overlay — the editor's controls. Absent when not editing. */
   chrome?: (o: LayoutObject) => ReactNode;
+  /** Placements to draw INSTEAD of the stored ones — the live preview of a drag
+   *  in progress, so the page shows what dropping here would do. */
+  boxes?: readonly Box[];
+  /** Slide cards between cells rather than jumping. On during a drag. */
+  animate?: boolean;
+  /** The grid element itself, for turning a pointer position into a cell. */
+  gridRef?: (el: HTMLDivElement | null) => void;
 }) {
   const ctx = useHomeCtx(layout);
+  const boxes = boxesOverride ?? boxesOf(cards);
+  const byId = new Map(boxes.map((b) => [b.id, b]));
+  // A signature rather than the array: the effect must run when a card MOVES,
+  // and an array identity changes on every render.
+  const signature = boxes.map((b) => `${b.id}:${b.col}:${b.row}`).join("|");
+  const setHost = useSlideOnMove(signature, animate);
   if (!ctx) return null;
 
   return (
@@ -146,14 +228,35 @@ export function HomeGrid({
       // on a laptop that had room for three.
       style={{ containerType: "inline-size", containerName: "home" } as CSSProperties}
     >
-      <div className="home-grid">
+      <div
+        className="home-grid"
+        ref={(el) => {
+          setHost(el);
+          gridRef?.(el);
+        }}
+        // Enough rows to reach past the last card, so the empty space below the
+        // page is somewhere a widget can actually be dropped. Without it the
+        // grid ends at its content and "leave a gap at the bottom" had no
+        // surface to land on.
+        style={{ gridTemplateRows: `repeat(${rowsNeeded(boxes)}, ${ROW_PX}px)` }}
+      >
         {cards.map((o) => {
           const { w, h } = SIZES[sizeOf(o)];
+          const box = byId.get(o.id);
           return (
             <div
               key={o.id}
               className="home-card group/card relative min-w-0"
-              style={{ gridColumn: `span ${w}`, gridRow: `span ${h}` }}
+              style={{
+                // Explicit cells, so a gap the operator left stays a gap. The
+                // narrow breakpoints below throw both away and let it flow —
+                // a column chosen on a three-wide page is not a column on a
+                // phone.
+                gridColumn: box ? `${box.col} / span ${w}` : `span ${w}`,
+                gridRow: box ? `${box.row} / span ${h}` : `span ${h}`,
+                ["--card-w" as string]: String(w),
+                ["--card-h" as string]: String(h),
+              }}
               data-card-id={o.id}
             >
               {/* boxStyle is what paints the widget's own frame — background,
@@ -186,10 +289,12 @@ export function HomeGrid({
            that size, not the grid's to paper over. */
         .home-grid {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(${COLUMNS}, minmax(0, 1fr));
           grid-auto-rows: ${ROW_PX}px;
           gap: ${GAP_PX}px;
-          /* A Small drops into the gap a Large leaves beside it. */
+          /* A Small drops into the gap a Large leaves beside it. Still here for
+             a card with no placement of its own — the placements above are
+             resolved before this ever sees them. */
           grid-auto-flow: row dense;
         }
         @container home (max-width: 520px) {
@@ -197,16 +302,30 @@ export function HomeGrid({
            is a panel, and a dashboard you have to scroll inside to read is not a
            glance. Content that does not fit is the WIDGET's problem to solve at
            that size, not the grid's to paper over. */
-        .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          .home-card { grid-column: span 2 !important; }
+        .home-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            /* Placements are for the full-width page. Here the rows are whatever
+               the flow makes them. */
+            grid-template-rows: none !important;
+          }
+          .home-card {
+            grid-column: span 2 !important;
+            grid-row: span var(--card-h, 1) !important;
+          }
         }
         @container home (max-width: 340px) {
           /* A widget is a fixed box. It does not scroll — a tile you can scroll
            is a panel, and a dashboard you have to scroll inside to read is not a
            glance. Content that does not fit is the WIDGET's problem to solve at
            that size, not the grid's to paper over. */
-        .home-grid { grid-template-columns: minmax(0, 1fr); }
-          .home-card { grid-column: span 1 !important; }
+        .home-grid {
+            grid-template-columns: minmax(0, 1fr);
+            grid-template-rows: none !important;
+          }
+          .home-card {
+            grid-column: span 1 !important;
+            grid-row: span var(--card-h, 1) !important;
+          }
         }
       `}</style>
     </div>
