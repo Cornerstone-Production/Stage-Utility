@@ -11,6 +11,8 @@ import { type RouteCtx, json, readBody } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { integrationManager } from "../integration-manager.js";
 import { obsService } from "../obs-service.js";
+import { resiService } from "../resi-service.js";
+import { youtubeService } from "../youtube-service.js";
 import { reaperService } from "../reaper-service.js";
 import { oscManager } from "../osc-manager.js";
 import { sensourceService } from "../sensource-service.js";
@@ -45,6 +47,16 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
     }
     if (method === "GET" && pathname === "/api/reaper/status") {
       json(res, reaperService.getLatest());
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/resi/status") {
+      json(res, resiService.getLatest());
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/youtube/status") {
+      json(res, youtubeService.getLatest());
       return;
     }
     if (method === "GET" && pathname === "/api/osc/feedback") {

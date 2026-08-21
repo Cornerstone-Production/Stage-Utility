@@ -140,6 +140,8 @@ describe("nothing appears or disappears", () => {
     obs: null,
     reaper: null,
     integrations: { states: [], labels: {} },
+    resi: null,
+    youtube: null,
   };
 
   test("every item renders with no service, no recorder and no integrations", () => {

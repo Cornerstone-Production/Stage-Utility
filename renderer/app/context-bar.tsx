@@ -24,10 +24,11 @@ import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
 import { BarConfigurator } from "./bar-configurator";
 import { BAR_SPACE, BAR_SPACER, visibleBarItems, type BarItemId } from "./bar-items";
-import { recordingStat, recorders } from "./recording-status";
+import { recordingStat, recorders, streamingStat, streamers } from "./recording-status";
 import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
 import { useIntegrations } from "../main/use-integration-states";
+import { useResiState, useYouTubeState } from "../main/use-stream-state";
 import { DisconnectedPopover } from "./disconnected-popover";
 import { formatClock } from "../lib/clock-format";
 
@@ -39,6 +40,8 @@ export interface BarItemContext {
   obs: ReturnType<typeof useObsState>;
   reaper: ReturnType<typeof useReaperState>;
   integrations: ReturnType<typeof useIntegrations>;
+  resi: StreamStatusDTO | null;
+  youtube: StreamStatusDTO | null;
 }
 
 export interface ContextBarState {
@@ -89,6 +92,8 @@ export function useBarContext(): BarItemContext {
   const obs = useObsState();
   const reaper = useReaperState();
   const integrations = useIntegrations();
+  const resi = useResiState();
+  const youtube = useYouTubeState();
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -106,7 +111,7 @@ export function useBarContext(): BarItemContext {
   });
 
   const bar = contextBarState(pcoLive, now, skewMs);
-  return { state, bar, now, obs, reaper, integrations };
+  return { state, bar, now, obs, reaper, integrations, resi, youtube };
 }
 
 /** The strip's own layout. Shared with the configurator's preview, so a bar that
@@ -219,7 +224,7 @@ function Idle({ children }: { children: ReactNode }) {
  * to drop, and dropping one brings back a bar that rearranges itself.
  */
 export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
-  const { state, bar, now, obs, reaper, integrations } = ctx;
+  const { state, bar, now, obs, reaper, integrations, resi, youtube } = ctx;
   switch (id) {
     case "clock":
       return (
@@ -309,6 +314,20 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
       // there and NOT red, which is legible at a glance without adding a
       // second colour to a strip whose colours all mean "look here".
       return <Idle>{setUp.length === 0 ? "No integrations" : "All connected"}</Idle>;
+    }
+
+    case "streaming": {
+      // The same judgement Home makes, from the same function — including
+      // "connected but not live", which mid-service is the state worth seeing.
+      const st = streamingStat(streamers(resi, youtube, obs), now);
+      // No tone is streamingStat's "no platform is even connected" — unknown,
+      // not off air, and the one streaming state not worth a colour.
+      if (!st.tone) return <Idle>No stream</Idle>;
+      return (
+        <span className={cn("text-footnote font-mono tabular-nums", st.tone === "danger" ? "text-danger-11" : "text-live-11")}>
+          {st.tone === "danger" ? "Off air" : st.value}
+        </span>
+      );
     }
 
     case "recording": {

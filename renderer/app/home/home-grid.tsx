@@ -96,6 +96,8 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     spl: d.spl,
     obs: d.obs,
     reaper: d.reaper,
+    resi: d.resi,
+    youtube: d.youtube,
     osc: d.osc,
     peopleCount: d.peopleCount,
     serviceLow: d.serviceLow,

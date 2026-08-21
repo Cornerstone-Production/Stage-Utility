@@ -953,6 +953,27 @@ export function Inspector({
           </>
         );
       })()}
+      {c.type === "stream-status" && (
+        <>
+          <RowSelect
+            label="Platform"
+            hint="Which platform to report. Any answers every one at once — live if anything is going out."
+            value={c.platform ?? "any"}
+            options={[
+              { value: "any", label: "Any platform" },
+              { value: "resi", label: "Resi" },
+              { value: "youtube", label: "YouTube" },
+            ]}
+            onChange={(v) => onConfig({ ...c, platform: v as "any" | "resi" | "youtube" })}
+          />
+          <RowSwitch
+            label="Show elapsed"
+            hint="Off shows just LIVE. Some platforms cannot say when a stream started, and there the elapsed time is measured from when this app first saw it."
+            checked={c.showElapsed ?? true}
+            onChange={(v) => onConfig({ ...c, showElapsed: v })}
+          />
+        </>
+      )}
       {c.type === "reaper-status" && (() => {
         const liveLabel = !reaper?.connected
           ? "Not connected"

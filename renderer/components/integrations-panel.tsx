@@ -932,6 +932,7 @@ const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
   { title: "Audio", ids: ["smaart"] },
   { title: "People", ids: ["sensource"] },
   { title: "Wireless", ids: ["wireless"] },
+  { title: "Streaming", ids: ["resi", "youtube"] },
   { title: "Control & output", ids: ["obs", "reaper", "osc", "rosstalk", "ross-tsl"] },
 ];
 

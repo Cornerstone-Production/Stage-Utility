@@ -118,7 +118,7 @@ export function streamers(
     // OBS has no start time for its stream — obs-websocket reports the output
     // is active, not when it began — so elapsed comes from whoever else is live,
     // or is absent.
-    { name: "OBS", connected: !!obs?.connected, streaming: !!obs?.streaming, live: !!obs?.streaming, startedAt: null } as Streamer,
+    { name: "OBS", connected: !!obs?.connected, live: !!obs?.streaming, startedAt: null },
   ];
 }
 

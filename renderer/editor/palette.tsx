@@ -20,6 +20,7 @@ import {
   DiscIcon, CircleDotIcon, PlugIcon, SendIcon, TvIcon, ZapIcon,
   SkipForwardIcon, StickyNoteIcon, CheckSquareIcon, FrameIcon, CastIcon,
   type LucideIcon,
+  RadioTowerIcon,
 } from "lucide-react";
 
 import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, type PaletteGroup } from "../main/layout-objects";
@@ -75,6 +76,10 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
   "home-recent-services": TrendingUpIcon,
   "home-recording": CircleDotIcon,
   "home-recording-obs": VideoIcon,
+  "home-streaming": RadioTowerIcon,
+  "home-streaming-resi": RadioTowerIcon,
+  "home-streaming-youtube": RadioTowerIcon,
+  "stream-status": RadioTowerIcon,
   "home-recording-reaper": DiscIcon,
   "home-spl": AudioLinesIcon,
   "home-screens": MonitorIcon,
@@ -99,6 +104,8 @@ const GROUP_ACCENT: Record<PaletteGroup, string> = {
   People: "var(--green-9)",
   Baptisms: "var(--blue-9)",
   OBS: "var(--gray-9)",
+  Resi: "var(--green-9)",
+  YouTube: "var(--red-9)",
   REAPER: "var(--gray-9)",
   Control: "var(--amber-9)",
   Status: "var(--gray-9)",

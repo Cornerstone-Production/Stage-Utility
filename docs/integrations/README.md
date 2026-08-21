@@ -17,6 +17,8 @@ countdown, so the app needs it.
 | [OBS Studio](obs.md) | Recording / streaming / virtual-cam state |
 | [REAPER](reaper.md) | Recording state (Web Interface poll) |
 | [OSC](osc.md) | Control buttons to LAN gear + feedback |
+| [Resi](resi.md) | Whether Resi is streaming, and for how long |
+| [YouTube](youtube.md) | Whether you are live on YouTube, and for how long |
 | [Bitfocus Companion](companion.md) | Stream-deck control of Stage (reversed — module dials in) |
 | [SenSource Vea](sensource.md) | People counts (attendance / occupancy) |
 | [Ross MultiViewer (TSL)](ross-tsl.md) | Pushes a count onto a multiviewer tile |

@@ -30,6 +30,8 @@ export const PALETTE_GROUP_ORDER = [
   "Baptisms",
   "OBS",
   "REAPER",
+  "Resi",
+  "YouTube",
   "Control",
   "Status",
 ] as const;
@@ -651,6 +653,45 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     style: BARE,
     homeSize: "s",
     stylingOnly: true,
+  },
+  "home-streaming": {
+    label: "Streaming",
+    blurb: "Live or off air, across every platform at once",
+    group: "Status",
+    config: () => ({ type: "home-streaming" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+  },
+  "home-streaming-resi": {
+    label: "Resi streaming",
+    blurb: "Live or off air, with the elapsed time",
+    group: "Resi",
+    config: () => ({ type: "home-streaming-resi" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+    integration: { id: "resi", label: "Resi" },
+  },
+  "home-streaming-youtube": {
+    label: "YouTube streaming",
+    blurb: "Live or off air, with the elapsed time",
+    group: "YouTube",
+    config: () => ({ type: "home-streaming-youtube" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+    integration: { id: "youtube", label: "YouTube" },
+  },
+  "stream-status": {
+    label: "Streaming status",
+    blurb: "Whether anything is going out, and for how long",
+    group: "Status",
+    config: () => ({ type: "stream-status", platform: "any", showElapsed: true }),
+    // A pill like obs-status: this one goes on a WALL, where a bare number has
+    // nothing to say what it is. The three Home ones stay bare, because Home's
+    // grid draws their frame.
+    style: () => PILL({ fontWeight: 700, uppercase: true }),
   },
 
   // Video layer — native client only; the web build ignores it.
