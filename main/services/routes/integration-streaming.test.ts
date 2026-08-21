@@ -11,8 +11,20 @@ process.env.STAGE_UTILITY_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "streamin
 // Nothing here may reach Resi or Google. Both services poll the moment they are
 // configured, so the stub goes in before the import that starts them.
 const realFetch = globalThis.fetch;
-globalThis.fetch = (async () =>
-  new Response(JSON.stringify({}), { status: 500 })) as typeof fetch;
+/** Every request the services attempt, so a test can assert what went on the
+ *  wire rather than only what the code meant to send. */
+const sent: { url: string; body: string }[] = [];
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  sent.push({
+    url: typeof input === "string" ? input : String((input as Request)?.url ?? input),
+    body: typeof init?.body === "string" ? init.body : "",
+  });
+  // Enough of a reply for the Resi and YouTube happy paths to walk to the end.
+  return new Response(
+    JSON.stringify({ access_token: "t", expires_in: 3600, customerId: "c", items: [] }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+}) as typeof fetch;
 
 const { integrationRoutes } = await import("./integration-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -52,13 +64,20 @@ after(() => {
  * there. Restore the bug — move either call back under the reaper arm — and this
  * goes red on the assertion below, which is how it was found.
  */
-const CONFIGS: Record<string, Record<string, string>> = {
-  resi: { username: "someone@example.org", password: "secret" },
-  youtube: { clientId: "id", clientSecret: "secret", refreshToken: "token" },
-};
+const CONFIGS: { name: string; id: string; config: Record<string, string> }[] = [
+  { name: "resi", id: "resi", config: { username: "someone@example.org", password: "secret" } },
+  // Both YouTube modes, because "configured" means different fields in each and
+  // a mode that cannot start is a card that says ready over nothing running.
+  { name: "youtube (public channel)", id: "youtube", config: { mode: "key", apiKey: "key", channel: "@example" } },
+  {
+    name: "youtube (OAuth)",
+    id: "youtube",
+    config: { mode: "oauth", clientId: "id", clientSecret: "secret", refreshToken: "token" },
+  },
+];
 
-for (const [id, config] of Object.entries(CONFIGS)) {
-  test(`enabling ${id} starts ${id}`, async () => {
+for (const { name, id, config } of CONFIGS) {
+  test(`enabling ${name} starts ${id}`, async () => {
     // Already enabled, credentials arriving: the shape of a first-time setup,
     // where the operator switches it on and then pastes the details in.
     states.set(id, { id, enabled: true, connection: "disconnected", message: null, config: {} });
@@ -69,7 +88,7 @@ for (const [id, config] of Object.entries(CONFIGS)) {
     assert.notEqual(
       (configured.json as { connection: string }).connection,
       "disconnected",
-      `${id} was given credentials while enabled but never applied`,
+      `${name} was given credentials while enabled but never applied`,
     );
 
     // And the other order: credentials already saved, the switch goes on.
@@ -84,7 +103,7 @@ for (const [id, config] of Object.entries(CONFIGS)) {
     assert.notEqual(
       (out.json as { connection: string }).connection,
       "disconnected",
-      `${id} was configured and enabled but never applied`,
+      `${name} was configured and enabled but never applied`,
     );
 
     // And disabling stops it again, so the poll does not outlive the operator
@@ -96,3 +115,47 @@ for (const [id, config] of Object.entries(CONFIGS)) {
     assert.equal((off.json as { connection: string }).connection, "disconnected");
   });
 }
+
+/**
+ * The credentials that reach the wire are the real ones.
+ *
+ * The state map holds secrets MASKED — the literal string "••••" — and reading
+ * a password from there instead of from secretsStore is invisible in every way
+ * that matters until production: the field is filled, the card says configured,
+ * the integration reports an error that reads like a typo, and a stub server
+ * happily accepts the mask. This asserts on the bytes.
+ *
+ * Reintroduce it — read `password` off `states.get("resi").config` in
+ * getResiConfig — and this goes red.
+ */
+const MASK = "\u2022\u2022\u2022\u2022";
+
+test("Resi is sent the real password, not the mask", async () => {
+  states.set("resi", { id: "resi", enabled: true, connection: "disconnected", message: null, config: {} });
+  await callRoute(integrationRoutes, "/api/integrations/resi/config", {
+    method: "POST",
+    body: { config: { username: "someone@example.org", password: "s3cret-resi" } },
+  });
+  sent.length = 0;
+  await callRoute(integrationRoutes, "/api/integrations/resi/test", { method: "POST", body: {} });
+
+  const auth = sent.find((r) => r.url.includes("/auth/token"));
+  assert.ok(auth, "Resi was never asked for a token");
+  assert.ok(auth.body.includes("s3cret-resi"), `the real password never reached Resi: ${auth.body}`);
+  assert.ok(!auth.body.includes(MASK), "the masked placeholder was sent as the password");
+});
+
+test("YouTube is sent the real API key, not the mask", async () => {
+  states.set("youtube", { id: "youtube", enabled: true, connection: "disconnected", message: null, config: {} });
+  await callRoute(integrationRoutes, "/api/integrations/youtube/config", {
+    method: "POST",
+    body: { config: { mode: "key", apiKey: "s3cret-key", channel: "@example" } },
+  });
+  sent.length = 0;
+  await callRoute(integrationRoutes, "/api/integrations/youtube/test", { method: "POST", body: {} });
+
+  const call = sent.find((r) => r.url.includes("/channels?"));
+  assert.ok(call, "YouTube was never asked to resolve the channel");
+  assert.ok(call.url.includes("s3cret-key"), `the real key never reached YouTube: ${call.url}`);
+  assert.ok(!call.url.includes(encodeURIComponent(MASK)), "the masked placeholder was sent as the key");
+});

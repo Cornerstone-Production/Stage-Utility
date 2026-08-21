@@ -9,7 +9,7 @@ import type { PeopleCountDTO } from "../types/stage.js";
 import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
-import { youtubeService } from "./youtube-service.js";
+import { youtubeService, configComplete, type YouTubeConfig } from "./youtube-service.js";
 import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
 import { rosstalkManager } from "./rosstalk-manager.js";
@@ -303,23 +303,50 @@ const RESI_DESCRIPTOR: IntegrationDescriptor = {
 };
 
 /**
- * YouTube — the one source that reports both halves itself.
+ * YouTube — two ways to ask, because setup burden should match what is asked.
  *
- * OAuth, not an API key: "are MY broadcasts live" is a question about the
- * authenticated channel and a key cannot answer it. The setup is the heaviest
- * of any integration here, so the description is a walkthrough rather than a
- * sentence.
+ * The default reads the channel the way a viewer's client would: an API key and
+ * a channel, no consent flow, and it answers the question worth asking when
+ * Resi restreams here — is it actually reaching viewers. OAuth is the second
+ * mode, for a channel whose broadcasts are private or unlisted, and it costs a
+ * consent round-trip and a refresh token to look after.
  */
 const YOUTUBE_DESCRIPTOR: IntegrationDescriptor = {
   id: "youtube",
   kind: "control",
   label: "YouTube",
   description:
-    "Shows whether you are live on YouTube and for how long — YouTube reports the real start time, so the clock is not a guess. Setup is a one-off: make a project at console.cloud.google.com, enable the YouTube Data API v3, create an OAuth client (Desktop app), then use it once to grant the youtube.readonly scope and paste the refresh token below. If Resi restreams to YouTube, this reports that same broadcast.",
+    "Shows whether you are live on YouTube and for how long, with the real start time YouTube reports. Public channel is the easy setup: make a project at console.cloud.google.com, enable the YouTube Data API v3, create an API key, and paste it below with your channel. Private broadcasts need OAuth instead — the same project, but an OAuth client (Desktop app) authorised once for the youtube.readonly scope, and its refresh token pasted here. If Resi restreams to YouTube, this reports that same broadcast.",
   configSchema: [
-    { key: "clientId", label: "OAuth Client ID", type: "text" },
-    { key: "clientSecret", label: "OAuth Client Secret", type: "password" },
-    { key: "refreshToken", label: "Refresh Token", type: "password" },
+    {
+      key: "mode",
+      label: "How to check",
+      type: "select",
+      default: "key",
+      options: [
+        { value: "key", label: "Public channel" },
+        { value: "oauth", label: "My broadcasts" },
+      ],
+      help:
+        "Public channel needs an API key and your channel, and sees anything a viewer could — including whether a Resi restream actually arrived. My broadcasts also sees private and unlisted streams, but needs an OAuth client and a refresh token to look after.",
+    },
+    {
+      key: "apiKey",
+      label: "API key",
+      type: "password",
+      showIf: { key: "mode", equals: "key" },
+    },
+    {
+      key: "channel",
+      label: "Channel",
+      type: "text",
+      placeholder: "@yourchurch or UC…",
+      showIf: { key: "mode", equals: "key" },
+      help: "The channel handle or id. Found in your channel's URL.",
+    },
+    { key: "clientId", label: "OAuth Client ID", type: "text", showIf: { key: "mode", equals: "oauth" } },
+    { key: "clientSecret", label: "OAuth Client Secret", type: "password", showIf: { key: "mode", equals: "oauth" } },
+    { key: "refreshToken", label: "Refresh Token", type: "password", showIf: { key: "mode", equals: "oauth" } },
   ],
 };
 
@@ -443,7 +470,7 @@ const SECRET_KEYS: Record<string, string[]> = {
   obs: ["password"],
   reaper: [],
   resi: ["password"],
-  youtube: ["clientSecret", "refreshToken"],
+  youtube: ["apiKey", "clientSecret", "refreshToken"],
   sensource: ["clientSecret", "apiToken"],
   "ross-tsl": [],
 };
@@ -555,6 +582,22 @@ class IntegrationManager {
   private isConfigured(state: IntegrationState): boolean {
     if (state.id === "companion") return true; // inbound — nothing to set up
     if (state.id === "wireless" || state.id === "osc") return state.enabled;
+    // YouTube asks for one of two sets of fields depending on how it is set to
+    // check, so "any value present" would call it configured the moment the mode
+    // select alone was saved — and the page would stop listing the one thing
+    // still needed. The masked secrets read as present here, which is right:
+    // a mask means a secret is stored.
+    if (state.id === "youtube") {
+      const c = state.config;
+      return configComplete({
+        mode: c.mode === "oauth" ? "oauth" : "key",
+        apiKey: String(c.apiKey ?? ""),
+        channel: String(c.channel ?? ""),
+        clientId: String(c.clientId ?? ""),
+        clientSecret: String(c.clientSecret ?? ""),
+        refreshToken: String(c.refreshToken ?? ""),
+      });
+    }
     return Object.values(state.config).some((v) => v !== "" && v != null);
   }
 
@@ -855,10 +898,10 @@ class IntegrationManager {
       }
 
       if (id === "resi") {
-        const cfg = this.states.get("resi")?.config ?? {};
-        const username = String(cfg.username ?? "").trim();
-        const password = String(cfg.password ?? "");
-        if (!username || !password) return { ok: false, message: "Resi email and password are required" };
+        const { username, password } = await this.getResiConfig();
+        if (!username || !password) {
+          return { ok: false, message: "Resi email and password are required" };
+        }
         const result = await resiService.test(username, password);
         this.setConnectionState("resi", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
@@ -866,14 +909,7 @@ class IntegrationManager {
       }
 
       if (id === "youtube") {
-        const cfg = this.states.get("youtube")?.config ?? {};
-        const clientId = String(cfg.clientId ?? "").trim();
-        const clientSecret = String(cfg.clientSecret ?? "");
-        const refreshToken = String(cfg.refreshToken ?? "").trim();
-        if (!clientId || !clientSecret || !refreshToken) {
-          return { ok: false, message: "Client ID, client secret and refresh token are all required" };
-        }
-        const result = await youtubeService.test(clientId, clientSecret, refreshToken);
+        const result = await youtubeService.test(await this.getYouTubeConfig());
         this.setConnectionState("youtube", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
         return result;
@@ -1100,12 +1136,7 @@ class IntegrationManager {
     });
 
     const enabled = this.states.get("resi")?.enabled ?? false;
-    const cfg = this.states.get("resi")?.config ?? {};
-    const username = String(cfg.username ?? "").trim();
-    const password = String(cfg.password ?? "");
-    // Comma or whitespace separated, because it is a text field an operator
-    // pastes ids into, not a picker.
-    const encoderIds = String(cfg.encoderIds ?? "").split(/[\s,]+/).filter(Boolean);
+    const { username, password, encoderIds } = await this.getResiConfig();
     if (enabled && username && password) {
       this.setConnectionState("resi", "connecting", "Signing in to Resi");
       resiService.configure(username, password, encoderIds);
@@ -1115,7 +1146,7 @@ class IntegrationManager {
     }
   }
 
-  /** Start/stop the YouTube broadcast poll to match enabled + configured state. */
+  /** Start/stop the YouTube poll to match enabled + configured state. */
   private async applyYouTube(): Promise<void> {
     youtubeService.setConnectionListener((state, message) => {
       this.setConnectionState("youtube", state, message);
@@ -1123,13 +1154,10 @@ class IntegrationManager {
     });
 
     const enabled = this.states.get("youtube")?.enabled ?? false;
-    const cfg = this.states.get("youtube")?.config ?? {};
-    const clientId = String(cfg.clientId ?? "").trim();
-    const clientSecret = String(cfg.clientSecret ?? "");
-    const refreshToken = String(cfg.refreshToken ?? "").trim();
-    if (enabled && clientId && clientSecret && refreshToken) {
+    const cfg = await this.getYouTubeConfig();
+    if (enabled && configComplete(cfg)) {
       this.setConnectionState("youtube", "connecting", "Connecting to YouTube");
-      youtubeService.configure(clientId, clientSecret, refreshToken);
+      youtubeService.configure(cfg);
     } else {
       youtubeService.stop();
       this.setConnectionState("youtube", "disconnected", null);
@@ -1156,6 +1184,42 @@ class IntegrationManager {
   }
 
   /** Resolve the SenSource config from non-secret state + the secrets store. */
+  /**
+   * Resi's credentials, with the real password.
+   *
+   * The state map holds secrets MASKED — `password` there is literally "••••" —
+   * so anything that talks to Resi must merge in secretsStore. Reading the state
+   * value shipped once and could not fail a stub, because a stub accepts any
+   * password; the real API answers 401.
+   */
+  private async getResiConfig(): Promise<{ username: string; password: string; encoderIds: string[] }> {
+    const cfg = this.states.get("resi")?.config ?? {};
+    const secrets = await secretsStore.getSecrets("resi");
+    return {
+      username: String(cfg.username ?? "").trim(),
+      password: secrets.password ?? "",
+      // Comma or whitespace separated, because it is a text field an operator
+      // pastes ids into, not a picker.
+      encoderIds: String(cfg.encoderIds ?? "").split(/[\s,]+/).filter(Boolean),
+    };
+  }
+
+  /** YouTube's config, with the real key and OAuth secrets. Same masking rule as
+   *  Resi above. */
+  private async getYouTubeConfig(): Promise<YouTubeConfig> {
+    const cfg = this.states.get("youtube")?.config ?? {};
+    const secrets = await secretsStore.getSecrets("youtube");
+    const mode = cfg.mode === "oauth" ? "oauth" : "key";
+    return {
+      mode,
+      apiKey: secrets.apiKey ?? "",
+      channel: String(cfg.channel ?? "").trim(),
+      clientId: String(cfg.clientId ?? "").trim(),
+      clientSecret: secrets.clientSecret ?? "",
+      refreshToken: secrets.refreshToken ?? "",
+    };
+  }
+
   private async getSensourceConfig(): Promise<SenSourceConfig> {
     const cfg = this.states.get("sensource")?.config ?? {};
     const secrets = await secretsStore.getSecrets("sensource");

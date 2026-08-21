@@ -83,8 +83,19 @@ Henry has approved using account credentials (2026-08-20).
 - `status.lifeCycleStatus === "live"` — live now. Other values: created, ready,
   testStarting, testing, liveStarting, live, complete, revoked.
 - `snippet.actualStartTime` — a real start time, populated once state is `live`.
-- **OAuth 2.0 only.** An API key will not work for `mine=true`. Scope
-  `https://www.googleapis.com/auth/youtube.readonly` is sufficient.
+- **OAuth 2.0 only for `mine=true`.** An API key cannot ask about the
+  authenticated channel. Scope `youtube.readonly` is sufficient.
+- **But a public channel needs no OAuth at all**, and that is the default the
+  integration ships with: `channels.list` (once, cached) → `playlistItems.list`
+  → `videos.list`, 2 units a poll, key only. Live is
+  `snippet.liveBroadcastContent === "live"` OR a `liveStreamingDetails`
+  `actualStartTime` with no `actualEndTime`. Only public broadcasts are visible
+  this way, so OAuth stays as the second mode for unlisted/private streams.
+- `search.list?eventType=live` also needs only a key but costs **100 units** a
+  call — unusable for polling. Do not reach for it.
+- Bitfocus's `companion-module-youtube-live` is NOT lighter: same OAuth plus the
+  `youtube.force-ssl` WRITE scope (it transitions broadcasts) and a manual
+  auth-code paste. Nothing there to copy.
 - Quota: 10,000 units/day for a project. A `list` is cheap, but polling every
   15s is 5,760/day. Use the PCO-aware cadence and it lands near 1,000.
 
