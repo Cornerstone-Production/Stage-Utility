@@ -101,6 +101,17 @@ carry across a room: a recorder painting itself red while recording, a section
 chip in its own colour. A filled widget is the same widget wearing a state, not a
 different design.
 
+## Editing a console in place
+
+A console has a quiet **Edit** button in its corner. It opens the same editor
+this page describes, on the same URL — entering edit mode deliberately creates no
+history entry, so Back leaves the console rather than stepping through edit
+toggles.
+
+**Done** returns you to the live console, and edit mode belongs to the console
+you opened it on: switching to another console tab lands on that console, live,
+not in its editor.
+
 ## Look: surface and tint
 
 Two independent questions, in that order.

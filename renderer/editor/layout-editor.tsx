@@ -903,6 +903,7 @@ export function LayoutEditor({
   onUpdateTemplate,
   onDeleteTemplate,
   startEditing = false,
+  onExit,
 }: {
   view: View;
   slotsViews: View[];
@@ -912,6 +913,17 @@ export function LayoutEditor({
   onUpdateTemplate: (id: string, patch: { name?: string; layout?: LayoutDTO }) => Promise<void>;
   /** Open straight into editing, for callers that arrived to edit. */
   startEditing?: boolean;
+  /**
+   * Leaving edit mode, for a caller that mounted this editor INSTEAD of its own
+   * content — a console, which is a live page in its own right.
+   *
+   * Without it, "Done" only put this component into its own preview, and the
+   * caller went on rendering an editor: the console came back framed, with an
+   * "Edit layout" button where its own quiet "Edit" had been, and no way back to
+   * the live page short of navigating away. A caller whose page IS this editor
+   * (the view detail panel) passes nothing and keeps the preview.
+   */
+  onExit?: () => void;
   onDeleteTemplate: (id: string) => Promise<void>;
 }) {
   const data = useLayoutData();
@@ -1125,10 +1137,18 @@ export function LayoutEditor({
     setDirty(false);
   }
 
+  // Every way out of edit mode goes through here, so a caller that replaces its
+  // own content with this editor is told every time — including from the unsaved
+  // dialog, which is the exit an operator with real work in hand actually takes.
+  function exitEditing() {
+    setIsEditing(false);
+    onExit?.();
+  }
+
   // Leaving edit mode: confirm if there are unsaved changes, else just exit.
   function leaveEditMode() {
     if (dirty) setConfirmLeave(true);
-    else setIsEditing(false);
+    else exitEditing();
   }
   function loadTemplate(t: LayoutTemplate) {
     pushHistory();
@@ -2199,8 +2219,8 @@ export function LayoutEditor({
         description="This layout has unsaved changes. Save them before leaving edit mode?"
         saveLabel="Save & close"
         onCancel={() => setConfirmLeave(false)}
-        onDiscard={() => { discardChanges(); setConfirmLeave(false); setIsEditing(false); }}
-        onSave={() => void saveThen(() => { setConfirmLeave(false); setIsEditing(false); })}
+        onDiscard={() => { discardChanges(); setConfirmLeave(false); exitEditing(); }}
+        onSave={() => void saveThen(() => { setConfirmLeave(false); exitEditing(); })}
       />
 
       {/* Navigating away with unsaved changes — the same question, so the same

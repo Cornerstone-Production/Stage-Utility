@@ -27,9 +27,14 @@ export function ConsoleRoute() {
   // Editing lives in component state, NOT the URL: entering edit mode must not
   // create a history entry, or Back would step through edit toggles instead of
   // leaving the console.
-  const [editing, setEditing] = useState(false);
-  const [sessionRev, setSessionRev] = useState<number | undefined>(undefined);
-  const [editorEpoch, setEditorEpoch] = useState(0);
+  //
+  // It records WHICH console is being edited rather than a bare yes/no. Switching
+  // console tabs is a param change on this same route, so React keeps this
+  // component mounted and a boolean stayed true — every other console then opened
+  // straight into the editor, and the only way back to a live console was to
+  // leave for Home and return.
+  const [editingFor, setEditingFor] = useState<string | null>(null);
+  const editing = !!viewId && editingFor === viewId;
 
   const view = s.stageState?.views?.find((v) => v.id === viewId) ?? null;
 
@@ -60,27 +65,17 @@ export function ConsoleRoute() {
   const editable = canEditInPlace(view, "shell");
 
   if (editing && editable) {
-    // The full editor, on the same route. Conflict handling is REUSED unchanged:
-    // sessionRev carries the revision the editor opened, so a save built on a
-    // layout someone else has since replaced is refused rather than silently
-    // overwriting their work. Remounting on editorEpoch restarts the canvas when
-    // a conflict is resolved by keeping the other version.
     return (
       <div className="h-full min-h-0 pt-3">
-        <LayoutEditor
-          key={`${view.id}:${editorEpoch}`}
+        <ConsoleEditor
+          // Keyed by the view, so the save-conflict state below belongs to the
+          // console it was read from. Carried across a tab switch it would send
+          // one console's revision as another's, and a save built on nobody's
+          // layout is exactly what that revision exists to refuse.
+          key={view.id}
           view={view}
-          startEditing
-          slotsViews={(s.stageState.views ?? []).filter((v) => v.kind === "slots")}
-          templates={s.layoutTemplates}
-          onSave={async (layout) => {
-            const r = await s.handlers.handleSetViewLayout(view.id, layout, sessionRev);
-            setSessionRev(r.rev);
-            if (r.discarded) setEditorEpoch((e) => e + 1);
-          }}
-          onSaveTemplate={s.handlers.handleSaveLayoutTemplate}
-          onUpdateTemplate={s.handlers.handleUpdateLayoutTemplate}
-          onDeleteTemplate={s.handlers.handleDeleteLayoutTemplate}
+          settings={s}
+          onExit={() => setEditingFor(null)}
         />
       </div>
     );
@@ -122,12 +117,55 @@ export function ConsoleRoute() {
         // button could never be found in the first place. Always visible where
         // there is no hover at all.
         <div className="absolute right-3 top-3 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-          <Button variant="filled" size="small" onClick={() => setEditing(true)}>
+          <Button variant="filled" size="small" onClick={() => setEditingFor(view.id)}>
             <PencilIcon className="size-3.5 text-fg-muted" />
             Edit
           </Button>
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The editor, as a console's content.
+ *
+ * Its own component so `key={view.id}` resets everything it holds when the
+ * operator moves to another console — the revision it opened on above all.
+ */
+function ConsoleEditor({
+  view,
+  settings,
+  onExit,
+}: {
+  view: View;
+  settings: ReturnType<typeof useStageSettings>;
+  onExit: () => void;
+}) {
+  // sessionRev carries the revision the editor opened, so a save built on a
+  // layout someone else has since replaced is refused rather than silently
+  // overwriting their work. Remounting on editorEpoch restarts the canvas when a
+  // conflict is resolved by keeping the other version.
+  const [sessionRev, setSessionRev] = useState<number | undefined>(undefined);
+  const [editorEpoch, setEditorEpoch] = useState(0);
+  return (
+    <LayoutEditor
+      key={`${view.id}:${editorEpoch}`}
+      view={view}
+      startEditing
+      // Done returns the operator to the live console. Without it the editor
+      // dropped into its own preview and the console never came back.
+      onExit={onExit}
+      slotsViews={(settings.stageState?.views ?? []).filter((v) => v.kind === "slots")}
+      templates={settings.layoutTemplates}
+      onSave={async (layout) => {
+        const r = await settings.handlers.handleSetViewLayout(view.id, layout, sessionRev);
+        setSessionRev(r.rev);
+        if (r.discarded) setEditorEpoch((e) => e + 1);
+      }}
+      onSaveTemplate={settings.handlers.handleSaveLayoutTemplate}
+      onUpdateTemplate={settings.handlers.handleUpdateLayoutTemplate}
+      onDeleteTemplate={settings.handlers.handleDeleteLayoutTemplate}
+    />
   );
 }
