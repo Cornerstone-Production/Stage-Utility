@@ -192,10 +192,11 @@ export interface StreamStatusDTO {
   connected: boolean;
   live: boolean;
   startedAt: string | null;
-  /** What it is streaming — the encoder or broadcast name, for the sub-line. */
+  /** What it is streaming — the encoder or broadcast name, for the sub-line.
+   *  Why a platform is UNREACHABLE is not here: that is the integration's
+   *  connection state, reported once on the Integrations page rather than
+   *  twice in two shapes. */
   detail: string | null;
-  /** Why it is not connected, when that is known and worth showing. */
-  error?: string | null;
 }
 
 /** Live people counts from the SenSource Vea integration (pushed on

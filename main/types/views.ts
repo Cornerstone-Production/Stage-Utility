@@ -368,7 +368,7 @@ export type LayoutObjectConfig =
     }
   /** Live streaming indicator. `platform` "any" answers every platform at once
    *  through streamers(); a named one reports just that platform. */
-  | { type: "stream-status"; platform?: "any" | "resi" | "youtube"; caption?: string | null; showElapsed?: boolean }
+  | { type: "stream-status"; platform?: "any" | "resi" | "youtube"; showElapsed?: boolean }
   // Live REAPER recording indicator (from the REAPER integration, `reaper:status`
   // channel). Turns red while REAPER is recording. Label texts override the
   // defaults ("REAPER: Recording" / "REAPER: Standby" / "REAPER: Offline");
