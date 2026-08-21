@@ -142,7 +142,7 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
   /** One-shot check for the Integrations "Test connection" button. */
   async test(username: string, password: string): Promise<{ ok: boolean; message?: string }> {
     try {
-      const token = await this.fetchToken(username, password);
+      const { token } = await this.fetchToken(username, password);
       const customerId = await this.fetchCustomerId(token);
       const encoders = await this.fetchEncoderStatus(token, customerId);
       const live = encoders.filter(encoderIsLive).length;
@@ -180,14 +180,16 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
     }
   }
 
-  private async fetchToken(username: string, password: string): Promise<string> {
+  /** Sign in. The one place the credentials are sent, so the test button and the
+   *  poll cannot drift apart about how Resi is asked. */
+  private async fetchToken(username: string, password: string): Promise<{ token: string; expiresInSec: number }> {
     const body = await this.json<{ access_token?: string; expires_in?: number }>(`${API}/auth/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password, grant_type: "password_cookie" }),
     });
     if (!body.access_token) throw new Error("Resi returned no access token");
-    return body.access_token;
+    return { token: body.access_token, expiresInSec: body.expires_in ?? 3600 };
   }
 
   private async ensureToken(): Promise<string> {
@@ -195,18 +197,9 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
     // spurious auth error and a needless reconnect.
     if (this.token && Date.now() < this.tokenExpiresAt - 60_000) return this.token;
     if (!this.username || !this.password) throw new Error("Resi is not configured");
-    const body = await this.json<{ access_token?: string; expires_in?: number }>(`${API}/auth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: this.username,
-        password: this.password,
-        grant_type: "password_cookie",
-      }),
-    });
-    if (!body.access_token) throw new Error("Resi returned no access token");
-    this.token = body.access_token;
-    this.tokenExpiresAt = Date.now() + (body.expires_in ?? 3600) * 1000;
+    const { token, expiresInSec } = await this.fetchToken(this.username, this.password);
+    this.token = token;
+    this.tokenExpiresAt = Date.now() + expiresInSec * 1000;
     return this.token;
   }
 

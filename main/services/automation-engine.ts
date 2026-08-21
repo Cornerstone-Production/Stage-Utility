@@ -284,3 +284,8 @@ export const automationEngine = new AutomationEngine();
 // tsl-service declare their own demand.
 smaartService.addDemandSource(() => automationEngine.wantsChannel("spl:metrics"));
 sensourceService.addDemandSource(() => automationEngine.wantsChannel("people:count"));
+// Same reasoning for the streaming polls: idle, Resi drops to two minutes and
+// YouTube to five, so "Resi goes live" on an unattended box would fire minutes
+// after the stream started. A rule reading the channel is a watcher.
+resiService.addDemandSource(() => automationEngine.wantsChannel("resi:status"));
+youtubeService.addDemandSource(() => automationEngine.wantsChannel("youtube:status"));
