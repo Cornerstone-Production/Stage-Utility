@@ -52,6 +52,8 @@ interface Decision {
   playlist: SignagePlaylist | null;
   reason: SignageReason;
   reasonLabel: string;
+  /** The schedule / group that decided this. See SignageHorizonEntry.reasonId. */
+  reasonId?: string;
 }
 
 const BLANK: Decision = { playlist: null, reason: "blank", reasonLabel: "" };
@@ -82,9 +84,9 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
       .filter((o) => groupIds.has(o.groupId))
       .sort((a, b) => b.startedAt - a.startedAt);
     for (const o of mine) {
-      if (o.blank) return { playlist: null, reason: "override", reasonLabel: "Take-over" };
+      if (o.blank) return { playlist: null, reason: "override", reasonLabel: "Take-over", reasonId: o.groupId };
       const p = playable(o.playlistId);
-      if (p) return { playlist: p, reason: "override", reasonLabel: p.name };
+      if (p) return { playlist: p, reason: "override", reasonLabel: p.name, reasonId: o.groupId };
       // An override naming a deleted playlist falls through rather than blanking
       // a wall because somebody tidied up.
     }
@@ -95,13 +97,13 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
       if (!s.groupIds.some((id) => groupIds.has(id))) continue;
       if (!windowActiveAt(s.window, at, input.tz, ctx)) continue;
       const p = playable(s.playlistId);
-      if (p) return { playlist: p, reason: "schedule", reasonLabel: s.name };
+      if (p) return { playlist: p, reason: "schedule", reasonLabel: s.name, reasonId: s.id };
     }
 
     // 3. The first group that names a usable default.
     for (const g of groups) {
       const p = playable(g.defaultPlaylistId);
-      if (p) return { playlist: p, reason: "default", reasonLabel: p.name };
+      if (p) return { playlist: p, reason: "default", reasonLabel: p.name, reasonId: g.id };
     }
 
     // 4. Blank.
@@ -146,6 +148,7 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
         previous &&
         previous.reason === d.reason &&
         previous.reasonLabel === d.reasonLabel &&
+        previous.reasonId === d.reasonId &&
         previous.playlist?.id === d.playlist?.id
       ) {
         previous.until = edge;
@@ -172,7 +175,7 @@ function entry(
   media: SignageMedia[],
 ): SignageHorizonEntry {
   if (!d.playlist) {
-    return { from, until, reason: d.reason, reasonLabel: d.reasonLabel };
+    return { from, until, reason: d.reason, reasonLabel: d.reasonLabel, ...(d.reasonId ? { reasonId: d.reasonId } : {}) };
   }
   const items = resolveItemDurations(d.playlist, media);
   return {
@@ -180,6 +183,7 @@ function entry(
     until,
     reason: d.reason,
     reasonLabel: d.reasonLabel,
+    ...(d.reasonId ? { reasonId: d.reasonId } : {}),
     playlist: {
       id: d.playlist.id,
       // The entry's own start. Deterministic, so an identical input gives an

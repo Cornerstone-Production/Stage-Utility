@@ -197,6 +197,15 @@ export interface SignageHorizonEntry {
   reason: SignageReason;
   /** e.g. the winning schedule's name. */
   reasonLabel: string;
+  /**
+   * The id of whatever decided this — the schedule, the group whose default won,
+   * or the overridden group.
+   *
+   * Carried alongside the label because the label is not unique: two schedules
+   * may share a name, and marking "the winning row" by name would light both.
+   * Absent on a blank entry, which nothing decided.
+   */
+  reasonId?: string;
 }
 
 /**

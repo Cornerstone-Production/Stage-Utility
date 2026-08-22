@@ -274,6 +274,30 @@ describe("the horizon itself", () => {
     assert.equal(h[1].reason, "blank");
   });
 
+  test("carries the winning schedule's ID, so the board marks the right row", () => {
+    // Two schedules may share a name, and marking the winning row by name would
+    // light both. The id is what the board matches on.
+    const r = run({
+      groups: [group("g1", ["out-1"])],
+      schedules: [
+        { ...sched("s1", "weekend", ["g1"], MONDAY), name: "Same name" },
+        { ...sched("s2", "office", ["g1"], ALL_DAY), name: "Same name" },
+      ],
+    });
+    assert.equal(now(r).reasonId, "s2");
+  });
+
+  test("names the group when a default or an override decided it", () => {
+    const byDefault = run({ groups: [group("g1", ["out-1"], "house")], schedules: [] });
+    assert.equal(byDefault["out-1"][0].reasonId, "g1");
+    const byOverride = run({
+      groups: [group("g1", ["out-1"])],
+      schedules: [],
+      overrides: [{ groupId: "g1", playlistId: "house", startedAt: NOW }],
+    });
+    assert.equal(now(byOverride).reasonId, "g1");
+  });
+
   test("carries the winning schedule's NAME, so the board can say why", () => {
     const r = run({
       groups: [group("g1", ["out-1"])],

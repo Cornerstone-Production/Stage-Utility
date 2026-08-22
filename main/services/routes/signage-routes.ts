@@ -177,6 +177,16 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
   if (await collection(c, "/api/signage/groups", signageGroupsStore, "group")) return;
   if (await collection(c, "/api/signage/schedules", signageSchedulesStore, "schedule")) return;
 
+  // What every display is showing, and why. The SAME resolver output the SSE
+  // channel carries — read from the scheduler rather than recomputed here, so
+  // the board and a wall cannot disagree about which schedule is winning.
+  if (c.pathname === "/api/signage/now" && c.method === "GET") {
+    return json(c.res, {
+      horizons: signageScheduler.getHorizons(),
+      staleWindows: false,
+    });
+  }
+
   if (c.pathname === "/api/signage/schedules/reorder" && c.method === "POST") {
     const body = (await readBody(c.req)) as { ids?: unknown };
     if (!Array.isArray(body?.ids) || body.ids.some((i) => typeof i !== "string")) {

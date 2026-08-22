@@ -156,9 +156,19 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "signage:deleteGroup":
       return del<T>(`/api/signage/groups/${encodeURIComponent(p.id as string)}`);
 
-    // The schedule write channels are added with the section that calls them:
-    // api-channels.test.ts fails on a channel with no caller, which is what
-    // keeps this switch from accumulating dead arms.
+    case "signage:saveSchedule":
+      return post<T>("/api/signage/schedules", { schedule: p.schedule });
+
+    case "signage:deleteSchedule":
+      return del<T>(`/api/signage/schedules/${encodeURIComponent(p.id as string)}`);
+
+    case "signage:reorderSchedules":
+      return post<T>("/api/signage/schedules/reorder", { ids: p.ids });
+
+    // What every display is showing, and why. The same resolver output the
+    // signage:plan channel pushes, so the board cannot disagree with a wall.
+    case "signage:now":
+      return apiFetch<T>("/api/signage/now");
 
     // ── Stage patch sheet ───────────────────────────────────────────────
     case "patch:get":

@@ -4,7 +4,7 @@
 // server will push, so what an operator approves here is what a display draws.
 // A bespoke preview is how an editor comes to disagree with the wall.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { GripVerticalIcon, ListVideoIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import type {
   SignageFit,
@@ -25,6 +25,7 @@ import { SelectField } from "./select-field";
 import { SignagePlayer } from "../../main/signage-player";
 import { invoke } from "../../lib/api";
 import { newSignageId } from "./ids";
+import { useNow } from "./use-now";
 import { toHorizonPlaylist } from "./preview-entry";
 
 const KINDS: { value: SignageTransitionKind; label: string }[] = [
@@ -57,16 +58,12 @@ export function PlaylistsSection({
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(playlists[0]?.id ?? null);
   const [draft, setDraft] = useState<SignagePlaylist | null>(null);
-  const [now, setNow] = useState(() => Date.now());
 
   const selected = playlists.find((p) => p.id === selectedId) ?? null;
 
-  // The preview needs a clock. One interval for the section, rather than one per
-  // player — the player itself holds no timers by design.
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 100);
-    return () => clearInterval(t);
-  }, []);
+  // The preview needs a clock, and the player deliberately holds none. A tenth
+  // of a second, because a transition is 600ms by default.
+  const now = useNow(100);
 
   // Editing works on a draft so a half-made change is never pushed to a wall.
   const editing = draft ?? selected;

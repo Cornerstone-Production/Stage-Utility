@@ -29,6 +29,9 @@ export interface SignageConfig {
  *  ways to be half-stale. */
 export const SIGNAGE_CONFIG_KEY = ["signage:config"] as const;
 
+/** What every display is showing, and why — the resolver's own output. */
+export const SIGNAGE_NOW_KEY = ["signage:now"] as const;
+
 const EMPTY: SignageConfig = { media: [], playlists: [], groups: [], schedules: [] };
 
 async function fetchSignageConfig(): Promise<SignageConfig> {
@@ -56,7 +59,13 @@ export function useSignageConfig(): {
   const q = useQuery({ queryKey: SIGNAGE_CONFIG_KEY, queryFn: fetchSignageConfig });
 
   const reload = useCallback(async () => {
-    await client.invalidateQueries({ queryKey: SIGNAGE_CONFIG_KEY });
+    // The board too, not just the config. Reordering a schedule changes which
+    // one is winning, and an operator who just pressed the button should not
+    // wait out a poll interval to see it - it reads as the button not working.
+    await Promise.all([
+      client.invalidateQueries({ queryKey: SIGNAGE_CONFIG_KEY }),
+      client.invalidateQueries({ queryKey: SIGNAGE_NOW_KEY }),
+    ]);
   }, [client]);
 
   return {
