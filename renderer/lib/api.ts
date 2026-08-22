@@ -144,9 +144,15 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "signage:listSchedules":
       return apiFetch<T>("/api/signage/schedules");
 
-    // The write channels for playlists, groups and schedules are added with the
-    // sections that call them: api-channels.test.ts fails on a channel with no
-    // caller, which is what keeps this switch from accumulating dead arms.
+    case "signage:savePlaylist":
+      return post<T>("/api/signage/playlists", { playlist: p.playlist });
+
+    case "signage:deletePlaylist":
+      return del<T>(`/api/signage/playlists/${encodeURIComponent(p.id as string)}`);
+
+    // The write channels for groups and schedules are added with the sections
+    // that call them: api-channels.test.ts fails on a channel with no caller,
+    // which is what keeps this switch from accumulating dead arms.
 
     // ── Stage patch sheet ───────────────────────────────────────────────
     case "patch:get":

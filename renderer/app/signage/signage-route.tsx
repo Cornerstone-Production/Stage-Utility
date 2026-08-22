@@ -7,6 +7,7 @@
 import { useState } from "react";
 
 import { MediaSection } from "./media-section";
+import { PlaylistsSection } from "./playlists-section";
 import { useSignageConfig } from "./use-signage-config";
 
 const SECTIONS = ["Now", "Media", "Playlists", "Groups", "Schedule"] as const;
@@ -45,6 +46,8 @@ export function SignageRoute() {
 
       {section === "Media" ? (
         <MediaSection media={config.media} playlists={config.playlists} loading={loading} onChange={reload} />
+      ) : section === "Playlists" ? (
+        <PlaylistsSection playlists={config.playlists} media={config.media} onChange={reload} />
       ) : (
         <p className="text-footnote text-fg-subtle">
           {section} is not built yet.
