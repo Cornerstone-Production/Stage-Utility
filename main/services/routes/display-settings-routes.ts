@@ -25,6 +25,22 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // ── Saved colours ─────────────────────────────────────────────────────
+    // The operator's own palette, kept beside the app's. Global config.
+    if (method === "POST" && pathname === "/api/saved-colors") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.color !== "string" || !body.color.trim()) {
+        error(res, "body.color (string) required");
+        return;
+      }
+      if (typeof body.keep !== "boolean") {
+        error(res, "body.keep (boolean) required");
+        return;
+      }
+      json(res, await stageController.setSavedColor(body.color.trim(), body.keep));
+      return;
+    }
+
     // ── Kiosk discovery ───────────────────────────────────────────────────
     if (method === "POST" && pathname === "/api/kiosk-discovery") {
       const body = await readBody(req) as Record<string, unknown>;

@@ -30,6 +30,9 @@ export interface StageState {
   slotsByView: Record<string, Slot[]>;
   /** Context-bar item ids in display order. Empty = the renderer's default. */
   barItems: string[];
+  /** Colours the operator has kept, newest first. Global, like the bar: the same
+   *  person mixes a colour on a laptop and reaches for it on a tablet. */
+  savedColors: string[];
   /** Content of notes/checklist objects, keyed by layout object id. The layout
    *  holds the design; this holds what the operator typed into it. */
   notesByObject: Record<string, { text?: string; items?: { id: string; text: string; done: boolean }[] }>;

@@ -158,6 +158,14 @@ Colours are stored as hex while they are opaque and `rgba()` once they are not.
 Changes apply as you drag, so the canvas behind the panel shows the result rather
 than waiting for it to close.
 
+**Saved colours.** Under the palette is your own: **Save** keeps the colour in
+the panel, and it is then in every colour control in the app — the church's
+green, a sponsor's blue, whatever this year's stage is. They live on the server,
+not in one browser, so a colour mixed on a laptop is there on the tablet by the
+desk, and they ride along in the config backup. The same button forgets one when
+that colour is showing. Two dozen are kept; saving past that drops the oldest and
+says so.
+
 ## Selection
 
 Only the selected object is outlined and named. Hovering shows a faint outline

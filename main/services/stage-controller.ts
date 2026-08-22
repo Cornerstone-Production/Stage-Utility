@@ -7,6 +7,7 @@ import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-def
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { barConfigStore } from "./bar-config-store.js";
+import { savedColorsStore } from "./saved-colors-store.js";
 import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
@@ -165,6 +166,7 @@ export class StageController {
     outputs: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", viewId: PRIMARY_DISPLAY_ID }],
     slotsByView: {},
     barItems: [],
+    savedColors: [],
     notesByObject: {},
     slotsByLayoutObject: {},
     resolvedByOutput: {},
@@ -248,6 +250,7 @@ export class StageController {
   async init(): Promise<void> {
     await notesStore.init();
     await barConfigStore.init();
+    await savedColorsStore.init();
     console.log("[stage-controller] init");
     let settings = await settingsStore.load();
 
@@ -275,6 +278,7 @@ export class StageController {
       // Loaded above; without this the field stays {} and every note reads empty
       // until the first edit — the content would look lost.
       barItems: barConfigStore.get().items,
+      savedColors: savedColorsStore.all(),
       notesByObject: notesStore.all(),
       serviceTypeId: settings.serviceTypeId,
       serviceTypeName: settings.serviceTypeName,
@@ -2167,6 +2171,14 @@ export class StageController {
   async setBarItems(items: string[]): Promise<StageState> {
     const saved = await barConfigStore.set(items);
     this.state = { ...this.state, barItems: saved.items };
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Keep a colour, or forget one. Global config, like the bar — see the store. */
+  async setSavedColor(color: string, keep: boolean): Promise<StageState> {
+    const colors = keep ? (await savedColorsStore.add(color)).colors : await savedColorsStore.remove(color);
+    this.state = { ...this.state, savedColors: colors };
     this.broadcast();
     return this.state;
   }

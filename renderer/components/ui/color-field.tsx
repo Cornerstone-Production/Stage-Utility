@@ -9,10 +9,12 @@
 // hex box, and the palette the app is actually built from. It commits as you
 // drag, so the canvas behind it updates live rather than on close.
 
-import { useCallback, useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { CheckIcon } from "lucide-react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
+import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
 
 import { cn } from "../../lib/cn";
+import { useSavedColors } from "./use-saved-colors";
 import {
   formatColor,
   hsvaToRgba,
@@ -123,13 +125,17 @@ function ColorPanel({
   allowAlpha,
   label,
   onChange,
+  anchor,
 }: {
   initial: Rgba;
   allowAlpha: boolean;
   label: string;
   onChange: (css: string) => void;
+  /** The swatch this panel belongs to, for placing it. */
+  anchor: HTMLElement | null;
 }) {
   const id = useId();
+  const saved = useSavedColors();
   const [draft, setDraft] = useState<Hsva>(() => rgbaToHsva(initial));
   const [typed, setTyped] = useState<string | null>(null);
 
@@ -155,12 +161,50 @@ function ColorPanel({
   const swatchCss = formatColor(current);
   const hueCss = formatColor(hsvaToRgba({ h: draft.h, s: 1, v: 1, a: 1 }));
 
-  return (
+  /**
+   * Placed against the viewport, in a portal on the body.
+   *
+   * As a child of the swatch it was clipped by whatever the swatch sat in — the
+   * inspector's scrolling column — and, on a row near the bottom, covered by the
+   * panel beside it: visible, and not clickable. z-index cannot help, because
+   * the ancestors it needs to beat are in a different stacking context.
+   *
+   * Flips above the swatch when there is no room below, so a control at the foot
+   * of a long panel still opens onto something.
+   */
+  const PANEL_W = 224;
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!anchor) return;
+    const place = () => {
+      const a = anchor.getBoundingClientRect();
+      const h = panelRef.current?.offsetHeight ?? 320;
+      const below = a.bottom + 8;
+      const top = below + h > window.innerHeight - 8 ? Math.max(8, a.top - h - 8) : below;
+      const left = Math.min(Math.max(8, a.right - PANEL_W), window.innerWidth - PANEL_W - 8);
+      setPos({ top, left });
+    };
+    place();
+    // A scroll or a resize moves the swatch; the panel has to go with it rather
+    // than hang where the swatch used to be.
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [anchor]);
+
+  return createPortal(
     <div
+      ref={panelRef}
       role="dialog"
       aria-label={label}
+      data-color-panel=""
+      style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, width: PANEL_W, visibility: pos ? "visible" : "hidden" }}
       className={cn(
-        "absolute right-0 top-9 z-50 w-56 rounded-lg p-3",
+        "fixed z-[100] rounded-lg p-3",
         "border border-line-strong bg-popover/95 shadow-2xl backdrop-blur-xl",
         "flex flex-col gap-2.5",
       )}
@@ -231,6 +275,9 @@ function ColorPanel({
 
       {/* A fixed eight columns, not a wrap: at this width the row was one swatch
           short and the last one dropped to a line of its own. */}
+      {/* THE APP'S palette. The operator's own is below it, and the two are kept
+          apart on purpose: one is what a widget usually ought to be, the other is
+          what this church's stage happens to be this year. */}
       <div className="grid grid-cols-8 gap-1.5 border-t border-line pt-2.5">
         {SWATCHES.map((sw) => {
           const rgb = parseColor(sw.value)!;
@@ -258,7 +305,62 @@ function ColorPanel({
           );
         })}
       </div>
-    </div>
+
+      <div className="flex flex-col gap-1.5 border-t border-line pt-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+            Saved
+          </span>
+          <button
+            type="button"
+            onClick={() => void saved.toggle(swatchCss)}
+            aria-pressed={saved.has(swatchCss)}
+            aria-label={saved.has(swatchCss) ? "Forget this colour" : "Save this colour"}
+            title={saved.has(swatchCss) ? "Forget this colour" : "Save this colour"}
+            className={cn(
+              "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-caption2 transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+              saved.has(swatchCss) ? "text-fg-muted hover:bg-fill hover:text-fg" : "text-accent hover:bg-fill",
+            )}
+          >
+            {/* One control, not a plus AND a delete: whether this colour is kept
+                is a yes or a no, and the button says which it currently is. */}
+            {saved.has(swatchCss) ? <XIcon className="size-3" /> : <PlusIcon className="size-3" />}
+            {saved.has(swatchCss) ? "Forget" : "Save"}
+          </button>
+        </div>
+
+        {saved.colors.length === 0 ? (
+          <p className="text-caption2 text-fg-subtle">
+            Colours you save are kept here, on every screen.
+          </p>
+        ) : (
+          <div className="grid max-h-[4.5rem] grid-cols-8 gap-1.5 overflow-y-auto">
+            {saved.colors.map((c) => {
+              const rgb = parseColor(c);
+              const on = c === swatchCss;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  title={c}
+                  aria-label={c}
+                  aria-pressed={on}
+                  onClick={() => rgb && commit(rgbaToHsva(rgb))}
+                  className="flex aspect-square w-full items-center justify-center rounded-full border border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                  // Over the checkerboard, so a kept translucent colour reads as
+                  // the translucent colour it is.
+                  style={{ background: `linear-gradient(${c}, ${c}), ${CHECKS}` }}
+                >
+                  {on && rgb && <CheckIcon className="size-3" style={{ color: isDark(rgb) ? "#fff" : "#000" }} />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -283,6 +385,9 @@ export function ColorField({
 }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
+  // In STATE, not a ref: the panel is placed from this element, so the render
+  // that opens it has to be the render that knows where it is.
+  const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null);
   const parsed = parseColor(value) ?? parseColor(fallback) ?? { r: 255, g: 255, b: 255, a: 1 };
 
   // Close on a click elsewhere or on Escape — the same manners as every other
@@ -290,7 +395,11 @@ export function ColorField({
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => {
-      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      // The panel is on the body now, so "inside" is either of the two.
+      if (wrap.current?.contains(t)) return;
+      if ((t as HTMLElement).closest?.("[data-color-panel]")) return;
+      setOpen(false);
     };
     const key = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -308,6 +417,7 @@ export function ColorField({
   return (
     <div ref={wrap} className={cn("relative inline-flex", className)}>
       <button
+        ref={setTrigger}
         type="button"
         aria-label={label}
         aria-haspopup="dialog"
@@ -324,7 +434,7 @@ export function ColorField({
       />
 
       {open && (
-        <ColorPanel initial={parsed} allowAlpha={allowAlpha} label={label} onChange={onChange} />
+        <ColorPanel initial={parsed} allowAlpha={allowAlpha} label={label} onChange={onChange} anchor={trigger} />
       )}
     </div>
   );
