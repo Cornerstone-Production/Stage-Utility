@@ -6,7 +6,7 @@
 // implementation is a promise to keep them matching, and this repo has enough
 // evidence about how those go.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { clamp } from "@main/services/clamp";
 import { shortDay, type TrendPoint } from "../settings/sections/overview-data";
@@ -16,19 +16,17 @@ import { shortDay, type TrendPoint } from "../settings/sections/overview-data";
  *  decorative. Falls back to a quiet note when there isn't enough to plot. */
 export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   /**
-   * The viewBox is the chart's REAL pixel width, measured.
+   * The chart's own size, measured, and used as PLAIN PIXELS — see the svg
+   * below for why there is no viewBox to scale them.
    *
-   * It used to be a fixed 640 stretched to fit with `preserveAspectRatio="none"`,
-   * which is fine for the polyline — it has a non-scaling stroke — and wrong for
-   * everything else in the drawing. On History, where the chart is about 640
-   * wide, the scale was near 1 and nobody noticed. On Home's widest tile it is
-   * three times that: the date labels came out three times too wide, and the dot
-   * marking the latest service was an ellipse.
-   *
-   * Measuring instead of stretching means one user unit is one pixel, so a
-   * circle is a circle at any width, and the same component keeps drawing the
-   * same chart on both pages — which is why it is one component.
+   * The width decides where the points sit; the height decides how much rise
+   * the line is given. Both come from the element rather than from a constant,
+   * so the same component draws the same chart on History's 640 and on Home's
+   * whole-tile width.
    */
+  // Unique per instance: Home and History can both be mounted, and two <defs>
+  // sharing an id means the second chart paints with the first one's gradient.
+  const gradientId = useId();
   const box = useRef<HTMLDivElement>(null);
   const [W, setW] = useState(640);
   /**
@@ -55,8 +53,11 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const padTop = 16;
-  const padBottom = 26;
+  // Tighter than it was. A third of a 130px band spent on margin is a third the
+  // line does not get, and at the widths Home hands this thing the line needs
+  // every pixel of rise it can be given.
+  const padTop = 10;
+  const padBottom = 20;
   const padX = 10;
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -82,6 +83,13 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   const x = (i: number) => padX + (i / (points.length - 1)) * (plotW - padX * 2);
   const y = (v: number) => padTop + (1 - (v - min) / range) * (H - padTop - padBottom);
   const poly = points.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+  // The same points closed down to the baseline, for the fill.
+  //
+  // A line alone is a thread, and stretched across a metre of wall-width tile a
+  // thread is what it looks like — the shape stops registering at all. Weight
+  // under it is what makes a shallow slope read as a shape rather than as a
+  // scratch, and it costs one path.
+  const area = `${padX},${H - padBottom} ${poly} ${plotW - padX},${H - padBottom}`;
   const lastX = x(points.length - 1);
   const lastY = y(points[points.length - 1].value);
   const latest = points[points.length - 1].value;
@@ -93,15 +101,24 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
       <div className="relative h-full">
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${plotW} ${H}`}
+        /**
+         * NO viewBox, and that is the point.
+         *
+         * A viewBox is a scale factor between the drawing and the box, and this
+         * chart has been distorted by that factor twice now: once because the
+         * factor was fixed at 640 and stretched to fit, and again because the
+         * measured factor and the real width can disagree — during a resize, at
+         * a browser zoom, or on any frame where the observer has not caught up.
+         * Whenever they disagree, preserveAspectRatio="none" stretches the text
+         * and turns the endpoint dot into an oval. Reported both times.
+         *
+         * Without one, the SVG's user units ARE CSS pixels, always. A stale
+         * measurement then costs a line that stops a few pixels short for one
+         * frame, and nothing can ever be drawn out of shape.
+         */
         width="100%"
         height={H}
         style={{ display: "block" }}
-        // The viewBox matches the measured width, so this scales nothing. It
-        // stays "none" only to keep a frame mid-resize — where the measurement
-        // is one tick stale — stretched rather than letterboxed, which is the
-        // less visible of the two.
-        preserveAspectRatio="none"
         onPointerMove={(e) => {
           const svg = svgRef.current;
           if (!svg) return;
@@ -114,6 +131,13 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
         aria-label="Attendance trend across recent services"
       >
         <line x1={0} y1={H - padBottom} x2={plotW} y2={H - padBottom} stroke="var(--su-line)" />
+        <defs>
+          <linearGradient id={`${gradientId}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--su-accent)" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="var(--su-accent)" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <polygon points={area} fill={`url(#${gradientId})`} />
         <polyline points={poly} fill="none" stroke="var(--su-accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         {/* The newest point is hollow while its service is still recording — that
             total is a partial and will keep climbing, so it must not read as a
@@ -132,8 +156,8 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
         <text x={padX} y={H - 8} fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[0].day)}</text>
         <text x={plotW - padX} y={H - 8} textAnchor="end" fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[points.length - 1].day)}</text>
       </svg>
-      {/* Hover tooltip — HTML overlay positioned by % so its text isn't stretched
-          by the chart's non-uniform (preserveAspectRatio="none") X scale. */}
+      {/* Hover tooltip — an HTML overlay rather than SVG text, so it takes the
+          app's own type and wraps like everything else. */}
       {hp && (
         <div
           className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border border-line-strong bg-popover px-2 py-1 shadow-md backdrop-blur-xl"

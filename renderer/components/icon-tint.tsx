@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import { Tooltip } from "./ui/tooltip";
 import { invoke } from "../lib/api";
 import { ColorField } from "./ui/color-field";
+import { cn } from "../lib/cn";
 
 /** The theme accent, used when an item has no color of its own. Kept as a CSS
  *  var so a tinted and an untinted icon still agree with the rest of the theme. */
@@ -41,17 +42,22 @@ export function IconTint({
   return (
     <Tooltip label={`Change the ${label} icon color`}>
       <span
-        className={
+        className={cn(
+          // RELATIVE, and that is load-bearing. The picker below covers this box
+          // absolutely; without a positioned ancestor it resolved against the
+          // document instead, so every tinted icon on a page sat at a fixed
+          // point and stayed there while the page scrolled underneath it.
+          "relative",
           className ??
-          "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:brightness-125"
-        }
+            "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:brightness-125",
+        )}
         style={{
           backgroundColor: `color-mix(in srgb, ${tint} 12%, transparent)`,
         }}
       >
-        <span className="pointer-events-none absolute">
-          <Icon className={iconClassName ?? "size-4"} style={{ color: tint }} />
-        </span>
+        {/* An ordinary centred child — it is the picker that overlays it, not
+            the other way round. */}
+        <Icon className={cn("pointer-events-none", iconClassName ?? "size-4")} style={{ color: tint }} />
         <ColorField
           label={`${label} icon color`}
           allowAlpha={false}
@@ -59,7 +65,7 @@ export function IconTint({
           // colour, which is a token with no numbers to put on a slider.
           value={color || "#3b82f6"}
           onChange={(v: string) => void invoke("icons:setColor", { key: itemKey, color: v })}
-          className="size-full [&>button]:size-full [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"
+          className="absolute inset-0 [&>button]:size-full [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"
         />
       </span>
     </Tooltip>
