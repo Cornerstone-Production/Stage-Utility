@@ -45,7 +45,7 @@ import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
 import { useObsState } from "../../main/use-obs-state";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
-import { recordingStat, recorderStat, recorders, loudestSpl } from "../recording-status";
+import { recordIndicator, recorders, loudestSpl } from "../recording-status";
 import { Readout } from "../../main/readout";
 
 /* ── Shared bits ──────────────────────────────────────────────────────────── */
@@ -175,7 +175,10 @@ export function Stat({
   value: string;
   sub?: string;
   to?: string;
-  tone?: "danger" | "live";
+  /** `muted` is the resting state — grey, the same grey the streaming widgets
+   *  use for off air. `offline` dims the whole card: nothing to report because
+   *  nothing is connected. */
+  tone?: "danger" | "live" | "muted" | "offline";
 }) {
   const body = (
     <Readout
@@ -186,7 +189,13 @@ export function Stat({
       // a stat on Home is read on Home. Readout leaves the value at the inherited
       // foreground when this is null, which inside .kiosk-surface is the same
       // white a display uses.
-      valueColor={tone === "danger" ? "var(--color-danger-11)" : tone === "live" ? "var(--color-live-11)" : null}
+      valueColor={
+        tone === "danger" ? "var(--color-danger-11)"
+        : tone === "live" ? "var(--color-live-11)"
+        : tone === "muted" ? "var(--color-fg-muted)"
+        : null
+      }
+      dim={tone === "offline"}
       mono
     />
   );
@@ -454,9 +463,18 @@ export function LiveStatusCard({
  */
 export function RecordingCard({ recorder = "any" }: { recorder?: string }) {
   const list = recorders(useObsState(), useReaperState());
-  const one = recorder !== "any" ? list.find((r) => r.name === recorder) : undefined;
-  const rec = recorder === "any" ? recordingStat(list) : recorderStat(one);
-  return <Stat label={recorder === "any" ? "Recording" : recorder} value={rec.value} sub={rec.sub} tone={rec.tone} />;
+  const chosen = recorder === "any" ? list : list.filter((r) => r.name === recorder);
+  // The same indicator the streaming cards use, so a row of them reads as a row
+  // rather than as two apps' worth of widgets.
+  const ind = recordIndicator(chosen);
+  return (
+    <Stat
+      label={recorder === "any" ? "Recording" : recorder}
+      value={ind.value}
+      sub={ind.sub ?? undefined}
+      tone={ind.state === "live" ? "live" : ind.state === "idle" ? "muted" : "offline"}
+    />
+  );
 }
 
 /** The loudest meter right now, and which one. */
