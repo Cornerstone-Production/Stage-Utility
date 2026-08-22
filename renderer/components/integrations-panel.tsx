@@ -103,7 +103,17 @@ function IpListField({ value, onChange, placeholder }: IpListFieldProps) {
 
 // ---- connection badge -------------------------------------------------------
 
-function ConnectionBadge({ connection, message }: { connection: ConnectionState; message?: string | null }) {
+function ConnectionBadge({
+  connection,
+  message,
+  inbound,
+}: {
+  connection: ConnectionState;
+  message?: string | null;
+  /** Nothing dials out, so "disconnected" would name a fault where there is
+   *  only an empty room. A listener with no client yet is waiting, not down. */
+  inbound?: boolean;
+}) {
   if (connection === "connected") {
     return (
       <span className="flex items-center gap-1">
@@ -135,8 +145,8 @@ function ConnectionBadge({ connection, message }: { connection: ConnectionState;
   // disconnected
   return (
     <span className="flex items-center gap-1">
-      <Status variant="warning" />
-      <span className="text-caption1 text-gray-9">Disconnected</span>
+      <Status variant={inbound ? "neutral" : "warning"} />
+      <span className="text-caption1 text-gray-9">{inbound ? "No clients yet" : "Disconnected"}</span>
     </span>
   );
 }
@@ -1018,13 +1028,19 @@ function IntegrationEntry({
       afterLabel={descriptor.description ? <InfoHint>{descriptor.description}</InfoHint> : undefined}
       right={
         <div className="flex items-center gap-3 shrink-0">
-          <ConnectionBadge connection={state.connection} message={state.message} />
-          <Switch
-            checked={state.enabled}
-            onCheckedChange={onToggle}
-            disabled={toggling}
-            aria-label={`Enable ${descriptor.label}`}
-          />
+          <ConnectionBadge connection={state.connection} message={state.message} inbound={descriptor.inbound} />
+          {/* No switch for an integration that dials US. There was one, and
+              nothing was gated on it: turning Companion off left the module
+              connecting and controlling the app exactly as before, while the
+              row said it was disabled. */}
+          {!descriptor.inbound && (
+            <Switch
+              checked={state.enabled}
+              onCheckedChange={onToggle}
+              disabled={toggling}
+              aria-label={`Enable ${descriptor.label}`}
+            />
+          )}
         </div>
       }
     >
