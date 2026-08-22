@@ -19,6 +19,12 @@ import { canEditInPlace } from "../editor/can-edit";
 import { LayoutEditor } from "../editor/layout-editor";
 import { Button, EmptyState } from "../components/ui";
 import { AppLink } from "./app-link";
+import { cn } from "../lib/cn";
+
+/** How close to the top-right corner the pointer has to be for Edit to appear.
+ *  Wide enough to find without aiming, small enough that it is never a surprise
+ *  in the middle of the console. */
+const CORNER_RADIUS_PX = 180;
 
 export function ConsoleRoute() {
   const { viewId } = useParams({ strict: false }) as { viewId?: string };
@@ -34,6 +40,7 @@ export function ConsoleRoute() {
   // straight into the editor, and the only way back to a live console was to
   // leave for Home and return.
   const [editingFor, setEditingFor] = useState<string | null>(null);
+  const [nearCorner, setNearCorner] = useState(false);
   const editing = !!viewId && editingFor === viewId;
 
   const view = s.stageState?.views?.find((v) => v.id === viewId) ?? null;
@@ -87,7 +94,21 @@ export function ConsoleRoute() {
     // themed page, which is what made it read as an embedded viewer rather than
     // a page of the app. The negative margins cancel that gutter so the console
     // simply IS the content area.
-    <div className="group relative flex h-full min-h-0 flex-col -mx-5 max-sm:-mx-3">
+    <div
+      className="relative flex h-full min-h-0 flex-col -mx-5 max-sm:-mx-3"
+      // Proximity, not a hover region. A region big enough to aim at is also a
+      // region that swallows every click inside it, and the top-right corner of
+      // a console is a perfectly reasonable place to put a control. This watches
+      // the distance instead, so nothing is covered until the button is actually
+      // there to be pressed.
+      onPointerMove={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        const dx = r.right - e.clientX;
+        const dy = e.clientY - r.top;
+        setNearCorner(Math.hypot(Math.max(0, dx), Math.max(0, dy)) < CORNER_RADIUS_PX);
+      }}
+      onPointerLeave={() => setNearCorner(false)}
+    >
       {/* The live console. `shell` context: controls fire, drill-down works.
           `ground="app"` so the canvas is the same material as the page. */}
       <div className="min-h-0 flex-1">
@@ -108,19 +129,37 @@ export function ConsoleRoute() {
       </div>
 
       {/* Over the canvas, not above it. A row of its own pushed the console down
-          and framed it, which is the framing this page was trying to lose. It is
-          quiet until the pointer is here, because a console is a thing you
-          operate far more often than a thing you edit. */}
+          and framed it, which is the framing this page was trying to lose. */}
       {editable && (
-        // group-hover, from the CONSOLE, not hover on the button's own wrapper:
-        // that only revealed it while pointing at something invisible, so the
-        // button could never be found in the first place. Always visible where
-        // there is no hover at all.
-        <div className="absolute right-3 top-3 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-          <Button variant="filled" size="small" onClick={() => setEditingFor(view.id)}>
-            <PencilIcon className="size-3.5 text-fg-muted" />
-            Edit
-          </Button>
+        // Shown near the CORNER, not from anywhere on the console: a button
+        // appearing under the pointer wherever the operator happens to be
+        // working — mid-drag on a fader — is the thing being fixed.
+        //
+        // Always visible where there is no hover at all, and while focused, so a
+        // touch screen and a keyboard both keep a way in.
+        <div className="pointer-events-none absolute right-3 top-3">
+          <span
+            className={cn(
+              "inline-block rounded-md transition-opacity",
+              // Nothing to click through while it is hidden, and a real target
+              // the moment it is not.
+              nearCorner ? "pointer-events-auto opacity-100" : "opacity-0",
+              "focus-within:pointer-events-auto focus-within:opacity-100",
+              "[@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100",
+              // Its OWN ground, because the console's is not the page's. In light
+              // mode the page is #f7f8fa and the console canvas is #0a0a0a, so a
+              // button wearing the page's tokens came out near-black text on
+              // near-black — measured at about 1.1:1, which is what "unreadable"
+              // meant. The popover ground is the app's floating surface: it
+              // carries its own contrast in both themes, over anything.
+              "border border-line-strong bg-popover/95 shadow-lg backdrop-blur-xl",
+            )}
+          >
+            <Button variant="transparent" size="small" onClick={() => setEditingFor(view.id)}>
+              <PencilIcon className="size-3.5" />
+              Edit
+            </Button>
+          </span>
         </div>
       )}
     </div>
