@@ -181,6 +181,9 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     H: NOMINAL_H,
     // Home is the operator's own screen: controls fire and drill-downs work.
     interactive: true,
+    // And it IS Home — the flag the streaming cards read to know they are tiles
+    // on a page of tiles rather than widgets on a wall.
+    home: true,
     placed: undefined,
     canvasBg: null,
   };

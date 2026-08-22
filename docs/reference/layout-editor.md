@@ -225,6 +225,15 @@ apart from a decision, and a pass that cleared it also cleared the alignments
 operators had set — on every restart, which is every update. Set one of those
 widgets to whatever you want; it will stay.
 
+## The inspector's width
+
+Drag its left edge; double-click the edge to go back to the default. It goes as
+narrow as the rail on the other side of the window, and the controls condense to
+suit: below about 248px each row puts its label above its control and the
+controls wrap, so a swatch row or a set of stepper fields takes two lines instead
+of running off the edge. Nothing is hidden at any width, and the panel never
+scrolls sideways.
+
 ## Checking object types at extreme sizes
 
 Objects are measured in a real browser rather than in unit tests: jsdom has no
@@ -241,6 +250,10 @@ Readouts that would otherwise overflow shrink to fit through one shared
 measurement (`useFitScale` in `renderer/main/layout-renderer.tsx`). Add new
 readouts to it rather than writing fresh sizing maths, so a fix reaches all of
 them at once.
+
+The inspector is measured the same way and for the same reason — container
+queries do not exist in jsdom either. Drag it to its minimum, select one object
+of each kind, and compare the panel's `scrollWidth` with its `clientWidth`.
 
 ## Motion
 

@@ -116,7 +116,7 @@ export function ResponsiveControls({
 
       {/* Real pixels, not fractions: the point of a limit is that it does not
           scale. A button below about 44px is not reliably tappable. */}
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2 @max-[248px]/insp:grid-cols-1">
         <label className="flex items-center justify-between gap-2">
           <span className="text-caption2 text-fg-muted">Min width</span>
           <UiNumberInput

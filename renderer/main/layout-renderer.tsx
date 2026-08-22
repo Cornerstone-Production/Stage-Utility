@@ -95,6 +95,16 @@ export interface LayoutRenderCtx {
   /** Pixel placements when the layout is rendering responsively; absent when it
    *  is letterboxed, in which case objects position by percentage as before. */
   placed?: Map<string, PlacedObject>;
+  /**
+   * This is HOME, the operator's own page of tiles — not a console, a wall, or
+   * a preview of either.
+   *
+   * Required rather than optional, so every surface that builds a context has to
+   * say which it is. The three streaming cards read it: on Home they are cards
+   * like the tiles beside them, and anywhere else they are the wall widget that
+   * OBS status and REAPER status are.
+   */
+  home: boolean;
 }
 
 function pad(n: number): string {
@@ -405,6 +415,25 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
   );
 }
 
+/**
+ * Home cards that have a WALL twin, and which platform each asks about.
+ *
+ * These three are listed in the palette as "Resi status" and "YouTube status"
+ * under their own groups, so they are what an operator picks for a console as
+ * well as for Home — and on a console they sit beside OBS status and REAPER
+ * status, which are wall widgets. Same object, two presentations, chosen by the
+ * surface rather than by which of two near-identical types got picked.
+ *
+ * `null` means "every platform at once", which is what the caption "Streaming"
+ * says. An explicit record rather than a prefix test: the prefix would also
+ * catch a future home-streaming-* card that has no wall twin.
+ */
+const WALL_TWIN = {
+  "home-streaming": null,
+  "home-streaming-resi": "Resi",
+  "home-streaming-youtube": "YouTube",
+} as const;
+
 function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   const c = o.config;
   const ts = textStyle(o, ctx.H);
@@ -439,6 +468,49 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     />
   );
 
+  /**
+   * The WALL composition for a streaming widget: caption, the state as a word,
+   * and the ticking number underneath.
+   *
+   * Deliberately the same one obs-status and reaper-status use. They answer the
+   * same kind of question on the same wall, and reading differently made the
+   * streaming ones look like a different app — a duration where its neighbour
+   * had a word.
+   *
+   * A function because TWO things need it: the `stream-status` object, and the
+   * three home-streaming cards when they are placed on something that is not
+   * Home. Those went to Home's card composition on every surface for a release,
+   * which put a small three-line mono tile in a row of large ALL-CAPS ones.
+   */
+  const streamingReadout = (
+    only: string | null,
+    opts: { showElapsed?: boolean; hideWhenIdle?: boolean; fillWhenLive?: boolean },
+  ) => {
+    const all = streamers(ctx.resi, ctx.youtube, ctx.obs);
+    const chosen = only ? all.filter((x) => x.name === only) : all;
+    const ind = streamIndicator(chosen, ctx.now, { showElapsed: opts.showElapsed });
+    const live = ind.state === "live";
+    // Tally-light mode: nothing on screen unless something is going out.
+    if (!live && (opts.hideWhenIdle ?? false)) return null;
+
+    // GREEN for live, grey for off air. Not the red a recorder uses: red is
+    // what OBS and REAPER mean by "rolling", and a wall carrying both wants
+    // one red. Off air takes the muted grey its neighbours wear rather than
+    // full-strength white — it is the resting state, not an announcement —
+    // while unreachable stays dimmed outright, so the two are still told apart
+    // by more than their word.
+    return readout(ind.value, {
+      caption: only ?? "Streaming",
+      // Only where there is a number to put underneath. On a wall the quiet
+      // states are one word; Home shows the connection line instead.
+      sub: ind.state === "live" ? ind.sub : null,
+      upper: true,
+      dim: ind.state === "offline",
+      fill: live && opts.fillWhenLive ? "var(--green-9)" : null,
+      valueColor: live && !opts.fillWhenLive ? "var(--green-10)" : ind.state === "idle" ? "var(--color-fg-muted)" : null,
+    });
+  };
+
   // Home's cards, BEFORE the switch. They render the SAME components Home's
   // fixed panel does, so the editable Home and the built-in one cannot drift
   // into looking like two different products — and asking first is what keeps
@@ -461,6 +533,15 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   // nothing off the shell is what the model already says they are. Home renders
   // them directly, not through here, and keeps its links.
   if (isHomeCard(c)) {
+    // OFF HOME, the three streaming cards wear the wall composition instead.
+    //
+    // They are the only home types with a wall twin — the palette lists them as
+    // "Resi status" and "YouTube status" under their own groups, which is what
+    // an operator picks for a console, where they sit beside OBS status and
+    // REAPER status. One object, two presentations, chosen by the surface it is
+    // drawn on rather than by which of two near-identical types got picked.
+    const platform = WALL_TWIN[c.type as keyof typeof WALL_TWIN];
+    if (!ctx.home && platform !== undefined) return streamingReadout(platform, {});
     return (
       <div className="w-full h-full pointer-events-none">
         <HomeCard
@@ -876,40 +957,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         />
       );
     }
-    case "stream-status": {
-      // The WALL composition, and deliberately the same one as
-      // obs-status and reaper-status above: caption, the state as a word, and
-      // the ticking number underneath. They answer the same kind of question on
-      // the same wall, and reading differently made the streaming ones look like
-      // a different app — a duration where its neighbour had a word.
-      const only =
-        c.platform && c.platform !== "any"
-          ? (c.platform === "resi" ? "Resi" : "YouTube")
-          : null;
-      const all = streamers(ctx.resi, ctx.youtube, ctx.obs);
-      const chosen = only ? all.filter((x) => x.name === only) : all;
-      const ind = streamIndicator(chosen, ctx.now, { showElapsed: c.showElapsed });
-      const live = ind.state === "live";
-      // Tally-light mode: nothing on screen unless something is going out.
-      if (!live && (c.hideWhenIdle ?? false)) return null;
-
-      // GREEN for live, grey for off air. Not the red a recorder uses: red is
-      // what OBS and REAPER mean by "rolling", and a wall carrying both wants
-      // one red. Off air takes the muted grey its neighbours wear rather than
-      // full-strength white — it is the resting state, not an announcement —
-      // while unreachable stays dimmed outright, so the two are still told apart
-      // by more than their word.
-      return readout(ind.value, {
-        caption: only ?? "Streaming",
-        // Only where there is a number to put underneath. On a wall the quiet
-        // states are one word; Home shows the connection line instead.
-        sub: ind.state === "live" ? ind.sub : null,
-        upper: true,
-        dim: ind.state === "offline",
-        fill: live && c.fillWhenLive ? "var(--green-9)" : null,
-        valueColor: live && !c.fillWhenLive ? "var(--green-10)" : ind.state === "idle" ? "var(--color-fg-muted)" : null,
-      });
-    }
+    case "stream-status":
+      return streamingReadout(
+        c.platform && c.platform !== "any" ? (c.platform === "resi" ? "Resi" : "YouTube") : null,
+        { showElapsed: c.showElapsed, hideWhenIdle: c.hideWhenIdle, fillWhenLive: c.fillWhenLive },
+      );
 
     case "reaper-status": {
       const reaper = ctx.reaper;
@@ -2305,7 +2357,10 @@ export function LayoutRenderer({
   const inheritSurface =
     bg == null || bg === "#000" || bg === "#000000" || bg === "#080810" || bg === "#0a0a0a";
 
-  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed, canvasBg: inheritSurface ? null : bg };
+  // NOT Home: Home draws its own grid with ObjectContent directly (see
+  // home-grid), and /consoles/home redirects to it. Anything reaching this
+  // renderer is a console, a display, or a preview of one.
+  const ctx: LayoutRenderCtx = { home: false, state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed, canvasBg: inheritSurface ? null : bg };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (
