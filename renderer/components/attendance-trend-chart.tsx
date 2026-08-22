@@ -6,7 +6,7 @@
 // implementation is a promise to keep them matching, and this repo has enough
 // evidence about how those go.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { clamp } from "@main/services/clamp";
 import { shortDay, type TrendPoint } from "../settings/sections/overview-data";
@@ -29,6 +29,9 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
    * circle is a circle at any width, and the same component keeps drawing the
    * same chart on both pages — which is why it is one component.
    */
+  // Unique per instance: Home and History can both be mounted, and two <defs>
+  // sharing an id means the second chart paints with the first one's gradient.
+  const gradientId = useId();
   const box = useRef<HTMLDivElement>(null);
   const [W, setW] = useState(640);
   /**
@@ -55,8 +58,11 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const padTop = 16;
-  const padBottom = 26;
+  // Tighter than it was. A third of a 130px band spent on margin is a third the
+  // line does not get, and at the widths Home hands this thing the line needs
+  // every pixel of rise it can be given.
+  const padTop = 10;
+  const padBottom = 20;
   const padX = 10;
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -82,6 +88,13 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   const x = (i: number) => padX + (i / (points.length - 1)) * (plotW - padX * 2);
   const y = (v: number) => padTop + (1 - (v - min) / range) * (H - padTop - padBottom);
   const poly = points.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+  // The same points closed down to the baseline, for the fill.
+  //
+  // A line alone is a thread, and stretched across a metre of wall-width tile a
+  // thread is what it looks like — the shape stops registering at all. Weight
+  // under it is what makes a shallow slope read as a shape rather than as a
+  // scratch, and it costs one path.
+  const area = `${padX},${H - padBottom} ${poly} ${plotW - padX},${H - padBottom}`;
   const lastX = x(points.length - 1);
   const lastY = y(points[points.length - 1].value);
   const latest = points[points.length - 1].value;
@@ -114,6 +127,13 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
         aria-label="Attendance trend across recent services"
       >
         <line x1={0} y1={H - padBottom} x2={plotW} y2={H - padBottom} stroke="var(--su-line)" />
+        <defs>
+          <linearGradient id={`${gradientId}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--su-accent)" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="var(--su-accent)" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <polygon points={area} fill={`url(#${gradientId})`} />
         <polyline points={poly} fill="none" stroke="var(--su-accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         {/* The newest point is hollow while its service is still recording — that
             total is a partial and will keep climbing, so it must not read as a
