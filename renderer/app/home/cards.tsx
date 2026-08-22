@@ -26,17 +26,14 @@ import type { LayoutObjectConfig } from "@main/types/views";
  * The cards Home draws with its own markup. Derived from the config union so a
  * new home-* type cannot be silently left out of the switch below.
  *
- * The streaming trio is excluded deliberately. They render through the shared
- * streaming case in layout-renderer instead — the same composition as obs-status
- * and reaper-status, on Home and on a wall alike — so that a widget cannot say
- * one thing in the editor and another on the dashboard. A card here as well
- * would be a second answer to the same question, which is how they came to
- * disagree in the first place.
+ * The streaming trio is here too. They ALSO render through the shared streaming
+ * case on a wall — the judgement is one function either way — but the two
+ * surfaces present it differently on purpose: a wall reads one word at a
+ * distance, Home reads a row of three-line cards, and a streaming card that
+ * wore the wall's composition was the odd one out on the page.
  */
-type HomeCardType = Exclude<
-  Extract<LayoutObjectConfig, { type: `home-${string}` }>["type"],
-  "home-streaming" | "home-streaming-resi" | "home-streaming-youtube"
->;
+export type HomeCardType = Extract<LayoutObjectConfig, { type: `home-${string}` }>["type"];
+
 import { flashTarget } from "../flash";
 import { cn } from "../../lib/cn";
 import { invoke, onNotification } from "../../lib/api";
@@ -45,8 +42,39 @@ import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
 import { useObsState } from "../../main/use-obs-state";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
-import { recordIndicator, recorders, loudestSpl } from "../recording-status";
+import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl } from "../recording-status";
+import { useResiState, useYouTubeState } from "../../main/use-stream-state";
 import { Readout } from "../../main/readout";
+
+/**
+ * The same set as a VALUE, so a renderer can ask before it starts matching.
+ *
+ * `Record<HomeCardType, true>` is what makes it safe: add a home card and this
+ * object stops compiling until it is listed. layout-renderer routes on this
+ * ahead of its own switch, which is the whole point — the streaming trio used
+ * to be caught by a case further up and drawn as a wall widget, so Home showed
+ * a two-line ALL-CAPS tile in a row of three-line cards.
+ */
+const HOME_CARD_TYPES: Record<HomeCardType, true> = {
+  "home-readiness": true,
+  "home-next-service": true,
+  "home-recent-services": true,
+  "home-live-status": true,
+  "home-recording": true,
+  "home-recording-obs": true,
+  "home-recording-reaper": true,
+  "home-streaming": true,
+  "home-streaming-resi": true,
+  "home-streaming-youtube": true,
+  "home-spl": true,
+  "home-screens": true,
+};
+
+export function isHomeCard(
+  c: LayoutObjectConfig,
+): c is Extract<LayoutObjectConfig, { type: HomeCardType }> {
+  return c.type in HOME_CARD_TYPES;
+}
 
 /* ── Shared bits ──────────────────────────────────────────────────────────── */
 
@@ -175,10 +203,11 @@ export function Stat({
   value: string;
   sub?: string;
   to?: string;
-  /** `muted` is the resting state — grey, the same grey the streaming widgets
-   *  use for off air. `offline` dims the whole card: nothing to report because
-   *  nothing is connected. */
-  tone?: "danger" | "live" | "muted" | "offline";
+  /** Only the two colours a stat ever earns. Everything else — offline,
+   *  standby, off air — is the page's own foreground: on Home the caption and
+   *  the sub-line carry the grey, and a card that greyed its value too read as
+   *  disabled beside the ones that had not. */
+  tone?: "danger" | "live";
 }) {
   const body = (
     <Readout
@@ -192,10 +221,8 @@ export function Stat({
       valueColor={
         tone === "danger" ? "var(--color-danger-11)"
         : tone === "live" ? "var(--color-live-11)"
-        : tone === "muted" ? "var(--color-fg-muted)"
         : null
       }
-      dim={tone === "offline"}
       mono
     />
   );
@@ -464,15 +491,40 @@ export function LiveStatusCard({
 export function RecordingCard({ recorder = "any" }: { recorder?: string }) {
   const list = recorders(useObsState(), useReaperState());
   const chosen = recorder === "any" ? list : list.filter((r) => r.name === recorder);
-  // The same indicator the streaming cards use, so a row of them reads as a row
-  // rather than as two apps' worth of widgets.
   const ind = recordIndicator(chosen);
+  // Only LIVE takes a colour. Everything else is the page's own foreground, the
+  // way the SPL card's value is: on Home the caption and the sub-line carry the
+  // grey, and the value is the thing you read.
   return (
     <Stat
       label={recorder === "any" ? "Recording" : recorder}
       value={ind.value}
       sub={ind.sub ?? undefined}
-      tone={ind.state === "live" ? "live" : ind.state === "idle" ? "muted" : "offline"}
+      tone={ind.state === "live" ? "live" : undefined}
+    />
+  );
+}
+
+/**
+ * Every platform at once, or one of them — the recording card's twin.
+ *
+ * Back through Stat rather than through the wall's composition. A wall wants one
+ * word in one colour at a distance; Home wants three lines that read as a row
+ * with the cards beside them, and those cards are Stat.
+ */
+export function StreamingCard({ platform = "any", now }: { platform?: string; now: number }) {
+  const list = streamers(useResiState(), useYouTubeState(), useObsState());
+  // The clock comes DOWN, from the one tick the page already runs. A card that
+  // started its own interval would be a second clock per streaming widget, all
+  // of them a fraction out of step with the countdown above them.
+  const chosen = platform === "any" ? list : list.filter((s) => s.name === platform);
+  const ind = streamIndicator(chosen, now, { name: platform === "any" ? null : platform });
+  return (
+    <Stat
+      label={platform === "any" ? "Streaming" : platform}
+      value={ind.value}
+      sub={ind.sub ?? undefined}
+      tone={ind.state === "live" ? "live" : undefined}
     />
   );
 }
@@ -542,6 +594,12 @@ export function HomeCard({
       return <RecordingCard recorder="OBS" />;
     case "home-recording-reaper":
       return <RecordingCard recorder="REAPER" />;
+    case "home-streaming":
+      return <StreamingCard now={now} />;
+    case "home-streaming-resi":
+      return <StreamingCard platform="Resi" now={now} />;
+    case "home-streaming-youtube":
+      return <StreamingCard platform="YouTube" now={now} />;
     case "home-spl":
       return <SplCard />;
     case "home-screens":

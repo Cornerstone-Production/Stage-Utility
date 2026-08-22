@@ -82,7 +82,11 @@ describe("the recording indicator", () => {
 
   test("with several, it does not claim one of them", () => {
     // "OBS not connected" under a card labelled Recording would be naming one
-    // recorder for a question asked about all of them.
-    assert.equal(recordIndicator([rec({ connected: false }), rec({ name: "REAPER", connected: false })]).sub, null);
+    // recorder for a question asked about all of them — but there is still a
+    // third line, because the card next to it has one.
+    assert.equal(
+      recordIndicator([rec({ connected: false }), rec({ name: "REAPER", connected: false })]).sub,
+      "no recorder connected",
+    );
   });
 });

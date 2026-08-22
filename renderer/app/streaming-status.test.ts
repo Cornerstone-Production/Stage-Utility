@@ -121,11 +121,10 @@ describe("the indicator on a wall", () => {
   // states. A streaming widget beside one of those has to read the same way,
   // which is the whole reason this function exists rather than each widget
   // phrasing it for itself.
-  test("nothing connected reads Offline, with no second line", () => {
+  test("nothing connected reads Offline", () => {
     const ind = streamIndicator([s({ connected: false })], NOW);
     assert.equal(ind.value, "Offline");
     assert.equal(ind.state, "offline");
-    assert.equal(ind.sub, null, "an unset platform has nothing to put underneath");
   });
 
   test("connected and not streaming is its own state, not a shade of offline", () => {
@@ -164,5 +163,42 @@ describe("the indicator on a wall", () => {
     );
     assert.equal(ind.value, "Live");
     assert.equal(ind.sub, "2:00");
+  });
+});
+
+describe("the indicator on Home", () => {
+  // Home draws three lines: caption, the state, and a line saying which platform
+  // this is about. The wall drops the third for its two quiet states; the words
+  // themselves are decided here so that Resi and YouTube cannot say it one way
+  // and OBS and REAPER another, which is exactly what they did.
+  test("a named platform that is not connected says so", () => {
+    const ind = streamIndicator([s({ name: "Resi", connected: false })], NOW, { name: "Resi" });
+    assert.equal(ind.value, "Offline");
+    assert.equal(ind.sub, "Resi not connected");
+  });
+
+  test("a named platform that IS connected says so too", () => {
+    const ind = streamIndicator([s({ name: "YouTube", connected: true, live: false })], NOW, {
+      name: "YouTube",
+    });
+    assert.equal(ind.value, "Off air");
+    assert.equal(ind.sub, "YouTube connected");
+  });
+
+  test("the card for all of them names none of them", () => {
+    const ind = streamIndicator([s({ name: "Resi", connected: false })], NOW);
+    assert.equal(ind.sub, "no streaming platform connected");
+  });
+
+  test("the state is a word, not a shout", () => {
+    // Home's other cards read "Offline" and "Standby". These arrived on the page
+    // as "OFF AIR" because they were being drawn by the wall's composition.
+    for (const ind of [
+      streamIndicator([s({ connected: false })], NOW),
+      streamIndicator([s({ connected: true, live: false })], NOW),
+      streamIndicator([s({ live: true, startedAt: at(1) })], NOW),
+    ]) {
+      assert.notEqual(ind.value, ind.value.toUpperCase(), `"${ind.value}" is upper-cased`);
+    }
   });
 });

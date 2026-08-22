@@ -1,6 +1,6 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
-import { HomeCard, onlineFromState } from "../app/home/cards";
+import { HomeCard, isHomeCard, onlineFromState } from "../app/home/cards";
 import { fitFor } from "./console-fit";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
@@ -439,6 +439,44 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     />
   );
 
+  // Home's cards, BEFORE the switch. They render the SAME components Home's
+  // fixed panel does, so the editable Home and the built-in one cannot drift
+  // into looking like two different products — and asking first is what keeps
+  // that true. As cases they sat below `stream-status`, which listed the three
+  // streaming home types alongside itself and drew them with the wall's
+  // composition: two ALL-CAPS lines in a row of three-line cards. isHomeCard is
+  // exhaustive by type, so no case can shadow one of these again.
+  //
+  // pointer-events-none, ALWAYS — not gated on ctx.interactive like
+  // live-controls is.
+  //
+  // Some of these cards contain in-app links (/screens, /history) put there for
+  // Home, which runs in the operator shell. Every OTHER surface that renders
+  // them — a wall display, a panel, the editor preview — is on the kiosk
+  // router, whose whole route table is "/". A touch on the SPL stat took a
+  // display to a "Route not found" page and left it there until somebody walked
+  // over and reloaded it.
+  //
+  // Their capability is ["readout"], with no drill-down, so a link that does
+  // nothing off the shell is what the model already says they are. Home renders
+  // them directly, not through here, and keeps its links.
+  if (isHomeCard(c)) {
+    return (
+      <div className="w-full h-full pointer-events-none">
+        <HomeCard
+          type={c.type}
+          state={ctx.state}
+          pcoLive={ctx.pcoLive}
+          now={ctx.now}
+          skewMs={ctx.skewMs}
+          // From the state snapshot, not a presence hook — see onlineFromState.
+          onlineOutputIds={onlineFromState(ctx.state)}
+          secondsToStart={homeSecondsToStart(ctx)}
+        />
+      </div>
+    );
+  }
+
   switch (c.type) {
     case "text":
       return span(c.text);
@@ -838,19 +876,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         />
       );
     }
-    case "stream-status":
-    case "home-streaming":
-    case "home-streaming-resi":
-    case "home-streaming-youtube": {
-      // ONE render for all four, and deliberately the same composition as
+    case "stream-status": {
+      // The WALL composition, and deliberately the same one as
       // obs-status and reaper-status above: caption, the state as a word, and
       // the ticking number underneath. They answer the same kind of question on
       // the same wall, and reading differently made the streaming ones look like
       // a different app — a duration where its neighbour had a word.
       const only =
-        c.type === "home-streaming-resi" ? "Resi"
-        : c.type === "home-streaming-youtube" ? "YouTube"
-        : c.type === "stream-status" && c.platform && c.platform !== "any"
+        c.platform && c.platform !== "any"
           ? (c.platform === "resi" ? "Resi" : "YouTube")
           : null;
       const all = streamers(ctx.resi, ctx.youtube, ctx.obs);
@@ -868,7 +901,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // by more than their word.
       return readout(ind.value, {
         caption: only ?? "Streaming",
-        sub: ind.sub,
+        // Only where there is a number to put underneath. On a wall the quiet
+        // states are one word; Home shows the connection line instead.
+        sub: ind.state === "live" ? ind.sub : null,
         upper: true,
         dim: ind.state === "offline",
         fill: live && c.fillWhenLive ? "var(--green-9)" : null,
@@ -1029,45 +1064,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         />
       );
     }
-    // Home's cards. They render the SAME components Home's fixed panel does, so
-    // the editable Home and the built-in one cannot drift into looking like two
-    // different products.
-    case "home-readiness":
-    case "home-next-service":
-    case "home-recent-services":
-    case "home-live-status":
-    case "home-recording":
-    case "home-recording-obs":
-    case "home-recording-reaper":
-    case "home-spl":
-    case "home-screens":
-      // pointer-events-none, ALWAYS — not gated on ctx.interactive like
-      // live-controls is.
-      //
-      // Three of these four cards contain in-app links (/screens, /history) put
-      // there for Home, which runs in the operator shell. Every OTHER surface
-      // that renders them — a wall display, a panel, the editor preview — is on
-      // the kiosk router, whose whole route table is "/". A touch on the SPL
-      // stat took a display to a "Route not found" page and left it there until
-      // somebody walked over and reloaded it.
-      //
-      // Their capability is ["readout"], with no drill-down, so a link that does
-      // nothing off the shell is what the model already says they are. Home
-      // renders them directly, not through here, and keeps its links.
-      return (
-        <div className="w-full h-full pointer-events-none">
-          <HomeCard
-            type={c.type}
-            state={ctx.state}
-            pcoLive={ctx.pcoLive}
-            now={ctx.now}
-            skewMs={ctx.skewMs}
-            // From the state snapshot, not a presence hook — see onlineFromState.
-            onlineOutputIds={onlineFromState(ctx.state)}
-            secondsToStart={homeSecondsToStart(ctx)}
-          />
-        </div>
-      );
     default: {
       // Exhaustiveness guard: every LayoutObjectType must have a case above. Add
       // a type to the registry without a renderer here and this assignment stops
