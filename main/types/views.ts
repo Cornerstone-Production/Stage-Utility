@@ -15,7 +15,8 @@ export type ViewKind =
   | "transcription"
   | "custom"
   | "script"
-  | "spl-rundown";
+  | "spl-rundown"
+  | "signage";
 
 /** A live transcript line from ProdCom (pushed on "prodcom:transcript"). */
 export interface TranscriptLineDTO {
