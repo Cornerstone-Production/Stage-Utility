@@ -20,9 +20,10 @@
 // the canvas no longer showed through at all. A tint is now resolved AGAINST
 // the surface: translucent over Glass, opaque everywhere else.
 
+import type { LayoutSurface } from "@main/types/views";
 import { CARD_PRESETS } from "../main/layout-objects";
 
-export type SurfaceKind = "flat" | "glass" | "solid" | "outline";
+export type SurfaceKind = LayoutSurface;
 export type TintKind = "none" | "neutral" | "green" | "red" | "amber";
 
 /**
@@ -34,27 +35,25 @@ export type TintKind = "none" | "neutral" | "green" | "red" | "amber";
  * below keeps an object already wearing it naming itself.
  */
 export const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
-  flat: { background: null, borderColor: null, borderWidth: 0, boxShadow: 0 },
+  flat: { surface: "flat", background: null, borderColor: null, borderWidth: 0, boxShadow: 0 },
   // GLASS STAYS TRANSLUCENT. It is the one look whose whole point is that the
   // canvas shows through, so making it opaque would leave no way to ask for
   // that at all. Everything else went opaque because nothing else was asking.
-  glass: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0 },
-  solid: { background: "var(--gray-2)", borderColor: null, borderWidth: 0, cornerRadius: 0.0148, boxShadow: 0.35 },
-  outline: { background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015, cornerRadius: 0.0148, boxShadow: 0 },
+  glass: { surface: "glass", background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0 },
+  solid: { surface: "solid", background: "var(--gray-2)", borderColor: null, borderWidth: 0, cornerRadius: 0.0148, boxShadow: 0.35 },
+  outline: { surface: "outline", background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015, cornerRadius: 0.0148, boxShadow: 0 },
 };
 
-export const SURFACES: { value: SurfaceKind; label: string }[] = [
-  { value: "flat", label: "Flat" },
-  { value: "glass", label: "Glass" },
-  { value: "solid", label: "Solid" },
-  { value: "outline", label: "Outline" },
+export const SURFACES: { value: SurfaceKind; label: string; hint: string }[] = [
+  // "None", not "Flat". Asked what the difference between Flat and Solid was,
+  // the honest answer is that one of them is not a material at all — Flat draws
+  // NOTHING, and the widget sits straight on the screen behind it. Named for
+  // what it does, the question does not arise.
+  { value: "flat", label: "None", hint: "No card at all — the widget sits straight on the screen" },
+  { value: "glass", label: "Glass", hint: "A translucent card — the screen behind shows through" },
+  { value: "solid", label: "Solid", hint: "An opaque card, with a shadow under it" },
+  { value: "outline", label: "Outline", hint: "A hairline border and nothing behind it" },
 ];
-
-/** What Elevated used to be, kept ONLY so an object already wearing it still
- *  matches a named surface instead of reading as "custom". Never offered. */
-const LEGACY_ELEVATED: LayoutStyle = {
-  background: "#191919", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001, cornerRadius: 0.0148, boxShadow: 0.6,
-};
 
 /**
  * The tints.
@@ -94,54 +93,28 @@ export function tintedBackground(surface: SurfaceKind | "", tint: TintKind): str
   return surface === "glass" ? t.sheer : t.opaque;
 }
 
-/** Every background that counts as "this surface, wearing some tint". */
-function allowedBackgrounds(surface: SurfaceKind, preset: LayoutStyle): (string | null)[] {
-  return [
-    preset.background ?? null,
-    ...TINTS.filter((t) => t.value !== "none").flatMap((t) =>
-      // BOTH strengths, whichever surface this is. An object tinted before the
-      // sheer values existed carries the opaque one, and refusing to recognise
-      // it would leave exactly the "Custom" this file exists to stop. Clicking
-      // any tint re-resolves it to the right strength for its surface.
-      [surface === "glass" ? t.sheer : t.opaque, surface === "glass" ? t.opaque : t.sheer],
-    ),
-  ];
-}
-
 /**
- * Which surface this style is wearing, or "" for a hand-tuned one.
+ * Which surface this style is wearing. Always one of the four.
  *
- * Structure decides it. `background` is compared only against what the surface
- * is ALLOWED to be wearing — its own, or any tint — because the tint owns that
- * field. A background outside the allowance is genuinely custom: somebody
- * picked a colour, and saying "Glass" over it would be a lie.
- */
-/**
- * Compare one structural field.
+ * The stored choice wins outright, which is the whole point: tint it, round its
+ * corners, pick a colour of your own — it is still the material you asked for,
+ * and the dropdown goes on saying so.
  *
- * A style is a PATCH, so "no shadow" is written both as `boxShadow: 0` and as
- * no key at all, and treating those as different is why the app's own default
- * card — the look most objects ship wearing — reported itself as "Custom" in a
- * dropdown that had never been touched.
+ * Anything made before the choice was recorded is CLASSIFIED from what it
+ * actually draws. That is a total function on purpose: "Custom" was never an
+ * entry in the list, so it has no business being what the list reads.
  */
-function sameField(a: unknown, b: unknown, key: keyof LayoutStyle): boolean {
-  const NUMERIC = ["borderWidth", "boxShadow", "cornerRadius"];
-  if (NUMERIC.includes(key as string)) return (a ?? 0) === (b ?? 0);
-  return (a ?? null) === (b ?? null);
-}
-
-export function matchSurface(s: LayoutStyle): SurfaceKind | "" {
-  const named: [SurfaceKind, LayoutStyle][] = [
-    ...SURFACES.map((x) => [x.value, SURFACE_PRESETS[x.value]] as [SurfaceKind, LayoutStyle]),
-    ["solid", LEGACY_ELEVATED],
-  ];
-  for (const [value, style] of named) {
-    const structural = (Object.keys(style) as (keyof LayoutStyle)[]).filter((k) => k !== "background");
-    if (!structural.every((k) => sameField(s[k], style[k], k))) continue;
-    if (!allowedBackgrounds(value, style).includes(s.background ?? null)) continue;
-    return value;
+export function surfaceOf(s: LayoutStyle): SurfaceKind {
+  if (s.surface && SURFACE_PRESETS[s.surface]) return s.surface;
+  const bg = s.background ?? null;
+  if (bg) {
+    // Translucent grounds are glass; opaque ones are a card. An rgba/hsla with
+    // an alpha below 1 is the only thing that can show the screen through it.
+    const alpha = /^(?:rgba|hsla)\([^)]*,\s*([\d.]+)\s*\)$/i.exec(bg)?.[1];
+    return alpha !== undefined && Number(alpha) < 1 ? "glass" : "solid";
   }
-  return "";
+  if (s.borderColor && (s.borderWidth ?? 0) > 0) return "outline";
+  return "flat";
 }
 
 /**
@@ -168,12 +141,16 @@ export function matchTint(s: LayoutStyle): TintKind {
  */
 export function applySurface(current: LayoutStyle, surface: SurfaceKind): LayoutStyle {
   const tint = matchTint(current);
-  return { ...SURFACE_PRESETS[surface], background: tintedBackground(surface, tint) };
+  // A hand-picked colour is kept as it is: it was chosen deliberately, and
+  // re-resolving it as if it were a tint would throw it away on a click that
+  // only meant to change the material.
+  const background = isCustomFill(current) ? current.background ?? null : tintedBackground(surface, tint);
+  return { ...SURFACE_PRESETS[surface], background };
 }
 
 /** The patch for choosing a tint, at the strength this surface calls for. */
 export function applyTint(current: LayoutStyle, tint: TintKind): LayoutStyle {
-  return { background: tintedBackground(matchSurface(current), tint) };
+  return { background: tintedBackground(surfaceOf(current), tint) };
 }
 
 /**
@@ -187,6 +164,5 @@ export function isCustomFill(s: LayoutStyle): boolean {
   if (matchTint(s) !== "none") return false;
   const bg = s.background ?? null;
   if (bg === null) return false;
-  const surface = matchSurface(s);
-  return bg !== (surface ? SURFACE_PRESETS[surface].background ?? null : null);
+  return bg !== (SURFACE_PRESETS[surfaceOf(s)].background ?? null);
 }

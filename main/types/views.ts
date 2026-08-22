@@ -180,7 +180,23 @@ export interface LayoutStyle {
    *  cards read as layered. 0 = none. */
   boxShadow?: number;
   lineClamp?: number | null;
+  /**
+   * The material this object is wearing: Glass, Solid, Outline or none.
+   *
+   * STORED, not inferred. It used to be worked out by comparing every style
+   * field against a table of presets, which meant tinting a Glass object — or
+   * nudging its radius — stopped it matching anything and the dropdown read
+   * "Custom" for a look the operator had picked from that same dropdown two
+   * clicks earlier. A surface is a choice; choices are recorded.
+   *
+   * Absent on everything made before this, so `surfaceOf` classifies those from
+   * what they draw. It never answers "custom": every style is one of the four.
+   */
+  surface?: LayoutSurface;
 }
+
+/** The four materials offered in the inspector's Look section. */
+export type LayoutSurface = "flat" | "glass" | "solid" | "outline";
 
 /** Per-type configuration. The discriminant is `type`. */
 export type LayoutObjectConfig =

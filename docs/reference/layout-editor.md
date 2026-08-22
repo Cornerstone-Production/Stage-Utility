@@ -116,8 +116,19 @@ not in its editor.
 
 Two independent questions, in that order.
 
-**Surface** is the material — Flat, Glass, Solid or Outline. It owns the border,
+**Surface** is the material — None, Glass, Solid or Outline. It owns the border,
 the corner radius and the shadow.
+
+| | |
+|---|---|
+| None | no card at all; the widget sits straight on the screen |
+| Glass | a translucent card — what is behind shows through |
+| Solid | an opaque card, with a shadow under it |
+| Outline | a hairline border and nothing behind it |
+
+The surface you pick is **stored**, not worked out from the fields afterwards. So
+tinting a Glass widget, rounding its corners or giving it a colour of your own
+leaves it Glass, and the dropdown goes on saying Glass.
 
 **Tint** is the colour on it, and owns only the background. Any surface can wear
 any tint, so a red Solid and a green Glass are both reachable. The row is called
@@ -128,10 +139,8 @@ A tint is resolved against the surface it lands on: translucent over Glass, so
 tinted glass is still glass and the canvas still shows through, and opaque
 everywhere else. The swatch shows the hue; the surface decides the strength.
 
-The last dot in the row is a colour wheel — any colour you like. Picking one
-makes the surface read **Custom**, which is honest: the object is no longer
-wearing a look the list can name. Picking a surface again is always possible from
-there, and keeps whatever colour is on.
+The last dot in the row is a colour wheel — any colour you like. It stays yours:
+changing the surface afterwards keeps it rather than resolving it back to a tint.
 
 ## Selection
 
