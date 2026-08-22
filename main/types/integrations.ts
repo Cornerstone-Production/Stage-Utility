@@ -30,6 +30,16 @@ export interface IntegrationDescriptor {
   /** Short paragraph shown in the settings panel's per-integration info "i":
    *  what it surfaces, how it connects, and where to set it up. */
   description?: string;
+  /**
+   * The other end dials US — there is nothing for this app to connect to.
+   *
+   * Companion is the one: its module opens an HTTP/SSE connection to this
+   * server. That makes an enable switch a lie, because nothing is gated on it —
+   * turning it off left the module connecting and controlling the app exactly as
+   * before — and it makes "disconnected" the wrong word for having no client
+   * attached, which is the resting state of a listener rather than a fault.
+   */
+  inbound?: boolean;
   configSchema: ConfigField[];
 }
 
@@ -45,4 +55,8 @@ export interface IntegrationState {
    *  consumers can tell "not set up" apart from "set up but disconnected".
    *  Computed in getStates(); stored entries omit it. */
   configured?: boolean;
+  /** Mirrors the descriptor's `inbound` — carried on the state because the
+   *  context bar and the health count read states, not descriptors, and an
+   *  integration nobody dials cannot be "down". Computed in getStates(). */
+  inbound?: boolean;
 }

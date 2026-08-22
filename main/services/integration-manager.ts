@@ -93,7 +93,8 @@ const COMPANION_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "Bitfocus Companion",
   description:
-    "Lets a Bitfocus Companion (Stream Deck) surface control and read Stage. The Companion module connects to this app, so there's nothing to configure here — just point the module at this server's IP and port, shown below. This row reflects how many Companion clients are connected.",
+    "Lets a Bitfocus Companion (Stream Deck) surface control and read Stage. The Companion module connects to this app, so there's nothing to configure here — and nothing to switch on: just point the module at this server's IP and port, shown below. This row reflects how many Companion clients are connected.",
+  inbound: true,
   configSchema: [],
 };
 
@@ -459,6 +460,33 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   ROSS_TSL_DESCRIPTOR,
 ];
 
+/** Derived from the descriptors rather than listed again, so an integration
+ *  cannot be inbound in one place and dialable in another. */
+const inboundIds = new Set(DESCRIPTORS.filter((d) => d.inbound).map((d) => d.id));
+
+/**
+ * Is this integration on, at load?
+ *
+ * An INBOUND one always is: the server listens whether or not anything is
+ * stored, so honouring a saved false would put the app's own record out of step
+ * with what it is actually doing. That false exists on real installs — the row
+ * used to carry a switch, and nothing was ever gated on it, so flicking it off
+ * left Companion connecting and controlling the app while the app filed it as
+ * disabled. It is ignored rather than migrated: there is nothing to migrate to.
+ *
+ * Exported for the guard, which is the only way to state this without booting
+ * the whole manager.
+ */
+export function enabledFor(
+  descriptor: Pick<IntegrationDescriptor, "id" | "inbound">,
+  stored: Record<string, boolean> | undefined,
+): boolean {
+  return descriptor.inbound === true || (stored?.[descriptor.id] ?? false);
+}
+
+/** The registered descriptors, for a guard that needs the real ones. */
+export const INTEGRATION_DESCRIPTORS: readonly IntegrationDescriptor[] = DESCRIPTORS;
+
 // Keys that are secrets for each integration id.
 const SECRET_KEYS: Record<string, string[]> = {
   "planning-center": ["secret"],
@@ -491,7 +519,7 @@ class IntegrationManager {
       // config snapshot restored over a newer build can arrive without keys added
       // since. Crashing init over it takes every display down.
       const savedConfig = settings.integrationConfigs?.[descriptor.id] ?? {};
-      const enabled = settings.integrationEnabled?.[descriptor.id] ?? false;
+      const enabled = enabledFor(descriptor, settings.integrationEnabled);
       const secrets = await secretsStore.getSecrets(descriptor.id);
 
       // Merge saved non-secret config with any secret keys (masked).
@@ -571,7 +599,11 @@ class IntegrationManager {
   }
 
   getStates(): IntegrationState[] {
-    return Array.from(this.states.values()).map((s) => ({ ...s, configured: this.isConfigured(s) }));
+    return Array.from(this.states.values()).map((s) => ({
+      ...s,
+      configured: this.isConfigured(s),
+      ...(inboundIds.has(s.id) ? { inbound: true as const } : null),
+    }));
   }
 
   /** Whether the operator has set an integration up — independent of the live
@@ -580,7 +612,7 @@ class IntegrationManager {
    *  config/secret value is saved; wireless/OSC (no config schema, set up via
    *  their own connection/target lists) use the master enable toggle. */
   private isConfigured(state: IntegrationState): boolean {
-    if (state.id === "companion") return true; // inbound — nothing to set up
+    if (inboundIds.has(state.id)) return true; // the other end dials us — nothing to set up
     if (state.id === "wireless" || state.id === "osc") return state.enabled;
     // YouTube asks for one of two sets of fields depending on how it is set to
     // check, so "any value present" would call it configured the moment the mode

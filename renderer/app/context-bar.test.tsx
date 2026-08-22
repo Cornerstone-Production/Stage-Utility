@@ -7,7 +7,7 @@ import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
-const { contextBarState, renderBarItem } = await import("./context-bar.js");
+const { contextBarState, renderBarItem, integrationHealth } = await import("./context-bar.js");
 const { BAR_ITEMS } = await import("./bar-items.js");
 
 after(() => {
@@ -173,5 +173,35 @@ describe("nothing appears or disappears", () => {
     for (const id of ALL) {
       assert.notEqual(renderBarItem(id, rolling as never), null, `${id} vanishes with a recorder stopped`);
     }
+  });
+});
+
+describe("what counts as an integration being down", () => {
+  // Both exclusions are things the bar used to complain about forever.
+  const st = (over: Partial<IntegrationState>): IntegrationState =>
+    ({ id: "x", enabled: true, configured: true, connection: "disconnected", message: null, config: {}, ...over }) as IntegrationState;
+
+  test("a set-up integration that is disconnected is down", () => {
+    const { down } = integrationHealth([st({ id: "obs" })]);
+    assert.deepEqual(down.map((d) => d.id), ["obs"]);
+  });
+
+  test("one nobody set up is absent, not down", () => {
+    const { setUp, down } = integrationHealth([st({ id: "resi", configured: false })]);
+    assert.deepEqual(setUp, []);
+    assert.deepEqual(down, []);
+  });
+
+  test("an INBOUND one is never down, however it reports itself", () => {
+    // Companion's module dials us. With no Stream Deck plugged in it sits at
+    // "disconnected" for weeks, and the bar was counting that as a fault.
+    const { setUp, down } = integrationHealth([st({ id: "companion", inbound: true })]);
+    assert.deepEqual(down, [], "an inbound integration was counted as down");
+    assert.deepEqual(setUp, [], "an inbound integration was counted at all");
+  });
+
+  test("and it does not hide the ones that ARE down beside it", () => {
+    const { down } = integrationHealth([st({ id: "companion", inbound: true }), st({ id: "obs" })]);
+    assert.deepEqual(down.map((d) => d.id), ["obs"]);
   });
 });

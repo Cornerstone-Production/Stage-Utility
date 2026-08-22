@@ -223,6 +223,26 @@ function Idle({ children }: { children: ReactNode }) {
  * Exported for the guard that holds that promise — the idle branches are easy
  * to drop, and dropping one brings back a bar that rearranges itself.
  */
+/**
+ * Which integrations the health item speaks for, and which of those are down.
+ *
+ * Exported because the rule is the whole item: two exclusions, each of which was
+ * a bar that complained forever about something that was not wrong.
+ *
+ *  - NOT SET UP is not disconnected, it is absent. Counting it makes the bar
+ *    permanently complain about gear this church does not own.
+ *  - INBOUND is not dialable. Companion's module connects to us, so having no
+ *    client attached is a listener's resting state — counting it would report a
+ *    problem every week nobody plugs in a Stream Deck.
+ */
+export function integrationHealth(states: readonly IntegrationState[] | undefined): {
+  setUp: IntegrationState[];
+  down: IntegrationState[];
+} {
+  const setUp = (states ?? []).filter((i) => i.enabled && i.configured !== false && !i.inbound);
+  return { setUp, down: setUp.filter((i) => i.connection === "error" || i.connection === "disconnected") };
+}
+
 export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
   const { state, bar, now, obs, reaper, integrations, resi, youtube } = ctx;
   switch (id) {
@@ -301,11 +321,7 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
       );
 
     case "integration-health": {
-      // Only ones the operator has actually SET UP: an integration nobody
-      // configured is not "disconnected", it is absent, and counting it would
-      // make the bar permanently complain about gear this church does not own.
-      const setUp = (integrations?.states ?? []).filter((i) => i.enabled && i.configured !== false);
-      const down = setUp.filter((i) => i.connection === "error" || i.connection === "disconnected");
+      const { setUp, down } = integrationHealth(integrations?.states);
       // A count on its own is the least useful place to stop: it says something
       // is wrong mid-service and leaves you to open Integrations and read every
       // card to find out what. Clicking it names them and takes you there.
