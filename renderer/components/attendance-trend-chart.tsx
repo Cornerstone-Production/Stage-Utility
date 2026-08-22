@@ -11,6 +11,20 @@ import { useEffect, useRef, useState } from "react";
 import { clamp } from "@main/services/clamp";
 import { shortDay, type TrendPoint } from "../settings/sections/overview-data";
 
+/**
+ * A trend is never drawn flatter than 8:1.
+ *
+ * Home's XL tile is some 1700px wide and about 130 tall. Filling it makes a
+ * fifteen-to-one band, and at that aspect every service becomes the same
+ * nearly-horizontal wire — the shape stops carrying the thing the chart exists
+ * to show. History has always capped its own chart at 640px for this reason;
+ * this is that rule as an aspect, so it holds at any height rather than at one
+ * magic width.
+ */
+export function plotWidth(width: number, height: number): number {
+  return Math.min(width, Math.round(height * 8));
+}
+
 /** Real attendance trend chart (SVG): a baseline, the per-service polyline, the
  *  latest point marked, and first/last date labels. The hero of the blend — not
  *  decorative. Falls back to a quiet note when there isn't enough to plot. */
@@ -31,17 +45,30 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
    */
   const box = useRef<HTMLDivElement>(null);
   const [W, setW] = useState(640);
+  /**
+   * And the HEIGHT, because a trend needs an aspect to be a shape.
+   *
+   * History caps the chart at 640px wide, where 130 tall is a reasonable band.
+   * Home hands it a whole XL tile — some 1900px — and at a fixed height that is
+   * fifteen to one: the line came out as a nearly flat wire pulled across the
+   * card, with the tile's remaining height empty underneath it. Taking the
+   * height it is actually given gives the curve room to be a curve.
+   *
+   * 130 is the floor and the fallback, so History — whose container is
+   * auto-height — draws exactly what it always drew.
+   */
+  const [H, setH] = useState(130);
   useEffect(() => {
     const el = box.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
-      // A floor, so a card mid-mount at zero width cannot divide by nothing.
+      // Floors, so a card mid-mount at zero size cannot divide by nothing.
       setW(Math.max(240, Math.round(entry.contentRect.width)));
+      setH(Math.max(130, Math.round(entry.contentRect.height)));
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const H = 130;
   const padTop = 16;
   const padBottom = 26;
   const padX = 10;
@@ -49,16 +76,19 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   const [hover, setHover] = useState<number | null>(null);
   if (points.length < 2) {
     return (
-      <div className="flex h-[130px] items-center justify-center text-caption1 text-fg-subtle">
+      <div className="flex h-full min-h-[130px] items-center justify-center text-caption1 text-fg-subtle">
         Not enough services yet to chart a trend.
       </div>
     );
   }
+  // Centred rather than pinned left: with the headline figures above it spanning
+  // the whole tile, a chart hugging one edge reads as a layout mistake.
+  const plotW = plotWidth(W, H);
   const vals = points.map((p) => p.value);
   const min = Math.min(...vals);
   const max = Math.max(...vals);
   const range = max - min || 1;
-  const x = (i: number) => padX + (i / (points.length - 1)) * (W - padX * 2);
+  const x = (i: number) => padX + (i / (points.length - 1)) * (plotW - padX * 2);
   const y = (v: number) => padTop + (1 - (v - min) / range) * (H - padTop - padBottom);
   const poly = points.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
   const lastX = x(points.length - 1);
@@ -68,12 +98,14 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   const hx = hover != null ? x(hover) : 0;
   const hy = hp ? y(hp.value) : 0;
   return (
-    <div className="relative" ref={box}>
+    <div className="relative h-full min-h-[130px]" ref={box}>
+      <div className="relative mx-auto h-full" style={{ maxWidth: plotW }}>
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
+        viewBox={`0 0 ${plotW} ${H}`}
         width="100%"
         height={H}
+        style={{ display: "block" }}
         // The viewBox matches the measured width, so this scales nothing. It
         // stays "none" only to keep a frame mid-resize — where the measurement
         // is one tick stale — stretched rather than letterboxed, which is the
@@ -90,7 +122,7 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
         role="img"
         aria-label="Attendance trend across recent services"
       >
-        <line x1={0} y1={H - padBottom} x2={W} y2={H - padBottom} stroke="var(--su-line)" />
+        <line x1={0} y1={H - padBottom} x2={plotW} y2={H - padBottom} stroke="var(--su-line)" />
         <polyline points={poly} fill="none" stroke="var(--su-accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         {/* The newest point is hollow while its service is still recording — that
             total is a partial and will keep climbing, so it must not read as a
@@ -107,14 +139,14 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
           </g>
         )}
         <text x={padX} y={H - 8} fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[0].day)}</text>
-        <text x={W - padX} y={H - 8} textAnchor="end" fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[points.length - 1].day)}</text>
+        <text x={plotW - padX} y={H - 8} textAnchor="end" fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[points.length - 1].day)}</text>
       </svg>
       {/* Hover tooltip — HTML overlay positioned by % so its text isn't stretched
           by the chart's non-uniform (preserveAspectRatio="none") X scale. */}
       {hp && (
         <div
           className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border border-line-strong bg-popover px-2 py-1 shadow-md backdrop-blur-xl"
-          style={{ left: `${(hx / W) * 100}%`, top: `${Math.max(hy - 8, 4)}px` }}
+          style={{ left: `${(hx / plotW) * 100}%`, top: `${Math.max(hy - 8, 4)}px` }}
         >
           <div className="font-mono text-caption2 tabular-nums text-fg-subtle whitespace-nowrap">
             {shortDay(hp.day)}{hp.live ? " · recording" : ""}
@@ -143,6 +175,7 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
           {latest.toLocaleString()}
         </span>
       )}
+      </div>
     </div>
   );
 }
