@@ -108,6 +108,7 @@ import {
 } from "../main/layout-objects";
 import { invoke } from "../lib/api";
 import { fitFor } from "../main/console-fit";
+import { HOME_VIEW_ID } from "@main/services/home-view";
 import { useInspectorWidth } from "../lib/use-sidebar-width";
 import { cn } from "../lib/cn";
 import { viewSurface } from "@main/types/views";
@@ -1927,7 +1928,10 @@ export function LayoutEditor({
               onDrawn={(rect) => setPendingRect(rect)}
               gridOn={gridOn && isEditing}
               interactive={isEditing}
-              ctx={{ ...data, state: data.state, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
+              // `home` is the VIEW's identity, not the editor's: editing Home's
+              // own layout must preview Home's cards, and editing anything else
+              // must preview what that surface will draw.
+              ctx={{ ...data, state: data.state, home: view.id === HOME_VIEW_ID, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}
@@ -2004,7 +2008,11 @@ export function LayoutEditor({
             (usePanelWidth) rather than a second implementation, so both get the
             rAF batching and pointercancel handling that drag needs. */}
         {isEditing && (
-        <div className="relative shrink-0 @max-4xl:w-full" style={{ width: inspectorWidth }}>
+        // A CONTAINER, so the controls inside can answer to the panel's own
+        // width rather than the window's. Dragging it narrow used to leave the
+        // rows at their full size and the panel scrolling sideways, which is
+        // how a swatch row ended up half off the edge.
+        <div className="relative shrink-0 @container/insp @max-4xl:w-full" style={{ width: inspectorWidth }}>
           <div
             role="separator"
             aria-orientation="vertical"

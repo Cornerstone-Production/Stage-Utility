@@ -64,8 +64,9 @@ about one you pick.
 
 **On Home** the same widget is drawn as a card instead: the platform's name, the
 state as a word, and a line saying whether Resi is connected — the shape SPL and
-the recording cards use, so a row of them reads as a row. The wall keeps the
-larger all-caps word, which is what it is for.
+the recording cards use, so a row of them reads as a row. Anywhere else — a
+console, a display — it is the wall widget above, matching OBS status and REAPER
+status beside it. The surface decides, not which of the two objects you picked.
 
 ## Automation
 

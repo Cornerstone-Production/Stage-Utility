@@ -76,14 +76,27 @@ export function MoreControls({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Label beside control — until the panel is too narrow for both, and then label
+ * ABOVE control.
+ *
+ * A fixed 96px label in a 176px panel leaves 64px for the control, which is
+ * narrower than a stepper field, so the row overflowed and the whole inspector
+ * scrolled sideways. Stacking gives the control the full width instead, and the
+ * controls wrap inside it, so nothing is ever cut off however far the panel is
+ * dragged in.
+ *
+ * A container query on the PANEL, not a media query: the inspector's width is
+ * dragged, and the window's says nothing about it.
+ */
 export function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-caption2 text-fg-muted w-24 shrink-0 flex items-center gap-1">
+    <div className="flex items-center gap-2 @max-[248px]/insp:flex-col @max-[248px]/insp:items-stretch @max-[248px]/insp:gap-1">
+      <span className="text-caption2 text-fg-muted w-24 shrink-0 flex items-center gap-1 @max-[248px]/insp:w-auto">
         <span className="truncate">{label}</span>
         {hint && <InfoHint className="shrink-0">{hint}</InfoHint>}
       </span>
-      <div className="flex-1 min-w-0 flex items-center gap-1">{children}</div>
+      <div className="flex-1 min-w-0 flex items-center gap-1 @max-[248px]/insp:flex-wrap">{children}</div>
     </div>
   );
 }

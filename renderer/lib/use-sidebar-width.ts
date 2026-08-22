@@ -161,7 +161,15 @@ export function useSidebarWidth(): SidebarWidth {
 /** The layout editor's inspector. Grows leftward: its handle is on its left edge. */
 export const INSPECTOR_WIDTH_KEY = "stage-inspector-width";
 export const DEFAULT_INSPECTOR_WIDTH = 320;
-export const MIN_INSPECTOR_WIDTH = 260;
+/**
+ * The same floor the left sidebar has.
+ *
+ * It was 260, and the contents did not fit even there: the tint swatches and
+ * the alignment buttons overflowed by 26px and 16px, so the panel scrolled
+ * sideways at its own minimum. The rows stack and wrap below 248px (see Row in
+ * inspector-rows), which is what lets this come down to match the rail.
+ */
+export const MIN_INSPECTOR_WIDTH = MIN_SIDEBAR_WIDTH;
 export const MAX_INSPECTOR_WIDTH = 640;
 
 export function useInspectorWidth(): SidebarWidth {

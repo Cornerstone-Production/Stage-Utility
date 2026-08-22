@@ -290,7 +290,7 @@ function PlanAttachmentConfig({
         </Select>
       </Row>
       <Row label="Crop %">
-        <div className="grid grid-cols-2 gap-1 flex-1">
+        <div className="grid grid-cols-2 gap-1 flex-1 @max-[248px]/insp:w-full">
           <NumberInput value={Math.round((crop.top ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("top", v)} />
           <NumberInput value={Math.round((crop.bottom ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("bottom", v)} />
           <NumberInput value={Math.round((crop.left ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("left", v)} />
@@ -375,8 +375,11 @@ export function Inspector({
 
   return (
     <div className="flex flex-col gap-2.5">
-      <div className="flex items-center gap-1">
-        <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted flex-1">{typeLabel(c.type)}</span>
+      {/* The object's own toolbar wraps rather than pushing the panel wider:
+          eight icon buttons and a type name do not fit a narrow inspector on
+          one line, and a row that cannot wrap is a row that clips. */}
+      <div className="flex items-center gap-1 flex-wrap">
+        <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted flex-1 min-w-0 truncate">{typeLabel(c.type)}</span>
         {c.type === "container" && (
           <Button variant="transparent" size="small" iconOnly onClick={onSaveGroup} aria-label="Save as group"><PackagePlusIcon className="size-3.5 text-fg-muted" /></Button>
         )}
@@ -1263,7 +1266,7 @@ export function Inspector({
         label={surfaceOf(s) === "solid" ? "Fill" : "Tint"}
         hint="The colour on this surface. The swatches are washes made for a dark stage canvas; the picker takes any colour. On Glass they stay see-through, so tinted glass is still glass."
       >
-        <div role="group" aria-label="Tint" className="flex items-center gap-1.5">
+        <div role="group" aria-label="Tint" className="flex items-center gap-1.5 flex-wrap">
           {TINTS.map((t) => {
             // "No tint" is not lit by a hand-picked colour: that is a colour,
             // and the slash would be claiming the object has none.
@@ -1424,7 +1427,7 @@ export function Inspector({
       <span className="text-caption2 text-fg-muted">
         Position &amp; size ({Math.round(parentW)}×{Math.round(parentH)}{nested ? " · in container" : ""})
       </span>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2 @max-[248px]/insp:grid-cols-1">
         <PixelField label="X" value={o.x} dim={parentW} onChange={(v) => onGeom({ x: clamp(v, 0, 1 - o.w) })} />
         <PixelField label="Y" value={o.y} dim={parentH} onChange={(v) => onGeom({ y: clamp(v, 0, 1 - o.h) })} />
         <PixelField label="W" value={o.w} dim={parentW} onChange={(v) => onGeom({ w: clamp(v, MIN, 1 - o.x) })} />
