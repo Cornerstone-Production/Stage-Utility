@@ -63,7 +63,10 @@ export function recordIndicator(
   if (wired.length === 0) {
     return {
       value: "Offline",
-      sub: list.length === 1 ? `${list[0].name} not connected` : null,
+      // Always a third line, so a card that is offline is the same height as the
+      // one beside it that is recording. Where there is one recorder it can say
+      // which; where there are two it cannot, and says what it does know.
+      sub: list.length === 1 ? `${list[0].name} not connected` : "no recorder connected",
       state: "offline",
     };
   }
@@ -184,19 +187,33 @@ export function streamingStat(
  *
  * The STATE is returned rather than a colour: the mapping belongs to the widget,
  * but which of the three we are in is a judgement, and judgements get tested.
+ *
  * Off air is its own state and not a shade of offline — "Resi is reachable and
  * is not streaming" is the single most useful thing this can say mid-service.
+ *
+ * The sub-line is always supplied, and the WALL widgets drop it for the two
+ * quiet states: a wall wants one word, and Home wants the third line saying
+ * which platform is or is not connected. One judgement, two presentations.
  */
 export function streamIndicator(
   list: readonly Streamer[],
   now: number,
-  opts: { showElapsed?: boolean } = {},
+  opts: { showElapsed?: boolean; name?: string | null } = {},
 ): { value: string; sub: string | null; state: "offline" | "idle" | "live" } {
   const st = streamingStat(list, now);
+  const named = opts.name;
   // No tone is streamingStat's "nothing is even connected". That is a platform
   // nobody has set up, not a stream that dropped.
-  if (!st.tone) return { value: "Offline", sub: null, state: "offline" };
-  if (st.tone !== "live") return { value: "Off air", sub: null, state: "idle" };
+  if (!st.tone) {
+    return {
+      value: "Offline",
+      sub: named ? `${named} not connected` : "no streaming platform connected",
+      state: "offline",
+    };
+  }
+  if (st.tone !== "live") {
+    return { value: "Off air", sub: named ? `${named} connected` : st.sub, state: "idle" };
+  }
   // Live: the word, with the elapsed time as the sub-line. streamingStat's value
   // IS the elapsed reading, or "LIVE" when the platform will not say since when.
   const elapsed = st.value === "LIVE" ? null : st.value;

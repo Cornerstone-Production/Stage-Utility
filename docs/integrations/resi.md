@@ -62,6 +62,11 @@ it a tally light, drawing nothing at all until something is going out.
 **Streaming status** is the same widget asking about every platform at once, or
 about one you pick.
 
+**On Home** the same widget is drawn as a card instead: the platform's name, the
+state as a word, and a line saying whether Resi is connected — the shape SPL and
+the recording cards use, so a row of them reads as a row. The wall keeps the
+larger all-caps word, which is what it is for.
+
 ## Automation
 
 - **Triggers:** Resi goes live · Resi stops streaming

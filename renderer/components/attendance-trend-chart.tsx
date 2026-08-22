@@ -27,7 +27,6 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   // Unique per instance: Home and History can both be mounted, and two <defs>
   // sharing an id means the second chart paints with the first one's gradient.
   const gradientId = useId();
-  const box = useRef<HTMLDivElement>(null);
   const [W, setW] = useState(640);
   /**
    * And the HEIGHT, because a trend needs an aspect to be a shape.
@@ -42,17 +41,36 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
    * auto-height — draws exactly what it always drew.
    */
   const [H, setH] = useState(130);
+  /**
+   * The measured element, in STATE, and the observer keyed to it.
+   *
+   * It was a ref read once in a mount effect, and that is the bug behind every
+   * complaint about this chart. The component returns a different element while
+   * there are fewer than two services to plot — the "not enough yet" note, which
+   * carries no ref — so on any load where the history had not arrived by first
+   * paint, the effect ran with a null ref, returned, and never ran again. No
+   * observer was ever attached, and the width stayed at its initial 640 for the
+   * life of the page.
+   *
+   * With a viewBox that came out as 640 stretched across a 1500px card: labels
+   * two and a half times too wide, and an endpoint dot drawn as an oval. Without
+   * one it came out as a line that stops at a third of its own card. Both were
+   * reported; both were this.
+   *
+   * A callback ref binds whenever the node appears, however many renders later,
+   * and re-binds if it is ever replaced.
+   */
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
-    const el = box.current;
-    if (!el) return;
+    if (!box) return;
     const ro = new ResizeObserver(([entry]) => {
       // Floors, so a card mid-mount at zero size cannot divide by nothing.
       setW(Math.max(240, Math.round(entry.contentRect.width)));
       setH(Math.max(130, Math.round(entry.contentRect.height)));
     });
-    ro.observe(el);
+    ro.observe(box);
     return () => ro.disconnect();
-  }, []);
+  }, [box]);
   // Tighter than it was. A third of a 130px band spent on margin is a third the
   // line does not get, and at the widths Home hands this thing the line needs
   // every pixel of rise it can be given.
@@ -97,7 +115,7 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   const hx = hover != null ? x(hover) : 0;
   const hy = hp ? y(hp.value) : 0;
   return (
-    <div className="relative h-full min-h-[130px]" ref={box}>
+    <div className="relative h-full min-h-[130px]" ref={setBox}>
       <div className="relative h-full">
       <svg
         ref={svgRef}
@@ -184,8 +202,16 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
           labeling every point would clutter. */}
       {!hp && (
         <span
-          className="pointer-events-none absolute right-1 font-mono text-caption1 font-medium tabular-nums text-fg"
-          style={{ top: `${Math.max(0, lastY - 20)}px` }}
+          className="pointer-events-none absolute font-mono text-caption1 font-medium tabular-nums text-fg"
+          // Above the last point, or beside it when there is no room above —
+          // which is exactly the common case, because the newest weekend being
+          // the highest one is what puts the point at the top of the band. It
+          // used to clear the dot only because the line stopped short of the
+          // card; now that the line reaches the edge, the two share a corner.
+          //
+          // Stepping sideways rather than making room at the top keeps every
+          // pixel of rise the curve has.
+          style={{ top: `${Math.max(0, lastY - 20)}px`, right: lastY - 20 < 0 ? 18 : 4 }}
         >
           {latest.toLocaleString()}
         </span>
