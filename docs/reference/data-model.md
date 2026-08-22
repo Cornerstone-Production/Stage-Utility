@@ -145,8 +145,8 @@ timer and service order.
 of its container, so moving or resizing the container moves and scales its contents
 together, nesting up to two levels. Drop an object onto a container to nest it.
 
-**Card presets** apply the built-in dashboards' rounded tile look — fill, border,
-radius, padding — to any object in one click, and **Flat** clears it. **Start from
+**Card presets** apply the built-in dashboards' rounded tile look — fill, border
+and radius — to any object in one click, and **None** clears it. **Start from
 Dashboard** builds the dashboard as editable tiles to work from.
 
 **Plan file** shows a file attached to the current plan, such as the stage plot. It

@@ -131,15 +131,9 @@ export function boxStyle(o: LayoutObject, H: number, _canvasBg?: string | null):
   // control entirely. A custom property is read by the one place that wants it
   // and inherited by nothing that does not.
   if (s.color) (css as Record<string, unknown>)["--readout-value-color"] = s.color;
-  if (s.opacity != null) css.opacity = s.opacity;
-  if (s.padding != null) css.padding = `${s.padding * H}px`;
   if (s.cornerRadius != null) css.borderRadius = `${s.cornerRadius * H}px`;
   // Clamp so a stray/legacy width can't swell into a solid fill.
   if (s.borderColor && s.borderWidth) css.border = `${Math.min(s.borderWidth, 0.04) * H}px solid ${s.borderColor}`;
-  if (s.boxShadow) {
-    const a = Math.min(1, s.boxShadow);
-    css.boxShadow = `0 ${0.006 * a * H}px ${0.02 * a * H}px rgba(0,0,0,${0.45 * a}), 0 ${0.02 * a * H}px ${0.05 * a * H}px rgba(0,0,0,${0.30 * a})`;
-  }
   if (o.config.type === "shape" && o.config.shape === "ellipse") css.borderRadius = "50%";
   return css;
 }
@@ -181,16 +175,6 @@ function textStyle(o: LayoutObject, H: number): CSSProperties {
   if (s.italic) css.fontStyle = "italic";
   if (s.uppercase) css.textTransform = "uppercase";
   if (s.letterSpacing != null) css.letterSpacing = `${s.letterSpacing}em`;
-  if (s.textShadow) {
-    const a = Math.min(1, s.textShadow);
-    css.textShadow = `0 ${0.004 * H}px ${0.012 * H}px rgba(0,0,0,${0.9 * a}), 0 ${0.01 * H}px ${0.03 * H}px rgba(0,0,0,${0.7 * a})`;
-  }
-  if (s.lineClamp) {
-    css.display = "-webkit-box";
-    css.WebkitBoxOrient = "vertical";
-    css.WebkitLineClamp = s.lineClamp;
-    css.overflow = "hidden";
-  }
   return css;
 }
 

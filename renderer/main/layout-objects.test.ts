@@ -117,6 +117,22 @@ function withCurrentGround(style: Record<string, unknown>): Record<string, unkno
 }
 const BASE_TEXT = { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 
+/**
+ * Style fields that no longer exist ANYWHERE.
+ *
+ * Elevation, opacity, padding, text shadow and line clamp were removed from the
+ * model, not just from the inspector — so every recorded style that carried one
+ * differs from the registry by exactly those keys and nothing else. Stripping
+ * them from both sides of the comparison keeps this guard's whole point: any
+ * OTHER drift in a default style still fails.
+ */
+const REMOVED_FIELDS = ["padding", "opacity", "boxShadow", "textShadow", "lineClamp"];
+function withoutRemoved(style: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...style };
+  for (const k of REMOVED_FIELDS) delete out[k];
+  return out;
+}
+
 /** defaultStyle() as it was, branch for branch. */
 function originalStyle(type: string): Record<string, unknown> {
   if (type === "shape") return { background: "#3b82f6", opacity: 1 };
@@ -443,7 +459,11 @@ describe("layout-object registry vs. the structures it replaced", () => {
 
   test("default style is the original, or a recorded restyle", () => {
     for (const t of ALL) {
-      assert.deepEqual(defaultStyle(t as never), RESTYLED[t] ?? withCurrentGround(originalStyle(t)), `defaultStyle("${t}")`);
+      assert.deepEqual(
+        defaultStyle(t as never),
+        withoutRemoved(RESTYLED[t] ?? withCurrentGround(originalStyle(t))),
+        `defaultStyle("${t}")`,
+      );
     }
   });
 
@@ -457,9 +477,9 @@ describe("layout-object registry vs. the structures it replaced", () => {
     const registry = Object.keys(LAYOUT_OBJECTS);
     for (const t of Object.keys(RESTYLED)) {
       assert.ok(registry.includes(t), `RESTYLED names "${t}", which is not an object type`);
-      assert.deepEqual(RESTYLED[t], defaultStyle(t as never), `RESTYLED["${t}"] no longer matches the registry`);
+      assert.deepEqual(withoutRemoved(RESTYLED[t]), defaultStyle(t as never), `RESTYLED["${t}"] no longer matches the registry`);
       if (ALL.includes(t)) {
-        assert.notDeepEqual(RESTYLED[t], originalStyle(t), `RESTYLED["${t}"] matches the original`);
+        assert.notDeepEqual(withoutRemoved(RESTYLED[t]), withoutRemoved(originalStyle(t)), `RESTYLED["${t}"] matches the original`);
       }
     }
   });

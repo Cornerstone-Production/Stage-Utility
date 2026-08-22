@@ -116,11 +116,11 @@ type CardAccent = "neutral" | "green" | "red" | "amber" | "flat";
  * show through still has Fill and Opacity in the inspector.
  */
 export const CARD_PRESETS: Record<CardAccent, LayoutStyle> = {
-  neutral: { background: "#141414", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  green: { background: "#0d1a15", borderColor: "rgba(45,212,150,0.13)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  red: { background: "#201011", borderColor: "rgba(229,72,77,0.25)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  amber: { background: "#1e190e", borderColor: "rgba(255,197,61,0.20)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  flat: { background: null, borderColor: null, borderWidth: 0, cornerRadius: 0, padding: 0 },
+  neutral: { background: "#141414", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148 },
+  green: { background: "#0d1a15", borderColor: "rgba(45,212,150,0.13)", borderWidth: 0.001, cornerRadius: 0.0148 },
+  red: { background: "#201011", borderColor: "rgba(229,72,77,0.25)", borderWidth: 0.001, cornerRadius: 0.0148 },
+  amber: { background: "#1e190e", borderColor: "rgba(255,197,61,0.20)", borderWidth: 0.001, cornerRadius: 0.0148 },
+  flat: { background: null, borderColor: null, borderWidth: 0, cornerRadius: 0 },
 };
 
 
@@ -193,7 +193,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     blurb: "A plain rectangle or circle, for dividing up a screen",
     group: "Layout",
     config: () => ({ type: "shape", shape: "rect" }),
-    style: () => ({ background: "#3b82f6", opacity: 1 }),
+    style: () => ({ background: "#3b82f6" }),
     homeSize: "s",
   },
   image: {

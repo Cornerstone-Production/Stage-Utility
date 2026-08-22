@@ -62,11 +62,12 @@ describe("the frame Home draws", () => {
   });
 
   test("what Home does NOT take from the object is still the object's", () => {
-    // The frame and the ground are Home's; padding, opacity and alignment are
-    // the operator's, and stripping those would flatten every widget into the
-    // same tile whatever they set.
+    // The frame and the ground are Home's; ALIGNMENT is the operator's, and
+    // stripping that would flatten every widget into the same tile whatever they
+    // set. Padding and opacity used to be here too — they are gone from the
+    // model entirely now, so there is nothing to pass through.
     const frame = cardFrame(obj("clock"), 720);
-    assert.ok(frame.padding !== undefined, "padding stopped coming from the object");
     assert.ok(frame.justifyContent !== undefined, "vertical alignment stopped coming from the object");
+    assert.equal(frame.padding, undefined, "padding is back, and the readout supplies its own");
   });
 });
