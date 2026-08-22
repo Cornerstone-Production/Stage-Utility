@@ -32,6 +32,7 @@ import {
   confirm,
 } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { ColorField } from "../../components/ui/color-field";
 import type { SectionHandlers, WirelessChannel } from "../types";
 import { PositionRangeEditor } from "./position-picker";
 import { useStageState } from "../../main/use-stage-state";
@@ -379,21 +380,20 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, teamPositions, s
             placeholder="Label (e.g. Backup)"
             className="flex-1 min-w-0"
           />
-          <input
-            type="color"
+          <ColorField
+            label="Slot colour"
+            allowAlpha={false}
             value={(slot.link as { kind: "static"; label: string; color: string }).color}
-            onChange={(e: ChangeEvent<HTMLInputElement>) =>
+            onChange={(color: string) =>
               onChange({
                 ...slot,
                 link: {
                   kind: "static",
                   label: (slot.link as { kind: "static"; label: string; color: string }).label,
-                  color: e.target.value,
+                  color,
                 },
               })
             }
-            className="w-9 h-8 rounded cursor-pointer border border-gray-a4 bg-transparent"
-            aria-label="Panel color"
           />
         </div>
       )}

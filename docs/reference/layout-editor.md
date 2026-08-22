@@ -142,6 +142,22 @@ everywhere else. The swatch shows the hue; the surface decides the strength.
 The last dot in the row is a colour wheel — any colour you like. It stays yours:
 changing the surface afterwards keeps it rather than resolving it back to a tint.
 
+## Picking a colour
+
+Every colour control in the app — text, fill, border, tint, a slot's colour, the
+brand accent, an icon's tint — is the same panel: a saturation square, a hue
+slider, an opacity slider where opacity means something, a hex box you can type
+or paste into, and the palette the app itself is built from.
+
+It replaces the browser's native colour input, which could not be themed, could
+not express an opacity at all — a translucent ground had to be typed as a string
+somewhere else — and on a wall-mounted touch screen opened a system window over a
+live dashboard.
+
+Colours are stored as hex while they are opaque and `rgba()` once they are not.
+Changes apply as you drag, so the canvas behind the panel shows the result rather
+than waiting for it to close.
+
 ## Selection
 
 Only the selected object is outlined and named. Hovering shows a faint outline

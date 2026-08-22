@@ -58,7 +58,7 @@ import {
   
 } from "../components/ui";
 import { loadProcessedAttachment } from "../main/layout-renderer";
-import { MIN, clamp, hexForInput } from "../settings/sections/layout-geometry.js";
+import { MIN, clamp } from "../settings/sections/layout-geometry.js";
 import { useSplState } from "../main/use-spl-state";
 import { useWirelessChannels } from "../main/use-wireless-channels";
 import { usePeopleCountState } from "../main/use-people-count-state";
@@ -91,6 +91,7 @@ import {
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
 import { cn } from "../lib/cn";
+import { ColorField } from "../components/ui/color-field";
 import {
   SURFACES, TINTS, applySurface, applyTint, isCustomFill, matchTint, surfaceOf,
   type SurfaceKind,
@@ -721,13 +722,13 @@ export function Inspector({
           </div>
           <Row label="Ahead color">
             <div className="flex items-center gap-2">
-              <input type="color" value={hexForInput(c.aheadColor, "#30a46c")} onChange={(e) => onConfig({ ...c, aheadColor: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" />
+              <ColorField label="Ahead colour" allowAlpha={false} value={c.aheadColor ?? "#30a46c"} onChange={(v) => onConfig({ ...c, aheadColor: v })} />
               {c.aheadColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, aheadColor: null })}>Reset</button>}
             </div>
           </Row>
           <Row label="Behind color">
             <div className="flex items-center gap-2">
-              <input type="color" value={hexForInput(c.behindColor, "#e5484d")} onChange={(e) => onConfig({ ...c, behindColor: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" />
+              <ColorField label="Behind colour" allowAlpha={false} value={c.behindColor ?? "#e5484d"} onChange={(v) => onConfig({ ...c, behindColor: v })} />
               {c.behindColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, behindColor: null })}>Reset</button>}
             </div>
           </Row>
@@ -1317,13 +1318,15 @@ export function Inspector({
                   : { background: "conic-gradient(#ef4444,#f59e0b,#84cc16,#22d3ee,#6366f1,#ec4899,#ef4444)", opacity: 0.55 }
               }
             />
-            <input
-              type="color"
-              aria-label="Custom colour"
-              title="Custom colour"
-              value={hexForInput(s.background, "#000000")}
-              onChange={(e) => onStyle({ background: e.target.value })}
-              className="absolute inset-0 size-6 cursor-pointer opacity-0"
+            {/* The app's picker, laid over the wheel dot: the dot is the
+                affordance, the picker is the panel. Opacity is offered here —
+                a ground is exactly where a translucent colour belongs, and the
+                native control could never express one. */}
+            <ColorField
+              label="Custom colour"
+              value={s.background ?? "#000000"}
+              onChange={(v) => onStyle({ background: v })}
+              className="absolute inset-0 [&>button]:size-6 [&>button]:rounded-full [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"
             />
           </span>
         </div>
@@ -1344,7 +1347,9 @@ export function Inspector({
               <SelectContent>{WEIGHTS.map((w) => <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
             </Select>
           </Row>
-          <Row label="Color"><input type="color" value={hexForInput(s.color, "#ffffff")} onChange={(e) => onStyle({ color: e.target.value })} className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent" /></Row>
+          {/* Text, so no opacity: a translucent word over a wall is not a
+              softer word, it is a harder one to read. */}
+          <Row label="Color"><ColorField label="Text colour" allowAlpha={false} value={s.color ?? "#ffffff"} onChange={(v) => onStyle({ color: v })} /></Row>
           {/* One pad, not two rows of lettered buttons. What reads as active has
               to be the alignment the object will actually RENDER at, not a
               hard-coded guess: a readout with nothing stored aligns left, and
@@ -1362,12 +1367,10 @@ export function Inspector({
 
       <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
       <Row label="Border">
-        <input
-          type="color"
-          value={hexForInput(s.borderColor, "#ffffff")}
-          onChange={(e) => onStyle({ borderColor: e.target.value, borderWidth: s.borderWidth ?? 0 })}
-          className="w-9 h-7 rounded cursor-pointer border border-line bg-transparent"
-          aria-label="Border color"
+        <ColorField
+          label="Border colour"
+          value={s.borderColor ?? "#ffffff"}
+          onChange={(v) => onStyle({ borderColor: v, borderWidth: s.borderWidth ?? 0 })}
         />
         <NumberField
           value={Math.round((s.borderWidth ?? 0) * canvas.height)}

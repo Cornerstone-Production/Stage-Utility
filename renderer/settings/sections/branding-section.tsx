@@ -18,6 +18,7 @@ import { BrandLogo } from "../../components/brand-logo";
 import type { SectionProps } from "../types";
 import { LogoCropper } from "./logo-cropper";
 import { cn } from "../../lib/cn";
+import { ColorField } from "../../components/ui/color-field";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 // Convenience presets for the brand accent (any org can also pick a custom hex).
@@ -232,25 +233,28 @@ export function BrandingSection({
                     Nested, it painted to the padding box while the preset swatches
                     paint to the border box — same 24px element, 22px of colour, and
                     it read as a smaller chip in the row. */}
-                <label
+                <span
                   className={cn(
-                    "relative size-6 cursor-pointer rounded-md border border-gray-a5 transition-transform hover:scale-110",
+                    "relative size-6 rounded-md border border-gray-a5 transition-transform hover:scale-110",
                     "bg-[conic-gradient(from_180deg,#c2410c,#0d9488,#5b9bd8,#6e56cf,#c2410c)]",
                   )}
-                  aria-label="Custom accent color"
                 >
-                  <input
-                    type="color"
+                  {/* The wheel stays the affordance; the app's picker is the
+                      panel behind it. An accent is a brand colour and opaque by
+                      definition, so no opacity slider. */}
+                  <ColorField
+                    label="Custom accent color"
+                    allowAlpha={false}
                     value={accentDraft}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => setAccentDraft(e.target.value)}
-                    onBlur={() => {
-                      if (accentDraft.toLowerCase() !== (stageState.accentColor ?? "").toLowerCase()) {
-                        handlers.handleSetBranding({ accentColor: accentDraft });
+                    onChange={(v: string) => {
+                      setAccentDraft(v);
+                      if (v.toLowerCase() !== (stageState.accentColor ?? "").toLowerCase()) {
+                        handlers.handleSetBranding({ accentColor: v });
                       }
                     }}
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    className="absolute inset-0 [&>button]:size-full [&>button]:rounded-md [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"
                   />
-                </label>
+                </span>
               </Tooltip>
               <Button
                 variant="transparent"

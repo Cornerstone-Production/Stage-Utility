@@ -9,7 +9,6 @@ import {
   clamp,
   gridUnits,
   handleCursor,
-  hexForInput,
   snapRectToGrid,
   snapTo,
 } from "./layout-geometry.js";
@@ -160,43 +159,4 @@ test("every handle has a cursor, and opposite corners share one", () => {
   assert.equal(handleCursor("ne"), handleCursor("sw"));
   assert.equal(handleCursor("n"), "ns-resize");
   assert.equal(handleCursor("e"), "ew-resize");
-});
-
-// ── Colour coercion ────────────────────────────────────────────────────────
-
-test("a solid hex passes through untouched", () => {
-  assert.equal(hexForInput("#1a2b3c", "#000000"), "#1a2b3c");
-});
-
-test("shorthand hex is expanded", () => {
-  assert.equal(hexForInput("#abc", "#000000"), "#aabbcc");
-});
-
-test("alpha is dropped from an 8-digit hex", () => {
-  assert.equal(hexForInput("#11223344", "#000000"), "#112233");
-});
-
-test("rgb and rgba are converted, alpha discarded", () => {
-  assert.equal(hexForInput("rgb(255, 0, 128)", "#000000"), "#ff0080");
-  assert.equal(hexForInput("rgba(0, 17, 34, 0.5)", "#000000"), "#001122");
-});
-
-test("an over-range channel is clamped rather than producing invalid hex", () => {
-  // Otherwise 999 becomes "3e7" — four characters — and the browser rejects the
-  // whole value with a "does not conform to #rrggbb" warning.
-  assert.equal(hexForInput("rgb(999, 0, 0)", "#000000"), "#ff0000");
-  assert.equal(hexForInput("rgb(300, 300, 300)", "#000000"), "#ffffff");
-});
-
-test("a negative channel falls back rather than being coerced", () => {
-  // The match requires digits, so a minus sign fails the pattern outright and
-  // never reaches the clamp. Falling back is the right answer — a colour with a
-  // negative channel is malformed, not merely out of range.
-  assert.equal(hexForInput("rgb(0, -5, 0)", "#fallbk"), "#fallbk");
-});
-
-test("anything unparseable falls back", () => {
-  for (const v of ["var(--su-accent)", "rebeccapurple", "", null, undefined, "#12"]) {
-    assert.equal(hexForInput(v, "#fallbk"), "#fallbk", `${String(v)} should fall back`);
-  }
 });
