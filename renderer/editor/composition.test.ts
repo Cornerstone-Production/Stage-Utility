@@ -63,7 +63,9 @@ describe("the editor shell composes its parts", () => {
   test("every extracted module is imported by something", () => {
     // A module nothing imports is dead weight that still type-checks.
     const files = readdirSync(HERE).filter(
-      (f) => /\.tsx?$/.test(f) && !f.endsWith(".test.ts") && f !== "layout-editor.tsx",
+      // .test.tsx as well as .test.ts — a component test is a test, and the
+      // first one written here was reported as an orphaned module.
+      (f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f) && f !== "layout-editor.tsx",
     );
     assert.ok(files.length >= 3, `only found ${files.length} extracted modules — scan looks broken`);
 

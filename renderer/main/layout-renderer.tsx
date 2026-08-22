@@ -131,6 +131,14 @@ export function boxStyle(o: LayoutObject, H: number, _canvasBg?: string | null):
   // control entirely. A custom property is read by the one place that wants it
   // and inherited by nothing that does not.
   if (s.color) (css as Record<string, unknown>)["--readout-value-color"] = s.color;
+  // And the vertical alignment, for the same reason: the readout idiom paints
+  // over this box absolutely, so the justifyContent above governs only the
+  // objects that do NOT use it. Every readout ignored the pad's top and bottom
+  // rows entirely — three of the nine cells did anything at all.
+  if (s.vAlign) {
+    (css as Record<string, unknown>)["--readout-v-align"] =
+      s.vAlign === "top" ? "flex-start" : s.vAlign === "bottom" ? "flex-end" : "center";
+  }
   if (s.cornerRadius != null) css.borderRadius = `${s.cornerRadius * H}px`;
   // Clamp so a stray/legacy width can't swell into a solid fill.
   if (s.borderColor && s.borderWidth) css.border = `${Math.min(s.borderWidth, 0.04) * H}px solid ${s.borderColor}`;

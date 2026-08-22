@@ -249,7 +249,10 @@ export function Readout({
         boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
-        justifyContent: "center",
+        // The object's own vertical alignment where it set one — published as a
+        // custom property by boxStyle, because this composition covers the box
+        // that would otherwise carry it. Centre is the default and the fallback.
+        justifyContent: "var(--readout-v-align, center)",
         alignItems: items,
         gap: `${boxH * GAP_SCALE}px`,
         overflow: "hidden",

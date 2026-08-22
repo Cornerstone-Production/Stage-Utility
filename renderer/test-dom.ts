@@ -19,6 +19,13 @@ const EXPOSED = [
   "document",
   "navigator",
   "HTMLElement",
+  // Testing Library reaches for this when it fires an event, so a component
+  // containing a form control — a Switch, an Input — cannot be rendered without
+  // it. The failure reads "HTMLFormElement is not defined" from inside React,
+  // which points nowhere near the missing global.
+  "HTMLFormElement",
+  "HTMLInputElement",
+  "HTMLButtonElement",
   "Element",
   "Node",
   "Event",
