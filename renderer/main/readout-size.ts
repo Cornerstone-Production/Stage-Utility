@@ -100,3 +100,57 @@ export function valueSizeFor(boxH: number, captionPx: number, subPx: number): nu
   // budget still shows a value rather than collapsing it to nothing.
   return Math.max(boxH * CONTENT_SCALE - spent, boxH * VALUE_FLOOR_SCALE) / VALUE_LEADING;
 }
+
+/**
+ * The whole composition, guaranteed to fit the box it is painted in.
+ *
+ * `valueSizeFor` shares out a BUDGET, and a budget is a proportion — which stops
+ * being enough at the small end, where the caption and sub-line sit on pixel
+ * floors that do not shrink with the box. Below about 16px of content height the
+ * caption alone is taller than everything available, and the value was rendered
+ * anyway and clipped: the exact "OFFLINE cut in half" a status widget shows when
+ * it is made small in the editor.
+ *
+ * So the lines are DROPPED rather than overflowed, least important first. A
+ * widget too short for three lines shows two; too short for two shows the value,
+ * which is the line it exists for. Nothing is ever painted outside the box.
+ *
+ * @param boxH the height the composition actually has, in layout pixels — the
+ *   content box, not the object's outer height.
+ */
+export function fitComposition(
+  boxH: number,
+  hasCaption: boolean,
+  hasSub: boolean,
+): { captionPx: number; valuePx: number; subPx: number } {
+  const avail = Math.max(0, boxH - 2 * boxH * PAD_SCALE);
+  const gap = boxH * GAP_SCALE;
+
+  const attempt = (caption: boolean, sub: boolean) => {
+    const captionPx = caption ? Math.max(CAPTION_MIN_PX, boxH * CAPTION_SCALE) : 0;
+    const subPx = sub ? Math.max(SUB_MIN_PX, boxH * SUB_SCALE) : 0;
+    const valuePx = valueSizeFor(boxH, captionPx, subPx);
+    const used =
+      valuePx * VALUE_LEADING +
+      (captionPx > 0 ? captionPx * CAPTION_LEADING + gap : 0) +
+      (subPx > 0 ? subPx * SUB_LEADING + gap : 0);
+    return { captionPx, valuePx, subPx, used };
+  };
+
+  // An unmeasured box is UNKNOWN, not tiny. Before the first measurement — and
+  // anywhere without layout at all — the composition is drawn whole and the
+  // measurement corrects it, rather than every widget flashing up as a bare
+  // value and growing its caption a frame later.
+  if (boxH <= 0) return attempt(hasCaption, hasSub);
+
+  // In order of what may be given up: the sub-line qualifies the value, the
+  // caption names it, and the value IS it.
+  for (const [caption, sub] of [[hasCaption, hasSub], [hasCaption, false], [false, false]] as const) {
+    const tried = attempt(caption, sub);
+    if (tried.used <= avail) return tried;
+  }
+  // Even the value alone is taller than the box. Give it exactly what there is,
+  // so a widget shrunk to a sliver draws a sliver rather than spilling over the
+  // object next to it.
+  return { captionPx: 0, valuePx: Math.max(1, avail / VALUE_LEADING), subPx: 0 };
+}

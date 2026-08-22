@@ -124,6 +124,13 @@ export function boxStyle(o: LayoutObject, H: number, _canvasBg?: string | null):
     boxSizing: "border-box",
   };
   if (s.background) css.background = s.background;
+  // The object's own text colour, published for the readout idiom to pick up.
+  // A readout sets its value colour EXPLICITLY (an inherited one resolved to
+  // black-on-black on the kiosk surface once, measured at 1.06:1), so a colour
+  // chosen in the inspector never reached it — every readout ignored the Color
+  // control entirely. A custom property is read by the one place that wants it
+  // and inherited by nothing that does not.
+  if (s.color) (css as Record<string, unknown>)["--readout-value-color"] = s.color;
   if (s.opacity != null) css.opacity = s.opacity;
   if (s.padding != null) css.padding = `${s.padding * H}px`;
   if (s.cornerRadius != null) css.borderRadius = `${s.cornerRadius * H}px`;

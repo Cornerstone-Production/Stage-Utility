@@ -22,8 +22,7 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import {
-  CAPTION_SCALE, CAPTION_MIN_PX, SUB_SCALE, SUB_MIN_PX, GAP_SCALE,
-  CAPTION_LEADING, VALUE_LEADING, SUB_LEADING, PAD_SCALE, valueSizeFor,
+  GAP_SCALE, CAPTION_LEADING, VALUE_LEADING, SUB_LEADING, PAD_SCALE, fitComposition,
 } from "./readout-size";
 import { DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
 import type { LayoutHAlign } from "@main/types/views";
@@ -45,7 +44,14 @@ function useBoxSize(): [React.RefObject<HTMLDivElement | null>, number, number] 
   const ref = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ h: 0, w: 0 });
   useLayoutEffect(() => {
-    const box = ref.current?.parentElement;
+    // The READOUT's own box, not the object's outer one. It is positioned
+    // inset:0, which resolves against the object's PADDING box — so an object
+    // carrying stored padding gives the composition less room than the object's
+    // height, and sizing from the outer height overran it by exactly that
+    // padding. A card preset's 16px a side is invisible on a big widget and
+    // clips a small one, which is why this only ever showed up on the ones
+    // somebody had shrunk.
+    const box = ref.current;
     if (!box) return;
     const measure = () =>
       setSize((prev) =>
@@ -190,9 +196,9 @@ export function Readout({
   // centred caption sitting over a left-set value.
   const items = side === "right" ? "flex-end" : side === "center" ? "center" : "flex-start";
   const [ref, boxH, boxW] = useBoxSize();
-  const captionPx = caption ? Math.max(CAPTION_MIN_PX, boxH * CAPTION_SCALE) : 0;
-  const subPx = sub ? Math.max(SUB_MIN_PX, boxH * SUB_SCALE) : 0;
-  const valuePx = valueSizeFor(boxH, captionPx, subPx);
+  // Lines are dropped rather than clipped when the box cannot hold them — see
+  // fitComposition. A caption cut in half is not a caption.
+  const { captionPx, valuePx, subPx } = fitComposition(boxH, !!caption, !!sub);
   const { wrapRef, elRef, scale } = useShrinkToWidth([value, valuePx, mono]);
 
   const filled = !!fill;
@@ -266,7 +272,7 @@ export function Readout({
           style={{ position: "absolute", inset: 0, background: fill!, borderRadius: "inherit" }}
         />
       ) : null}
-      {caption ? <span style={{ ...captionStyle, position: "relative" }}>{caption}</span> : null}
+      {caption && captionPx > 0 ? <span style={{ ...captionStyle, position: "relative" }}>{caption}</span> : null}
       <div ref={wrapRef} style={{ width: "100%", minHeight: 0, overflow: "hidden", position: "relative", textAlign: side }}>
         <span
           ref={elRef}
@@ -275,8 +281,11 @@ export function Readout({
             fontSize: `${valuePx * scale}px`,
             fontWeight: weight ?? (filled ? 700 : 600),
             // Explicit, never inherited: an inherited colour resolved to black
-            // on black on the kiosk surface once — measured at 1.06:1.
-            color: filled ? "#ffffff" : valueColor ?? "var(--color-fg)",
+            // on black on the kiosk surface once — measured at 1.06:1. The
+            // custom property is the object's OWN colour where it set one (see
+            // boxStyle), and falls back to the token where it did not, so this
+            // stays explicit either way.
+            color: filled ? "#ffffff" : valueColor ?? "var(--readout-value-color, var(--color-fg))",
             lineHeight: VALUE_LEADING,
             whiteSpace: "nowrap",
             ...(upper ? { textTransform: "uppercase" as const } : null),
@@ -286,7 +295,7 @@ export function Readout({
           {value}
         </span>
       </div>
-      {sub ? (
+      {sub && subPx > 0 ? (
         <span style={{ ...subStyle, position: "relative" }} title={sub}>
           {sub}
         </span>

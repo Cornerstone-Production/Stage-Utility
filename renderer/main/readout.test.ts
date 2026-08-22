@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { VALUE_SCALE, valueSizeFor, CONTENT_SCALE, PAD_SCALE } from "./readout-size.js";
+import { VALUE_SCALE, valueSizeFor, CONTENT_SCALE, PAD_SCALE, fitComposition } from "./readout-size.js";
 
 // The composition is caption / value / sub, sized from the widget's own height.
 // These are the proportions the comparison page was approved at, plus the one
@@ -108,5 +108,61 @@ describe("small boxes", () => {
     const px = valueSizeFor(tiny, 9, 10);
     assert.ok(px > 0, "the value collapsed to nothing");
     assert.ok(px >= (tiny * 0.18) / 1.05 - 0.01, `value floor not applied: ${px}px`);
+  });
+});
+
+describe("a widget that has been made small", () => {
+  // The report: integration widgets clip in the editor once they are shrunk —
+  // "OFFLINE" cut in half under its caption. Two things did it. The composition
+  // was sized from the OBJECT's height while it paints inside the object's
+  // padding, and at the small end the caption's pixel floor is taller than
+  // everything available and was drawn anyway.
+  const LINES = [
+    { caption: true, sub: true },
+    { caption: true, sub: false },
+    { caption: false, sub: false },
+  ];
+
+  test("nothing is ever painted outside the box, at any height", () => {
+    for (let box = 6; box <= 400; box += 2) {
+      for (const { caption, sub } of LINES) {
+        const { captionPx, valuePx, subPx } = fitComposition(box, caption, sub);
+        const gap = box * 0.03;
+        const used =
+          valuePx * 1.05 +
+          (captionPx > 0 ? captionPx * 1.1 + gap : 0) +
+          (subPx > 0 ? subPx * 1.2 + gap : 0);
+        const avail = box - 2 * box * PAD_SCALE;
+        assert.ok(
+          used <= avail + 0.01,
+          `${box}px box, caption=${caption} sub=${sub}: ${used.toFixed(1)}px of content in ${avail.toFixed(1)}px`,
+        );
+      }
+    }
+  });
+
+  test("lines are given up in order, and the value is the last to go", () => {
+    // A short box drops the sub-line before the caption, and the caption before
+    // the value — the value is the line the widget exists for.
+    const roomy = fitComposition(200, true, true);
+    assert.ok(roomy.captionPx > 0 && roomy.subPx > 0, "a 200px box should hold all three");
+
+    const tight = fitComposition(28, true, true);
+    assert.equal(tight.subPx, 0, "the sub-line should be the first to go");
+    assert.ok(tight.valuePx > 0, "the value must survive");
+
+    const tiny = fitComposition(12, true, true);
+    assert.equal(tiny.captionPx, 0, "the caption should go before the value");
+    assert.ok(tiny.valuePx > 0, "the value must survive");
+  });
+
+  test("a roomy box is unchanged — this only bites at the small end", () => {
+    // The proportions above are the approved composition, and a fix for small
+    // widgets that quietly resized every big one would be a worse bug.
+    const box = 200;
+    const { captionPx, valuePx, subPx } = fitComposition(box, true, true);
+    assert.ok(Math.abs(valuePx - box * VALUE_SCALE) < 0.01, `value is ${valuePx}, expected ${box * VALUE_SCALE}`);
+    assert.ok(Math.abs(captionPx - box * 0.105) < 0.01);
+    assert.ok(Math.abs(subPx - box * 0.115) < 0.01);
   });
 });

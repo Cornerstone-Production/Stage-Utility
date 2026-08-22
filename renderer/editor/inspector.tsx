@@ -92,7 +92,7 @@ import {
 import { ResponsiveControls } from "./responsive-controls";
 import { cn } from "../lib/cn";
 import {
-  SURFACES, TINTS, applySurface, applyTint, isCustomFill, matchSurface, matchTint,
+  SURFACES, TINTS, applySurface, applyTint, isCustomFill, matchTint, surfaceOf,
   type SurfaceKind,
 } from "./object-surface";
 
@@ -1245,12 +1245,15 @@ export function Inspector({
       {/* SURFACE and TINT, separately — they are independent questions, and the
           single list that mixed them (Glass, Glass·Green, Glass·Red, …) was both
           longer and less capable: it had no way to ask for a tinted Solid. */}
-      <Row label="Surface" hint="The material: Flat, Glass (the canvas shows through), Solid, or Outline. Fine-tune with Border and Elevation below.">
+      <Row label="Surface" hint="What the widget sits on. None draws no card at all; Glass is translucent, so the screen shows through; Solid is an opaque card with a shadow; Outline is a hairline and nothing behind it.">
         <Select
-          value={matchSurface(s)}
+          value={surfaceOf(s)}
           onValueChange={(v: string) => onStyle(applySurface(s, v as SurfaceKind))}
         >
-          <SelectTrigger><SelectValue placeholder="Custom" /></SelectTrigger>
+          {/* No placeholder: every style IS one of the four, so there is nothing
+              for the trigger to fall back to. "Custom" was never an entry in
+              this list and has no business being what it reads. */}
+          <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
             {SURFACES.map((x) => <SelectItem key={x.value} value={x.value}>{x.label}</SelectItem>)}
           </SelectContent>
@@ -1262,7 +1265,7 @@ export function Inspector({
           shown in one place. Named for what it does on THIS surface: Solid IS
           its colour, the others are washed with one. */}
       <Row
-        label={matchSurface(s) === "solid" ? "Fill" : "Tint"}
+        label={surfaceOf(s) === "solid" ? "Fill" : "Tint"}
         hint="The colour on this surface. The swatches are washes made for a dark stage canvas; the picker takes any colour. On Glass they stay see-through, so tinted glass is still glass."
       >
         <div role="group" aria-label="Tint" className="flex items-center gap-1.5">

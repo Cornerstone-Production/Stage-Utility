@@ -69,7 +69,14 @@ describe("Home's cards on the kiosk surface", () => {
     // both grounds — inside .kiosk-surface (every display, and Home's widget
     // grid) --color-fg IS white, and on a themed page it is the theme's
     // foreground. A literal would be invisible on the second.
-    assert.match(READOUT, /color: filled \? "#ffffff" : valueColor \?\? "var\(--color-fg\)"/,
+    // The value may now start from the OBJECT's own colour — a custom property
+    // the object sets on itself, so the inspector's Color control reaches a
+    // readout at all — but the chain still has to end in a token. Written as two
+    // assertions rather than one long regex: the second is the one that matters,
+    // and it fails on "inherit", on a bare literal, and on dropping the fallback.
+    assert.match(READOUT, /color: filled \? "#ffffff" : valueColor \?\?/,
+      "the readout's value no longer starts from the filled/valueColor pair");
+    assert.match(READOUT, /valueColor \?\? "var\((?:--readout-value-color, )?var\(--color-fg\)\)"/,
       "the readout's value no longer resolves its colour from a token");
     // The unfilled caption and sub too — those are the lines that would go
     // black-on-black, since the value usually carries a state colour.

@@ -10,7 +10,7 @@ import {
   TINTS,
   applySurface,
   applyTint,
-  matchSurface,
+  surfaceOf,
   matchTint,
   isCustomFill,
   tintedBackground,
@@ -23,22 +23,40 @@ const after = (style: LayoutStyle, patch: LayoutStyle): LayoutStyle => ({ ...sty
 describe("a surface names itself", () => {
   test("each preset matches the surface it came from", () => {
     for (const kind of Object.keys(SURFACE_PRESETS) as SurfaceKind[]) {
-      assert.equal(matchSurface(SURFACE_PRESETS[kind]), kind, `${kind} did not match itself`);
+      assert.equal(surfaceOf(SURFACE_PRESETS[kind]), kind, `${kind} did not match itself`);
     }
   });
 
-  test("a hand-picked background is Custom, and says so", () => {
-    // The honest case: somebody chose a colour of their own. Naming a surface
-    // over it would be a lie, and would silently discard the colour on the next
-    // surface click.
+  test("a hand-picked colour does not change the material", () => {
+    // The reported bug: pick Glass, pick a colour, and the dropdown stopped
+    // saying Glass — for a look chosen from that same dropdown two clicks
+    // earlier. The choice is stored, so it survives anything done to the fields.
     const s = after(SURFACE_PRESETS.glass, { background: "#ff0000" });
-    assert.equal(matchSurface(s), "");
+    assert.equal(surfaceOf(s), "glass");
   });
 
-  test("an empty style is Flat, because that is what it draws", () => {
-    // Nothing behind the object, no border, no shadow. "Custom" would be the
-    // dropdown refusing to name the plainest look there is.
-    assert.equal(matchSurface({}), "flat");
+  test("neither does a tint, a radius or a border", () => {
+    for (const patch of [
+      applyTint(SURFACE_PRESETS.glass, "green"),
+      { cornerRadius: 0.05 },
+      { borderColor: "#fff", borderWidth: 0.004 },
+      { boxShadow: 0.9 },
+    ]) {
+      assert.equal(surfaceOf(after(SURFACE_PRESETS.glass, patch)), "glass");
+    }
+  });
+
+  test("an empty style is None, because that is what it draws", () => {
+    assert.equal(surfaceOf({}), "flat");
+  });
+
+  test("a style from before the choice was recorded is classified by what it draws", () => {
+    // Every layout on disk is in this state, and none of them may read as
+    // "Custom" — it was never an entry in the list.
+    assert.equal(surfaceOf({ background: "rgba(255,255,255,0.04)" }), "glass");
+    assert.equal(surfaceOf({ background: "#141414" }), "solid");
+    assert.equal(surfaceOf({ borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015 }), "outline");
+    assert.equal(surfaceOf({ fontSize: 0.06 }), "flat");
   });
 });
 
@@ -50,7 +68,7 @@ describe("picking a tint keeps the surface", () => {
     for (const tint of TINTS.filter((t) => t.value !== "none")) {
       test(`${kind} + ${tint.label} is still ${kind}`, () => {
         const s = after(SURFACE_PRESETS[kind], applyTint(SURFACE_PRESETS[kind], tint.value));
-        assert.equal(matchSurface(s), kind);
+        assert.equal(surfaceOf(s), kind);
         assert.equal(matchTint(s), tint.value);
       });
     }
@@ -61,18 +79,16 @@ describe("picking a surface keeps the tint", () => {
   test("moving a tinted object between surfaces carries the colour", () => {
     let s = after(SURFACE_PRESETS.solid, applyTint(SURFACE_PRESETS.solid, "green"));
     s = after(s, applySurface(s, "glass"));
-    assert.equal(matchSurface(s), "glass");
+    assert.equal(surfaceOf(s), "glass");
     assert.equal(matchTint(s), "green");
   });
 
-  test("a surface can always be chosen again, from Custom too", () => {
-    // The second half of the report: with the dropdown stuck on Custom, picking
-    // an entry appeared to do nothing — because the tint re-applied on top left
-    // the style unmatched all over again.
+  test("a surface can always be chosen again", () => {
     const custom = after(SURFACE_PRESETS.glass, { background: "#ff0000", boxShadow: 0.9 });
-    assert.equal(matchSurface(custom), "");
     const s = after(custom, applySurface(custom, "outline"));
-    assert.equal(matchSurface(s), "outline");
+    assert.equal(surfaceOf(s), "outline");
+    // And the colour somebody picked by hand is still theirs.
+    assert.equal(s.background, "#ff0000");
   });
 });
 
@@ -92,11 +108,9 @@ describe("tinted glass is still glass", () => {
   });
 
   test("an object tinted before this existed still names itself", () => {
-    // Layouts already on disk carry the opaque value on a glass structure. If
-    // that read as Custom, this fix would have left the very thing it set out
-    // to remove.
+    // Layouts on disk carry the opaque value on a glass structure.
     const legacy = after(SURFACE_PRESETS.glass, { background: "#0d1a15" });
-    assert.equal(matchSurface(legacy), "glass");
+    assert.equal(surfaceOf(legacy), "glass");
     assert.equal(matchTint(legacy), "green");
   });
 });
@@ -108,7 +122,7 @@ describe("no tint means the surface's own background", () => {
     const tinted = after(SURFACE_PRESETS.glass, applyTint(SURFACE_PRESETS.glass, "red"));
     const cleared = after(tinted, applyTint(tinted, "none"));
     assert.equal(cleared.background, SURFACE_PRESETS.glass.background);
-    assert.equal(matchSurface(cleared), "glass");
+    assert.equal(surfaceOf(cleared), "glass");
     assert.equal(matchTint(cleared), "none");
   });
 
@@ -116,16 +130,15 @@ describe("no tint means the surface's own background", () => {
     const tinted = after(SURFACE_PRESETS.flat, applyTint(SURFACE_PRESETS.flat, "amber"));
     const cleared = after(tinted, applyTint(tinted, "none"));
     assert.equal(cleared.background, null);
-    assert.equal(matchSurface(cleared), "flat");
+    assert.equal(surfaceOf(cleared), "flat");
   });
 });
 
-describe("a patch that omits a field means that field's zero", () => {
-  test("the default card names itself instead of reading as Custom", () => {
-    // CARD_PRESETS.neutral is what most objects ship wearing, and it writes no
-    // boxShadow at all. Against a preset that writes `boxShadow: 0` that read as
-    // a difference, so the surface dropdown said "Custom" for a look nobody had
-    // touched — and picking anything from it threw the card's look away.
+describe("the look most objects ship wearing", () => {
+  test("the default card reads as Solid, which is what it draws", () => {
+    // CARD_PRESETS.neutral is an OPAQUE near-black with a hairline. It used to
+    // read as "Custom" — for a look nobody had touched — and calling it Glass
+    // would be the other kind of wrong: nothing shows through it.
     const card: LayoutStyle = {
       background: "#141414",
       borderColor: "rgba(255,255,255,0.08)",
@@ -133,13 +146,13 @@ describe("a patch that omits a field means that field's zero", () => {
       cornerRadius: 0.0148,
       padding: 0.0148,
     };
-    assert.equal(matchSurface(card), "glass");
+    assert.equal(surfaceOf(card), "solid");
     assert.equal(matchTint(card), "neutral");
   });
 
   test("a real shadow still tells Solid from Flat", () => {
-    assert.equal(matchSurface(SURFACE_PRESETS.solid), "solid");
-    assert.equal(matchSurface(SURFACE_PRESETS.flat), "flat");
+    assert.equal(surfaceOf(SURFACE_PRESETS.solid), "solid");
+    assert.equal(surfaceOf(SURFACE_PRESETS.flat), "flat");
   });
 });
 
