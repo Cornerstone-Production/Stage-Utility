@@ -113,7 +113,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     path: "/baptism",
     label: "Baptisms",
-    description: "Time testimonies and baptisms live.",
+    description: "Time testimonies and baptisms live. Splits, totals and averages can go on a display, with the “Baptism timer” layout object.",
     icon: <DropletIcon className="size-4" />,
     Component: BaptismOperator,
   },
