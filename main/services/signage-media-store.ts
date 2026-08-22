@@ -231,15 +231,30 @@ const PRUNE_GRACE_MS = 6 * 60 * 60 * 1000;
  * not read is not evidence that nothing is referenced, and the cost of guessing
  * wrong is an operator's media library.
  *
- * Playlists become a reference source in the task that introduces them; until
- * then the manifest itself is the only one, which is the conservative direction.
+ * BOTH sources count. A file is referenced if the manifest still lists it (the
+ * operator has not deleted the record) or if any playlist points at a record
+ * holding it. Reading only one of the two is how a file still on screen gets
+ * reaped.
  */
 export async function pruneSignageMedia(): Promise<number> {
   let referenced: Set<string>;
   try {
-    referenced = new Set((await signageMediaStore.load()).map((m) => m.file));
+    const [all, playlists] = await Promise.all([
+      signageMediaStore.load(),
+      // Imported lazily: the playlists store does not otherwise need to be in
+      // this module's import graph, and a cycle here would be silent.
+      import("./signage-playlists-store.js").then((m) => m.signagePlaylistsStore.load()),
+    ]);
+    const byId = new Map(all.map((m) => [m.id, m.file]));
+    referenced = new Set(all.map((m) => m.file));
+    for (const p of playlists) {
+      for (const item of p.items) {
+        const file = byId.get(item.mediaId);
+        if (file) referenced.add(file);
+      }
+    }
   } catch (err) {
-    console.error("[signage-media] could not read the manifest; pruning nothing:", err);
+    console.error("[signage-media] could not read a store; pruning nothing:", err);
     return 0;
   }
 
