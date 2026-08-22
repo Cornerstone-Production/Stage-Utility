@@ -150,9 +150,15 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "signage:deletePlaylist":
       return del<T>(`/api/signage/playlists/${encodeURIComponent(p.id as string)}`);
 
-    // The write channels for groups and schedules are added with the sections
-    // that call them: api-channels.test.ts fails on a channel with no caller,
-    // which is what keeps this switch from accumulating dead arms.
+    case "signage:saveGroup":
+      return post<T>("/api/signage/groups", { group: p.group });
+
+    case "signage:deleteGroup":
+      return del<T>(`/api/signage/groups/${encodeURIComponent(p.id as string)}`);
+
+    // The schedule write channels are added with the section that calls them:
+    // api-channels.test.ts fails on a channel with no caller, which is what
+    // keeps this switch from accumulating dead arms.
 
     // ── Stage patch sheet ───────────────────────────────────────────────
     case "patch:get":

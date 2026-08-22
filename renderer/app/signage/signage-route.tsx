@@ -6,7 +6,10 @@
 
 import { useState } from "react";
 
+import { useStageState } from "../../main/use-stage-state";
+
 import { MediaSection } from "./media-section";
+import { GroupsSection } from "./groups-section";
 import { PlaylistsSection } from "./playlists-section";
 import { useSignageConfig } from "./use-signage-config";
 
@@ -16,6 +19,8 @@ type Section = (typeof SECTIONS)[number];
 export function SignageRoute() {
   const [section, setSection] = useState<Section>("Media");
   const { config, loading, error, reload } = useSignageConfig();
+  // Outputs and views come from the shared stage state, not a signage copy.
+  const { state } = useStageState();
 
   return (
     <div className="flex flex-col gap-4">
@@ -48,6 +53,14 @@ export function SignageRoute() {
         <MediaSection media={config.media} playlists={config.playlists} loading={loading} onChange={reload} />
       ) : section === "Playlists" ? (
         <PlaylistsSection playlists={config.playlists} media={config.media} onChange={reload} />
+      ) : section === "Groups" ? (
+        <GroupsSection
+          groups={config.groups}
+          playlists={config.playlists}
+          outputs={state?.outputs ?? []}
+          views={state?.views ?? []}
+          onChange={reload}
+        />
       ) : (
         <p className="text-footnote text-fg-subtle">
           {section} is not built yet.

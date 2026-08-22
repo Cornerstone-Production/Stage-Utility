@@ -1,4 +1,5 @@
 import { ScreenDevice } from "../../app/screens/screen-device";
+import { ScreenSignageGroups } from "../../app/screens/screen-signage-groups";
 import { useState, useEffect, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
@@ -441,6 +442,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
       {/* The machine showing this screen, when one is bound. Nothing when it is
           a browser tab somebody opened. */}
       <ScreenDevice outputId={output.id} name={output.name} />
+      <ScreenSignageGroups outputId={output.id} />
     </div>
   );
 }

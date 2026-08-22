@@ -201,6 +201,7 @@ export function isDisplayKind(v: unknown): v is ViewKind {
     v === "transcription" ||
     v === "custom" ||
     v === "script" ||
-    v === "spl-rundown"
+    v === "spl-rundown" ||
+    v === "signage"
   );
 }
