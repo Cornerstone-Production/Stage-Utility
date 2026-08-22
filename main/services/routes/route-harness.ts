@@ -24,6 +24,8 @@ export interface Captured {
   body: string;
   /** Body parsed as JSON, or null when it was not JSON. */
   json: unknown;
+  /** Raw bytes, when the handler ended with a Buffer (a served asset). */
+  bytes?: Buffer;
   /** True once writeHead or end has run — the dispatcher's "handled" signal. */
   responded: boolean;
 }
@@ -59,7 +61,13 @@ function fakeResponse(): { res: http.ServerResponse; captured: Captured } {
       return true;
     },
     end(chunk?: unknown) {
-      if (chunk !== undefined) captured.body += String(chunk);
+      if (chunk !== undefined) {
+        // Buffers are kept as bytes as well as stringified: a route serving a
+        // binary asset would otherwise be untestable, because String(buffer)
+        // mangles anything that is not UTF-8.
+        if (Buffer.isBuffer(chunk)) captured.bytes = chunk;
+        captured.body += String(chunk);
+      }
       captured.responded = true;
       try {
         captured.json = captured.body ? JSON.parse(captured.body) : null;
@@ -77,8 +85,11 @@ export interface RequestOptions {
   method?: string;
   /** Sent as a JSON body. Mutually exclusive with `raw`. */
   body?: unknown;
-  /** Sent verbatim — for malformed-JSON and binary cases. */
+  /** Sent verbatim — for malformed-JSON cases. */
   raw?: string;
+  /** Sent verbatim as bytes — for upload routes, which read the request as a
+   *  stream rather than parsing it. */
+  rawBytes?: Buffer;
   headers?: Record<string, string>;
 }
 
@@ -95,9 +106,12 @@ export async function callRoute(
   const { res, captured } = fakeResponse();
   const url = new URL(path, "http://localhost:8788");
 
-  const payload = opts.raw ?? (opts.body === undefined ? "" : JSON.stringify(opts.body));
+  const payload =
+    opts.rawBytes ?? opts.raw ?? (opts.body === undefined ? "" : JSON.stringify(opts.body));
   // readBody consumes the request as a stream, so the fake has to be one.
-  const req = Readable.from(payload ? [Buffer.from(payload)] : []) as unknown as http.IncomingMessage;
+  const req = Readable.from(
+    payload.length ? [Buffer.isBuffer(payload) ? payload : Buffer.from(payload)] : [],
+  ) as unknown as http.IncomingMessage;
   req.method = opts.method ?? "GET";
   req.url = path;
   req.headers = opts.headers ?? {};

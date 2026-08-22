@@ -53,6 +53,7 @@ import { proxyRoutes } from "./routes/proxy-routes.js";
 import { stateRoutes } from "./routes/state-routes.js";
 import { scriptviewRoutes } from "./routes/scriptview-routes.js";
 import { viewRoutes } from "./routes/view-routes.js";
+import { signageRoutes } from "./routes/signage-routes.js";
 import { integrationRoutes } from "./routes/integration-routes.js";
 import { rosstalkRoutes } from "./routes/rosstalk-routes.js";
 import { automationRoutes } from "./routes/automation-routes.js";
@@ -85,6 +86,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   stateRoutes,
   scriptviewRoutes,
   viewRoutes,
+  signageRoutes,
   integrationRoutes,
   rosstalkRoutes,
   automationRoutes,
