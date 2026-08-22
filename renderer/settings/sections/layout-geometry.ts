@@ -120,29 +120,3 @@ export function applyResize(
   return { x, y, w, h: hh };
 }
 
-/**
- * A solid `#rrggbb` for a native colour input.
- *
- * `<input type="color">` accepts nothing else, but a stored style colour can be
- * a translucent `rgba()` (the glass presets), `#rgb`, `#rrggbbaa`, a `var()`, or
- * a named colour. Coerced here — dropping alpha — so the swatch has something
- * valid to show. The stored style keeps its original value until the user picks
- * a new one.
- */
-export function hexForInput(v: string | null | undefined, fallback: string): string {
-  if (!v) return fallback;
-  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v;
-
-  const m3 = v.match(/^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/);
-  if (m3) return `#${m3[1]}${m3[1]}${m3[2]}${m3[2]}${m3[3]}${m3[3]}`;
-
-  const m8 = v.match(/^#([0-9a-fA-F]{6})[0-9a-fA-F]{2}$/);
-  if (m8) return `#${m8[1]}`;
-
-  const rgb = v.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
-  if (rgb) {
-    const h = (n: number) => clamp(n, 0, 255).toString(16).padStart(2, "0");
-    return `#${h(+rgb[1])}${h(+rgb[2])}${h(+rgb[3])}`;
-  }
-  return fallback;
-}
