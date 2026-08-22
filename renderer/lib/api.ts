@@ -1103,6 +1103,7 @@ function ensureEventSource(): EventSource {
   eventSource.onopen = () => {
     sseReconnectDelayMs = SSE_RECONNECT_MIN_MS;
     reportChannels();
+    setSseConnected(true);
   };
 
   eventSource.onerror = (e) => {
@@ -1112,6 +1113,11 @@ function ensureEventSource(): EventSource {
     // nothing, until someone reloads it. That is what a display looks like when
     // it "stops updating" after a server restart — the browser closes the stream
     // on an error response and never comes back on its own.
+    // Reported as disconnected for BOTH states, including the transparent retry.
+    // The stream is down either way, and the one consumer that cares (signage)
+    // only consults this at a content boundary, so a blip that resolves in
+    // between changes nothing.
+    setSseConnected(false);
     if (eventSource?.readyState === EventSource.CLOSED) {
       console.warn("[api] SSE closed — scheduling reconnect", e);
       scheduleSseReconnect();
@@ -1160,6 +1166,42 @@ if (typeof document !== "undefined") {
  * Subscribe to a server-sent event channel.
  * Returns an unsubscribe function.
  */
+/**
+ * Whether the event stream is currently up.
+ *
+ * Exported because a signage display's behaviour at a content boundary depends
+ * on it: connected, it advances; disconnected, it holds what it is playing. No
+ * other consumer needs this, and nothing here debounces — the caller decides
+ * what a momentary drop means, and for signage the answer is "nothing, unless a
+ * boundary happens to fall inside it".
+ */
+let sseConnected = false;
+const sseConnectionListeners = new Set<(up: boolean) => void>();
+
+function setSseConnected(up: boolean): void {
+  if (sseConnected === up) return;
+  sseConnected = up;
+  for (const cb of sseConnectionListeners) {
+    try {
+      cb(up);
+    } catch (err) {
+      console.error("[api] an SSE connection listener threw:", err);
+    }
+  }
+}
+
+export function isSseConnected(): boolean {
+  return sseConnected;
+}
+
+/** Subscribe to stream up/down. Returns an unsubscribe function, and calls back
+ *  once immediately so a subscriber never starts from a guess. */
+export function onSseConnection(cb: (up: boolean) => void): () => void {
+  sseConnectionListeners.add(cb);
+  cb(sseConnected);
+  return () => sseConnectionListeners.delete(cb);
+}
+
 export function onNotification(
   channel: string,
   cb: (payload: unknown) => void,

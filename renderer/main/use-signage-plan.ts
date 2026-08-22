@@ -5,14 +5,16 @@
 // clock, which is what lets the server stay quiet between config edits rather
 // than talking at every boundary.
 //
-// The rule about advancing only while connected lands in the task that adds it;
-// for now this selects the entry the clock points at.
+// The rule that makes this worth doing lives in signage-hold.ts: at a boundary a
+// display advances only while it is connected. Everything here is plumbing for
+// that — the horizon, the connection state, and the one piece of state the rule
+// needs (what this screen was last actually showing).
 
 import { useEffect, useState } from "react";
 import type { SignageHorizon, SignageHorizonEntry } from "@main/types/signage";
 
-import { onNotification } from "../lib/api";
-import { entryAt } from "./signage-cycle";
+import { onNotification, onSseConnection } from "../lib/api";
+import { pickEntry } from "./signage-hold";
 
 export function useSignagePlan(
   outputId: string,
@@ -23,8 +25,20 @@ export function useSignagePlan(
 ): {
   entry: SignageHorizonEntry | null;
   horizon: SignageHorizon;
+  connected: boolean;
 } {
   const [horizon, setHorizon] = useState<SignageHorizon>([]);
+
+  /**
+   * When the event stream went down, or null while it is up.
+   *
+   * This single number IS the offline rule: pickEntry reads the horizon at this
+   * instant instead of now, so a disconnected display's clock stops and it never
+   * reaches the next boundary. Set from the connection callback, which is an
+   * event rather than a render, so there is no ref to read and no state to
+   * synchronise on a tick.
+   */
+  const [disconnectedAtMs, setDisconnectedAtMs] = useState<number | null>(null);
 
   useEffect(() => {
     // The channel is hydrated on connect (see the hello burst), so a screen that
@@ -36,5 +50,19 @@ export function useSignagePlan(
     });
   }, [outputId]);
 
-  return { entry: entryAt(horizon, nowMs), horizon };
+  useEffect(
+    () =>
+      onSseConnection((up) => {
+        // Date.now() at the moment of the drop, which is more accurate than
+        // anything a render could observe: the display may be between ticks.
+        setDisconnectedAtMs(up ? null : Date.now());
+      }),
+    [],
+  );
+
+  return {
+    entry: pickEntry({ horizon, nowMs, disconnectedAtMs }),
+    horizon,
+    connected: disconnectedAtMs === null,
+  };
 }
