@@ -857,17 +857,23 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       const all = streamers(ctx.resi, ctx.youtube, ctx.obs);
       const chosen = only ? all.filter((x) => x.name === only) : all;
       const ind = streamIndicator(chosen, ctx.now, { showElapsed: c.showElapsed });
-      const fill = c.fillWhenLive ?? true;
+      const live = ind.state === "live";
       // Tally-light mode: nothing on screen unless something is going out.
-      if (!ind.live && (c.hideWhenIdle ?? false)) return null;
+      if (!live && (c.hideWhenIdle ?? false)) return null;
 
+      // GREEN for live, grey for off air. Not the red a recorder uses: red is
+      // what OBS and REAPER mean by "rolling", and a wall carrying both wants
+      // one red. Off air takes the muted grey its neighbours wear rather than
+      // full-strength white — it is the resting state, not an announcement —
+      // while unreachable stays dimmed outright, so the two are still told apart
+      // by more than their word.
       return readout(ind.value, {
         caption: only ?? "Streaming",
         sub: ind.sub,
         upper: true,
-        dim: ind.dim,
-        fill: ind.live && fill ? "var(--red-9)" : null,
-        valueColor: ind.live && !fill ? "var(--red-10)" : null,
+        dim: ind.state === "offline",
+        fill: live && c.fillWhenLive ? "var(--green-9)" : null,
+        valueColor: live && !c.fillWhenLive ? "var(--green-10)" : ind.state === "idle" ? "var(--color-fg-muted)" : null,
       });
     }
 

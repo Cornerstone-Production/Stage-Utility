@@ -323,11 +323,12 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
       // No tone is streamingStat's "no platform is even connected" — unknown,
       // not off air, and the one streaming state not worth a colour.
       if (!st.tone) return <Idle>No stream</Idle>;
-      return (
-        <span className={cn("text-footnote font-mono tabular-nums", st.tone === "danger" ? "text-danger-11" : "text-live-11")}>
-          {st.tone === "danger" ? "Off air" : st.value}
-        </span>
-      );
+      // Off air is quiet, not red. It is the state the bar sits in all week, and
+      // a red word on a bar that is always on screen stops meaning anything long
+      // before the morning it matters. Going out is the thing worth a colour, and
+      // it gets the same green the widgets use.
+      if (st.tone === "danger") return <Idle>Off air</Idle>;
+      return <span className="text-footnote font-mono tabular-nums text-live-11">{st.value}</span>;
     }
 
     case "recording": {
