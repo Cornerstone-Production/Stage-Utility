@@ -24,7 +24,7 @@ import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
 import { BarConfigurator } from "./bar-configurator";
 import { BAR_SPACE, BAR_SPACER, visibleBarItems, type BarItemId } from "./bar-items";
-import { recordingStat, recorders, streamingStat, streamers } from "./recording-status";
+import { recordIndicator, recorders, streamingStat, streamers } from "./recording-status";
 import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
 import { useIntegrations } from "../main/use-integration-states";
@@ -332,17 +332,17 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
     }
 
     case "recording": {
-      // The same judgement Home makes, from the same function - including
-      // "connected but stopped", which is the state worth surfacing.
-      const rec = recordingStat(recorders(obs, reaper));
-      // No tone is recordingStat's "nothing is even connected" — the one
-      // recording state that is not worth a colour.
-      if (!rec.tone) return <Idle>No recorder</Idle>;
+      // The same indicator Home draws, from the same function — including
+      // "connected but not rolling", which is the state worth surfacing.
+      const ind = recordIndicator(recorders(obs, reaper));
+      // Offline is not worth a colour, and neither is standby: it is what the
+      // bar sits in all week. Rolling is the thing worth saying, and it gets the
+      // green the streaming item beside it uses.
+      if (ind.state !== "live") return <Idle>{ind.state === "offline" ? "No recorder" : "Standby"}</Idle>;
       return (
-        <span className={cn("text-footnote font-mono tabular-nums", rec.tone === "danger" ? "text-danger-11" : "text-live-11")}>
-          {rec.tone === "danger" ? "REC stopped" : rec.value}
-        </span>
+        <span className="text-footnote font-mono tabular-nums text-live-11">{ind.sub ?? ind.value}</span>
       );
     }
+
   }
 }

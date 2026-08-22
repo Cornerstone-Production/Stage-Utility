@@ -27,7 +27,7 @@ live state and timer.
 ## Nothing appears or disappears
 
 Every item you turn on is always on screen. An item with nothing to report says
-so — `No item`, `All connected`, `No recorder`, `No stream` — rather than
+so — `No item`, `All connected`, `Standby`, `Off air` — rather than
 vanishing and
 letting its neighbours slide across. The bar keeps one shape, so you learn where
 to look once.

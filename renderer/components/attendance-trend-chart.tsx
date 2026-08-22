@@ -11,20 +11,6 @@ import { useEffect, useRef, useState } from "react";
 import { clamp } from "@main/services/clamp";
 import { shortDay, type TrendPoint } from "../settings/sections/overview-data";
 
-/**
- * A trend is never drawn flatter than 8:1.
- *
- * Home's XL tile is some 1700px wide and about 130 tall. Filling it makes a
- * fifteen-to-one band, and at that aspect every service becomes the same
- * nearly-horizontal wire — the shape stops carrying the thing the chart exists
- * to show. History has always capped its own chart at 640px for this reason;
- * this is that rule as an aspect, so it holds at any height rather than at one
- * magic width.
- */
-export function plotWidth(width: number, height: number): number {
-  return Math.min(width, Math.round(height * 8));
-}
-
 /** Real attendance trend chart (SVG): a baseline, the per-service polyline, the
  *  latest point marked, and first/last date labels. The hero of the blend — not
  *  decorative. Falls back to a quiet note when there isn't enough to plot. */
@@ -81,9 +67,14 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
       </div>
     );
   }
-  // Centred rather than pinned left: with the headline figures above it spanning
-  // the whole tile, a chart hugging one edge reads as a layout mistake.
-  const plotW = plotWidth(W, H);
+  // The FULL width of whatever it is given.
+  //
+  // It was capped at 8:1 for a while, centred, so a wide tile did not render
+  // every weekend as the same near-horizontal wire. Asked for outright: a chart
+  // in a widget should fill the widget. The aspect is the tile's to decide — a
+  // Tall one gives the curve its shape back — and a chart that stops short of
+  // its own card reads as broken in a way a shallow slope does not.
+  const plotW = W;
   const vals = points.map((p) => p.value);
   const min = Math.min(...vals);
   const max = Math.max(...vals);
@@ -99,7 +90,7 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   const hy = hp ? y(hp.value) : 0;
   return (
     <div className="relative h-full min-h-[130px]" ref={box}>
-      <div className="relative mx-auto h-full" style={{ maxWidth: plotW }}>
+      <div className="relative h-full">
       <svg
         ref={svgRef}
         viewBox={`0 0 ${plotW} ${H}`}

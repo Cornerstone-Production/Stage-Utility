@@ -41,44 +41,44 @@ export function recorders(
   ];
 }
 
-/** Is anything actually recording, and what should it say?
- *
- *  Every recorder counts. They are reported TOGETHER because the question
- *  mid-service is "are we getting this?", not "what is OBS doing" - and a panel
- *  that showed only one would read as reassurance while the other sat stopped.
- *  Disconnected is not the same as not recording, and says so. */
-export function recordingStat(
-  list: readonly Recorder[],
-): { value: string; sub: string; tone?: "danger" | "live" } {
-  const wired = list.filter((r) => r.connected);
-  if (wired.length === 0) return { value: "—", sub: "no recorder connected" };
 
-  const rolling = wired.filter((r) => r.recording);
-  if (rolling.length === 0) {
-    // Connected but not rolling, mid-service, is worth noticing.
-    return { value: "STOPPED", sub: `${wired.map((r) => r.name).join(" + ")} connected`, tone: "danger" };
-  }
-  return {
-    // A timecode from whichever rolling recorder reports one; the word otherwise.
-    value: rolling.find((r) => r.timecode)?.timecode ?? "RECORDING",
-    sub: rolling.map((r) => r.name).join(" + "),
-    tone: "live",
-  };
-}
 
 /**
- * One named recorder, on its own.
+ * What a recording INDICATOR shows — the same three states, in the same shape,
+ * as `streamIndicator`.
  *
- * The word first and in colour — "recording" green, "stopped" red — because
- * mid-service the answer is a state, not a duration, and a timecode reads as
- * fine at a glance whether or not it is moving. The elapsed time goes underneath
- * where it belongs: confirmation, not the headline.
+ * They sit side by side on Home and on a wall, and they were answering in two
+ * different vocabularies: a recorder said "—" with a line of prose underneath
+ * while a platform beside it said "OFF AIR". Reported as the recorders not
+ * matching, which they did not.
+ *
+ * Grey for a recorder that is not rolling, for the reason the streaming widgets
+ * are grey: it is the state the page sits in all week, and a red word that is
+ * always there stops meaning anything long before the morning it matters.
  */
-export function recorderStat(r: Recorder | undefined): { value: string; sub: string; tone?: "danger" | "live" } {
-  if (!r) return { value: "—", sub: "not set up" };
-  if (!r.connected) return { value: "—", sub: `${r.name} not connected` };
-  if (!r.recording) return { value: "STOPPED", sub: `${r.name} connected`, tone: "danger" };
-  return { value: "RECORDING", sub: r.timecode ?? "no position reported", tone: "live" };
+export function recordIndicator(
+  list: readonly Recorder[],
+): { value: string; sub: string | null; state: "offline" | "idle" | "live" } {
+  const wired = list.filter((r) => r.connected);
+  if (wired.length === 0) {
+    return {
+      value: "Offline",
+      sub: list.length === 1 ? `${list[0].name} not connected` : null,
+      state: "offline",
+    };
+  }
+  const rolling = wired.filter((r) => r.recording);
+  if (rolling.length === 0) {
+    return { value: "Standby", sub: wired.map((r) => r.name).join(" + "), state: "idle" };
+  }
+  return {
+    value: "Recording",
+    // The timecode goes underneath, where the elapsed time goes on a stream:
+    // welded onto the state word it makes the string long enough to shrink the
+    // word it was qualifying.
+    sub: rolling.find((r) => r.timecode)?.timecode ?? rolling.map((r) => r.name).join(" + "),
+    state: "live",
+  };
 }
 
 /**
