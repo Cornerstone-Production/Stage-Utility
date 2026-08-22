@@ -169,17 +169,9 @@ export interface LayoutStyle {
   textAlign?: LayoutHAlign;
   vAlign?: LayoutVAlign;
   background?: string | null;
-  opacity?: number; // 0..1
   cornerRadius?: number; // fraction of canvas height
-  padding?: number; // fraction of canvas height
   borderColor?: string | null;
   borderWidth?: number; // fraction of canvas height
-  /** Drop-shadow strength 0..1 for legibility over video/photos. */
-  textShadow?: number;
-  /** Box elevation 0..1 — a soft drop shadow under the object's box, so stacked
-   *  cards read as layered. 0 = none. */
-  boxShadow?: number;
-  lineClamp?: number | null;
   /**
    * The material this object is wearing: Glass, Solid, Outline or none.
    *

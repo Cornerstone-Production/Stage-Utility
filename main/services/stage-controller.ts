@@ -406,8 +406,9 @@ export class StageController {
       console.log(
         `[layout-defaults] ${realigned} object${realigned === 1 ? "" : "s"} carried styling written by the ` +
           "object registry rather than chosen — a centre alignment on readouts, a translucent card ground, " +
-          "or both. Replaced with the current defaults: readouts align left, and cards are opaque so they " +
-          "cover what is behind them. Both are still editable per object in the layout editor.",
+          "or the older #191919 card, which left one layout wearing two different cards. Replaced with the " +
+          "current defaults: readouts align left, and every card is the same opaque one. All still editable " +
+          "per object in the layout editor.",
       );
     }
     const result = migrateSurfaces(aligned, outputs);

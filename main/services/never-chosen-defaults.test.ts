@@ -159,3 +159,32 @@ describe("the count that gets logged", () => {
     assert.equal(countNeverChosen(migrateNeverChosenDefaults(views)), 0);
   });
 });
+
+// ── The older card ───────────────────────────────────────────────────────────
+// Two eras of card in one layout is what "some objects have a slight border and
+// others don't" turned out to be, measured on a real console: #191919 with a 10%
+// hairline beside #141414 with an 8% one.
+
+test("the older card is folded into the current one", () => {
+  const out = migrateNeverChosenDefaults([
+    view([obj("clock", { background: "#191919", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001 })]),
+  ]);
+  const style = out[0].layout!.objects[0].style!;
+  assert.equal(style.background, "#141414");
+  assert.equal(style.borderColor, "rgba(255,255,255,0.08)");
+  assert.equal(style.borderWidth, 0.001, "the width was not part of the difference and must not move");
+});
+
+test("only the PAIR counts — a ground somebody picked is left alone", () => {
+  // #191919 on its own is a colour, not the old card. Rewriting it would be
+  // taking a decision away from whoever made it.
+  const picked = view([obj("clock", { background: "#191919", borderColor: "#ff0000" })]);
+  const out = migrateNeverChosenDefaults([picked]);
+  assert.equal(out[0].layout!.objects[0].style!.background, "#191919");
+  assert.equal(out[0], picked, "an untouched view should come back by reference");
+});
+
+test("the count includes them, so the log is not silent about it", () => {
+  const views = [view([obj("clock", { background: "#191919", borderColor: "rgba(255,255,255,0.10)" })])];
+  assert.equal(countNeverChosen(views), 1);
+});

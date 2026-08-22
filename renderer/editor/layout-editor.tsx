@@ -179,7 +179,9 @@ function EditorObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         left: `${o.x * 100}%`, top: `${o.y * 100}%`,
         width: `${o.w * 100}%`, height: `${o.h * 100}%`,
         ...boxStyle(o, ctx.H),
-        opacity: (o.style?.opacity ?? 1) * (o.hidden ? 0.25 : 1),
+        // Hidden objects are shown faintly IN THE EDITOR so they can be found
+        // and brought back. Nothing else dims an object any more.
+        opacity: o.hidden ? 0.25 : 1,
       }}
     >
       {kids ? kids.map((c) => <EditorObject key={c.id} o={c} ctx={ctx} />) : <ObjectContent o={o} ctx={ctx} />}

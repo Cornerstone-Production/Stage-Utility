@@ -40,7 +40,6 @@ describe("a surface names itself", () => {
       applyTint(SURFACE_PRESETS.glass, "green"),
       { cornerRadius: 0.05 },
       { borderColor: "#fff", borderWidth: 0.004 },
-      { boxShadow: 0.9 },
     ]) {
       assert.equal(surfaceOf(after(SURFACE_PRESETS.glass, patch)), "glass");
     }
@@ -84,7 +83,7 @@ describe("picking a surface keeps the tint", () => {
   });
 
   test("a surface can always be chosen again", () => {
-    const custom = after(SURFACE_PRESETS.glass, { background: "#ff0000", boxShadow: 0.9 });
+    const custom = after(SURFACE_PRESETS.glass, { background: "#ff0000" });
     const s = after(custom, applySurface(custom, "outline"));
     assert.equal(surfaceOf(s), "outline");
     // And the colour somebody picked by hand is still theirs.
@@ -144,7 +143,6 @@ describe("the look most objects ship wearing", () => {
       borderColor: "rgba(255,255,255,0.08)",
       borderWidth: 0.001,
       cornerRadius: 0.0148,
-      padding: 0.0148,
     };
     assert.equal(surfaceOf(card), "solid");
     assert.equal(matchTint(card), "neutral");

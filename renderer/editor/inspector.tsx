@@ -98,13 +98,6 @@ import {
 } from "./object-surface";
 
 
-// Nearest labeled stop for the single Elevation slider (None/Low/Med/High).
-function elevationLabel(v: number): string {
-  if (v <= 0.175) return "None";
-  if (v <= 0.5) return "Low";
-  if (v <= 0.825) return "Med";
-  return "High";
-}
 
 const RECORDED_LATEST = "__latest__";
 
@@ -1383,52 +1376,19 @@ export function Inspector({
         />
       </Row>
 
-      {/* Elevation: one slider with labeled None/Low/Med/High stops (ticks), fine
-          values allowed in between. Drives the box's drop shadow for layered depth. */}
-      {/* Rare by measurement, not by feel — see MoreControls. */}
-      <MoreControls>
-      <Row label="Opacity">
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={Math.round((s.opacity ?? 1) * 100)}
-          onChange={(e) => onStyle({ opacity: parseInt(e.target.value, 10) / 100 })}
-          className="flex-1 min-w-0 accent-accent"
-          aria-label="Opacity"
-        />
-        <span className="w-9 shrink-0 text-right tabular-nums text-caption2 text-fg">{Math.round((s.opacity ?? 1) * 100)}%</span>
-      </Row>
-      <Row label="Padding"><NumberField value={pxOf(s.padding, 0)} step={1} min={0} max={Math.round(0.3 * canvas.height)} suffix="px" onChange={(px) => onStyle({ padding: px / canvas.height })} /></Row>
-      <Row label="Elevation" hint="Soft drop shadow under this object's box — lifts it above whatever it overlaps. Snaps toward None/Low/Med/High; drag for in-between.">
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={s.boxShadow ?? 0}
-          onChange={(e) => onStyle({ boxShadow: parseFloat(e.target.value) })}
-          list="elevation-stops"
-          className="flex-1 min-w-0 accent-accent"
-          aria-label="Elevation"
-        />
-        <datalist id="elevation-stops">
-          <option value="0" />
-          <option value="0.35" />
-          <option value="0.65" />
-          <option value="1" />
-        </datalist>
-        <span className="w-10 shrink-0 text-caption2 text-fg-muted text-right tabular-nums">{elevationLabel(s.boxShadow ?? 0)}</span>
-      </Row>
-        {isText && (
-          <>
-            <Row label="Uppercase"><Switch checked={s.uppercase ?? false} onCheckedChange={(v) => onStyle({ uppercase: v })} /></Row>
-            <Row label="Text shadow"><NumberInput value={s.textShadow ?? 0} step={0.1} min={0} max={1} onChange={(v) => onStyle({ textShadow: v })} /></Row>
-            <Row label="Max lines"><NumberInput value={s.lineClamp ?? 0} step={1} min={0} max={10} onChange={(v) => onStyle({ lineClamp: v > 0 ? Math.round(v) : null })} /></Row>
-          </>
-        )}
-      </MoreControls>
+      {/* Uppercase is what is left of the "more" drawer.
+          Elevation, opacity, padding, text shadow and max lines are GONE — not
+          hidden. They were five ways to make a widget look slightly wrong: a
+          shadow under a card on a black wall is invisible, an opacity below one
+          is a legibility bug waiting for a service, and the stored padding was
+          the thing that made small widgets clip, because the readout draws its
+          own. Anything an object needs at a size is the composition's job, not
+          five sliders'. */}
+      {isText && (
+        <MoreControls>
+          <Row label="Uppercase"><Switch checked={s.uppercase ?? false} onCheckedChange={(v) => onStyle({ uppercase: v })} /></Row>
+        </MoreControls>
+      )}
 
       {/* The way back. Every other control here adds to the styling; without this
           the only route out of a look you have tuned into a corner is to delete

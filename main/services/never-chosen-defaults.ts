@@ -24,12 +24,36 @@
 //     blend of itself over the kiosk black, so a card is unchanged on a bare
 //     canvas and now covers what is behind it.
 //
+//  3. the ELEVATED card. Objects created before the surface list was cut down
+//     wear #191919 with a 10% hairline, while everything created since wears
+//     #141414 with an 8% one. Both are cards; they are just cards from two
+//     different years, and a layout built across both reads as some widgets
+//     having a border and others not. Reported exactly that way. Folded into the
+//     current card so a row of widgets looks like a row of widgets.
+//
 // Deliberately narrow, because this edits the operator's layouts: only the exact
 // strings the registry wrote. An alignment already set to `right`, or a
 // background an operator picked themselves, is left alone.
 
 import { isNeverChosenAlign, opaqueGroundFor } from "../types/readout-types.js";
 import type { LayoutObject, View } from "../types/views.js";
+
+/**
+ * The card the registry used to write, and the one it writes now.
+ *
+ * Matched as a PAIR: an object has to be wearing both the old ground and the old
+ * hairline to be one of these. A #191919 somebody chose themselves, on anything
+ * else, is not touched.
+ */
+const LEGACY_CARD = { background: "#191919", borderColor: "rgba(255,255,255,0.10)" } as const;
+const CURRENT_CARD = { background: "#141414", borderColor: "rgba(255,255,255,0.08)" } as const;
+
+function isLegacyCard(style: LayoutObject["style"]): boolean {
+  return (
+    (style?.background ?? "").replace(/\s+/g, "").toLowerCase() === LEGACY_CARD.background &&
+    (style?.borderColor ?? "").replace(/\s+/g, "").toLowerCase() === LEGACY_CARD.borderColor
+  );
+}
 
 /** Strip every never-chosen default from one object and its children.
  *  Returns the SAME object when nothing changed, so the caller can tell. */
@@ -39,12 +63,17 @@ function cleanObject(o: LayoutObject): LayoutObject {
 
   const dropAlign = isNeverChosenAlign(o.config.type, o.style);
   const opaque = opaqueGroundFor(o.style?.background);
-  if (!dropAlign && !opaque) {
+  const oldCard = isLegacyCard(o.style);
+  if (!dropAlign && !opaque && !oldCard) {
     return kidsChanged ? { ...o, children: kids } : o;
   }
   const style = { ...o.style };
   if (dropAlign) delete style.textAlign;
   if (opaque) style.background = opaque;
+  if (oldCard) {
+    style.background = CURRENT_CARD.background;
+    style.borderColor = CURRENT_CARD.borderColor;
+  }
   return { ...o, style, ...(kidsChanged ? { children: kids } : null) };
 }
 
@@ -76,7 +105,7 @@ export function countNeverChosen(views: readonly View[]): number {
   let n = 0;
   const walk = (objs: readonly LayoutObject[] | undefined) => {
     for (const o of objs ?? []) {
-      if (isNeverChosenAlign(o.config.type, o.style) || opaqueGroundFor(o.style?.background)) n++;
+      if (isNeverChosenAlign(o.config.type, o.style) || opaqueGroundFor(o.style?.background) || isLegacyCard(o.style)) n++;
       walk(o.children);
     }
   };

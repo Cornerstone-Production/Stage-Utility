@@ -67,6 +67,13 @@ columns and then one, and placements are ignored: a column chosen on a
 three-wide page is not a column on a phone, and honouring it there would leave
 holes down a screen with no room for them.
 
+A console is edited in place: **Edit** appears near its top-right corner when the
+pointer comes within reach of it, and does nothing to the console until it does —
+a button that appeared under the pointer wherever you happened to be working
+would be in the way of the thing consoles are for. It carries its own ground
+rather than the page's, because a console's canvas is dark whatever theme the app
+is wearing.
+
 Home is edited in the Home tab itself, with the pencil in the header. In edit
 mode each tile gains a size picker, a visibility select, a remove button and a
 drag handle, and **Add widget** offers the whole object registry.
@@ -145,8 +152,8 @@ timer and service order.
 of its container, so moving or resizing the container moves and scales its contents
 together, nesting up to two levels. Drop an object onto a container to nest it.
 
-**Card presets** apply the built-in dashboards' rounded tile look — fill, border,
-radius, padding — to any object in one click, and **Flat** clears it. **Start from
+**Card presets** apply the built-in dashboards' rounded tile look — fill, border
+and radius — to any object in one click, and **None** clears it. **Start from
 Dashboard** builds the dashboard as editable tiles to work from.
 
 **Plan file** shows a file attached to the current plan, such as the stage plot. It

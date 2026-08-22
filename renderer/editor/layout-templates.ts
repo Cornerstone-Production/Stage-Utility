@@ -97,7 +97,7 @@ export function confidenceMonitorTemplate(): LayoutObject[] {
 
   // ── LEFT: CURRENT hero (~60% width) ─────────────────────────────────────────
   const hero = obj(0.02, 0.115, 0.6, 0.87, { type: "container" }, {
-    background: "rgba(70,196,126,0.06)", borderColor: "rgba(70,196,126,0.32)", borderWidth: 0.0012, cornerRadius: 0.018, padding: 0.02,
+    background: "rgba(70,196,126,0.06)", borderColor: "rgba(70,196,126,0.32)", borderWidth: 0.0012, cornerRadius: 0.018,
   }, [
     { id: uid(), x: 0.04, y: 0.06, w: 0.9, h: 0.06, z: 1, config: { type: "text", text: "Current" }, style: eyebrow() },
     { id: uid(), x: 0.04, y: 0.13, w: 0.92, h: 0.12, z: 2, config: { type: "current-service-item" }, style: { fontSize: 0.042, fontWeight: 500, color: FG, textAlign: "left", vAlign: "middle" } },
@@ -110,7 +110,7 @@ export function confidenceMonitorTemplate(): LayoutObject[] {
 
   // ── RIGHT rail: NEXT card + 2×2 tiles ───────────────────────────────────────
   const railX = 0.64, railW = 0.34;
-  const next = obj(railX, 0.115, railW, 0.2, { type: "container" }, { ...glass, padding: 0.014 }, [
+  const next = obj(railX, 0.115, railW, 0.2, { type: "container" }, { ...glass }, [
     { id: uid(), x: 0.06, y: 0.12, w: 0.9, h: 0.22, z: 1, config: { type: "text", text: "Next" }, style: eyebrow() },
     { id: uid(), x: 0.06, y: 0.4, w: 0.9, h: 0.5, z: 2, config: { type: "next-service-item" }, style: { fontSize: 0.03, fontWeight: 500, color: FG, textAlign: "left", vAlign: "middle" } },
   ]);
@@ -122,7 +122,7 @@ export function confidenceMonitorTemplate(): LayoutObject[] {
   const cx1 = railX, cx2 = railX + tileW + gap;
   const ry1 = tileTop, ry2 = tileTop + rowH + gap;
   const tile = (x: number, y: number, label: string, content: LayoutObject): LayoutObject =>
-    obj(x, y, tileW, rowH, { type: "container" }, { ...glass, padding: 0.012 }, [
+    obj(x, y, tileW, rowH, { type: "container" }, { ...glass }, [
       { id: uid(), x: 0.08, y: 0.14, w: 0.84, h: 0.24, z: 1, config: { type: "text", text: label }, style: eyebrow() },
       content,
     ]);

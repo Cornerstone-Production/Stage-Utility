@@ -142,6 +142,25 @@ everywhere else. The swatch shows the hue; the surface decides the strength.
 The last dot in the row is a colour wheel — any colour you like. It stays yours:
 changing the surface afterwards keeps it rather than resolving it back to a tint.
 
+## What a widget's look is made of
+
+Surface, colour, radius, border, font and alignment. That is the whole list.
+
+Elevation, opacity, padding, text shadow and max-lines used to be here and are
+gone — from the model, not just from the panel. They were five ways to make a
+widget look slightly wrong: a drop shadow under a card on a black wall is
+invisible, an opacity below one is a legibility problem waiting for a service,
+and the stored padding was what made small widgets clip, because the readout
+composition draws its own. How a widget uses the space it is given is the
+composition's job.
+
+Objects created before the surface list was cut down wear an older card —
+`#191919` with a 10% hairline — while everything since wears `#141414` with an
+8% one. Both are cards; they are cards from two different years, and a layout
+built across both reads as some widgets having a border and others not. They are
+folded into the current card once, on load, and the server logs how many under
+`[layout-defaults]`. A ground you picked yourself is never touched.
+
 ## Picking a colour
 
 Every colour control in the app — text, fill, border, tint, a slot's colour, the
