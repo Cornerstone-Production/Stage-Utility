@@ -100,7 +100,7 @@ export interface SignageGroup {
  */
 export type SignageWindow =
   | { kind: "always" }
-  | { kind: "weekly"; days: number[]; start: string; end: string }
+  | { kind: "weekly"; days: readonly number[]; start: string; end: string }
   | {
       kind: "dates";
       /** "YYYY-MM-DD", inclusive. */
@@ -108,7 +108,7 @@ export type SignageWindow =
       /** "YYYY-MM-DD", inclusive. */
       to: string;
       /** Optional weekly pattern inside the range. */
-      days?: number[];
+      days?: readonly number[];
       start: string;
       end: string;
     }
