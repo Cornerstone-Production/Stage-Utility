@@ -170,6 +170,17 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "signage:now":
       return apiFetch<T>("/api/signage/now");
 
+    case "signage:listOverrides":
+      return apiFetch<T>("/api/signage/overrides");
+
+    case "signage:setOverride":
+      return post<T>(`/api/signage/groups/${encodeURIComponent(p.groupId as string)}/override`, {
+        ...(p.blank ? { blank: true } : { playlistId: p.playlistId }),
+      });
+
+    case "signage:clearOverride":
+      return del<T>(`/api/signage/groups/${encodeURIComponent(p.groupId as string)}/override`);
+
     // ── Stage patch sheet ───────────────────────────────────────────────
     case "patch:get":
       return apiFetch<T>("/api/patch");

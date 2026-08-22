@@ -17,6 +17,7 @@ import { useNow } from "./use-now";
 
 import { MediaSection } from "./media-section";
 import { GroupsSection } from "./groups-section";
+import { NowBoard } from "./now-board";
 import { PlaylistsSection } from "./playlists-section";
 import { ScheduleSection } from "./schedule-section";
 import { SIGNAGE_NOW_KEY, useSignageConfig } from "./use-signage-config";
@@ -25,7 +26,7 @@ const SECTIONS = ["Now", "Media", "Playlists", "Groups", "Schedule"] as const;
 type Section = (typeof SECTIONS)[number];
 
 export function SignageRoute() {
-  const [section, setSection] = useState<Section>("Media");
+  const [section, setSection] = useState<Section>("Now");
   const { config, loading, error, reload } = useSignageConfig();
   // Outputs and views come from the shared stage state, not a signage copy.
   const { state } = useStageState();
@@ -85,7 +86,14 @@ export function SignageRoute() {
         </p>
       ) : null}
 
-      {section === "Media" ? (
+      {section === "Now" ? (
+        <NowBoard
+          groups={config.groups}
+          playlists={config.playlists}
+          outputs={state?.outputs ?? []}
+          onChange={reload}
+        />
+      ) : section === "Media" ? (
         <MediaSection media={config.media} playlists={config.playlists} loading={loading} onChange={reload} />
       ) : section === "Playlists" ? (
         <PlaylistsSection playlists={config.playlists} media={config.media} onChange={reload} />

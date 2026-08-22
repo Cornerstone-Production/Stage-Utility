@@ -14,6 +14,7 @@
 import type { DataStore } from "../data-store.js";
 import { errorMessage } from "../errors.js";
 import { signageGroupsStore } from "../signage-groups-store.js";
+import { clearOverride, listOverrides, setOverride } from "../signage-overrides-store.js";
 import { signagePlaylistsStore } from "../signage-playlists-store.js";
 import { reorderSchedules, signageSchedulesStore } from "../signage-schedules-store.js";
 import {
@@ -177,6 +178,58 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
   if (await collection(c, "/api/signage/playlists", signagePlaylistsStore, "playlist")) return;
   if (await collection(c, "/api/signage/groups", signageGroupsStore, "group")) return;
   if (await collection(c, "/api/signage/schedules", signageSchedulesStore, "schedule")) return;
+
+  // ── Overrides ─────────────────────────────────────────────────────────────
+  if (c.pathname === "/api/signage/overrides" && c.method === "GET") {
+    return json(c.res, { overrides: await listOverrides() });
+  }
+
+  const override = /^\/api\/signage\/groups\/([^/]+)\/override$/.exec(c.pathname);
+  if (override) {
+    const groupId = decodeURIComponent(override[1]);
+
+    if (c.method === "POST") {
+      const body = (await readBody(c.req)) as { playlistId?: unknown; blank?: unknown; note?: unknown };
+      const playlistId = typeof body?.playlistId === "string" ? body.playlistId : null;
+      const blank = body?.blank === true;
+
+      // Exactly one. Neither would resolve as "nothing", which on a dark wall is
+      // indistinguishable from a bug - and the operator pressed a button that
+      // appeared to work.
+      if ((playlistId && blank) || (!playlistId && !blank)) {
+        return error(c.res, "an override needs a playlist or blank, not both", 400);
+      }
+
+      // Both existence checks happen here rather than at resolve time: a stale
+      // page could otherwise store an override nothing will ever read, and the
+      // banner would name a group that is not there.
+      if (!(await signageGroupsStore.load()).some((g) => g.id === groupId)) {
+        return error(c.res, "no such group", 404);
+      }
+      if (playlistId && !(await signagePlaylistsStore.load()).some((p) => p.id === playlistId)) {
+        return error(c.res, "no such playlist", 400);
+      }
+
+      const record = {
+        groupId,
+        ...(blank ? { blank: true } : { playlistId: playlistId as string }),
+        startedAt: Date.now(),
+        ...(typeof body?.note === "string" ? { note: cleanName(body.note, "") } : {}),
+      };
+      await setOverride(record);
+      await signageScheduler.recompute();
+      return json(c.res, { override: record });
+    }
+
+    if (c.method === "DELETE") {
+      // Not an error when there is nothing to release: the operator's intent is
+      // "no override on this group", and that is already true. Failing would be
+      // noise on a screen someone is trying to fix.
+      await clearOverride(groupId);
+      await signageScheduler.recompute();
+      return json(c.res, { released: groupId });
+    }
+  }
 
   // What every display is showing, and why. The SAME resolver output the SSE
   // channel carries — read from the scheduler rather than recomputed here, so

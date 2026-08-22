@@ -32,6 +32,10 @@ export const SIGNAGE_CONFIG_KEY = ["signage:config"] as const;
 /** What every display is showing, and why — the resolver's own output. */
 export const SIGNAGE_NOW_KEY = ["signage:now"] as const;
 
+/** Active take-overs. Its own key because the banner has to clear the instant
+ *  Release is pressed, not on the next poll. */
+export const SIGNAGE_OVERRIDES_KEY = ["signage:overrides"] as const;
+
 const EMPTY: SignageConfig = { media: [], playlists: [], groups: [], schedules: [] };
 
 async function fetchSignageConfig(): Promise<SignageConfig> {
@@ -65,6 +69,7 @@ export function useSignageConfig(): {
     await Promise.all([
       client.invalidateQueries({ queryKey: SIGNAGE_CONFIG_KEY }),
       client.invalidateQueries({ queryKey: SIGNAGE_NOW_KEY }),
+      client.invalidateQueries({ queryKey: SIGNAGE_OVERRIDES_KEY }),
     ]);
   }, [client]);
 
