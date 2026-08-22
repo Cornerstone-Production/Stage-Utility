@@ -19,6 +19,7 @@ import {
   DropletIcon,
   ListChecksIcon,
   MonitorIcon,
+  MonitorPlayIcon,
   PaletteIcon,
   PlugIcon,
   SlidersHorizontalIcon,
@@ -35,6 +36,7 @@ import { IntegrationsSection } from "../settings/sections/integrations-section";
 import { PatchSection } from "../settings/sections/patch-section";
 import { HomeRoute } from "./home/home-route";
 import { ScreensRoute } from "./screens/screens-route";
+import { SignageRoute } from "./signage/signage-route";
 import { ConsoleRoute } from "./console-route";
 import { ViewEditorRoute } from "./screens/view-editor-route";
 import { ScriptViewSection } from "../settings/sections/scriptview-section";
@@ -71,6 +73,13 @@ export const DESTINATIONS: readonly Destination[] = [
     description: "Every physical screen, what it shows, and whether it is on.",
     icon: <MonitorIcon className="size-4" />,
     Component: ScreensRoute,
+  },
+  {
+    path: "/signage",
+    label: "Signage",
+    description: "Graphics and video on a schedule, per group of screens.",
+    icon: <MonitorPlayIcon className="size-4" />,
+    Component: SignageRoute,
   },
   {
     path: "/scriptview",
@@ -173,7 +182,7 @@ export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // "output" in its description is XLR, not a display.
   { label: "Content", paths: ["/scriptview", "/patch"] },
   // Where it shows.
-  { label: "Screens", paths: ["/screens"] },
+  { label: "Screens", paths: ["/screens", "/signage"] },
   // What it talks to. Automation rules act ON integrations.
   { label: "Devices", paths: ["/automation"] },
   // A service you ran — one live, one recorded.

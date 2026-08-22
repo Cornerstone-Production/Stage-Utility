@@ -122,6 +122,32 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return apiFetch<T>(`/api/scriptview/note-categories?serviceTypeId=${encodeURIComponent(id)}`);
     }
 
+    // ── Signage ─────────────────────────────────────────────────────────
+    // Media UPLOAD is deliberately absent: it sends raw bytes with the file's own
+    // content type, which apiFetch cannot express (it forces application/json).
+    // See uploadMedia in app/signage/use-signage-config.ts.
+    case "signage:listMedia":
+      return apiFetch<T>("/api/signage/media");
+
+    case "signage:renameMedia":
+      return patch<T>(`/api/signage/media/${encodeURIComponent(p.id as string)}`, { name: p.name });
+
+    case "signage:deleteMedia":
+      return del<T>(`/api/signage/media/${encodeURIComponent(p.id as string)}`);
+
+    case "signage:listPlaylists":
+      return apiFetch<T>("/api/signage/playlists");
+
+    case "signage:listGroups":
+      return apiFetch<T>("/api/signage/groups");
+
+    case "signage:listSchedules":
+      return apiFetch<T>("/api/signage/schedules");
+
+    // The write channels for playlists, groups and schedules are added with the
+    // sections that call them: api-channels.test.ts fails on a channel with no
+    // caller, which is what keeps this switch from accumulating dead arms.
+
     // ── Stage patch sheet ───────────────────────────────────────────────
     case "patch:get":
       return apiFetch<T>("/api/patch");

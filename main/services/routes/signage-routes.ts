@@ -11,7 +11,11 @@
 // checked before any lookup, and every response carries nosniff plus a sandbox
 // CSP so a file opened directly in a tab is inert whatever it turns out to hold.
 
+import type { DataStore } from "../data-store.js";
 import { errorMessage } from "../errors.js";
+import { signageGroupsStore } from "../signage-groups-store.js";
+import { signagePlaylistsStore } from "../signage-playlists-store.js";
+import { reorderSchedules, signageSchedulesStore } from "../signage-schedules-store.js";
 import {
   addMedia,
   clampMeasured,
@@ -35,7 +39,18 @@ const MAX_NAME = 200;
  * line is how a forged entry reaches the LAN-visible /log page.
  */
 function cleanName(raw: string | undefined, fallback: string): string {
-  const s = (raw ?? "")
+  let decoded = raw ?? "";
+  try {
+    // The browser percent-encodes the name, because header values are latin-1 on
+    // the wire and fetch() throws on a raw accented character. curl and any
+    // hand-written client send it plain, and decoding a plain name is a no-op —
+    // so both work. A malformed sequence falls back to the raw text rather than
+    // failing the upload over a filename.
+    decoded = decodeURIComponent(decoded);
+  } catch {
+    /* keep the raw text */
+  }
+  const s = decoded
     // eslint-disable-next-line no-control-regex -- stripping control chars is the point
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/\s+/g, " ")
@@ -147,4 +162,97 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
       return json(c.res, { media });
     }
   }
+
+  // ── Playlists, groups and schedules ───────────────────────────────────────
+  // Three collections with identical mechanics, so one helper rather than three
+  // copies that drift. Schedules additionally own their ORDER, which is the
+  // conflict-resolution rule, so a create appends and never reshuffles.
+  //
+  // The base path is spelled out at each call site rather than built from the
+  // segment name. route-coverage.test.ts scans source TEXT for the paths the
+  // client calls, so a templated `/api/signage/${segment}` is invisible to it and
+  // reads as an unhandled route. Spelling them out also means this list greps.
+  if (await collection(c, "/api/signage/playlists", signagePlaylistsStore, "playlist")) return;
+  if (await collection(c, "/api/signage/groups", signageGroupsStore, "group")) return;
+  if (await collection(c, "/api/signage/schedules", signageSchedulesStore, "schedule")) return;
+
+  if (c.pathname === "/api/signage/schedules/reorder" && c.method === "POST") {
+    const body = (await readBody(c.req)) as { ids?: unknown };
+    if (!Array.isArray(body?.ids) || body.ids.some((i) => typeof i !== "string")) {
+      return error(c.res, "ids must be an array of schedule ids", 400);
+    }
+    return json(c.res, { schedules: await reorderSchedules(body.ids as string[]) });
+  }
+}
+
+/** A stored record with an id — everything the collection helper handles. */
+interface Identified {
+  id: string;
+  name?: string;
+}
+
+/**
+ * GET / POST / DELETE for one signage collection.
+ *
+ * Returns true when it responded, so the caller can stop. POST is an upsert
+ * keyed on id: the editor sends the whole record back, and a create simply has
+ * an id nothing matches yet. Appending on create matters for schedules, where
+ * position in the array is priority — inserting anywhere else would silently
+ * change which schedule wins.
+ */
+async function collection<T extends Identified>(
+  c: RouteCtx,
+  base: string,
+  store: DataStore<T[]>,
+  key: string,
+): Promise<boolean> {
+  // The response wraps the list under its plural name ("playlists"), which is the
+  // last path segment.
+  const segment = base.slice(base.lastIndexOf("/") + 1);
+
+  if (c.pathname === base) {
+    if (c.method === "GET") {
+      json(c.res, { [segment]: await store.load() });
+      return true;
+    }
+    if (c.method === "POST") {
+      const body = (await readBody(c.req)) as Record<string, unknown>;
+      const record = body?.[key] as T | undefined;
+      if (!record || typeof record !== "object" || typeof record.id !== "string" || !record.id) {
+        error(c.res, `a ${key} with an id is required`, 400);
+        return true;
+      }
+      if (typeof record.name === "string") {
+        record.name = cleanName(record.name, record.id);
+      }
+      const saved = await store.update((all) =>
+        all.some((r) => r.id === record.id)
+          ? all.map((r) => (r.id === record.id ? record : r))
+          : [...all, record],
+      );
+      json(c.res, { [key]: record, [segment]: saved });
+      return true;
+    }
+  }
+
+  const item = new RegExp(`^${base}/([^/]+)$`).exec(c.pathname);
+  if (item && c.method === "DELETE") {
+    const id = decodeURIComponent(item[1]);
+    let removed: T | null = null;
+    const remaining = await store.update((all) =>
+      all.filter((r) => {
+        if (r.id !== id) return true;
+        removed = r;
+        return false;
+      }),
+    );
+    if (!removed) {
+      error(c.res, `no such ${key}`, 404);
+      return true;
+    }
+    json(c.res, { [key]: removed, [segment]: remaining });
+    return true;
+  }
+
+  return false;
 }

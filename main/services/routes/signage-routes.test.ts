@@ -146,6 +146,41 @@ describe("uploading media", () => {
     assert.ok(!/[\r\n]/.test(name), "a newline survived into the stored name");
   });
 
+  test("decodes the name the browser percent-encoded", async () => {
+    // The browser has to encode it (header values are latin-1 and fetch throws
+    // on a raw accented character). If the server does not decode, an operator's
+    // library fills up with names like "Foyer%20welcome.png".
+    const r = await upload(
+      {
+        "content-type": "image/png",
+        "x-signage-name": encodeURIComponent("Bienvenido á casa.png"),
+        "x-signage-w": "8",
+        "x-signage-h": "8",
+      },
+      Buffer.from("encoded name"),
+    );
+    assert.equal((r.json as { media: { name: string } }).media.name, "Bienvenido á casa.png");
+  });
+
+  test("a plain name from curl still works", async () => {
+    // Decoding a name with no escapes in it is a no-op, so a hand-written client
+    // is unaffected.
+    const r = await upload(
+      { "content-type": "image/png", "x-signage-name": "Foyer welcome.png", "x-signage-w": "8", "x-signage-h": "8" },
+      Buffer.from("plain name"),
+    );
+    assert.equal((r.json as { media: { name: string } }).media.name, "Foyer welcome.png");
+  });
+
+  test("a malformed escape does not fail the upload", async () => {
+    const r = await upload(
+      { "content-type": "image/png", "x-signage-name": "100%-cotton.png", "x-signage-w": "8", "x-signage-h": "8" },
+      Buffer.from("malformed escape"),
+    );
+    assert.equal(r.status, 200);
+    assert.equal((r.json as { media: { name: string } }).media.name, "100%-cotton.png");
+  });
+
   test("an absurdly long name is bounded", async () => {
     const r = await upload(
       {
@@ -199,5 +234,68 @@ describe("listing, renaming and deleting", () => {
     // module after it in the chain.
     const r = await callRoute(signageRoutes, "/api/state");
     assert.equal(r.responded, false, "signageRoutes answered a path belonging to another module");
+  });
+});
+
+describe("playlists, groups and schedules", () => {
+  const save = (segment: string, key: string, record: unknown) =>
+    callRoute(signageRoutes, `/api/signage/${segment}`, { method: "POST", body: { [key]: record } });
+
+  test("a create appends, so schedule order is never silently reshuffled", async () => {
+    // Position in this array IS priority. Inserting a new schedule anywhere but
+    // the end would change which schedule wins for displays nobody touched.
+    await save("schedules", "schedule", { id: "s1", name: "First", groupIds: [], playlistId: "p1" });
+    await save("schedules", "schedule", { id: "s2", name: "Second", groupIds: [], playlistId: "p1" });
+    const r = await callRoute(signageRoutes, "/api/signage/schedules");
+    assert.deepEqual((r.json as { schedules: { id: string }[] }).schedules.map((s) => s.id), ["s1", "s2"]);
+  });
+
+  test("saving an existing record replaces it in place, keeping its position", async () => {
+    await save("schedules", "schedule", { id: "s1", name: "Renamed", groupIds: [], playlistId: "p1" });
+    const r = await callRoute(signageRoutes, "/api/signage/schedules");
+    const all = (r.json as { schedules: { id: string; name: string }[] }).schedules;
+    assert.deepEqual(all.map((s) => s.id), ["s1", "s2"], "an edit moved the schedule");
+    assert.equal(all[0].name, "Renamed");
+  });
+
+  test("reorder changes priority", async () => {
+    const r = await callRoute(signageRoutes, "/api/signage/schedules/reorder", {
+      method: "POST",
+      body: { ids: ["s2", "s1"] },
+    });
+    assert.equal(r.status, 200);
+    assert.deepEqual((r.json as { schedules: { id: string }[] }).schedules.map((s) => s.id), ["s2", "s1"]);
+  });
+
+  test("reorder refuses a body that is not a list of ids", async () => {
+    const r = await callRoute(signageRoutes, "/api/signage/schedules/reorder", {
+      method: "POST",
+      body: { ids: "s1" },
+    });
+    assert.equal(r.status, 400);
+  });
+
+  test("a record with no id is refused rather than stored unaddressable", async () => {
+    const r = await save("groups", "group", { name: "Foyer", outputIds: [] });
+    assert.equal(r.status, 400);
+  });
+
+  test("deleting something that is gone is a 404", async () => {
+    const r = await callRoute(signageRoutes, "/api/signage/groups/no-such-id", { method: "DELETE" });
+    assert.equal(r.status, 404);
+  });
+
+  test("a group name is cleaned the same way a media name is", async () => {
+    // The same operator text reaching the same log lines. One cleaner, applied
+    // everywhere a name is stored, rather than remembering it per route.
+    const r = await save("groups", "group", { id: "g1", name: "Foyer\r\n[stage] fake", outputIds: [] });
+    assert.ok(!/[\r\n]/.test((r.json as { group: { name: string } }).group.name));
+  });
+
+  test("each collection is separate", async () => {
+    const groups = await callRoute(signageRoutes, "/api/signage/groups");
+    const playlists = await callRoute(signageRoutes, "/api/signage/playlists");
+    assert.equal((groups.json as { groups: unknown[] }).groups.length, 1);
+    assert.equal((playlists.json as { playlists: unknown[] }).playlists.length, 0);
   });
 });
