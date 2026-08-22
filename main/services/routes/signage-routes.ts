@@ -24,6 +24,7 @@ import {
   readMediaFile,
   renameMedia,
 } from "../signage-media-store.js";
+import { signageScheduler } from "../signage-scheduler.js";
 import { streamUploadToMedia, UploadTooLargeError } from "../signage-upload.js";
 import { error, json, readBody, type RouteCtx } from "./context.js";
 
@@ -181,7 +182,10 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
     if (!Array.isArray(body?.ids) || body.ids.some((i) => typeof i !== "string")) {
       return error(c.res, "ids must be an array of schedule ids", 400);
     }
-    return json(c.res, { schedules: await reorderSchedules(body.ids as string[]) });
+    const schedules = await reorderSchedules(body.ids as string[]);
+    // Reordering IS the priority rule, so this changes what walls show.
+    await signageScheduler.recompute();
+    return json(c.res, { schedules });
   }
 }
 
@@ -230,6 +234,9 @@ async function collection<T extends Identified>(
           ? all.map((r) => (r.id === record.id ? record : r))
           : [...all, record],
       );
+      // Push the new horizon at once rather than waiting for the safety tick:
+      // an operator who just edited a schedule expects the wall to follow.
+      await signageScheduler.recompute();
       json(c.res, { [key]: record, [segment]: saved });
       return true;
     }
@@ -250,6 +257,7 @@ async function collection<T extends Identified>(
       error(c.res, `no such ${key}`, 404);
       return true;
     }
+    await signageScheduler.recompute();
     json(c.res, { [key]: removed, [segment]: remaining });
     return true;
   }

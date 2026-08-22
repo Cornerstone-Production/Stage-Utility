@@ -54,6 +54,7 @@ import { stateRoutes } from "./routes/state-routes.js";
 import { scriptviewRoutes } from "./routes/scriptview-routes.js";
 import { viewRoutes } from "./routes/view-routes.js";
 import { signageRoutes } from "./routes/signage-routes.js";
+import { signageScheduler } from "./signage-scheduler.js";
 import { integrationRoutes } from "./routes/integration-routes.js";
 import { rosstalkRoutes } from "./routes/rosstalk-routes.js";
 import { automationRoutes } from "./routes/automation-routes.js";
@@ -888,6 +889,10 @@ export class RemoteServer {
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
       sseWrite(res, "displays:presence", presenceSnapshot());
+      // Signage only broadcasts when the horizon CHANGES, which on a quiet
+      // Tuesday can be hours. Without this a screen that loads mid-window sits
+      // black until its next boundary.
+      sseWrite(res, "signage:plan", signageScheduler.getHorizons());
       sseClients.add(res);
       // Correlate this stream to its client id so POST /api/events/subscribe can set
       // its channel filter. No cid (or no report yet) → the fan-out sends everything.
