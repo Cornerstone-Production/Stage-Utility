@@ -101,6 +101,13 @@ carry across a room: a recorder painting itself red while recording, a section
 chip in its own colour. A filled widget is the same widget wearing a state, not a
 different design.
 
+The caption and sub-line have pixel floors — they stop shrinking rather than
+becoming decoration — so a small widget gives them proportionally more room and
+its value proportionally less. That is why the editor draws in the design
+canvas' pixels whatever the fit is: it is a scale model of the screen, not a
+render at the size of your editor pane, and a small widget in a responsive
+layout used to compose differently in the two.
+
 ## Editing a console in place
 
 A console has a quiet **Edit** button in its corner. It opens the same editor
@@ -207,15 +214,16 @@ text read straight through it, which looks exactly like a broken layer order.
 
 ## What changed on your existing layouts
 
-Two things the object registry wrote into every object it ever created, which
-nobody chose, are replaced once on first start after upgrading:
+**Card grounds become opaque**, as described above — once, on the first start
+after upgrading, and never again. The server logs what it changed, under
+`[layout-defaults]`. It is an ordinary style field afterwards: change it on any
+object and it stays changed.
 
-- **Readouts lose a centre alignment** they were given at creation, so they take
-  the left default above. An alignment you set yourself is untouched.
-- **Card grounds become opaque**, as described above.
-
-The server logs what it changed, under `[layout-defaults]`. Both are ordinary
-style fields afterwards: change either on any object and it stays changed.
+Readouts created before the left default also carry a centre alignment nobody
+picked. That is left alone rather than cleared: the file cannot tell a default
+apart from a decision, and a pass that cleared it also cleared the alignments
+operators had set — on every restart, which is every update. Set one of those
+widgets to whatever you want; it will stay.
 
 ## Checking object types at extreme sizes
 

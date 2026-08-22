@@ -396,22 +396,31 @@ export class StageController {
     // may write views, and two writers racing over the same file is how one of
     // them loses. Seeding first means the surface migration also sees Home.
     const seeded = seedHomeView(views);
-    // Objects shed the styling the registry wrote into them at creation and
-    // nobody ever chose: readouts' centre alignment, and every card's
-    // translucent ground. Runs in this same pass for the same reason Home is
-    // seeded here: one writer for views.json, not three.
-    const aligned = migrateNeverChosenDefaults(seeded as View[]);
-    const realigned = countNeverChosen(seeded as View[]);
-    if (realigned > 0) {
+    // Objects shed the translucent card ground the registry wrote into them at
+    // creation and nobody ever chose. Runs in this same pass for the same reason
+    // Home is seeded here: one writer for views.json, not three.
+    //
+    // ONCE, and the flag is why: a value the registry wrote and one the operator
+    // chose are the same characters in the file, so a pass that runs every load
+    // cannot tell them apart. It used to take readouts' alignment as well, and
+    // took the operator's centre away on every restart — which is every update.
+    // That half is gone (see never-chosen-defaults.ts); this half stops after
+    // its one pass.
+    const alreadyCleaned = (await settingsStore.get()).layoutDefaultsCleaned === true;
+    const cleaned = alreadyCleaned ? (seeded as View[]) : migrateNeverChosenDefaults(seeded as View[]);
+    const cleanedCount = alreadyCleaned ? 0 : countNeverChosen(seeded as View[]);
+    // Recorded even when it found nothing: a fresh install has nothing to clean,
+    // and must still never run it again.
+    if (!alreadyCleaned) await settingsStore.patch({ layoutDefaultsCleaned: true });
+    if (cleanedCount > 0) {
       console.log(
-        `[layout-defaults] ${realigned} object${realigned === 1 ? "" : "s"} carried styling written by the ` +
-          "object registry rather than chosen — a centre alignment on readouts, a translucent card ground, " +
-          "or the older #191919 card, which left one layout wearing two different cards. Replaced with the " +
-          "current defaults: readouts align left, and every card is the same opaque one. All still editable " +
-          "per object in the layout editor.",
+        `[layout-defaults] ${cleanedCount} object${cleanedCount === 1 ? "" : "s"} carried a card ground written by ` +
+          "the object registry rather than chosen — a translucent one, which let the page read through the " +
+          "widget, or the older #191919 card, which left one layout wearing two different cards. Replaced " +
+          "with the current opaque card, once. Still editable per object in the layout editor.",
       );
     }
-    const result = migrateSurfaces(aligned, outputs);
+    const result = migrateSurfaces(cleaned, outputs);
     const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
     const outputsChanged = result.outputs.some((o, i) => o !== outputs[i]);
     if (!viewsChanged && !outputsChanged) return { views, outputs };

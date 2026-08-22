@@ -5,13 +5,12 @@ import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-def
 import { IDIOM_TYPES, LEGACY_TRANSLUCENT_GROUNDS } from "../types/readout-types.js";
 import type { View } from "../types/views.js";
 
-// The widget idiom aligns left by default, and the alignment control still
-// works. Both of those are only true because the centre alignment the object
-// registry wrote into every object it created comes off first — it was never a
-// choice, and treating it as one would flip every readout back to centred.
-//
-// This edits the operator's layouts, so the tests are as much about what it
-// must NOT touch as what it must.
+// This edits the operator's layouts, so the tests are as much about what it must
+// NOT touch as what it must — and the biggest of those is the ALIGNMENT, which
+// this pass used to strip and no longer does at all. A centre the registry wrote
+// and a centre somebody picked are the same characters in the file, so stripping
+// it deleted a real choice on every restart. Those cases are still here, the
+// other way up.
 
 const obj = (type: string, style: Record<string, unknown> | undefined, children?: unknown[]) =>
   ({ id: `${type}-1`, x: 0, y: 0, w: 0.2, h: 0.2, z: 0, config: { type }, style, children }) as never;
@@ -22,40 +21,37 @@ const view = (objects: unknown[]): View =>
 const alignOf = (views: View[], i = 0, j = 0) =>
   (views[i].layout!.objects[j] as { style?: { textAlign?: string } }).style?.textAlign;
 
-describe("what it clears", () => {
-  test("a readout's never-chosen centre comes off", () => {
+describe("the alignment, which it must never touch", () => {
+  test("a readout's centre stays put", () => {
+    // This is the reported bug, at the unit: it used to come off here, and the
+    // operator re-centred the same widgets after every update.
     const out = migrateNeverChosenDefaults([view([obj("clock", { textAlign: "center", fontSize: 0.09 })])]);
-    assert.equal(alignOf(out), undefined, "the centre alignment survived");
+    assert.equal(alignOf(out), "center", "the alignment was stripped again");
   });
 
-  test("the rest of the style is untouched", () => {
-    // Only the one field. A migration that rebuilt the style would silently
-    // discard a colour or a font size the operator did choose.
-    const out = migrateNeverChosenDefaults([
-      view([obj("clock", { textAlign: "center", fontSize: 0.09, color: "#ff0000", vAlign: "top" })]),
-    ]);
-    const style = out[0].layout!.objects[0].style as unknown as Record<string, unknown>;
-    assert.deepEqual(style, { fontSize: 0.09, color: "#ff0000", vAlign: "top" });
-  });
-
-  test("it reaches readouts nested inside containers", () => {
-    // Layouts nest — a container of status pills is the normal shape. A pass
-    // that only walked the top level would leave every grouped readout centred
-    // and the operator with no way to tell why some moved and some did not.
+  test("nor a nested one", () => {
+    // Layouts nest — a container of status pills is the normal shape — and a
+    // walk that reached into containers is how the grouped ones lost theirs too.
     const out = migrateNeverChosenDefaults([
       view([obj("container", undefined, [obj("obs-status", { textAlign: "center" })])]),
     ]);
     const kid = (out[0].layout!.objects[0] as { children: { style?: { textAlign?: string } }[] }).children[0];
-    assert.equal(kid.style?.textAlign, undefined, "a nested readout kept its centre");
+    assert.equal(kid.style?.textAlign, "center", "a nested readout lost its centre");
   });
 
-  test("every readout type is covered", () => {
-    // An EXACT walk of the set, not a sample. A type missing from the migration
-    // is a widget that stays centred forever while its neighbours move.
+  test("no readout type is an exception", () => {
+    // An EXACT walk of the set. One type still being stripped is one widget that
+    // will not stay where it was put.
     for (const type of IDIOM_TYPES) {
       const out = migrateNeverChosenDefaults([view([obj(type, { textAlign: "center" })])]);
-      assert.equal(alignOf(out), undefined, `${type} kept its never-chosen centre`);
+      assert.equal(alignOf(out), "center", `${type} lost its alignment`);
     }
+  });
+
+  test("and a view whose only styling is an alignment comes back BY REFERENCE", () => {
+    // Which is how the caller knows there is nothing to write.
+    const views = [view([obj("clock", { textAlign: "center" })])];
+    assert.equal(migrateNeverChosenDefaults(views), views);
   });
 });
 
@@ -93,30 +89,16 @@ describe("the translucent card ground", () => {
     }
   });
 
-  test("both defaults come off the same object in one pass", () => {
+  test("the ground moves and the alignment beside it does not", () => {
     const out = migrateNeverChosenDefaults([
       view([obj("clock", { textAlign: "center", background: "rgba(255,255,255,0.04)" })]),
     ]);
-    assert.equal(alignOf(out), undefined, "the alignment survived");
     assert.equal(bgOf(out), "#141414", "the ground survived");
+    assert.equal(alignOf(out), "center", "the alignment went with it");
   });
 });
 
 describe("what it must not touch", () => {
-  test("an alignment the operator actually chose survives", () => {
-    // `right` is impossible to arrive at by accident — the registry only ever
-    // wrote `center` — so it is a decision, and decisions are not ours to undo.
-    const out = migrateNeverChosenDefaults([view([obj("clock", { textAlign: "right" })])]);
-    assert.equal(alignOf(out), "right", "a chosen alignment was cleared");
-  });
-
-  test("a non-readout keeps its centre", () => {
-    // Plain text, slide text, service items: centred is their default and their
-    // composition, and nothing about this change touches them.
-    const out = migrateNeverChosenDefaults([view([obj("text", { textAlign: "center" })])]);
-    assert.equal(alignOf(out), "center", "a text object lost its alignment");
-  });
-
   test("an object with no style at all is left alone", () => {
     const out = migrateNeverChosenDefaults([view([obj("clock", undefined)])]);
     assert.equal(alignOf(out), undefined);
@@ -125,15 +107,15 @@ describe("what it must not touch", () => {
 
 describe("running it twice", () => {
   test("the array comes back BY REFERENCE when there is nothing to do", () => {
-    // So the caller skips the write. This runs on every load beside two other
-    // migrations over the same file; a fresh array each launch is a rewrite for
-    // nothing, and three writers racing is how one of them loses.
-    const views = [view([obj("clock", { textAlign: "right" }), obj("text", { textAlign: "center" })])];
+    // So the caller skips the write. It runs beside two other migrations over
+    // the same file; a fresh array is a rewrite for nothing, and three writers
+    // racing is how one of them loses.
+    const views = [view([obj("clock", { textAlign: "right" }), obj("text", { background: "#141414" })])];
     assert.equal(migrateNeverChosenDefaults(views), views);
   });
 
   test("a second run changes nothing", () => {
-    const once = migrateNeverChosenDefaults([view([obj("clock", { textAlign: "center" })])]);
+    const once = migrateNeverChosenDefaults([view([obj("clock", { background: "rgba(255,255,255,0.04)" })])]);
     assert.equal(migrateNeverChosenDefaults(once), once);
   });
 });
@@ -145,17 +127,17 @@ describe("the count that gets logged", () => {
     // is not there.
     const views = [
       view([
-        obj("clock", { textAlign: "center" }),
+        obj("clock", { background: "rgba(255,255,255,0.04)" }),
         obj("text", { textAlign: "center" }),
-        obj("obs-status", { textAlign: "right" }),
-        obj("container", undefined, [obj("spl-meter", { textAlign: "center" })]),
+        obj("obs-status", { background: "#0f0f0f" }),
+        obj("container", undefined, [obj("spl-meter", { background: "rgba(45,212,150,0.08)" })]),
       ]),
     ];
     assert.equal(countNeverChosen(views), 2);
   });
 
   test("it is zero once the migration has run", () => {
-    const views = [view([obj("clock", { textAlign: "center" })])];
+    const views = [view([obj("clock", { background: "rgba(255,255,255,0.04)" })])];
     assert.equal(countNeverChosen(migrateNeverChosenDefaults(views)), 0);
   });
 });

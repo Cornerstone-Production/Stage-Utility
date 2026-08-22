@@ -1,22 +1,20 @@
 // Drop the styling nobody chose off existing objects.
 //
-// Every style preset in the object registry spreads TEXT(), which writes
-// `textAlign: "center"`. So every readout ever created stored a centre
-// alignment as a side effect of being created — 24 of them across four real
-// views, and not one of them a decision anybody made.
+// Runs ONCE per install, recorded in settings — see stage-controller. It has to
+// be once, because the file cannot say who wrote a value.
 //
-// That made the widget idiom's left-aligned composition impossible to have as a
-// DEFAULT without ignoring the field outright, which is what the first cut did
-// — and ignoring it meant a custom view could never centre a widget on purpose.
+// There was a third of these, and it is why: it took the centre ALIGNMENT off
+// every readout, since the registry wrote one into each object it created. But a
+// centre the registry wrote and a centre the operator picked in the inspector
+// are the same three characters, so running it every load deleted the operator's
+// choice on every restart — which is every update, and it was reported exactly
+// that way. That one is gone entirely; see readout-types.ts.
 //
-// So the never-chosen value comes off once, here. After this runs, whatever is
-// stored IS a choice, the default is left, and the control works again.
+// What is left changes how a card OCCLUDES, which is a property of the widget
+// rather than a preference. TWO of them, in one pass over one file rather than
+// two walks and two writes:
 //
-// TWO of these now, in one pass over one file rather than two walks and two
-// writes:
-//
-//  1. the centre ALIGNMENT above.
-//  2. the translucent card GROUND. Every preset ground was an rgba at 4-10%,
+//  1. the translucent card GROUND. Every preset ground was an rgba at 4-10%,
 //     which does not occlude: a status widget over a transcript let the text
 //     read straight through it, which looks exactly like the widget being drawn
 //     underneath. Paint order was verified correct while that was happening —
@@ -24,7 +22,7 @@
 //     blend of itself over the kiosk black, so a card is unchanged on a bare
 //     canvas and now covers what is behind it.
 //
-//  3. the ELEVATED card. Objects created before the surface list was cut down
+//  2. the ELEVATED card. Objects created before the surface list was cut down
 //     wear #191919 with a 10% hairline, while everything created since wears
 //     #141414 with an 8% one. Both are cards; they are just cards from two
 //     different years, and a layout built across both reads as some widgets
@@ -32,10 +30,10 @@
 //     current card so a row of widgets looks like a row of widgets.
 //
 // Deliberately narrow, because this edits the operator's layouts: only the exact
-// strings the registry wrote. An alignment already set to `right`, or a
-// background an operator picked themselves, is left alone.
+// strings the registry wrote. A background an operator picked themselves is left
+// alone.
 
-import { isNeverChosenAlign, opaqueGroundFor } from "../types/readout-types.js";
+import { opaqueGroundFor } from "../types/readout-types.js";
 import type { LayoutObject, View } from "../types/views.js";
 
 /**
@@ -61,14 +59,12 @@ function cleanObject(o: LayoutObject): LayoutObject {
   const kids = o.children?.map(cleanObject);
   const kidsChanged = kids != null && kids.some((k, i) => k !== o.children![i]);
 
-  const dropAlign = isNeverChosenAlign(o.config.type, o.style);
   const opaque = opaqueGroundFor(o.style?.background);
   const oldCard = isLegacyCard(o.style);
-  if (!dropAlign && !opaque && !oldCard) {
+  if (!opaque && !oldCard) {
     return kidsChanged ? { ...o, children: kids } : o;
   }
   const style = { ...o.style };
-  if (dropAlign) delete style.textAlign;
   if (opaque) style.background = opaque;
   if (oldCard) {
     style.background = CURRENT_CARD.background;
@@ -105,7 +101,7 @@ export function countNeverChosen(views: readonly View[]): number {
   let n = 0;
   const walk = (objs: readonly LayoutObject[] | undefined) => {
     for (const o of objs ?? []) {
-      if (isNeverChosenAlign(o.config.type, o.style) || opaqueGroundFor(o.style?.background) || isLegacyCard(o.style)) n++;
+      if (opaqueGroundFor(o.style?.background) || isLegacyCard(o.style)) n++;
       walk(o.children);
     }
   };
