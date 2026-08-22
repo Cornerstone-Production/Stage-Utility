@@ -107,6 +107,8 @@ const EXPECTED_CONFIG = [
   "osc-targets.json",
   "patch.json",
   "presets.json",
+  // The operator's own colours, kept from the picker.
+  "saved-colors.json",
   "rosstalk-settings.json",
   "rosstalk-targets.json",
   "scriptview-config.json",

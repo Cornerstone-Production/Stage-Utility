@@ -698,6 +698,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "barItems:set":
       return post<T>("/api/bar-items", p);
 
+    case "savedColors:set":
+      return post<T>("/api/saved-colors", p);
+
     case "notes:set":
       return post<T>("/api/notes", p);
 
