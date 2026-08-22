@@ -1,4 +1,4 @@
-import type { LayoutObjectType, LayoutStyle, LayoutHAlign } from "./views.js";
+import type { LayoutObjectType, LayoutHAlign } from "./views.js";
 
 /**
  * The object types that render through the shared Readout.
@@ -67,25 +67,21 @@ export const IDIOM_TYPES = new Set<LayoutObjectType>([
  */
 export const DEFAULT_READOUT_ALIGN: LayoutHAlign = "left";
 
-/**
- * Should this object's stored alignment be dropped as never-chosen?
+/*
+ * There was an `isNeverChosenAlign` here, and it is deliberately gone.
  *
- * Every readout in every existing layout carries `textAlign: "center"` — 24 of
- * them across four real views — because the registry wrote it into the default
- * style of every object it ever created. None of it was a decision.
+ * The object registry used to write `textAlign: "center"` into every object it
+ * created, so a load-time pass stripped it to make DEFAULT_READOUT_ALIGN mean
+ * something. The trouble is that the file cannot tell the two apart: a centre
+ * the registry wrote and a centre the operator picked in the inspector are the
+ * same three characters. So the pass deleted the operator's choice on every
+ * restart — that is, on every update — and it was reported exactly that way.
  *
- * Honouring it as though it were would flip every readout back to centred and
- * undo the idiom; ignoring it forever would mean a readout could never be
- * centred at all. So the never-chosen value is removed once, and after that
- * whatever is stored IS a choice.
- *
- * Deliberately narrow: only readouts, and only the exact value the registry
- * wrote. An object someone had already set to `right` is untouched, as is any
- * object that is not a readout.
+ * The registry no longer writes it (see defaultStyle in layout-objects.ts), so
+ * nothing new acquires one. An old layout keeps whatever it has, which renders
+ * the way it always rendered, and the operator can change it. Leaving a stale
+ * default alone is a smaller cost than deleting a decision, every time.
  */
-export function isNeverChosenAlign(type: LayoutObjectType, style: LayoutStyle | undefined): boolean {
-  return IDIOM_TYPES.has(type) && style?.textAlign === "center";
-}
 
 
 /**

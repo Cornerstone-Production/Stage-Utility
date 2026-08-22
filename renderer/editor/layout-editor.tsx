@@ -393,15 +393,15 @@ function OverlayNode({
   );
 }
 
-function EditorCanvas({
-  effectiveFit,
+/**
+ * The canvas, exported for the guard that pins its coordinate space — see
+ * editor-canvas-space.test.tsx. Nothing else outside this file renders it.
+ */
+export function EditorCanvas({
   canvas, objects, selectedId, selectedIds, gridOn, alignOn, locked, ctx, ndiSource, interactive,
   onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
   onContextMenu, onDropType, onDrawn,
 }: {
-  /** What the layout will actually do — a console with no explicit fit is
-   *  responsive. Passed in so the canvas and the toolbar cannot disagree. */
-  effectiveFit: "contain" | "responsive";
   canvas: LayoutCanvas;
   objects: LayoutObject[];
   selectedId: string | null;
@@ -474,21 +474,21 @@ function EditorCanvas({
     };
   }, [wrap]);
 
-  // "fill" mode: objects reflow to the window rather than letterboxing the design
-  // aspect. The PREVIEW still keeps the design aspect, and that is deliberate.
+  // A responsive layout and a letterboxed one are drawn the SAME way here.
   //
-  // It used to take the editor pane's own shape, which made it a model of a
-  // display nobody owns: fonts are a fraction of HEIGHT, so a pane that is
-  // relatively narrower than the design renders the same text larger relative to
-  // the width it has to fit in. Status pills wrapped in the preview and not on the
-  // display, and a rundown hid 633px of columns in the preview against 256px on
-  // the page — the preview was not just imprecise, it disagreed about what fits.
+  // The canvas already used one box for both — a preview cannot know the shape of
+  // the screen this ends up on, so it models the one shape it does know, the
+  // design canvas. What differed was the pixels the content was drawn in:
+  // responsive layouts rendered into the live box (~29px tall for a status
+  // widget in a half-size pane) instead of design space (58px), and everything
+  // sized in real pixels rather than fractions then came out wrong. The readout
+  // idiom has pixel FLOORS — a caption never goes below 9px, so it cannot shrink
+  // with the pane — and at 29px that floor took a third of the box, leaving the
+  // value at 7px where the display draws it at 19. Measured, both ways. Reported
+  // as the small widgets in a custom layout not looking like what they are.
   //
-  // A preview cannot know the shape of the screen this will end up on, so it
-  // models the one shape it does know: the design canvas. Same box as letterbox
-  // mode; what still differs is `H`, which tracks the live box so the preview is a
-  // true scale model rather than a fixed design-space render.
-  const fill = effectiveFit === "responsive";
+  // So the content is always design space + a transform, and the scale model is
+  // true at every size. Only the grid's line width still cares about the scale.
   const scale = avail.w > 0 && avail.h > 0 ? Math.min(avail.w / canvas.width, avail.h / canvas.height) : 0;
   const boxW = canvas.width * scale;
   const boxH = canvas.height * scale;
@@ -741,27 +741,25 @@ function EditorCanvas({
   const sorted = [...objects].sort((a, b) => a.z - b.z);
   // Editor canvas is never interactive — live-control objects render as static
   // previews here so editing can't fire real PCO commands.
-  const fullCtx: LayoutRenderCtx = { ...ctx, H: fill ? boxH : canvas.height, ndiSource, interactive: false };
+  const fullCtx: LayoutRenderCtx = { ...ctx, H: canvas.height, ndiSource, interactive: false };
 
   // The grid lives INSIDE the content layer (see below) so it shares the object's
-  // EXACT box + transform. In letterbox mode that means the grid is drawn once in
-  // fixed design-space px and only the transform scale changes on resize (GPU
-  // composited, no per-frame reflow) — and Safari can't rasterize the grid on a
-  // different pixel grid than the objects. The old sibling boxW×boxH layer used
-  // CSS background tiling in screen px while objects were transform-scaled, so the
-  // two diverged in Safari (objects off the grid) and jittered while resizing.
-  // Cells are SQUARE (same px on both axes) so lines match the snap step exactly.
-  const contentW = fill ? boxW : canvas.width;
-  const contentH = fill ? boxH : canvas.height;
-  const contentCell = contentW / GRID;
-  // Keep lines ~1px on screen after the letterbox transform scales the layer down.
-  const gridLine = fill || scale <= 0 ? 1 : 1 / scale;
+  // EXACT box + transform: drawn once in fixed design-space px, with only the
+  // transform scale changing on resize (GPU composited, no per-frame reflow) —
+  // and Safari can't rasterize the grid on a different pixel grid than the
+  // objects. The old sibling boxW×boxH layer used CSS background tiling in screen
+  // px while objects were transform-scaled, so the two diverged in Safari
+  // (objects off the grid) and jittered while resizing. Cells are SQUARE (same px
+  // on both axes) so lines match the snap step exactly.
+  const contentCell = canvas.width / GRID;
+  // Keep lines ~1px on screen after the transform scales the layer down.
+  const gridLine = scale <= 0 ? 1 : 1 / scale;
   const gridLayer: CSSProperties = {
     position: "absolute",
     top: 0,
     left: 0,
-    width: contentW,
-    height: contentH,
+    width: canvas.width,
+    height: canvas.height,
     pointerEvents: "none",
     backgroundImage:
       `linear-gradient(rgba(255,255,255,0.06) ${gridLine}px, transparent ${gridLine}px), linear-gradient(90deg, rgba(255,255,255,0.06) ${gridLine}px, transparent ${gridLine}px)`,
@@ -805,20 +803,18 @@ function EditorCanvas({
             onDropType({ x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height });
           } : undefined}
         >
-          {/* Content layer (visual only). Letterbox: design dims scaled. Fill: the
-              layer IS the box (objects positioned by % of the live box). The grid
-              is the first child so it shares this layer's exact box + transform —
-              objects can never drift off it, in any browser. */}
+          {/* Content layer (visual only): design dimensions, scaled. Objects sit
+              at percentages of it, so this is the same geometry a responsive
+              layout had when it was drawn into the live box — and the pixels
+              everything is sized in are now the ones the display will use. The
+              grid is the first child so it shares this layer's exact box +
+              transform, and objects can never drift off it, in any browser. */}
           <div
-            style={
-              fill
-                ? { width: boxW, height: boxH, position: "absolute", top: 0, left: 0, pointerEvents: "none" }
-                : {
-                    width: canvas.width, height: canvas.height,
-                    transform: `scale(${scale})`, transformOrigin: "top left",
-                    position: "absolute", top: 0, left: 0, pointerEvents: "none",
-                  }
-            }
+            style={{
+              width: canvas.width, height: canvas.height,
+              transform: `scale(${scale})`, transformOrigin: "top left",
+              position: "absolute", top: 0, left: 0, pointerEvents: "none",
+            }}
           >
             {gridOn && <div style={gridLayer} />}
             {sorted.map((o) => (
@@ -1922,7 +1918,6 @@ export function LayoutEditor({
             />
           ) : data.state ? (
             <EditorCanvas
-              effectiveFit={effectiveFit}
               canvas={canvas}
               objects={objects}
               selectedId={selectedId}

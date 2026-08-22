@@ -109,6 +109,20 @@ export interface SettingsData {
   splVisibleMetrics: string[];
   /** Operator dismissed the first-run "Getting started" checklist (machine-wide). */
   onboardingDismissed: boolean;
+  /**
+   * The one-time strip of registry-written styling has run (see
+   * never-chosen-defaults.ts).
+   *
+   * It has to be recorded, because the data cannot say it: a readout wearing
+   * `textAlign: "center"` looks identical whether the registry wrote it at
+   * creation or the operator chose it in the inspector. Running the strip on
+   * every load therefore deleted the operator's choice every restart — reported
+   * as widgets un-centring themselves after each update.
+   *
+   * Absent means never run, so an install that upgrades into this still gets its
+   * one pass.
+   */
+  layoutDefaultsCleaned?: boolean;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
