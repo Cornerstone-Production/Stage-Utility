@@ -119,11 +119,15 @@ export function BaptismOperator() {
   }
 
   return (
-    <div className="flex flex-col gap-5 max-w-2xl">
-      <div className="flex flex-col gap-1">
-        <span className="text-title3 font-semibold text-gray-12">Baptism timer</span>
-        <span className="text-caption1 text-gray-9">Time testimonies and baptisms. Splits, totals and averages are tracked live and can be shown on a display with the &ldquo;Baptism timer&rdquo; layout object.</span>
-      </div>
+    // CENTRED, not pinned to the left edge of a monitor-wide page: this is a
+    // column of controls about one thing, and left-aligned it read as having
+    // come loose in the corner with the rest of the screen empty beside it.
+    //
+    // And NO heading of its own. It had one — "Baptism timer", with a paragraph
+    // under it — from when this was a tab inside Settings and nothing above it
+    // said what it was. In the shell the page header says that already, so the
+    // page opened with two titles, one under the other, saying the same thing.
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 py-1">
 
       {/* Workflow mode */}
       <div className="flex items-center gap-2">

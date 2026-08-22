@@ -77,12 +77,17 @@ export function ScriptViewIndex() {
       {/* Scroll container + inner min-h-full centering wrapper: centers when the
           list is short, scrolls without clipping the ends when it's long. */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-        {/* Left-aligned and top-anchored. The centred brand mark and vertical
-            centering belonged to a standalone page that owned the whole window;
-            inside the shell they pushed the list halfway down a screen that
-            already has a title and a rail. */}
-        <div className="flex flex-col gap-8 pb-[50vh] max-sm:pb-24">
-        <div className="flex flex-col gap-2 w-full max-w-md">
+        {/* CENTRED, in both axes. This is a launcher — four rows and an arrow —
+            and left-aligned at the top of a page the width of a monitor it read
+            as something that had come loose in the corner, with the rest of the
+            screen empty behind it. The page's own title stays where the shell
+            puts it; this is the content, and the content is the picker.
+
+            `m-auto` rather than `justify-center`, because a flex child centred
+            by justify has its overflowing top cut off when the list grows past
+            the window — auto margins collapse instead of clipping. */}
+        <div className="flex min-h-full py-8 max-sm:py-4">
+        <div className="m-auto flex flex-col gap-2 w-full max-w-md">
 
           {error ? (
             <p className="text-body text-red-10 text-center px-4">{error}</p>
