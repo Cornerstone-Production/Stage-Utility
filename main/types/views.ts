@@ -373,6 +373,9 @@ export type LayoutObjectConfig =
       platform?: "any" | "resi" | "youtube";
       showElapsed?: boolean;
       hideWhenIdle?: boolean;
+      /** Paint the whole widget green while live, rather than colouring the
+       *  word. Off by default: red is what a recorder means by rolling, and a
+       *  wall carrying both wants one of them shouting, not two. */
       fillWhenLive?: boolean;
     }
   // Live REAPER recording indicator (from the REAPER integration, `reaper:status`

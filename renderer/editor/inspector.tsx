@@ -917,8 +917,9 @@ export function Inspector({
             />
           )}
           <RowSwitch
-            label="Fill red when live"
-            checked={c.fillWhenLive ?? true}
+            label="Fill green when live"
+            hint="Off colours the word. On paints the whole widget — a signal that carries across a room."
+            checked={c.fillWhenLive ?? false}
             onChange={(v) => onConfig({ ...c, fillWhenLive: v })}
           />
           <RowSwitch

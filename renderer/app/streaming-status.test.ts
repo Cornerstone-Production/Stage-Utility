@@ -121,26 +121,26 @@ describe("the indicator on a wall", () => {
   // states. A streaming widget beside one of those has to read the same way,
   // which is the whole reason this function exists rather than each widget
   // phrasing it for itself.
-  test("nothing connected reads Offline, dimmed, with no second line", () => {
+  test("nothing connected reads Offline, with no second line", () => {
     const ind = streamIndicator([s({ connected: false })], NOW);
     assert.equal(ind.value, "Offline");
-    assert.equal(ind.dim, true);
-    assert.equal(ind.live, false);
+    assert.equal(ind.state, "offline");
     assert.equal(ind.sub, null, "an unset platform has nothing to put underneath");
   });
 
-  test("connected and not streaming reads Off air, undimmed", () => {
+  test("connected and not streaming is its own state, not a shade of offline", () => {
+    // The two are told apart by more than their word — one is the resting state
+    // and one is a platform you cannot reach.
     const ind = streamIndicator([s({ connected: true, live: false })], NOW);
     assert.equal(ind.value, "Off air");
-    assert.equal(ind.dim, false);
-    assert.equal(ind.live, false);
+    assert.equal(ind.state, "idle");
   });
 
   test("live reads Live, with the clock underneath", () => {
     const ind = streamIndicator([s({ live: true, startedAt: at(90) })], NOW);
     assert.equal(ind.value, "Live");
     assert.equal(ind.sub, "1:30:00");
-    assert.equal(ind.live, true);
+    assert.equal(ind.state, "live");
   });
 
   test("show-elapsed off keeps the word and drops the clock", () => {
