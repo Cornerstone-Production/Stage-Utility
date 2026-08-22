@@ -36,7 +36,16 @@ function PinGrid({
 }) {
   const x = value?.x, y = value?.y;
   return (
-    <div className="inline-grid grid-cols-3 gap-0.5 rounded-md border border-line p-0.5" role="group" aria-label="Pin to edges">
+    <div
+      // shrink-0, and it is load-bearing. The hint beside this grid gets LONGER
+      // the moment a cell is pinned — "Unpinned: scales with the window." becomes
+      // "Holds its distance from that corner instead of drifting." — and as a
+      // shrinkable flex item the grid gave up its width to make room, so clicking
+      // a pin squashed the very control you had just clicked.
+      className="inline-grid shrink-0 grid-cols-3 gap-0.5 rounded-md border border-line p-0.5"
+      role="group"
+      aria-label="Pin to edges"
+    >
       {YS.map((ry) =>
         XS.map((rx) => {
           const on = x === rx && y === ry;
@@ -88,7 +97,8 @@ export function ResponsiveControls({
 
       <div className="flex items-start gap-3">
         <PinGrid value={settings.anchor} onChange={(anchor) => onChange({ anchor })} />
-        <span className="text-caption2 text-fg-subtle">
+        {/* min-w-0 so the sentence wraps instead of pushing at the grid. */}
+        <span className="min-w-0 text-caption2 text-fg-subtle">
           {anchored
             ? "Holds its distance from that corner instead of drifting."
             : "Unpinned: scales with the window."}
