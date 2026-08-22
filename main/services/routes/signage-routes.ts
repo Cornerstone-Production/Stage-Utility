@@ -24,6 +24,7 @@ import {
   readMediaFile,
   renameMedia,
 } from "../signage-media-store.js";
+import { signagePcoWindows } from "../signage-pco-windows.js";
 import { signageScheduler } from "../signage-scheduler.js";
 import { streamUploadToMedia, UploadTooLargeError } from "../signage-upload.js";
 import { error, json, readBody, type RouteCtx } from "./context.js";
@@ -183,7 +184,10 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
   if (c.pathname === "/api/signage/now" && c.method === "GET") {
     return json(c.res, {
       horizons: signageScheduler.getHorizons(),
-      staleWindows: false,
+      // A stale window is USED rather than ignored, so the only way an operator
+      // learns PCO is unreachable is by being told here.
+      staleWindows: signagePcoWindows.isStale(),
+      pcoError: signagePcoWindows.error(),
     });
   }
 
@@ -245,7 +249,10 @@ async function collection<T extends Identified>(
           : [...all, record],
       );
       // Push the new horizon at once rather than waiting for the safety tick:
-      // an operator who just edited a schedule expects the wall to follow.
+      // an operator who just edited a schedule expects the wall to follow. A
+      // new PCO-driven schedule also needs its windows fetched now rather than
+      // up to half an hour later, which would look like the schedule not working.
+      if (segment === "schedules") await signagePcoWindows.refresh();
       await signageScheduler.recompute();
       json(c.res, { [key]: record, [segment]: saved });
       return true;

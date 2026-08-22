@@ -23,6 +23,7 @@ import { resolveSlots } from "./slot-resolver.js";
 import { migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
+import { signagePcoWindows } from "./signage-pco-windows.js";
 import { signageScheduler } from "./signage-scheduler.js";
 import { viewsStore } from "./views-store.js";
 import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
@@ -322,15 +323,22 @@ export class StageController {
     // Signage resolves per output, so it needs the outputs and the live service
     // type. Injected as a getter rather than imported the other way: the
     // scheduler is a leaf, and importing the controller there would be a cycle.
+    // PCO-derived windows are precomputed rather than evaluated per boundary, so
+    // the resolver stays pure and a 24h horizon needs no network call.
+    signagePcoWindows.configure({
+      creds: () =>
+        this.pcoAppId && this.pcoSecret ? { appId: this.pcoAppId, secret: this.pcoSecret } : null,
+      onChange: () => void signageScheduler.recompute(),
+    });
+    signagePcoWindows.start();
+
     signageScheduler.setContext(() => ({
       outputs: this.state.outputs,
       // "item" mode, not "preservice": the extension exists so a service running
       // LONG does not blank the foyer mid-service. Preservice is before the
       // service, which the window's own lead time already covers.
       liveServiceTypeId: this.lastLive?.mode === "item" ? this.state.serviceTypeId : null,
-      // Filled in by the PCO-windows poller in a later task; an empty list
-      // simply means no PCO-driven schedule can be open yet.
-      pcoWindows: [],
+      pcoWindows: signagePcoWindows.get(),
     }));
     signageScheduler.start();
 
