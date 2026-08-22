@@ -16,18 +16,13 @@ import { shortDay, type TrendPoint } from "../settings/sections/overview-data";
  *  decorative. Falls back to a quiet note when there isn't enough to plot. */
 export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   /**
-   * The viewBox is the chart's REAL pixel width, measured.
+   * The chart's own size, measured, and used as PLAIN PIXELS — see the svg
+   * below for why there is no viewBox to scale them.
    *
-   * It used to be a fixed 640 stretched to fit with `preserveAspectRatio="none"`,
-   * which is fine for the polyline — it has a non-scaling stroke — and wrong for
-   * everything else in the drawing. On History, where the chart is about 640
-   * wide, the scale was near 1 and nobody noticed. On Home's widest tile it is
-   * three times that: the date labels came out three times too wide, and the dot
-   * marking the latest service was an ellipse.
-   *
-   * Measuring instead of stretching means one user unit is one pixel, so a
-   * circle is a circle at any width, and the same component keeps drawing the
-   * same chart on both pages — which is why it is one component.
+   * The width decides where the points sit; the height decides how much rise
+   * the line is given. Both come from the element rather than from a constant,
+   * so the same component draws the same chart on History's 640 and on Home's
+   * whole-tile width.
    */
   // Unique per instance: Home and History can both be mounted, and two <defs>
   // sharing an id means the second chart paints with the first one's gradient.
@@ -106,15 +101,24 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
       <div className="relative h-full">
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${plotW} ${H}`}
+        /**
+         * NO viewBox, and that is the point.
+         *
+         * A viewBox is a scale factor between the drawing and the box, and this
+         * chart has been distorted by that factor twice now: once because the
+         * factor was fixed at 640 and stretched to fit, and again because the
+         * measured factor and the real width can disagree — during a resize, at
+         * a browser zoom, or on any frame where the observer has not caught up.
+         * Whenever they disagree, preserveAspectRatio="none" stretches the text
+         * and turns the endpoint dot into an oval. Reported both times.
+         *
+         * Without one, the SVG's user units ARE CSS pixels, always. A stale
+         * measurement then costs a line that stops a few pixels short for one
+         * frame, and nothing can ever be drawn out of shape.
+         */
         width="100%"
         height={H}
         style={{ display: "block" }}
-        // The viewBox matches the measured width, so this scales nothing. It
-        // stays "none" only to keep a frame mid-resize — where the measurement
-        // is one tick stale — stretched rather than letterboxed, which is the
-        // less visible of the two.
-        preserveAspectRatio="none"
         onPointerMove={(e) => {
           const svg = svgRef.current;
           if (!svg) return;
@@ -152,8 +156,8 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
         <text x={padX} y={H - 8} fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[0].day)}</text>
         <text x={plotW - padX} y={H - 8} textAnchor="end" fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[points.length - 1].day)}</text>
       </svg>
-      {/* Hover tooltip — HTML overlay positioned by % so its text isn't stretched
-          by the chart's non-uniform (preserveAspectRatio="none") X scale. */}
+      {/* Hover tooltip — an HTML overlay rather than SVG text, so it takes the
+          app's own type and wraps like everything else. */}
       {hp && (
         <div
           className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border border-line-strong bg-popover px-2 py-1 shadow-md backdrop-blur-xl"
