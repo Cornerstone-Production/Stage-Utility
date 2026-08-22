@@ -35,6 +35,7 @@ import "./scriptview-roles-store.js";
 import "./service-timeline-store.js";
 import "./kiosk-devices-store.js";
 import "./settings-store.js";
+import "./signage-media-store.js";
 import "./signal-store.js";
 import "./update-notices-store.js";
 import "./slots-store.js";

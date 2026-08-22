@@ -115,6 +115,9 @@ const EXPECTED_CONFIG = [
   "scriptview-layouts.json",
   "scriptview-roles.json",
   "settings.json",
+  // The signage media LIBRARY, not its bytes: the manifest is config, and the
+  // files ride separately under a per-file size cap (see IMAGE_DIRS).
+  "signage-media.json",
   "slots.json",
   "views.json",
   "wireless-connections.json",

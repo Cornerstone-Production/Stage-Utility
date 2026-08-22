@@ -1,0 +1,269 @@
+// signage-media-store.ts — the signage media library: a manifest of records
+// beside content-addressed files on disk.
+//
+// Same shape as layout-image-store: the bytes stay out of the JSON, because a
+// playlist rides inside the resolved horizon that is broadcast to every display,
+// and a base64 video there would be absurd. The manifest holds
+// "<sha256-16>.<ext>"; the file is served like any other static asset, with
+// immutable caching — safe precisely because the name IS the hash, so the bytes
+// at a name can never change.
+//
+// Where it differs from layout images: files here can be 200 MB, so nothing in
+// this module ever reads a whole upload into memory. Writing is
+// signage-upload.ts's job and it streams.
+
+import * as crypto from "node:crypto";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+
+import {
+  MAX_ITEM_MS,
+  MAX_MEDIA_DIMENSION,
+  MIN_ITEM_MS,
+  SIGNAGE_EXTS,
+  type SignageMedia,
+  isSignageVideo,
+} from "../types/signage.js";
+import { getUserDataPath } from "./app-paths.js";
+import { DataStore } from "./data-store.js";
+
+/** Directory under the data dir. Exported because config-snapshot allowlists it
+ *  and signage-upload writes into it. */
+export const SIGNAGE_MEDIA_DIR = "signage-media";
+
+export const signageMediaStore = new DataStore<SignageMedia[]>(
+  "signage-media.json",
+  [],
+  "config",
+);
+
+function dir(): string {
+  return path.join(getUserDataPath(), SIGNAGE_MEDIA_DIR);
+}
+
+/**
+ * Only names this app wrote.
+ *
+ * Built from the mime allowlist rather than a second hand-written list: the two
+ * drifting is how an upload succeeds and the file it just wrote can never be
+ * served back. Lower-case hex only, so a name is either exactly what the hasher
+ * produces or it is refused.
+ */
+const MEDIA_NAME = new RegExp(`^[0-9a-f]{16}\\.(${SIGNAGE_EXTS.join("|")})$`);
+
+export function isMediaFileName(file: string): boolean {
+  return MEDIA_NAME.test(file);
+}
+
+export function mediaFilePath(file: string): string {
+  if (!isMediaFileName(file)) throw new Error(`not a signage media name: ${file}`);
+  return path.join(dir(), file);
+}
+
+/**
+ * Range-check what the browser measured and hand back the stored form.
+ *
+ * THROWS rather than defaulting. These arrive as request headers from a page, so
+ * they are untrusted, but the reason for rejecting is not security — it is that
+ * a wrong value is silently wrong on a wall. A zero or absent duration makes a
+ * playlist's cycle length unusable, and Infinity (which a live stream or a
+ * malformed container reports, and which survives Math.round) would become an
+ * item that never ends.
+ */
+export function clampMeasured(o: {
+  w: unknown;
+  h: unknown;
+  durationMs?: unknown;
+  mime: string;
+}): { w: number; h: number; durationMs?: number } {
+  const finite = (v: unknown): number =>
+    typeof v === "number" && Number.isFinite(v) ? Math.round(v) : NaN;
+
+  const w = finite(o.w);
+  const h = finite(o.h);
+  if (!(w >= 1 && w <= MAX_MEDIA_DIMENSION) || !(h >= 1 && h <= MAX_MEDIA_DIMENSION)) {
+    throw new Error(`dimension out of range: ${String(o.w)} x ${String(o.h)}`);
+  }
+  if (!isSignageVideo(o.mime)) return { w, h };
+
+  const d = finite(o.durationMs);
+  if (!(d >= MIN_ITEM_MS && d <= MAX_ITEM_MS)) {
+    throw new Error(`duration out of range for a video: ${String(o.durationMs)}`);
+  }
+  return { w, h, durationMs: d };
+}
+
+export async function listMedia(): Promise<SignageMedia[]> {
+  return signageMediaStore.load();
+}
+
+/**
+ * Record an already-written file in the manifest.
+ *
+ * Deduplicates on `file`. The name is the hash of the content, so the same file
+ * twice is the same content and a second record would be a lie — it would let
+ * deleting either copy look like it freed the bytes, and would show a library
+ * full of phantom duplicates. The FIRST name the operator gave it wins, because
+ * the second upload is the accident.
+ */
+export async function addMedia(o: {
+  file: string;
+  name: string;
+  mime: string;
+  bytes: number;
+  w: number;
+  h: number;
+  durationMs?: number;
+}): Promise<{ media: SignageMedia; deduped: boolean }> {
+  if (!isMediaFileName(o.file)) throw new Error(`not a signage media name: ${o.file}`);
+
+  let result: { media: SignageMedia; deduped: boolean } | null = null;
+  await signageMediaStore.update((all) => {
+    const existing = all.find((m) => m.file === o.file);
+    if (existing) {
+      result = { media: existing, deduped: true };
+      return all;
+    }
+    const media: SignageMedia = {
+      // Not crypto.randomUUID: prod is served over plain HTTP and this module is
+      // shared with code paths that also run in the renderer's origin.
+      id: `sm-${crypto.randomBytes(8).toString("hex")}`,
+      file: o.file,
+      name: o.name,
+      mime: o.mime,
+      bytes: o.bytes,
+      w: o.w,
+      h: o.h,
+      ...(o.durationMs === undefined ? {} : { durationMs: o.durationMs }),
+      createdAt: new Date().toISOString(),
+    };
+    result = { media, deduped: false };
+    return [...all, media];
+  });
+
+  if (!result) throw new Error("media store update did not produce a record");
+  return result;
+}
+
+export async function renameMedia(id: string, name: string): Promise<SignageMedia | null> {
+  let found: SignageMedia | null = null;
+  await signageMediaStore.update((all) =>
+    all.map((m) => {
+      if (m.id !== id) return m;
+      found = { ...m, name };
+      return found;
+    }),
+  );
+  return found;
+}
+
+/**
+ * Remove a record.
+ *
+ * The FILE is deliberately left behind for pruneSignageMedia to reap later. Two
+ * records can never share a file (addMedia dedupes), but a delete immediately
+ * followed by a re-upload of the same image is common, and unlinking here would
+ * throw away bytes that are about to be wanted again.
+ */
+export async function deleteMedia(id: string): Promise<SignageMedia | null> {
+  let removed: SignageMedia | null = null;
+  await signageMediaStore.update((all) =>
+    all.filter((m) => {
+      if (m.id !== id) return true;
+      removed = m;
+      return false;
+    }),
+  );
+  return removed;
+}
+
+/**
+ * Read a stored file for serving.
+ *
+ * The NAME is the whole check and it runs before any lookup, so traversal is
+ * refused without consulting the manifest at all. Returns null rather than
+ * throwing: every caller is answering an HTTP request and wants a 404.
+ */
+export async function readMediaFile(
+  file: string,
+): Promise<{ data: Buffer; mime: string } | null> {
+  if (!isMediaFileName(file)) return null;
+  const all = await listMedia().catch(() => [] as SignageMedia[]);
+  const rec = all.find((m) => m.file === file);
+  try {
+    const data = await fs.readFile(path.join(dir(), file));
+    // Trust the manifest's mime over the extension where we have a record: it is
+    // what the uploader declared and what the allowlist was checked against.
+    return { data, mime: rec?.mime ?? mimeForExt(file) };
+  } catch {
+    return null;
+  }
+}
+
+function mimeForExt(file: string): string {
+  const ext = file.slice(file.lastIndexOf(".") + 1);
+  switch (ext) {
+    case "png": return "image/png";
+    case "jpg": return "image/jpeg";
+    case "webp": return "image/webp";
+    case "gif": return "image/gif";
+    case "mp4": return "video/mp4";
+    case "webm": return "video/webm";
+    // Unreachable while MEDIA_NAME is derived from the allowlist. If that ever
+    // stops being true, refuse rather than guess a type for bytes we serve.
+    default: throw new Error(`no mime for signage media extension: ${ext}`);
+  }
+}
+
+/**
+ * Don't reap a file newer than this.
+ *
+ * An upload can exist on disk and be referenced only by an unsaved playlist
+ * draft in somebody's browser, so a recent file may legitimately appear in no
+ * store yet.
+ */
+const PRUNE_GRACE_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Delete files no store references any more.
+ *
+ * Returns 0 WITHOUT deleting anything if a store read fails: a manifest we could
+ * not read is not evidence that nothing is referenced, and the cost of guessing
+ * wrong is an operator's media library.
+ *
+ * Playlists become a reference source in the task that introduces them; until
+ * then the manifest itself is the only one, which is the conservative direction.
+ */
+export async function pruneSignageMedia(): Promise<number> {
+  let referenced: Set<string>;
+  try {
+    referenced = new Set((await signageMediaStore.load()).map((m) => m.file));
+  } catch (err) {
+    console.error("[signage-media] could not read the manifest; pruning nothing:", err);
+    return 0;
+  }
+
+  let files: string[];
+  try {
+    files = await fs.readdir(dir());
+  } catch {
+    return 0; // no directory yet
+  }
+
+  const now = Date.now();
+  let removed = 0;
+  for (const f of files) {
+    if (referenced.has(f)) continue;
+    if (!isMediaFileName(f)) continue; // never touch anything we did not write
+    try {
+      const st = await fs.stat(path.join(dir(), f));
+      if (now - st.mtimeMs < PRUNE_GRACE_MS) continue;
+      await fs.rm(path.join(dir(), f), { force: true });
+      removed++;
+    } catch (err) {
+      console.error(`[signage-media] could not prune ${f}:`, err);
+    }
+  }
+  if (removed) console.log(`[signage-media] pruned ${removed} unreferenced file(s)`);
+  return removed;
+}
