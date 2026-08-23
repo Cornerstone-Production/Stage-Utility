@@ -79,19 +79,33 @@ export function ScheduleSection({
     [onChange],
   );
 
-  const create = useCallback(async () => {
-    const schedule: SignageSchedule = {
-      id: newSignageId("sc"),
-      name: "New schedule",
-      enabled: true,
-      groupIds: [],
-      playlistId: playlists[0]?.id ?? "",
-      window: { kind: "weekly", days: [0], start: "05:00", end: "13:00" },
-      createdAt: new Date().toISOString(),
-    };
-    await save(schedule);
-    setOpenId(schedule.id);
-  }, [playlists, save]);
+  /**
+   * A new schedule, saved and opened for editing.
+   *
+   * Opened rather than silently added: it has no tags yet, and the resolver
+   * skips a schedule whose tag list is empty — so until one is picked it does
+   * nothing at all, and an operator who was not shown the editor would have made
+   * a rule that never runs.
+   *
+   * Shared by the New schedule button and by a drag on the calendar, which
+   * differ only in the window.
+   */
+  const create = useCallback(
+    async (window: SignageSchedule["window"]) => {
+      const schedule: SignageSchedule = {
+        id: newSignageId("sc"),
+        name: "New schedule",
+        enabled: true,
+        groupIds: [],
+        playlistId: playlists[0]?.id ?? "",
+        window,
+        createdAt: new Date().toISOString(),
+      };
+      await save(schedule);
+      setOpenId(schedule.id);
+    },
+    [playlists, save],
+  );
 
   const remove = useCallback(
     async (s: SignageSchedule) => {
@@ -114,31 +128,6 @@ export function ScheduleSection({
         draft ? { what: draft.name, save: () => save(draft), discard: () => setDraft(null) } : null,
       [draft, save],
     ),
-  );
-
-  /**
-   * A slot dragged onto the calendar.
-   *
-   * Created and OPENED, rather than silently added: a new schedule has no
-   * playlist and no tags yet, so it would do nothing at all and the operator
-   * would have drawn a rectangle that never plays.
-   */
-  const createOn = useCallback(
-    async (weekday: number, start: string, end: string) => {
-      const schedule: SignageSchedule = {
-        id: newSignageId("sc"),
-        name: "New schedule",
-        enabled: true,
-        groupIds: [],
-        playlistId: playlists[0]?.id ?? "",
-        window: { kind: "weekly", days: [weekday], start, end },
-        createdAt: new Date().toISOString(),
-      };
-      await save(schedule);
-      setView("list");
-      setOpenId(schedule.id);
-    },
-    [playlists, save],
   );
 
   /** Move a schedule up or down, which changes which one wins. */
@@ -182,7 +171,13 @@ export function ScheduleSection({
             Order
           </Button>
         </ButtonGroup>
-        <Button variant="accent" onClick={() => void create()}>
+        <Button
+          variant="accent"
+          onClick={() => {
+            setView("list");
+            void create({ kind: "weekly", days: [0], start: "05:00", end: "13:00" });
+          }}
+        >
           <PlusIcon className="size-4" />
           New schedule
         </Button>
@@ -198,7 +193,12 @@ export function ScheduleSection({
             setView("list");
             setOpenId(sched.id);
           }}
-          onCreate={(weekday, start, end) => void createOn(weekday, start, end)}
+          onCreate={(weekday, start, end) => {
+            // To the list, because that is where the editor is: a dragged slot
+            // still needs a playlist and its tags before it does anything.
+            setView("list");
+            void create({ kind: "weekly", days: [weekday], start, end });
+          }}
         />
       ) : schedules.length === 0 ? (
         <EmptyState

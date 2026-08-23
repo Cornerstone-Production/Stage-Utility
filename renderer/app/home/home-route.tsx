@@ -32,14 +32,15 @@ import { HOME_VIEW_ID, defaultHomeLayout } from "@main/services/home-view";
 import type { LayoutObject } from "@main/types/views";
 import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
-import { addCard, removeCard, replaceCard, setSize, setWhen, visibleCards } from "./home-cards";
-import { SIZES, SIZE_ORDER, WHEN_LABELS, sizeOf, whenOf } from "./home-cards";
+import {
+  COLUMNS, SIZES, SIZE_ORDER, WHEN_LABELS,
+  addCard, removeCard, replaceCard, setSize, setWhen, sizeOf, visibleCards, whenOf,
+} from "./home-cards";
 import { togglesFor, withToggle } from "./card-toggles";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
 import type { HomeCardSize, HomeVisibility } from "@main/types/views";
 import { ROW_PX, GRID_GAP_PX } from "./home-grid";
-import { COLUMNS } from "./home-cards";
 import {
   boxesOf, clampCol, isPlaced, placeAt, placeNewCard, pushAway, resetPlacement, type Box,
 } from "./home-placement";
@@ -433,8 +434,8 @@ export function HomeRoute() {
         />
       )}
 
-      {menuCard && (
-        <ContextMenu x={menu!.x} y={menu!.y} items={cardMenu(menuCard)} onClose={() => setMenu(null)} />
+      {menu && menuCard && (
+        <ContextMenu x={menu.x} y={menu.y} items={cardMenu(menuCard)} onClose={() => setMenu(null)} />
       )}
 
       <AddWidgetSheet
