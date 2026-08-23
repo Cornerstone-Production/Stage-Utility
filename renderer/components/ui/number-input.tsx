@@ -89,8 +89,14 @@ export function NumberInput({
   return (
     <div
       className={cn(
-        // `min-w-fit` so the box grows to whatever the field below needs rather
-        // than clipping it — a caller's `w-16` becomes a floor, not a ceiling.
+        // `min-w-fit` so the box cannot shrink below what it needs to draw: the
+        // field's own minWidth plus two steppers. Without it flex shrinks the
+        // box, the input cannot give way, and `overflow-hidden` clips the number
+        // — "1000" rendering as "1" on the transition field.
+        //
+        // It IS a floor of roughly 96px on every use. Measured across the pages
+        // that use one and none overflows; a caller needing narrower than that
+        // wants a plain field rather than steppers.
         "inline-flex h-7 w-full min-w-fit items-stretch overflow-hidden rounded-md border border-line bg-field",
         "transition-colors focus-within:border-focus focus-within:ring-1 focus-within:ring-focus",
         disabled && "cursor-not-allowed opacity-50",

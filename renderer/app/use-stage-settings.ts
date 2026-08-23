@@ -727,9 +727,12 @@ export function useStageSettings() {
         }
       }
     } catch (err) {
-      // Surfaced, never swallowed: a half-made screen with no view is worse
-      // than a failure the operator can retry.
+      // Surfaced AND rethrown. The toast tells the operator; the throw tells the
+      // caller, which is the Add-screen dialog - it used to close on a failure,
+      // taking the name they had typed with it, because a handler that only
+      // toasts looks exactly like success to an `await`.
       toast.error(`Failed to add screen: ${errorMessage(err)}`);
+      throw err;
     }
   }
 

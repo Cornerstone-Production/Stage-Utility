@@ -44,6 +44,7 @@ import { SignagePlayer } from "../../main/signage-player";
 import { invoke } from "../../lib/api";
 import { SelectField } from "./select-field";
 import { PrepareOffline } from "./prepare-offline";
+import { formatClock } from "../../lib/clock-format";
 import { TagPicker } from "./tag-picker";
 import { boardEntry } from "./board-entry";
 import { SIGNAGE_NOW_KEY, SIGNAGE_OVERRIDES_KEY } from "./use-signage-config";
@@ -357,7 +358,7 @@ export function NowBoard({
               <p className="text-caption1 text-fg-muted">
                 {entry?.playlist ? entry.reasonLabel : "Nothing scheduled"}
                 {entry && entry.until < Number.MAX_SAFE_INTEGER ? (
-                  <span className="text-fg-subtle"> · until {clock(entry.until)}</span>
+                  <span className="text-fg-subtle"> · until {formatClock(entry.until)}</span>
                 ) : null}
               </p>
 
@@ -400,6 +401,4 @@ function reasonWord(reason: string): string {
   }
 }
 
-function clock(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-}
+

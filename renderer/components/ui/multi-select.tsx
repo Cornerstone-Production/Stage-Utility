@@ -74,7 +74,11 @@ export function MultiSelect({
   }
 
   return (
-    <PopoverPrimitive.Root>
+    // Search is CLEARED when the popover closes. It lives out here (Radix
+    // unmounts only the content), so reopening the picker used to reapply the
+    // previous filter — and All/None then silently acted on that narrowed set
+    // rather than on everything.
+    <PopoverPrimitive.Root onOpenChange={(open) => { if (!open) setSearch(""); }}>
       <PopoverPrimitive.Trigger
         disabled={disabled}
         className={cn(

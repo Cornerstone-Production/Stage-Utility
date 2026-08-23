@@ -15,6 +15,7 @@ import type {
 
 import { errorMessage } from "@main/services/errors";
 import { invoke } from "../../lib/api";
+import { SIGNAGE_TAGS_KEY } from "./use-signage-tags";
 import { uploadHeadersFor } from "./upload-headers";
 
 export interface SignageConfig {
@@ -70,6 +71,11 @@ export function useSignageConfig(): {
       client.invalidateQueries({ queryKey: SIGNAGE_CONFIG_KEY }),
       client.invalidateQueries({ queryKey: SIGNAGE_NOW_KEY }),
       client.invalidateQueries({ queryKey: SIGNAGE_OVERRIDES_KEY }),
+      // And the tag list the Screens page reads. Tags live in two caches
+      // because the two pages want different amounts of signage config; that is
+      // fine, but a write to one has to refresh the other or renaming a tag
+      // here leaves Screens showing the old name.
+      client.invalidateQueries({ queryKey: SIGNAGE_TAGS_KEY }),
     ]);
   }, [client]);
 

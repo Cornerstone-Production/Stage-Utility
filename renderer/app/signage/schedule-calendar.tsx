@@ -20,6 +20,7 @@ import type { PcoWindow, SignagePlaylist, SignageSchedule } from "@main/types/si
 import { intervalsOnDay, localDayStart } from "@main/services/signage-window";
 import { zonedParts, type TimeZone } from "@main/services/app-timezone";
 import { Button } from "../../components/ui/button";
+import { displayHourCycle } from "../../lib/clock-format";
 import { useNow } from "./use-now";
 import { layOutDay, dragToTimes, type WeekBlock } from "./week-layout";
 import { weekOf } from "./week-layout";
@@ -210,7 +211,9 @@ export function ScheduleCalendar({
                 // midnight label is not half-clipped by the top of the column.
                 style={{ top: `calc(${(h / 24) * 100}% + 1px)` }}
               >
-                {`${h % 12 === 0 ? 12 : h % 12}${h < 12 ? "a" : "p"}`}
+                {/* The same rule as a block's own label - a THIRD hand-rolled
+                    12-hour formatter used to live here. */}
+                {clockish(h, 0).replace(":00", "").replace("am", "a").replace("pm", "p")}
               </span>
             ))}
           </div>
@@ -385,13 +388,31 @@ function ScheduleBlock({
   );
 }
 
-/** "5am" / "1:30pm" — the way a calendar writes a time, with the minutes only
- *  when there are any. */
+/**
+ * "5am" / "1:30pm" / "17:00" — the way a calendar writes a time, with the
+ * minutes only when there are any.
+ *
+ * Compact, so it fits inside a block, which is why this is not `formatClock`.
+ * The 12/24 CHOICE still comes from the app's one setting rather than being
+ * assumed here — the Now board on the same page used to hardcode a cycle, so a
+ * card said "3:00 PM" and the calendar beside it said "5pm" about the same
+ * boundary.
+ */
 function shortTime(ms: number, tz: TimeZone): string {
   const p = zonedParts(ms, tz);
-  const h = p.hour % 12 === 0 ? 12 : p.hour % 12;
-  const suffix = p.hour < 12 ? "am" : "pm";
-  return p.minute === 0 ? `${h}${suffix}` : `${h}:${String(p.minute).padStart(2, "0")}${suffix}`;
+  return clockish(p.hour, p.minute);
+}
+
+/** The compact form for an hour and minute, in the app's hour cycle. */
+function clockish(hour: number, minute: number): string {
+  if (displayHourCycle() === "24h") {
+    return minute === 0
+      ? `${String(hour).padStart(2, "0")}:00`
+      : `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  }
+  const h = hour % 12 === 0 ? 12 : hour % 12;
+  const suffix = hour < 12 ? "am" : "pm";
+  return minute === 0 ? `${h}${suffix}` : `${h}:${String(minute).padStart(2, "0")}${suffix}`;
 }
 
 function rangeLabel(days: number[], tz: TimeZone): string {

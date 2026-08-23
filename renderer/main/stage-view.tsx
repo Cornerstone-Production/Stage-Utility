@@ -541,7 +541,10 @@ export function StageView() {
   // in a preview iframe, which is a thumbnail in a settings page, not a wall.
   const rotation = isPreview ? 0 : (resolved?.rotation ?? 0);
   // Per-output kiosk lock (Displays-tab toggle) — never in the settings preview iframe.
-  const outputLocked = !previewViewId && (resolved?.locked ?? false);
+  // isPreview, not previewViewId: an OUTPUT preview (/preview-out-<id>) has no
+  // view id, so it was being treated as a real wall here - taking the lock and
+  // the blackout that belong to the screen it is a thumbnail OF.
+  const outputLocked = !isPreview && (resolved?.locked ?? false);
 
   // Blackout: a true black screen on command (Companion / Displays page), taking
   // priority over the routed View. Toggling it off restores the View instantly.

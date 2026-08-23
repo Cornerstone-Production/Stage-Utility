@@ -80,6 +80,11 @@ export function NewScreenDialog({
     try {
       await onCreate(kind, name.trim());
       close(false);
+    } catch {
+      // Stay OPEN, keeping what they typed. The handler has already toasted the
+      // reason; closing as well would make them type the name again to find out
+      // whether it works the second time. Not rethrown: there is no caller above
+      // this to tell, and the operator has been told.
     } finally {
       setBusy(false);
     }
@@ -134,7 +139,9 @@ export function NewScreenDialog({
         </label>
 
         <div className="mt-4 flex justify-end gap-2">
-          <Button onClick={() => close(false)}>Cancel</Button>
+          {/* Disabled while creating: cancelling mid-write would close the
+              dialog over a screen that is being made anyway. */}
+          <Button disabled={busy} onClick={() => close(false)}>Cancel</Button>
           <Button variant="accent" disabled={busy} onClick={() => void create()}>
             Add screen
           </Button>

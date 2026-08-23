@@ -1,5 +1,4 @@
 import { ScreenDevice } from "../../app/screens/screen-device";
-import { ScreenSignageGroups } from "../../app/screens/screen-signage-groups";
 import { NewScreenDialog } from "./new-screen-dialog";
 import { SignageScreenRow } from "./signage-screen-row";
 import { AppLink } from "../../app/app-link";
@@ -386,7 +385,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
             viewId={output.viewId}
             // Signage resolves per OUTPUT, so its card previews the screen
             // rather than the view every signage screen shares.
-            outputId={assignedView?.kind === "signage" ? output.id : undefined}
+            outputId={output.id}
             onExpand={onEditLayout}
             expandLabel={`Edit what ${output.name} shows`}
           />
@@ -482,7 +481,6 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
       {/* The machine showing this screen, when one is bound. Nothing when it is
           a browser tab somebody opened. */}
       <ScreenDevice outputId={output.id} name={output.name} />
-      <ScreenSignageGroups outputId={output.id} isSignage={assignedView?.kind === "signage"} />
     </div>
   );
 }
@@ -681,7 +679,13 @@ export function OutputsSection({
             glance. rectSortingStrategy is the grid-aware counterpart to the
             vertical strategy; the vertical one assumes a single column and
             computes the wrong drop target as soon as there are two. */}
-        <SortableContext items={outputs.map((o) => o.id)} strategy={rectSortingStrategy}>
+        {/* mainOutputs, not every output: signage screens render through
+            SignageScreenRow, which does not call useSortable, so their ids left
+            holes in dnd-kit's sorted rects and some main cards did not animate
+            to their preview position mid-drag. handleDragEnd still indexes the
+            FULL list, which is what keeps the stored order correct. */}
+        <SortableContext
+          items={mainOutputs.map((o) => o.id)} strategy={rectSortingStrategy}>
           <div className="grid gap-3 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
             {mainOutputs.map((output) => (
               <OutputRow
