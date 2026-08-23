@@ -115,6 +115,14 @@ const EXPECTED_CONFIG = [
   "scriptview-layouts.json",
   "scriptview-roles.json",
   "settings.json",
+  "signage-groups.json",
+  // The signage media LIBRARY, not its bytes: the manifest is config, and the
+  // files ride separately under a per-file size cap (see IMAGE_DIRS).
+  "signage-media.json",
+  "signage-playlists.json",
+  "signage-published.json",
+  // Order IS priority in this one, so restoring it restores the conflict rule.
+  "signage-schedules.json",
   "slots.json",
   "views.json",
   "wireless-connections.json",
@@ -125,6 +133,10 @@ const EXPECTED_RUNTIME = [
   "automation-log.json",
   "baptism.json",
   "service-timeline.json",
+  // A live take-over. Persisted so a restart cannot drop an announcement, but
+  // deliberately NOT backed up: restoring a fortnight-old snapshot must never
+  // put a forgotten announcement back on a wall.
+  "signage-overrides.json",
   "signals.json",
   "stream-starts.json",
   "spl-history.json",

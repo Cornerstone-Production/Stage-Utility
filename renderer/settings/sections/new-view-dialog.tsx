@@ -42,8 +42,9 @@ const KIND_LABELS: Record<ViewKind, string> = {
   custom: "Custom Layout",
   script: "Script",
   "spl-rundown": "SPL Rundown",
+  signage: "Signage",
 };
-const KIND_ORDER: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "script", "spl-rundown", "custom"];
+const KIND_ORDER: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "script", "spl-rundown", "signage", "custom"];
 
 type StartFrom = "blank" | "dashboard" | "confidence";
 type Surface = "display" | "console";

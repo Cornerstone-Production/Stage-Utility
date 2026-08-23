@@ -19,6 +19,7 @@ View kinds:
 | **Script** | the full rundown with note columns, headers, lengths, live countdown |
 | **SPL Rundown** | a compact item-plus-level list for the live service |
 | **Custom** | a layout you design in the visual editor |
+| **Signage** | graphics and video on a schedule — see [signage](../features/signage.md) |
 
 ## Surfaces: displays and consoles
 
@@ -78,6 +79,22 @@ Home is edited in the Home tab itself, with the pencil in the header. In edit
 mode each tile gains a size picker, a visibility select, a remove button and a
 drag handle, and **Add widget** offers the whole object registry.
 
+**Right-click a tile** for its size, when it shows, remove, and the few settings
+that widget supports — seconds and the hour cycle on a clock, hide-when-idle and
+fill-when-recording on a status widget. No edit mode needed. Ticking one leaves
+the menu open, so several can be changed at once. Home's own cards
+(`home-screens`, `home-recording` and the rest) carry no settings on purpose;
+their menu is size, visibility and remove.
+
+Everything else stays in the layout editor. Which widgets offer which setting is
+derived from the config type by the type checker, so a widget that gains a
+setting cannot be silently left out of the menu.
+
+Values on Home are sized as though every tile had a caption and a sub-line, even
+where one has neither. A grid of same-height tiles reads as a grid when the
+values share a size; on a wall, where a widget is placed alone at a size somebody
+chose, a caption-less widget still fills its box.
+
 The widgets come from the same registry every other surface uses, so a Home tile
 and a stage-display widget are the same component — anything you can put on a
 wall you can put on Home. Sizes are fixed shapes on a three-column grid:
@@ -108,6 +125,21 @@ Nothing has to be done by hand. On first start, any view containing a button
 becomes a console and the screens showing it become panels, so a control surface that
 worked before still works. What moved is written to the log, so a stray control
 left on a wall display years ago can be spotted and set back deliberately.
+
+## Signage
+
+A **signage** view has no content of its own. What each screen showing one plays
+is resolved per screen on the server, from four stores: a media library,
+playlists of that media, groups of screens, and an ordered list of schedules.
+
+A screen may be in any number of groups. When two schedules match it at once the
+one nearer the top of the schedule list wins — order is the whole priority rule.
+Falling through that, a group's default playlist plays; failing that, black.
+
+The server pushes each screen a **24-hour plan** rather than a current item, so a
+screen switches itself at each boundary and keeps working when the server is
+away. Details, including what happens offline, are in
+[signage](../features/signage.md).
 
 ## Object capabilities
 

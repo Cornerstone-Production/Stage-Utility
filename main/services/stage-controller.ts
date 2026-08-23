@@ -8,7 +8,7 @@ import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
-import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
+import { viewSurface, outputMode, screenRotation, type ViewSurface, type OutputMode, type ScreenRotation } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub } from "./scrub.js";
@@ -22,7 +22,10 @@ import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
 import { migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
+import { forgetOutputInSignageGroups } from "./signage-groups-store.js";
 import { slotsStore } from "./slots-store.js";
+import { signagePcoWindows } from "./signage-pco-windows.js";
+import { signageScheduler } from "./signage-scheduler.js";
 import { viewsStore } from "./views-store.js";
 import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
 import { scriptViewConfigStore } from "./scriptview-config-store.js";
@@ -317,6 +320,28 @@ export class StageController {
 
     await this.loadAllViewRawSlots(settings.serviceTypeId);
     this.recomputeResolved();
+
+    // Signage resolves per output, so it needs the outputs and the live service
+    // type. Injected as a getter rather than imported the other way: the
+    // scheduler is a leaf, and importing the controller there would be a cycle.
+    // PCO-derived windows are precomputed rather than evaluated per boundary, so
+    // the resolver stays pure and a 24h horizon needs no network call.
+    signagePcoWindows.configure({
+      creds: () =>
+        this.pcoAppId && this.pcoSecret ? { appId: this.pcoAppId, secret: this.pcoSecret } : null,
+      onChange: () => void signageScheduler.recompute(),
+    });
+    signagePcoWindows.start();
+
+    signageScheduler.setContext(() => ({
+      outputs: this.state.outputs,
+      // "item" mode, not "preservice": the extension exists so a service running
+      // LONG does not blank the foyer mid-service. Preservice is before the
+      // service, which the window's own lead time already covers.
+      liveServiceTypeId: this.lastLive?.mode === "item" ? this.state.serviceTypeId : null,
+      pcoWindows: signagePcoWindows.get(),
+    }));
+    signageScheduler.start();
 
     console.log("[stage-controller] loaded settings", {
       serviceTypeId: this.state.serviceTypeId,
@@ -1709,6 +1734,13 @@ export class StageController {
     if (!this.state.views.find((v) => v.id === id)) {
       throw new Error(`views:rename — view ${id} not found`);
     }
+    // Two views called the same thing are indistinguishable in every picker
+    // that offers them, and the picker is how a screen gets pointed at one —
+    // so "point it at Signage" becomes a coin toss.
+    const clash = this.state.views.find(
+      (v) => v.id !== id && v.name.trim().toLowerCase() === trimmed.toLowerCase(),
+    );
+    if (clash) throw new Error(`Another view is already called "${clash.name}".`);
     const views = this.state.views.map((v) => (v.id === id ? { ...v, name: trimmed } : v));
     console.log(`[stage-controller] renameView id=${scrub(id)} name="${scrub(trimmed)}"`);
     this.state = { ...this.state, views };
@@ -2047,6 +2079,13 @@ export class StageController {
     if (!this.state.outputs.find((o) => o.id === id)) {
       throw new Error(`outputs:rename — output ${id} not found`);
     }
+    // Refused for the same reason as a view: two screens called "Foyer" are one
+    // screen as far as anybody reading a list is concerned, including the tag
+    // pickers and the Now board.
+    const clash = this.state.outputs.find(
+      (o) => o.id !== id && o.name.trim().toLowerCase() === trimmed.toLowerCase(),
+    );
+    if (clash) throw new Error(`Another screen is already called "${clash.name}".`);
     const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, name: trimmed } : o));
     console.log(`[stage-controller] renameOutput id=${scrub(id)} name="${scrub(trimmed)}"`);
     this.state = { ...this.state, outputs };
@@ -2128,6 +2167,22 @@ export class StageController {
     console.log(`[stage-controller] setOutputView output=${scrub(id)} → view=${scrub(viewId ?? "(none)")}`);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /** How the panel is mounted, in quarter turns clockwise. */
+  async setOutputRotation(id: string, rotation: ScreenRotation): Promise<StageState> {
+    const output = this.state.outputs.find((o) => o.id === id);
+    if (!output) throw new Error(`outputs:setRotation — output ${id} not found`);
+
+    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, rotation } : o));
+    console.log(`[stage-controller] setOutputRotation output=${scrub(id)} → ${rotation}`);
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    // The kiosk reads rotation off resolvedByOutput, so it has to be rebuilt or
+    // the screen keeps the old turn until something else changes.
     this.recomputeResolved();
     this.broadcast();
     return this.state;
@@ -2253,6 +2308,20 @@ export class StageController {
     const outputs = this.state.outputs.filter((o) => o.id !== id);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
+    // Signage tags kept naming the screen forever. It read as a member that was
+    // simply never online — and because a tag's screen count included it, "the
+    // foyer (7)" meant six. Cleaned here rather than tolerated at every reader,
+    // because it is dead the moment the screen is.
+    const forgotten = await forgetOutputInSignageGroups(id);
+    if (forgotten.error) {
+      // The screen is already out of settings.outputs, so the delete stands —
+      // but its tags still name it, which is the exact state that cleanup
+      // exists to prevent. Said out loud rather than left as a return value
+      // nobody read: a tag's screen count will be wrong until it is fixed.
+      console.error(
+        `[signage] ${id} was deleted but could not be removed from its tags: ${forgotten.error}`,
+      );
+    }
     this.recomputeResolved();
     this.broadcast();
     return this.state;
@@ -2633,6 +2702,7 @@ export class StageController {
         viewName: view?.name ?? null,
         blackout: output.blackout ?? false,
         locked: output.locked ?? false,
+        rotation: screenRotation(output),
       };
     }
     this.state = {

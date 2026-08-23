@@ -14,6 +14,7 @@ export const OPERATOR_PATHS = [
   "/automation",
   "/plan",
   "/screens",
+  "/signage",
   // A console, in the shell. Without this the server serves the KIOSK bundle for
   // a direct load of /consoles/…, which only shows up on a reload or a pasted
   // link — client-side navigation from the rail works either way, so it hides.

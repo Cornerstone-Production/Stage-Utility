@@ -150,6 +150,28 @@ image like any other Raspberry Pi OS one — so they go in at flash time, on the
 machine doing the flashing. This repository is public; a released image must
 never carry a credential or a site's server address.
 
+## Using one for signage
+
+Choose **Signage** when you add the screen. It is routed to the Signage view for
+you. See [signage](features/signage.md).
+
+**Signage screens are not listed on the Screens page.** They live on the Signage
+tab, where each card shows what that screen is playing, its tags, and — from the
+card's own menu — rename, rotation, open in a window, reload and remove. Listing
+them in both places was the same screen twice, and twice the preview iframes.
+
+A signage device is the one kind that comes back after a power cut with no server
+on the network. It needs one run against a live server first, and **Prepare for
+offline** has to be opened on the device itself — see
+[coming back after a power cut](features/signage.md#coming-back-after-a-power-cut).
+
+## Rotation
+
+A screen's menu has **Rotation** — normal, 90°, upside down, 270°. It describes
+how the panel is MOUNTED, so it applies to whatever that screen is showing, and
+a portrait screen comes back portrait after a power cut without a server to ask.
+For a signage screen the menu is on its card on the Signage tab.
+
 ## Removing one
 
 *Release*, on the screen's card, unbinds it: the screen keeps its view and its

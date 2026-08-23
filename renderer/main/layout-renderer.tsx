@@ -464,6 +464,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // The object's own alignment, so a custom view can centre one widget
       // without every other readout following it.
       align={o.style?.textAlign}
+      // Home is a grid of same-height tiles, so its values share a size rather
+      // than each one filling whatever its own lines leave.
+      uniform={ctx.home}
       {...opts}
     />
   );

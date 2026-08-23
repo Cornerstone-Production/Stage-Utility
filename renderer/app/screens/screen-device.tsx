@@ -16,7 +16,16 @@ import { Tooltip, toast } from "../../components/ui";
 import { errorMessage } from "@main/services/errors";
 import { useDevices, refreshDevices, describeScreen } from "./use-devices";
 
-export function ScreenDevice({ outputId, name }: { outputId: string; name: string }) {
+export function ScreenDevice({
+  outputId,
+  name,
+  compact = false,
+}: {
+  outputId: string;
+  name: string;
+  /** One inline line instead of a bordered strip, for a compact row. */
+  compact?: boolean;
+}) {
   const { bound } = useDevices();
   const [busy, setBusy] = useState(false);
   const device = bound.find((d) => d.outputId === outputId);
@@ -41,6 +50,17 @@ export function ScreenDevice({ outputId, name }: { outputId: string; name: strin
     } finally {
       setBusy(false);
     }
+  }
+
+  if (compact) {
+    // Just which machine it is. Releasing and the device id belong on the full
+    // card, where there is room to say what they mean.
+    return (
+      <span className="hidden min-w-0 shrink truncate text-caption2 text-fg-subtle sm:block">
+        {device.label || device.hostname || "on a device"}
+        {size ? ` · ${size}` : ""}
+      </span>
+    );
   }
 
   return (

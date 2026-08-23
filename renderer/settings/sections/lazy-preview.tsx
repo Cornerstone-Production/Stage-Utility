@@ -56,11 +56,21 @@ function release(token: symbol): void {
 
 export function LazyPreview({
   viewId,
+  outputId,
   aspect,
   onExpand,
   expandLabel,
 }: {
   viewId: string;
+  /**
+   * Preview this OUTPUT rather than the view, when the two differ.
+   *
+   * Signage is why: one Signage view drives every signage screen and the content
+   * is resolved per output, so previewing the view showed a black rectangle on
+   * every signage card. Everything else looks the same whichever output is
+   * showing it, and previews the view.
+   */
+  outputId?: string;
   aspect?: number;
   /** When set, a STREAMING preview becomes a button that opens the editor.
    *  Only the streaming branch: the paused placeholder is already a button whose
@@ -138,7 +148,7 @@ export function LazyPreview({
             aria-label={expandLabel}
             className="group relative block w-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
-            <ViewPreview viewId={viewId} aspect={aspect} />
+            <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} />
             <span
               className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
               aria-hidden="true"
@@ -152,7 +162,7 @@ export function LazyPreview({
             </span>
           </button>
         ) : (
-          <ViewPreview viewId={viewId} aspect={aspect} />
+          <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} />
         )
       ) : (
         <button

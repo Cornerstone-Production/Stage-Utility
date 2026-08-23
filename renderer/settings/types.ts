@@ -100,7 +100,10 @@ export interface SectionHandlers {
   handleRenamePreset: (id: string, name: string) => Promise<void>;
   handleOverwritePreset: (id: string) => Promise<void>;
   // Outputs (physical screens + routing)
-  handleAddOutput: () => Promise<void>;
+  /** Add a screen of a stated kind — kiosk, signage or console. */
+  handleCreateScreen: (kind: "kiosk" | "signage" | "console", name: string) => Promise<void>;
+  /** How the panel is mounted, in quarter turns clockwise. */
+  handleSetOutputRotation: (id: string, rotation: 0 | 90 | 180 | 270) => Promise<void>;
   handleRenameOutput: (id: string, name: string) => Promise<void>;
   handleSetOutputView: (id: string, viewId: string | null) => Promise<void>;
   handleSetOutputLocked: (id: string, locked: boolean) => Promise<void>;

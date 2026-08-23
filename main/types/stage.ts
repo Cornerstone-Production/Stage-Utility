@@ -9,6 +9,7 @@
 // want; import from here when you want several, or from the renderer.
 
 export * from "./views.js";
+export * from "./signage.js";
 export * from "./live.js";
 export * from "./history.js";
 export * from "./baptism.js";

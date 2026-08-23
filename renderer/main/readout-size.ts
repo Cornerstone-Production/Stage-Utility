@@ -117,19 +117,35 @@ export function valueSizeFor(boxH: number, captionPx: number, subPx: number): nu
  *
  * @param boxH the height the composition actually has, in layout pixels — the
  *   content box, not the object's outer height.
+ * @param uniform size the VALUE as though the composition had all three lines,
+ *   whatever this tile actually carries. For a GRID of same-height tiles, which
+ *   is what Home is: there the caption and sub-line are the surface's, not the
+ *   operator's, and a tile that happens to have neither — the clock — took the
+ *   whole budget and rendered at 52px in a row of 35px values. On a wall, where
+ *   a widget is placed alone at a size somebody chose, filling the box is still
+ *   right, so this is off by default.
  */
 export function fitComposition(
   boxH: number,
   hasCaption: boolean,
   hasSub: boolean,
+  uniform = false,
 ): { captionPx: number; valuePx: number; subPx: number } {
   const avail = Math.max(0, boxH - 2 * boxH * PAD_SCALE);
   const gap = boxH * GAP_SCALE;
 
+  const fullCaptionPx = Math.max(CAPTION_MIN_PX, boxH * CAPTION_SCALE);
+  const fullSubPx = Math.max(SUB_MIN_PX, boxH * SUB_SCALE);
+
   const attempt = (caption: boolean, sub: boolean) => {
-    const captionPx = caption ? Math.max(CAPTION_MIN_PX, boxH * CAPTION_SCALE) : 0;
-    const subPx = sub ? Math.max(SUB_MIN_PX, boxH * SUB_SCALE) : 0;
-    const valuePx = valueSizeFor(boxH, captionPx, subPx);
+    const captionPx = caption ? fullCaptionPx : 0;
+    const subPx = sub ? fullSubPx : 0;
+    // `used` below still counts the lines actually rendered, so the drop-a-line
+    // loop is unaffected — and a uniform value is never LARGER than the value
+    // the same box would otherwise get, so it cannot start overflowing.
+    const valuePx = uniform
+      ? valueSizeFor(boxH, fullCaptionPx, fullSubPx)
+      : valueSizeFor(boxH, captionPx, subPx);
     const used =
       valuePx * VALUE_LEADING +
       (captionPx > 0 ? captionPx * CAPTION_LEADING + gap : 0) +

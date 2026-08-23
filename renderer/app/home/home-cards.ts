@@ -108,6 +108,12 @@ export function removeCard(objects: readonly LayoutObject[], id: string): Layout
   return objects.filter((o) => o.id !== id);
 }
 
+/** Replace one card, by id. For an edit that touches the object's own config
+ *  rather than its placement — see card-toggles. */
+export function replaceCard(objects: readonly LayoutObject[], next: LayoutObject): LayoutObject[] {
+  return objects.map((o) => (o.id === next.id ? next : o));
+}
+
 export function setSize(objects: readonly LayoutObject[], id: string, size: HomeCardSize): LayoutObject[] {
   return objects.map((o) => (o.id === id ? { ...o, home: { ...o.home, size } } : o));
 }

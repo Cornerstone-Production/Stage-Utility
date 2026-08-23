@@ -1,18 +1,16 @@
 import { ScreenDevice } from "../../app/screens/screen-device";
+import { NewScreenDialog } from "./new-screen-dialog";
 import { useState, useEffect, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
+import { MENU_CONTENT, MENU_ITEM, RotationMenu } from "../../components/ui/rotation-menu";
 import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
 /** Shared menu-item styling, so the six actions cannot drift apart. */
-const MENU_ITEM =
-  "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill";
-const MENU_CONTENT =
-  "z-50 min-w-48 rounded-md border border-line-strong bg-popover p-1 shadow-md backdrop-blur-xl";
 import {
   Button,
   Input,
@@ -28,7 +26,7 @@ import { IconTint } from "../../components/icon-tint";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
-import { viewSurface, outputMode } from "@main/types/views";
+import { viewSurface, outputMode, screenRotation } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
@@ -84,6 +82,7 @@ interface OutputRowProps {
   /** Awaited: switching a screen to a panel must LAND before a console view
    *  is assigned to it, because the server refuses the pair in the wrong order. */
   onSetMode: (mode: "display" | "panel") => Promise<void>;
+  onSetRotation: (rotation: 0 | 90 | 180 | 270) => Promise<void>;
   onOpenWindow: () => void;
   onRefresh: () => void;
   onRemove: () => void;
@@ -96,7 +95,7 @@ interface OutputRowProps {
 // One card per display: the name reads as a title, the View it shows is the one
 // prominent control, Open + Lock stay in reach, and the URL sits quietly in the
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
-function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetMode, onOpenWindow, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetMode, onSetRotation, onOpenWindow, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   const [renamingView, setRenamingView] = useState(false);
@@ -277,6 +276,11 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
                   : <HandIcon className="size-3.5 text-fg-subtle" />}
                 {outputMode(output) === "panel" ? "Use as a display" : "Use as a control surface"}
               </DropdownMenu.Item>
+              {/* How the panel is MOUNTED — a physical fact about the TV, not a
+                  property of what it is playing. Four quarter turns, because a
+                  panel is hung one of four ways and an arbitrary angle is a
+                  mis-typed number that leaves a wall crooked. */}
+              <RotationMenu rotation={screenRotation(output)} onSet={(deg) => void onSetRotation(deg)} />
               <DropdownMenu.Item
                 onSelect={() => onSetLocked(!(output.locked ?? false))}
                 className={MENU_ITEM}
@@ -346,6 +350,9 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           // The preview iframe sets pointer-events:none, so the click lands here.
           <LazyPreview
             viewId={output.viewId}
+            // Signage resolves per OUTPUT, so its card previews the screen
+            // rather than the view every signage screen shares.
+            outputId={output.id}
             onExpand={onEditLayout}
             expandLabel={`Edit what ${output.name} shows`}
           />
@@ -576,6 +583,17 @@ export function OutputsSection({
   // to it. "" means the dialog was opened from the unassigned section, where
   // there is nothing to assign to.
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
+  const [addingScreen, setAddingScreen] = useState(false);
+
+  // Signage screens sit in their own section. A building can have a dozen of
+  // them and they are all configured in one place (Signage), so mixed in they
+  // pushed the two or three screens anyone actually edits here off the fold.
+  // Same card, same controls — only the grouping differs.
+  const signageViewIds = new Set(
+    (stageState.views ?? []).filter((v) => v.kind === "signage").map((v) => v.id),
+  );
+  const isSignageOutput = (o: Output) => !!o.viewId && signageViewIds.has(o.viewId);
+  const mainOutputs = outputs.filter((o) => !isSignageOutput(o));
 
   // A view no screen points at. Without a home these are unreachable: the only
   // way in was the Views list this page replaced.
@@ -627,9 +645,15 @@ export function OutputsSection({
             glance. rectSortingStrategy is the grid-aware counterpart to the
             vertical strategy; the vertical one assumes a single column and
             computes the wrong drop target as soon as there are two. */}
-        <SortableContext items={outputs.map((o) => o.id)} strategy={rectSortingStrategy}>
+        {/* mainOutputs, not every output: signage screens are not listed here
+            at all, so their ids would leave holes in dnd-kit's sorted rects and
+            some main cards would not animate to their preview position mid-drag.
+            handleDragEnd still indexes the FULL list, which is what keeps the
+            stored order correct. */}
+        <SortableContext
+          items={mainOutputs.map((o) => o.id)} strategy={rectSortingStrategy}>
           <div className="grid gap-3 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
-            {outputs.map((output) => (
+            {mainOutputs.map((output) => (
               <OutputRow
                 key={output.id}
                 output={output}
@@ -644,6 +668,7 @@ export function OutputsSection({
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
                 onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
+                onSetRotation={(rotation) => handlers.handleSetOutputRotation(output.id, rotation)}
                 onOpenWindow={() => handlers.handleOpenOutputWindow(output.id)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}
@@ -663,7 +688,7 @@ export function OutputsSection({
                 was below the fold on the page where you would want it. */}
             <button
               type="button"
-              onClick={handlers.handleAddOutput}
+              onClick={() => setAddingScreen(true)}
               className="flex flex-col rounded-xl border border-dashed border-line bg-transparent p-3 text-left transition-colors hover:border-line-strong hover:bg-fill"
             >
               <span className="flex items-center gap-2 px-0.5 pb-2 pt-0.5">
@@ -674,10 +699,17 @@ export function OutputsSection({
                 Point a monitor at {baseUrl}
               </span>
               <span className="px-0.5 pt-2.5 text-caption1 text-fg-subtle">
-                then pick which display it is
+                kiosk, signage or console
               </span>
             </button>
           </div>
+
+          {/* Signage screens are NOT listed here.
+              They live on the Signage tab, where the card shows what each one is
+              playing, its tags, and — since this row was removed — rename,
+              rotation, open in a window, reload and remove. Listing them here as
+              well was the same screen twice, and twice the preview iframes: each
+              preview is a real kiosk page holding its own event stream. */}
         </SortableContext>
       </DndContext>
 
@@ -753,6 +785,15 @@ export function OutputsSection({
           </Button>
         )}
       </div>
+
+      {/* Asked at the moment a screen is made, because that is when the operator
+          knows the answer. It also replaces the "turn a screen into a signage
+          screen" button that lived on the signage Groups page. */}
+      <NewScreenDialog
+        open={addingScreen}
+        onOpenChange={setAddingScreen}
+        onCreate={handlers.handleCreateScreen}
+      />
     </div>
   );
 }

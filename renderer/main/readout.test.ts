@@ -166,3 +166,47 @@ describe("a widget that has been made small", () => {
     assert.ok(Math.abs(subPx - box * 0.115) < 0.01);
   });
 });
+
+describe("a uniform grid of tiles", () => {
+  // Home is a grid of same-height tiles. Every card there carries a caption and
+  // a sub-line except the clock, which has neither — so it took the whole budget
+  // and rendered at 52px in a row of 35px values. Henry's note, verbatim: "clock
+  // on the homepage widget needs to be smaller to match the other widget text
+  // sizing."
+  test("a caption-less tile gets the SAME value size as a three-line one", () => {
+    const three = fitComposition(BOX, true, true, true);
+    const bare = fitComposition(BOX, false, false, true);
+    assert.equal(bare.valuePx, three.valuePx);
+    assert.equal(bare.captionPx, 0, "it still renders no caption");
+    assert.equal(bare.subPx, 0);
+  });
+
+  test("and that is SMALLER than the same tile fills its box with", () => {
+    // The other half of the property: if uniform did nothing, the test above
+    // would pass on a version where nothing changed.
+    const filling = fitComposition(BOX, false, false, false);
+    const uniform = fitComposition(BOX, false, false, true);
+    assert.ok(uniform.valuePx < filling.valuePx, `${uniform.valuePx} !< ${filling.valuePx}`);
+  });
+
+  test("off by default, so a wall widget still fills the box it was placed at", () => {
+    assert.deepEqual(fitComposition(BOX, false, false), fitComposition(BOX, false, false, false));
+    assert.ok(fitComposition(BOX, false, false).valuePx > fitComposition(BOX, true, true).valuePx);
+  });
+
+  test("never overflows the box it is given", () => {
+    // A uniform value is only ever smaller, but the drop-a-line loop measures
+    // what is RENDERED — so assert the invariant directly rather than by
+    // reasoning about it.
+    for (const box of [8, 12, 20, 28, 40, 54, 120, 200, 480]) {
+      for (const [caption, sub] of [[true, true], [true, false], [false, false]] as const) {
+        const { captionPx, valuePx, subPx } = fitComposition(box, caption, sub, true);
+        const used =
+          valuePx * 1.05 +
+          (captionPx > 0 ? captionPx * 1.1 + box * 0.03 : 0) +
+          (subPx > 0 ? subPx * 1.2 + box * 0.03 : 0);
+        assert.ok(used <= box - 2 * box * PAD_SCALE + 0.01, `${box}px box overflowed: ${used}`);
+      }
+    }
+  });
+});

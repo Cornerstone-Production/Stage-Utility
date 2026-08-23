@@ -38,6 +38,10 @@ export const HYDRATED_CHANNELS = [
   "osc:feedback",
   "companion:signals",
   "people:count",
+  // The 24h signage horizon. STATE, not an event: it only changes when the
+  // config does, so a subscriber that missed the burst would sit black until
+  // someone edited a schedule.
+  "signage:plan",
   "displays:presence",
 ] as const;
 

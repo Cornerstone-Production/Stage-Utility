@@ -364,6 +364,39 @@
     animation: su-flash-pulse 2s ease-in-out;
     border-radius: 0.875rem;
   }
+
+  /* Signage transitions, run by the COMPOSITOR rather than by React.
+
+     They used to be interpolated in the render: the player is a pure function of
+     a clock that ticks every 100ms, so a 600ms crossfade was six opacity steps.
+     On a wall that reads as a stutter, and no amount of tuning the tick fixes it
+     without re-rendering a still image sixty times a second on a Pi.
+
+     So the player now only decides WHICH items are on screen and mounts them;
+     these carry the interpolation at the display's own refresh rate. Only
+     opacity and transform, which are the two properties a GPU composites without
+     repainting — see signage-transition.ts for why wipe is a translation.
+
+     Duration is set inline from the operator's own setting; these are shapes,
+     not timings, so they carry no duration of their own. */
+  @keyframes signage-fade-in  { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes signage-fade-out { from { opacity: 1; } to { opacity: 0; } }
+  /* Direction is a pair of custom properties so four directions do not become
+     eight keyframes that can disagree with each other. */
+  @keyframes signage-slide-in {
+    from { transform: translate(var(--signage-dx, 0), var(--signage-dy, 0)); }
+    to   { transform: translate(0, 0); }
+  }
+  @keyframes signage-slide-out {
+    from { transform: translate(0, 0); }
+    to   { transform: translate(var(--signage-dx, 0), var(--signage-dy, 0)); }
+  }
+  /* Black in, black out, with the swap happening under the opaque middle. */
+  @keyframes signage-veil {
+    0%   { opacity: 0; }
+    50%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
   /* One place that honours the operating system's reduced-motion setting, rather
      than per-component motion-reduce: variants that each have to be remembered.
      Not `animation: none` globally - a spinner that stops spinning reads as a

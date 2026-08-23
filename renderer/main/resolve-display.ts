@@ -23,3 +23,58 @@ export function resolveDisplayId(
   const bySlug = outputs.find((o) => o.slug != null && o.slug.trim().toLowerCase() === s);
   return bySlug ? bySlug.id : null;
 }
+
+/**
+ * Every shape a kiosk URL can take, read once.
+ *
+ * Three, and they resolve differently enough that spelling the checks out
+ * inline three times is how they come to disagree:
+ *
+ *   /display-9, /foyer-north   a real screen, by id or by friendly slug
+ *   /preview-<viewId>          a VIEW, for the layout editor's live preview
+ *   /preview-out-<outputId>    an OUTPUT, for the preview on a screen's card
+ *
+ * The last exists because of signage. One Signage view drives every signage
+ * screen and the content is resolved per OUTPUT, so a per-view preview has no
+ * output to resolve for — every signage card on the Screens page was a black
+ * rectangle. Everything else looks the same whichever screen shows it.
+ *
+ * `preview-out-` is tested BEFORE `preview-`, or an output preview parses as a
+ * view whose id starts with "out-".
+ */
+export interface ScreenPath {
+  /** The output whose content is being rendered. */
+  displayId: string;
+  /** Set only for a view preview. */
+  previewViewId: string | null;
+  /** Either kind. Neither is a wall: no presence, no remote refresh, no boot
+   *  record, and never rotated — a thumbnail in a settings page is read the way
+   *  the browser is. */
+  isPreview: boolean;
+}
+
+const VIEW_PREVIEW = "preview-";
+const OUTPUT_PREVIEW = "preview-out-";
+
+export function parseScreenPath(
+  pathSlug: string,
+  outputs: readonly { id: string; slug?: string }[] | undefined,
+): ScreenPath {
+  if (pathSlug.startsWith(OUTPUT_PREVIEW)) {
+    // Its own id IS the display id here; a separate field carried the same
+    // fact and nothing read it. "Is this an output preview" is
+    // `isPreview && !previewViewId`.
+    return { displayId: pathSlug.slice(OUTPUT_PREVIEW.length), previewViewId: null, isPreview: true };
+  }
+  if (pathSlug.startsWith(VIEW_PREVIEW)) {
+    const previewViewId = pathSlug.slice(VIEW_PREVIEW.length);
+    // displayId stays the raw slug: a view preview has no output, and nothing
+    // downstream may treat it as one.
+    return { displayId: pathSlug, previewViewId, isPreview: true };
+  }
+  return {
+    displayId: resolveDisplayId(pathSlug, outputs) ?? pathSlug,
+    previewViewId: null,
+    isPreview: false,
+  };
+}

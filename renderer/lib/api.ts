@@ -122,6 +122,78 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return apiFetch<T>(`/api/scriptview/note-categories?serviceTypeId=${encodeURIComponent(id)}`);
     }
 
+    // ── Signage ─────────────────────────────────────────────────────────
+    // Media UPLOAD is deliberately absent: it sends raw bytes with the file's own
+    // content type, which apiFetch cannot express (it forces application/json).
+    // See uploadMedia in app/signage/use-signage-config.ts.
+    case "signage:listMedia":
+      return apiFetch<T>("/api/signage/media");
+
+    case "signage:renameMedia":
+      return patch<T>(`/api/signage/media/${encodeURIComponent(p.id as string)}`, { name: p.name });
+
+    case "signage:deleteMedia":
+      return del<T>(`/api/signage/media/${encodeURIComponent(p.id as string)}`);
+
+    case "signage:listPlaylists":
+      return apiFetch<T>("/api/signage/playlists");
+
+    case "signage:listGroups":
+      return apiFetch<T>("/api/signage/groups");
+
+    case "signage:listSchedules":
+      return apiFetch<T>("/api/signage/schedules");
+
+    case "signage:savePlaylist":
+      return post<T>("/api/signage/playlists", { playlist: p.playlist });
+
+    case "signage:deletePlaylist":
+      return del<T>(`/api/signage/playlists/${encodeURIComponent(p.id as string)}`);
+
+    case "signage:saveGroup":
+      return post<T>("/api/signage/groups", { group: p.group });
+
+    case "signage:deleteGroup":
+      return del<T>(`/api/signage/groups/${encodeURIComponent(p.id as string)}`);
+
+    case "signage:saveSchedule":
+      return post<T>("/api/signage/schedules", { schedule: p.schedule });
+
+    case "signage:deleteSchedule":
+      return del<T>(`/api/signage/schedules/${encodeURIComponent(p.id as string)}`);
+
+    case "signage:reorderSchedules":
+      return post<T>("/api/signage/schedules/reorder", { ids: p.ids });
+
+    // Put the edited config on the walls. Nothing an operator types reaches a
+    // screen until this is pressed — see signage-published-store.
+    case "signage:publish":
+      return post<T>("/api/signage/publish", {});
+
+    // What every display is showing, and why. The same resolver output the
+    // signage:plan channel pushes, so the board cannot disagree with a wall.
+    case "signage:now":
+      return apiFetch<T>("/api/signage/now");
+
+    case "signage:storage":
+      return apiFetch<T>("/api/signage/storage");
+
+    case "signage:listOverrides":
+      return apiFetch<T>("/api/signage/overrides");
+
+    case "signage:setOverride":
+      return post<T>(`/api/signage/groups/${encodeURIComponent(p.groupId as string)}/override`, {
+        ...(p.blank ? { blank: true } : { playlistId: p.playlistId }),
+      });
+
+    case "signage:offlineAssets":
+      return apiFetch<T>(
+        `/api/signage/outputs/${encodeURIComponent(p.outputId as string)}/offline-assets`,
+      );
+
+    case "signage:clearOverride":
+      return del<T>(`/api/signage/groups/${encodeURIComponent(p.groupId as string)}/override`);
+
     // ── Stage patch sheet ───────────────────────────────────────────────
     case "patch:get":
       return apiFetch<T>("/api/patch");
@@ -695,6 +767,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "outputs:setMode":
       return patch<T>(`/api/outputs/${encodeURIComponent(String(p.id))}`, { mode: p.mode });
 
+    case "outputs:setRotation":
+      return patch<T>(`/api/outputs/${encodeURIComponent(String(p.id))}`, { rotation: p.rotation });
+
     case "barItems:set":
       return post<T>("/api/bar-items", p);
 
@@ -1065,6 +1140,7 @@ function ensureEventSource(): EventSource {
   eventSource.onopen = () => {
     sseReconnectDelayMs = SSE_RECONNECT_MIN_MS;
     reportChannels();
+    setSseConnected(true);
   };
 
   eventSource.onerror = (e) => {
@@ -1074,6 +1150,11 @@ function ensureEventSource(): EventSource {
     // nothing, until someone reloads it. That is what a display looks like when
     // it "stops updating" after a server restart — the browser closes the stream
     // on an error response and never comes back on its own.
+    // Reported as disconnected for BOTH states, including the transparent retry.
+    // The stream is down either way, and the one consumer that cares (signage)
+    // only consults this at a content boundary, so a blip that resolves in
+    // between changes nothing.
+    setSseConnected(false);
     if (eventSource?.readyState === EventSource.CLOSED) {
       console.warn("[api] SSE closed — scheduling reconnect", e);
       scheduleSseReconnect();
@@ -1121,6 +1202,42 @@ if (typeof document !== "undefined") {
 /**
  * Subscribe to a server-sent event channel.
  * Returns an unsubscribe function.
+ */
+let sseConnected = false;
+const sseConnectionListeners = new Set<(up: boolean) => void>();
+
+function setSseConnected(up: boolean): void {
+  if (sseConnected === up) return;
+  sseConnected = up;
+  for (const cb of sseConnectionListeners) {
+    try {
+      cb(up);
+    } catch (err) {
+      console.error("[api] an SSE connection listener threw:", err);
+    }
+  }
+}
+
+export function isSseConnected(): boolean {
+  return sseConnected;
+}
+
+/** Subscribe to stream up/down. Returns an unsubscribe function, and calls back
+ *  once immediately so a subscriber never starts from a guess. */
+export function onSseConnection(cb: (up: boolean) => void): () => void {
+  sseConnectionListeners.add(cb);
+  cb(sseConnected);
+  return () => sseConnectionListeners.delete(cb);
+}
+
+/**
+ * Whether the event stream is currently up.
+ *
+ * Exported because a signage display's behaviour at a content boundary depends
+ * on it: connected, it advances; disconnected, it holds what it is playing. No
+ * other consumer needs this, and nothing here debounces — the caller decides
+ * what a momentary drop means, and for signage the answer is "nothing, unless a
+ * boundary happens to fall inside it".
  */
 export function onNotification(
   channel: string,
