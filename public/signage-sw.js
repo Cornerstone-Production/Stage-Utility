@@ -13,7 +13,7 @@
 // fetched at least once. A worker that installs a broken or half-downloaded app
 // strands a screen on it, and there is nobody at the screen to clear a cache.
 
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL = `signage-shell-${VERSION}`;
 const MEDIA = `signage-media-${VERSION}`;
 
@@ -84,6 +84,37 @@ self.addEventListener("fetch", (event) => {
         const res = await fetch(req);
         if (res.ok) await cache.put(req, res.clone());
         return res;
+      })(),
+    );
+    return;
+  }
+
+  // A NAVIGATION - the reload this whole file exists for.
+  //
+  // A display lives at its own path: /display-8, /foyer-north, whatever slug it
+  // was given. Matching a list of known shell paths misses every one of them, so
+  // the worker declined to handle the request, the browser went to the dead
+  // network, and the reload was a connection error. Which is precisely the
+  // failure this was written to remove.
+  //
+  // Every navigation is answered with the app shell instead. The app is a single
+  // page that routes on the path, so /index.html is the correct response for any
+  // of them - the same rule any SPA offline fallback uses.
+  if (req.mode === "navigate") {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(SHELL);
+        try {
+          const res = await fetch(req);
+          if (res.ok) await cache.put("/index.html", res.clone());
+          return res;
+        } catch (err) {
+          // Match the DOCUMENT, not the request: nothing ever cached
+          // "/display-8" itself, and matching on the request would miss.
+          const hit = (await cache.match("/index.html")) ?? (await cache.match("/"));
+          if (hit) return hit;
+          throw err;
+        }
       })(),
     );
     return;

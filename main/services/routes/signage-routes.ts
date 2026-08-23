@@ -16,6 +16,7 @@ import { errorMessage } from "../errors.js";
 import { andList, groupUsage, mediaUsage, playlistUsage } from "../signage-integrity.js";
 import { signageGroupsStore } from "../signage-groups-store.js";
 import { clearOverride, listOverrides, setOverride } from "../signage-overrides-store.js";
+import { resolveItemDurations } from "../signage-playlist-items.js";
 import { signagePlaylistsStore } from "../signage-playlists-store.js";
 import { reorderSchedules, signageSchedulesStore } from "../signage-schedules-store.js";
 import {
@@ -241,6 +242,35 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
       await signageScheduler.recompute();
       return json(c.res, { released: groupId });
     }
+  }
+
+  // Everything a group needs to play with no server: its DEFAULT playlist in
+  // full, resolved to urls. A display asks the service worker to hold these and
+  // reports back what it actually holds, so "ready" is a fact rather than an
+  // intention.
+  const prepare = /^\/api\/signage\/groups\/([^/]+)\/offline-assets$/.exec(c.pathname);
+  if (prepare && c.method === "GET") {
+    const groupId = decodeURIComponent(prepare[1]);
+    const group = (await signageGroupsStore.load()).find((g) => g.id === groupId);
+    if (!group) return error(c.res, "no such group", 404);
+    if (!group.defaultPlaylistId) {
+      // Not an error, but not silence either: a group with no default has
+      // nothing to play offline, and the operator needs to be told that BEFORE
+      // unplugging the Pi rather than after.
+      return json(c.res, { assets: [], reason: "this group has no default playlist" });
+    }
+    const [playlists, media] = await Promise.all([
+      signagePlaylistsStore.load(),
+      listMedia(),
+    ]);
+    const playlist = playlists.find((p) => p.id === group.defaultPlaylistId);
+    if (!playlist) return json(c.res, { assets: [], reason: "its default playlist is missing" });
+
+    const items = resolveItemDurations(playlist, media);
+    return json(c.res, {
+      assets: items.map((r) => ({ url: `/signage-media/${r.media.file}`, bytes: r.media.bytes })),
+      playlist: playlist.name,
+    });
   }
 
   // What every display is showing, and why. The SAME resolver output the SSE

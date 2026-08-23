@@ -79,6 +79,9 @@ PORT=$PORT
 ID="\$(cat "\$STATE_DIR/device-id")"
 BOUND_FILE="\$STATE_DIR/bound-to"
 TOKEN_FILE="\$STATE_DIR/token"
+# The last server that answered. A screen with no server on the network - taken
+# offsite, or booting first - launches at this rather than never launching at all.
+LAST_SERVER_FILE="\$STATE_DIR/last-server"
 
 macs() {
   for f in /sys/class/net/*/address; do
@@ -132,12 +135,31 @@ else
     [ -n "\$SRV" ] && printf '%s' "\$SRV" > "\$BOUND_FILE.candidate"
     if [ -z "\$URL" ]; then
       fails=\$((fails + 1))
+      # After a real effort, fall back to the server we found last time.
+      #
+      # This loop used to run forever, which meant a Pi taken offsite - or one
+      # booting before the server does - never launched a browser AT ALL. No
+      # amount of cached content helps a screen that never loads the page, and
+      # signage is specifically meant to keep playing without a server.
+      #
+      # Discovery is still tried first and keeps being tried on the next launch
+      # (the browser exiting re-runs this), so a server that moved is still
+      # found; this only decides what to do while nothing answers.
+      if [ "\$fails" -ge 15 ] && [ -r "\$LAST_SERVER_FILE" ]; then
+        URL="\$(cat "\$LAST_SERVER_FILE" 2>/dev/null || true)"
+        [ -n "\$URL" ] && echo "no server answered; using the last known one: \$URL"
+      fi
+    fi
+    if [ -z "\$URL" ]; then
       # Two seconds while it might be booting, backing off to thirty so a screen
       # left on overnight is not shouting all night.
       [ "\$fails" -lt 10 ] && sleep 2 || sleep 30
     fi
   done
 fi
+
+# Remember it, so the next boot has somewhere to go if nothing answers.
+[ -n "\$URL" ] && printf '%s' "\$URL" > "\$LAST_SERVER_FILE" 2>/dev/null || true
 
 TOKEN="\$(cat "\$TOKEN_FILE" 2>/dev/null || true)"
 TARGET="\$URL/enroll?device=\$ID"
@@ -154,9 +176,16 @@ mkdir -p "\$PROFILE/Default"
 sed -i 's/"exit_type":"[^"]*"/"exit_type":"Normal"/; s/"exited_cleanly":false/"exited_cleanly":true/' \\
   "\$PROFILE/Default/Preferences" 2>/dev/null || true
 
+# --unsafely-treat-insecure-origin-as-secure is what lets the signage service
+# worker register. A service worker needs a secure context and this app is served
+# over plain HTTP on a LAN, so without this a screen that REBOOTS with no server
+# is dead however much it had cached. Scoped to this one origin, in this one
+# browser profile, and it needs no certificate.
 exec \$CHROME \\
   --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble \\
   --disable-features=TranslateUI --check-for-update-interval=31536000 \\
+  --unsafely-treat-insecure-origin-as-secure="\$URL" \\
+  --allow-insecure-localhost \\
   --user-data-dir="\$PROFILE" \\
   "\$TARGET"
 LAUNCHER

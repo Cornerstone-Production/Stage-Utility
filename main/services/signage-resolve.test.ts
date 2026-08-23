@@ -252,6 +252,8 @@ describe("the horizon itself", () => {
       groups: [group("g1", ["out-1"])],
       schedules: [sched("s1", "weekend", ["g1"], SUNDAY_AM)],
     });
+    // No group default here, so no trailing fallback entry - the horizon is
+    // exactly the 24 hours.
     const h = r["out-1"];
     assert.equal(h[0].from, NOW);
     assert.equal(h[h.length - 1].until, NOW + 24 * 3600_000);
@@ -272,6 +274,31 @@ describe("the horizon itself", () => {
     assert.equal(h[0].playlist?.id, "weekend");
     assert.equal(h[0].until, Date.parse("2026-08-23T18:00:00Z")); // 13:00 CDT
     assert.equal(h[1].reason, "blank");
+  });
+
+  test("ends with the group's DEFAULT, so a cold boot has something to play", () => {
+    // A display that boots with no server plays its group's default, and the
+    // persisted horizon is the only place it can find one. Without this a screen
+    // whose schedule covers the whole day boots to black - which is what a real
+    // reboot test showed.
+    const r = run({
+      groups: [group("g1", ["out-1"], "house")],
+      schedules: [sched("s1", "weekend", ["g1"], ALL_DAY)],
+    });
+    const h = r["out-1"];
+    const last = h[h.length - 1];
+    assert.equal(last.reason, "default");
+    assert.equal(last.playlist?.id, "house");
+    // Beyond the horizon proper, so it is never selected in normal play.
+    assert.ok(last.from >= NOW + 24 * 3600_000, "the fallback overlaps the real horizon");
+  });
+
+  test("has no trailing default when the group has none", () => {
+    const r = run({
+      groups: [group("g1", ["out-1"])],
+      schedules: [sched("s1", "weekend", ["g1"], ALL_DAY)],
+    });
+    assert.ok(!r["out-1"].some((e) => e.reason === "default"));
   });
 
   test("carries the winning schedule's ID, so the board marks the right row", () => {

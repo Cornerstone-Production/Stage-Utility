@@ -19,6 +19,7 @@ import { Input } from "../../components/ui/input";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { invoke } from "../../lib/api";
 import { newSignageId } from "./ids";
+import { PrepareOffline } from "./prepare-offline";
 import { SelectField } from "./select-field";
 
 const NO_DEFAULT = "__none__";
@@ -192,6 +193,7 @@ export function GroupsSection({
               <p className="text-caption2 text-fg-subtle">
                 Played when no schedule matches, and by a screen that starts up with no server.
               </p>
+              {g.defaultPlaylistId ? <PrepareOffline group={g} /> : null}
             </div>
           ))}
         </div>

@@ -178,6 +178,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
         ...(p.blank ? { blank: true } : { playlistId: p.playlistId }),
       });
 
+    case "signage:offlineAssets":
+      return apiFetch<T>(
+        `/api/signage/groups/${encodeURIComponent(p.groupId as string)}/offline-assets`,
+      );
+
     case "signage:clearOverride":
       return del<T>(`/api/signage/groups/${encodeURIComponent(p.groupId as string)}/override`);
 

@@ -128,6 +128,16 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
     return [...set].sort((a, b) => a - b);
   };
 
+  /** Just the group-default step of the precedence, for the trailing entry. */
+  const defaultFor = (outputId: string): Decision => {
+    for (const g of input.groups) {
+      if (!g.outputIds.includes(outputId)) continue;
+      const p = playable(g.defaultPlaylistId);
+      if (p) return { playlist: p, reason: "default", reasonLabel: p.name, reasonId: g.id };
+    }
+    return BLANK;
+  };
+
   const end = input.now + HORIZON_MS;
   const edges = boundaries(input.now, end);
   const out: Record<string, SignageHorizon> = {};
@@ -162,6 +172,25 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
     // An output in no group still gets a horizon. An absent one is
     // indistinguishable, at the display, from a server that has not answered.
     if (horizon.length === 0) horizon.push(entry(input.now, end, BLANK, input.media));
+
+    // The group's DEFAULT playlist, appended as a trailing entry covering the
+    // day AFTER the horizon.
+    //
+    // It has to be in here somewhere, because a display that boots with no
+    // server plays the default and has nothing but this persisted horizon to
+    // find it in — and the default otherwise appears only if it happens to be
+    // winning at some point in the next 24 hours. A screen whose schedule
+    // covers the whole day would have booted to black.
+    //
+    // A trailing entry rather than a separate field so the horizon stays one
+    // list. It is unreachable in normal play: while connected the horizon is
+    // refreshed long before the clock gets there, and while disconnected the
+    // display holds rather than advancing (see signage-hold.ts).
+    const fallback = defaultFor(output.id);
+    if (fallback.playlist) {
+      horizon.push(entry(end, end + HORIZON_MS, fallback, input.media));
+    }
+
     out[output.id] = horizon;
   }
 
