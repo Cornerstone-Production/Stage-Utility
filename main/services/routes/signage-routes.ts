@@ -29,6 +29,7 @@ import {
   renameMedia,
   statMediaFile,
 } from "../signage-media-store.js";
+import { appTimeZone } from "../app-timezone.js";
 import { signagePcoWindows } from "../signage-pco-windows.js";
 import { signageStorage } from "../signage-storage.js";
 import { publishSignage } from "../signage-published-store.js";
@@ -308,6 +309,12 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
       // when there is nothing waiting.
       draftHorizons: signageScheduler.getDraftHorizons(),
       pending: signageScheduler.getPending(),
+      // For the calendar, so it draws PCO-driven slots where the resolver
+      // actually puts them rather than guessing at plan times — and the APP
+      // time zone, never the browser's: a laptop in another zone must not draw
+      // a different week from the one the server will run.
+      pcoWindows: signagePcoWindows.get(),
+      timeZone: appTimeZone(),
       // A stale window is USED rather than ignored, so the only way an operator
       // learns PCO is unreachable is by being told here.
       staleWindows: signagePcoWindows.isStale(),

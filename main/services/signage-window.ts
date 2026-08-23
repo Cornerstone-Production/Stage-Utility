@@ -178,6 +178,58 @@ export function windowActiveAt(
   }
 }
 
+/**
+ * Every interval this window is open for, on the local day beginning at
+ * `dayStart`.
+ *
+ * For drawing a calendar. Exported from HERE rather than worked out again in the
+ * renderer, because "when is this window open" is the one rule the whole feature
+ * turns on — and a calendar that disagreed with the resolver would be a picture
+ * of a schedule nobody is running.
+ *
+ * Returns intervals that may START on an earlier day: a window that wraps past
+ * midnight belongs to the day it started, and a calendar has to draw the part
+ * that lands on this one.
+ */
+export function intervalsOnDay(
+  w: SignageWindow,
+  dayStart: number,
+  tz: TimeZone,
+  ctx: WindowCtx,
+): { from: number; to: number }[] {
+  const dayEnd = startOfLocalDay(dayStart + DAY_MS + 3 * 3600_000, tz);
+
+  if (w.kind === "always") return [{ from: dayStart, to: dayEnd }];
+
+  if (w.kind === "pco") {
+    return ctx.pcoWindows
+      .filter((p) => p.serviceTypeId === w.serviceTypeId && p.from < dayEnd && dayStart < p.to)
+      .map((p) => ({ from: p.from, to: p.to }));
+  }
+
+  // Yesterday as well as today, so a window that wrapped past midnight draws its
+  // tail on this day — the same rule windowActiveAt follows.
+  const yesterday = startOfLocalDay(dayStart - 3 * 3600_000, tz);
+  const days = w.kind === "weekly" ? w.days : w.kind === "dates" ? w.days : undefined;
+
+  const out: { from: number; to: number }[] = [];
+  for (const start of [yesterday, dayStart]) {
+    const key = dateKey(start, tz);
+    const inRange =
+      w.kind === "once" ? key === w.date : w.kind === "dates" ? key >= w.from && key <= w.to : true;
+    if (!inRange) continue;
+    const interval = intervalOnDay(start, days, w.start, w.end, tz);
+    // Only the ones that actually touch this day.
+    if (interval && interval.from < dayEnd && dayStart < interval.to) out.push(interval);
+  }
+  return out;
+}
+
+/** Local midnight of the day containing `ms`. Exported for a calendar's grid. */
+export function localDayStart(ms: number, tz: TimeZone): number {
+  return startOfLocalDay(ms, tz);
+}
+
 /** How many local days the boundary search visits. The walk starts YESTERDAY (a
  *  wrapping window's closing edge belongs to the day it started), so 8 covers
  *  yesterday, today and seven days ahead — a weekly window's next edge is at

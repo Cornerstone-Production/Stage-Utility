@@ -9,7 +9,7 @@ import { UploadCloudIcon } from "lucide-react";
 
 import { useQuery } from "@tanstack/react-query";
 import type { ServiceTypeDTO } from "@main/types/stage";
-import type { SignageHorizon } from "@main/types/signage";
+import type { PcoWindow, SignageHorizon } from "@main/types/signage";
 
 import { errorMessage } from "@main/services/errors";
 import { Button } from "../../components/ui/button";
@@ -94,6 +94,8 @@ function SignageSections() {
       invoke<{
         horizons: Record<string, SignageHorizon>;
         pending: { playlists: number; groups: number; schedules: number; total: number };
+        pcoWindows: PcoWindow[];
+        timeZone: string;
       }>("signage:now"),
     refetchInterval: 5000,
   });
@@ -233,6 +235,8 @@ function SignageSections() {
           serviceTypes={serviceTypes ?? []}
           winningIds={winningIds}
           winningOn={winningOn}
+          pcoWindows={nowBoard?.pcoWindows ?? []}
+          timeZone={nowBoard?.timeZone ?? "UTC"}
           onChange={reload}
         />
       ) : (

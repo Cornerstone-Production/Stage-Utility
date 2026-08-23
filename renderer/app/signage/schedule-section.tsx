@@ -10,9 +10,10 @@
 // wall about which schedule is in charge.
 
 import { useCallback, useMemo, useState } from "react";
-import { CalendarClockIcon, ChevronDownIcon, ChevronUpIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { CalendarClockIcon, CalendarDaysIcon, ChevronDownIcon, ChevronUpIcon, ListIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import type { ServiceTypeDTO } from "@main/types/stage";
-import type { SignageGroup, SignagePlaylist, SignageSchedule } from "@main/types/signage";
+import type { PcoWindow, SignageGroup, SignagePlaylist, SignageSchedule } from "@main/types/signage";
+import type { TimeZone } from "@main/services/app-timezone";
 
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
@@ -22,6 +23,8 @@ import { Switch } from "../../components/ui/switch";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { invoke } from "../../lib/api";
 import { useRegisterUnsaved } from "./unsaved-guard";
+import { ScheduleCalendar } from "./schedule-calendar";
+import { ButtonGroup } from "../../components/ui/button-group";
 import { newSignageId } from "./ids";
 import { SelectField } from "./select-field";
 import { WindowEditor, describeWindow } from "./window-editor";
@@ -33,6 +36,8 @@ export function ScheduleSection({
   serviceTypes,
   winningIds,
   winningOn,
+  pcoWindows,
+  timeZone,
   onChange,
 }: {
   schedules: SignageSchedule[];
@@ -44,9 +49,19 @@ export function ScheduleSection({
   /** The screens a schedule is winning on. Several schedules can be winning at
    *  once — one per group — so a bare "winning" reads as "the one". */
   winningOn: (scheduleId: string) => string[];
+  /** Precomputed PCO windows, so the calendar draws PCO-driven slots where the
+   *  resolver actually puts them rather than guessing at plan times. */
+  pcoWindows: PcoWindow[];
+  /** The APP time zone, never the browser's — a laptop in another zone must not
+   *  draw a different week from the one the server will run. */
+  timeZone: TimeZone;
   onChange: () => Promise<void>;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
+  // Calendar first: it answers the question an operator actually has ("what is
+  // on Sunday morning, and does anything clash"), and the list answers the one
+  // only the list can — the ORDER, which is the priority rule.
+  const [view, setView] = useState<"calendar" | "list">("calendar");
   const [draft, setDraft] = useState<SignageSchedule | null>(null);
 
   const playlistName = useMemo(
@@ -101,6 +116,31 @@ export function ScheduleSection({
     ),
   );
 
+  /**
+   * A slot dragged onto the calendar.
+   *
+   * Created and OPENED, rather than silently added: a new schedule has no
+   * playlist and no tags yet, so it would do nothing at all and the operator
+   * would have drawn a rectangle that never plays.
+   */
+  const createOn = useCallback(
+    async (weekday: number, start: string, end: string) => {
+      const schedule: SignageSchedule = {
+        id: newSignageId("sc"),
+        name: "New schedule",
+        enabled: true,
+        groupIds: [],
+        playlistId: playlists[0]?.id ?? "",
+        window: { kind: "weekly", days: [weekday], start, end },
+        createdAt: new Date().toISOString(),
+      };
+      await save(schedule);
+      setView("list");
+      setOpenId(schedule.id);
+    },
+    [playlists, save],
+  );
+
   /** Move a schedule up or down, which changes which one wins. */
   const move = useCallback(
     async (index: number, delta: number) => {
@@ -124,13 +164,43 @@ export function ScheduleSection({
             The topmost matching schedule wins. Move one up to give it priority.
           </p>
         </div>
+        <ButtonGroup className="ml-auto">
+          <Button
+            size="small"
+            variant={view === "calendar" ? "accent" : undefined}
+            onClick={() => setView("calendar")}
+          >
+            <CalendarDaysIcon className="size-3.5" />
+            Calendar
+          </Button>
+          <Button
+            size="small"
+            variant={view === "list" ? "accent" : undefined}
+            onClick={() => setView("list")}
+          >
+            <ListIcon className="size-3.5" />
+            Order
+          </Button>
+        </ButtonGroup>
         <Button variant="accent" onClick={() => void create()}>
           <PlusIcon className="size-4" />
           New schedule
         </Button>
       </div>
 
-      {schedules.length === 0 ? (
+      {view === "calendar" ? (
+        <ScheduleCalendar
+          schedules={schedules}
+          playlists={playlists}
+          pcoWindows={pcoWindows}
+          tz={timeZone}
+          onOpen={(sched) => {
+            setView("list");
+            setOpenId(sched.id);
+          }}
+          onCreate={(weekday, start, end) => void createOn(weekday, start, end)}
+        />
+      ) : schedules.length === 0 ? (
         <EmptyState
           icon={<CalendarClockIcon />}
           title="No schedules yet"

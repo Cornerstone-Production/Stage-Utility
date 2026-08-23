@@ -10,7 +10,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { windowActiveAt, nextBoundaryAfter } from "./signage-window.js";
+import { windowActiveAt, nextBoundaryAfter, intervalsOnDay, localDayStart } from "./signage-window.js";
 
 const TZ = "America/Chicago";
 const CTX = { pcoWindows: [], liveServiceTypeId: null };
@@ -281,5 +281,82 @@ describe("the next moment a window's answer could change", () => {
       const b = nextBoundaryAfter(w, at(t), TZ, CTX);
       assert.ok(b === null || b > at(t), `boundary ${b} is not after ${t}`);
     }
+  });
+});
+
+describe("the intervals a calendar draws", () => {
+  const dayOf = (iso: string) => localDayStart(at(iso), TZ);
+
+  test("agrees with windowActiveAt at every quarter hour of a day", () => {
+    // The point of exporting intervalsOnDay rather than working the times out
+    // again in the renderer. If these two ever disagree, the calendar is a
+    // picture of a schedule nobody is running — and the operator would have no
+    // way to tell which one was lying.
+    const windows = [
+      { kind: "weekly", days: [0], start: "05:00", end: "13:00" },
+      { kind: "weekly", days: [4], start: "22:00", end: "02:00" }, // wraps
+      { kind: "weekly", days: [5], start: "22:00", end: "02:00" }, // wraps INTO the day under test
+      { kind: "dates", from: "2026-08-20", to: "2026-08-24", days: [6], start: "09:00", end: "11:00" },
+      { kind: "once", date: "2026-08-22", start: "18:00", end: "20:00" },
+    ] as const;
+
+    for (const w of windows) {
+      // The last day is deliberately OUTSIDE the `dates` window's range and
+      // outside the `once` date: sampling only days inside the range let a
+      // version that ignored the range entirely pass this test.
+      for (const dayIso of [
+        "2026-08-22T12:00:00Z",
+        "2026-08-23T12:00:00Z",
+        "2026-08-21T12:00:00Z",
+        "2026-08-29T12:00:00Z",
+      ]) {
+        const dayStart = dayOf(dayIso);
+        const intervals = intervalsOnDay(w, dayStart, TZ, CTX);
+        for (let q = 0; q < 96; q++) {
+          const t = dayStart + q * 15 * 60_000;
+          const drawn = intervals.some((i) => t >= i.from && t < i.to);
+          assert.equal(
+            drawn,
+            windowActiveAt(w, t, TZ, CTX),
+            `${JSON.stringify(w)} at +${q * 15}min of ${dayIso}: drawn=${drawn}`,
+          );
+        }
+      }
+    }
+  });
+
+  test("a window that started YESTERDAY still draws its tail on this day", () => {
+    // Saturday 22:00 to Sunday 02:00, asked about the Sunday. Looking only at
+    // today's occurrence returns nothing and the Sunday column comes up empty,
+    // with the wall showing a playlist the calendar says is not on.
+    const w = { kind: "weekly", days: [6], start: "22:00", end: "02:00" } as const;
+    const sunday = dayOf("2026-08-23T12:00:00Z");
+    const drawn = intervalsOnDay(w, sunday, TZ, CTX);
+    assert.equal(drawn.length, 1);
+    assert.ok(drawn[0].from < sunday, "the interval has to have started before this day");
+    assert.equal(drawn[0].to, sunday + 2 * 3_600_000);
+  });
+
+  test("a PCO window is drawn only for its own service type, and only if it touches the day", () => {
+    const w = { kind: "pco", serviceTypeId: "st-1", leadMinutes: 0, trailMinutes: 0, liveExtension: false } as const;
+    const ctx = {
+      pcoWindows: [
+        { serviceTypeId: "st-1", from: at("2026-08-23T13:00:00Z"), to: at("2026-08-23T17:00:00Z"), fresh: true },
+        { serviceTypeId: "st-2", from: at("2026-08-23T13:00:00Z"), to: at("2026-08-23T17:00:00Z"), fresh: true },
+        { serviceTypeId: "st-1", from: at("2026-08-30T13:00:00Z"), to: at("2026-08-30T17:00:00Z"), fresh: true },
+      ],
+      liveServiceTypeId: null,
+    };
+    const drawn = intervalsOnDay(w, dayOf("2026-08-23T12:00:00Z"), TZ, ctx);
+    assert.deepEqual(drawn, [{ from: at("2026-08-23T13:00:00Z"), to: at("2026-08-23T17:00:00Z") }]);
+  });
+
+  test("an always window fills exactly one local day, DST included", () => {
+    // The spring-forward Sunday is 23 hours long. A hard-coded +24h would run
+    // the block an hour into the Monday column.
+    const day = dayOf("2026-03-08T12:00:00Z");
+    const [iv] = intervalsOnDay({ kind: "always" }, day, TZ, CTX);
+    assert.equal(iv.from, day);
+    assert.equal(iv.to - iv.from, 23 * 3_600_000);
   });
 });
