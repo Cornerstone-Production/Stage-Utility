@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
 import { describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { parseReleaseSections, SECTION_ORDER } from "./release-notes.js";
+import { parseReleaseIntro, parseReleaseSections, SECTION_ORDER } from "./release-notes.js";
 
 // What an operator reads once, after an update they may not have watched happen.
 // The section a line came from is the part the old parser threw away, and it is
@@ -105,5 +108,110 @@ describe("release notes, by section", () => {
 
   test("a line that is only emphasis markers does not become an empty bullet", () => {
     assert.deepEqual(parseReleaseSections("## New\n- ****\n- real\n")[0].lines, ["real"]);
+  });
+});
+
+// The prose a release opens with — the part no commit range can produce.
+//
+// It was reaching GitHub and stopping there. The dialog rendered only bullets,
+// so "nothing to do to install this", "every view comes across as it was" and
+// "the settings window has moved" were invisible to the operator who most needs
+// them: the one who did not start the update and is now looking at an app whose
+// navigation has changed.
+describe("the release's opening prose", () => {
+  /** A body shaped like a real release: notice, sections, install commands. */
+  const BODY = `> **Nothing to do to install this.** No manual step and no config
+> migration — update the way you normally would.
+
+Stage Utility is now one app. The settings window is gone.
+
+## Changed
+
+- The settings window is gone
+- Views and Displays are one page
+
+## Fixed
+
+- Alignments stay put
+
+## Install
+
+Two supported ways in.
+
+\`\`\`bash
+curl -fsSL https://example.invalid/install.sh | sudo bash
+\`\`\`
+`;
+
+  test("is returned, having been dropped entirely before", () => {
+    const intro = parseReleaseIntro(BODY);
+    assert.ok(intro, "no intro — the reassurance never reaches the dialog");
+    assert.match(intro, /Nothing to do to install this/);
+    assert.match(intro, /Stage Utility is now one app/);
+  });
+
+  test("stops at the first heading, so install commands stay out", () => {
+    // The specific hazard: a shell command rendered as a paragraph in a dialog
+    // is something an operator might try to type.
+    const intro = parseReleaseIntro(BODY) ?? "";
+    assert.doesNotMatch(intro, /curl/, "the install command leaked into the dialog");
+    assert.doesNotMatch(intro, /Two supported ways/);
+    assert.doesNotMatch(intro, /##/);
+  });
+
+  test("does not repeat the change lines", () => {
+    // Those are rendered as sections. Saying them twice in one dialog is worse
+    // than saying them once.
+    const intro = parseReleaseIntro(BODY) ?? "";
+    assert.doesNotMatch(intro, /Views and Displays are one page/);
+  });
+
+  test("strips the markdown the dialog would otherwise print literally", () => {
+    const intro = parseReleaseIntro(BODY) ?? "";
+    assert.doesNotMatch(intro, /^>/m, "a blockquote marker survived");
+    assert.doesNotMatch(intro, /\*\*/, "bold markers survived");
+  });
+
+  test("keeps paragraphs apart", () => {
+    const intro = parseReleaseIntro(BODY) ?? "";
+    assert.ok(intro.includes("\n\n"), "the two paragraphs ran together");
+  });
+
+  test("a body with no headings has no intro", () => {
+    // A git checkout's changelog is bare commit subjects. Treating those as
+    // prose would put the whole changelog in the dialog a second time, above
+    // the list of the same lines.
+    assert.equal(parseReleaseIntro("fix(home): a thing\nfeat(editor): another"), null);
+  });
+
+  test("a release with sections but no prose has no intro", () => {
+    assert.equal(parseReleaseIntro("## New\n\n- Something\n"), null);
+  });
+
+  test("nothing at all is null, not a crash", () => {
+    assert.equal(parseReleaseIntro(null), null);
+    assert.equal(parseReleaseIntro(""), null);
+  });
+
+  test("an essay is truncated rather than filling the dialog", () => {
+    const long = `${"word ".repeat(400)}\n\n## New\n\n- x\n`;
+    const intro = parseReleaseIntro(long) ?? "";
+    assert.ok(intro.length <= 901, `intro is ${intro.length} characters`);
+    assert.match(intro, /…$/, "truncation is not signalled");
+  });
+});
+
+describe("the cap is big enough for the notices actually written", () => {
+  test("a two-paragraph overview survives whole", () => {
+    // The regression this exists for: the first cap was 600 and cut the real
+    // 1.11.0 notice off mid-sentence, losing the last thing it had to say.
+    const real = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "docs", "release-notes", "1.11.0.md"),
+      "utf8",
+    );
+    const intro = parseReleaseIntro(`${real}\n## Install\n\ncurl …\n`) ?? "";
+    assert.ok(intro, "the shipped notice produces no intro at all");
+    assert.doesNotMatch(intro, /…$/, "the shipped notice is being truncated");
+    assert.match(intro, /Resi and\s+YouTube now sit alongside/, "the closing sentence was cut");
   });
 });

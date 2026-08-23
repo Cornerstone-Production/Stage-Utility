@@ -60,7 +60,7 @@ export function UpdateNotices() {
   }
 
   if (!justUpdated) return null;
-  const { version, fromVersion, notes, lines } = justUpdated;
+  const { version, fromVersion, notes, lines, intro } = justUpdated;
 
   return (
     <DialogRoot open onOpenChange={(open: boolean) => { if (!open) void dismiss(); }}>
@@ -71,8 +71,28 @@ export function UpdateNotices() {
         </DialogHeader>
 
         <div className="mt-4 flex max-h-[52vh] flex-col gap-3 overflow-y-auto">
+          {/* The release's own opening words, above the lists.
+              A section heading answers "what changed"; this answers "what does
+              that mean for me" — whether there is a manual step, whether the
+              config came across, where a page went. It only exists because
+              somebody wrote it for this release, so when it is absent nothing
+              is drawn rather than an empty box. Paragraphs are split on blank
+              lines; the parser has already stripped the markdown. */}
+          {intro && (
+            <div className="flex shrink-0 flex-col gap-2 rounded-lg border border-line bg-fill/50 px-3 py-2.5">
+              {intro.split(/\n{2,}/).map((para, i) => (
+                <p key={i} className="text-footnote leading-relaxed text-fg-muted">{para}</p>
+              ))}
+            </div>
+          )}
+
           {notes.map((s) => (
-            <div key={s.section} className="overflow-hidden rounded-lg border border-line">
+            // shrink-0: these are flex children of a scrolling column, and a
+            // flex child shrinks by default. Without it every section was
+            // squashed to fit the box and `overflow-hidden` clipped the rest —
+            // a four-section release rendered as four headings with one bullet
+            // each, and no scrollbar to suggest anything was missing.
+            <div key={s.section} className="shrink-0 overflow-hidden rounded-lg border border-line">
               <div className="flex items-center gap-2 bg-fill px-3 py-2">
                 <span aria-hidden="true" className={cn("size-1.5 rounded-sm", SECTION_TONE[s.section] ?? "bg-accent")} />
                 <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">{s.section}</span>
@@ -85,7 +105,7 @@ export function UpdateNotices() {
 
           {/* A checkout's changelog is commit subjects, which carry no sections. */}
           {notes.length === 0 && lines.length > 0 && (
-            <ul className="flex list-disc flex-col gap-1.5 rounded-lg border border-line py-2.5 pl-8 pr-3">
+            <ul className="flex shrink-0 list-disc flex-col gap-1.5 rounded-lg border border-line py-2.5 pl-8 pr-3">
               {lines.map((l, i) => <li key={i} className="text-footnote text-fg-muted">{l}</li>)}
             </ul>
           )}

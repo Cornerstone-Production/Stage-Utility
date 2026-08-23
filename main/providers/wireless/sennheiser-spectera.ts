@@ -86,7 +86,7 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
   }
 
   async listChannels(): Promise<DeviceChannel[]> {
-    return [...this.channels.values()].map((s) => ({ id: s.channelId, label: s.name ?? s.channelId }));
+    return [...this.channels.values()].map((s) => ({ id: s.channelId, label: s.name ?? s.channelId, deviceType: s.deviceType }));
   }
 
   // ── SSE stream lifecycle ────────────────────────────────────────────────────

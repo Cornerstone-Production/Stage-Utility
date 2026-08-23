@@ -77,6 +77,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
       result.push({
         id: String(n),
         label: state?.name ?? `Ch ${n}`,
+        deviceType: state?.deviceType ?? this.defaultDeviceType,
       });
     }
     return result;

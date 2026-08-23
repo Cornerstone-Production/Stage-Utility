@@ -22,6 +22,10 @@ export interface JustUpdated {
   /** The flat changelog, used only when `notes` is empty — a git checkout's
    *  changelog is commit subjects, which carry no sections. */
   lines: string[];
+  /** The release's opening prose, shown above the sections. Optional because
+   *  notices stored by an older version do not have it, and a dialog that threw
+   *  on last week's notice would be worse than one without a paragraph. */
+  intro?: string | null;
   at: string;
 }
 

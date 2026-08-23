@@ -60,6 +60,61 @@ function takeInOrder(bySection: Map<SectionName, string[]>, cap: number): Releas
 }
 
 /**
+ * A lead longer than this is an essay, not an overview.
+ *
+ * ~900 characters is two solid paragraphs — enough to say what a release is and
+ * roughly how it works, which is what an operator opening this actually wants.
+ * The first number here was 600 and it truncated the real 1.11.0 notice
+ * mid-sentence, which is the failure that matters: a cap that cuts the last
+ * thing the writer chose to say is worse than no cap.
+ */
+const INTRO_CAP = 900;
+
+/**
+ * The prose a release opens with, above its first heading.
+ *
+ * The sections below are a list of what changed; this is the sentence somebody
+ * wrote because no commit range could produce it — "nothing to do to install
+ * this", "every view comes across as it was", "the settings window has moved".
+ * It was reaching GitHub and stopping there: the dialog rendered only bullets,
+ * so the reassurance an operator most needs after an update they did not
+ * initiate was the one thing they could not see.
+ *
+ * Stops at the FIRST heading of any kind, which is what keeps the Install
+ * section's shell commands out — they live under `## Install`, below every
+ * change list.
+ *
+ * Returns null when the body has no headings at all. That is a git checkout's
+ * changelog, which is bare commit subjects; treating those as prose would put
+ * the whole changelog in the dialog twice.
+ */
+export function parseReleaseIntro(body: string | null | undefined): string | null {
+  if (!body) return null;
+  if (!/^#{1,6}\s/m.test(body)) return null;
+
+  const out: string[] = [];
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (/^#{1,6}\s/.test(line)) break;
+    // A fenced block before the first heading is a command, not a sentence.
+    if (line.startsWith("```")) break;
+    if (!line) {
+      // Blank line: a paragraph break, kept only between text we already have.
+      if (out.length && out[out.length - 1] !== "") out.push("");
+      continue;
+    }
+    if (line.startsWith("- ") || line.startsWith("* ")) continue;
+    // Blockquote and emphasis markers are markdown furniture; the dialog styles
+    // its own text and would otherwise render the leading ">" literally.
+    out.push(line.replace(/^>\s?/, "").replace(/\*\*/g, "").replace(/`/g, ""));
+  }
+
+  const text = out.join("\n").trim().replace(/\n{3,}/g, "\n\n");
+  if (!text) return null;
+  return text.length > INTRO_CAP ? `${text.slice(0, INTRO_CAP).trimEnd()}…` : text;
+}
+
+/**
  * Group a release body's change lines by section.
  *
  * Total lines are capped, not lines per section, and the cap is spent in

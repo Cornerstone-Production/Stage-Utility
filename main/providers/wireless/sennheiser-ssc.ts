@@ -80,6 +80,7 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
     return [...this.channels.values()].map((st) => ({
       id: st.channelId,
       label: st.name ?? `Ch ${st.channelId}`,
+      deviceType: st.deviceType,
     }));
   }
 

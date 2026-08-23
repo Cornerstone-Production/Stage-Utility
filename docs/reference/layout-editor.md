@@ -5,6 +5,27 @@ that is not the shape they were designed for, and how the look is reset.
 
 Reach it from **Screens**, then **Edit layout** on any view with a custom layout.
 
+## The inspector
+
+Select an object and its settings appear on the right, in three sections that are
+always in the same order:
+
+| | |
+|---|---|
+| **Content** | what this widget shows — the channel a mic tile reads, the mode OBS status watches, the text of a text object. Different for every widget type, and absent for the ones that have nothing to choose |
+| **Look** | how it is drawn — surface, tint, font size and weight, colour, alignment, corner radius, border. The same controls for every widget |
+| **Place** | where it sits — position, size, and how it behaves when the window is not the shape it was designed for |
+
+The split is worth knowing because it tells you where to look: anything that
+changes the NUMBER is in Content, anything that changes how the number is DRAWN
+is in Look. They used to be one list, and on a widget with a dozen settings the
+one you wanted was wherever it happened to have been added.
+
+**Content is hidden entirely** on a widget with nothing to configure — a clock
+showing the time needs no source — rather than left as an empty heading.
+
+See [Widget reference](widgets.md) for what each widget's Content settings mean.
+
 ## Placing objects
 
 Objects are stored as fractions of the canvas (0–1), never pixels, so a layout
