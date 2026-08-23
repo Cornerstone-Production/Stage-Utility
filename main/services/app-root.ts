@@ -20,11 +20,46 @@ const MARKERS = ["package.json", "VERSION"];
 /** Guards against walking to `/` on a filesystem where no marker exists. */
 const MAX_DEPTH = 8;
 
+/** Does this directory actually look like the app's own install? */
+function looksLikeAppRoot(dir: string): boolean {
+  try {
+    if (!fs.statSync(dir).isDirectory()) return false;
+  } catch {
+    return false;
+  }
+  return MARKERS.some((m) => fs.existsSync(path.join(dir, m)));
+}
+
 function resolveAppRoot(): string {
   // An explicit override wins. The packaged launcher sets this, which makes the
   // answer independent of how the process was started.
+  //
+  // VALIDATED, not just resolved. This value ends up as the script path the
+  // updater spawns and as the cwd it spawns in, so a typo used to mean the
+  // updater ran a script from a directory that is not the app — and CodeQL
+  // reads it, correctly, as an unchecked environment variable reaching a
+  // command line. Requiring a real directory carrying one of the app's own
+  // markers is the check that makes it a verified app root rather than an
+  // arbitrary string.
+  //
+  // An override that fails the check is IGNORED rather than fatal, and says so:
+  // falling back to the search below finds the right answer in every case where
+  // the override was simply wrong, and refusing to boot over an environment
+  // variable would take a display wall down for a typo.
   const override = process.env.STAGE_UTILITY_ROOT?.trim();
-  if (override) return path.resolve(override);
+  if (override) {
+    const resolved = path.resolve(override);
+    if (looksLikeAppRoot(resolved)) return resolved;
+    // The VALUE is deliberately not echoed. This module stays dependency-free —
+    // it resolves at import time and is copied verbatim by the bundler, which is
+    // what app-root.test.ts reproduces — so it has no scrub() to hand, and
+    // interpolating an unscrubbed environment variable into a LAN-visible log is
+    // the exact bug being fixed three files over. Whoever set the variable can
+    // read it back; the log only has to say it was ignored and why.
+    console.warn(
+      `[app-root] ignoring STAGE_UTILITY_ROOT: not a directory containing ${MARKERS.join(" or ")}`,
+    );
+  }
 
   let dir = path.dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < MAX_DEPTH; i++) {

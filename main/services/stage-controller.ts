@@ -260,7 +260,7 @@ export class StageController {
     const { patch, converted } = await migrateInlineBrandingImages(settings);
     if (converted.length > 0) {
       settings = await settingsStore.patch(patch);
-      console.log(`[stage-controller] moved ${converted.length} branding image(s) out of settings:`, converted.join(", "));
+      console.log(`[stage-controller] moved ${scrub(converted.length)} branding image(s) out of settings:`, converted.join(", "));
     }
 
     const showQr = settings.showQr ?? true;
@@ -432,7 +432,7 @@ export class StageController {
     // will pull that screen into panel mode, and the only way an operator learns
     // that is by being told.
     for (const line of migrationLog(result)) {
-      console.log(`[surface-migration] ${line}`);
+      console.log(`[surface-migration] ${scrub(line)}`);
     }
     return { views: result.views, outputs: result.outputs };
   }
@@ -973,7 +973,7 @@ export class StageController {
       console.log("[stage-controller] selectNextPlan: already at the last upcoming plan");
       return this.state;
     }
-    console.log(`[stage-controller] selectNextPlan → ${next.id} (${next.title})`);
+    console.log(`[stage-controller] selectNextPlan → ${scrub(next.id)} (${scrub(next.title)})`);
     await this.applyPlan(next);
     return this.state;
   }
@@ -1042,7 +1042,7 @@ export class StageController {
           best = { type, plan: nearest };
         }
       } catch (err) {
-        console.error(`[stage-controller] selectGlobalNextPlan — error fetching plans for type ${type.id}:`, err);
+        console.error(`[stage-controller] selectGlobalNextPlan — error fetching plans for type ${scrub(type.id)}:`, err);
       }
     }
 
@@ -1171,7 +1171,7 @@ export class StageController {
     if (!this.state.serviceTypeId) {
       console.log("[stage-controller] setViewSlots: no active service type — slots not persisted");
     } else {
-      console.log(`[stage-controller] setViewSlots (${slots.length} slots) for view=${scrub(viewId)} serviceType=${scrub(this.state.serviceTypeId)}`);
+      console.log(`[stage-controller] setViewSlots (${scrub(slots.length)} slots) for view=${scrub(viewId)} serviceType=${scrub(this.state.serviceTypeId)}`);
       await slotsStore.setSlots(viewId, this.state.serviceTypeId, slots);
     }
     this.rawSlotsByView.set(viewId, slots);
@@ -1187,7 +1187,7 @@ export class StageController {
     if (!this.state.serviceTypeId) {
       console.log("[stage-controller] setLayoutObjectSlots: no active service type — slots not persisted");
     } else {
-      console.log(`[stage-controller] setLayoutObjectSlots (${slots.length} slots) for object=${scrub(objectId)} serviceType=${scrub(this.state.serviceTypeId)}`);
+      console.log(`[stage-controller] setLayoutObjectSlots (${scrub(slots.length)} slots) for object=${scrub(objectId)} serviceType=${scrub(this.state.serviceTypeId)}`);
       await slotsStore.setSlots(objectId, this.state.serviceTypeId, slots);
     }
     this.rawSlotsByObject.set(objectId, slots);
@@ -1312,7 +1312,7 @@ export class StageController {
   async setTimezone(tz: string | null): Promise<StageState> {
     const next = tz && tz.trim() ? tz.trim() : null;
     if (next !== null && !isValidTimeZone(next)) throw new Error(`Unknown time zone: ${next}`);
-    console.log(`[stage-controller] setTimezone -> ${next ?? "follow host"} (host is ${hostTimeZone()})`);
+    console.log(`[stage-controller] setTimezone -> ${scrub(next ?? "follow host")} (host is ${scrub(hostTimeZone())})`);
     setAppTimeZone(next);
     this.state = { ...this.state, timezone: next, hostTimezone: hostTimeZone() };
     await settingsStore.patch({ timezone: next });
@@ -1358,7 +1358,7 @@ export class StageController {
         }
       }
       serviceWindow.setWindows(windows);
-      console.log(`[stage-controller] reconnect windows recomputed: ${windows.length}`);
+      console.log(`[stage-controller] reconnect windows recomputed: ${scrub(windows.length)}`);
     } catch (err) {
       console.warn("[stage-controller] refreshServiceWindows failed:", err instanceof Error ? err.message : err);
     }
@@ -1600,7 +1600,7 @@ export class StageController {
   }
 
   async deletePreset(id: string): Promise<SlotPreset[]> {
-    console.log(`[stage-controller] deletePreset ${id}`);
+    console.log(`[stage-controller] deletePreset ${scrub(id)}`);
     const presets = await presetsStore.load();
     const updated = presets.filter((p) => p.id !== id);
     await presetsStore.save(updated);
@@ -1616,7 +1616,7 @@ export class StageController {
       slots: slots.map((s, i) => ({ ...s, id: randomUUID(), order: i })),
       createdAt: new Date().toISOString(),
     };
-    console.log(`[stage-controller] importPreset "${scrub(newPreset.name)}" (${newPreset.slots.length} slots)`);
+    console.log(`[stage-controller] importPreset "${scrub(newPreset.name)}" (${scrub(newPreset.slots.length)} slots)`);
     const updated = [...presets, newPreset];
     await presetsStore.save(updated);
     return updated;
@@ -1636,7 +1636,7 @@ export class StageController {
       }
     }
     for (const p of byId.values()) reordered.push(p);
-    console.log(`[stage-controller] reorderPresets → ${reordered.map((p) => p.id).join(", ")}`);
+    console.log(`[stage-controller] reorderPresets → ${scrub(reordered.map((p) => p.id).join(", "))}`);
     await presetsStore.save(reordered);
     return reordered;
   }
@@ -1660,7 +1660,7 @@ export class StageController {
     const presets = await presetsStore.load();
     if (!presets.find((p) => p.id === id)) throw new Error(`Preset ${id} not found`);
     const rawSlots = explicitSlots ?? this.rawSlotsByView.get(viewId) ?? [];
-    console.log(`[stage-controller] overwritePreset ${scrub(id)} (${rawSlots.length} slots)`);
+    console.log(`[stage-controller] overwritePreset ${scrub(id)} (${scrub(rawSlots.length)} slots)`);
     const updated = presets.map((p) =>
       p.id === id ? { ...p, slots: rawSlots.map((s) => ({ ...s, id: randomUUID() })) } : p,
     );
@@ -1747,7 +1747,7 @@ export class StageController {
     }
 
     const views = this.state.views.map((v) => (v.id === id ? { ...v, surface } : v));
-    console.log(`[stage-controller] setViewSurface view=${scrub(id)} → ${surface}`);
+    console.log(`[stage-controller] setViewSurface view=${scrub(id)} → ${scrub(surface)}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();
@@ -1849,7 +1849,7 @@ export class StageController {
     }
     const views = this.state.views.map((v) => (v.id === id ? { ...v, layout, layoutRev: rev + 1 } : v));
     const objectCount = Array.isArray(layout.objects) ? layout.objects.length : 0;
-    console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${scrub(objectCount)} objects) rev=${rev + 1}`);
+    console.log(`[stage-controller] setViewLayout id=${scrub(id)} (${scrub(objectCount)} objects) rev=${scrub(rev + 1)}`);
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     // Load raw slots for any newly-added inline mic-slots objects, and drop the
@@ -1944,7 +1944,7 @@ export class StageController {
     if (screensListViews(this.state.views).length <= 1) {
       throw new Error("views:delete — cannot remove the last view");
     }
-    console.log(`[stage-controller] deleteView id=${id}`);
+    console.log(`[stage-controller] deleteView id=${scrub(id)}`);
     const removed = this.state.views.find((v) => v.id === id);
     const views = this.state.views.filter((v) => v.id !== id);
     // Drop any inline mic-slots stored for this view's layout objects.
@@ -1999,7 +1999,7 @@ export class StageController {
       }
     }
     for (const v of byId.values()) reordered.push(v);
-    console.log(`[stage-controller] reorderViews → ${reordered.map((v) => v.id).join(", ")}`);
+    console.log(`[stage-controller] reorderViews → ${scrub(reordered.map((v) => v.id).join(", "))}`);
     this.state = { ...this.state, views: reordered };
     await viewsStore.save(reordered);
     this.recomputeResolved();
@@ -2155,7 +2155,7 @@ export class StageController {
     }
 
     const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, mode } : o));
-    console.log(`[stage-controller] setOutputMode output=${scrub(id)} → ${mode}`);
+    console.log(`[stage-controller] setOutputMode output=${scrub(id)} → ${scrub(mode)}`);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
     this.recomputeResolved();
@@ -2199,7 +2199,7 @@ export class StageController {
       throw new Error(`outputs:setBlackout — output ${id} not found`);
     }
     const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, blackout } : o));
-    console.log(`[stage-controller] setOutputBlackout output=${id} → ${blackout ? "ON" : "off"}`);
+    console.log(`[stage-controller] setOutputBlackout output=${scrub(id)} → ${scrub(blackout ? "ON" : "off")}`);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
     this.recomputeResolved();
@@ -2214,7 +2214,7 @@ export class StageController {
       throw new Error(`outputs:setLocked — output ${id} not found`);
     }
     const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, locked } : o));
-    console.log(`[stage-controller] setOutputLocked output=${id} → ${locked ? "LOCKED" : "unlocked"}`);
+    console.log(`[stage-controller] setOutputLocked output=${scrub(id)} → ${scrub(locked ? "LOCKED" : "unlocked")}`);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
     this.recomputeResolved();
@@ -2234,7 +2234,7 @@ export class StageController {
       }
     }
     for (const o of byId.values()) reordered.push(o);
-    console.log(`[stage-controller] reorderOutputs → ${reordered.map((o) => o.id).join(", ")}`);
+    console.log(`[stage-controller] reorderOutputs → ${scrub(reordered.map((o) => o.id).join(", "))}`);
     this.state = { ...this.state, outputs: reordered };
     await settingsStore.patch({ outputs: reordered });
     this.recomputeResolved();
@@ -2249,7 +2249,7 @@ export class StageController {
     if (!this.state.outputs.find((o) => o.id === id)) {
       throw new Error(`outputs:remove — output ${id} not found`);
     }
-    console.log(`[stage-controller] removeOutput id=${id}`);
+    console.log(`[stage-controller] removeOutput id=${scrub(id)}`);
     const outputs = this.state.outputs.filter((o) => o.id !== id);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
@@ -2308,7 +2308,7 @@ export class StageController {
   }
 
   async refresh(full = true): Promise<StageState> {
-    console.log(`[stage-controller] refresh (${full ? "full" : "targeted"})`);
+    console.log(`[stage-controller] refresh (${scrub(full ? "full" : "targeted")})`);
     // Manual "Refresh now" (full) drops the whole cache for a clean re-pull. The
     // unattended periodic tick only invalidates the active plan, so static
     // metadata (service types, note categories, team positions, other plans'
@@ -2337,7 +2337,7 @@ export class StageController {
 
   startAutoRefresh(intervalMs = 60 * 60 * 1000): void {
     this.stopAutoRefresh();
-    console.log(`[stage-controller] auto-refresh every ${Math.round(intervalMs / 60000)} min`);
+    console.log(`[stage-controller] auto-refresh every ${scrub(Math.round(intervalMs / 60000))} min`);
     this.autoRefreshIntervalMs = intervalMs;
     this.autoRefreshTimer = setInterval(() => {
       void this.autoRefreshTick();
@@ -2586,7 +2586,7 @@ export class StageController {
         planId,
       );
       this.teamMembersKey = key;
-      console.log(`[stage-controller] fetched ${this.teamMembers.length} team members`);
+      console.log(`[stage-controller] fetched ${scrub(this.teamMembers.length)} team members`);
     } catch (err) {
       // Offline is not "nobody is scheduled". This used to clear the roster, and
       // the caller re-resolves every slot straight afterwards — so a 30-second

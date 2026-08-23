@@ -77,3 +77,52 @@ describe("scrub coverage in pco-service.ts", () => {
     assert.deepEqual(offenders, [], "these log sites interpolate unscrubbed values");
   });
 });
+
+// The check above passes whether or not anybody CALLS it, which is how it came
+// to be applied at one of three sites and missed at the other two. CodeQL found
+// them as two critical js/request-forgery alerts: `links.next` from a response
+// body, handed straight to request(), which attaches the operator's App ID and
+// secret.
+//
+// So this asserts APPLICATION, not existence, and matches on the assignment
+// rather than the word — prose cannot satisfy it. Counts are EXACT: a new
+// follow-the-link site fails here until it is guarded, rather than riding along
+// under a floor.
+describe("sameOrigin is applied wherever a body URL is followed", () => {
+  const src = fs.readFileSync(path.join(HERE, "pco-service.ts"), "utf8");
+  const lines = src.split("\n");
+
+  it("every URL taken from links.next is guarded", () => {
+    const offenders: string[] = [];
+    lines.forEach((line, i) => {
+      // The assignment that decides what the next request goes to.
+      if (!/\burl\s*=\s*/.test(line)) return;
+      if (!/\bnext\b/.test(line)) return;
+      if (!line.includes("sameOrigin(")) offenders.push(`${i + 1}: ${line.trim()}`);
+    });
+    assert.deepEqual(offenders, [], "these follow a response-body URL without checking its origin");
+  });
+
+  it("and there are exactly the three sites we know about", () => {
+    // One live-action URL plus two pagination follows. A fourth appearing
+    // without a guard fails the test above; a fourth appearing WITH one fails
+    // this, so it has to be looked at either way.
+    const uses = lines.filter((l) => l.includes("sameOrigin(") && !l.includes("function sameOrigin"));
+    assert.equal(uses.length, 3, `expected 3 guarded sites, found ${uses.length}:\n  ${uses.join("\n  ")}`);
+  });
+
+  it("no fetch in this file takes a URL that skipped the guard", () => {
+    // The sinks themselves: requestInner, postAction and postJson. All three
+    // take a `url` PARAMETER, so the origin check has to happen in the callers
+    // above — this pins that no sink has grown a form that builds its own URL
+    // out of response data where the guard could not reach it.
+    //
+    // postJson is the one worth naming: it is only ever called with a URL built
+    // from PCO_BASE, but it exists to open an attachment, whose RESPONSE is a
+    // temporary link. If that link ever becomes something this server fetches
+    // rather than something it hands to the browser, it needs the guard too.
+    const fetches = lines.filter((l) => /\bfetch\(/.test(l));
+    assert.equal(fetches.length, 3, `expected 3 fetch sites, found ${fetches.length}`);
+    for (const f of fetches) assert.match(f, /fetch\(url\b/, `fetch takes something other than the checked url: ${f.trim()}`);
+  });
+});
