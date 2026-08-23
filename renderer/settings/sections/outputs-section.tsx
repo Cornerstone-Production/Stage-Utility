@@ -1,12 +1,13 @@
 import { ScreenDevice } from "../../app/screens/screen-device";
 import { ScreenSignageGroups } from "../../app/screens/screen-signage-groups";
 import { NewScreenDialog } from "./new-screen-dialog";
+import { AppLink } from "../../app/app-link";
 import { useState, useEffect, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon, RotateCwIcon, CheckIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
@@ -30,7 +31,7 @@ import { IconTint } from "../../components/icon-tint";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
-import { viewSurface, outputMode } from "@main/types/views";
+import { viewSurface, outputMode, screenRotation } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
@@ -86,6 +87,7 @@ interface OutputRowProps {
   /** Awaited: switching a screen to a panel must LAND before a console view
    *  is assigned to it, because the server refuses the pair in the wrong order. */
   onSetMode: (mode: "display" | "panel") => Promise<void>;
+  onSetRotation: (rotation: 0 | 90 | 180 | 270) => Promise<void>;
   onOpenWindow: () => void;
   onRefresh: () => void;
   onRemove: () => void;
@@ -98,7 +100,7 @@ interface OutputRowProps {
 // One card per display: the name reads as a title, the View it shows is the one
 // prominent control, Open + Lock stay in reach, and the URL sits quietly in the
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
-function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetMode, onOpenWindow, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetMode, onSetRotation, onOpenWindow, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   const [renamingView, setRenamingView] = useState(false);
@@ -279,6 +281,39 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
                   : <HandIcon className="size-3.5 text-fg-subtle" />}
                 {outputMode(output) === "panel" ? "Use as a display" : "Use as a control surface"}
               </DropdownMenu.Item>
+              {/* How the panel is MOUNTED — a physical fact about the TV, not a
+                  property of what it is playing. Four quarter turns, because a
+                  panel is hung one of four ways and an arbitrary angle is a
+                  mis-typed number that leaves a wall crooked. */}
+              <DropdownMenu.Sub>
+                <DropdownMenu.SubTrigger className={MENU_ITEM}>
+                  <RotateCwIcon className="size-3.5 text-fg-subtle" />
+                  Rotation
+                  <span className="ml-auto text-caption2 text-fg-subtle">
+                    {screenRotation(output) === 0 ? "Normal" : `${screenRotation(output)}°`}
+                  </span>
+                </DropdownMenu.SubTrigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.SubContent className={MENU_CONTENT} sideOffset={2}>
+                    {([0, 90, 180, 270] as const).map((deg) => (
+                      <DropdownMenu.Item
+                        key={deg}
+                        onSelect={() => void onSetRotation(deg)}
+                        className={MENU_ITEM}
+                      >
+                        <CheckIcon
+                          className={
+                            screenRotation(output) === deg
+                              ? "size-3.5 text-accent"
+                              : "size-3.5 opacity-0"
+                          }
+                        />
+                        {deg === 0 ? "Normal" : deg === 180 ? "Upside down" : `${deg}° clockwise`}
+                      </DropdownMenu.Item>
+                    ))}
+                  </DropdownMenu.SubContent>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Sub>
               <DropdownMenu.Item
                 onSelect={() => onSetLocked(!(output.locked ?? false))}
                 className={MENU_ITEM}
@@ -348,6 +383,9 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           // The preview iframe sets pointer-events:none, so the click lands here.
           <LazyPreview
             viewId={output.viewId}
+            // Signage resolves per OUTPUT, so its card previews the screen
+            // rather than the view every signage screen shares.
+            outputId={assignedView?.kind === "signage" ? output.id : undefined}
             onExpand={onEditLayout}
             expandLabel={`Edit what ${output.name} shows`}
           />
@@ -581,6 +619,17 @@ export function OutputsSection({
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
   const [addingScreen, setAddingScreen] = useState(false);
 
+  // Signage screens sit in their own section. A building can have a dozen of
+  // them and they are all configured in one place (Signage), so mixed in they
+  // pushed the two or three screens anyone actually edits here off the fold.
+  // Same card, same controls — only the grouping differs.
+  const signageViewIds = new Set(
+    (stageState.views ?? []).filter((v) => v.kind === "signage").map((v) => v.id),
+  );
+  const isSignageOutput = (o: Output) => !!o.viewId && signageViewIds.has(o.viewId);
+  const mainOutputs = outputs.filter((o) => !isSignageOutput(o));
+  const signageOutputs = outputs.filter(isSignageOutput);
+
   // A view no screen points at. Without a home these are unreachable: the only
   // way in was the Views list this page replaced.
   const assigned = new Set(outputs.map((o) => o.viewId).filter(Boolean));
@@ -633,7 +682,7 @@ export function OutputsSection({
             computes the wrong drop target as soon as there are two. */}
         <SortableContext items={outputs.map((o) => o.id)} strategy={rectSortingStrategy}>
           <div className="grid gap-3 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
-            {outputs.map((output) => (
+            {mainOutputs.map((output) => (
               <OutputRow
                 key={output.id}
                 output={output}
@@ -648,6 +697,7 @@ export function OutputsSection({
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
                 onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
+                onSetRotation={(rotation) => handlers.handleSetOutputRotation(output.id, rotation)}
                 onOpenWindow={() => handlers.handleOpenOutputWindow(output.id)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}
@@ -682,6 +732,48 @@ export function OutputsSection({
               </span>
             </button>
           </div>
+
+          {signageOutputs.length > 0 && (
+            <>
+              <div className="flex items-baseline gap-2 pt-5">
+                <h3 className="text-subheadline font-semibold text-fg">Signage</h3>
+                <span className="text-caption1 text-fg-subtle">
+                  {signageOutputs.length} {signageOutputs.length === 1 ? "screen" : "screens"} —
+                  what they play is set under{" "}
+                  <AppLink to="/signage" className="text-accent hover:underline">
+                    Signage
+                  </AppLink>
+                </span>
+              </div>
+              <div className="grid gap-3 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
+                {signageOutputs.map((output) => (
+                  <OutputRow
+                    key={output.id}
+                    output={output}
+                    views={views}
+                    baseUrl={baseUrl}
+                    online={connected.has(output.id)}
+                    canRemove={outputs.length > 1}
+                    iconColor={stageState.iconColors?.[output.id]}
+                    onRename={(name) => handlers.handleRenameOutput(output.id, name)}
+                    onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
+                    onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
+                    onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
+                    onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
+                    onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
+                    onSetRotation={(rotation) => handlers.handleSetOutputRotation(output.id, rotation)}
+                    onOpenWindow={() => handlers.handleOpenOutputWindow(output.id)}
+                    onRefresh={() => handlers.handleRefreshDisplay(output.id)}
+                    onRemove={() => handlers.handleRemoveOutput(output.id)}
+                    onEditLayout={
+                      onEditLayout && output.viewId ? () => onEditLayout(output.viewId!) : undefined
+                    }
+                    onRequestNewView={() => setCreatingFor(output.id)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </SortableContext>
       </DndContext>
 

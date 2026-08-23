@@ -759,6 +759,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "outputs:setMode":
       return patch<T>(`/api/outputs/${encodeURIComponent(String(p.id))}`, { mode: p.mode });
 
+    case "outputs:setRotation":
+      return patch<T>(`/api/outputs/${encodeURIComponent(String(p.id))}`, { rotation: p.rotation });
+
     case "barItems:set":
       return post<T>("/api/bar-items", p);
 

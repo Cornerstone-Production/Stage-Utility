@@ -741,6 +741,15 @@ export function useStageSettings() {
     }
   }
 
+  async function handleSetOutputRotation(id: string, rotation: 0 | 90 | 180 | 270) {
+    try {
+      const next = await ipc<StageState>("outputs:setRotation", { id, rotation });
+      queryClient.setQueryData(["stage:getState"], next);
+    } catch (err) {
+      toast.error(`Failed to rotate screen: ${errorMessage(err)}`);
+    }
+  }
+
   async function handleRenameOutput(id: string, name: string) {
     try {
       const next = await ipc<StageState>("outputs:rename", { id, name });
@@ -895,6 +904,7 @@ export function useStageSettings() {
     handleOverwritePreset,
     handleAddOutput,
     handleCreateScreen,
+    handleSetOutputRotation,
     handleRenameOutput,
     handleSetOutputView,
     handleSetOutputLocked,

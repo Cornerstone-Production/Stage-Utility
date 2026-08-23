@@ -429,12 +429,21 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasSlug = typeof body.slug === "string";
       const mode = body.mode === "panel" ? "panel" : body.mode === "display" ? "display" : null;
       const hasMode = mode !== null;
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasSlug && !hasMode) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
+      // Four quarter turns, not free-form degrees: a panel is mounted one of
+      // four ways, and an arbitrary angle is a mis-typed number that leaves a
+      // wall crooked with no obvious way back.
+      const rotation =
+        body.rotation === 0 || body.rotation === 90 || body.rotation === 180 || body.rotation === 270
+          ? body.rotation
+          : null;
+      const hasRotation = rotation !== null;
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasSlug && !hasMode && !hasRotation) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.mode (\"display\"|\"panel\"), body.rotation (0|90|180|270), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameOutput(id, body.name as string);
+      if (hasRotation) state = await stageController.setOutputRotation(id, rotation);
       // Mode BEFORE viewId, so a single request can turn a screen into a panel
       // and point it at a console. The other order refuses its own second half.
       if (hasMode) {

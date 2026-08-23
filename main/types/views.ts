@@ -727,6 +727,28 @@ export interface Output {
    *  Only a "panel" may be bound to a console View, enforced server-side in
    *  stage-controller's setOutputView. */
   mode?: OutputMode;
+  /**
+   * How the panel is mounted, in degrees clockwise. Absent = 0.
+   *
+   * A physical fact about the TV on the wall, which is why it lives on the
+   * SCREEN and not on the content: that panel is portrait whatever is playing
+   * on it, and a playlist that plays on both a portrait and a landscape wall
+   * cannot carry the answer.
+   *
+   * Applied as a transform on the whole kiosk surface, so 90 and 270 swap the
+   * width and height the content is laid out in.
+   */
+  rotation?: ScreenRotation;
+}
+
+/** Quarter turns clockwise. Not free-form degrees: a panel is mounted one of
+ *  four ways, and an arbitrary angle is a mis-typed number that leaves a wall
+ *  crooked with no obvious way back. */
+export type ScreenRotation = 0 | 90 | 180 | 270;
+
+/** Read a screen's rotation, tolerating anything a hand-edited store holds. */
+export function screenRotation(o: Pick<Output, "rotation">): ScreenRotation {
+  return o.rotation === 90 || o.rotation === 180 || o.rotation === 270 ? o.rotation : 0;
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */
@@ -737,6 +759,8 @@ export interface ResolvedOutput {
   viewName: string | null;
   blackout: boolean;
   locked: boolean;
+  /** Degrees clockwise the panel is mounted at. See Output.rotation. */
+  rotation: ScreenRotation;
 }
 
 /**

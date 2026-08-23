@@ -24,10 +24,13 @@ export function ViewPreview({
   viewId,
   aspect = 16 / 9,
   draftSlots = null,
+  outputId,
 }: {
   viewId: string;
   aspect?: number;
   draftSlots?: Slot[] | null;
+  /** Preview this output instead of the view. See LazyPreview for why. */
+  outputId?: string;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -84,7 +87,7 @@ export function ViewPreview({
       <iframe
         ref={iframeRef}
         key={`${viewId}:${designH}`}
-        src={`/preview-${encodeURIComponent(viewId)}`}
+        src={outputId ? `/preview-out-${encodeURIComponent(outputId)}` : `/preview-${encodeURIComponent(viewId)}`}
         title="View preview"
         tabIndex={-1}
         onLoad={() => postDraft(iframeRef.current?.contentWindow)}

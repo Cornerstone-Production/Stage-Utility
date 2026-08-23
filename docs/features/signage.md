@@ -2,10 +2,15 @@
 
 Graphics and video on a schedule, on tagged sets of screens.
 
-A signage screen is an ordinary screen. It is set up in [Screens](../kiosk-devices.md)
-like any other, then routed to a **Signage** view; what it plays is worked out on
-the server and pushed to it. Nothing about a signage screen is special to the
-device, so swapping a dead Pi loses nothing.
+A signage screen is an ordinary screen. Add one under [Screens](../kiosk-devices.md)
+and choose **Signage**; what it plays is worked out on the server and pushed to
+it. Nothing about a signage screen is special to the device, so swapping a dead
+Pi loses nothing.
+
+Signage screens get their own section on the Screens page, and each card shows a
+live preview of what that screen is actually playing. A screen mounted portrait
+is set with **Rotation** on its own card — it is a fact about the panel, not
+about the content.
 
 ## The parts
 

@@ -20,6 +20,15 @@ export interface SignageBootRecord {
   /** The output's canonical id. A screen may be visited at a friendly slug, and
    *  the persisted plan — and everything else — is keyed by id, never by slug. */
   outputId: string;
+  /**
+   * Degrees clockwise the panel is mounted at.
+   *
+   * Here for the same reason the output id is: it is something the screen has
+   * to know BEFORE it has heard from anybody. A portrait TV coming up after a
+   * power cut has to come up portrait, and the server that would have said so
+   * is the thing that is missing.
+   */
+  rotation?: number;
 }
 
 /** A kiosk device's own URL. It always opens `/enroll?device=<id>` and is
@@ -36,10 +45,14 @@ export function readSignageBoot(): SignageBootRecord | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { path?: unknown; outputId?: unknown };
+    const parsed = JSON.parse(raw) as { path?: unknown; outputId?: unknown; rotation?: unknown };
     if (typeof parsed.path !== "string" || typeof parsed.outputId !== "string") return null;
     if (!parsed.path || !parsed.outputId) return null;
-    return { path: parsed.path, outputId: parsed.outputId };
+    const rotation =
+      parsed.rotation === 90 || parsed.rotation === 180 || parsed.rotation === 270
+        ? parsed.rotation
+        : 0;
+    return { path: parsed.path, outputId: parsed.outputId, rotation };
   } catch {
     // Unreadable or malformed reads the same as "nothing remembered", which the
     // caller already handles: wait for the server like every other screen.
@@ -54,9 +67,13 @@ export function readSignageBoot(): SignageBootRecord | null {
  * holding a screen that will NOT come back on its own, which is worth saying
  * out loud rather than discovering after a power cut.
  */
-export function rememberSignageBoot(pathSlug: string, outputId: string): boolean {
+export function rememberSignageBoot(
+  pathSlug: string,
+  outputId: string,
+  rotation = 0,
+): boolean {
   try {
-    const record: SignageBootRecord = { path: normalise(pathSlug), outputId };
+    const record: SignageBootRecord = { path: normalise(pathSlug), outputId, rotation };
     localStorage.setItem(KEY, JSON.stringify(record));
     return true;
   } catch {

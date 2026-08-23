@@ -152,14 +152,20 @@ never carry a credential or a site's server address.
 
 ## Using one for signage
 
-A screen showing graphics on a schedule is set up exactly like any other — it is
-the VIEW it is routed to that makes it signage, and Signage can do that routing
-for you. See [signage](features/signage.md).
+Choose **Signage** when you add the screen. It is routed to the Signage view for
+you, and appears in its own section on the Screens page. See
+[signage](features/signage.md).
 
 A signage device is the one kind that comes back after a power cut with no server
 on the network. It needs one run against a live server first, and **Prepare for
 offline** has to be opened on the device itself — see
 [coming back after a power cut](features/signage.md#coming-back-after-a-power-cut).
+
+## Rotation
+
+A screen's menu has **Rotation** — normal, 90°, upside down, 270°. It describes
+how the panel is MOUNTED, so it applies to whatever that screen is showing, and
+a portrait screen comes back portrait after a power cut without a server to ask.
 
 ## Removing one
 

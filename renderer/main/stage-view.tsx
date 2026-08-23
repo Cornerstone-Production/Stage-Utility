@@ -17,7 +17,9 @@ import { LayoutRenderer } from "./layout-renderer";
 import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
-import { resolveDisplayId } from "./resolve-display";
+import { parseScreenPath } from "./resolve-display";
+import { rotationStyle } from "./screen-rotation";
+import type { ScreenRotation } from "@main/types/views";
 import {
   forgetSignageBoot,
   isDevicePath,
@@ -40,7 +42,10 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-class StageErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
+class StageErrorBoundary extends Component<
+  { children: ReactNode; rotation?: ScreenRotation },
+  ErrorBoundaryState
+> {
   state: ErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
@@ -53,6 +58,8 @@ class StageErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundar
 
   render() {
     if (this.state.error) {
+      // Deliberately NOT rotated. This is a message for whoever is standing
+      // there with a laptop, and it is readable the way the browser is.
       return (
         <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-4">
           <AlertCircleIcon className="size-8 text-red-10" />
@@ -61,7 +68,17 @@ class StageErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundar
         </div>
       );
     }
-    return this.props.children;
+
+    // Every content branch already goes through this boundary, which makes it
+    // the one place the panel's mounting can be applied without threading a
+    // wrapper through eight separate return statements.
+    const rotation = this.props.rotation ?? 0;
+    if (rotation === 0) return this.props.children;
+    return (
+      <div className="fixed inset-0 overflow-hidden bg-black">
+        <div style={rotationStyle(rotation)}>{this.props.children}</div>
+      </div>
+    );
   }
 }
 
@@ -348,10 +365,10 @@ export function StageView() {
   // downstream (slotsByDisplay, resolvedByOutput, reload targeting) keys off the id,
   // so a slug must never reach them. Falling back to the raw path keeps every
   // pre-slug behavior intact, including the preview- prefix.
-  const displayId = resolveDisplayId(pathSlug, state?.outputs) ?? pathSlug;
-  // Preview slug → view id (null on a real display). Computed before any early
-  // return so the draft-bridge hook is called unconditionally.
-  const previewViewId = displayId.startsWith("preview-") ? displayId.slice("preview-".length) : null;
+  // Every URL shape a kiosk can be opened at, read once — see parseScreenPath.
+  // Computed before any early return so the draft-bridge hook below is called
+  // unconditionally.
+  const { displayId, previewViewId, isPreview } = parseScreenPath(pathSlug, state?.outputs);
   const previewDraftSlots = usePreviewDraftSlots(previewViewId);
 
   // What this browser last played signage on. Read ONCE, synchronously, before
@@ -377,19 +394,19 @@ export function StageView() {
   // targeting this display (or "all"). Lets the operator push new content from
   // Settings without walking to the screen. Preview iframes are never reloaded.
   useEffect(() => {
-    if (displayId.startsWith("preview-")) return;
+    if (isPreview) return;
     return onNotification("display:refresh", (payload: unknown) => {
       const target = (payload as { target?: string } | null)?.target ?? "all";
       if (target === "all" || target === displayId) window.location.reload();
     });
-  }, [displayId]);
+  }, [displayId, isPreview]);
 
   // Presence heartbeat: tell the server this screen is alive so Settings → Displays
   // can show a Connected/Offline dot. Fast cadence near/during a PCO service, slow
   // otherwise (no point pinging every 20s during a dead week); a sendBeacon on unload
   // flips the dot offline at once, and the server TTL catches ungraceful deaths.
   useEffect(() => {
-    if (displayId.startsWith("preview-")) return;
+    if (isPreview) return;
     // The device URL is not an output. A screen sitting there is one whose
     // server was gone when it started; reporting "enroll" as a display would
     // put a screen that does not exist on the Screens page the moment the
@@ -444,22 +461,23 @@ export function StageView() {
       window.removeEventListener("pagehide", leave);
       leave();
     };
-  }, [displayId, atDevicePath]);
+  }, [displayId, atDevicePath, isPreview]);
 
   // Keep the record of what this screen is, so a cold boot with no server has
   // something to go on. Keyed on the resolved KIND rather than the state object,
   // which changes identity on every broadcast — this must not write to storage
   // once a second for the life of a display.
   const resolvedKind = state?.resolvedByOutput?.[displayId]?.kind ?? null;
+  const resolvedRotation = state?.resolvedByOutput?.[displayId]?.rotation ?? 0;
   const hasState = state !== null;
   useEffect(() => {
     // Only a real, routed output is a screen. A preview iframe is not, and the
     // device URL is a redirect — recording either would point a cold boot at
     // something that cannot play.
-    if (!hasState || previewViewId || atDevicePath) return;
+    if (!hasState || isPreview || atDevicePath) return;
     const stored =
       resolvedKind === "signage"
-        ? rememberSignageBoot(pathSlug, displayId)
+        ? rememberSignageBoot(pathSlug, displayId, resolvedRotation)
         : forgetSignageBoot(pathSlug);
     if (!stored) {
       // Returned, not swallowed. Nobody stands at a wall screen, but this is the
@@ -469,7 +487,7 @@ export function StageView() {
         "[kiosk] this browser would not store the screen's kind — a reboot with no server will show an error rather than signage",
       );
     }
-  }, [hasState, previewViewId, atDevicePath, resolvedKind, pathSlug, displayId]);
+  }, [hasState, isPreview, atDevicePath, resolvedKind, resolvedRotation, pathSlug, displayId]);
 
   // The server is back and this browser is still sitting on the device URL, so
   // let the server do the redirecting: it decides which display a device shows,
@@ -488,7 +506,9 @@ export function StageView() {
   // straight to the content rather than flashing a spinner at the room.
   if (offlineSignageOutput && !state) {
     return (
-      <StageErrorBoundary>
+      // The REMEMBERED rotation: there is no server to ask, and a portrait wall
+      // has to come up portrait.
+      <StageErrorBoundary rotation={(remembered?.rotation ?? 0) as ScreenRotation}>
         <SignageScreen outputId={offlineSignageOutput} />
       </StageErrorBoundary>
     );
@@ -515,6 +535,11 @@ export function StageView() {
   // A real output (not a preview) with no View routed to it is unconfigured —
   // show a clear "no view assigned" screen rather than an empty slot grid.
   const resolved = previewViewId ? null : state.resolvedByOutput?.[displayId];
+  // How the panel is mounted. A physical fact about the TV, so it wraps
+  // EVERYTHING this screen draws rather than being a per-view concern — a
+  // portrait wall is portrait whether it is showing signage or mic slots. Never
+  // in a preview iframe, which is a thumbnail in a settings page, not a wall.
+  const rotation = isPreview ? 0 : (resolved?.rotation ?? 0);
   // Per-output kiosk lock (Displays-tab toggle) — never in the settings preview iframe.
   const outputLocked = !previewViewId && (resolved?.locked ?? false);
 
@@ -527,7 +552,7 @@ export function StageView() {
   const isUnrouted = !previewViewId && (!resolved || resolved.viewId === null);
   if (isUnrouted) {
     return (
-      <StageErrorBoundary>
+      <StageErrorBoundary rotation={rotation}>
         <KioskUnrouted state={state} displayName={displayName} locked={outputLocked} />
       </StageErrorBoundary>
     );
@@ -539,7 +564,7 @@ export function StageView() {
     const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
     if (activeView?.layout) {
       return (
-        <StageErrorBoundary>
+        <StageErrorBoundary rotation={rotation}>
           <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
             <KioskTopBar
               serviceTypeName={state.serviceTypeName}
@@ -574,7 +599,7 @@ export function StageView() {
       );
     }
     return (
-      <StageErrorBoundary>
+      <StageErrorBoundary rotation={rotation}>
         <KioskEmpty state={state} displayName={displayName} locked={outputLocked} />
       </StageErrorBoundary>
     );
@@ -583,21 +608,21 @@ export function StageView() {
   // Dashboard- and stage-kind displays render entirely different views.
   if (kind === "dashboard") {
     return (
-      <StageErrorBoundary>
+      <StageErrorBoundary rotation={rotation}>
         <DashboardView displayId={displayId} />
       </StageErrorBoundary>
     );
   }
   if (kind === "stage") {
     return (
-      <StageErrorBoundary>
+      <StageErrorBoundary rotation={rotation}>
         <StageDisplayView displayId={displayId} />
       </StageErrorBoundary>
     );
   }
   if (kind === "transcription") {
     return (
-      <StageErrorBoundary>
+      <StageErrorBoundary rotation={rotation}>
         <TranscriptionView displayId={displayId} />
       </StageErrorBoundary>
     );
@@ -605,7 +630,7 @@ export function StageView() {
   if (kind === "script") {
     const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
     return (
-      <StageErrorBoundary>
+      <StageErrorBoundary rotation={rotation}>
         {/* ScriptView sizes to h-full so it can also live inside a layout object;
             the screen height and the safe-area insets belong to this route. */}
         <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
@@ -616,14 +641,14 @@ export function StageView() {
   }
   if (kind === "spl-rundown") {
     return (
-      <StageErrorBoundary>
+      <StageErrorBoundary rotation={rotation}>
         <SplRundownView displayId={displayId} />
       </StageErrorBoundary>
     );
   }
   if (kind === "signage") {
     return (
-      <StageErrorBoundary>
+      <StageErrorBoundary rotation={rotation}>
         <SignageScreen outputId={displayId} />
       </StageErrorBoundary>
     );
@@ -631,7 +656,7 @@ export function StageView() {
 
   if (!state.pcoConfigured) {
     return (
-      <StageErrorBoundary>
+      <StageErrorBoundary rotation={rotation}>
         <KioskNotConfigured state={state} displayName={displayName} locked={outputLocked} />
       </StageErrorBoundary>
     );
@@ -656,14 +681,14 @@ export function StageView() {
 
   if (sortedSlots.length === 0) {
     return (
-      <StageErrorBoundary>
+      <StageErrorBoundary rotation={rotation}>
         <KioskEmpty state={state} displayName={displayName} locked={outputLocked} />
       </StageErrorBoundary>
     );
   }
 
   return (
-    <StageErrorBoundary>
+    <StageErrorBoundary rotation={rotation}>
       <div className="flex flex-col h-[100dvh] overscroll-none overflow-hidden bg-transparent pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
         <KioskTopBar
           serviceTypeName={state.serviceTypeName}

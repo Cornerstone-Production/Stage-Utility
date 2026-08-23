@@ -111,7 +111,7 @@ describe("a screen booting with no server", () => {
 describe("the boot record", () => {
   test("survives a round trip and normalises the path", () => {
     assert.equal(boot.rememberSignageBoot("/Display-9/", "display-9"), true);
-    assert.deepEqual(boot.readSignageBoot(), { path: "display-9", outputId: "display-9" });
+    assert.deepEqual(boot.readSignageBoot(), { path: "display-9", outputId: "display-9", rotation: 0 });
   });
 
   test("a friendly slug still resolves to the canonical output id", () => {
@@ -119,6 +119,23 @@ describe("the boot record", () => {
     // nothing, and the screen boots black with a perfectly good plan on disk.
     boot.rememberSignageBoot("foyer-north", "display-9");
     assert.equal(boot.signageBootOutput("/foyer-north", boot.readSignageBoot()), "display-9");
+  });
+
+  test("remembers how the panel is mounted, for a boot with no server", () => {
+    // A portrait TV coming up after a power cut has to come up portrait, and
+    // the server that would have said so is exactly what is missing.
+    boot.rememberSignageBoot("display-9", "display-9", 90);
+    assert.equal(boot.readSignageBoot()?.rotation, 90);
+  });
+
+  test("and refuses an angle that is not a quarter turn", () => {
+    // A hand-edited store, or an older record. 47 degrees leaves a wall crooked
+    // with no obvious way back.
+    localStorage.setItem(
+      "stage:signage-screen",
+      JSON.stringify({ path: "display-9", outputId: "display-9", rotation: 47 }),
+    );
+    assert.equal(boot.readSignageBoot()?.rotation, 0);
   });
 
   test("malformed storage reads as nothing remembered", () => {
@@ -140,6 +157,6 @@ describe("the boot record", () => {
     // quietly cost the signage screen its ability to come back after a power cut.
     boot.rememberSignageBoot("display-9", "display-9");
     boot.forgetSignageBoot("display-4");
-    assert.deepEqual(boot.readSignageBoot(), { path: "display-9", outputId: "display-9" });
+    assert.deepEqual(boot.readSignageBoot(), { path: "display-9", outputId: "display-9", rotation: 0 });
   });
 });

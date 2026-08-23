@@ -8,7 +8,7 @@ import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
-import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
+import { viewSurface, outputMode, screenRotation, type ViewSurface, type OutputMode, type ScreenRotation } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub } from "./scrub.js";
@@ -1733,6 +1733,13 @@ export class StageController {
     if (!this.state.views.find((v) => v.id === id)) {
       throw new Error(`views:rename — view ${id} not found`);
     }
+    // Two views called the same thing are indistinguishable in every picker
+    // that offers them, and the picker is how a screen gets pointed at one —
+    // so "point it at Signage" becomes a coin toss.
+    const clash = this.state.views.find(
+      (v) => v.id !== id && v.name.trim().toLowerCase() === trimmed.toLowerCase(),
+    );
+    if (clash) throw new Error(`Another view is already called "${clash.name}".`);
     const views = this.state.views.map((v) => (v.id === id ? { ...v, name: trimmed } : v));
     console.log(`[stage-controller] renameView id=${scrub(id)} name="${scrub(trimmed)}"`);
     this.state = { ...this.state, views };
@@ -2071,6 +2078,13 @@ export class StageController {
     if (!this.state.outputs.find((o) => o.id === id)) {
       throw new Error(`outputs:rename — output ${id} not found`);
     }
+    // Refused for the same reason as a view: two screens called "Foyer" are one
+    // screen as far as anybody reading a list is concerned, including the tag
+    // pickers and the Now board.
+    const clash = this.state.outputs.find(
+      (o) => o.id !== id && o.name.trim().toLowerCase() === trimmed.toLowerCase(),
+    );
+    if (clash) throw new Error(`Another screen is already called "${clash.name}".`);
     const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, name: trimmed } : o));
     console.log(`[stage-controller] renameOutput id=${scrub(id)} name="${scrub(trimmed)}"`);
     this.state = { ...this.state, outputs };
@@ -2164,6 +2178,22 @@ export class StageController {
    * silently unbinding it: the operator would be left with a screen showing
    * nothing and no indication why.
    */
+  /** How the panel is mounted, in quarter turns clockwise. */
+  async setOutputRotation(id: string, rotation: ScreenRotation): Promise<StageState> {
+    const output = this.state.outputs.find((o) => o.id === id);
+    if (!output) throw new Error(`outputs:setRotation — output ${id} not found`);
+
+    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, rotation } : o));
+    console.log(`[stage-controller] setOutputRotation output=${scrub(id)} → ${rotation}`);
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    // The kiosk reads rotation off resolvedByOutput, so it has to be rebuilt or
+    // the screen keeps the old turn until something else changes.
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
   async setOutputMode(id: string, mode: OutputMode): Promise<StageState> {
     const output = this.state.outputs.find((o) => o.id === id);
     if (!output) throw new Error(`outputs:setMode — output ${id} not found`);
@@ -2657,6 +2687,7 @@ export class StageController {
         viewName: view?.name ?? null,
         blackout: output.blackout ?? false,
         locked: output.locked ?? false,
+        rotation: screenRotation(output),
       };
     }
     this.state = {
