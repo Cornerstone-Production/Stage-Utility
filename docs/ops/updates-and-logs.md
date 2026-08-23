@@ -152,6 +152,16 @@ A release with no usable notes shows the version alone. An install updating from
 a git checkout lists commit subjects without headings, since commit subjects
 carry no sections.
 
+**A stable release does not list the fixes that built its own new features.** It
+folds in thirty-odd betas, so Fixed would otherwise fill with the polish commits
+behind whatever is announced under New — of no use to somebody meeting the
+feature whole, and enough of them to push out the fixes to things they already
+had. A fix is held back only where its scope both shipped a feature in the same
+release and had never appeared before it; a fix to anything that was already
+released is always listed. The count held back is stated at the end of Fixed, so
+the filter is never silent. Prereleases list everything: on the beta track, the
+fix is the reason to update.
+
 Notes are captured **before** the update runs. Afterwards the update status
 describes the next pending release rather than the one just installed, so there
 is no later moment when the right answer is still knowable.

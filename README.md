@@ -24,6 +24,7 @@ screens, the settings UI and a phone remote from one port.
 | [Integrations](docs/integrations/README.md) | every device and service it talks to |
 | [Data model](docs/reference/data-model.md) | Views, Outputs and Slots — the nouns |
 | [Layout editor](docs/reference/layout-editor.md) | placing objects, other window shapes, motion |
+| [Widget reference](docs/reference/widgets.md) | every widget, what it shows and where the data comes from |
 | [Display URLs](docs/display-urls.md) | addressing screens |
 | [The context bar](docs/features/context-bar.md) | the live strip above every operator page |
 | [Slots](docs/slots.md) | matching people and devices to positions |
