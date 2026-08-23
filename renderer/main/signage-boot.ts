@@ -12,6 +12,8 @@
 // this is read during the first render. An async read answers after the shell
 // has already drawn the error screen, which is the failure being fixed.
 
+import { toScreenRotation, type ScreenRotation } from "@main/types/views";
+
 const KEY = "stage:signage-screen";
 
 export interface SignageBootRecord {
@@ -21,14 +23,14 @@ export interface SignageBootRecord {
    *  the persisted plan — and everything else — is keyed by id, never by slug. */
   outputId: string;
   /**
-   * Degrees clockwise the panel is mounted at.
+   * How the panel is mounted.
    *
    * Here for the same reason the output id is: it is something the screen has
    * to know BEFORE it has heard from anybody. A portrait TV coming up after a
    * power cut has to come up portrait, and the server that would have said so
    * is the thing that is missing.
    */
-  rotation?: number;
+  rotation: ScreenRotation;
 }
 
 /** A kiosk device's own URL. It always opens `/enroll?device=<id>` and is
@@ -48,11 +50,13 @@ export function readSignageBoot(): SignageBootRecord | null {
     const parsed = JSON.parse(raw) as { path?: unknown; outputId?: unknown; rotation?: unknown };
     if (typeof parsed.path !== "string" || typeof parsed.outputId !== "string") return null;
     if (!parsed.path || !parsed.outputId) return null;
-    const rotation =
-      parsed.rotation === 90 || parsed.rotation === 180 || parsed.rotation === 270
-        ? parsed.rotation
-        : 0;
-    return { path: parsed.path, outputId: parsed.outputId, rotation };
+    // Through the shared narrower, not a second copy of "which numbers are
+    // allowed" — see toScreenRotation.
+    return {
+      path: parsed.path,
+      outputId: parsed.outputId,
+      rotation: toScreenRotation(parsed.rotation),
+    };
   } catch {
     // Unreadable or malformed reads the same as "nothing remembered", which the
     // caller already handles: wait for the server like every other screen.
@@ -70,10 +74,14 @@ export function readSignageBoot(): SignageBootRecord | null {
 export function rememberSignageBoot(
   pathSlug: string,
   outputId: string,
-  rotation = 0,
+  rotation: unknown = 0,
 ): boolean {
   try {
-    const record: SignageBootRecord = { path: normalise(pathSlug), outputId, rotation };
+    const record: SignageBootRecord = {
+      path: normalise(pathSlug),
+      outputId,
+      rotation: toScreenRotation(rotation),
+    };
     localStorage.setItem(KEY, JSON.stringify(record));
     return true;
   } catch {

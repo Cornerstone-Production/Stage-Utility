@@ -746,9 +746,21 @@ export interface Output {
  *  crooked with no obvious way back. */
 export type ScreenRotation = 0 | 90 | 180 | 270;
 
+/**
+ * Narrow anything at all to a quarter turn.
+ *
+ * THE one place this rule is written. It was four: here, the PATCH route's body
+ * check, the offline boot record's reader, and a cast in the kiosk shell — and
+ * four copies of "which numbers are allowed" is how a wall ends up crooked
+ * because one of them let 47 through.
+ */
+export function toScreenRotation(v: unknown): ScreenRotation {
+  return v === 90 || v === 180 || v === 270 ? v : 0;
+}
+
 /** Read a screen's rotation, tolerating anything a hand-edited store holds. */
 export function screenRotation(o: Pick<Output, "rotation">): ScreenRotation {
-  return o.rotation === 90 || o.rotation === 180 || o.rotation === 270 ? o.rotation : 0;
+  return toScreenRotation(o.rotation);
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */

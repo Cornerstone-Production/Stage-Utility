@@ -20,7 +20,7 @@ import {
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
-import { isLayoutShape } from "../../types/views.js";
+import { isLayoutShape, toScreenRotation } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
@@ -431,12 +431,10 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasMode = mode !== null;
       // Four quarter turns, not free-form degrees: a panel is mounted one of
       // four ways, and an arbitrary angle is a mis-typed number that leaves a
-      // wall crooked with no obvious way back.
-      const rotation =
-        body.rotation === 0 || body.rotation === 90 || body.rotation === 180 || body.rotation === 270
-          ? body.rotation
-          : null;
-      const hasRotation = rotation !== null;
+      // wall crooked with no obvious way back. Narrowed by the shared helper,
+      // so "which numbers are allowed" is not written here as well.
+      const hasRotation = typeof body.rotation === "number";
+      const rotation = toScreenRotation(body.rotation);
       if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasSlug && !hasMode && !hasRotation) {
         error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.mode (\"display\"|\"panel\"), body.rotation (0|90|180|270), or body.slug (string) required");
         return;

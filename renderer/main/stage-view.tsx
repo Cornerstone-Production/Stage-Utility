@@ -508,7 +508,7 @@ export function StageView() {
     return (
       // The REMEMBERED rotation: there is no server to ask, and a portrait wall
       // has to come up portrait.
-      <StageErrorBoundary rotation={(remembered?.rotation ?? 0) as ScreenRotation}>
+      <StageErrorBoundary rotation={remembered?.rotation ?? 0}>
         <SignageScreen outputId={offlineSignageOutput} />
       </StageErrorBoundary>
     );

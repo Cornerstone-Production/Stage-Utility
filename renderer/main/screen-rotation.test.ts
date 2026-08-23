@@ -7,6 +7,7 @@ import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
 import { isQuarterTurn, rotatedSize, rotationStyle } from "./screen-rotation";
+import { screenRotation, toScreenRotation } from "@main/types/views";
 
 describe("an unrotated screen", () => {
   test("fills the viewport and is not transformed at all", () => {
@@ -73,5 +74,32 @@ describe("which turns swap the sides", () => {
     assert.deepEqual(rotatedSize({ w: 1920, h: 1080 }, 270), { w: 1080, h: 1920 });
     assert.deepEqual(rotatedSize({ w: 1920, h: 1080 }, 180), { w: 1920, h: 1080 });
     assert.deepEqual(rotatedSize({ w: 1920, h: 1080 }, 0), { w: 1920, h: 1080 });
+  });
+});
+
+describe("which numbers count as a quarter turn", () => {
+  // This rule was written FOUR times — the type helper, the PATCH route's body
+  // check, the offline boot record's reader, and a cast in the kiosk shell. Four
+  // copies of "which numbers are allowed" is how a wall ends up crooked because
+  // one of them let 47 through. It is one function now, and this is it.
+
+  test("the four turns are kept", () => {
+    for (const deg of [0, 90, 180, 270]) {
+      assert.equal(toScreenRotation(deg), deg);
+    }
+  });
+
+  test("and everything else is normal", () => {
+    // A hand-edited store, a mis-typed form, an older record, a string from a
+    // query. All of them are a screen the right way up, never a crooked one.
+    for (const bad of [47, -90, 360, 89.9, "90", null, undefined, Number.NaN, Infinity, {}, []]) {
+      assert.equal(toScreenRotation(bad), 0, `${JSON.stringify(bad)} was accepted as a rotation`);
+    }
+  });
+
+  test("a screen record reads through the same rule", () => {
+    assert.equal(screenRotation({ rotation: 270 }), 270);
+    assert.equal(screenRotation({ rotation: 47 as never }), 0);
+    assert.equal(screenRotation({}), 0);
   });
 });
