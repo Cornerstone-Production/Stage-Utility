@@ -18,7 +18,8 @@ import { useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SignageGroup } from "@main/types/signage";
 
-import { MultiSelect } from "../../components/ui/multi-select";
+import { newSignageId } from "../signage/ids";
+import { TagPicker } from "../signage/tag-picker";
 import { invoke } from "../../lib/api";
 import { AppLink } from "../app-link";
 
@@ -63,17 +64,45 @@ export function ScreenSignageGroups({
     [groups, outputId, client],
   );
 
+  /**
+   * Make a tag from inside the picker, with THIS screen already in it.
+   *
+   * Created empty at first, on the reasoning that the picker's own onChange
+   * would add the screen a moment later. It does call it — but setTags can only
+   * write groups it already has, and the brand-new one is not in that list yet,
+   * so the tag appeared with no screens in it and the operator had to tick the
+   * thing they had just made. Making it in one write is both correct and fewer
+   * round trips.
+   *
+   * The onChange that follows is then a no-op for this id, which is harmless:
+   * it names a group setTags does not know about and is skipped.
+   */
+  const createTag = useCallback(
+    async (name: string): Promise<string | null> => {
+      const group = {
+        id: newSignageId("gr"),
+        name,
+        outputIds: [outputId],
+        createdAt: new Date().toISOString(),
+      };
+      await invoke("signage:saveGroup", { group });
+      await client.invalidateQueries({ queryKey: SIGNAGE_GROUPS_KEY });
+      return group.id;
+    },
+    [client, outputId],
+  );
+
   if (!isSignage) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
       <span className="text-caption2 text-fg-subtle">Signage tags</span>
-      <MultiSelect
-        options={groups.map((g) => ({ value: g.id, label: g.name }))}
+      <TagPicker
+        groups={groups}
         selected={mine}
         onChange={(next) => void setTags(next)}
+        onCreate={createTag}
         placeholder="None"
-        searchable={groups.length > 8}
         className="min-w-32"
       />
       <AppLink to="/signage" className="ml-auto text-caption2 text-accent hover:underline">

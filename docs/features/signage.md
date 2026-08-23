@@ -75,9 +75,12 @@ There is no page for administering tags, because there is nothing to administer:
 assign them where the work is.
 
 - On a screen's card under **Screens**, to say what that screen is part of.
-- On a playlist under **Default for**, which also offers *New tag…*.
+- On a playlist under **Default for**.
 - On the **Now** board, where each tag's card carries the screens it covers, a
   rename, and a delete.
+
+Both pickers offer **New tag…**, so naming one never means going somewhere else
+first. Made from a screen's card, the new tag contains that screen.
 
 Which schedule wins when two tags disagree is settled by the schedule list, not
 by the tags — see below.

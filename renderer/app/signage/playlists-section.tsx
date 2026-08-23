@@ -30,7 +30,7 @@ import { useElapsed } from "./use-now";
 import { toHorizonPlaylist } from "./preview-entry";
 import { MediaPicker } from "./media-picker";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
-import { MultiSelect } from "../../components/ui/multi-select";
+import { TagPicker } from "./tag-picker";
 
 const KINDS: { value: SignageTransitionKind; label: string }[] = [
   { value: "cut", label: "Cut" },
@@ -515,27 +515,12 @@ export function PlaylistsSection({
                 the loop. */}
             <div className="flex flex-col gap-1">
               <span className="text-caption1 text-fg-muted">Default for</span>
-              <MultiSelect
-                options={groups.map((g) => ({ value: g.id, label: g.name }))}
+              <TagPicker
+                groups={groups}
                 selected={editing.defaultForGroupIds ?? []}
                 onChange={(next) => patch({ defaultForGroupIds: next })}
+                onCreate={onCreateGroup}
                 placeholder="No screens"
-                searchable={groups.length > 8}
-                footer={
-                  <button
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-footnote text-accent hover:bg-fill"
-                    onClick={() => {
-                      const name = window.prompt("Name for the new tag");
-                      if (!name?.trim()) return;
-                      void onCreateGroup(name.trim()).then((id) => {
-                        if (id) patch({ defaultForGroupIds: [...(editing.defaultForGroupIds ?? []), id] });
-                      });
-                    }}
-                  >
-                    <PlusIcon className="size-3.5" />
-                    New tag…
-                  </button>
-                }
               />
               <span className="text-caption2 text-fg-subtle">
                 Played on these screens when no schedule matches, and by a screen that starts up
