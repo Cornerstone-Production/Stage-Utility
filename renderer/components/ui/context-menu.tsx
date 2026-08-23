@@ -7,6 +7,7 @@
 // rather than running off the screen.
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { CheckIcon } from "lucide-react";
 
 import { cn } from "../../lib/cn";
 
@@ -111,8 +112,13 @@ function MenuList({
             ) : (
               // A fixed-width gutter rather than a conditional tick, so the
               // labels in a list of toggles line up whatever is on.
-              <span className="w-3 shrink-0 text-center text-accent" aria-hidden>
-                {item.checked ? "✓" : ""}
+              //
+              // CheckIcon, not a literal ✓. Every other tick in the app is that
+              // icon; a text glyph renders at the font's own weight and sits on
+              // its own baseline, so it read lighter and lower than the ticks
+              // next to it.
+              <span className="flex w-3 shrink-0 items-center justify-center text-accent" aria-hidden>
+                {item.checked ? <CheckIcon className="size-3" strokeWidth={3} /> : null}
               </span>
             )}
             <span className="flex-1 truncate">{item.label}</span>
