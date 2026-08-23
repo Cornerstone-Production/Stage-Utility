@@ -10,23 +10,29 @@
 // caller can say which ones changed rather than the operator discovering it.
 
 import type { SignageGroup, SignagePlaylist, SignageSchedule } from "../types/signage.js";
+import { tagsDefaultingTo } from "./signage-defaults.js";
 
 /** Everything that would break if this playlist went. */
 export function playlistUsage(
   playlistId: string,
   schedules: SignageSchedule[],
   groups: SignageGroup[],
+  playlists: SignagePlaylist[],
 ): { schedules: string[]; groups: string[] } {
   // An empty id would otherwise match every group whose default is unset, making
   // every playlist permanently undeletable.
   if (!playlistId) return { schedules: [], groups: [] };
   return {
     schedules: schedules.filter((s) => s.playlistId === playlistId).map((s) => s.name),
-    // A playlist used ONLY as a group default is still in use, and nothing in
-    // the schedule list points at it. Missing this is how deleting a playlist
-    // silently blanks a group - including a Pi that boots with no server, whose
+    // A playlist used ONLY as a tag default is still in use, and nothing in the
+    // schedule list points at it. Missing this is how deleting a playlist
+    // silently blanks a tag - including a Pi that boots with no server, whose
     // whole content is that default.
-    groups: groups.filter((g) => g.defaultPlaylistId === playlistId).map((g) => g.name),
+    //
+    // Through signage-defaults, NOT by reading group.defaultPlaylistId here.
+    // That field is deprecated and nothing writes it, so this asked a question
+    // whose answer was always "no" for every tag made since groups became tags.
+    groups: tagsDefaultingTo(playlistId, playlists, groups),
   };
 }
 

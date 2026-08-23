@@ -296,20 +296,67 @@ describe("playlists, groups and schedules", () => {
     assert.match(String((r.json as { error: string }).error), /Weekend mornings/);
   });
 
-  test("REFUSES to delete a playlist that is only a group's default", async () => {
+  test("REFUSES to delete a playlist that is only a tag's default", async () => {
     // Nothing in the schedule list points at it, so a check that walked only
-    // schedules would report it free - and deleting it silently blanks that
-    // group, including on a Pi that boots with no server.
+    // schedules would report it free - and deleting it silently blanks that tag,
+    // including on a Pi that boots with no server.
+    //
+    // The claim is on the PLAYLIST (`defaultForGroupIds`), which is what the
+    // editor writes. This test used to put `defaultPlaylistId` on the group
+    // instead - a field nothing has written since groups became tags - so it was
+    // green while the real path returned 200 and deleted the playlist.
     await save("playlists", "playlist", {
       id: "p-default", name: "House loop", items: [], defaultDurationMs: 8000,
-      fit: "contain", transition: { kind: "cut", ms: 0 }, createdAt: "",
+      fit: "contain", transition: { kind: "cut", ms: 0 }, defaultForGroupIds: ["g-default"],
+      createdAt: "",
     });
     await save("groups", "group", {
-      id: "g-default", name: "Cafe", outputIds: [], defaultPlaylistId: "p-default", createdAt: "",
+      id: "g-default", name: "Cafe", outputIds: [], createdAt: "",
     });
     const r = await callRoute(signageRoutes, "/api/signage/playlists/p-default", { method: "DELETE" });
     assert.equal(r.status, 409);
     assert.match(String((r.json as { error: string }).error), /Cafe/);
+  });
+
+  test("and offline-assets names the tag default of the SCREEN asking", async () => {
+    // The other half of the same rule, and the other reader that was asking the
+    // deprecated field: this route answered "no default playlist" for every tag
+    // that had one, on the screen whose whole job is confirming a Pi can boot
+    // with the server off.
+    //
+    // Keyed on the screen because that is the question - a screen can be in
+    // several tags, and what it plays offline is whichever of their defaults
+    // wins.
+    // A REAL upload, because the media library has no plain POST - the manifest
+    // is written by the upload path, and a hand-saved record is not in it.
+    const up = await upload(
+      { "content-type": "image/png", "x-signage-name": "card.png", "x-signage-w": "8", "x-signage-h": "8" },
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x01, 0x02, 0x03]),
+    );
+    assert.equal(up.status, 200);
+    const media = (up.json as { media: { id: string; file: string } }).media;
+    await save("playlists", "playlist", {
+      id: "p-offline", name: "Foyer loop", items: [{ mediaId: media.id }],
+      defaultDurationMs: 8000, fit: "contain", transition: { kind: "cut", ms: 0 },
+      defaultForGroupIds: ["g-offline"], createdAt: "",
+    });
+    await save("groups", "group", {
+      id: "g-offline", name: "Foyer", outputIds: ["display-offline"], createdAt: "",
+    });
+    const r = await callRoute(signageRoutes, "/api/signage/outputs/display-offline/offline-assets", { method: "GET" });
+    assert.equal(r.status, 200);
+    const body = r.json as { assets: { url: string }[]; reason?: string; playlist?: string };
+    assert.equal(body.reason, undefined, `still reporting no default: ${body.reason}`);
+    assert.equal(body.playlist, "Foyer loop");
+    assert.deepEqual(body.assets.map((a) => a.url), [`/signage-media/${media.file}`]);
+  });
+
+  test("and says so plainly when the screen is in no tags", async () => {
+    const r = await callRoute(signageRoutes, "/api/signage/outputs/display-untagged/offline-assets", { method: "GET" });
+    assert.equal(r.status, 200);
+    const body = r.json as { assets: unknown[]; reason?: string };
+    assert.deepEqual(body.assets, []);
+    assert.match(String(body.reason), /no tags/);
   });
 
   test("REFUSES to delete a group a schedule targets, and names it", async () => {

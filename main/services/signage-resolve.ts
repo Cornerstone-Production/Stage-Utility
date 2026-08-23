@@ -23,6 +23,7 @@ import type {
 } from "../types/stage.js";
 import type { TimeZone } from "./app-timezone.js";
 import { resolveItemDurations, toHorizonItems } from "./signage-playlist-items.js";
+import { tagDefault } from "./signage-defaults.js";
 import { migrateGroupDefaults } from "./signage-playlists-store.js";
 import { nextBoundaryAfter, windowActiveAt } from "./signage-window.js";
 
@@ -109,18 +110,18 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
    * what it shows when the server is up.
    */
   const groupDefault = (groups: SignageGroup[]): Decision => {
-    if (groups.length === 0) return BLANK;
-    const mine = new Set(groups.map((g) => g.id));
-    for (const candidate of playlists) {
-      const claims = candidate.defaultForGroupIds ?? [];
-      const tag = claims.find((id) => mine.has(id));
-      if (!tag) continue;
-      const p = playable(candidate.id);
-      // An unplayable default falls through to the next claimant rather than
-      // blanking the screen, exactly as an unplayable schedule does.
-      if (p) return { playlist: p, reason: "default", reasonLabel: p.name, reasonId: tag };
-    }
-    return BLANK;
+    // The rule itself is in signage-defaults, shared with the delete blocker and
+    // the offline-assets route. Both of those used to ask the GROUP for its
+    // default - a field nothing writes any more - and both were silently wrong.
+    //
+    // The playability filter stays here because only the resolver has one: an
+    // unplayable default falls through to the next claimant rather than blanking
+    // the screen, exactly as an unplayable schedule does.
+    const won = tagDefault(playlists, new Set(groups.map((g) => g.id)), (c) => !!playable(c.id));
+    if (!won) return BLANK;
+    const p = playable(won.playlist.id);
+    if (!p) return BLANK;
+    return { playlist: p, reason: "default", reasonLabel: p.name, reasonId: won.tagId };
   };
 
   /** Precedence, for one output at one instant. See the spec's section 3.1. */

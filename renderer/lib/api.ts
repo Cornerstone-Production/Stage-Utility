@@ -188,7 +188,7 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "signage:offlineAssets":
       return apiFetch<T>(
-        `/api/signage/groups/${encodeURIComponent(p.groupId as string)}/offline-assets`,
+        `/api/signage/outputs/${encodeURIComponent(p.outputId as string)}/offline-assets`,
       );
 
     case "signage:clearOverride":

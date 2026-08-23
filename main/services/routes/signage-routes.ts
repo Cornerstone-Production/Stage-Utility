@@ -18,7 +18,8 @@ import { errorMessage } from "../errors.js";
 import { andList, groupUsage, mediaUsage, playlistUsage } from "../signage-integrity.js";
 import { signageGroupsStore } from "../signage-groups-store.js";
 import { clearOverride, listOverrides, setOverride } from "../signage-overrides-store.js";
-import { resolveItemDurations } from "../signage-playlist-items.js";
+import { tagDefault } from "../signage-defaults.js";
+import { resolveItemDurations, toHorizonItems } from "../signage-playlist-items.js";
 import { listPlaylists, signagePlaylistsStore } from "../signage-playlists-store.js";
 import { reorderSchedules, signageSchedulesStore } from "../signage-schedules-store.js";
 import {
@@ -274,28 +275,40 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
   // full, resolved to urls. A display asks the service worker to hold these and
   // reports back what it actually holds, so "ready" is a fact rather than an
   // intention.
-  const prepare = /^\/api\/signage\/groups\/([^/]+)\/offline-assets$/.exec(c.pathname);
+  // Keyed on the SCREEN, not on a tag. What a screen plays with no server is
+  // its winning tag default (see signage-hold's bootEntry), and a screen may
+  // carry several tags - so asking about one tag answered a question the
+  // operator was not asking, and answered it about the wrong content whenever
+  // another tag won. Resolved here through the same signage-defaults rule the
+  // player and the delete blocker use.
+  const prepare = /^\/api\/signage\/outputs\/([^/]+)\/offline-assets$/.exec(c.pathname);
   if (prepare && c.method === "GET") {
-    const groupId = decodeURIComponent(prepare[1]);
-    const group = (await signageGroupsStore.load()).find((g) => g.id === groupId);
-    if (!group) return error(c.res, "no such group", 404);
-    if (!group.defaultPlaylistId) {
-      // Not an error, but not silence either: a group with no default has
-      // nothing to play offline, and the operator needs to be told that BEFORE
-      // unplugging the Pi rather than after.
-      return json(c.res, { assets: [], reason: "this group has no default playlist" });
-    }
-    const [playlists, media] = await Promise.all([
+    const outputId = decodeURIComponent(prepare[1]);
+    const [groups, playlists, media] = await Promise.all([
+      signageGroupsStore.load(),
       listPlaylists(),
       listMedia(),
     ]);
-    const playlist = playlists.find((p) => p.id === group.defaultPlaylistId);
-    if (!playlist) return json(c.res, { assets: [], reason: "its default playlist is missing" });
-
-    const items = resolveItemDurations(playlist, media);
+    const mine = groups.filter((g) => Array.isArray(g.outputIds) && g.outputIds.includes(outputId));
+    if (mine.length === 0) {
+      return json(c.res, { assets: [], reason: "this screen is in no tags, so it has nothing to play offline" });
+    }
+    const winner = tagDefault(playlists, new Set(mine.map((g) => g.id)));
+    if (!winner) {
+      // Not an error, but not silence either: a screen whose tags have no
+      // default has nothing to play offline, and the operator needs to be told
+      // that BEFORE unplugging the Pi rather than after.
+      return json(c.res, { assets: [], reason: "none of this screen's tags has a default playlist" });
+    }
+    const items = resolveItemDurations(winner.playlist, media);
+    if (items.length === 0) {
+      return json(c.res, { assets: [], reason: `${winner.playlist.name} has no playable items` });
+    }
     return json(c.res, {
-      assets: items.map((r) => ({ url: `/signage-media/${r.media.file}`, bytes: r.media.bytes })),
-      playlist: playlist.name,
+      // toHorizonItems, not a second hand-rolled mapping: the named type exists
+      // so the url/bytes shape is written once.
+      assets: toHorizonItems(items).map((i) => ({ url: i.url, bytes: i.bytes })),
+      playlist: winner.playlist.name,
     });
   }
 
@@ -363,7 +376,7 @@ async function deleteBlockers(key: string, id: string): Promise<string[]> {
       signageSchedulesStore.load(),
       signageGroupsStore.load(),
     ]);
-    const u = playlistUsage(id, schedules, groups);
+    const u = playlistUsage(id, schedules, groups, await listPlaylists());
     const out: string[] = [];
     if (u.schedules.length) out.push(`it is scheduled by ${andList(u.schedules)}`);
     if (u.groups.length) out.push(`it is the default playlist for ${andList(u.groups)}`);

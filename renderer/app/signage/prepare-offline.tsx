@@ -1,18 +1,22 @@
-// prepare-offline.tsx — make a group ready to play with no server, and say so.
+// prepare-offline.tsx — make a screen ready to play with no server, and say so.
 //
 // The whole point is turning "I hope it cached" into something checked before a
 // Pi leaves the building. So this reports what the browser ACTUALLY holds, and
 // every way it can fall short is stated rather than rounded up to "ready":
-// a group with no default playlist, a browser that cannot cache at all, and any
+// a screen whose tags have no default playlist, a browser that cannot cache at
+// all, and any
 // individual asset that failed.
 //
 // It prepares the browser it is RUNNING IN. That is a real constraint and the
 // copy says so — an operator has to open this on the screen itself, which for a
 // Pi means visiting the Signage tab on that Pi.
+//
+// Keyed on the SCREEN rather than on a tag: what a screen plays with no server
+// is its winning tag default, and a screen can carry several tags. Asking about
+// one tag answered a question nobody had.
 
 import { useCallback, useState } from "react";
 import { DownloadIcon } from "lucide-react";
-import type { SignageGroup } from "@main/types/signage";
 
 import { errorMessage } from "@main/services/errors";
 import { Button } from "../../components/ui/button";
@@ -25,7 +29,7 @@ interface Asset {
   bytes: number;
 }
 
-export function PrepareOffline({ group }: { group: SignageGroup }) {
+export function PrepareOffline({ outputId }: { outputId: string }) {
   const [status, setStatus] = useState<string | null>(null);
   const [tone, setTone] = useState<"ok" | "warn">("ok");
   const [busy, setBusy] = useState(false);
@@ -39,7 +43,7 @@ export function PrepareOffline({ group }: { group: SignageGroup }) {
         assets: Asset[];
         reason?: string;
         playlist?: string;
-      }>("signage:offlineAssets", { groupId: group.id });
+      }>("signage:offlineAssets", { outputId });
 
       if (reason || assets.length === 0) {
         setTone("warn");
@@ -87,7 +91,7 @@ export function PrepareOffline({ group }: { group: SignageGroup }) {
     } finally {
       setBusy(false);
     }
-  }, [group.id]);
+  }, [outputId]);
 
   return (
     <div className="flex flex-col gap-1">

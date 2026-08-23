@@ -43,6 +43,7 @@ import { confirm } from "../../components/ui/confirm-dialog";
 import { SignagePlayer } from "../../main/signage-player";
 import { invoke } from "../../lib/api";
 import { SelectField } from "./select-field";
+import { PrepareOffline } from "./prepare-offline";
 import { TagPicker } from "./tag-picker";
 import { boardEntry } from "./board-entry";
 import { SIGNAGE_NOW_KEY, SIGNAGE_OVERRIDES_KEY } from "./use-signage-config";
@@ -375,6 +376,13 @@ export function NowBoard({
                 placeholder="No tags"
                 className="w-full"
               />
+
+              {/* Caching is per BROWSER, so this has to be opened on the screen
+                  itself — which is exactly where the card for that screen is
+                  useful. It shipped with no mount point at all when the Groups
+                  page was deleted, so the offline promise had no way to be
+                  checked before a Pi left the building. */}
+              <PrepareOffline outputId={output.id} />
             </div>
           );
         })}

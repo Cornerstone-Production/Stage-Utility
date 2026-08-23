@@ -80,7 +80,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const render = useScriptViewRender(rundown, layout, roles, pcoLive, now, skewMs);
 
   return (
-    <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-[var(--screen-h,100dvh)] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* The bar and the rundown are shared with the script View-kind and the
           layout object; only the two navigation slots are this page's own. */}
       <ScriptViewHeader

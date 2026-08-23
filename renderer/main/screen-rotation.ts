@@ -23,10 +23,24 @@ import type { ScreenRotation } from "@main/types/views";
  * bottom of a rotated layout behind a toolbar.
  */
 export function rotationStyle(rotation: ScreenRotation): CSSProperties {
-  if (rotation === 0) return { width: "100dvw", height: "100dvh" };
+  const quarter = isQuarterTurn(rotation);
+  // The box's own dimensions, published for the content inside it.
+  //
+  // Every kiosk root sizes itself `h-[100dvh]`, which resolves against the
+  // VIEWPORT and not against this box - so at a quarter turn on a 1920x1080
+  // panel the content filled a 1080x1080 square and left 840px of black. Only
+  // the signage screen used `h-full`, which is why it was the one case that got
+  // driven. They read these instead, with `100dvh` as the fallback so anything
+  // not inside a rotated wrapper is unchanged.
+  const box = {
+    ["--screen-w" as string]: quarter ? "100dvh" : "100dvw",
+    ["--screen-h" as string]: quarter ? "100dvw" : "100dvh",
+  } as CSSProperties;
 
-  const quarter = rotation === 90 || rotation === 270;
+  if (rotation === 0) return { ...box, width: "100dvw", height: "100dvh" };
+
   return {
+    ...box,
     // Swapped at a quarter turn: this is the box the CONTENT is laid out in,
     // before the turn puts it on the panel.
     width: quarter ? "100dvh" : "100dvw",
