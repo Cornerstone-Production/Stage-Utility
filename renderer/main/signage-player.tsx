@@ -32,8 +32,15 @@ export function SignagePlayer({
   nowMs: number;
   className?: string;
 }) {
+  // Marks the signage surface in the DOM. Black-on-black is otherwise
+  // indistinguishable from a screen that rendered nothing at all — which is the
+  // difference between "playing, between graphics" and "the shell gave up".
   const black = (
-    <div className={className} style={{ position: "relative", background: "#000", overflow: "hidden" }} />
+    <div
+      data-signage-player=""
+      className={className}
+      style={{ position: "relative", background: "#000", overflow: "hidden" }}
+    />
   );
 
   const playlist = entry?.playlist;
@@ -62,6 +69,7 @@ export function SignagePlayer({
 
   return (
     <div
+      data-signage-player=""
       className={className}
       style={{ position: "relative", background: "#000", overflow: "hidden" }}
     >

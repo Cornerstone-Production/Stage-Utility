@@ -125,6 +125,30 @@ confidently and wrongly is worse than one that plays what it was given.
 To take a screen offsite, put it in a group, give that group a default playlist,
 and use **Prepare for offline**.
 
+**Prepare for offline works on the browser it is opened in.** On a Raspberry Pi
+that means opening the Signage tab on the Pi itself, not from a laptop.
+
+### Coming back after a power cut
+
+A screen that reboots with no server on the network comes up playing, without
+waiting for one. Three things make that work, and all three need a run against
+a live server first:
+
+- the app itself is held on the device, so the page loads with nothing to load it
+  from;
+- the graphics are held on the device (that is what **Prepare for offline**
+  does);
+- the screen remembers that it is a signage screen, so it starts playing rather
+  than waiting for the server to tell it what it is.
+
+A kiosk device opens the same URL forever (`/enroll?device=…`) and is redirected
+from there to its display, so with no server there is no redirect. It plays
+anyway. When the server answers again, the screen reloads and the server decides
+where it belongs — which may have changed while it was dark.
+
+Every other kind of display still shows "could not load" with no server, which is
+the truth: there is nothing for it to draw.
+
 ## Backups
 
 Playlists, groups, schedules and the media library are all carried in a config

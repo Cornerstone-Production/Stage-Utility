@@ -34,6 +34,16 @@ export async function registerSignageWorker(): Promise<boolean> {
     // Without this, Chromium may evict the cache under storage pressure — which
     // on a Pi that has been running for months is exactly when it is needed.
     await navigator.storage?.persist?.();
+    // Tell the worker to refresh the shell it will serve after a power cut.
+    //
+    // Asked for HERE, and only here, because this runs on a signage screen: the
+    // page knows it is the kiosk document. The worker does not — this app ships
+    // two shells (kiosk index.html, operator app.html), and a worker that cached
+    // whatever navigation it saw last would answer a reboot with whichever one
+    // was opened most recently. Preparing a Pi means opening the Signage tab on
+    // that Pi, so the operator shell is not a corner case.
+    const reg = await navigator.serviceWorker.ready.catch(() => null);
+    reg?.active?.postMessage({ type: "signage:shell" });
     return true;
   } catch (err) {
     console.error("[signage] could not register the offline worker:", err);

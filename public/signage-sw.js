@@ -17,9 +17,18 @@ const VERSION = "v2";
 const SHELL = `signage-shell-${VERSION}`;
 const MEDIA = `signage-media-${VERSION}`;
 
-/** The app shell. Kept deliberately short — anything hashed is picked up by the
- *  runtime cache below, and listing hashed names here would break every build. */
+/** The kiosk shell, and the ONLY document this worker ever serves offline.
+ *
+ *  Kept deliberately short — anything hashed is picked up by the runtime cache
+ *  below, and listing hashed names here would break every build.
+ *
+ *  This app ships TWO shells: index.html is the kiosk, app.html is the operator
+ *  console (see remote-server.tryServeStatic). They are different documents, and
+ *  a display served the operator one is a display showing a settings page. */
 const SHELL_URLS = ["/", "/index.html"];
+
+/** The document a failed navigation is answered with. */
+const SHELL_DOC = "/index.html";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -92,30 +101,32 @@ self.addEventListener("fetch", (event) => {
   // A NAVIGATION - the reload this whole file exists for.
   //
   // A display lives at its own path: /display-8, /foyer-north, whatever slug it
-  // was given. Matching a list of known shell paths misses every one of them, so
-  // the worker declined to handle the request, the browser went to the dead
-  // network, and the reload was a connection error. Which is precisely the
-  // failure this was written to remove.
+  // was given, and a kiosk device boots at /enroll and is redirected from there.
+  // Matching a list of known shell paths misses every one of them, so the worker
+  // declined to handle the request, the browser went to the dead network, and
+  // the reload was a connection error. Which is precisely the failure this was
+  // written to remove.
   //
-  // Every navigation is answered with the app shell instead. The app is a single
-  // page that routes on the path, so /index.html is the correct response for any
-  // of them - the same rule any SPA offline fallback uses.
+  // Every navigation falls back to the kiosk shell instead. The kiosk is a
+  // single page that routes on the path, so index.html is the right answer for
+  // any of them - the same rule any SPA offline fallback uses.
+  //
+  // What it must NOT do is cache the response it got. Not every navigation is
+  // the kiosk: /settings serves app.html, and /enroll on an unclaimed device
+  // serves a server-rendered holding screen. Storing either as the shell means
+  // the next power cut brings the wall up on a settings page. The documented way
+  // to prepare a Pi is to open the Signage tab ON that Pi, so the operator path
+  // was not a corner case - it was the workflow.
   if (req.mode === "navigate") {
     event.respondWith(
-      (async () => {
+      fetch(req).catch(async (err) => {
         const cache = await caches.open(SHELL);
-        try {
-          const res = await fetch(req);
-          if (res.ok) await cache.put("/index.html", res.clone());
-          return res;
-        } catch (err) {
-          // Match the DOCUMENT, not the request: nothing ever cached
-          // "/display-8" itself, and matching on the request would miss.
-          const hit = (await cache.match("/index.html")) ?? (await cache.match("/"));
-          if (hit) return hit;
-          throw err;
-        }
-      })(),
+        // Match the DOCUMENT, not the request: nothing ever cached "/display-8"
+        // itself, and matching on the request would miss.
+        const hit = (await cache.match(SHELL_DOC)) ?? (await cache.match("/"));
+        if (hit) return hit;
+        throw err;
+      }),
     );
     return;
   }
@@ -145,10 +156,39 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
+// Refresh the held shell, asked for by a page that IS the kiosk shell.
+//
+// The alternative — caching whatever a navigation returned — is what shipped
+// the operator console to a wall screen. The kiosk page knows what it is; the
+// worker, looking at a URL, does not, and teaching it the server's route table
+// would be a second copy of that table to keep in step.
+//
+// Fetched by URL rather than reusing a response, so what lands in the cache is
+// the shell and nothing else.
+async function refreshShell() {
+  const res = await fetch(SHELL_DOC, { cache: "reload" });
+  if (!res.ok) throw new Error(`shell refresh: ${res.status}`);
+  const cache = await caches.open(SHELL);
+  await cache.put(SHELL_DOC, res);
+}
+
 // The page asks for a set of assets to be held. Answers with what it actually
 // holds, so "Prepare for offline" reports a fact rather than an intention.
 self.addEventListener("message", (event) => {
   const msg = event.data;
+
+  if (msg && msg.type === "signage:shell") {
+    event.waitUntil(
+      refreshShell().catch((err) => {
+        // A screen with a stale shell still plays; one with none does not come
+        // back at all. Either way the install-time copy stands, so this is
+        // reported and not escalated.
+        console.warn("[signage] could not refresh the offline shell:", err);
+      }),
+    );
+    return;
+  }
+
   if (!msg || msg.type !== "signage:precache") return;
 
   event.waitUntil(

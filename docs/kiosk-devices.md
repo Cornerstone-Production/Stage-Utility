@@ -156,6 +156,11 @@ A screen showing graphics on a schedule is set up exactly like any other — it 
 the VIEW it is routed to that makes it signage, and Signage can do that routing
 for you. See [signage](features/signage.md).
 
+A signage device is the one kind that comes back after a power cut with no server
+on the network. It needs one run against a live server first, and **Prepare for
+offline** has to be opened on the device itself — see
+[coming back after a power cut](features/signage.md#coming-back-after-a-power-cut).
+
 ## Removing one
 
 *Release*, on the screen's card, unbinds it: the screen keeps its view and its

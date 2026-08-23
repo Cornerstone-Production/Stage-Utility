@@ -18,6 +18,13 @@ import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
+import {
+  forgetSignageBoot,
+  isDevicePath,
+  readSignageBoot,
+  rememberSignageBoot,
+  signageBootOutput,
+} from "./signage-boot";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
 // form (/display-1), falling back to the legacy ?display= query, then default.
@@ -347,6 +354,15 @@ export function StageView() {
   const previewViewId = displayId.startsWith("preview-") ? displayId.slice("preview-".length) : null;
   const previewDraftSlots = usePreviewDraftSlots(previewViewId);
 
+  // What this browser last played signage on. Read ONCE, synchronously, before
+  // anything has been asked of the server: the shell decides what to draw on its
+  // first render, and an async read answers after it has already drawn.
+  const [remembered] = useState(readSignageBoot);
+  const offlineSignageOutput = previewViewId ? null : signageBootOutput(pathSlug, remembered);
+  // Running at the device URL only ever happens with the server down: /enroll is
+  // a redirect, never a page.
+  const atDevicePath = isDevicePath(pathSlug);
+
   // Keep the browser tab title in sync with the brand + this display's name, so
   // renaming a display (Settings) updates its kiosk tab too.
   const titleDisplay = (state?.outputs?.length ?? 0) > 1
@@ -374,6 +390,11 @@ export function StageView() {
   // flips the dot offline at once, and the server TTL catches ungraceful deaths.
   useEffect(() => {
     if (displayId.startsWith("preview-")) return;
+    // The device URL is not an output. A screen sitting there is one whose
+    // server was gone when it started; reporting "enroll" as a display would
+    // put a screen that does not exist on the Screens page the moment the
+    // server came back, just before the reload takes us to the real one.
+    if (atDevicePath) return;
     const url = "/api/displays/presence";
     let near = false;
     let timer: ReturnType<typeof setInterval>;
@@ -423,7 +444,55 @@ export function StageView() {
       window.removeEventListener("pagehide", leave);
       leave();
     };
-  }, [displayId]);
+  }, [displayId, atDevicePath]);
+
+  // Keep the record of what this screen is, so a cold boot with no server has
+  // something to go on. Keyed on the resolved KIND rather than the state object,
+  // which changes identity on every broadcast — this must not write to storage
+  // once a second for the life of a display.
+  const resolvedKind = state?.resolvedByOutput?.[displayId]?.kind ?? null;
+  const hasState = state !== null;
+  useEffect(() => {
+    // Only a real, routed output is a screen. A preview iframe is not, and the
+    // device URL is a redirect — recording either would point a cold boot at
+    // something that cannot play.
+    if (!hasState || previewViewId || atDevicePath) return;
+    const stored =
+      resolvedKind === "signage"
+        ? rememberSignageBoot(pathSlug, displayId)
+        : forgetSignageBoot(pathSlug);
+    if (!stored) {
+      // Returned, not swallowed. Nobody stands at a wall screen, but this is the
+      // difference between a Pi that comes back after a power cut and one that
+      // does not, and the console is where that gets diagnosed.
+      console.warn(
+        "[kiosk] this browser would not store the screen's kind — a reboot with no server will show an error rather than signage",
+      );
+    }
+  }, [hasState, previewViewId, atDevicePath, resolvedKind, pathSlug, displayId]);
+
+  // The server is back and this browser is still sitting on the device URL, so
+  // let the server do the redirecting: it decides which display a device shows,
+  // and that binding may have changed while the screen was dark.
+  useEffect(() => {
+    if (atDevicePath && hasState) window.location.reload();
+  }, [atDevicePath, hasState]);
+
+  // Signage is the one kind that plays without a server: it holds its own plan
+  // and its own media on the device. So a screen that was signage the last time
+  // it heard from a server starts playing immediately rather than waiting on
+  // /api/state — a wait that, on a Pi rebooted with nothing on the network,
+  // ends at the "could not load" screen instead of the graphics it is holding.
+  //
+  // Ahead of the loading state as well as the error, so a normal boot goes
+  // straight to the content rather than flashing a spinner at the room.
+  if (offlineSignageOutput && !state) {
+    return (
+      <StageErrorBoundary>
+        <SignageScreen outputId={offlineSignageOutput} />
+      </StageErrorBoundary>
+    );
+  }
 
   if (isLoading) return <KioskLoading />;
   if (error) return <KioskError message={error} />;
