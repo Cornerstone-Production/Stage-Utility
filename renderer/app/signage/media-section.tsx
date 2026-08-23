@@ -16,14 +16,8 @@ import { EmptyState } from "../../components/ui/empty-state";
 import { Input } from "../../components/ui/input";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { invoke } from "../../lib/api";
+import { size } from "./format";
 import { uploadMedia } from "./use-signage-config";
-
-/** Bytes as something readable at a glance. */
-function size(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
 
 function duration(ms: number): string {
   const total = Math.round(ms / 1000);

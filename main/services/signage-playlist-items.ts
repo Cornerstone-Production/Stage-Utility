@@ -10,7 +10,13 @@
 // after 8 seconds because that is the playlist's default reads as a broken
 // video, not as a misconfigured playlist.
 
-import type { SignageFit, SignageMedia, SignagePlaylist, SignageTransition } from "../types/signage.js";
+import type {
+  SignageFit,
+  SignageHorizonItem,
+  SignageMedia,
+  SignagePlaylist,
+  SignageTransition,
+} from "../types/signage.js";
 import { isSignageVideo } from "../types/signage.js";
 
 /** One item, with everything the player needs and nothing left to look up. */
@@ -73,6 +79,25 @@ export function resolveItemDurations(
   }
 
   return out;
+}
+
+/**
+ * Resolved items as the shape that travels in a horizon entry.
+ *
+ * Shared with the renderer, which builds a preview entry for the playlist editor
+ * and the Now board. It was written out twice, identically, and the failure mode
+ * is quiet: add a field to a horizon item and the preview keeps omitting it, so
+ * the editor disagrees with the wall about something nobody thought to check.
+ */
+export function toHorizonItems(items: ResolvedItem[]): SignageHorizonItem[] {
+  return items.map((r) => ({
+    url: `/signage-media/${r.media.file}`,
+    mime: r.media.mime,
+    durationMs: r.durationMs,
+    fit: r.fit,
+    transition: r.transition,
+    bytes: r.media.bytes,
+  }));
 }
 
 /** How long one revolution of `items` takes. Mirrors the renderer's cycleMs, on

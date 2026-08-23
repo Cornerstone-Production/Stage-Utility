@@ -171,6 +171,24 @@ export interface WindowCtx {
 /** Why a horizon entry is what it is. Shown on the Now board and in the log. */
 export type SignageReason = "override" | "schedule" | "default" | "blank";
 
+/**
+ * One item as it travels to a display: everything the player needs, nothing left
+ * to look up.
+ *
+ * Named rather than inline because two places build it — the resolver, and the
+ * renderer's preview entry for the playlist editor and the Now board — and while
+ * the shape was anonymous both wrote the mapping out by hand. See
+ * toHorizonItems, which is now the only place it is written.
+ */
+export interface SignageHorizonItem {
+  url: string;
+  mime: string;
+  durationMs: number;
+  fit: SignageFit;
+  transition: SignageTransition;
+  bytes: number;
+}
+
 export interface SignageHorizonEntry {
   /** Epoch ms, inclusive. */
   from: number;
@@ -185,14 +203,7 @@ export interface SignageHorizonEntry {
     startedAt: number;
     fit: SignageFit;
     transition: SignageTransition;
-    items: {
-      url: string;
-      mime: string;
-      durationMs: number;
-      fit: SignageFit;
-      transition: SignageTransition;
-      bytes: number;
-    }[];
+    items: SignageHorizonItem[];
   };
   reason: SignageReason;
   /** e.g. the winning schedule's name. */

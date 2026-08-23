@@ -17,17 +17,12 @@ import type { SignageGroup } from "@main/types/signage";
 import { errorMessage } from "@main/services/errors";
 import { Button } from "../../components/ui/button";
 import { offlineCapable, precache } from "../../main/signage-offline";
+import { size } from "./format";
 import { invoke } from "../../lib/api";
 
 interface Asset {
   url: string;
   bytes: number;
-}
-
-function size(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
-  if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 export function PrepareOffline({ group }: { group: SignageGroup }) {

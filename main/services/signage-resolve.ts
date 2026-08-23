@@ -22,7 +22,7 @@ import type {
   SignageSchedule,
 } from "../types/stage.js";
 import type { TimeZone } from "./app-timezone.js";
-import { resolveItemDurations } from "./signage-playlist-items.js";
+import { resolveItemDurations, toHorizonItems } from "./signage-playlist-items.js";
 import { nextBoundaryAfter, windowActiveAt } from "./signage-window.js";
 
 export interface ResolveInput {
@@ -83,9 +83,29 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
   const groupsWithOutputs = input.groups.filter((g) => Array.isArray(g.outputIds));
   const schedulesWithGroups = input.schedules.filter((s) => Array.isArray(s.groupIds));
 
+  /** The groups an output belongs to, in list order. */
+  const groupsFor = (outputId: string) =>
+    groupsWithOutputs.filter((g) => g.outputIds.includes(outputId));
+
+  /**
+   * Step 3 of the precedence: the first group naming a playlist that can play.
+   *
+   * Its own function because the trailing default entry needs exactly this step
+   * and nothing else. Written twice, the two drifted apart at the first change —
+   * and the symptom would be a screen that boots offline to something other than
+   * what it shows when the server is up.
+   */
+  const groupDefault = (groups: SignageGroup[]): Decision => {
+    for (const g of groups) {
+      const p = playable(g.defaultPlaylistId);
+      if (p) return { playlist: p, reason: "default", reasonLabel: p.name, reasonId: g.id };
+    }
+    return BLANK;
+  };
+
   /** Precedence, for one output at one instant. See the spec's section 3.1. */
   const decide = (outputId: string, at: number): Decision => {
-    const groups = groupsWithOutputs.filter((g) => g.outputIds.includes(outputId));
+    const groups = groupsFor(outputId);
     const groupIds = new Set(groups.map((g) => g.id));
 
     // 1. Override — the most recently started, which is "the last thing you
@@ -110,14 +130,8 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
       if (p) return { playlist: p, reason: "schedule", reasonLabel: s.name, reasonId: s.id };
     }
 
-    // 3. The first group that names a usable default.
-    for (const g of groups) {
-      const p = playable(g.defaultPlaylistId);
-      if (p) return { playlist: p, reason: "default", reasonLabel: p.name, reasonId: g.id };
-    }
-
-    // 4. Blank.
-    return BLANK;
+    // 3. The first group that names a usable default. 4. Blank.
+    return groupDefault(groups);
   };
 
   /** Every instant inside the horizon at which any answer could change. */
@@ -136,16 +150,6 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
       }
     }
     return [...set].sort((a, b) => a - b);
-  };
-
-  /** Just the group-default step of the precedence, for the trailing entry. */
-  const defaultFor = (outputId: string): Decision => {
-    for (const g of groupsWithOutputs) {
-      if (!g.outputIds.includes(outputId)) continue;
-      const p = playable(g.defaultPlaylistId);
-      if (p) return { playlist: p, reason: "default", reasonLabel: p.name, reasonId: g.id };
-    }
-    return BLANK;
   };
 
   const end = input.now + HORIZON_MS;
@@ -196,7 +200,7 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
     // list. It is unreachable in normal play: while connected the horizon is
     // refreshed long before the clock gets there, and while disconnected the
     // display holds rather than advancing (see signage-hold.ts).
-    const fallback = defaultFor(output.id);
+    const fallback = groupDefault(groupsFor(output.id));
     if (fallback.playlist) {
       horizon.push(entry(end, end + HORIZON_MS, fallback, input.media));
     }
@@ -231,14 +235,7 @@ function entry(
       startedAt: from,
       fit: d.playlist.fit,
       transition: d.playlist.transition,
-      items: items.map((r) => ({
-        url: `/signage-media/${r.media.file}`,
-        mime: r.media.mime,
-        durationMs: r.durationMs,
-        fit: r.fit,
-        transition: r.transition,
-        bytes: r.media.bytes,
-      })),
+      items: toHorizonItems(items),
     },
   };
 }

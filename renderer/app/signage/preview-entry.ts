@@ -7,6 +7,7 @@
 
 import type { SignageHorizonEntry, SignagePlaylist } from "@main/types/signage";
 import type { ResolvedItem } from "@main/services/signage-playlist-items";
+import { toHorizonItems } from "@main/services/signage-playlist-items";
 
 /**
  * A preview entry for `playlist`.
@@ -29,14 +30,7 @@ export function toHorizonPlaylist(
       startedAt: 0,
       fit: playlist.fit,
       transition: playlist.transition,
-      items: resolved.map((r) => ({
-        url: `/signage-media/${r.media.file}`,
-        mime: r.media.mime,
-        durationMs: r.durationMs,
-        fit: r.fit,
-        transition: r.transition,
-        bytes: r.media.bytes,
-      })),
+      items: toHorizonItems(resolved),
     },
   };
 }
