@@ -117,16 +117,13 @@ export function valueSizeFor(boxH: number, captionPx: number, subPx: number): nu
  *
  * @param boxH the height the composition actually has, in layout pixels — the
  *   content box, not the object's outer height.
- */
-/**
  * @param uniform size the VALUE as though the composition had all three lines,
- *   whatever this tile actually carries.
- *
- *   For a GRID of same-height tiles, which is what Home is. There the caption
- *   and sub-line are the surface's, not the operator's, and a tile that happens
- *   to have neither — the clock — took the whole budget and rendered at 52px in a
- *   row of 35px values. On a wall, where a widget is placed alone at a size
- *   somebody chose, filling the box is still right, so this is off by default.
+ *   whatever this tile actually carries. For a GRID of same-height tiles, which
+ *   is what Home is: there the caption and sub-line are the surface's, not the
+ *   operator's, and a tile that happens to have neither — the clock — took the
+ *   whole budget and rendered at 52px in a row of 35px values. On a wall, where
+ *   a widget is placed alone at a size somebody chose, filling the box is still
+ *   right, so this is off by default.
  */
 export function fitComposition(
   boxH: number,

@@ -1203,15 +1203,6 @@ if (typeof document !== "undefined") {
  * Subscribe to a server-sent event channel.
  * Returns an unsubscribe function.
  */
-/**
- * Whether the event stream is currently up.
- *
- * Exported because a signage display's behaviour at a content boundary depends
- * on it: connected, it advances; disconnected, it holds what it is playing. No
- * other consumer needs this, and nothing here debounces — the caller decides
- * what a momentary drop means, and for signage the answer is "nothing, unless a
- * boundary happens to fall inside it".
- */
 let sseConnected = false;
 const sseConnectionListeners = new Set<(up: boolean) => void>();
 
@@ -1239,6 +1230,15 @@ export function onSseConnection(cb: (up: boolean) => void): () => void {
   return () => sseConnectionListeners.delete(cb);
 }
 
+/**
+ * Whether the event stream is currently up.
+ *
+ * Exported because a signage display's behaviour at a content boundary depends
+ * on it: connected, it advances; disconnected, it holds what it is playing. No
+ * other consumer needs this, and nothing here debounces — the caller decides
+ * what a momentary drop means, and for signage the answer is "nothing, unless a
+ * boundary happens to fall inside it".
+ */
 export function onNotification(
   channel: string,
   cb: (payload: unknown) => void,

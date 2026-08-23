@@ -7,6 +7,7 @@
 // rather than running off the screen.
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { CheckIcon } from "lucide-react";
 
 import { cn } from "../../lib/cn";
 
@@ -111,9 +112,14 @@ function MenuList({
             ) : (
               // A fixed-width gutter rather than a conditional tick, so the
               // labels in a list of toggles line up whatever is on.
-              <span className="w-3 shrink-0 text-center text-accent" aria-hidden>
-                {item.checked ? "✓" : ""}
-              </span>
+              // A fixed-width gutter rather than a conditional tick, so the
+              // labels in a list of toggles line up whatever is on. CheckIcon,
+              // like every other menu in the app — a literal glyph rendered at a
+              // different weight and colour from its neighbours.
+              <CheckIcon
+                className={item.checked ? "size-3.5 shrink-0 text-accent" : "size-3.5 shrink-0 opacity-0"}
+                aria-hidden
+              />
             )}
             <span className="flex-1 truncate">{item.label}</span>
             {item.shortcut && <span className="ml-3 tabular-nums text-fg-subtle">{item.shortcut}</span>}

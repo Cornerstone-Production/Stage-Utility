@@ -21,7 +21,7 @@ import { Input } from "../../components/ui/input";
 import { Switch } from "../../components/ui/switch";
 import { confirmDelete } from "./confirm-delete";
 import { invoke } from "../../lib/api";
-import { useRegisterUnsaved } from "./unsaved-guard";
+import { DraftFooter, useRegisterDraft } from "./unsaved-guard";
 import { ScheduleCalendar } from "./schedule-calendar";
 import { TagPicker } from "./tag-picker";
 import { ButtonGroup } from "../../components/ui/button-group";
@@ -120,13 +120,10 @@ export function ScheduleSection({
     [onChange],
   );
 
-  useRegisterUnsaved(
-    useMemo(
-      () =>
-        draft ? { what: draft.name, save: () => save(draft), discard: () => setDraft(null) } : null,
-      [draft, save],
-    ),
-  );
+  // The shared registration — see useDraft. It was written out here and in
+  // the other section, character for character.
+  const discardDraft = useCallback(() => setDraft(null), []);
+  useRegisterDraft(draft, save, discardDraft);
 
   /** Move a schedule up or down, which changes which one wins. */
   const move = useCallback(
@@ -321,12 +318,7 @@ export function ScheduleSection({
                     />
 
                     {draft?.id === s.id ? (
-                      <div className="flex gap-2">
-                        <Button variant="accent" onClick={() => void save(draft)}>
-                          Save
-                        </Button>
-                        <Button onClick={() => setDraft(null)}>Discard</Button>
-                      </div>
+                      <DraftFooter onSave={() => void save(draft)} onDiscard={discardDraft} />
                     ) : null}
                   </div>
                 ) : null}

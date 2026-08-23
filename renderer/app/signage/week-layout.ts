@@ -44,6 +44,8 @@ export interface WeekBlock {
 }
 
 const DAY_MS = 86_400_000;
+/** Enough to clear the longest DST shift before snapping back to midnight. */
+const DST_SLACK_MS = 3 * 3600_000;
 
 export interface DayOccurrences {
   /** Local midnight this column begins at. */
@@ -165,15 +167,26 @@ export function dragToTimes(
 }
 
 /** Seven local midnights, starting from the Sunday on or before `anchor`. */
-export function weekOf(anchor: number, dayStartOf: (ms: number) => number, weekdayOf: (ms: number) => number): number[] {
+export function weekOf(
+  anchor: number,
+  /** Local midnight of the day containing `ms`. Injected so this stays pure —
+   *  the app-zone version lives in signage-window. */
+  dayStartOf: (ms: number) => number,
+  weekdayOf: (ms: number) => number,
+): number[] {
   const today = dayStartOf(anchor);
   // Walked back a day at a time rather than subtracting N×24h: a DST day is 23
   // or 25 hours long, and subtracting would land in the wrong day that week.
+  // The +/-3h nudge clears the longest DST shift and is then snapped back to
+  // midnight; adding a flat 24h lands in the wrong day twice a year. Named here
+  // rather than repeated inline — signage-window exports the same rule as
+  // nextLocalDayStart / prevLocalDayStart for callers that have a time zone.
+  const back = (ms: number) => dayStartOf(ms - DST_SLACK_MS);
+  const forward = (ms: number) => dayStartOf(ms + DAY_MS + DST_SLACK_MS);
+
   let sunday = today;
-  for (let i = 0; i < 7 && weekdayOf(sunday) !== 0; i++) {
-    sunday = dayStartOf(sunday - 3 * 3600_000);
-  }
+  for (let i = 0; i < 7 && weekdayOf(sunday) !== 0; i++) sunday = back(sunday);
   const days = [sunday];
-  for (let i = 1; i < 7; i++) days.push(dayStartOf(days[i - 1] + DAY_MS + 3 * 3600_000));
+  for (let i = 1; i < 7; i++) days.push(forward(days[i - 1]));
   return days;
 }

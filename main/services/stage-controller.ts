@@ -2172,13 +2172,6 @@ export class StageController {
     return this.state;
   }
 
-  /**
-   * Make a screen a read-only display or an interactive control surface.
-   *
-   * Demoting a panel that currently shows a console is refused rather than
-   * silently unbinding it: the operator would be left with a screen showing
-   * nothing and no indication why.
-   */
   /** How the panel is mounted, in quarter turns clockwise. */
   async setOutputRotation(id: string, rotation: ScreenRotation): Promise<StageState> {
     const output = this.state.outputs.find((o) => o.id === id);
@@ -2195,6 +2188,13 @@ export class StageController {
     return this.state;
   }
 
+  /**
+   * Make a screen a read-only display or an interactive control surface.
+   *
+   * Demoting a panel that currently shows a console is refused rather than
+   * silently unbinding it: the operator would be left with a screen showing
+   * nothing and no indication why.
+   */
   async setOutputMode(id: string, mode: OutputMode): Promise<StageState> {
     const output = this.state.outputs.find((o) => o.id === id);
     if (!output) throw new Error(`outputs:setMode — output ${id} not found`);

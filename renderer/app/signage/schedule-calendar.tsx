@@ -17,7 +17,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { PcoWindow, SignagePlaylist, SignageSchedule } from "@main/types/signage";
 
-import { intervalsOnDay, localDayStart } from "@main/services/signage-window";
+import { intervalsOnDay, localDayStart, nextLocalDayStart } from "@main/services/signage-window";
 import { zonedParts, type TimeZone } from "@main/services/app-timezone";
 import { Button } from "../../components/ui/button";
 import { displayHourCycle } from "../../lib/clock-format";
@@ -92,7 +92,7 @@ export function ScheduleCalendar({
   const blocks = useMemo(() => {
     const ctx = { pcoWindows, liveServiceTypeId: null };
     return days.flatMap((dayStart, i) => {
-      const dayEnd = localDayStart(dayStart + DAY_MS + 3 * 3600_000, tz);
+      const dayEnd = nextLocalDayStart(dayStart, tz);
       const intervals = schedules.flatMap((schedule) =>
         intervalsOnDay(schedule.window, dayStart, tz, ctx).map((iv: { from: number; to: number }) => ({
           schedule,
@@ -142,7 +142,7 @@ export function ScheduleCalendar({
     todayIndex === -1
       ? null
       : (now - days[todayIndex]) /
-        Math.max(1, localDayStart(days[todayIndex] + DAY_MS + 3 * 3600_000, tz) - days[todayIndex]);
+        Math.max(1, nextLocalDayStart(days[todayIndex], tz) - days[todayIndex]);
 
   // Open on the current hour rather than at midnight — the top of a 24-hour
   // column is the part of the day nothing is ever scheduled in.

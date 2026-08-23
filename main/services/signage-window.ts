@@ -87,7 +87,7 @@ function intervalOnDay(
   // Computed from the NEXT local day rather than by adding 24h, so a wrapping
   // window is still correct on the night the clocks change (that day is 23 or 25
   // hours long).
-  const nextDay = zonedParts(dayStart + DAY_MS + 3 * 3600_000, tz);
+  const nextDay = zonedParts(nextLocalDayStart(dayStart, tz), tz);
   const to =
     e > s
       ? instantOfLocal(p.year, p.month, p.day, e, tz)
@@ -168,7 +168,7 @@ export function intervalsOnDay(
   tz: TimeZone,
   ctx: WindowCtx,
 ): { from: number; to: number }[] {
-  const dayEnd = startOfLocalDay(dayStart + DAY_MS + 3 * 3600_000, tz);
+  const dayEnd = nextLocalDayStart(dayStart, tz);
 
   if (w.kind === "always") return [{ from: dayStart, to: dayEnd }];
 
@@ -186,7 +186,7 @@ export function intervalsOnDay(
 
   // Yesterday as well as today, so a window that wrapped past midnight draws its
   // tail on this day — the same rule windowActiveAt follows.
-  const yesterday = startOfLocalDay(dayStart - 3 * 3600_000, tz);
+  const yesterday = prevLocalDayStart(dayStart, tz);
   const days = "days" in w ? w.days : undefined;
 
   const out: { from: number; to: number }[] = [];
@@ -200,6 +200,23 @@ export function intervalsOnDay(
     if (interval && interval.from < dayEnd && dayStart < interval.to) out.push(interval);
   }
   return out;
+}
+
+/**
+ * The local midnight AFTER / BEFORE the one containing `ms`.
+ *
+ * Never `+ 24h`: a DST day is 23 or 25 hours long, so adding a fixed day lands
+ * in the wrong one twice a year. The +/-3h nudge is enough to clear the longest
+ * shift and is then snapped back to midnight — a rule that was spelled out as a
+ * bare `+ DAY_MS + 3 * 3600_000` in nine places across this module and the
+ * calendar, with the reasoning written down at exactly one of them.
+ */
+export function nextLocalDayStart(ms: number, tz: TimeZone): number {
+  return startOfLocalDay(ms + DAY_MS + 3 * 3600_000, tz);
+}
+
+export function prevLocalDayStart(ms: number, tz: TimeZone): number {
+  return startOfLocalDay(ms - 3 * 3600_000, tz);
 }
 
 /** Local midnight of the day containing `ms`. Exported for a calendar's grid. */
@@ -258,7 +275,7 @@ export function nextBoundaryAfter(
   //
   // Costs nothing for a window that does not wrap: yesterday's edges are all at
   // or before today's midnight, and every edge is filtered on `> afterMs`.
-  let day = startOfLocalDay(startOfLocalDay(afterMs, tz) - 3 * 3600_000, tz);
+  let day = prevLocalDayStart(startOfLocalDay(afterMs, tz), tz);
   for (let i = 0; i <= SEARCH_DAYS; i++) {
     const key = zonedDateKey(day, tz);
     const inRange =
@@ -273,7 +290,7 @@ export function nextBoundaryAfter(
       }
     }
     // +3h then snap, so the step cannot land back on the same local day.
-    day = startOfLocalDay(day + DAY_MS + 3 * 3600_000, tz);
+    day = nextLocalDayStart(day, tz);
   }
 
   return best;

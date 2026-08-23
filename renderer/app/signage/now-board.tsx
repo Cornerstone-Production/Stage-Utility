@@ -29,7 +29,6 @@ import { MonitorPlayIcon } from "lucide-react";
 import type { Output, View } from "@main/types/stage";
 import type {
   SignageGroup,
-  SignageHorizon,
   SignageOverride,
   SignagePlaylist,
 } from "@main/types/signage";
@@ -47,17 +46,8 @@ import { PrepareOffline } from "./prepare-offline";
 import { formatClock } from "../../lib/clock-format";
 import { TagPicker } from "./tag-picker";
 import { boardEntry } from "./board-entry";
-import { SIGNAGE_NOW_KEY, SIGNAGE_OVERRIDES_KEY } from "./use-signage-config";
+import { SIGNAGE_NOW_KEY, SIGNAGE_OVERRIDES_KEY , type SignageNow } from "./use-signage-config";
 import { useNow } from "./use-now";
-
-interface NowResponse {
-  horizons: Record<string, SignageHorizon>;
-  /** What a push would put on the walls. Null when nothing is pending. */
-  draftHorizons: Record<string, SignageHorizon> | null;
-  pending: { total: number };
-  staleWindows: boolean;
-  pcoError: string | null;
-}
 
 const PICK = "__pick__";
 
@@ -91,7 +81,7 @@ export function NowBoard({
 
   const { data } = useQuery({
     queryKey: SIGNAGE_NOW_KEY,
-    queryFn: () => invoke<NowResponse>("signage:now"),
+    queryFn: () => invoke<SignageNow>("signage:now"),
     refetchInterval: 5000,
   });
   const { data: overrideData } = useQuery({

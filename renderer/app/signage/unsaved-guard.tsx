@@ -23,6 +23,7 @@ import {
 } from "react";
 
 import { ask } from "../../components/ui/confirm-dialog";
+import { Button } from "../../components/ui/button";
 
 interface Pending {
   /** What is unsaved, named for the question: "Save the changes to Foyer loop?" */
@@ -139,4 +140,52 @@ export function useRegisterUnsaved(pending: Pending | null): void {
     register(pending);
     return () => register(null);
   }, [pending, register]);
+}
+
+/**
+ * Register a section's draft with the guard.
+ *
+ * The three lines this replaces were character-for-character identical in the
+ * playlist editor and the schedule editor. Written out each time, the next
+ * section to grow an editor forgets the registration — which is the failure this
+ * module's own header says it exists to prevent.
+ *
+ * Registration only, not the draft state: the sections set their draft from a
+ * dozen places and taking that over would be a bigger change than the
+ * duplication costs.
+ */
+export function useRegisterDraft<T extends { name: string }>(
+  draft: T | null,
+  save: (record: T) => Promise<void> | void,
+  /** Throw the draft away. Passed in rather than assumed: the hook does not own
+   *  the state, and a no-op here would leave "Discard" doing nothing. */
+  discard: () => void,
+): void {
+  useRegisterUnsaved(
+    useMemo(
+      () =>
+        draft
+          ? { what: draft.name, save: async () => void (await save(draft)), discard }
+          : null,
+      [draft, save, discard],
+    ),
+  );
+}
+
+/** The Save/Discard pair a draft editor ends with. */
+export function DraftFooter({
+  onSave,
+  onDiscard,
+}: {
+  onSave: () => void;
+  onDiscard: () => void;
+}) {
+  return (
+    <div className="flex justify-end gap-2">
+      <Button variant="accent" onClick={onSave}>
+        Save
+      </Button>
+      <Button onClick={onDiscard}>Discard</Button>
+    </div>
+  );
 }

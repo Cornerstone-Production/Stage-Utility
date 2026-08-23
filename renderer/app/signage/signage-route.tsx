@@ -9,7 +9,6 @@ import { UploadCloudIcon } from "lucide-react";
 
 import { useQuery } from "@tanstack/react-query";
 import type { ServiceTypeDTO } from "@main/types/stage";
-import type { PcoWindow, SignageHorizon } from "@main/types/signage";
 
 import { errorMessage } from "@main/services/errors";
 import { Button } from "../../components/ui/button";
@@ -23,7 +22,7 @@ import { MediaSection } from "./media-section";
 import { NowBoard } from "./now-board";
 import { PlaylistsSection } from "./playlists-section";
 import { ScheduleSection } from "./schedule-section";
-import { SIGNAGE_NOW_KEY, useSignageConfig } from "./use-signage-config";
+import { SIGNAGE_NOW_KEY, useSignageConfig, type SignageNow } from "./use-signage-config";
 import { uid } from "../../lib/uid";
 import { UnsavedGuardProvider, useUnsavedGuard } from "./unsaved-guard";
 import { winningOutputsFor, winningScheduleIds } from "./board-entry";
@@ -91,12 +90,7 @@ function SignageSections() {
   const { data: nowBoard } = useQuery({
     queryKey: SIGNAGE_NOW_KEY,
     queryFn: () =>
-      invoke<{
-        horizons: Record<string, SignageHorizon>;
-        pending: { playlists: number; groups: number; schedules: number; total: number };
-        pcoWindows: PcoWindow[];
-        timeZone: string;
-      }>("signage:now"),
+      invoke<SignageNow>("signage:now"),
     refetchInterval: 5000,
   });
   const pending = nowBoard?.pending ?? { playlists: 0, groups: 0, schedules: 0, total: 0 };

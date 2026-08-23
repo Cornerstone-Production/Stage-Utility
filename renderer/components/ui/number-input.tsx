@@ -24,12 +24,6 @@ export interface NumberInputProps {
 }
 
 /**
- * Themed number field used across settings. Commits live on every change and on
- * each stepper click (so dirty-tracking fires), selects-all on focus, can be
- * cleared while typing, and replaces the browser's native up/down spinners with
- * styled chevron steppers that match the app.
- */
-/**
  * How many digits the widest allowed value needs.
  *
  * From the bounds rather than from the current value, so the field does not
@@ -45,6 +39,12 @@ export function digitsNeeded(min: number | undefined, max: number | undefined): 
   return Math.max(3, widest);
 }
 
+/**
+ * Themed number field used across settings. Commits live on every change and on
+ * each stepper click (so dirty-tracking fires), selects-all on focus, can be
+ * cleared while typing, and replaces the browser's native up/down spinners with
+ * styled chevron steppers that match the app.
+ */
 export function NumberInput({
   value,
   onChange,

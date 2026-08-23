@@ -14,6 +14,7 @@ import type {
 } from "@main/types/signage";
 
 import { errorMessage } from "@main/services/errors";
+import type { PcoWindow, SignageHorizon } from "@main/types/signage";
 import { invoke } from "../../lib/api";
 import { SIGNAGE_TAGS_KEY } from "./use-signage-tags";
 import { uploadHeadersFor } from "./upload-headers";
@@ -32,6 +33,24 @@ export const SIGNAGE_CONFIG_KEY = ["signage:config"] as const;
 
 /** What every display is showing, and why — the resolver's own output. */
 export const SIGNAGE_NOW_KEY = ["signage:now"] as const;
+
+/**
+ * What `signage:now` answers with.
+ *
+ * ONE declaration. It was fetched under this key from two places, each with its
+ * own hand-written interface naming a different subset — so the cache entry was
+ * typed two ways and neither was the truth. Change the server payload and one of
+ * them keeps compiling while lying.
+ */
+export interface SignageNow {
+  horizons: Record<string, SignageHorizon>;
+  draftHorizons?: Record<string, SignageHorizon>;
+  pending: { playlists: number; groups: number; schedules: number; total: number };
+  pcoWindows: PcoWindow[];
+  timeZone: string;
+  staleWindows: boolean;
+  pcoError: string | null;
+}
 
 /** Active take-overs. Its own key because the banner has to clear the instant
  *  Release is pressed, not on the next poll. */

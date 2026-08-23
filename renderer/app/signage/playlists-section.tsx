@@ -34,7 +34,7 @@ import { uid } from "../../lib/uid";
 import { useElapsed } from "./use-now";
 import { toHorizonPlaylist } from "./preview-entry";
 import { MediaPicker } from "./media-picker";
-import { useRegisterUnsaved } from "./unsaved-guard";
+import { DraftFooter, useRegisterDraft } from "./unsaved-guard";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { MediaThumb } from "./media-thumb";
 import { TagPicker } from "./tag-picker";
@@ -191,13 +191,10 @@ export function PlaylistsSection({
   }, [editing, playlists, groups]);
 
   // So switching tab asks instead of silently throwing the draft away.
-  useRegisterUnsaved(
-    useMemo(
-      () =>
-        draft ? { what: draft.name, save: () => save(draft), discard: () => setDraft(null) } : null,
-      [draft, save],
-    ),
-  );
+  // The shared registration — see useDraft. It was written out here and in
+  // the other section, character for character.
+  const discardDraft = useCallback(() => setDraft(null), []);
+  useRegisterDraft(draft, save, discardDraft);
 
   /** The menu for a right-click on a playlist row. */
   const menuFor = useCallback(
@@ -550,12 +547,7 @@ export function PlaylistsSection({
             </div>
 
             {draft ? (
-              <div className="flex gap-2">
-                <Button variant="accent" onClick={() => void save(draft)}>
-                  Save
-                </Button>
-                <Button onClick={() => setDraft(null)}>Discard</Button>
-              </div>
+              <DraftFooter onSave={() => void save(draft)} onDiscard={discardDraft} />
             ) : null}
           </div>
         </>
