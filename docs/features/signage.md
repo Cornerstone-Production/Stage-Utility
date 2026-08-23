@@ -199,10 +199,20 @@ cannot trust what time it thinks it is — and a screen that picks a window
 confidently and wrongly is worse than one that plays what it was given.
 
 To take a screen offsite, tag it, make a playlist the default for that tag, and
-use **Prepare for offline**.
+use **Prepare for offline** on that screen's card on the Now board.
+
+It is keyed on the SCREEN, not on a tag: a screen can carry several tags, and
+what it plays with no server is whichever of their defaults wins. The button
+reports what the browser actually holds, names any file it could not fetch, and
+says how many old files it released.
 
 **Prepare for offline works on the browser it is opened in.** On a Raspberry Pi
 that means opening the Signage tab on the Pi itself, not from a laptop.
+
+It also PRUNES: whatever that screen no longer plays is dropped from the device's
+cache. Media is content-addressed, so nothing cached is ever stale — but without
+this, swapping one graphic in a weekly playlist added a permanent copy every
+week.
 
 ### Coming back after a power cut
 

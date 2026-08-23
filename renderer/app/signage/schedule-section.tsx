@@ -258,15 +258,8 @@ export function ScheduleSection({
                   </button>
 
                   {winning ? (
-                    <span
-                      className="shrink-0 text-caption2 font-medium text-live-11"
-                      title={`Playing on ${winningOn(s.id).join(", ")}`}
-                    >
-                      {(() => {
-                        const on = winningOn(s.id);
-                        return on.length === 1 ? `on ${on[0]}` : `on ${on.length} screens`;
-                      })()}
-                    </span>
+                    // Once, not twice: each call walks every horizon.
+                    <WinningOn screens={winningOn(s.id)} />
                   ) : null}
 
                   <Switch
@@ -328,5 +321,18 @@ export function ScheduleSection({
         </div>
       )}
     </div>
+  );
+}
+
+
+/** The "playing on …" marker beside a winning schedule. */
+function WinningOn({ screens }: { screens: string[] }) {
+  return (
+    <span
+      className="shrink-0 text-caption2 font-medium text-live-11"
+      title={`Playing on ${screens.join(", ")}`}
+    >
+      {screens.length === 1 ? `on ${screens[0]}` : `on ${screens.length} screens`}
+    </span>
   );
 }

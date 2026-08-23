@@ -100,7 +100,10 @@ export function MediaSection({
   const order = useMemo(() => shown.map((m) => m.id), [shown]);
   // Pruned every render against what still EXISTS — not against what is shown,
   // or filtering the grid would silently drop the selection behind it.
-  const selection = pruneSelection(rawSelection, media.map((m) => m.id));
+  // Memoised: this is an argument to a call on every render, and the byId map
+  // two lines down already is.
+  const allIds = useMemo(() => media.map((m) => m.id), [media]);
+  const selection = pruneSelection(rawSelection, allIds);
   const picked = new Set(selection.ids);
 
   const send = useCallback(
@@ -407,7 +410,11 @@ export function MediaSection({
           />
         ) : (
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]">
-            {shown.map((m) => (
+            {shown.map((m) => {
+              // Once per card, not twice in one expression: each call walks
+              // every playlist's items.
+              const uses = usedBy(m, playlists);
+              return (
               <div
                 key={m.id}
                 onContextMenu={(e) => {
@@ -480,7 +487,9 @@ export function MediaSection({
                   </span>
                   {" · "}
                   {size(m.bytes)}
-                  {usedBy(m, playlists).length ? ` · in ${usedBy(m, playlists).length}` : ""}
+                  {/* Once, not twice: each call walks every playlist's items,
+                      and this is per card per render. */}
+                  {uses.length ? ` · in ${uses.length}` : ""}
                 </span>
                 {belowPanel(m) ? (
                   // The one place quality is actually lost. Nothing in the
@@ -493,7 +502,8 @@ export function MediaSection({
                   </span>
                 ) : null}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

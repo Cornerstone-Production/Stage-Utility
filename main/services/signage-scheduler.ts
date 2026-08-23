@@ -219,7 +219,7 @@ class SignageScheduler {
         resolveSignage({
           now: Date.now(),
           tz: appTimeZone(),
-          outputs: ctx.outputs as never,
+          outputs: ctx.outputs,
           groups: config.groups,
           schedules: config.schedules,
           playlists: config.playlists,
@@ -242,10 +242,13 @@ class SignageScheduler {
       // rebuild does not send every wall back to its first graphic.
       const carried = carryStartedAt(this.horizons, next);
       this.horizons = carried;
-      if (shouldBroadcast(this.last, carried) && channelHasSubscribers(SIGNAGE_PLAN_CHANNEL)) {
+      // Compared ONCE. shouldBroadcast is two full JSON.stringify of the whole
+      // horizon map, and this asked it twice per tick.
+      const changed = shouldBroadcast(this.last, carried);
+      if (changed && channelHasSubscribers(SIGNAGE_PLAN_CHANNEL)) {
         this.last = carried;
         broadcast(SIGNAGE_PLAN_CHANNEL, carried);
-      } else if (shouldBroadcast(this.last, carried)) {
+      } else if (changed) {
         // Nobody is listening, so nothing was sent — but the map DID change, and
         // recording it as sent would mean the next subscriber's first real change
         // never arrives. The hello burst covers them instead.

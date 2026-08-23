@@ -30,7 +30,9 @@ import { nextBoundaryAfter, windowActiveAt } from "./signage-window.js";
 export interface ResolveInput {
   now: number;
   tz: TimeZone;
-  outputs: Output[];
+  /** Only the ids are read. Narrowed so the scheduler, which holds a lighter
+   *  context object, does not have to cast — it was passing `as never`. */
+  outputs: Pick<Output, "id">[];
   groups: SignageGroup[];
   /** ORDERED. The index is the priority. */
   schedules: SignageSchedule[];
@@ -58,9 +60,20 @@ export const HORIZON_MS = 24 * 3600_000;
  */
 export const HORIZON_QUANTUM_MS = HORIZON_MS;
 
-/** A ceiling on entries, so a pathological schedule set cannot loop or produce a
- *  horizon too big to push. Reaching it is a bug, not a configuration. */
+/** A ceiling on entries, so a pathological schedule set cannot produce a horizon
+ *  too big to push. Reaching it is a bug, not a configuration.
+ *
+ *  The trailing default entry is appended AFTER this check, so a horizon can be
+ *  MAX_ENTRIES + 1 long. Deliberate: that entry is what a screen boots to with
+ *  no server, and dropping it to respect a ceiling would trade a cold-boot
+ *  blank for a bound nobody is near. */
 const MAX_ENTRIES = 200;
+
+/** A separate ceiling on the boundary WALK, so a window that reports a boundary
+ *  it has already passed cannot spin. Unrelated to how many entries a horizon
+ *  may hold — they shared one constant, which read as though the two limits were
+ *  the same fact. */
+const MAX_BOUNDARY_STEPS = 200;
 
 /** What plays, decided for one instant. Null playlist means blank. */
 interface Decision {
@@ -186,9 +199,9 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
     for (const s of schedulesWithGroups) {
       if (!s.enabled) continue;
       let cursor = from;
-      // Bounded by MAX_ENTRIES so a window that reports a boundary it has
+      // Bounded by MAX_BOUNDARY_STEPS so a window that reports a boundary it has
       // already passed cannot spin here.
-      for (let i = 0; i < MAX_ENTRIES; i++) {
+      for (let i = 0; i < MAX_BOUNDARY_STEPS; i++) {
         const b = nextBoundaryAfter(s.window, cursor, input.tz, ctx);
         if (b === null || b >= to) break;
         set.add(b);
