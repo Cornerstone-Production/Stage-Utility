@@ -2,6 +2,7 @@
 
 import type { DragEndEvent } from "@dnd-kit/core";
 import type { useSensors } from "@dnd-kit/core";
+import type { DeviceChannel } from "@main/types/devices";
 
 export type SectionId =
   | "plan"
@@ -23,10 +24,16 @@ export interface SectionItem {
   icon: React.ReactNode;
 }
 
-export interface WirelessChannel {
-  id: string;
-  label: string;
-}
+/**
+ * One bindable wireless channel, as `/api/integrations/wireless/channels`
+ * returns it.
+ *
+ * An ALIAS, not a second declaration. This was a hand-copy of `DeviceChannel`
+ * that happened to match, so adding `deviceType` on the server left the client
+ * unable to see it — and a client type that silently lags the wire is what let
+ * the wireless widgets read fields the endpoint had never sent.
+ */
+export type WirelessChannel = DeviceChannel;
 
 // Action callbacks owned by SettingsView and threaded into each section.
 export interface SectionHandlers {

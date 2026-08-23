@@ -52,6 +52,18 @@ export interface DeviceStatus {
 export interface DeviceChannel {
   id: string;
   label: string;
+  /**
+   * What this channel IS, so a picker can offer only the relevant ones.
+   *
+   * Without it the bindable list is undifferentiated, and the Mic channel widget
+   * offered all twenty-four charger bays alongside the twelve mics — pick one
+   * and the widget draws a dash for ever, because a bay has no RF and belongs to
+   * `charger-battery` instead. It cannot be derived from the live telemetry,
+   * which is the obvious shortcut: telemetry only exists for gear that has
+   * reported, and binding a widget to a receiver still in its case is exactly
+   * when a picker is used.
+   */
+  deviceType: "receiver" | "iem" | "charger";
 }
 
 export interface DeviceProvider {

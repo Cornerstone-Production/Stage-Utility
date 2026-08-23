@@ -5,7 +5,6 @@
 // selection and writes config and style back.
 
 import { useState, useEffect } from "react";
-import { } from "../components/ui/tooltip";
 import {
   
   Trash2Icon,
@@ -697,14 +696,20 @@ export function Inspector({
           )}
         </>
       )}
-      {c.type === "wireless-channel" && (
+      {c.type === "wireless-channel" && (() => {
+        // Mics and IEM packs only. A charger bay has no RF and no frequency, so
+        // binding this widget to one draws a dash for ever — and the picker was
+        // offering twenty-four of them against twelve real channels. Charger
+        // battery is the widget for bays.
+        const rfChannels = wirelessChannels.filter((d) => d.deviceType !== "charger");
+        return (
         <>
-          <Row label="Channel" hint="Which wireless channel this tile shows. Auto uses the first one detected.">
+          <Row label="Channel" hint="Which wireless channel this tile shows. Auto uses the first one detected. Charger bays are not listed — use the Charger battery widget for those.">
             <Select value={c.channelId ?? ""} onValueChange={(v: string) => onConfig({ ...c, channelId: v || null })}>
-              <SelectTrigger><SelectValue placeholder={wirelessChannels.length ? "Auto (first)" : "No channels detected"} /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder={rfChannels.length ? "Auto (first)" : "No channels detected"} /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="">Auto (first)</SelectItem>
-                {wirelessChannels.map((d) => <SelectItem key={d.id} value={d.id}>{d.label}</SelectItem>)}
+                {rfChannels.map((d) => <SelectItem key={d.id} value={d.id}>{d.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </Row>
@@ -715,7 +720,8 @@ export function Inspector({
           <RowSwitch label="Audio level" checked={c.show?.audio ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, audio: v } })} />
           <RowSwitch label="Show channel name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
         </>
-      )}
+        );
+      })()}
       {c.type === "service-pacing" && (
         <>
           <div className="px-1 pb-1 text-xs text-fg-subtle">

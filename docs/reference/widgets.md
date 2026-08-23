@@ -167,9 +167,12 @@ three hours on one pack and forty minutes on another.
 
 Runtime comes from the receiver, not from us, so it is only shown where the gear
 computes one — Shure Axient Digital and ULX-D report it, and a dash means this
-receiver does not. Neither figure includes charger bays; **Charger battery** is
-the widget for those, and mixing them would let a shelf of docked spares pad the
-online count.
+receiver does not.
+
+Neither figure includes charger bays, and **Mic channel** does not offer them in
+its channel picker either: a bay has no RF and no frequency, so a widget bound to
+one could only ever draw a dash. **Charger battery** is the widget for bays. IEM
+packs are offered, since those do have RF and a battery.
 
 See [Wireless Gear](../integrations/wireless.md) and [Mic slots](../slots.md).
 

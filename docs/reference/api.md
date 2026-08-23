@@ -70,7 +70,7 @@ screens.
 | GET / POST | `/api/wireless/connections` | List / add a device connection |
 | PATCH / DELETE | `/api/wireless/connections/:id` | Update / remove a connection |
 | POST | `/api/wireless/connections/:id/test` | Test a device connection |
-| GET | `/api/integrations/wireless/channels` | Bindable channels — `{id, label}` per configured channel, whether or not it has ever reported. For pickers |
+| GET | `/api/integrations/wireless/channels` | Bindable channels — `{id, label, deviceType}` per configured channel, whether or not it has ever reported. For pickers; `deviceType` is what lets one offer mics without charger bays |
 | GET | `/api/integrations/wireless/statuses` | Live telemetry — full `DeviceStatus` per RF channel (RF, battery, runtime, frequency, audio). Chargers excluded. For widgets |
 | GET / POST | `/api/wireless/meter-rate` | Get / set the polling interval |
 
