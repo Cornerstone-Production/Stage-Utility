@@ -21,6 +21,7 @@ import { Input } from "../../components/ui/input";
 import { Switch } from "../../components/ui/switch";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { invoke } from "../../lib/api";
+import { useRegisterUnsaved } from "./unsaved-guard";
 import { newSignageId } from "./ids";
 import { SelectField } from "./select-field";
 import { WindowEditor, describeWindow } from "./window-editor";
@@ -90,6 +91,14 @@ export function ScheduleSection({
       await onChange();
     },
     [onChange],
+  );
+
+  useRegisterUnsaved(
+    useMemo(
+      () =>
+        draft ? { what: draft.name, save: () => save(draft), discard: () => setDraft(null) } : null,
+      [draft, save],
+    ),
   );
 
   /** Move a schedule up or down, which changes which one wins. */

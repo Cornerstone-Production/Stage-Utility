@@ -29,6 +29,7 @@ import { newSignageId } from "./ids";
 import { useElapsed } from "./use-now";
 import { toHorizonPlaylist } from "./preview-entry";
 import { MediaPicker } from "./media-picker";
+import { useRegisterUnsaved } from "./unsaved-guard";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { TagPicker } from "./tag-picker";
 
@@ -187,6 +188,15 @@ export function PlaylistsSection({
     }
     return out;
   }, [editing, playlists, groups]);
+
+  // So switching tab asks instead of silently throwing the draft away.
+  useRegisterUnsaved(
+    useMemo(
+      () =>
+        draft ? { what: draft.name, save: () => save(draft), discard: () => setDraft(null) } : null,
+      [draft, save],
+    ),
+  );
 
   /** The menu for a right-click on a playlist row. */
   const menuFor = useCallback(

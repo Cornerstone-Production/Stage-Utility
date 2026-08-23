@@ -25,6 +25,7 @@ import { PlaylistsSection } from "./playlists-section";
 import { ScheduleSection } from "./schedule-section";
 import { SIGNAGE_NOW_KEY, useSignageConfig } from "./use-signage-config";
 import { newSignageId } from "./ids";
+import { UnsavedGuardProvider, useUnsavedGuard } from "./unsaved-guard";
 import { winningOutputsFor, winningScheduleIds } from "./board-entry";
 
 // No "Groups" tab. A tag is not a thing you go and administer — it is assigned
@@ -47,6 +48,16 @@ function describePending(p: { playlists: number; groups: number; schedules: numb
 }
 
 export function SignageRoute() {
+  // The guard has to sit ABOVE the tab strip: the strip is what asks, and the
+  // editors inside are what know there is something to ask about.
+  return (
+    <UnsavedGuardProvider>
+      <SignageSections />
+    </UnsavedGuardProvider>
+  );
+}
+
+function SignageSections() {
   const [section, setSection] = useState<Section>("Now");
   // Copied media ids. Held HERE rather than in either section, because the whole
   // point is copying on Media and pasting on Playlists — two tabs that are never
@@ -88,6 +99,16 @@ export function SignageRoute() {
   });
   const pending = nowBoard?.pending ?? { playlists: 0, groups: 0, schedules: 0, total: 0 };
   const [pushing, setPushing] = useState(false);
+  const { dirty, confirmLeave } = useUnsavedGuard();
+
+  /** Switch tab, asking first if an editor is holding an unsaved draft. */
+  const leaveTo = useCallback(
+    async (next: Section) => {
+      if (next === section) return;
+      if (await confirmLeave()) setSection(next);
+    },
+    [section, confirmLeave],
+  );
 
   const push = useCallback(async () => {
     setPushing(true);
@@ -128,7 +149,7 @@ export function SignageRoute() {
             key={s}
             role="tab"
             aria-selected={s === section}
-            onClick={() => setSection(s)}
+            onClick={() => void leaveTo(s)}
             className={
               s === section
                 ? "px-3 pb-2.5 pt-2 text-footnote font-medium text-fg border-b-2 border-accent -mb-px"
@@ -136,6 +157,12 @@ export function SignageRoute() {
             }
           >
             {s}
+            {dirty && s === section ? (
+              // A dot, not a word: the editor already shows Save and Discard,
+              // and this only has to say which tab is holding something when
+              // you are looking at another one.
+              <span className="ml-1.5 inline-block size-1.5 rounded-full bg-amber-9 align-middle" aria-label="unsaved" />
+            ) : null}
           </button>
         ))}
       </div>

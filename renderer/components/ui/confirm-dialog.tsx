@@ -13,13 +13,26 @@ export interface ConfirmOptions {
   message?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /**
+   * A THIRD answer, between confirming and cancelling — "Discard", to
+   * "Save"/"Stay here".
+   *
+   * Some questions genuinely have three, and forcing them into two is not a
+   * simplification: asked "save before leaving?" with only Save and Cancel,
+   * every answer to "I clicked the wrong tab" costs you either the work or the
+   * navigation. Absent, the dialog is exactly as it was.
+   */
+  denyLabel?: string;
   /** Style the confirm button red and treat it as a dangerous action. */
   destructive?: boolean;
 }
 
+/** What the operator chose. `cancel` also covers Escape and clicking away. */
+export type ConfirmAnswer = "confirm" | "deny" | "cancel";
+
 interface ConfirmState extends ConfirmOptions {
   id: number;
-  resolve: (ok: boolean) => void;
+  resolve: (answer: ConfirmAnswer) => void;
 }
 
 let _state: ConfirmState | null = null;
@@ -31,16 +44,27 @@ function notify() {
 }
 
 /** Open the confirm dialog; resolves true on confirm, false on cancel/dismiss. */
-export function confirm(opts: ConfirmOptions): Promise<boolean> {
+export function confirm(opts: Omit<ConfirmOptions, "denyLabel">): Promise<boolean> {
+  return ask(opts).then((answer) => answer === "confirm");
+}
+
+/**
+ * The same dialog, answering with WHICH button.
+ *
+ * Separate from `confirm` rather than changing what it returns: every existing
+ * caller reads a boolean, and quietly turning that into a string would make
+ * `if (await confirm(…))` true for "cancel".
+ */
+export function ask(opts: ConfirmOptions): Promise<ConfirmAnswer> {
   return new Promise((resolve) => {
     _state = { ...opts, id: _nextId++, resolve };
     notify();
   });
 }
 
-function settle(ok: boolean) {
+function settle(answer: ConfirmAnswer) {
   // Guard so the close-after-confirm onOpenChange doesn't double-resolve.
-  if (_state) _state.resolve(ok);
+  if (_state) _state.resolve(answer);
   _state = null;
   notify();
 }
@@ -55,7 +79,7 @@ export function ConfirmHost() {
   }, []);
 
   return (
-    <AlertDialogPrimitive.Root open={state !== null} onOpenChange={(o) => { if (!o) settle(false); }}>
+    <AlertDialogPrimitive.Root open={state !== null} onOpenChange={(o) => { if (!o) settle("cancel"); }}>
       <AlertDialogPrimitive.Portal>
         <AlertDialogPrimitive.Overlay
           className={cn(
@@ -84,12 +108,19 @@ export function ConfirmHost() {
             <AlertDialogPrimitive.Cancel asChild>
               <Button variant="transparent" size="small">{state?.cancelLabel ?? "Cancel"}</Button>
             </AlertDialogPrimitive.Cancel>
+            {state?.denyLabel && (
+              // Not an Action: Radix's Action closes the dialog itself, and the
+              // close would settle as a cancel before this could answer.
+              <Button variant="transparent" size="small" onClick={() => settle("deny")}>
+                {state.denyLabel}
+              </Button>
+            )}
             <AlertDialogPrimitive.Action asChild>
               <Button
                 variant="accent"
                 size="small"
                 className={state?.destructive ? "bg-red-9 hover:bg-red-10 active:bg-red-11" : undefined}
-                onClick={() => settle(true)}
+                onClick={() => settle("confirm")}
               >
                 {state?.confirmLabel ?? "Confirm"}
               </Button>
