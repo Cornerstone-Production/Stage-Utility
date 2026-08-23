@@ -175,6 +175,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "signage:now":
       return apiFetch<T>("/api/signage/now");
 
+    case "signage:storage":
+      return apiFetch<T>("/api/signage/storage");
+
     case "signage:listOverrides":
       return apiFetch<T>("/api/signage/overrides");
 

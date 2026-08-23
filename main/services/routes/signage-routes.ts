@@ -30,6 +30,7 @@ import {
   statMediaFile,
 } from "../signage-media-store.js";
 import { signagePcoWindows } from "../signage-pco-windows.js";
+import { signageStorage } from "../signage-storage.js";
 import { publishSignage } from "../signage-published-store.js";
 import { signageScheduler } from "../signage-scheduler.js";
 import { streamUploadToMedia, UploadTooLargeError } from "../signage-upload.js";
@@ -312,6 +313,10 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
       staleWindows: signagePcoWindows.isStale(),
       pcoError: signagePcoWindows.error(),
     });
+  }
+
+  if (c.pathname === "/api/signage/storage" && c.method === "GET") {
+    return json(c.res, await signageStorage());
   }
 
   // ── Publishing ────────────────────────────────────────────────────────────

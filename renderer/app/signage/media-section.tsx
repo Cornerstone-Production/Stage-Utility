@@ -23,6 +23,7 @@ import { confirm } from "../../components/ui/confirm-dialog";
 import { toast } from "../../components/ui/toast";
 import { invoke } from "../../lib/api";
 import { size } from "./format";
+import { StorageBar } from "./storage-bar";
 import { SelectField } from "./select-field";
 import {
   DEFAULT_VIEW,
@@ -351,6 +352,8 @@ export function MediaSection({
           ))}
         </div>
       ) : null}
+
+      <StorageBar />
 
       {media.length ? (
         <div className="flex flex-wrap items-end gap-2">

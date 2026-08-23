@@ -36,6 +36,11 @@ already has it, under whatever name it was first given.
 
 Deleting a file removes it from the playlists that used it, and says which.
 
+A **storage bar** shows what the disk is holding — graphics, video, files waiting
+to be cleared, everything else — and warns before it fills. This matters more on
+a Pi than it sounds: signage is the only part of the app that writes anything
+large, and a full card stops the server saving settings, not just uploads.
+
 ## Playlists
 
 Each item is on screen for a number of seconds. A **video ignores that** and
