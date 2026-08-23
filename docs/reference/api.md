@@ -59,6 +59,26 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 clients that want a flat list. `POST /api/displays/refresh` reloads connected
 screens.
 
+**Signage**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/signage/media` | The media library |
+| POST | `/api/signage/media` | Upload one file. The body IS the file, streamed to disk; its name and measured size travel in `X-Signage-Name`, `X-Signage-W`, `X-Signage-H` and, for video, `X-Signage-Duration-Ms`. Answers `{media, deduped}` |
+| PATCH | `/api/signage/media/:id` | Rename |
+| DELETE | `/api/signage/media/:id` | Delete, answering with the playlists it was removed from |
+| GET/POST | `/api/signage/playlists` | List / create-or-update |
+| DELETE | `/api/signage/playlists/:id` | Refused `409` when a schedule or a group default uses it, naming them |
+| GET/POST | `/api/signage/groups` | List / create-or-update |
+| DELETE | `/api/signage/groups/:id` | Refused `409` when a schedule targets it, naming them |
+| GET/POST | `/api/signage/schedules` | List / create-or-update. A create appends — order is priority |
+| DELETE | `/api/signage/schedules/:id` | Delete |
+| POST | `/api/signage/schedules/reorder` | `{ids}` — sets the priority order |
+| GET | `/api/signage/overrides` | Active take-overs |
+| POST | `/api/signage/groups/:id/override` | Take over: `{playlistId}` or `{blank: true}`, not both |
+| DELETE | `/api/signage/groups/:id/override` | Release |
+| GET | `/api/signage/now` | What every screen is showing and why, plus whether PCO windows are stale. The same resolver output the `signage:plan` stream carries |
+| GET | `/signage-media/:file` | A media file. Immutable, `nosniff`, sandboxed CSP |
+
 **Integrations & wireless**
 | Method | Path | Purpose |
 |--------|------|---------|

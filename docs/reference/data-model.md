@@ -19,6 +19,7 @@ View kinds:
 | **Script** | the full rundown with note columns, headers, lengths, live countdown |
 | **SPL Rundown** | a compact item-plus-level list for the live service |
 | **Custom** | a layout you design in the visual editor |
+| **Signage** | graphics and video on a schedule — see [signage](../features/signage.md) |
 
 ## Surfaces: displays and consoles
 
@@ -108,6 +109,21 @@ Nothing has to be done by hand. On first start, any view containing a button
 becomes a console and the screens showing it become panels, so a control surface that
 worked before still works. What moved is written to the log, so a stray control
 left on a wall display years ago can be spotted and set back deliberately.
+
+## Signage
+
+A **signage** view has no content of its own. What each screen showing one plays
+is resolved per screen on the server, from four stores: a media library,
+playlists of that media, groups of screens, and an ordered list of schedules.
+
+A screen may be in any number of groups. When two schedules match it at once the
+one nearer the top of the schedule list wins — order is the whole priority rule.
+Falling through that, a group's default playlist plays; failing that, black.
+
+The server pushes each screen a **24-hour plan** rather than a current item, so a
+screen switches itself at each boundary and keeps working when the server is
+away. Details, including what happens offline, are in
+[signage](../features/signage.md).
 
 ## Object capabilities
 

@@ -150,6 +150,12 @@ image like any other Raspberry Pi OS one — so they go in at flash time, on the
 machine doing the flashing. This repository is public; a released image must
 never carry a credential or a site's server address.
 
+## Using one for signage
+
+A screen showing graphics on a schedule is set up exactly like any other — it is
+the VIEW it is routed to that makes it signage, and Signage can do that routing
+for you. See [signage](features/signage.md).
+
 ## Removing one
 
 *Release*, on the screen's card, unbinds it: the screen keeps its view and its
