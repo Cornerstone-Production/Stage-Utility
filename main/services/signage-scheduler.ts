@@ -11,7 +11,7 @@
 // what GET /api/signage/now and the hello burst answer with, and both have to be
 // right for a client that has not connected yet.
 
-import type { SignageHorizon } from "../types/signage.js";
+import type { SignageHorizon, SignageHorizonEntry } from "../types/signage.js";
 import { appTimeZone } from "./app-timezone.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { errorMessage } from "./errors.js";
@@ -34,6 +34,70 @@ export const SIGNAGE_PLAN_CHANNEL = "signage:plan";
 export const SAFETY_TICK_MS = 60_000;
 
 export type HorizonMap = Record<string, SignageHorizon>;
+
+/**
+ * Keep a playlist's start where it was, for as long as the same thing is still
+ * playing for the same reason.
+ *
+ * The resolver stamps every entry's `startedAt` with its own `from`, and for the
+ * entry covering NOW that is the instant of the recompute. So every rebuild
+ * moved it — and a display derives its position in the cycle from `startedAt`,
+ * so every rebuild sent every wall back to the first graphic.
+ *
+ * That fired far more often than it sounds. Any config edit anywhere rebuilds
+ * the whole map, so renaming a tag no screen carries restarted every screen in
+ * the building; and because the moved value made the map differ from the last
+ * one, the safety tick broadcast a "change" every minute forever. Reported as
+ * "every time i change what group a display is in, it causes them to restart
+ * their playlist" — which was the visible half of it.
+ *
+ * PURE, and by identity rather than by index: the entry covering an instant can
+ * move position in the list when a boundary appears earlier in the day, and
+ * comparing index to index would then carry a start across a genuine change of
+ * content — a playlist resuming mid-way through a loop it never started.
+ */
+export function carryStartedAt(previous: HorizonMap | null, next: HorizonMap): HorizonMap {
+  if (!previous) return next;
+  const out: HorizonMap = {};
+  for (const [outputId, horizon] of Object.entries(next)) {
+    const before = previous[outputId];
+    out[outputId] = before ? horizon.map((e) => withCarriedStart(before, e)) : horizon;
+  }
+  return out;
+}
+
+/**
+ * The same entry, with the start AND the beginning it already had, if this is
+ * the same content still playing.
+ *
+ * Both, and the `from` matters as much as the start. The entry covering now is
+ * rebuilt with `from` set to the instant of the rebuild, so even with the start
+ * carried the map differed from the last one every time — and the safety tick
+ * went on broadcasting a "change" once a minute to every display, forever.
+ *
+ * A `from` in the past is the truthful value anyway: it is when this content
+ * began, not when the server last thought about it. Everything that reads a
+ * horizon tests `from <= now < until`, which a past `from` satisfies.
+ */
+function withCarriedStart(before: SignageHorizon, entry: SignageHorizonEntry): SignageHorizonEntry {
+  if (!entry.playlist) return entry;
+  const match = before.find(
+    (b) =>
+      b.playlist?.id === entry.playlist?.id &&
+      b.reason === entry.reason &&
+      b.reasonId === entry.reasonId &&
+      // Overlapping, not equal: the entry covering now had its `from` moved to
+      // the instant of the rebuild, so its bounds never match the old ones.
+      b.from < entry.until &&
+      entry.from < b.until,
+  );
+  if (!match?.playlist) return entry;
+  return {
+    ...entry,
+    from: Math.min(entry.from, match.from),
+    playlist: { ...entry.playlist, startedAt: match.playlist.startedAt },
+  };
+}
 
 /**
  * Has anything actually changed?
@@ -133,11 +197,14 @@ class SignageScheduler {
         liveServiceTypeId: ctx.liveServiceTypeId,
       });
 
-      this.horizons = next;
-      if (shouldBroadcast(this.last, next) && channelHasSubscribers(SIGNAGE_PLAN_CHANNEL)) {
-        this.last = next;
-        broadcast(SIGNAGE_PLAN_CHANNEL, next);
-      } else if (shouldBroadcast(this.last, next)) {
+      // Content that is still playing keeps the start it already had, so a
+      // rebuild does not send every wall back to its first graphic.
+      const carried = carryStartedAt(this.horizons, next);
+      this.horizons = carried;
+      if (shouldBroadcast(this.last, carried) && channelHasSubscribers(SIGNAGE_PLAN_CHANNEL)) {
+        this.last = carried;
+        broadcast(SIGNAGE_PLAN_CHANNEL, carried);
+      } else if (shouldBroadcast(this.last, carried)) {
         // Nobody is listening, so nothing was sent — but the map DID change, and
         // recording it as sent would mean the next subscriber's first real change
         // never arrives. The hello burst covers them instead.
