@@ -4,19 +4,45 @@
 // own progress and error state per file rather than going through the shared
 // query layer. A failure names the file it belongs to: dropping eight graphics
 // and getting one unattributed "upload failed" is useless.
+//
+// Selecting and ordering are NOT here. selection.ts and media-order.ts own them,
+// because the picker dialog has to behave identically — a shift-click that means
+// one thing in the library and another in the picker is worse than neither.
 
-import { useCallback, useRef, useState } from "react";
-import { FilmIcon, ImageIcon, Trash2Icon, UploadIcon } from "lucide-react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { FilmIcon, ImageIcon, SearchIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import type { SignageMedia, SignagePlaylist } from "@main/types/signage";
 import { isSignageVideo } from "@main/types/signage";
 
 import { errorMessage } from "@main/services/errors";
 import { Button } from "../../components/ui/button";
+import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { EmptyState } from "../../components/ui/empty-state";
 import { Input } from "../../components/ui/input";
 import { confirm } from "../../components/ui/confirm-dialog";
+import { toast } from "../../components/ui/toast";
 import { invoke } from "../../lib/api";
 import { size } from "./format";
+import { SelectField } from "./select-field";
+import {
+  DEFAULT_VIEW,
+  KIND_LABELS,
+  SORT_LABELS,
+  orderMedia,
+  type MediaKind,
+  type MediaSort,
+  type MediaView,
+} from "./media-order";
+import {
+  EMPTY,
+  clickSelect,
+  contextTarget,
+  modsOf,
+  pruneSelection,
+  selectAll,
+  type Selection,
+} from "./selection";
+import { newSignageId } from "./ids";
 import { uploadMedia } from "./use-signage-config";
 
 /** The panel nearly every wall screen is. Not a preference — it is the size a
@@ -49,16 +75,31 @@ export function MediaSection({
   playlists,
   loading,
   onChange,
+  clipboard,
+  onCopy,
 }: {
   media: SignageMedia[];
   playlists: SignagePlaylist[];
   loading: boolean;
   onChange: () => Promise<void>;
+  /** Media ids copied and waiting to be pasted into a playlist. */
+  clipboard: string[];
+  onCopy: (ids: string[]) => void;
 }) {
   const [pending, setPending] = useState<Pending[]>([]);
   const [dragging, setDragging] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [view, setView] = useState<MediaView>(DEFAULT_VIEW);
+  const [rawSelection, setSelection] = useState<Selection>(EMPTY);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const shown = useMemo(() => orderMedia(media, view), [media, view]);
+  const order = useMemo(() => shown.map((m) => m.id), [shown]);
+  // Pruned every render against what still EXISTS — not against what is shown,
+  // or filtering the grid would silently drop the selection behind it.
+  const selection = pruneSelection(rawSelection, media.map((m) => m.id));
+  const picked = new Set(selection.ids);
 
   const send = useCallback(
     async (files: File[]) => {
@@ -107,14 +148,124 @@ export function MediaSection({
     [playlists, onChange],
   );
 
+  const byId = useMemo(() => new Map(media.map((m) => [m.id, m])), [media]);
+  /** Delete a whole selection, saying what it is in before it goes. */
+  const removeMany = useCallback(
+    async (ids: string[]) => {
+      const items = ids.map((id) => byId.get(id)).filter((m): m is SignageMedia => !!m);
+      if (items.length === 0) return;
+      // Every playlist any of them appears in, listed once. Deleting eight
+      // graphics and finding out afterwards which loops lost items is the thing
+      // this exists to prevent.
+      const uses = [...new Set(items.flatMap((m) => usedBy(m, playlists)))];
+      const ok = await confirm({
+        title: items.length === 1 ? `Delete ${items[0].name}?` : `Delete ${items.length} items?`,
+        message: uses.length
+          ? `Used by ${uses.join(", ")}. Deleting removes ${items.length === 1 ? "it" : "them"} from ${uses.length === 1 ? "that playlist" : "those playlists"}.`
+          : `Not used by any playlist.`,
+        confirmLabel: "Delete",
+        destructive: true,
+      });
+      if (!ok) return;
+      // Sequential, not Promise.all: each delete rewrites the playlists store,
+      // and concurrent read-modify-writes lose each other's edits.
+      const failed: string[] = [];
+      for (const m of items) {
+        try {
+          await invoke("signage:deleteMedia", { id: m.id });
+        } catch (err) {
+          failed.push(`${m.name} (${errorMessage(err)})`);
+        }
+      }
+      setSelection(EMPTY);
+      await onChange();
+      // Returned to the operator rather than swallowed: a "Delete 8" that
+      // removed six must not look like it removed eight.
+      if (failed.length) toast.error(`Could not delete ${failed.join(", ")}`);
+    },
+    [byId, playlists, onChange],
+  );
+
+  /** Append a selection to an existing playlist. */
+  const addToPlaylist = useCallback(
+    async (playlist: SignagePlaylist, ids: string[]) => {
+      const items = [...playlist.items, ...ids.map((mediaId) => ({ mediaId }))];
+      await invoke("signage:savePlaylist", { playlist: { ...playlist, items } });
+      await onChange();
+      toast.success(`Added ${ids.length} to ${playlist.name}`);
+    },
+    [onChange],
+  );
+
+  /** Make a new playlist holding exactly this selection. */
+  const newPlaylistFrom = useCallback(
+    async (ids: string[]) => {
+      const playlist = {
+        id: newSignageId("pl"),
+        // Named after what is in it, which beats "New playlist" when three of
+        // them accumulate.
+        name: ids.length === 1 ? (byId.get(ids[0])?.name ?? "New playlist") : `${ids.length} graphics`,
+        items: ids.map((mediaId) => ({ mediaId })),
+        defaultDurationMs: 8000,
+        fit: "contain" as const,
+        transition: { kind: "crossfade" as const, ms: 600 },
+        createdAt: new Date().toISOString(),
+      };
+      await invoke("signage:savePlaylist", { playlist });
+      await onChange();
+      toast.success(`Made ${playlist.name}`);
+    },
+    [byId, onChange],
+  );
+
+  /** The menu for a right-click on `id`. */
+  const menuFor = useCallback(
+    (id: string): ContextMenuItem[] => {
+      // Right-clicking inside a selection acts on all of it; outside, on the one
+      // row — and selects it, so the menu and the highlight agree.
+      const target = contextTarget(selection, id);
+      setSelection(target);
+      const ids = [...target.ids];
+      const many = ids.length > 1;
+
+      return [
+        {
+          label: many ? `Add ${ids.length} to playlist` : "Add to playlist",
+          items: [
+            ...playlists.map((p) => ({
+              label: p.name,
+              onSelect: () => void addToPlaylist(p, ids),
+            })),
+            ...(playlists.length ? [{ separator: true }] : []),
+            { label: "New playlist…", onSelect: () => void newPlaylistFrom(ids) },
+          ],
+        },
+        { separator: true },
+        { label: many ? `Copy ${ids.length}` : "Copy", shortcut: "⌘C", onSelect: () => onCopy(ids) },
+        ...(many
+          ? []
+          : [{ label: "Rename", onSelect: () => setRenaming(id) }]),
+        { separator: true },
+        {
+          label: many ? `Delete ${ids.length}` : "Delete",
+          danger: true,
+          onSelect: () => void removeMany(ids),
+        },
+      ];
+    },
+    [selection, playlists, addToPlaylist, newPlaylistFrom, removeMany, onCopy],
+  );
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-headline text-fg">Media library</h2>
           <p className="text-caption1 text-fg-subtle">
-            {media.length} {media.length === 1 ? "item" : "items"} ·{" "}
-            {size(media.reduce((n, m) => n + m.bytes, 0))} · deduplicated on upload
+            {shown.length === media.length
+              ? `${media.length} ${media.length === 1 ? "item" : "items"}`
+              : `${shown.length} of ${media.length} shown`}{" "}
+            · {size(shown.reduce((n, m) => n + m.bytes, 0))} · deduplicated on upload
           </p>
         </div>
         <Button variant="accent" onClick={() => fileInput.current?.click()}>
@@ -151,6 +302,71 @@ export function MediaSection({
         </div>
       ) : null}
 
+      {media.length ? (
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="relative min-w-0 flex-1 max-w-xs">
+            <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-fg-subtle" />
+            <Input
+              value={view.search}
+              onChange={(e) => setView({ ...view, search: e.target.value })}
+              placeholder="Search"
+              aria-label="Search the library"
+              className="pl-8"
+            />
+          </label>
+          <SelectField
+            label="Show"
+            hideLabel
+            value={view.kind}
+            onChange={(v) => setView({ ...view, kind: v as MediaKind })}
+            options={Object.entries(KIND_LABELS).map(([value, label]) => ({ value, label }))}
+          />
+          <SelectField
+            label="Sort"
+            hideLabel
+            value={view.sort}
+            onChange={(v) => setView({ ...view, sort: v as MediaSort })}
+            options={Object.entries(SORT_LABELS).map(([value, label]) => ({ value, label }))}
+          />
+        </div>
+      ) : null}
+
+      {/* Appears only with a selection, so the ordinary view stays quiet. */}
+      {selection.ids.length ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-raised px-3 py-2">
+          <span className="text-footnote text-fg">
+            {selection.ids.length} selected
+          </span>
+          <Button size="small" onClick={() => setSelection(selectAll(order))}>
+            Select all
+          </Button>
+          <Button size="small" onClick={() => setSelection(EMPTY)}>
+            Clear
+          </Button>
+          <Button size="small" onClick={() => onCopy([...selection.ids])}>
+            Copy
+          </Button>
+          {clipboard.length ? (
+            // Copy is otherwise a button that appears to do nothing: the paste
+            // is on the Playlists tab, which is not on screen.
+            <span className="text-caption2 text-fg-subtle">
+              {clipboard.length} copied — paste in a playlist
+            </span>
+          ) : null}
+          <Button size="small" onClick={() => void newPlaylistFrom([...selection.ids])}>
+            New playlist from these
+          </Button>
+          <Button
+            size="small"
+            className="ml-auto"
+            onClick={() => void removeMany([...selection.ids])}
+          >
+            <Trash2Icon className="size-3.5" />
+            Delete {selection.ids.length}
+          </Button>
+        </div>
+      ) : null}
+
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -172,17 +388,48 @@ export function MediaSection({
             title="No media yet"
             hint="Drop graphics or video here, or press Upload. PNG, JPG, WebP, GIF, MP4 and WebM."
           />
+        ) : shown.length === 0 ? (
+          <EmptyState
+            icon={<SearchIcon />}
+            title="Nothing matches that"
+            hint="Try a different search, or show everything."
+          />
         ) : (
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]">
-            {media.map((m) => (
-              <div key={m.id} className="flex flex-col gap-1.5">
-                <div className="relative aspect-video overflow-hidden rounded-lg border border-line bg-black">
+            {shown.map((m) => (
+              <div
+                key={m.id}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({ x: e.clientX, y: e.clientY, items: menuFor(m.id) });
+                }}
+                className="flex flex-col gap-1.5"
+              >
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={picked.has(m.id)}
+                  onClick={(e) => setSelection(clickSelect(selection, order, m.id, modsOf(e)))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelection(clickSelect(selection, order, m.id, modsOf(e)));
+                    }
+                  }}
+                  className={
+                    picked.has(m.id)
+                      ? "relative aspect-video cursor-pointer overflow-hidden rounded-lg border-2 border-accent bg-black"
+                      : "relative aspect-video cursor-pointer overflow-hidden rounded-lg border-2 border-line bg-black"
+                  }
+                >
                   {isSignageVideo(m.mime) ? (
                     <>
                       {/* No poster frame is generated: it would mean decoding on
                           the server. The clip's own first frame is enough. */}
                       <video
-                        src={`/signage-media/${m.file}`}
+                        // #t=0.1 so a frame is actually painted — metadata
+                        // alone gets the duration and leaves a black rectangle.
+                        src={`/signage-media/${m.file}#t=0.1`}
                         muted
                         playsInline
                         preload="metadata"
@@ -255,6 +502,8 @@ export function MediaSection({
           </div>
         )}
       </div>
+
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
   );
 }

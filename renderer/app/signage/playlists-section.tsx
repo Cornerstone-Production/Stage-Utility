@@ -27,6 +27,8 @@ import { invoke } from "../../lib/api";
 import { newSignageId } from "./ids";
 import { useElapsed } from "./use-now";
 import { toHorizonPlaylist } from "./preview-entry";
+import { MediaPicker } from "./media-picker";
+import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 
 const KINDS: { value: SignageTransitionKind; label: string }[] = [
   { value: "cut", label: "Cut" },
@@ -51,13 +53,18 @@ export function PlaylistsSection({
   playlists,
   media,
   onChange,
+  clipboard,
 }: {
   playlists: SignagePlaylist[];
   media: SignageMedia[];
   onChange: () => Promise<void>;
+  /** Media ids copied on the Media tab, ready to paste into a playlist. */
+  clipboard: string[];
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(playlists[0]?.id ?? null);
   const [draft, setDraft] = useState<SignagePlaylist | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
 
   const selected = playlists.find((p) => p.id === selectedId) ?? null;
 
@@ -146,6 +153,42 @@ export function PlaylistsSection({
     setDraft({ ...editing, items });
   };
 
+  /** The menu for a right-click on a playlist row. */
+  const menuFor = useCallback(
+    (p: SignagePlaylist): ContextMenuItem[] => [
+      {
+        label: clipboard.length ? `Paste ${clipboard.length}` : "Paste",
+        shortcut: "⌘V",
+        // Disabled rather than hidden: an operator who just pressed Copy needs
+        // to see that this is where it lands, even before there is anything in
+        // it. A menu whose shape changes is a menu you have to re-read.
+        disabled: clipboard.length === 0,
+        onSelect: () => {
+          const items = [...p.items, ...clipboard.map((mediaId) => ({ mediaId }))];
+          void save({ ...p, items });
+        },
+      },
+      { separator: true },
+      {
+        label: "Duplicate",
+        onSelect: () =>
+          void save({
+            ...p,
+            id: newSignageId("pl"),
+            name: `${p.name} copy`,
+            createdAt: new Date().toISOString(),
+          }),
+      },
+      { label: "Rename…", onSelect: () => {
+        setSelectedId(p.id);
+        setDraft({ ...p });
+      } },
+      { separator: true },
+      { label: "Delete", danger: true, onSelect: () => void remove(p) },
+    ],
+    [clipboard, save, remove],
+  );
+
   return (
     <div className="grid gap-4 lg:grid-cols-[240px_1fr_320px]">
       {/* ── the playlists ── */}
@@ -164,6 +207,11 @@ export function PlaylistsSection({
             {playlists.map((p) => (
               <button
                 key={p.id}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setSelectedId(p.id);
+                  setMenu({ x: e.clientX, y: e.clientY, items: menuFor(p) });
+                }}
                 onClick={() => {
                   setSelectedId(p.id);
                   setDraft(null);
@@ -284,16 +332,22 @@ export function PlaylistsSection({
               })}
             </div>
 
-            <SelectField
-              label="Add media"
-              value=""
-              placeholder="Pick a graphic or clip"
-              onChange={(v) => {
-                if (!v) return;
-                setDraft({ ...editing, items: [...editing.items, { mediaId: v }] });
-              }}
-              options={media.map((m) => ({ value: m.id, label: m.name }))}
-              className="max-w-xs"
+            {/* A picker, not a dropdown. A <select> of the whole library works
+                at four files and falls apart at four hundred: no search, no
+                thumbnail, and one item per trip. */}
+            <Button className="self-start" onClick={() => setPicking(true)}>
+              <PlusIcon className="size-3.5" />
+              Add media
+            </Button>
+
+            <MediaPicker
+              open={picking}
+              onOpenChange={setPicking}
+              media={media}
+              destination={editing.name}
+              onAdd={(ids) =>
+                setDraft({ ...editing, items: [...editing.items, ...ids.map((mediaId) => ({ mediaId }))] })
+              }
             />
           </div>
 
@@ -376,6 +430,8 @@ export function PlaylistsSection({
           </div>
         </>
       )}
+
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
   );
 }

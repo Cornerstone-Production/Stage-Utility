@@ -28,6 +28,10 @@ type Section = (typeof SECTIONS)[number];
 
 export function SignageRoute() {
   const [section, setSection] = useState<Section>("Now");
+  // Copied media ids. Held HERE rather than in either section, because the whole
+  // point is copying on Media and pasting on Playlists — two tabs that are never
+  // mounted at the same time.
+  const [clipboard, setClipboard] = useState<string[]>([]);
   const { config, loading, error, reload } = useSignageConfig();
   // Outputs and views come from the shared stage state, not a signage copy.
   const { state } = useStageState();
@@ -99,9 +103,21 @@ export function SignageRoute() {
           onChange={reload}
         />
       ) : section === "Media" ? (
-        <MediaSection media={config.media} playlists={config.playlists} loading={loading} onChange={reload} />
+        <MediaSection
+          media={config.media}
+          playlists={config.playlists}
+          loading={loading}
+          onChange={reload}
+          clipboard={clipboard}
+          onCopy={setClipboard}
+        />
       ) : section === "Playlists" ? (
-        <PlaylistsSection playlists={config.playlists} media={config.media} onChange={reload} />
+        <PlaylistsSection
+          playlists={config.playlists}
+          media={config.media}
+          onChange={reload}
+          clipboard={clipboard}
+        />
       ) : section === "Groups" ? (
         <GroupsSection
           groups={config.groups}
