@@ -9,7 +9,7 @@
 // because the picker dialog has to behave identically — a shift-click that means
 // one thing in the library and another in the picker is worse than neither.
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FilmIcon, ImageIcon, SearchIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import type { SignageMedia, SignagePlaylist } from "@main/types/signage";
 import { isSignageVideo } from "@main/types/signage";
@@ -256,18 +256,68 @@ export function MediaSection({
     [selection, playlists, addToPlaylist, newPlaylistFrom, removeMany, onCopy],
   );
 
+  // Keyboard, rather than more buttons on the page. Select-all and delete are
+  // things a hand already knows how to ask for, and a row of controls that
+  // appears when something is selected pushes the whole grid down the page.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Never while typing. The search field and the rename field are both
+      // inputs on this page, and cmd-A in one of them means select the text.
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setSelection(selectAll(order));
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && selection.ids.length) {
+        e.preventDefault();
+        onCopy([...selection.ids]);
+        return;
+      }
+      if (e.key === "Escape" && selection.ids.length) {
+        setSelection(EMPTY);
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && selection.ids.length) {
+        e.preventDefault();
+        void removeMany([...selection.ids]);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [order, selection.ids, onCopy, removeMany]);
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <h2 className="text-headline text-fg">Media library</h2>
           <p className="text-caption1 text-fg-subtle">
-            {shown.length === media.length
-              ? `${media.length} ${media.length === 1 ? "item" : "items"}`
-              : `${shown.length} of ${media.length} shown`}{" "}
-            · {size(shown.reduce((n, m) => n + m.bytes, 0))} · deduplicated on upload
+            {selection.ids.length
+              ? `${selection.ids.length} selected`
+              : shown.length === media.length
+                ? `${media.length} ${media.length === 1 ? "item" : "items"}`
+                : `${shown.length} of ${media.length} shown`}{" "}
+            · {size(shown.reduce((n, m) => n + m.bytes, 0))}
+            {clipboard.length ? ` · ${clipboard.length} copied, paste in a playlist` : ""}
           </p>
         </div>
+        {/* Everything else a selection can do is on the right-click menu, where
+            it does not cost a row. Delete is here because it is the one action
+            worth reaching for without a right-click — and it sits in a row that
+            is ALWAYS rendered, so selecting something no longer shoves the grid
+            down the page. */}
+        {selection.ids.length ? (
+          <Button
+            className="ml-auto"
+            onClick={() => void removeMany([...selection.ids])}
+          >
+            <Trash2Icon className="size-4" />
+            Delete {selection.ids.length}
+          </Button>
+        ) : null}
         <Button variant="accent" onClick={() => fileInput.current?.click()}>
           <UploadIcon className="size-4" />
           Upload
@@ -328,42 +378,6 @@ export function MediaSection({
             onChange={(v) => setView({ ...view, sort: v as MediaSort })}
             options={Object.entries(SORT_LABELS).map(([value, label]) => ({ value, label }))}
           />
-        </div>
-      ) : null}
-
-      {/* Appears only with a selection, so the ordinary view stays quiet. */}
-      {selection.ids.length ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-raised px-3 py-2">
-          <span className="text-footnote text-fg">
-            {selection.ids.length} selected
-          </span>
-          <Button size="small" onClick={() => setSelection(selectAll(order))}>
-            Select all
-          </Button>
-          <Button size="small" onClick={() => setSelection(EMPTY)}>
-            Clear
-          </Button>
-          <Button size="small" onClick={() => onCopy([...selection.ids])}>
-            Copy
-          </Button>
-          {clipboard.length ? (
-            // Copy is otherwise a button that appears to do nothing: the paste
-            // is on the Playlists tab, which is not on screen.
-            <span className="text-caption2 text-fg-subtle">
-              {clipboard.length} copied — paste in a playlist
-            </span>
-          ) : null}
-          <Button size="small" onClick={() => void newPlaylistFrom([...selection.ids])}>
-            New playlist from these
-          </Button>
-          <Button
-            size="small"
-            className="ml-auto"
-            onClick={() => void removeMany([...selection.ids])}
-          >
-            <Trash2Icon className="size-3.5" />
-            Delete {selection.ids.length}
-          </Button>
         </div>
       ) : null}
 

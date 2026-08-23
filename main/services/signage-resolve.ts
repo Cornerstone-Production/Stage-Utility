@@ -23,6 +23,7 @@ import type {
 } from "../types/stage.js";
 import type { TimeZone } from "./app-timezone.js";
 import { resolveItemDurations, toHorizonItems } from "./signage-playlist-items.js";
+import { migrateGroupDefaults } from "./signage-playlists-store.js";
 import { nextBoundaryAfter, windowActiveAt } from "./signage-window.js";
 
 export interface ResolveInput {
@@ -59,7 +60,12 @@ interface Decision {
 const BLANK: Decision = { playlist: null, reason: "blank", reasonLabel: "" };
 
 export function resolveSignage(input: ResolveInput): Record<string, SignageHorizon> {
-  const byId = new Map(input.playlists.map((p) => [p.id, p]));
+  // A group's old defaultPlaylistId becomes a tag on the playlist it named.
+  // Applied HERE rather than by the caller: this function is what every screen's
+  // content comes from, and a caller that forgot would silently drop an
+  // operator's default with no error anywhere.
+  const playlists = migrateGroupDefaults(input.playlists, input.groups);
+  const byId = new Map(playlists.map((p) => [p.id, p]));
 
   /** A playlist that can actually play, or null. Both "does not exist" and
    *  "nothing in it can play" fall through to the next precedence step rather
@@ -88,17 +94,31 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
     groupsWithOutputs.filter((g) => g.outputIds.includes(outputId));
 
   /**
-   * Step 3 of the precedence: the first group naming a playlist that can play.
+   * Step 3 of the precedence: the fallback playlist for the tags this output
+   * carries.
+   *
+   * Walks PLAYLISTS in list order, not groups, and that ordering is the entire
+   * tie-break: several playlists may declare themselves the default for one tag
+   * — a weekend loop and a youth loop on the same foyer screens is a real thing
+   * an operator wants — and the first of them wins. Order is something they can
+   * see and change; anything else would be a rule they have to be told.
    *
    * Its own function because the trailing default entry needs exactly this step
-   * and nothing else. Written twice, the two drifted apart at the first change —
+   * and nothing else. Written twice, the two drifted apart at the first change,
    * and the symptom would be a screen that boots offline to something other than
    * what it shows when the server is up.
    */
   const groupDefault = (groups: SignageGroup[]): Decision => {
-    for (const g of groups) {
-      const p = playable(g.defaultPlaylistId);
-      if (p) return { playlist: p, reason: "default", reasonLabel: p.name, reasonId: g.id };
+    if (groups.length === 0) return BLANK;
+    const mine = new Set(groups.map((g) => g.id));
+    for (const candidate of playlists) {
+      const claims = candidate.defaultForGroupIds ?? [];
+      const tag = claims.find((id) => mine.has(id));
+      if (!tag) continue;
+      const p = playable(candidate.id);
+      // An unplayable default falls through to the next claimant rather than
+      // blanking the screen, exactly as an unplayable schedule does.
+      if (p) return { playlist: p, reason: "default", reasonLabel: p.name, reasonId: tag };
     }
     return BLANK;
   };

@@ -1,5 +1,6 @@
 import { ScreenDevice } from "../../app/screens/screen-device";
 import { ScreenSignageGroups } from "../../app/screens/screen-signage-groups";
+import { NewScreenDialog } from "./new-screen-dialog";
 import { useState, useEffect, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
@@ -442,7 +443,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
       {/* The machine showing this screen, when one is bound. Nothing when it is
           a browser tab somebody opened. */}
       <ScreenDevice outputId={output.id} name={output.name} />
-      <ScreenSignageGroups outputId={output.id} />
+      <ScreenSignageGroups outputId={output.id} isSignage={assignedView?.kind === "signage"} />
     </div>
   );
 }
@@ -578,6 +579,7 @@ export function OutputsSection({
   // to it. "" means the dialog was opened from the unassigned section, where
   // there is nothing to assign to.
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
+  const [addingScreen, setAddingScreen] = useState(false);
 
   // A view no screen points at. Without a home these are unreachable: the only
   // way in was the Views list this page replaced.
@@ -665,7 +667,7 @@ export function OutputsSection({
                 was below the fold on the page where you would want it. */}
             <button
               type="button"
-              onClick={handlers.handleAddOutput}
+              onClick={() => setAddingScreen(true)}
               className="flex flex-col rounded-xl border border-dashed border-line bg-transparent p-3 text-left transition-colors hover:border-line-strong hover:bg-fill"
             >
               <span className="flex items-center gap-2 px-0.5 pb-2 pt-0.5">
@@ -676,7 +678,7 @@ export function OutputsSection({
                 Point a monitor at {baseUrl}
               </span>
               <span className="px-0.5 pt-2.5 text-caption1 text-fg-subtle">
-                then pick which display it is
+                kiosk, signage or console
               </span>
             </button>
           </div>
@@ -755,6 +757,15 @@ export function OutputsSection({
           </Button>
         )}
       </div>
+
+      {/* Asked at the moment a screen is made, because that is when the operator
+          knows the answer. It also replaces the "turn a screen into a signage
+          screen" button that lived on the signage Groups page. */}
+      <NewScreenDialog
+        open={addingScreen}
+        onOpenChange={setAddingScreen}
+        onCreate={handlers.handleCreateScreen}
+      />
     </div>
   );
 }

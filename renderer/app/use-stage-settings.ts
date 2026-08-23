@@ -692,6 +692,55 @@ export function useStageSettings() {
     }
   }
 
+  /**
+   * Add a screen of a stated kind.
+   *
+   * THE ONE PLACE the three kinds map onto the model — an output mode plus a
+   * view kind. Signage is a normal display routed to a View of kind "signage",
+   * reusing the existing one if there is one: a second Signage view would split
+   * the screens between two identical things nobody chose to have.
+   *
+   * Reuses views:add and outputs:setView rather than a signage-specific path,
+   * because a second way to route an output is a second way to get it wrong.
+   */
+  async function handleCreateScreen(kind: "kiosk" | "signage" | "console", name: string) {
+    try {
+      let viewId: string | null = null;
+
+      if (kind === "signage") {
+        const views = stageState?.views ?? [];
+        viewId = views.find((v) => v.kind === "signage")?.id ?? null;
+        if (!viewId) {
+          // POST /api/views answers with the whole StageState, not the created
+          // view — so the id is read back out of it.
+          const created = await ipc<StageState>("views:add", { name: "Signage", kind: "signage" });
+          viewId = created.views?.find((v) => v.kind === "signage")?.id ?? null;
+          if (!viewId) throw new Error("the Signage view was not created");
+        }
+      }
+
+      const next = await ipc<StageState>("outputs:add", {
+        ...(name ? { name } : {}),
+        ...(viewId ? { viewId } : {}),
+      });
+      queryClient.setQueryData(["stage:getState"], next);
+
+      if (kind === "console") {
+        // A console is a screen somebody OPERATES: panel mode is what makes its
+        // controls live rather than read-only.
+        const added = next.outputs?.[next.outputs.length - 1];
+        if (added) {
+          const withMode = await ipc<StageState>("outputs:setMode", { id: added.id, mode: "panel" });
+          queryClient.setQueryData(["stage:getState"], withMode);
+        }
+      }
+    } catch (err) {
+      // Surfaced, never swallowed: a half-made screen with no view is worse
+      // than a failure the operator can retry.
+      toast.error(`Failed to add screen: ${errorMessage(err)}`);
+    }
+  }
+
   async function handleRenameOutput(id: string, name: string) {
     try {
       const next = await ipc<StageState>("outputs:rename", { id, name });
@@ -845,6 +894,7 @@ export function useStageSettings() {
     handleRenamePreset,
     handleOverwritePreset,
     handleAddOutput,
+    handleCreateScreen,
     handleRenameOutput,
     handleSetOutputView,
     handleSetOutputLocked,

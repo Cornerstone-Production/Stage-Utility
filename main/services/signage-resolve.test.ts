@@ -388,6 +388,98 @@ describe("the horizon itself", () => {
     assert.equal(now(r).reason, "schedule");
   });
 
+  test("a playlist that is the default for a tag plays when nothing else does", () => {
+    // The new shape: the fallback lives on the PLAYLIST, named by tag, because
+    // that is where the operator is standing when they decide it.
+    const r = run({
+      groups: [group("g1", ["out-1"])],
+      playlists: [{ ...pl("house"), defaultForGroupIds: ["g1"] }],
+      schedules: [],
+    });
+    assert.equal(now(r).playlist?.id, "house");
+    assert.equal(now(r).reason, "default");
+    assert.equal(now(r).reasonId, "g1", "the entry should name the tag that decided it");
+  });
+
+  test("two playlists claiming one tag: the first in the list wins", () => {
+    // A weekend loop and a youth loop on the same foyer screens is a real thing
+    // an operator wants, so this is allowed rather than refused. Order is the
+    // whole tie-break, because order is something they can see and change.
+    const r = run({
+      groups: [group("g1", ["out-1"])],
+      playlists: [
+        { ...pl("weekend"), defaultForGroupIds: ["g1"] },
+        { ...pl("office", "m2"), defaultForGroupIds: ["g1"] },
+      ],
+      schedules: [],
+    });
+    assert.equal(now(r).playlist?.id, "weekend");
+  });
+
+  test("and reordering them reverses the answer", () => {
+    const r = run({
+      groups: [group("g1", ["out-1"])],
+      playlists: [
+        { ...pl("office", "m2"), defaultForGroupIds: ["g1"] },
+        { ...pl("weekend"), defaultForGroupIds: ["g1"] },
+      ],
+      schedules: [],
+    });
+    assert.equal(now(r).playlist?.id, "office");
+  });
+
+  test("an unplayable default falls through to the next claimant", () => {
+    // Exactly what an unplayable schedule does. Blanking the screen because the
+    // first claimant lost its media would be a wall going dark over tidying up.
+    const r = run({
+      groups: [group("g1", ["out-1"])],
+      playlists: [
+        { ...pl("weekend"), items: [{ mediaId: "deleted" }], defaultForGroupIds: ["g1"] },
+        { ...pl("office", "m2"), defaultForGroupIds: ["g1"] },
+      ],
+      schedules: [],
+    });
+    assert.equal(now(r).playlist?.id, "office");
+  });
+
+  test("a default for a tag this screen does not carry does not reach it", () => {
+    const r = run({
+      groups: [group("g1", ["out-1"]), group("g2", ["somewhere-else"])],
+      playlists: [{ ...pl("house"), defaultForGroupIds: ["g2"] }],
+      schedules: [],
+    });
+    assert.equal(now(r).reason, "blank");
+  });
+
+  test("a group's old defaultPlaylistId still works, unmigrated on disk", () => {
+    // The operator's existing setup. Dropping this silently would take every
+    // screen that relies on a group default to black — including offline, where
+    // the default is the ONLY thing a booting display has.
+    const r = run({
+      groups: [group("g1", ["out-1"], "house")],
+      playlists: [pl("house")],
+      schedules: [],
+    });
+    assert.equal(now(r).playlist?.id, "house");
+    assert.equal(now(r).reason, "default");
+  });
+
+  test("and the playlist's own list wins over a stale group field", () => {
+    // Once someone has edited this on the new screen, a leftover field on the
+    // old record must not put back a tag they took off.
+    const r = run({
+      groups: [group("g1", ["out-1"], "weekend"), group("g2", ["out-1"])],
+      playlists: [
+        { ...pl("weekend"), defaultForGroupIds: ["g1"] },
+        { ...pl("office", "m2"), defaultForGroupIds: ["g2"] },
+      ],
+      schedules: [],
+    });
+    // Both are claimants; list order decides, and the migration must not have
+    // reordered anything.
+    assert.equal(now(r).playlist?.id, "weekend");
+  });
+
   test("does not run away on a pathological schedule set", () => {
     // Twenty schedules whose windows all flip constantly must still produce a
     // bounded horizon rather than looping.

@@ -8,6 +8,7 @@ import { useCallback, useMemo, useState } from "react";
 import { GripVerticalIcon, ListVideoIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import type {
   SignageFit,
+  SignageGroup,
   SignageMedia,
   SignagePlaylist,
   SignageTransition,
@@ -29,6 +30,7 @@ import { useElapsed } from "./use-now";
 import { toHorizonPlaylist } from "./preview-entry";
 import { MediaPicker } from "./media-picker";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
+import { MultiSelect } from "../../components/ui/multi-select";
 
 const KINDS: { value: SignageTransitionKind; label: string }[] = [
   { value: "cut", label: "Cut" },
@@ -54,12 +56,18 @@ export function PlaylistsSection({
   media,
   onChange,
   clipboard,
+  groups,
+  onCreateGroup,
 }: {
   playlists: SignagePlaylist[];
   media: SignageMedia[];
   onChange: () => Promise<void>;
   /** Media ids copied on the Media tab, ready to paste into a playlist. */
   clipboard: string[];
+  /** Every tag, for the "Default for" picker. */
+  groups: SignageGroup[];
+  /** Make a tag from inside the picker, so naming one does not mean leaving. */
+  onCreateGroup: (name: string) => Promise<string | null>;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(playlists[0]?.id ?? null);
   const [draft, setDraft] = useState<SignagePlaylist | null>(null);
@@ -152,6 +160,33 @@ export function PlaylistsSection({
     items.splice(to, 0, moved);
     setDraft({ ...editing, items });
   };
+
+  /**
+   * Tags this playlist claims that another playlist claims too.
+   *
+   * Reported rather than refused: two playlists defaulting for one set of
+   * screens is something an operator legitimately wants. What they must not
+   * have to guess is which one plays.
+   */
+  const conflicts = useMemo(() => {
+    if (!editing) return [];
+    const mine = editing.defaultForGroupIds ?? [];
+    const out: { group: string; by: string; winning: boolean }[] = [];
+    for (const gid of mine) {
+      const claimants = playlists.filter((p) => (p.defaultForGroupIds ?? []).includes(gid));
+      const others = claimants.filter((p) => p.id !== editing.id);
+      if (others.length === 0) continue;
+      // "Winning" is decided the way the resolver decides it: the first
+      // claimant in playlist order.
+      const first = claimants[0];
+      out.push({
+        group: groups.find((g) => g.id === gid)?.name ?? gid,
+        by: others.map((p) => p.name).join(", "),
+        winning: first?.id === editing.id,
+      });
+    }
+    return out;
+  }, [editing, playlists, groups]);
 
   /** The menu for a right-click on a playlist row. */
   const menuFor = useCallback(
@@ -418,6 +453,53 @@ export function PlaylistsSection({
                 />
               </label>
             ) : null}
+
+            {/* Where the offline story is configured, and the fallback when no
+                schedule matches. On the playlist rather than on the tag because
+                this is the moment an operator decides it: they have just built
+                the loop. */}
+            <div className="flex flex-col gap-1">
+              <span className="text-caption1 text-fg-muted">Default for</span>
+              <MultiSelect
+                options={groups.map((g) => ({ value: g.id, label: g.name }))}
+                selected={editing.defaultForGroupIds ?? []}
+                onChange={(next) => patch({ defaultForGroupIds: next })}
+                placeholder="No screens"
+                searchable={groups.length > 8}
+                footer={
+                  <button
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-footnote text-accent hover:bg-fill"
+                    onClick={() => {
+                      const name = window.prompt("Name for the new tag");
+                      if (!name?.trim()) return;
+                      void onCreateGroup(name.trim()).then((id) => {
+                        if (id) patch({ defaultForGroupIds: [...(editing.defaultForGroupIds ?? []), id] });
+                      });
+                    }}
+                  >
+                    <PlusIcon className="size-3.5" />
+                    New tag…
+                  </button>
+                }
+              />
+              <span className="text-caption2 text-fg-subtle">
+                Played on these screens when no schedule matches, and by a screen that starts up
+                with no server.
+              </span>
+              {conflicts.length ? (
+                // Allowed on purpose — a weekend loop and a youth loop on the
+                // same foyer screens is a real thing to want. But the operator
+                // has to be told which one actually plays, and the answer is
+                // list order, which they can see and change.
+                <span className="text-caption2 text-amber-11">
+                  {conflicts.map((c) => `${c.group} is also claimed by ${c.by}`).join("; ")}.
+                  {" "}
+                  {conflicts.every((c) => c.winning)
+                    ? "This one is higher in the list, so it wins."
+                    : "The one higher in the list wins."}
+                </span>
+              ) : null}
+            </div>
 
             {draft ? (
               <div className="flex gap-2">

@@ -16,14 +16,17 @@ import { useStageState } from "../../main/use-stage-state";
 import { useNow } from "./use-now";
 
 import { MediaSection } from "./media-section";
-import { GroupsSection } from "./groups-section";
 import { NowBoard } from "./now-board";
 import { PlaylistsSection } from "./playlists-section";
 import { ScheduleSection } from "./schedule-section";
 import { SIGNAGE_NOW_KEY, useSignageConfig } from "./use-signage-config";
+import { newSignageId } from "./ids";
 import { winningOutputsFor, winningScheduleIds } from "./board-entry";
 
-const SECTIONS = ["Now", "Media", "Playlists", "Groups", "Schedule"] as const;
+// No "Groups" tab. A tag is not a thing you go and administer — it is assigned
+// where the work is: on a playlist ("Default for"), on the Screens page, and
+// from a right-click on the Now board.
+const SECTIONS = ["Now", "Media", "Playlists", "Schedule"] as const;
 type Section = (typeof SECTIONS)[number];
 
 export function SignageRoute() {
@@ -32,7 +35,18 @@ export function SignageRoute() {
   // point is copying on Media and pasting on Playlists — two tabs that are never
   // mounted at the same time.
   const [clipboard, setClipboard] = useState<string[]>([]);
+
   const { config, loading, error, reload } = useSignageConfig();
+  /** Make a tag and return its id, so a picker can select it immediately. */
+  const createGroup = useCallback(
+    async (name: string): Promise<string | null> => {
+      const group = { id: newSignageId("gr"), name, outputIds: [], createdAt: new Date().toISOString() };
+      await invoke("signage:saveGroup", { group });
+      await reload();
+      return group.id;
+    },
+    [reload],
+  );
   // Outputs and views come from the shared stage state, not a signage copy.
   const { state } = useStageState();
 
@@ -100,6 +114,7 @@ export function SignageRoute() {
           groups={config.groups}
           playlists={config.playlists}
           outputs={state?.outputs ?? []}
+          views={state?.views ?? []}
           onChange={reload}
         />
       ) : section === "Media" ? (
@@ -117,14 +132,8 @@ export function SignageRoute() {
           media={config.media}
           onChange={reload}
           clipboard={clipboard}
-        />
-      ) : section === "Groups" ? (
-        <GroupsSection
           groups={config.groups}
-          playlists={config.playlists}
-          outputs={state?.outputs ?? []}
-          views={state?.views ?? []}
-          onChange={reload}
+          onCreateGroup={createGroup}
         />
       ) : section === "Schedule" ? (
         <ScheduleSection

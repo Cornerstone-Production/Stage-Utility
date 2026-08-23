@@ -1,6 +1,6 @@
 # Signage
 
-Graphics and video on a schedule, on groups of screens.
+Graphics and video on a schedule, on tagged sets of screens.
 
 A signage screen is an ordinary screen. It is set up in [Screens](../kiosk-devices.md)
 like any other, then routed to a **Signage** view; what it plays is worked out on
@@ -13,8 +13,8 @@ device, so swapping a dead Pi loses nothing.
 |---|---|
 | **Media** | the library of graphics and video |
 | **Playlists** | ordered sets of media, each item with a duration and a transition |
-| **Groups** | named sets of screens — a foyer, a hallway |
-| **Schedules** | a playlist on a group, between certain times |
+| **Tags** | named sets of screens — a foyer, a hallway |
+| **Schedules** | a playlist on a tag, between certain times |
 
 A single graphic is a playlist with one item in it. There is no separate concept.
 
@@ -44,18 +44,32 @@ the playlist default is never what anyone means.
 3000 ms. A transition happens inside the incoming item's own time, so changing it
 does not change how long a lap of the playlist takes.
 
-Every screen in a group is at the same point in the playlist at the same moment,
-including mid-transition. Nothing coordinates them; they each work it out from
-the clock.
+Every screen carrying a tag is at the same point in the playlist at the same
+moment, including mid-transition. Nothing coordinates them; they each work it out
+from the clock.
 
-## Groups
+**Default for** names the tags this playlist is the fallback for. It plays when
+no schedule matches, instead of the screen going black, and it is also what a
+screen plays when it starts up with no server (see *Offline*).
 
-A screen can be in any number of groups. Which schedule wins when two of them
-disagree is settled by the schedule list, not by the groups — see below.
+Several playlists may be the default for one tag — a weekend loop and a youth
+loop on the same foyer screens is a reasonable thing to want. The one **higher in
+the playlist list** wins, and the editor says so when it happens.
 
-A group can name a **default playlist**. It plays when no schedule matches,
-instead of the screen going black, and it is also what a screen plays when it
-starts up with no server (see *Offline*).
+## Tags
+
+A tag is a named set of screens. A screen can carry any number of them.
+
+There is no page for administering tags, because there is nothing to administer:
+assign them where the work is.
+
+- On a screen's card under **Screens**, to say what that screen is part of.
+- On a playlist under **Default for**, which also offers *New tag…*.
+- On the **Now** board, where each tag's card carries the screens it covers, a
+  rename, and a delete.
+
+Which schedule wins when two tags disagree is settled by the schedule list, not
+by the tags — see below.
 
 ## Schedules
 
@@ -94,7 +108,7 @@ keep being used, and Signage says so. They keep working; they may be out of date
 
 ## Taking over
 
-**Take over** puts a playlist on a group immediately, beating every schedule until
+**Take over** puts a playlist on a tag immediately, beating every schedule until
 released. **Blank** does the same with nothing. A banner names every active
 take-over, so a forgotten one is visible rather than mysterious.
 
@@ -117,13 +131,13 @@ A screen that was already blank when the server went away stays blank.
 ## Offline
 
 A screen that **starts up** with no server has nothing to hold, so it plays its
-group's **default playlist** and never consults a schedule. That is deliberate: a
+tag's **default playlist** and never consults a schedule. That is deliberate: a
 Raspberry Pi has no battery-backed clock, so after a cold boot with no network it
 cannot trust what time it thinks it is — and a screen that picks a window
 confidently and wrongly is worse than one that plays what it was given.
 
-To take a screen offsite, put it in a group, give that group a default playlist,
-and use **Prepare for offline**.
+To take a screen offsite, tag it, make a playlist the default for that tag, and
+use **Prepare for offline**.
 
 **Prepare for offline works on the browser it is opened in.** On a Raspberry Pi
 that means opening the Signage tab on the Pi itself, not from a laptop.
@@ -151,7 +165,7 @@ the truth: there is nothing for it to draw.
 
 ## Backups
 
-Playlists, groups, schedules and the media library are all carried in a config
+Playlists, tags, schedules and the media library are all carried in a config
 backup. Media **files** are carried up to 12 MB each, which is every graphic and
 no video. Anything skipped is named in the backup, so a restore can say what did
 not come back.
@@ -160,5 +174,5 @@ not come back.
 
 - A screen's day-long plan is a snapshot. If a Planning Center time moves while a
   screen is disconnected, it cannot know.
-- Offline, a screen plays its group's default and ignores schedules entirely.
+- Offline, a screen plays its tag's default and ignores schedules entirely.
   Time-based schedules need a server.

@@ -1,10 +1,11 @@
+import { useMemo, useState } from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 // A popover rather than a native control, unlike Select. HTML has no native
 // multi-select DROPDOWN: adding `multiple` to a <select> turns it into an inline
 // scrolling list box, not an OS popup, so there is nothing native to opt into. The
 // position picker is custom for the same reason (it also needs a search field).
 // Styling therefore follows that picker — a bare tick, not a filled checkbox.
-import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 
 export interface MultiSelectOption {
@@ -23,6 +24,8 @@ export function MultiSelect({
   summary,
   className,
   disabled,
+  searchable,
+  footer,
 }: {
   options: MultiSelectOption[];
   selected: string[];
@@ -32,9 +35,25 @@ export function MultiSelect({
   summary?: string;
   className?: string;
   disabled?: boolean;
+  /**
+   * Show a search field above the list.
+   *
+   * Worth it past a dozen options and noise below that, so it is opt-in: a
+   * screen picker in a building with twenty TVs needs it, a three-item filter
+   * does not. All/None act on what the search has NARROWED to, which is what
+   * makes the pair useful — "tick every foyer screen" is a search and one click.
+   */
+  searchable?: boolean;
+  /** Trailing row, e.g. "New tag…", so a picker can also create. */
+  footer?: React.ReactNode;
 }) {
+  const [search, setSearch] = useState("");
   const selectedSet = new Set(selected);
   const chosen = options.filter((o) => selectedSet.has(o.value));
+  const shown = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return needle ? options.filter((o) => o.label.toLowerCase().includes(needle)) : options;
+  }, [options, search]);
   const label =
     summary ??
     (chosen.length === 0
@@ -75,15 +94,48 @@ export function MultiSelect({
             "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           )}
         >
+          {searchable && (
+            <div className="relative border-b border-line">
+              <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-gray-9" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search"
+                aria-label="Search options"
+                autoFocus
+                className="w-full bg-transparent py-1.5 pl-8 pr-2.5 text-footnote text-fg outline-none placeholder:text-gray-a8"
+              />
+            </div>
+          )}
           <div className="flex items-center justify-between gap-2 border-b border-line px-2.5 py-1.5">
             <span className="text-caption2 text-gray-9">{chosen.length} of {options.length}</span>
             <div className="flex items-center gap-3 text-caption2">
-              <button className="text-accent hover:text-accent-hover" onClick={() => onChange(options.map((o) => o.value))}>All</button>
-              <button className="text-gray-10 hover:text-gray-12" onClick={() => onChange([])}>None</button>
+              {/* All and None act on what the SEARCH narrowed to. Acting on the
+                  whole list from behind a filter is how "tick these four" ticks
+                  twenty, and the operator does not find out until a wall
+                  changes. Outside a search this is the whole list either way. */}
+              <button
+                className="text-accent hover:text-accent-hover"
+                onClick={() => onChange([...new Set([...selected, ...shown.map((o) => o.value)])])}
+              >
+                All
+              </button>
+              <button
+                className="text-gray-10 hover:text-gray-12"
+                onClick={() => {
+                  const drop = new Set(shown.map((o) => o.value));
+                  onChange(selected.filter((v) => !drop.has(v)));
+                }}
+              >
+                None
+              </button>
             </div>
           </div>
           <div className="flex flex-col gap-0.5 p-1 max-h-[min(20rem,var(--radix-popover-content-available-height))] overflow-y-auto">
-            {options.map((o) => {
+            {shown.length === 0 && (
+              <p className="px-2 py-3 text-center text-caption2 text-gray-9">Nothing matches that.</p>
+            )}
+            {shown.map((o) => {
               const on = selectedSet.has(o.value);
               return (
                 <button
@@ -111,6 +163,7 @@ export function MultiSelect({
               );
             })}
           </div>
+          {footer && <div className="border-t border-line p-1">{footer}</div>}
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>

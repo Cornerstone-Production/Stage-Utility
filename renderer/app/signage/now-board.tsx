@@ -11,7 +11,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MonitorPlayIcon } from "lucide-react";
-import type { Output } from "@main/types/stage";
+import type { Output, View } from "@main/types/stage";
 import type { SignageGroup, SignageHorizon, SignageOverride, SignagePlaylist } from "@main/types/signage";
 
 import { errorMessage } from "@main/services/errors";
@@ -22,6 +22,11 @@ import { SignagePlayer } from "../../main/signage-player";
 import { invoke } from "../../lib/api";
 import { SelectField } from "./select-field";
 import { boardEntry } from "./board-entry";
+import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
+import { MultiSelect } from "../../components/ui/multi-select";
+import { confirm } from "../../components/ui/confirm-dialog";
+import { Input } from "../../components/ui/input";
+import { MoreHorizontalIcon } from "lucide-react";
 import { SIGNAGE_NOW_KEY, SIGNAGE_OVERRIDES_KEY } from "./use-signage-config";
 import { useNow } from "./use-now";
 
@@ -37,16 +42,26 @@ export function NowBoard({
   groups,
   playlists,
   outputs,
+  views,
   onChange,
 }: {
   groups: SignageGroup[];
   playlists: SignagePlaylist[];
   outputs: Output[];
+  views: View[];
   onChange: () => Promise<void>;
 }) {
   // 100ms, because these previews run the real player and a transition is 600ms.
   const now = useNow(100);
   const [busy, setBusy] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+
+  /** A screen is signage-capable when the View it is routed to is a signage View. */
+  const signageViewIds = useMemo(
+    () => new Set(views.filter((v) => v.kind === "signage").map((v) => v.id)),
+    [views],
+  );
 
   const { data } = useQuery({
     queryKey: SIGNAGE_NOW_KEY,
@@ -60,6 +75,12 @@ export function NowBoard({
   });
 
   const outputName = useMemo(() => new Map(outputs.map((o) => [o.id, o.name])), [outputs]);
+  // Only signage screens are offered. Tagging a slots display would make a card
+  // that can never play anything, and the operator would have to work out why.
+  const signageOutputs = useMemo(
+    () => outputs.filter((o) => o.viewId && signageViewIds.has(o.viewId)),
+    [outputs, signageViewIds],
+  );
   const overrides = overrideData?.overrides ?? [];
 
   const act = useCallback(
@@ -79,12 +100,45 @@ export function NowBoard({
     [onChange],
   );
 
+  const saveGroup = useCallback(
+    async (group: SignageGroup) => act(() => invoke("signage:saveGroup", { group })),
+    [act],
+  );
+
+  /** The menu for a right-click (or the three dots) on a group card.
+   *
+   *  This is where a tag is renamed, re-pointed at different screens, or
+   *  deleted — the three things the Groups page used to exist for. Doing it on
+   *  the card means doing it while looking at what that tag is playing. */
+  const menuFor = useCallback(
+    (g: SignageGroup): ContextMenuItem[] => [
+      { label: "Rename…", onSelect: () => setRenaming(g.id) },
+      { separator: true },
+      {
+        label: "Delete tag",
+        danger: true,
+        onSelect: () =>
+          void (async () => {
+            const ok = await confirm({
+              title: `Delete ${g.name}?`,
+              message:
+                "Screens keep working — they stop carrying this tag. Any schedule targeting it will say so rather than being deleted with it.",
+              confirmLabel: "Delete",
+              destructive: true,
+            });
+            if (ok) await act(() => invoke("signage:deleteGroup", { id: g.id }));
+          })(),
+      },
+    ],
+    [act],
+  );
+
   if (groups.length === 0) {
     return (
       <EmptyState
         icon={<MonitorPlayIcon />}
-        title="No groups yet"
-        hint="Make a group of screens, and this is where you will see what they are playing."
+        title="No screen tags yet"
+        hint="Tag a screen on the Screens page, or make a tag from a playlist's Default-for picker. This is where you will see what each one is playing."
       />
     );
   }
@@ -141,6 +195,10 @@ export function NowBoard({
           return (
             <div
               key={g.id}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenu({ x: e.clientX, y: e.clientY, items: menuFor(g) });
+              }}
               // Amber all the way round a taken-over card, not just on its pill.
               // A wall of these is scanned, not read, and the question being
               // asked is "which one am I holding?" — a border answers it from
@@ -152,7 +210,36 @@ export function NowBoard({
               }
             >
               <div className="flex items-center justify-between gap-2">
-                <h3 className="truncate text-callout font-medium text-fg">{g.name}</h3>
+                {renaming === g.id ? (
+                  <Input
+                    autoFocus
+                    defaultValue={g.name}
+                    onBlur={(e) => {
+                      setRenaming(null);
+                      const name = e.currentTarget.value.trim();
+                      if (name && name !== g.name) void saveGroup({ ...g, name });
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                      if (e.key === "Escape") setRenaming(null);
+                    }}
+                  />
+                ) : (
+                  <h3 className="truncate text-callout font-medium text-fg">{g.name}</h3>
+                )}
+                <Button
+                  variant="transparent"
+                  size="small"
+                  iconOnly
+                  tooltip={`Edit ${g.name}`}
+                  className="shrink-0"
+                  onClick={(e) => {
+                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    setMenu({ x: r.left, y: r.bottom + 4, items: menuFor(g) });
+                  }}
+                >
+                  <MoreHorizontalIcon className="size-3.5" />
+                </Button>
                 <span
                   className={
                     overridden
@@ -175,17 +262,25 @@ export function NowBoard({
                 ) : null}
               </p>
 
-              <div className="flex flex-wrap gap-1">
-                {g.outputIds.length === 0 ? (
-                  <span className="text-caption2 text-fg-subtle">No screens in this group</span>
-                ) : (
-                  g.outputIds.map((id) => (
-                    <span key={id} className="rounded border border-line px-1.5 py-0.5 text-caption2 text-fg-subtle">
-                      {outputName.get(id) ?? id}
-                    </span>
-                  ))
-                )}
-              </div>
+              {/* The screens carrying this tag, and the control that changes
+                  them. Editable here because this is the card that shows what
+                  the tag is playing — the question "should that screen be in
+                  this?" is asked while looking at it, not on another page. */}
+              <MultiSelect
+                options={signageOutputs.map((o) => ({ value: o.id, label: o.name }))}
+                selected={g.outputIds}
+                onChange={(outputIds) => void saveGroup({ ...g, outputIds })}
+                placeholder="No screens"
+                summary={
+                  g.outputIds.length === 0
+                    ? "No screens"
+                    : g.outputIds.length === 1
+                      ? (outputName.get(g.outputIds[0]) ?? g.outputIds[0])
+                      : `${g.outputIds.length} screens`
+                }
+                searchable={signageOutputs.length > 8}
+                className="w-full"
+              />
 
               <div className="flex items-center gap-1.5">
                 {/* Shows what is ACTUALLY taken over, not a standing invitation.
@@ -231,6 +326,8 @@ export function NowBoard({
           );
         })}
       </div>
+
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
   );
 }

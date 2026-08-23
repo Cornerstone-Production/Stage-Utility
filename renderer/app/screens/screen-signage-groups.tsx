@@ -1,40 +1,83 @@
-// Which signage groups a screen belongs to, on that screen's own card.
+// Which signage tags a screen carries, on that screen's own card.
 //
-// Read-only on purpose. Membership is edited in Signage, where the groups, the
-// playlists and the schedule are all visible together; a checkbox here would let
-// someone change what a wall plays without seeing what else is in that group or
-// which schedule currently wins.
+// EDITABLE here, which it was not before. The reasoning for read-only was that
+// membership should be changed where the playlists and the schedule are visible
+// together — but that argument was for a Groups page that no longer exists, and
+// it had the effect of making "put that TV in the foyer set" a trip to another
+// tab to find a list of screens and tick one.
 //
-// Renders nothing for a screen that is not in any group, which is every screen
-// that is not doing signage.
+// Tagging a screen cannot silently change what a wall plays in a way the
+// operator cannot see, because the Now board shows every tag and what it is
+// playing; the link to it is right here.
+//
+// Renders a control only for a screen that is actually doing signage — a slots
+// display carrying a signage tag would make a card on the Now board that can
+// never play anything.
 
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SignageGroup } from "@main/types/signage";
 
+import { MultiSelect } from "../../components/ui/multi-select";
 import { invoke } from "../../lib/api";
 import { AppLink } from "../app-link";
 
-export function ScreenSignageGroups({ outputId }: { outputId: string }) {
+export const SIGNAGE_GROUPS_KEY = ["signage:groups"] as const;
+
+export function ScreenSignageGroups({
+  outputId,
+  /** False for a screen that is not routed to a signage View. */
+  isSignage,
+}: {
+  outputId: string;
+  isSignage: boolean;
+}) {
+  const client = useQueryClient();
   // Its own query rather than the Signage tab's config bundle: this renders on
   // Screens, where the other three signage stores are not wanted.
   const { data } = useQuery({
-    queryKey: ["signage:groups"],
+    queryKey: SIGNAGE_GROUPS_KEY,
     queryFn: () => invoke<{ groups: SignageGroup[] }>("signage:listGroups"),
+    enabled: isSignage,
   });
 
-  const groups = (data?.groups ?? []).filter((g) => g.outputIds.includes(outputId));
-  if (groups.length === 0) return null;
+  // Memoised so setTags below does not get a new identity on every render.
+  const groups = useMemo(() => data?.groups ?? [], [data]);
+  const mine = groups.filter((g) => g.outputIds.includes(outputId)).map((g) => g.id);
+
+  const setTags = useCallback(
+    async (next: string[]) => {
+      const want = new Set(next);
+      // Only the groups whose membership actually changed are written. Saving
+      // every group on every edit would rewrite the whole store — and each write
+      // recomputes the horizon for every screen in the building.
+      const changed = groups.filter((g) => g.outputIds.includes(outputId) !== want.has(g.id));
+      for (const g of changed) {
+        const outputIds = want.has(g.id)
+          ? [...g.outputIds, outputId]
+          : g.outputIds.filter((id) => id !== outputId);
+        await invoke("signage:saveGroup", { group: { ...g, outputIds } });
+      }
+      await client.invalidateQueries({ queryKey: SIGNAGE_GROUPS_KEY });
+    },
+    [groups, outputId, client],
+  );
+
+  if (!isSignage) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-t border-line px-3 py-2">
-      <span className="text-caption2 text-fg-subtle">Signage</span>
-      {groups.map((g) => (
-        <span key={g.id} className="rounded border border-line px-1.5 py-0.5 text-caption2 text-fg-muted">
-          {g.name}
-        </span>
-      ))}
+    <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
+      <span className="text-caption2 text-fg-subtle">Signage tags</span>
+      <MultiSelect
+        options={groups.map((g) => ({ value: g.id, label: g.name }))}
+        selected={mine}
+        onChange={(next) => void setTags(next)}
+        placeholder="None"
+        searchable={groups.length > 8}
+        className="min-w-32"
+      />
       <AppLink to="/signage" className="ml-auto text-caption2 text-accent hover:underline">
-        Edit in Signage
+        Open Signage
       </AppLink>
     </div>
   );

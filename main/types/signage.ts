@@ -70,6 +70,23 @@ export interface SignagePlaylist {
   defaultDurationMs: number;
   fit: SignageFit;
   transition: SignageTransition;
+  /**
+   * Tags this playlist is the FALLBACK for. "Default for" in the UI.
+   *
+   * Two jobs, and both matter: it plays when no schedule matches instead of the
+   * screen going black, AND it is what a display plays when it BOOTS with no
+   * server reachable. The second job is why an offline deployment is configured
+   * by setting this rather than by writing a schedule — a booting display has no
+   * connection to check and a Pi has no RTC, so a window it cannot trust must
+   * never be consulted.
+   *
+   * It lives on the PLAYLIST rather than on the tag because that is where an
+   * operator is when they decide it: they have just built the loop, and saying
+   * "this is what the foyer shows when nothing else is on" belongs to that
+   * moment. Several playlists may claim the same tag — the UI warns and names
+   * the winner, which is the first of them in playlist order.
+   */
+  defaultForGroupIds?: string[];
   createdAt: string;
 }
 
@@ -78,14 +95,12 @@ export interface SignageGroup {
   name: string;
   outputIds: string[];
   /**
-   * This group's content when there is nothing else to go on. Two jobs, and both
-   * matter: it plays when no schedule matches instead of the screen going black,
-   * AND it is what a display plays when it BOOTS with no server reachable.
+   * @deprecated Moved to SignagePlaylist.defaultForGroupIds.
    *
-   * The second job is why an offline deployment is configured by setting this
-   * rather than by writing a schedule — a booting display has no connection to
-   * check and a Pi has no RTC, so a window it cannot trust must never be
-   * consulted. "Default playlist" in the UI.
+   * Read on load and migrated, never written. Kept on the type so the migration
+   * can SEE it: dropping the field first would make an operator's existing
+   * default silently unreachable, which is the one thing a rename of a concept
+   * must not do.
    */
   defaultPlaylistId?: string | null;
   createdAt: string;
