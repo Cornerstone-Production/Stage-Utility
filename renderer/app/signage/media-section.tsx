@@ -20,7 +20,7 @@ import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-m
 import { MediaThumb } from "./media-thumb";
 import { EmptyState } from "../../components/ui/empty-state";
 import { Input } from "../../components/ui/input";
-import { confirm } from "../../components/ui/confirm-dialog";
+import { confirmDelete } from "./confirm-delete";
 import { toast } from "../../components/ui/toast";
 import { invoke } from "../../lib/api";
 import { size } from "./format";
@@ -135,14 +135,9 @@ export function MediaSection({
   const remove = useCallback(
     async (m: SignageMedia) => {
       const uses = usedBy(m, playlists);
-      const ok = await confirm({
-        title: `Delete ${m.name}?`,
-        message: uses.length
+      const ok = await confirmDelete(`${m.name}`, uses.length
           ? `It is in ${uses.join(", ")}. Deleting removes it from ${uses.length === 1 ? "that playlist" : "those playlists"}.`
-          : "It is not in any playlist.",
-        confirmLabel: "Delete",
-        destructive: true,
-      });
+          : "It is not in any playlist.");
       if (!ok) return;
       await invoke("signage:deleteMedia", { id: m.id });
       await onChange();
@@ -160,14 +155,12 @@ export function MediaSection({
       // graphics and finding out afterwards which loops lost items is the thing
       // this exists to prevent.
       const uses = [...new Set(items.flatMap((m) => usedBy(m, playlists)))];
-      const ok = await confirm({
-        title: items.length === 1 ? `Delete ${items[0].name}?` : `Delete ${items.length} items?`,
-        message: uses.length
+      const ok = await confirmDelete(
+        items.length === 1 ? items[0].name : `${items.length} items`,
+        uses.length
           ? `Used by ${uses.join(", ")}. Deleting removes ${items.length === 1 ? "it" : "them"} from ${uses.length === 1 ? "that playlist" : "those playlists"}.`
-          : `Not used by any playlist.`,
-        confirmLabel: "Delete",
-        destructive: true,
-      });
+          : "Not used by any playlist.",
+      );
       if (!ok) return;
       // Sequential, not Promise.all: each delete rewrites the playlists store,
       // and concurrent read-modify-writes lose each other's edits.

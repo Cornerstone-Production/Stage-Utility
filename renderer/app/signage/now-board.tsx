@@ -39,7 +39,7 @@ import { Button } from "../../components/ui/button";
 import { ButtonGroup } from "../../components/ui/button-group";
 import { EmptyState } from "../../components/ui/empty-state";
 import { toast } from "../../components/ui/toast";
-import { confirm } from "../../components/ui/confirm-dialog";
+import { confirmDelete } from "./confirm-delete";
 import { SignagePlayer } from "../../main/signage-player";
 import { invoke } from "../../lib/api";
 import { SelectField } from "./select-field";
@@ -171,9 +171,7 @@ export function NowBoard({
   const deleteTag = useCallback(
     async (g: SignageGroup) => {
       const usedBy = playlists.filter((p) => (p.defaultForGroupIds ?? []).includes(g.id));
-      const ok = await confirm({
-        title: `Delete ${g.name}?`,
-        message: [
+      const ok = await confirmDelete(`${g.name}`, [
           g.outputIds.length
             ? `${g.outputIds.length} ${g.outputIds.length === 1 ? "screen stops" : "screens stop"} carrying it.`
             : "No screens carry it.",
@@ -181,10 +179,7 @@ export function NowBoard({
           "Any schedule targeting it will say so rather than being deleted with it.",
         ]
           .filter(Boolean)
-          .join(" "),
-        confirmLabel: "Delete",
-        destructive: true,
-      });
+          .join(" "));
       if (ok) await act(() => invoke("signage:deleteGroup", { id: g.id }));
     },
     [playlists, act],

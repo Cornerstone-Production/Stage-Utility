@@ -235,6 +235,7 @@ function SignageSections() {
           serviceTypes={serviceTypes ?? []}
           winningIds={winningIds}
           winningOn={winningOn}
+          onCreateGroup={createGroup}
           pcoWindows={nowBoard?.pcoWindows ?? []}
           timeZone={nowBoard?.timeZone ?? "UTC"}
           onChange={reload}

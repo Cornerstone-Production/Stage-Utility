@@ -7,15 +7,12 @@ import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon, RotateCwIcon, CheckIcon } from "lucide-react";
+import { MENU_CONTENT, MENU_ITEM, RotationMenu } from "./rotation-menu";
+import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
 /** Shared menu-item styling, so the six actions cannot drift apart. */
-const MENU_ITEM =
-  "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill";
-const MENU_CONTENT =
-  "z-50 min-w-48 rounded-md border border-line-strong bg-popover p-1 shadow-md backdrop-blur-xl";
 import {
   Button,
   Input,
@@ -285,35 +282,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
                   property of what it is playing. Four quarter turns, because a
                   panel is hung one of four ways and an arbitrary angle is a
                   mis-typed number that leaves a wall crooked. */}
-              <DropdownMenu.Sub>
-                <DropdownMenu.SubTrigger className={MENU_ITEM}>
-                  <RotateCwIcon className="size-3.5 text-fg-subtle" />
-                  Rotation
-                  <span className="ml-auto text-caption2 text-fg-subtle">
-                    {screenRotation(output) === 0 ? "Normal" : `${screenRotation(output)}°`}
-                  </span>
-                </DropdownMenu.SubTrigger>
-                <DropdownMenu.Portal>
-                  <DropdownMenu.SubContent className={MENU_CONTENT} sideOffset={2}>
-                    {([0, 90, 180, 270] as const).map((deg) => (
-                      <DropdownMenu.Item
-                        key={deg}
-                        onSelect={() => void onSetRotation(deg)}
-                        className={MENU_ITEM}
-                      >
-                        <CheckIcon
-                          className={
-                            screenRotation(output) === deg
-                              ? "size-3.5 text-accent"
-                              : "size-3.5 opacity-0"
-                          }
-                        />
-                        {deg === 0 ? "Normal" : deg === 180 ? "Upside down" : `${deg}° clockwise`}
-                      </DropdownMenu.Item>
-                    ))}
-                  </DropdownMenu.SubContent>
-                </DropdownMenu.Portal>
-              </DropdownMenu.Sub>
+              <RotationMenu rotation={screenRotation(output)} onSet={(deg) => void onSetRotation(deg)} />
               <DropdownMenu.Item
                 onSelect={() => onSetLocked(!(output.locked ?? false))}
                 className={MENU_ITEM}

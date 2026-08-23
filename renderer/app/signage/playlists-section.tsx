@@ -26,7 +26,7 @@ import { Button } from "../../components/ui/button";
 import { EmptyState } from "../../components/ui/empty-state";
 import { Input } from "../../components/ui/input";
 import { NumberInput } from "../../components/ui/number-input";
-import { confirm } from "../../components/ui/confirm-dialog";
+import { confirmDelete } from "./confirm-delete";
 import { SelectField } from "./select-field";
 import { SignagePlayer } from "../../main/signage-player";
 import { invoke } from "../../lib/api";
@@ -119,12 +119,7 @@ export function PlaylistsSection({
 
   const remove = useCallback(
     async (p: SignagePlaylist) => {
-      const ok = await confirm({
-        title: `Delete ${p.name}?`,
-        message: "Any schedule using it will say so rather than being deleted with it.",
-        confirmLabel: "Delete",
-        destructive: true,
-      });
+      const ok = await confirmDelete(`${p.name}`, "Any schedule using it will say so rather than being deleted with it.");
       if (!ok) return;
       await invoke("signage:deletePlaylist", { id: p.id });
       setSelectedId(null);

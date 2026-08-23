@@ -13,14 +13,8 @@
 
 import { useState } from "react";
 import { DropdownMenu } from "radix-ui";
-import {
-  CheckIcon,
-  ExternalLinkIcon,
-  MoreVerticalIcon,
-  RefreshCwIcon,
-  RotateCwIcon,
-  TrashIcon,
-} from "lucide-react";
+import { MENU_CONTENT, MENU_ITEM, RotationMenu } from "./rotation-menu";
+import { ExternalLinkIcon, MoreVerticalIcon, RefreshCwIcon, TrashIcon } from "lucide-react";
 import type { Output } from "@main/types/stage";
 import { screenRotation } from "@main/types/views";
 
@@ -30,11 +24,6 @@ import { confirm } from "../../components/ui/confirm-dialog";
 import { ScreenDevice } from "../../app/screens/screen-device";
 import { ScreenSignageGroups } from "../../app/screens/screen-signage-groups";
 
-const MENU_CONTENT =
-  "z-50 min-w-44 rounded-lg border border-line-strong bg-popover p-1 shadow-xl backdrop-blur-xl";
-const MENU_ITEM =
-  "flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-left text-footnote " +
-  "text-fg outline-none data-[highlighted]:bg-fill";
 
 export function SignageScreenRow({
   output,
@@ -131,31 +120,7 @@ export function SignageScreenRow({
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content align="end" sideOffset={4} className={MENU_CONTENT}>
-            <DropdownMenu.Sub>
-              <DropdownMenu.SubTrigger className={MENU_ITEM}>
-                <RotateCwIcon className="size-3.5 text-fg-subtle" />
-                Rotation
-                <span className="ml-auto text-caption2 text-fg-subtle">
-                  {rotation === 0 ? "Normal" : `${rotation}°`}
-                </span>
-              </DropdownMenu.SubTrigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.SubContent className={MENU_CONTENT} sideOffset={2}>
-                  {([0, 90, 180, 270] as const).map((deg) => (
-                    <DropdownMenu.Item
-                      key={deg}
-                      onSelect={() => void onSetRotation(deg)}
-                      className={MENU_ITEM}
-                    >
-                      <CheckIcon
-                        className={rotation === deg ? "size-3.5 text-accent" : "size-3.5 opacity-0"}
-                      />
-                      {deg === 0 ? "Normal" : deg === 180 ? "Upside down" : `${deg}° clockwise`}
-                    </DropdownMenu.Item>
-                  ))}
-                </DropdownMenu.SubContent>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Sub>
+            <RotationMenu rotation={rotation} onSet={(deg) => void onSetRotation(deg)} />
             <DropdownMenu.Item onSelect={onOpenWindow} className={MENU_ITEM}>
               <ExternalLinkIcon className="size-3.5 text-fg-subtle" />
               Open in a window

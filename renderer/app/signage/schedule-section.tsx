@@ -16,14 +16,14 @@ import type { PcoWindow, SignageGroup, SignagePlaylist, SignageSchedule } from "
 import type { TimeZone } from "@main/services/app-timezone";
 
 import { Button } from "../../components/ui/button";
-import { Checkbox } from "../../components/ui/checkbox";
 import { EmptyState } from "../../components/ui/empty-state";
 import { Input } from "../../components/ui/input";
 import { Switch } from "../../components/ui/switch";
-import { confirm } from "../../components/ui/confirm-dialog";
+import { confirmDelete } from "./confirm-delete";
 import { invoke } from "../../lib/api";
 import { useRegisterUnsaved } from "./unsaved-guard";
 import { ScheduleCalendar } from "./schedule-calendar";
+import { TagPicker } from "./tag-picker";
 import { ButtonGroup } from "../../components/ui/button-group";
 import { uid } from "../../lib/uid";
 import { SelectField } from "./select-field";
@@ -34,6 +34,7 @@ export function ScheduleSection({
   groups,
   playlists,
   serviceTypes,
+  onCreateGroup,
   winningIds,
   winningOn,
   pcoWindows,
@@ -55,6 +56,8 @@ export function ScheduleSection({
   /** The APP time zone, never the browser's — a laptop in another zone must not
    *  draw a different week from the one the server will run. */
   timeZone: TimeZone;
+  /** Make a tag from inside the picker — the same prop the other sections take. */
+  onCreateGroup: (name: string) => Promise<string | null>;
   onChange: () => Promise<void>;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
@@ -109,12 +112,7 @@ export function ScheduleSection({
 
   const remove = useCallback(
     async (s: SignageSchedule) => {
-      const ok = await confirm({
-        title: `Delete ${s.name}?`,
-        message: "Screens it was driving fall through to whatever is next in the list.",
-        confirmLabel: "Delete",
-        destructive: true,
-      });
+      const ok = await confirmDelete(`${s.name}`, "Screens it was driving fall through to whatever is next in the list.");
       if (!ok) return;
       await invoke("signage:deleteSchedule", { id: s.id });
       await onChange();
@@ -204,7 +202,7 @@ export function ScheduleSection({
         <EmptyState
           icon={<CalendarClockIcon />}
           title="No schedules yet"
-          hint="A schedule puts a playlist on a group of screens between certain times."
+          hint="A schedule puts a playlist on the screens carrying a tag, between certain times."
         />
       ) : (
         <div className="flex flex-col gap-1.5">
@@ -258,7 +256,7 @@ export function ScheduleSection({
                       {" · "}
                       {s.groupIds.length
                         ? s.groupIds.map((g) => groupName.get(g) ?? g).join(", ")
-                        : "no groups"}
+                        : "no tags"}
                     </span>
                   </button>
 
@@ -301,29 +299,19 @@ export function ScheduleSection({
                     />
 
                     <div className="flex flex-col gap-1">
-                      <span className="text-caption1 text-fg-muted">Groups</span>
-                      {groups.length === 0 ? (
-                        <p className="text-caption2 text-fg-subtle">Make a group first.</p>
-                      ) : (
-                        <div className="flex flex-wrap gap-3">
-                          {groups.map((g) => (
-                            <label key={g.id} className="flex items-center gap-1.5 text-footnote text-fg">
-                              <Checkbox
-                                checked={editing.groupIds.includes(g.id)}
-                                onCheckedChange={(on) =>
-                                  setDraft({
-                                    ...editing,
-                                    groupIds: on
-                                      ? [...editing.groupIds, g.id]
-                                      : editing.groupIds.filter((x) => x !== g.id),
-                                  })
-                                }
-                              />
-                              {g.name}
-                            </label>
-                          ))}
-                        </div>
-                      )}
+                      <span className="text-caption1 text-fg-muted">Tags</span>
+                      {/* The same control the Now board and the Screens page
+                          use. A raw checkbox grid was fine at three tags and an
+                          unscannable wall at twenty, and it got none of the
+                          picker's search or inline create. */}
+                      <TagPicker
+                        groups={groups}
+                        selected={editing.groupIds}
+                        onChange={(next) => setDraft({ ...editing, groupIds: next })}
+                        onCreate={onCreateGroup}
+                        placeholder="No tags"
+                        className="w-full"
+                      />
                     </div>
 
                     <WindowEditor
