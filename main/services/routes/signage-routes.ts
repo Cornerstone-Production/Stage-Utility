@@ -346,6 +346,15 @@ async function deleteBlockers(key: string, id: string): Promise<string[]> {
   return [];
 }
 
+/** Does saving this record mean Planning Center has to be asked anything?
+ *
+ *  Only a PCO-driven window does. An "always" or weekly schedule needs no round
+ *  trip at all, and making every save wait for one was most of the delay. */
+function needsPcoWindows(record: unknown): boolean {
+  const window = (record as { window?: { kind?: string } } | null)?.window;
+  return window?.kind === "pco";
+}
+
 /** A stored record with an id — everything the collection helper handles. */
 interface Identified {
   id: string;
@@ -424,12 +433,25 @@ async function collection<T extends Identified>(
           : [...all, record],
       );
       // Push the new horizon at once rather than waiting for the safety tick:
-      // an operator who just edited a schedule expects the wall to follow. A
-      // new PCO-driven schedule also needs its windows fetched now rather than
-      // up to half an hour later, which would look like the schedule not working.
-      if (segment === "schedules") await signagePcoWindows.refresh();
+      // an operator who just edited a schedule expects the wall to follow.
       await signageScheduler.recompute();
       json(c.res, { [key]: record, [segment]: saved });
+
+      // A PCO-driven schedule also needs its windows fetched now rather than up
+      // to half an hour later, which would look like the schedule not working.
+      // NOT awaited, and not on every save: it is a round trip to Planning
+      // Center, and awaiting it made Save take 1947ms against this server while
+      // every subsequent save took 2ms. Reported as "save button on schedules
+      // lags" — it was one network call wearing a button's clothes.
+      if (segment === "schedules" && needsPcoWindows(record)) {
+        void signagePcoWindows
+          .refresh()
+          .then(() => signageScheduler.recompute())
+          // Reported, not swallowed. The scheduler's own tick will try again, so
+          // this is a slower path rather than a broken one — but an operator
+          // wondering why a PCO schedule has not started needs this in the log.
+          .catch((err) => console.error("[signage] could not refresh PCO windows:", errorMessage(err)));
+      }
       return true;
     }
   }

@@ -29,6 +29,22 @@ export interface NumberInputProps {
  * cleared while typing, and replaces the browser's native up/down spinners with
  * styled chevron steppers that match the app.
  */
+/**
+ * How many digits the widest allowed value needs.
+ *
+ * From the bounds rather than from the current value, so the field does not
+ * resize as you type — a control that changes width under the cursor is worse
+ * than one that is slightly too wide. Three is the floor: a two-character box
+ * beside two steppers reads as broken even when nothing is clipped.
+ */
+export function digitsNeeded(min: number | undefined, max: number | undefined): number {
+  const widest = Math.max(
+    String(Math.trunc(max ?? 0)).length,
+    String(Math.trunc(min ?? 0)).length,
+  );
+  return Math.max(3, widest);
+}
+
 export function NumberInput({
   value,
   onChange,
@@ -73,7 +89,9 @@ export function NumberInput({
   return (
     <div
       className={cn(
-        "inline-flex h-7 w-full items-stretch overflow-hidden rounded-md border border-line bg-field",
+        // `min-w-fit` so the box grows to whatever the field below needs rather
+        // than clipping it — a caller's `w-16` becomes a floor, not a ceiling.
+        "inline-flex h-7 w-full min-w-fit items-stretch overflow-hidden rounded-md border border-line bg-field",
         "transition-colors focus-within:border-focus focus-within:ring-1 focus-within:ring-focus",
         disabled && "cursor-not-allowed opacity-50",
         className,
@@ -102,6 +120,12 @@ export function NumberInput({
           }
         }}
         onChange={(e) => commitText(e.target.value)}
+        // Wide enough for the largest value it can hold, so a caller that picks
+        // a tight width cannot clip the number. `min-w-0` alone let flex shrink
+        // the field to nothing once the two steppers had taken their 48px:
+        // "1000" rendered as "1" with the rest cut off, on the transition field
+        // where four digits are the normal case.
+        style={{ minWidth: `${digitsNeeded(min, max) + 1}ch` }}
         className={cn("min-w-0 flex-1 bg-transparent px-2.5 py-1 text-footnote text-fg tabular-nums outline-none", NO_SPINNER)}
       />
       {suffix && (

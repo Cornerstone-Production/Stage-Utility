@@ -464,6 +464,28 @@ describe("the horizon itself", () => {
     assert.equal(now(r).reason, "default");
   });
 
+  test("removing a tag STICKS, even with the old group field still pointing here", () => {
+    // The report: "tried unselecting one and saving and it kept reverting to
+    // selecting all three". The save worked; the migration merged the old field
+    // back in on the next read, so the edit could never take. An explicit list —
+    // even an empty one — is now the answer.
+    const r = run({
+      groups: [group("g1", ["out-1"], "house")],
+      playlists: [{ ...pl("house"), defaultForGroupIds: [] }, pl("office", "m2")],
+      schedules: [],
+    });
+    assert.equal(now(r).reason, "blank", "the tag the operator removed came back");
+  });
+
+  test("but a playlist that has never been edited still inherits", () => {
+    const r = run({
+      groups: [group("g1", ["out-1"], "house")],
+      playlists: [pl("house")],
+      schedules: [],
+    });
+    assert.equal(now(r).playlist?.id, "house");
+  });
+
   test("and the playlist's own list wins over a stale group field", () => {
     // Once someone has edited this on the new screen, a leftover field on the
     // old record must not put back a tag they took off.

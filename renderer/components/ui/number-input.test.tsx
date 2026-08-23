@@ -23,7 +23,7 @@ import { installDom } from "../../test-dom.js";
 const teardown = installDom();
 
 const { fireEvent, render, screen, cleanup } = await import("@testing-library/react");
-const { NumberInput } = await import("./number-input.js");
+const { NumberInput, digitsNeeded } = await import("./number-input.js");
 
 after(() => {
   cleanup();
@@ -140,5 +140,37 @@ describe("NumberInput", () => {
     const second = setup({ value: 250 });
     assert.equal(second.field.value, "250");
     cleanup();
+  });
+});
+
+describe("the field is wide enough for its own numbers", () => {
+  // "at numbers larger than 9 the number clips". The two steppers take 48px of
+  // a fixed-width box, and `min-w-0` let flex shrink the field to nothing with
+  // whatever was left — so "1000" on the transition field rendered as "1".
+  //
+  // Asserted on the RULE, not on a style attribute: this file does not test
+  // markup, and the rule is the thing that was wrong.
+
+  test("four digits get room for four digits", () => {
+    // MAX_TRANSITION_MS is 3000, and this is the field the report came from.
+    assert.equal(digitsNeeded(0, 3000), 4);
+  });
+
+  test("a bigger range gets more room still", () => {
+    assert.equal(digitsNeeded(0, 86_400), 5);
+  });
+
+  test("a small range still gets a usable minimum", () => {
+    // A two-character box beside two steppers reads as broken even when nothing
+    // is actually clipped.
+    assert.equal(digitsNeeded(0, 9), 3);
+  });
+
+  test("with no bounds at all it does not collapse", () => {
+    assert.equal(digitsNeeded(undefined, undefined), 3);
+  });
+
+  test("a negative minimum is counted, sign and all", () => {
+    assert.equal(digitsNeeded(-120, 10), 4);
   });
 });

@@ -55,9 +55,10 @@ export async function listPlaylists(): Promise<SignagePlaylist[]> {
  * be a field on the group; it is now a list of tags on the playlist, which is
  * where the operator is standing when they decide it.
  *
- * Both directions are honoured, and the playlist's own list wins: once someone
- * has edited this on the new screen, a stale field on the old record must not
- * put a tag back that they took off.
+ * Applied ONLY to a playlist that has never carried the new field. Once it has
+ * one — even an empty one — that list is the answer, and the old field on the
+ * group is ignored. A stale record must not be able to put back a tag the
+ * operator took off, which is precisely what merging the two did.
  */
 export function migrateGroupDefaults(
   playlists: SignagePlaylist[],
@@ -72,13 +73,16 @@ export function migrateGroupDefaults(
   if (inherited.size === 0) return playlists;
 
   return playlists.map((p) => {
+    // The PRESENCE of the new field is the whole test, and an empty list counts.
+    // Merging instead — which is what this did — meant the old field could only
+    // ever ADD, so unticking a tag and saving put it straight back on the next
+    // read. Reported as "tried unselecting one and saving and it kept reverting
+    // to selecting all three": the edit did save, and was then undone here.
+    if (p.defaultForGroupIds !== undefined) return p;
     const extra = inherited.get(p.id);
     if (!extra) return p;
-    const already = p.defaultForGroupIds ?? [];
-    const merged = [...new Set([...already, ...extra])];
-    // Same array, same object: a migration that rewrote every playlist on every
-    // read would broadcast a new horizon on every tick.
-    if (merged.length === already.length) return p;
-    return { ...p, defaultForGroupIds: merged };
+    // Same object where there is nothing to do, so a read does not look like a
+    // change and broadcast a new horizon on every tick.
+    return { ...p, defaultForGroupIds: extra };
   });
 }
