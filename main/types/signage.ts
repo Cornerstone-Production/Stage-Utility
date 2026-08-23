@@ -60,6 +60,18 @@ export interface SignagePlaylistItem {
   durationMs?: number;
   fit?: SignageFit;
   transition?: SignageTransition;
+  /**
+   * Video only: play from here, and stop there. Milliseconds into the clip.
+   *
+   * The item's duration becomes the trimmed length, so a lap of the playlist
+   * shortens with it — the whole reason to trim rather than to shorten a
+   * duration, which for video is ignored.
+   *
+   * Nothing is re-encoded and no file is touched: the same media can be trimmed
+   * two different ways in two playlists, and the library still holds one copy.
+   */
+  trimStartMs?: number;
+  trimEndMs?: number;
 }
 
 export interface SignagePlaylist {
@@ -198,10 +210,14 @@ export type SignageReason = "override" | "schedule" | "default" | "blank";
 export interface SignageHorizonItem {
   url: string;
   mime: string;
+  /** For a trimmed video this is the TRIMMED length, not the file's. */
   durationMs: number;
   fit: SignageFit;
   transition: SignageTransition;
   bytes: number;
+  /** Video only: where in the clip to start and stop, in milliseconds. */
+  trimStartMs?: number;
+  trimEndMs?: number;
 }
 
 export interface SignageHorizonEntry {

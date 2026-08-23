@@ -23,9 +23,43 @@ import { isSignageVideo } from "../types/signage.js";
 export interface ResolvedItem {
   mediaId: string;
   media: SignageMedia;
+  /** For a trimmed video this is the TRIMMED length, not the file's. */
   durationMs: number;
   fit: SignageFit;
   transition: SignageTransition;
+  /** Video only, and only when trimmed. */
+  trimStartMs?: number;
+  trimEndMs?: number;
+}
+
+/**
+ * Where a video actually starts and stops, and how long that is.
+ *
+ * PURE and exported so the editor can show the trimmed length while the
+ * operator drags the numbers, rather than after a save.
+ *
+ * Every way an operator can enter nonsense resolves to something playable
+ * rather than to a refusal: out beyond the end clamps to the end, in past out
+ * yields nothing and the caller drops the item. A wall is not the place to
+ * discover that a number was typed wrong, but neither is a validation error the
+ * thing to put there.
+ */
+export function trimOf(
+  item: { trimStartMs?: number; trimEndMs?: number },
+  clipMs: number,
+): { startMs: number; endMs: number; durationMs: number } {
+  // Each end falls back to ITS OWN sensible default, not to a shared one. A
+  // clamp that answered 0 for anything non-finite turned an Infinity out-point
+  // into a zero-length trim and dropped the clip — an untrimmed video vanishing
+  // because a number was wrong, rather than simply playing whole.
+  const start = clamp(item.trimStartMs, 0, clipMs, 0);
+  const end = clamp(item.trimEndMs, 0, clipMs, clipMs);
+  return { startMs: start, endMs: end, durationMs: Math.max(0, end - start) };
+}
+
+function clamp(v: number | undefined, lo: number, hi: number, fallback: number): number {
+  if (v === undefined || !Number.isFinite(v)) return fallback;
+  return Math.min(hi, Math.max(lo, v));
 }
 
 /** Last-resort length for an image whose playlist has no usable default. A
@@ -60,10 +94,21 @@ export function resolveItemDurations(
     if (!m) continue; // the file was deleted out from under this playlist
 
     let durationMs: number;
+    let trim: { startMs: number; endMs: number } | null = null;
     if (isSignageVideo(m.mime)) {
-      // The clip's own length, full stop.
+      // The clip's own length, or the trimmed part of it. Never the playlist
+      // default — cutting a 42-second clip off after eight seconds because that
+      // is the default reads as a broken video, not a misconfigured playlist.
       if (!m.durationMs || m.durationMs <= 0) continue; // hand-edited store; do not guess
-      durationMs = m.durationMs;
+      const t = trimOf(item, m.durationMs);
+      // A trim that leaves nothing is dropped like any other unplayable item,
+      // rather than becoming a zero-length turn that the cycle skips past
+      // invisibly.
+      if (t.durationMs <= 0) continue;
+      durationMs = t.durationMs;
+      // Only carried when it is actually a trim, so an untrimmed clip's URL
+      // stays exactly what it was.
+      if (t.startMs > 0 || t.endMs < m.durationMs) trim = { startMs: t.startMs, endMs: t.endMs };
     } else {
       const chosen = item.durationMs ?? playlist.defaultDurationMs;
       durationMs = chosen > 0 ? chosen : FALLBACK_IMAGE_MS;
@@ -75,6 +120,7 @@ export function resolveItemDurations(
       durationMs,
       fit: item.fit ?? playlist.fit,
       transition: item.transition ?? playlist.transition,
+      ...(trim ? { trimStartMs: trim.startMs, trimEndMs: trim.endMs } : {}),
     });
   }
 
@@ -97,6 +143,8 @@ export function toHorizonItems(items: ResolvedItem[]): SignageHorizonItem[] {
     fit: r.fit,
     transition: r.transition,
     bytes: r.media.bytes,
+    ...(r.trimStartMs === undefined ? {} : { trimStartMs: r.trimStartMs }),
+    ...(r.trimEndMs === undefined ? {} : { trimEndMs: r.trimEndMs }),
   }));
 }
 

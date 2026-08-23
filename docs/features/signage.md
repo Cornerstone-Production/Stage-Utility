@@ -42,8 +42,14 @@ Each item is on screen for a number of seconds. A **video ignores that** and
 plays for its own length; cutting a clip off after eight seconds because that is
 the playlist default is never what anyone means.
 
+A video can be **trimmed** — set where it starts and stops, in seconds, and the
+item takes the trimmed length so a lap of the playlist shortens with it. Nothing
+is re-encoded and the file is not touched, so the same clip can be trimmed two
+different ways in two playlists and the library still holds one copy. A trim that
+leaves nothing is skipped, and the editor says so.
+
 **Fit** decides what happens when a graphic is not the shape of the screen:
-*contain* shows all of it with black bars, *cover* fills the screen and crops.
+*Fit* shows all of it with black bars, *Fill* fills the screen and crops.
 
 **Transitions** are cut, crossfade, fade through black, slide and wipe, from 0 to
 3000 ms. A transition happens inside the incoming item's own time, so changing it

@@ -104,6 +104,18 @@ export function SignagePlayer({
   );
 }
 
+/** "#t=start,end" in seconds, or nothing when the clip is not trimmed. */
+function trimFragment(url: string, startMs?: number, endMs?: number): string {
+  if (startMs === undefined && endMs === undefined) return url;
+  const s = (startMs ?? 0) / 1000;
+  // Three decimals: the fragment is in seconds and a millisecond is the finest
+  // thing anybody sets here.
+  const from = s.toFixed(3).replace(/\.?0+$/, "");
+  if (endMs === undefined) return `${url}#t=${from}`;
+  const to = (endMs / 1000).toFixed(3).replace(/\.?0+$/, "");
+  return `${url}#t=${from},${to}`;
+}
+
 function Layer({
   item,
   fit,
@@ -131,10 +143,20 @@ function Layer({
   };
 
   if (isSignageVideo(item.mime)) {
+    // A MEDIA FRAGMENT does the trimming: "#t=10,20" starts the clip ten
+    // seconds in and stops it at twenty. No seeking code, no re-encode, and the
+    // same file trimmed two ways in two playlists is still one file.
+    //
+    // The fragment is not sent to the server and is excluded from the URL a
+    // Request is keyed by, so this changes neither the immutable caching nor
+    // what the offline worker holds.
+    const src = trimFragment(item.url, item.trimStartMs, item.trimEndMs);
     return (
       <video
-        key={item.url}
-        src={item.url}
+        // Keyed on the trimmed src: changing where a clip starts has to remount
+        // it, or the element keeps playing the range it was given.
+        key={src}
+        src={src}
         // muted + playsInline or a browser refuses to autoplay at all, and a
         // signage screen has nobody to press play.
         muted

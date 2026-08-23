@@ -15,7 +15,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { resolveItemDurations } from "./signage-playlist-items.js";
+import { resolveItemDurations, toHorizonItems } from "./signage-playlist-items.js";
 
 const MEDIA = [
   { id: "m1", file: "a.png", name: "a", mime: "image/png", bytes: 1, w: 1920, h: 1080, createdAt: "" },
@@ -95,5 +95,103 @@ describe("how long each item is on screen", () => {
 
   test("an empty playlist resolves to nothing, not to a phantom item", () => {
     assert.deepEqual(resolveItemDurations(playlist([]), MEDIA), []);
+  });
+});
+
+describe("trimming a video", () => {
+  const clip = {
+    id: "v1",
+    file: "cccccccccccccccc.mp4",
+    name: "bumper",
+    mime: "video/mp4",
+    bytes: 1,
+    w: 1920,
+    h: 1080,
+    durationMs: 42_000,
+    createdAt: "",
+  };
+  const playlist = (item: Record<string, unknown>) => ({
+    id: "pl",
+    name: "pl",
+    items: [{ mediaId: "v1", ...item }],
+    defaultDurationMs: 8000,
+    fit: "contain" as const,
+    transition: { kind: "cut" as const, ms: 0 },
+    createdAt: "",
+  });
+
+  test("an untrimmed clip is its own length, and carries no trim", () => {
+    const [r] = resolveItemDurations(playlist({}) as never, [clip]);
+    assert.equal(r.durationMs, 42_000);
+    assert.equal(r.trimStartMs, undefined, "an untrimmed clip must not change its own URL");
+  });
+
+  test("the item's duration becomes the TRIMMED length", () => {
+    // The whole reason to trim rather than shorten a duration, which for video
+    // is ignored: a lap of the playlist gets shorter with it.
+    const [r] = resolveItemDurations(playlist({ trimStartMs: 10_000, trimEndMs: 25_000 }) as never, [clip]);
+    assert.equal(r.durationMs, 15_000);
+    assert.equal(r.trimStartMs, 10_000);
+    assert.equal(r.trimEndMs, 25_000);
+  });
+
+  test("trimming only the head works", () => {
+    const [r] = resolveItemDurations(playlist({ trimStartMs: 2000 }) as never, [clip]);
+    assert.equal(r.durationMs, 40_000);
+  });
+
+  test("trimming only the tail works", () => {
+    const [r] = resolveItemDurations(playlist({ trimEndMs: 5000 }) as never, [clip]);
+    assert.equal(r.durationMs, 5000);
+  });
+
+  test("an out point past the end clamps to the end", () => {
+    // Rather than a clip that claims to run longer than it does and leaves the
+    // playlist showing a frozen last frame for the difference.
+    const [r] = resolveItemDurations(playlist({ trimEndMs: 99_000 }) as never, [clip]);
+    assert.equal(r.durationMs, 42_000);
+  });
+
+  test("a negative in point clamps to the start", () => {
+    const [r] = resolveItemDurations(playlist({ trimStartMs: -5000 }) as never, [clip]);
+    assert.equal(r.durationMs, 42_000);
+  });
+
+  test("an in point past the out point drops the item", () => {
+    // A zero-length turn is worse than a missing one: the cycle skips it
+    // invisibly and the operator sees a clip that never plays with nothing
+    // saying why. Dropped, it is visible as a shorter list.
+    assert.deepEqual(resolveItemDurations(playlist({ trimStartMs: 30_000, trimEndMs: 10_000 }) as never, [clip]), []);
+  });
+
+  test("a trim that leaves nothing at all drops the item", () => {
+    assert.deepEqual(resolveItemDurations(playlist({ trimStartMs: 5000, trimEndMs: 5000 }) as never, [clip]), []);
+  });
+
+  test("nonsense clamps rather than throwing", () => {
+    // A hand-edited store, or a NaN from a form.
+    const [r] = resolveItemDurations(
+      playlist({ trimStartMs: Number.NaN, trimEndMs: Number.POSITIVE_INFINITY }) as never,
+      [clip],
+    );
+    assert.equal(r.durationMs, 42_000);
+  });
+
+  test("an image ignores trim points entirely", () => {
+    const image = { ...clip, id: "i1", file: "dddddddddddddddd.png", mime: "image/png", durationMs: undefined };
+    const [r] = resolveItemDurations(
+      { ...playlist({ trimStartMs: 1000, trimEndMs: 2000 }), items: [{ mediaId: "i1", trimStartMs: 1000, trimEndMs: 2000 }] } as never,
+      [image as never],
+    );
+    assert.equal(r.durationMs, 8000, "an image took its length from a video trim");
+    assert.equal(r.trimStartMs, undefined);
+  });
+
+  test("the trim reaches the horizon item the player reads", () => {
+    const resolved = resolveItemDurations(playlist({ trimStartMs: 10_000, trimEndMs: 25_000 }) as never, [clip]);
+    const [item] = toHorizonItems(resolved);
+    assert.equal(item.durationMs, 15_000);
+    assert.equal(item.trimStartMs, 10_000);
+    assert.equal(item.trimEndMs, 25_000);
   });
 });

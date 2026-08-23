@@ -5,7 +5,7 @@
 // A bespoke preview is how an editor comes to disagree with the wall.
 
 import { useCallback, useMemo, useState } from "react";
-import { GripVerticalIcon, ListVideoIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import { GripVerticalIcon, ListVideoIcon, PlusIcon, RotateCcwIcon, Trash2Icon, XIcon } from "lucide-react";
 import type {
   SignageFit,
   SignageGroup,
@@ -15,7 +15,7 @@ import type {
   SignageTransitionKind,
 } from "@main/types/signage";
 import { DEFAULT_TRANSITION, MAX_TRANSITION_MS, isSignageVideo } from "@main/types/signage";
-import { resolveItemDurations, resolvedCycleMs } from "@main/services/signage-playlist-items";
+import { resolveItemDurations, resolvedCycleMs, trimOf } from "@main/services/signage-playlist-items";
 
 import { Button } from "../../components/ui/button";
 import { EmptyState } from "../../components/ui/empty-state";
@@ -339,9 +339,61 @@ export function PlaylistsSection({
                       {m?.name ?? "Missing file"}
                     </span>
                     {video ? (
-                      <span className="text-caption1 text-fg-subtle">
-                        {m?.durationMs ? seconds(m.durationMs) : "—"} · clip length
-                      </span>
+                      // Trim points, in seconds. Nothing is re-encoded and no
+                      // file is touched — the player asks for a range of the
+                      // same clip — so one video can be trimmed two different
+                      // ways in two playlists and the library holds one copy.
+                      (() => {
+                        const clip = m?.durationMs ?? 0;
+                        const t = trimOf(item, clip);
+                        const trimmed = t.startMs > 0 || t.endMs < clip;
+                        return (
+                          <span className="flex items-center gap-1.5">
+                            <NumberInput
+                              value={Math.round(t.startMs / 1000)}
+                              min={0}
+                              max={Math.max(0, Math.round(clip / 1000))}
+                              onChange={(v) => patchItem(i, { trimStartMs: v * 1000 })}
+                              className="w-16"
+                              aria-label={`Start ${m?.name ?? "clip"} at, in seconds`}
+                            />
+                            <span className="text-caption2 text-fg-subtle">to</span>
+                            <NumberInput
+                              value={Math.round(t.endMs / 1000)}
+                              min={0}
+                              max={Math.max(0, Math.round(clip / 1000))}
+                              onChange={(v) => patchItem(i, { trimEndMs: v * 1000 })}
+                              className="w-16"
+                              aria-label={`End ${m?.name ?? "clip"} at, in seconds`}
+                            />
+                            <span
+                              className={
+                                t.durationMs <= 0
+                                  ? "text-caption2 text-amber-11"
+                                  : "text-caption2 text-fg-subtle"
+                              }
+                            >
+                              {t.durationMs <= 0
+                                ? "nothing left — this will be skipped"
+                                : trimmed
+                                  ? `${seconds(t.durationMs)} of ${seconds(clip)}`
+                                  : `${seconds(clip)} clip`}
+                            </span>
+                            {trimmed ? (
+                              <Button
+                                size="small"
+                                iconOnly
+                                tooltip="Play the whole clip"
+                                onClick={() =>
+                                  patchItem(i, { trimStartMs: undefined, trimEndMs: undefined })
+                                }
+                              >
+                                <RotateCcwIcon className="size-3.5" />
+                              </Button>
+                            ) : null}
+                          </span>
+                        );
+                      })()
                     ) : (
                       <NumberInput
                         value={Math.round((item.durationMs ?? editing.defaultDurationMs) / 1000)}
@@ -411,8 +463,11 @@ export function PlaylistsSection({
               value={editing.fit}
               onChange={(v) => patch({ fit: v as SignageFit })}
               options={[
-                { value: "contain", label: "Contain - whole graphic, black bars" },
-                { value: "cover", label: "Cover - fills the screen, crops" },
+                // "Fit" and "Fill", with no explanation. The words carry it —
+                // and the preview above shows the answer immediately, which is
+                // a better explanation than a sentence in a dropdown.
+                { value: "contain", label: "Fit" },
+                { value: "cover", label: "Fill" },
               ]}
             />
 
