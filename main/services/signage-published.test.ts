@@ -9,7 +9,7 @@ import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
 import type { SignageGroup, SignagePlaylist, SignageSchedule } from "../types/signage.js";
-import { EMPTY_PUBLISHED, isPublished, pendingChanges } from "./signage-published-store.js";
+import { EMPTY_PUBLISHED, pendingChanges } from "./signage-published-store.js";
 
 const pl = (id: string, name = id): SignagePlaylist => ({
   id,
@@ -44,12 +44,6 @@ const live = (over: Partial<{ playlists: SignagePlaylist[]; groups: SignageGroup
 const publishedOf = (l: ReturnType<typeof live>) => ({ publishedAt: 1000, ...structuredClone(l) });
 
 describe("what is waiting to be pushed", () => {
-  test("nothing, when the walls run exactly what the editor holds", () => {
-    const l = live();
-    assert.equal(pendingChanges(l, publishedOf(l)).total, 0);
-    assert.equal(isPublished(l, publishedOf(l)), true);
-  });
-
   test("an edited playlist counts once, as a playlist", () => {
     // Counted per KIND, because "3 changes" tells an operator nothing about
     // whether they are about to change what is on a wall.

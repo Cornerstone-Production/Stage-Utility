@@ -15,7 +15,12 @@
 // on the wall.
 
 import type { CSSProperties } from "react";
-import type { SignageHorizonEntry, SignageTransition } from "@main/types/signage";
+import type {
+  SignageFit,
+  SignageHorizonEntry,
+  SignageHorizonItem,
+  SignageTransition,
+} from "@main/types/signage";
 import { isSignageVideo } from "@main/types/signage";
 
 import { itemAt } from "./signage-cycle";
@@ -51,7 +56,17 @@ export function SignagePlayer({
 
   const incomingItem = playlist.items[at.index];
   const transition: SignageTransition = incomingItem.transition ?? playlist.transition;
-  const plan = transitionPlan(transition);
+  // CLAMPED to the item's own slot, at the input, so the animation the browser
+  // is given is the one that actually runs. A 3s fade-through-black on a 1s clip
+  // otherwise held `showingPrevious` true for the whole slot: the wall showed
+  // item N-1 during item N's turn, every revolution, forever. Nothing clamps
+  // MAX_TRANSITION_MS against MIN_ITEM_MS, so it is reachable with a short
+  // trimmed clip today.
+  const plan = transitionPlan(
+    transition.ms > incomingItem.durationMs
+      ? { ...transition, ms: incomingItem.durationMs }
+      : transition,
+  );
 
   // The outgoing item is simply the previous one in the cycle, which wraps. A
   // one-item playlist has no previous item other than itself, and crossfading an
@@ -60,14 +75,18 @@ export function SignagePlayer({
   const previousIndex = (at.index - 1 + playlist.items.length) % playlist.items.length;
   const previous = hasPrevious ? playlist.items[previousIndex] : null;
 
-  // The transition occupies the FIRST `ms` of this item's own slot — which is
-  // what keeps the cycle equal to the plain sum of durations, and therefore what
-  // keeps two screens in step.
-  const during = transition.kind !== "cut" && transition.ms > 0 && at.offsetMs < transition.ms;
+  // The transition occupies the FIRST `plan.ms` of this item's own slot — which
+  // is what keeps the cycle equal to the plain sum of durations, and therefore
+  // what keeps two screens in step.
+  //
+  // `plan.ms`, not a second reading of the transition: what counts as a cut is
+  // transitionPlan's to decide, and asking here as well was the same rule stated
+  // twice with one of them negated.
+  const during = at.offsetMs < plan.ms;
 
   // Fade through black swaps under the opaque middle, so for the first half of
   // the transition the layer is still showing the item going out.
-  const showingPrevious = during && plan.swapAtMidpoint && at.offsetMs < transition.ms / 2;
+  const showingPrevious = during && plan.swapAtMidpoint && at.offsetMs < plan.ms / 2;
   const shown = showingPrevious && previous ? previous : incomingItem;
   const shownIndex = showingPrevious && previous ? previousIndex : at.index;
 
@@ -77,26 +96,37 @@ export function SignagePlayer({
       className={className}
       style={{ position: "relative", background: "#000", overflow: "hidden" }}
     >
-      {during && plan.showOutgoing && previous ? (
-        // Keyed by the item it is leaving, so React mounts a NEW element each
-        // time round — which is what starts its animation. Reusing the element
-        // would leave the last transition's finished animation in place.
+      {/* ONE key namespace across both slots, so the element that was playing
+          item N is MOVED into the outgoing slot rather than unmounted and
+          rebuilt. With `out-N` and `in-N` as separate namespaces React saw two
+          different elements, and for a video that meant a fresh <video> at the
+          boundary: a 30-second clip crossfaded out showing its first 600ms
+          instead of its last, and two decoders spinning up per boundary on a Pi.
+
+          The animation still starts, because the moved element's animationName
+          changes (static -> signage-fade-out is a new animation).
+
+          showOutgoing and swapAtMidpoint are mutually exclusive in every plan,
+          so the two layers can never claim the same key. */}
+      {[
+        during && plan.showOutgoing && previous ? (
+          <Layer
+            key={`layer-${previousIndex}`}
+            item={previous}
+            fit={playlist.fit}
+            style={{ ...FILL, ...plan.outgoing }}
+          />
+        ) : null,
         <Layer
-          key={`out-${previousIndex}`}
-          item={previous}
+          key={`layer-${shownIndex}`}
+          item={shown}
           fit={playlist.fit}
-          style={{ ...FILL, ...plan.outgoing }}
-        />
-      ) : null}
-      <Layer
-        key={`in-${shownIndex}`}
-        item={shown}
-        fit={playlist.fit}
-        // Once the transition is over, plain and static: an animation left
-        // declared on a layer that is simply sitting there keeps it on its own
-        // compositor surface for the whole eight seconds.
-        style={{ ...FILL, ...(during ? plan.incoming : { opacity: 1 }) }}
-      />
+          // Once the transition is over, plain and static: an animation left
+          // declared on a layer that is simply sitting there keeps it on its own
+          // compositor surface for the whole eight seconds.
+          style={{ ...FILL, ...(during ? plan.incoming : { opacity: 1 }) }}
+        />,
+      ]}
       {during && plan.veil ? (
         <div key={`veil-${at.index}`} style={{ ...FILL, ...plan.veil, pointerEvents: "none" }} />
       ) : null}
@@ -121,12 +151,8 @@ function Layer({
   fit,
   style,
 }: {
-  item: SignageHorizonEntry["playlist"] extends infer P
-    ? P extends { items: (infer I)[] }
-      ? I
-      : never
-    : never;
-  fit: "contain" | "cover";
+  item: SignageHorizonItem;
+  fit: SignageFit;
   style: CSSProperties;
 }) {
   const objectFit = (item.fit ?? fit) as CSSProperties["objectFit"];

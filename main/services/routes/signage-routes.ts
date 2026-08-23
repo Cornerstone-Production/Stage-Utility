@@ -32,7 +32,7 @@ import {
 } from "../signage-media-store.js";
 import { appTimeZone } from "../app-timezone.js";
 import { signagePcoWindows } from "../signage-pco-windows.js";
-import { signageStorage } from "../signage-storage.js";
+import { signageStorage, storagePressure } from "../signage-storage.js";
 import { publishSignage } from "../signage-published-store.js";
 import { signageScheduler } from "../signage-scheduler.js";
 import { streamUploadToMedia, UploadTooLargeError } from "../signage-upload.js";
@@ -336,7 +336,11 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (c.pathname === "/api/signage/storage" && c.method === "GET") {
-    return json(c.res, await signageStorage());
+    // `pressure` comes from here rather than being recomputed in the browser.
+    // The renderer carried its own copy of both thresholds with a comment saying
+    // "matches the server" - which is the shape that drifts.
+    const s = await signageStorage();
+    return json(c.res, { ...s, pressure: storagePressure(s) });
   }
 
   // ── Publishing ────────────────────────────────────────────────────────────

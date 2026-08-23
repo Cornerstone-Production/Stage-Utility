@@ -56,7 +56,16 @@ export function SignageScreen({ outputId }: { outputId: string }) {
   // they run when it changes rather than a hundred times a second.
   useEffect(() => {
     if (horizon.length === 0) return;
-    void persistHorizon(outputId, horizon);
+    void persistHorizon(outputId, horizon).then((ok) => {
+      // Reported, not swallowed: a screen whose plan did not persist comes up
+      // black after a power cut, and the operator can only know that in advance
+      // if somebody says so. Same shape as the boot-record warning next door.
+      if (!ok) {
+        console.warn(
+          "[signage] this screen could not store its plan - a reboot with no server will be black",
+        );
+      }
+    });
 
     const plan = planPrefetch(horizon, Date.now());
     if (plan.skipped.length) {

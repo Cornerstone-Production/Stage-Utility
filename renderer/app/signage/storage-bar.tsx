@@ -22,11 +22,12 @@ interface Storage {
   free: number;
   total: number;
   orphanBytes: number;
+  /** Decided by the SERVER — see signage-storage. Carried on the response rather
+   *  than recomputed here: this file used to hold its own copy of both
+   *  thresholds under a comment promising they matched, which is exactly the
+   *  shape that drifts. */
+  pressure: "ok" | "low" | "critical";
 }
-
-/** Matches the server's thresholds — see signage-storage. */
-const LOW = 2 * 1024 * 1024 * 1024;
-const CRITICAL = 512 * 1024 * 1024;
 
 const SEGMENTS = [
   { key: "images", label: "Graphics", className: "bg-accent" },
@@ -46,7 +47,7 @@ export function StorageBar() {
 
   if (!data || data.total <= 0) return null;
 
-  const pressure = data.free <= CRITICAL ? "critical" : data.free <= LOW ? "low" : "ok";
+  const pressure = data.pressure;
   const used = data.total - data.free;
 
   return (

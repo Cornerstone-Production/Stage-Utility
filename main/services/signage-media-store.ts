@@ -55,11 +55,6 @@ export function isMediaFileName(file: string): boolean {
   return MEDIA_NAME.test(file);
 }
 
-export function mediaFilePath(file: string): string {
-  if (!isMediaFileName(file)) throw new Error(`not a signage media name: ${file}`);
-  return path.join(dir(), file);
-}
-
 /**
  * Range-check what the browser measured and hand back the stored form.
  *

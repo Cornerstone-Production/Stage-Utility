@@ -47,8 +47,6 @@ export interface ScreenPath {
   displayId: string;
   /** Set only for a view preview. */
   previewViewId: string | null;
-  /** Set only for an output preview. */
-  previewOutputId: string | null;
   /** Either kind. Neither is a wall: no presence, no remote refresh, no boot
    *  record, and never rotated — a thumbnail in a settings page is read the way
    *  the browser is. */
@@ -63,19 +61,20 @@ export function parseScreenPath(
   outputs: readonly { id: string; slug?: string }[] | undefined,
 ): ScreenPath {
   if (pathSlug.startsWith(OUTPUT_PREVIEW)) {
-    const previewOutputId = pathSlug.slice(OUTPUT_PREVIEW.length);
-    return { displayId: previewOutputId, previewViewId: null, previewOutputId, isPreview: true };
+    // Its own id IS the display id here; a separate field carried the same
+    // fact and nothing read it. "Is this an output preview" is
+    // `isPreview && !previewViewId`.
+    return { displayId: pathSlug.slice(OUTPUT_PREVIEW.length), previewViewId: null, isPreview: true };
   }
   if (pathSlug.startsWith(VIEW_PREVIEW)) {
     const previewViewId = pathSlug.slice(VIEW_PREVIEW.length);
     // displayId stays the raw slug: a view preview has no output, and nothing
     // downstream may treat it as one.
-    return { displayId: pathSlug, previewViewId, previewOutputId: null, isPreview: true };
+    return { displayId: pathSlug, previewViewId, isPreview: true };
   }
   return {
     displayId: resolveDisplayId(pathSlug, outputs) ?? pathSlug,
     previewViewId: null,
-    previewOutputId: null,
     isPreview: false,
   };
 }

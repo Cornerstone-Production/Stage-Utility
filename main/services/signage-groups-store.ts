@@ -18,12 +18,6 @@ export function listGroups(): Promise<SignageGroup[]> {
   return signageGroupsStore.load();
 }
 
-/** Every group this output belongs to, in stored order — which is the order the
- *  resolver walks when looking for a default playlist. */
-export function groupsForOutput(groups: SignageGroup[], outputId: string): SignageGroup[] {
-  return groups.filter((g) => g.outputIds.includes(outputId));
-}
-
 /**
  * Drop a deleted screen from every tag that named it.
  *

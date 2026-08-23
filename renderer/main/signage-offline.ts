@@ -65,20 +65,32 @@ function openDb(): Promise<IDBDatabase | null> {
   });
 }
 
-/** Keep this screen's plan, so a cold boot has something to play. */
-export async function persistHorizon(outputId: string, horizon: SignageHorizon): Promise<void> {
+/**
+ * Keep this screen's plan, so a cold boot has something to play.
+ *
+ * Returns whether it landed. A screen whose plan did not persist will come up
+ * black after a power cut, which is the failure this whole module exists to
+ * prevent — so the caller is told rather than a line going to a console nobody
+ * is reading. rememberSignageBoot next door already reports the same way, for
+ * the same reason; the two were asymmetric for no reason.
+ */
+export async function persistHorizon(
+  outputId: string,
+  horizon: SignageHorizon,
+): Promise<boolean> {
   const db = await openDb();
-  if (!db) return;
-  await new Promise<void>((resolve) => {
+  if (!db) return false;
+  const ok = await new Promise<boolean>((resolve) => {
     const tx = db.transaction(STORE, "readwrite");
     tx.objectStore(STORE).put(horizon, outputId);
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => resolve(true);
     tx.onerror = () => {
       console.error("[signage] could not persist the horizon:", tx.error);
-      resolve();
+      resolve(false);
     };
   });
   db.close();
+  return ok;
 }
 
 /** The plan this screen last held, or null. */
@@ -98,26 +110,43 @@ export async function loadPersistedHorizon(outputId: string): Promise<SignageHor
 /** Ask the worker to hold these assets, and report what it actually holds. */
 export async function precache(
   urls: string[],
-): Promise<{ cached: number; total: number; failed: { url: string; error: string }[] } | null> {
+  /** True when `urls` is this screen's COMPLETE current set, so the worker may
+   *  delete anything outside it. False for a partial top-up — pruning on a
+   *  partial list would delete media the screen still plays. */
+  prune = false,
+): Promise<{
+  cached: number;
+  pruned: number;
+  total: number;
+  failed: { url: string; error: string }[];
+} | null> {
   if (!offlineCapable()) return null;
   const reg = await navigator.serviceWorker.ready.catch(() => null);
   const worker = reg?.active;
   if (!worker) return null;
 
   return new Promise((resolve) => {
-    const onMessage = (e: MessageEvent) => {
-      if (e.data?.type !== "signage:precache-done") return;
-      navigator.serviceWorker.removeEventListener("message", onMessage);
-      resolve({ cached: e.data.cached, total: e.data.total, failed: e.data.failed ?? [] });
-    };
-    navigator.serviceWorker.addEventListener("message", onMessage);
-    worker.postMessage({ type: "signage:precache", urls });
-
     // A worker that never answers must not leave the UI saying "preparing"
     // forever - the operator is standing there deciding whether to unplug a Pi.
-    setTimeout(() => {
+    // CLEARED on the normal path: left armed it pins this closure and the whole
+    // url list for two minutes after every single prepare.
+    const timer = setTimeout(() => {
       navigator.serviceWorker.removeEventListener("message", onMessage);
       resolve(null);
     }, 120_000);
+
+    function onMessage(e: MessageEvent) {
+      if (e.data?.type !== "signage:precache-done") return;
+      clearTimeout(timer);
+      navigator.serviceWorker.removeEventListener("message", onMessage);
+      resolve({
+        cached: e.data.cached,
+        pruned: e.data.pruned ?? 0,
+        total: e.data.total,
+        failed: e.data.failed ?? [],
+      });
+    }
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    worker.postMessage({ type: "signage:precache", urls, prune });
   });
 }

@@ -5,7 +5,18 @@ import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 
 export default [
-  { ignores: ["build/**", "node_modules/**", "public/**"] },
+  // `public/**` was ignored wholesale, which meant the service worker — real
+  // shipped code that decides what a wall holds offline — was never linted.
+  { ignores: ["build/**", "node_modules/**"] },
+  {
+    // The service worker: a worker global scope, plain JS, no TS parser.
+    files: ["public/*.js"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "script",
+      globals: { ...globals.serviceworker, ...globals.browser },
+    },
+  },
   js.configs.recommended,
   {
     // Plain ESM helpers run by the update scripts — Node globals, no TS parser.

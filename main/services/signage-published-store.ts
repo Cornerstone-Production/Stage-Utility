@@ -102,11 +102,6 @@ function countDifferences<T extends { id: string }>(live: T[], published: T[]): 
   return changed;
 }
 
-/** True when the walls are running exactly what the editor holds. */
-export function isPublished(live: SignageConfigTriple, published: PublishedSignage): boolean {
-  return pendingChanges(live, published).total === 0;
-}
-
 /**
  * Read the published config, adopting the live one the FIRST time.
  *

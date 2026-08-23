@@ -53,10 +53,40 @@ self.addEventListener("activate", (event) => {
       await Promise.all(
         keys.filter((k) => k !== SHELL && k !== MEDIA).map((k) => caches.delete(k)),
       );
+
+      // And prune the hashed bundle chunks this shell no longer references.
+      // Dropping whole caches only helps when VERSION is bumped by hand, so
+      // between bumps every /assets/ file of every release accumulated.
+      await pruneShell();
+
       await self.clients.claim();
     })(),
   );
 });
+
+/**
+ * Drop cached bundle chunks the current shell does not reference.
+ *
+ * Best effort: if the shell is not cached yet, or cannot be read, nothing is
+ * removed. Deleting a chunk the shell still needs would leave a screen unable to
+ * boot offline, which is far worse than a stale file on disk.
+ */
+async function pruneShell() {
+  try {
+    const cache = await caches.open(SHELL);
+    const shell = await cache.match("/index.html");
+    if (!shell) return;
+    const html = await shell.clone().text();
+    for (const key of await cache.keys()) {
+      const p = new URL(key.url).pathname;
+      if (!p.startsWith("/assets/")) continue;
+      if (html.includes(p)) continue;
+      await cache.delete(key);
+    }
+  } catch {
+    // Nothing removed. See above: keeping too much is the safe failure.
+  }
+}
 
 /** Media is content-addressed and immutable, so a hit is always correct. */
 function isMedia(url) {
@@ -212,10 +242,31 @@ self.addEventListener("message", (event) => {
           failed.push({ url, error: String(err) });
         }
       }
+      // PRUNE what this screen no longer plays.
+      //
+      // Media is content-addressed, so nothing here is ever stale - but nothing
+      // was ever removed either. Swapping one graphic in a weekly playlist added
+      // a permanent copy every week, forever, on an SD card. `msg.urls` is the
+      // complete current set (the page computes it in planPrefetch), so anything
+      // outside it is content this screen has stopped playing.
+      //
+      // Only when the page said so: a partial list would delete media the screen
+      // still needs, and re-fetching it costs a black frame on the next boundary.
+      let pruned = 0;
+      if (msg.prune) {
+        const keep = new Set((msg.urls ?? []).map((u) => new URL(u, self.location.origin).pathname));
+        for (const key of await cache.keys()) {
+          if (keep.has(new URL(key.url).pathname)) continue;
+          await cache.delete(key);
+          pruned++;
+        }
+      }
+
       const source = event.source ?? (await self.clients.matchAll())[0];
       source?.postMessage({
         type: "signage:precache-done",
         cached,
+        pruned,
         total: (msg.urls ?? []).length,
         failed,
       });

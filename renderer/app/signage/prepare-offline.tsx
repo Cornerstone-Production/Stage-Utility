@@ -64,7 +64,10 @@ export function PrepareOffline({ outputId }: { outputId: string }) {
       const total = assets.reduce((n, a) => n + a.bytes, 0);
       setStatus(`Holding ${assets.length} asset${assets.length === 1 ? "" : "s"} · ${size(total)}…`);
 
-      const result = await precache(assets.map((a) => a.url));
+      // prune: this IS the complete set for this screen — the route returns the
+      // whole winning playlist. Anything else in the cache is content the screen
+      // has stopped playing, and on an SD card it otherwise accumulates forever.
+      const result = await precache(assets.map((a) => a.url), true);
       if (!result) {
         setTone("warn");
         setStatus("The offline worker did not answer. Reload this page and try again.");
@@ -84,7 +87,12 @@ export function PrepareOffline({ outputId }: { outputId: string }) {
       }
 
       setTone("ok");
-      setStatus(`${result.cached} of ${result.total} assets · ${size(total)} · ready${playlist ? ` (${playlist})` : ""}`);
+      // The pruned count is said out loud rather than tidied away silently: an
+      // operator watching free space drop wants to know something was released.
+      const freed = result.pruned ? ` · ${result.pruned} old file${result.pruned === 1 ? "" : "s"} released` : "";
+      setStatus(
+        `${result.cached} of ${result.total} assets · ${size(total)} · ready${playlist ? ` (${playlist})` : ""}${freed}`,
+      );
     } catch (err) {
       setTone("warn");
       setStatus(errorMessage(err));

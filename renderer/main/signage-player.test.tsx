@@ -179,3 +179,85 @@ describe("video", () => {
     assert.ok(v.hasAttribute("playsinline") || v.hasAttribute("playsInline"));
   });
 });
+
+const vid = (url: string, durationMs = 8000) => ({
+  url,
+  mime: "video/mp4",
+  durationMs,
+  fit: "contain" as const,
+  bytes: 1,
+});
+
+/** Render at `t1`, then advance to `t2` in the SAME container, so React
+ *  reconciles rather than starting over. Element identity is the whole point.
+ *
+ *  Asserted on <img> rather than <video>: the property under test is React's
+ *  reconciliation, which does not care about the tag, and jsdom stalls for
+ *  thirty seconds when a <video> is remounted - which turns a clean assertion
+ *  failure into a timeout. The consequence being guarded against is a video one;
+ *  the mechanism is not. */
+function advance(entry: unknown, t1: number, t2: number) {
+  cleanup();
+  const r = render(React.createElement(SignagePlayer as never, { entry, nowMs: t1 }));
+  const before = [...r.container.querySelectorAll("img")];
+  r.rerender(React.createElement(SignagePlayer as never, { entry, nowMs: t2 }));
+  return { before, after: [...r.container.querySelectorAll("img")], container: r.container };
+}
+
+describe("crossfading out of an item", () => {
+  test("keeps the SAME element, so an outgoing VIDEO does not restart", () => {
+    // Two key namespaces (`out-N` and `in-N`) meant the element playing item N
+    // was unmounted and a fresh one mounted for the outgoing layer. For a video
+    // that is a new <video>: a 30-second clip crossfading out showed its FIRST
+    // 600ms rather than its last, and two decoders spun up per boundary on a Pi.
+    const e = entryWith(TWO, { kind: "crossfade", ms: 600 });
+
+    // 7900: item A alone. 8100: item B incoming, A outgoing mid-crossfade.
+    const { before, after } = advance(e, 7900, 8100);
+    assert.equal(before.length, 1, "expected one layer before the boundary");
+    assert.equal(after.length, 2, "expected both layers during the crossfade");
+
+    const outgoing = after.find((v) => v.getAttribute("src")?.startsWith("/a.png"));
+    assert.ok(outgoing, "the outgoing item is not on screen at all");
+    assert.equal(outgoing, before[0], "the outgoing element was rebuilt, so a video would restart");
+  });
+
+  test("and the incoming one is genuinely a new element", () => {
+    // The other half: if everything were reused the incoming item would inherit
+    // the outgoing element's playback position.
+    const { before, after } = advance(entryWith(TWO, { kind: "crossfade", ms: 600 }), 7900, 8100);
+    const incoming = after.find((v) => v.getAttribute("src")?.startsWith("/b.png"));
+    assert.ok(incoming);
+    assert.ok(!before.includes(incoming), "the incoming item reused an element already on screen");
+  });
+
+  test("a video still renders as a <video>, so the case above is the real one", () => {
+    const c = draw(entryWith([vid("/a.mp4"), vid("/b.mp4")], { kind: "cut", ms: 0 }), 1000);
+    assert.ok(c.querySelector("video"), "a video item did not render a video element");
+  });
+});
+
+describe("a transition longer than the item it runs over", () => {
+  test("still reaches the incoming item inside that item's own slot", () => {
+    // MAX_TRANSITION_MS is 3000 and MIN_ITEM_MS is 100, and nothing clamps one
+    // against the other - so a 3s fade-through-black on a 1s trimmed clip held
+    // `showingPrevious` true for the item's whole slot and the wall showed item
+    // N-1 during item N's turn, every revolution, forever.
+    const items = [item("/a.png", 1000), item("/b.png", 1000)];
+    const e = entryWith(items, { kind: "fade-through-black", ms: 3000 });
+
+    // Item B's slot is 1000..2000. Past its own midpoint the swap must have
+    // happened.
+    assert.match(draw(e, 1700).innerHTML, /b\.png/, "the wall is a graphic behind");
+    // And the first half still shows the outgoing one, so the swap-at-midpoint
+    // behaviour is not simply disabled.
+    assert.match(draw(e, 1200).innerHTML, /a\.png/);
+  });
+
+  test("a transition that fits is untouched", () => {
+    const items = [item("/a.png", 8000), item("/b.png", 8000)];
+    const e = entryWith(items, { kind: "fade-through-black", ms: 600 });
+    assert.match(draw(e, 8100).innerHTML, /a\.png/, "first half still shows the outgoing item");
+    assert.match(draw(e, 8400).innerHTML, /b\.png/, "second half shows the incoming one");
+  });
+});

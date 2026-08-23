@@ -683,14 +683,6 @@ export function useStageSettings() {
   }
 
   // ── Outputs (physical screens + routing) ─────────────────────────────
-  async function handleAddOutput() {
-    try {
-      const next = await ipc<StageState>("outputs:add", {});
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to add display: ${String(err)}`);
-    }
-  }
 
   /**
    * Add a screen of a stated kind.
@@ -902,7 +894,6 @@ export function useStageSettings() {
     handleReorderPresets,
     handleRenamePreset,
     handleOverwritePreset,
-    handleAddOutput,
     handleCreateScreen,
     handleSetOutputRotation,
     handleRenameOutput,

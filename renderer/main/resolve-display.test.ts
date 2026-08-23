@@ -37,7 +37,6 @@ describe("a view preview", () => {
 
   test("names the view", () => {
     assert.equal(p.previewViewId, "view-3");
-    assert.equal(p.previewOutputId, null);
   });
 
   test("and is not an output", () => {
@@ -59,7 +58,10 @@ describe("an output preview", () => {
     // screen and content is resolved per OUTPUT, so a per-view preview had no
     // output and every signage card on the Screens page was a black rectangle.
     assert.equal(p.displayId, "display-9");
-    assert.equal(p.previewOutputId, "display-9");
+    // "Is this an output preview" is isPreview with no view id — the separate
+    // field said the same thing and nothing read it.
+    assert.equal(p.isPreview, true);
+    assert.equal(p.previewViewId, null);
   });
 
   test("is NOT read as a view preview", () => {

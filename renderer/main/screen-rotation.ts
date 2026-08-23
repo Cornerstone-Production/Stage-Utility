@@ -67,11 +67,3 @@ export function isQuarterTurn(rotation: ScreenRotation): boolean {
   return rotation === 90 || rotation === 270;
 }
 
-/** How a screen's own pixel size reads once it is mounted this way — what the
- *  operator should be designing against. */
-export function rotatedSize(
-  size: { w: number; h: number },
-  rotation: ScreenRotation,
-): { w: number; h: number } {
-  return isQuarterTurn(rotation) ? { w: size.h, h: size.w } : { w: size.w, h: size.h };
-}

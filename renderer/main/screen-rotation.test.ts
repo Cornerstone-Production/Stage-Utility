@@ -6,7 +6,8 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { isQuarterTurn, rotatedSize, rotationStyle } from "./screen-rotation";
+import { isQuarterTurn, rotationStyle } from "./screen-rotation";
+
 import { screenRotation, toScreenRotation } from "@main/types/views";
 
 describe("an unrotated screen", () => {
@@ -56,27 +57,6 @@ describe("a half turn", () => {
   });
 });
 
-describe("which turns swap the sides", () => {
-  test("the quarter turns do", () => {
-    assert.equal(isQuarterTurn(90), true);
-    assert.equal(isQuarterTurn(270), true);
-  });
-
-  test("and nothing else does", () => {
-    assert.equal(isQuarterTurn(0), false);
-    assert.equal(isQuarterTurn(180), false);
-  });
-
-  test("a screen's size reads swapped at a quarter turn", () => {
-    // What the operator should be designing against: a 1920x1080 panel mounted
-    // portrait is a 1080x1920 canvas.
-    assert.deepEqual(rotatedSize({ w: 1920, h: 1080 }, 90), { w: 1080, h: 1920 });
-    assert.deepEqual(rotatedSize({ w: 1920, h: 1080 }, 270), { w: 1080, h: 1920 });
-    assert.deepEqual(rotatedSize({ w: 1920, h: 1080 }, 180), { w: 1920, h: 1080 });
-    assert.deepEqual(rotatedSize({ w: 1920, h: 1080 }, 0), { w: 1920, h: 1080 });
-  });
-});
-
 describe("which numbers count as a quarter turn", () => {
   // This rule was written FOUR times — the type helper, the PATCH route's body
   // check, the offline boot record's reader, and a cast in the kiosk shell. Four
@@ -101,6 +81,18 @@ describe("which numbers count as a quarter turn", () => {
     assert.equal(screenRotation({ rotation: 270 }), 270);
     assert.equal(screenRotation({ rotation: 47 as never }), 0);
     assert.equal(screenRotation({}), 0);
+  });
+});
+
+describe("which turns swap the sides", () => {
+  test("the quarter turns do", () => {
+    assert.equal(isQuarterTurn(90), true);
+    assert.equal(isQuarterTurn(270), true);
+  });
+
+  test("and nothing else does", () => {
+    assert.equal(isQuarterTurn(0), false);
+    assert.equal(isQuarterTurn(180), false);
   });
 });
 

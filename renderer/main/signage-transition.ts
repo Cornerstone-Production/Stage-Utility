@@ -28,6 +28,15 @@ import type { SignageDirection, SignageTransition } from "@main/types/signage";
 
 /** What the player should mount, and what the compositor should do with it. */
 export interface TransitionPlan {
+  /**
+   * How long this transition actually runs, in ms. ZERO for a cut.
+   *
+   * On the plan so the player does not restate the rule. It used to ask
+   * `kind !== "cut" && ms > 0` for itself, one negation away from the check
+   * here — two statements of the same thing, and the pair would drift the first
+   * time a kind or a clamp was added.
+   */
+  ms: number;
   /** Keep the previous item underneath for the transition's duration. */
   showOutgoing: boolean;
   /**
@@ -97,12 +106,13 @@ export function transitionPlan(t: SignageTransition): TransitionPlan {
   // A zero-length transition of any kind is a cut. Running a 0ms animation is a
   // frame of flicker for no reason.
   if (t.kind === "cut" || t.ms <= 0) {
-    return { showOutgoing: false, swapAtMidpoint: false, incoming: STILL, outgoing: HIDDEN, veil: null };
+    return { ms: 0, showOutgoing: false, swapAtMidpoint: false, incoming: STILL, outgoing: HIDDEN, veil: null };
   }
 
   switch (t.kind) {
     case "crossfade":
       return {
+        ms: t.ms,
         showOutgoing: true,
         swapAtMidpoint: false,
         incoming: run("signage-fade-in", t.ms),
@@ -115,6 +125,7 @@ export function transitionPlan(t: SignageTransition): TransitionPlan {
       // underneath it at the midpoint. Cross-fading as well would show a ghost
       // of both through the black.
       return {
+        ms: t.ms,
         showOutgoing: false,
         swapAtMidpoint: true,
         incoming: STILL,
@@ -127,6 +138,7 @@ export function transitionPlan(t: SignageTransition): TransitionPlan {
       const inTravel = travel(dir, 1);
       const outTravel = travel(dir, -1);
       return {
+        ms: t.ms,
         showOutgoing: true,
         swapAtMidpoint: false,
         incoming: { ...run("signage-slide-in", t.ms), "--signage-dx": inTravel.dx, "--signage-dy": inTravel.dy } as CSSProperties,
@@ -139,6 +151,7 @@ export function transitionPlan(t: SignageTransition): TransitionPlan {
       // Only the incoming layer moves, revealing itself over a stationary one.
       const inTravel = travel(dir, 1);
       return {
+        ms: t.ms,
         showOutgoing: true,
         swapAtMidpoint: false,
         incoming: { ...run("signage-slide-in", t.ms), "--signage-dx": inTravel.dx, "--signage-dy": inTravel.dy } as CSSProperties,
