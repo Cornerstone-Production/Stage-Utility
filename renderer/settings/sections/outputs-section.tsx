@@ -1,13 +1,11 @@
 import { ScreenDevice } from "../../app/screens/screen-device";
 import { NewScreenDialog } from "./new-screen-dialog";
-import { SignageScreenRow } from "./signage-screen-row";
-import { AppLink } from "../../app/app-link";
 import { useState, useEffect, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
-import { MENU_CONTENT, MENU_ITEM, RotationMenu } from "./rotation-menu";
+import { MENU_CONTENT, MENU_ITEM, RotationMenu } from "../../components/ui/rotation-menu";
 import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
@@ -596,7 +594,6 @@ export function OutputsSection({
   );
   const isSignageOutput = (o: Output) => !!o.viewId && signageViewIds.has(o.viewId);
   const mainOutputs = outputs.filter((o) => !isSignageOutput(o));
-  const signageOutputs = outputs.filter(isSignageOutput);
 
   // A view no screen points at. Without a home these are unreachable: the only
   // way in was the Views list this page replaced.
@@ -648,11 +645,11 @@ export function OutputsSection({
             glance. rectSortingStrategy is the grid-aware counterpart to the
             vertical strategy; the vertical one assumes a single column and
             computes the wrong drop target as soon as there are two. */}
-        {/* mainOutputs, not every output: signage screens render through
-            SignageScreenRow, which does not call useSortable, so their ids left
-            holes in dnd-kit's sorted rects and some main cards did not animate
-            to their preview position mid-drag. handleDragEnd still indexes the
-            FULL list, which is what keeps the stored order correct. */}
+        {/* mainOutputs, not every output: signage screens are not listed here
+            at all, so their ids would leave holes in dnd-kit's sorted rects and
+            some main cards would not animate to their preview position mid-drag.
+            handleDragEnd still indexes the FULL list, which is what keeps the
+            stored order correct. */}
         <SortableContext
           items={mainOutputs.map((o) => o.id)} strategy={rectSortingStrategy}>
           <div className="grid gap-3 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
@@ -707,44 +704,12 @@ export function OutputsSection({
             </button>
           </div>
 
-          {signageOutputs.length > 0 && (
-            <>
-              <div className="flex items-baseline gap-2 pt-5">
-                <h3 className="text-subheadline font-semibold text-fg">Signage</h3>
-                <span className="text-caption1 text-fg-subtle">
-                  {signageOutputs.length} {signageOutputs.length === 1 ? "screen" : "screens"} — what
-                  they play, and their tags, are on{" "}
-                  <AppLink to="/signage" className="text-accent hover:underline">
-                    Signage
-                  </AppLink>
-                </span>
-              </div>
-
-              {/* COMPACT rows, not the full card.
-                  These screens appear on the Now board too, and there they get a
-                  live preview and their tags — which is the right home for both,
-                  because that page is about what is playing. Repeating them here
-                  was the same screen twice, and twice the preview iframes: each
-                  one is a real kiosk page holding its own event stream.
-                  What is left is what only Screens can answer — is it online,
-                  which machine, what URL, how is it mounted. */}
-              <div className="flex flex-col gap-1.5">
-                {signageOutputs.map((output) => (
-                  <SignageScreenRow
-                    key={output.id}
-                    output={output}
-                    baseUrl={baseUrl}
-                    online={connected.has(output.id)}
-                    onRename={(name) => handlers.handleRenameOutput(output.id, name)}
-                    onSetRotation={(rotation) => handlers.handleSetOutputRotation(output.id, rotation)}
-                    onOpenWindow={() => handlers.handleOpenOutputWindow(output.id)}
-                    onRefresh={() => handlers.handleRefreshDisplay(output.id)}
-                    onRemove={() => handlers.handleRemoveOutput(output.id)}
-                  />
-                ))}
-              </div>
-            </>
-          )}
+          {/* Signage screens are NOT listed here.
+              They live on the Signage tab, where the card shows what each one is
+              playing, its tags, and — since this row was removed — rename,
+              rotation, open in a window, reload and remove. Listing them here as
+              well was the same screen twice, and twice the preview iframes: each
+              preview is a real kiosk page holding its own event stream. */}
         </SortableContext>
       </DndContext>
 

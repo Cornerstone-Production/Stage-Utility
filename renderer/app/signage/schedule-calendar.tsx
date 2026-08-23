@@ -13,13 +13,14 @@
 // function the resolver uses. A calendar that worked it out again would
 // eventually draw a picture of a schedule nobody is running.
 
-import { useCallback, useMemo, useRef, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { ChevronLeftIcon, ChevronRightIcon, EyeIcon, EyeOffIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import type { PcoWindow, SignagePlaylist, SignageSchedule } from "@main/types/signage";
 
 import { intervalsOnDay, localDayStart, nextLocalDayStart } from "@main/services/signage-window";
 import { zonedParts, type TimeZone } from "@main/services/app-timezone";
 import { Button } from "../../components/ui/button";
+import { ContextMenu } from "../../components/ui/context-menu";
 import { displayHourCycle } from "../../lib/clock-format";
 import { useNow } from "./use-now";
 import { DAY_NAMES, layOutDay, dragToTimes, type WeekBlock } from "./week-layout";
@@ -29,17 +30,39 @@ const DAY_MS = 86_400_000;
 /** Every third hour gets a label; all 24 is a wall of numbers. */
 const HOUR_MARKS = [0, 3, 6, 9, 12, 15, 18, 21];
 
-/** A colour per playlist, so a week reads as a pattern rather than a list.
- *  Hashed from the id, so a playlist keeps its colour between sessions.
+/**
+ * Every block is the app's ACCENT.
  *
- *  Blue through green through amber to red, and NO purple or magenta — this app
- *  has none anywhere, and a hash that occasionally produced one would put a
- *  violet slab across the whole week. */
-const HUES = [201, 152, 43, 12, 178, 96, 225, 28];
-function hueOf(playlistId: string): number {
-  let n = 0;
-  for (let i = 0; i < playlistId.length; i++) n = (n * 31 + playlistId.charCodeAt(i)) >>> 0;
-  return HUES[n % HUES.length];
+ * Not a hue per playlist. A colour wheel made the week read as a pattern, but it
+ * also meant the calendar was the one surface in the app inventing its own
+ * palette — and the accent is themeable, so a wheel of fixed hues would drift
+ * away from whatever the operator picked. Which playlist a block is stays
+ * legible: it is written on the block.
+ */
+const BLOCK_BG = "color-mix(in srgb, var(--color-accent) 88%, transparent)";
+const BLOCK_BG_DIM = "color-mix(in srgb, var(--color-accent) 26%, transparent)";
+const BLOCK_EDGE = "color-mix(in srgb, var(--color-accent) 100%, white 25%)";
+
+/**
+ * The grid's measured height in px.
+ *
+ * The day is sized with a clamp() so it fits whatever window it is in, which
+ * means no constant can say how tall an hour is — and a block has to know that
+ * to decide how many lines it has room for. Measured through a ResizeObserver,
+ * the same way the widget readout does it.
+ */
+function useMeasuredHeight(ref: React.RefObject<HTMLDivElement | null>): number {
+  const [h, setH] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setH((prev) => (Math.abs(el.offsetHeight - prev) > 0.5 ? el.offsetHeight : prev));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return h;
 }
 
 export function ScheduleCalendar({
@@ -49,6 +72,8 @@ export function ScheduleCalendar({
   tz,
   onOpen,
   onCreate,
+  onToggleEnabled,
+  onDelete,
 }: {
   schedules: SignageSchedule[];
   playlists: SignagePlaylist[];
@@ -58,9 +83,17 @@ export function ScheduleCalendar({
   onOpen: (schedule: SignageSchedule) => void;
   /** A finished drag: a new weekly slot on this weekday, at these times. */
   onCreate: (weekday: number, start: string, end: string) => void;
+  /** Right-click a block. Editing from the calendar without going to the list
+   *  first is the whole point — a block you can see is a block you should be
+   *  able to change. */
+  onToggleEnabled: (schedule: SignageSchedule) => void;
+  onDelete: (schedule: SignageSchedule) => void;
 }) {
   const [weekOffset, setWeekOffset] = useState(0);
+  /** The right-click menu on a block: a schedule and where to draw it. */
+  const [menu, setMenu] = useState<{ x: number; y: number; schedule: SignageSchedule } | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const dayHeight = useMeasuredHeight(gridRef);
   /** The drag in progress, in day-fractions. `onBlock` is the schedule the press
    *  landed on, if any — a press that does not turn into a drag opens it. */
   const [drag, setDrag] = useState<{
@@ -144,18 +177,6 @@ export function ScheduleCalendar({
       : (now - days[todayIndex]) /
         Math.max(1, nextLocalDayStart(days[todayIndex], tz) - days[todayIndex]);
 
-  // Open on the current hour rather than at midnight — the top of a 24-hour
-  // column is the part of the day nothing is ever scheduled in.
-  const scrolled = useRef(false);
-  const scrollBody = useCallback(
-    (el: HTMLDivElement | null) => {
-      if (!el || scrolled.current || nowFraction === null) return;
-      scrolled.current = true;
-      el.scrollTop = Math.max(0, nowFraction * el.scrollHeight - el.clientHeight / 3);
-    },
-    [nowFraction],
-  );
-
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
@@ -199,9 +220,14 @@ export function ScheduleCalendar({
           })}
         </div>
 
-        <div ref={scrollBody} className="relative flex max-h-[58vh] overflow-y-auto">
+        {/* The WHOLE day, with no scrolling. A calendar you have to scroll to see
+            the evening is a calendar that cannot answer "what is on this week" at
+            a glance, which is the only reason it exists. Everything inside is
+            positioned in percentages, so the day simply gets shorter on a shorter
+            window; the height is clamped so a 15-minute slot stays clickable. */}
+        <div className="relative flex" style={{ height: DAY_HEIGHT }}>
           {/* The hour gutter. */}
-          <div className="relative w-12 shrink-0 border-r border-line" style={{ height: HOUR_HEIGHT * 24 }}>
+          <div className="relative w-12 shrink-0 border-r border-line">
             {HOUR_MARKS.map((h) => (
               <span
                 key={h}
@@ -220,7 +246,6 @@ export function ScheduleCalendar({
           <div
             ref={gridRef}
             className="relative flex flex-1"
-            style={{ height: HOUR_HEIGHT * 24 }}
             onPointerDown={(e) => {
               // Left button only: a right-click is a context menu, not a slot.
               if (e.button !== 0) return;
@@ -297,18 +322,54 @@ export function ScheduleCalendar({
                 block={b}
                 playlistName={playlistName.get(b.schedule.playlistId) ?? "no playlist"}
                 tz={tz}
+                dayHeight={dayHeight}
                 onOpen={() => onOpen(b.schedule)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setMenu({ x: e.clientX, y: e.clientY, schedule: b.schedule });
+                }}
               />
             ))}
           </div>
         </div>
       </div>
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            { label: "Edit schedule", icon: <PencilIcon className="size-3.5" />, onSelect: () => onOpen(menu.schedule) },
+            {
+              label: menu.schedule.enabled ? "Disable" : "Enable",
+              icon: menu.schedule.enabled ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />,
+              onSelect: () => onToggleEnabled(menu.schedule),
+            },
+            { separator: true },
+            {
+              label: `Delete ${menu.schedule.name}`,
+              icon: <Trash2Icon className="size-3.5" />,
+              danger: true,
+              onSelect: () => onDelete(menu.schedule),
+            },
+          ]}
+        />
+      )}
     </div>
   );
 }
 
-/** Tall enough that a 15-minute slot is still a clickable target. */
-const HOUR_HEIGHT = 34;
+/**
+ * How tall the whole 24 hours is.
+ *
+ * Sized so the day FITS — the calendar used to run to 816px inside a 58vh box,
+ * so half of it was below the fold and the evening needed scrolling. Clamped at
+ * both ends: below about 380px a 15-minute slot stops being a clickable target,
+ * and above 620px the day starts pushing the page itself into a scroll.
+ */
+const DAY_HEIGHT = "clamp(380px, 58dvh, 620px)";
 
 /** Below this much movement a press is a click, not a drag. Roughly 5px of a
  *  24-hour column — a hand does not hold perfectly still on a trackpad. */
@@ -318,19 +379,26 @@ function ScheduleBlock({
   block,
   playlistName,
   tz,
+  dayHeight,
   onOpen,
+  onContextMenu,
 }: {
   block: WeekBlock;
   playlistName: string;
   tz: TimeZone;
+  /** The measured height of the whole day, in px — see useMeasuredHeight. */
+  dayHeight: number;
   onOpen: () => void;
+  onContextMenu: (e: ReactMouseEvent) => void;
 }) {
-  const hue = hueOf(block.schedule.playlistId);
   const dim = !block.schedule.enabled || block.beatenBy !== null;
   const height = block.bottom - block.top;
   /** Below about an hour tall there is only room for the name. */
-  const roomFor = (lines: number) => height * 24 * HOUR_HEIGHT >= lines * 13 + 6;
-  const times = `${shortTime(block.from, tz)} – ${shortTime(block.to, tz)}`;
+  const roomFor = (lines: number) => height * dayHeight >= lines * 13 + 6;
+  // "00:00 - 00:00" is what an all-day window's real instants say, and it reads
+  // as a mistake. A block that fills its column says so in words.
+  const allDay = block.top <= 0 && block.bottom >= 1;
+  const times = allDay ? "All day" : `${shortTime(block.from, tz)} – ${shortTime(block.to, tz)}`;
 
   return (
     <button
@@ -340,6 +408,7 @@ function ScheduleBlock({
       // column, which opens it there — handling it here as well would open it
       // twice, and a real drag that ENDED over a block would also fire this.
       onClick={(e) => e.detail === 0 && onOpen()}
+      onContextMenu={onContextMenu}
       title={
         block.beatenBy
           ? `${block.schedule.name}, ${times} — beaten here by ${block.beatenBy}`
@@ -357,15 +426,15 @@ function ScheduleBlock({
         width: `calc(${(1 / 7 / block.columns) * 100}% - 4px)`,
         top: block.top * 100 + "%",
         height: `calc(${(block.bottom - block.top) * 100}% - 2px)`,
-        background: `hsl(${hue} 55% 42% / ${dim ? 0.28 : 0.92})`,
-        borderLeft: block.continued ? "none" : `3px solid hsl(${hue} 60% 62%)`,
+        background: dim ? BLOCK_BG_DIM : BLOCK_BG,
+        borderLeft: block.continued ? "none" : `3px solid ${BLOCK_EDGE}`,
         // A beaten block is struck through with a hatch rather than merely
         // faded: faded reads as "disabled", and this one is enabled and simply
         // losing.
         backgroundImage: block.beatenBy
           ? "repeating-linear-gradient(45deg, rgba(255,255,255,.18) 0 4px, transparent 4px 8px)"
           : undefined,
-        color: dim ? "var(--color-fg-muted)" : "white",
+        color: dim ? "var(--color-fg-muted)" : "var(--color-on-accent, white)",
       }}
     >
       <span className="block truncate text-caption2 font-medium leading-tight">

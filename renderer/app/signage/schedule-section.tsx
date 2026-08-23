@@ -188,6 +188,10 @@ export function ScheduleSection({
             setView("list");
             setOpenId(sched.id);
           }}
+          // Editing from the calendar rather than only from the list: a block
+          // you can see is a block you should be able to change.
+          onToggleEnabled={(sched) => void save({ ...sched, enabled: !sched.enabled })}
+          onDelete={(sched) => void remove(sched)}
           onCreate={(weekday, start, end) => {
             // To the list, because that is where the editor is: a dragged slot
             // still needs a playlist and its tags before it does anything.

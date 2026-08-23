@@ -93,12 +93,15 @@ by the tags — see below.
 
 Two views of the same list, switched at the top right.
 
-**Calendar** draws the week. Each block is a schedule at the times it is open,
-coloured by playlist, with blocks that overlap sitting side by side. **Press and
-drag down a day to make a new slot** — release and it opens for a playlist and
-tags, snapped to a quarter hour. A block that starts before the day it appears on
-is marked with an arrow; one that a higher-ordered schedule beats is hatched and
-says which schedule beats it. Clicking a block opens it.
+**Calendar** draws the whole week, all twenty-four hours, without scrolling.
+Each block is a schedule at the times it is open, with blocks that overlap
+sitting side by side. **Press and drag down a day to make a new slot** — release
+and it opens for a playlist and tags, snapped to a quarter hour. A block that
+starts before the day it appears on is marked with an arrow; one that a
+higher-ordered schedule beats is hatched and says which schedule beats it.
+
+**Click a block to open it. Right-click for edit, enable/disable and delete** —
+a schedule you can see is one you can change without going to the list first.
 
 **Order** is the list, and it is where priority is set.
 

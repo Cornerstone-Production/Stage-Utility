@@ -43,6 +43,7 @@ import { SignagePlayer } from "../../main/signage-player";
 import { invoke } from "../../lib/api";
 import { SelectField } from "./select-field";
 import { PrepareOffline } from "./prepare-offline";
+import { ScreenMenu } from "./screen-menu";
 import { formatClock } from "../../lib/clock-format";
 import { TagPicker } from "./tag-picker";
 import { boardEntry } from "./board-entry";
@@ -334,6 +335,9 @@ export function NowBoard({
                 >
                   {entry ? reasonWord(entry.reason) : "Blank"}
                 </span>
+                {/* Rename, rotation, open, reload, remove — the actions that
+                    used to live on the Screens tab's duplicate row. */}
+                <ScreenMenu output={output} onChanged={onChange} />
               </div>
 
               <div className="overflow-hidden rounded-lg border border-line">

@@ -1,5 +1,9 @@
 // rotation-menu.tsx — how a panel is hung, as a submenu.
 //
+// In components/ui because three surfaces need it now: the main screen card,
+// and the Now board, which took over the signage screens when they were removed
+// from the Screens tab.
+//
 // ONE copy. It was written out twice, verbatim down to the labels, in the main
 // screen card and in the signage screen row — and so were the two menu class
 // constants beside it. Four quarter turns, because a panel is hung one of four

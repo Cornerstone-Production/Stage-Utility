@@ -27,7 +27,8 @@ export function ScreenSignageGroups({
   outputId: string;
   isSignage: boolean;
   /** Inline, for the compact signage row. The bordered strip belongs to a full
-   *  card, and signage screens do not get one — see SignageScreenRow. */
+   *  card. Signage screens are not listed on the Screens tab at all — they live
+   *  on the Signage tab, where the card shows what each is playing. */
   compact?: boolean;
 }) {
   // The shared hook: one key, one set of writes, shared with the Now board.
