@@ -2358,20 +2358,10 @@ export function LayoutRenderer({
   ndiSource,
   interactive = false,
   surface,
-  ground = "stage",
 }: {
   layout: LayoutDTO;
   ndiSource: string | null;
   interactive?: boolean;
-  /**
-   * Which ground this is drawn on.
-   *
-   * "stage" is the near-black kiosk surface every wall screen uses. "app" is
-   * the operator shell's own surface — for a console opened INSIDE the app,
-   * where a slab of stage-black inside a themed page read as an embedded
-   * viewer bolted into the layout rather than a page of it.
-   */
-  ground?: "stage" | "app";
   /** The View's surface, so a console can respond to the window while a display
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
@@ -2451,9 +2441,25 @@ export function LayoutRenderer({
   return (
     <div
       ref={setBox}
-      className={`relative w-full h-full flex items-center justify-center ${
-        ground === "app" ? "bg-bg" : "kiosk-surface"
-      } ${overflows ? "overflow-y-auto overflow-x-hidden" : "overflow-hidden"}`}
+      // ALWAYS the kiosk surface, never the app's theme background.
+      //
+      // A console used to be drawn on `bg-bg` so it read as part of the page
+      // rather than a slab of stage-black bolted into it. That reasoning held
+      // while the app was dark: measured, `--color-bg` is #0e0e0e against the
+      // kiosk's #0a0a0a, four points apart and indistinguishable.
+      //
+      // In LIGHT mode the same token is #f7f8fa, and a layout's objects carry
+      // colours somebody authored against a dark canvas — white text, most of
+      // it. The ground inverted and the text stayed white, so a console on a
+      // phone in daylight was white-on-white. The editor never showed this,
+      // because it draws on the kiosk surface: what you designed was not what
+      // you got.
+      //
+      // A layout brings its own ground with it. `canvas.background` is where an
+      // operator says what that is; the app's theme does not get a vote.
+      className={`relative w-full h-full flex items-center justify-center kiosk-surface ${
+        overflows ? "overflow-y-auto overflow-x-hidden" : "overflow-hidden"
+      }`}
     >
       <div
         style={
