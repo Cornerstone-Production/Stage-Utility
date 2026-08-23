@@ -45,6 +45,19 @@ export interface ResolveInput {
  *  through a whole day without the server, short enough to stay small. */
 export const HORIZON_MS = 24 * 3600_000;
 
+/**
+ * The grid the horizon's END is snapped to.
+ *
+ * The end is an artifact of how far ahead we compute, not an instant anything
+ * happens at. Left as `now + HORIZON_MS` it moved with the clock, so the safety
+ * tick produced a map that differed from the last one every time and
+ * `shouldBroadcast` said "changed" once a minute, forever — every screen
+ * receiving the whole plan, rewriting it to the SD card and re-requesting every
+ * asset, with nothing edited. Snapped to a grid it is byte-identical between
+ * ticks, and only moves when it genuinely rolls over.
+ */
+export const HORIZON_QUANTUM_MS = HORIZON_MS;
+
 /** A ceiling on entries, so a pathological schedule set cannot loop or produce a
  *  horizon too big to push. Reaching it is a bug, not a configuration. */
 const MAX_ENTRIES = 200;
@@ -173,7 +186,7 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
     return [...set].sort((a, b) => a - b);
   };
 
-  const end = input.now + HORIZON_MS;
+  const end = Math.ceil((input.now + HORIZON_MS) / HORIZON_QUANTUM_MS) * HORIZON_QUANTUM_MS;
   const edges = boundaries(input.now, end);
   const out: Record<string, SignageHorizon> = {};
 
@@ -223,7 +236,11 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
     // display holds rather than advancing (see signage-hold.ts).
     const fallback = groupDefault(groupsFor(output.id));
     if (fallback.playlist) {
-      horizon.push(entry(end, end + HORIZON_MS, fallback, input.media));
+      // No end, rather than `end + HORIZON_MS`: this entry is unreachable in
+      // normal play, so its upper bound is not a fact about anything — and a
+      // bound derived from the clock moved on every tick. The Now board already
+      // reads MAX_SAFE_INTEGER as "no end".
+      horizon.push(entry(end, Number.MAX_SAFE_INTEGER, fallback, input.media));
     }
 
     out[output.id] = horizon;

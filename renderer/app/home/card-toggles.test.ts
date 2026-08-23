@@ -14,15 +14,26 @@ import { describe, test } from "node:test";
 
 import type { LayoutObject } from "@main/types/views";
 
+import { setDisplayHourCycle } from "../../lib/clock-format";
 import { togglesFor, withToggle } from "./card-toggles";
 
 const card = (config: Record<string, unknown>): LayoutObject =>
   ({ id: "c1", x: 0, y: 0, w: 1, h: 1, config }) as unknown as LayoutObject;
 
 describe("what a widget offers", () => {
-  test("a clock offers seconds, the hour cycle and AM/PM", () => {
+  test("a clock offers seconds, the hour cycle and AM/PM on a 12-hour app", () => {
+    setDisplayHourCycle("12h");
     const keys = togglesFor(card({ type: "clock" })).map((t) => t.key);
     assert.deepEqual(keys, ["showSeconds", "format", "showMeridiem"]);
+  });
+
+  test("and drops AM/PM on a 24-hour app, where it does nothing", () => {
+    // The app-wide setting reaches an UNTOUCHED clock: the renderer reads
+    // `c.format ?? displayHourCycle()`, so a clock nobody has configured is
+    // drawing 24-hour and has no meridiem to show.
+    setDisplayHourCycle("24h");
+    const keys = togglesFor(card({ type: "clock" })).map((t) => t.key);
+    assert.deepEqual(keys, ["showSeconds", "format"]);
   });
 
   test("a setting the widget does not support is never offered", () => {
@@ -71,7 +82,27 @@ describe("the state a toggle reports", () => {
     assert.equal(t?.checked, false);
   });
 
+  test("an untouched clock ticks 24-hour when the APP is set to 24-hour", () => {
+    // This is the bug: the fallback was the literal "12h" while the renderer
+    // uses displayHourCycle(), whose default is 24h - so every untouched clock
+    // drew 24-hour and this menu showed "24-hour" unticked. The file's own
+    // comment on `fallback` states the requirement it broke.
+    setDisplayHourCycle("24h");
+    assert.equal(togglesFor(card({ type: "clock" })).find((t) => t.key === "format")?.checked, true);
+    setDisplayHourCycle("12h");
+    assert.equal(togglesFor(card({ type: "clock" })).find((t) => t.key === "format")?.checked, false);
+  });
+
+  test("but an object that CHOSE a cycle keeps it whatever the app says", () => {
+    setDisplayHourCycle("24h");
+    assert.equal(
+      togglesFor(card({ type: "clock", format: "12h" })).find((t) => t.key === "format")?.checked,
+      false,
+    );
+  });
+
   test("the hour cycle is a choice, not a boolean", () => {
+    setDisplayHourCycle("12h");
     const on24 = togglesFor(card({ type: "clock", format: "24h" })).find((x) => x.key === "format");
     assert.equal(on24?.checked, true);
     assert.equal(on24?.next, "12h");
@@ -81,6 +112,7 @@ describe("the state a toggle reports", () => {
   });
 
   test("AM/PM is dropped on a 24-hour clock, where it does nothing", () => {
+    setDisplayHourCycle("12h");
     const at24 = togglesFor(card({ type: "clock", format: "24h" })).map((t) => t.key);
     assert.ok(!at24.includes("showMeridiem"), at24.join(", "));
     const at12 = togglesFor(card({ type: "clock", format: "12h" })).map((t) => t.key);
@@ -107,6 +139,7 @@ describe("applying one", () => {
   test("round-trips: applying a toggle's own `next` flips its reported state", () => {
     // The whole menu contract in one property — the tick you see is the value
     // that gets written, and clicking again puts it back.
+    setDisplayHourCycle("12h");
     for (const type of ["clock", "obs-status", "stream-status"]) {
       let c = card({ type });
       let flipped = 0;
@@ -125,6 +158,7 @@ describe("applying one", () => {
   });
 
   test("turning a clock to 24-hour removes the AM/PM item", () => {
+    setDisplayHourCycle("12h");
     const c = withToggle(card({ type: "clock", format: "12h" }), "format", "24h");
     assert.ok(!togglesFor(c).some((t) => t.key === "showMeridiem"));
   });

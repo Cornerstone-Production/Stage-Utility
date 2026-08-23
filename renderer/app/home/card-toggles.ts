@@ -21,6 +21,8 @@
 
 import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
 
+import { displayHourCycle } from "../../lib/clock-format";
+
 /** The members of the config union that declare `K`, by their `type`. */
 type TypesWith<K extends PropertyKey, T = LayoutObjectConfig> = T extends { type: infer N }
   ? K extends keyof T
@@ -74,13 +76,20 @@ const SPECS: {
   label: string;
   /** For a two-way choice: the stored values meaning on and off. */
   choice?: { on: string; off: string };
-  /** The renderer's fallback when the object never set the key. It must match
-   *  what layout-renderer actually does, or an untouched widget shows a tick for
-   *  a setting it is not using. */
-  fallback: boolean | string;
+  /**
+   * The renderer's fallback when the object never set the key. It must match
+   * what layout-renderer actually does, or an untouched widget shows a tick for
+   * a setting it is not using.
+   *
+   * A THUNK where the fallback is itself a setting. `format` was written as the
+   * literal "12h" while the renderer uses `c.format ?? displayHourCycle()`,
+   * whose default is 24h — so an untouched clock drew 24-hour and this menu
+   * showed "24-hour" unticked. It was the only one of the ten that disagreed.
+   */
+  fallback: boolean | string | (() => boolean | string);
 }[] = [
   { key: "showSeconds", label: "Seconds", fallback: true },
-  { key: "format", label: "24-hour", choice: { on: "24h", off: "12h" }, fallback: "12h" },
+  { key: "format", label: "24-hour", choice: { on: "24h", off: "12h" }, fallback: displayHourCycle },
   { key: "showMeridiem", label: "AM / PM", fallback: true },
   { key: "showTimecode", label: "Timecode", fallback: false },
   { key: "showPosition", label: "Position", fallback: false },
@@ -113,7 +122,11 @@ export function togglesFor(card: LayoutObject): CardToggle[] {
   const type = config.type as string;
   const supports = (key: ToggleKey) => type in (APPLIES[key] as Record<string, true>);
   const valueOf = (spec: (typeof SPECS)[number]) =>
-    spec.key in config ? config[spec.key] : spec.fallback;
+    spec.key in config
+      ? config[spec.key]
+      : typeof spec.fallback === "function"
+        ? spec.fallback()
+        : spec.fallback;
 
   const is24h = supports("format") && valueOf(SPECS[1]) === "24h";
 

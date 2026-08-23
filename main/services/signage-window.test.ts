@@ -296,8 +296,20 @@ describe("the intervals a calendar draws", () => {
       { kind: "weekly", days: [0], start: "05:00", end: "13:00" },
       { kind: "weekly", days: [4], start: "22:00", end: "02:00" }, // wraps
       { kind: "weekly", days: [5], start: "22:00", end: "02:00" }, // wraps INTO the day under test
+      { kind: "weekly", days: [], start: "05:00", end: "13:00" }, // half-configured: always shut
       { kind: "dates", from: "2026-08-20", to: "2026-08-24", days: [6], start: "09:00", end: "11:00" },
       { kind: "once", date: "2026-08-22", start: "18:00", end: "20:00" },
+      // WRAPPING once and dates. The previous version of this list had neither,
+      // and that is exactly why it stayed green while the two disagreed: these
+      // three kinds used to test the date range against the day being ASKED
+      // ABOUT rather than the day the window STARTED, so a one-off "Aug 22,
+      // 22:00-02:00" reported shut at midnight while the calendar drew it
+      // running to 02:00.
+      { kind: "once", date: "2026-08-22", start: "22:00", end: "02:00" },
+      { kind: "dates", from: "2026-08-20", to: "2026-08-22", days: [6], start: "22:00", end: "02:00" },
+      // A dates range whose LAST day wraps, asked on the day after the range
+      // ends - the case where the two answers differ by a whole night.
+      { kind: "dates", from: "2026-08-21", to: "2026-08-22", days: [5, 6], start: "23:00", end: "01:00" },
     ] as const;
 
     for (const w of windows) {

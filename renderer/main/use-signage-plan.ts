@@ -16,6 +16,22 @@ import type { SignageHorizon, SignageHorizonEntry } from "@main/types/signage";
 import { onNotification, onSseConnection } from "../lib/api";
 import { pickEntry } from "./signage-hold";
 
+/**
+ * Is this the same horizon this screen already has?
+ *
+ * PURE and exported so it can be checked without a DOM. Structural, not by
+ * reference: every broadcast arrives as fresh JSON, so a reference check would
+ * always say "changed".
+ *
+ * It matters because the horizon array keys an effect that writes the whole plan
+ * to the device and re-fetches every asset. The server broadcasts on a change to
+ * ANY screen, so a screen whose own slice did not change still receives it — and
+ * on a Pi, acting on that is SD-card writes for nothing.
+ */
+export function sameHorizon(a: SignageHorizon, b: SignageHorizon): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b);
+}
+
 export function useSignagePlan(
   outputId: string,
   /** The surface's clock. Passed in rather than read here: the surface already
@@ -46,7 +62,10 @@ export function useSignagePlan(
     // next change — which on a quiet Tuesday could be hours.
     return onNotification("signage:plan", (payload: unknown) => {
       const map = payload as Record<string, SignageHorizon> | null;
-      setHorizon(map?.[outputId] ?? []);
+      const next = map?.[outputId] ?? [];
+      // The SAME array back when this screen's own slice did not change — see
+      // sameHorizon for why that identity matters.
+      setHorizon((prev) => (sameHorizon(prev, next) ? prev : next));
     });
   }, [outputId]);
 

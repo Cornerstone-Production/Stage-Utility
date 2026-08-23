@@ -10,7 +10,7 @@ import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
 import type { SignageHorizon, SignageHorizonEntry } from "../types/signage.js";
-import { resolveSignage } from "./signage-resolve.js";
+import { HORIZON_QUANTUM_MS, resolveSignage } from "./signage-resolve.js";
 
 const TZ = "America/Chicago";
 const NOW = Date.parse("2026-08-23T15:00:00Z"); // Sunday 10:00 CDT
@@ -247,19 +247,25 @@ describe("a playlist that cannot play", () => {
 });
 
 describe("the horizon itself", () => {
-  test("is contiguous, ordered, and covers 24 hours", () => {
+  test("is contiguous, ordered, and covers at least 24 hours", () => {
     const r = run({
       groups: [group("g1", ["out-1"])],
       schedules: [sched("s1", "weekend", ["g1"], SUNDAY_AM)],
     });
-    // No group default here, so no trailing fallback entry - the horizon is
-    // exactly the 24 hours.
+    // No group default here, so no trailing fallback entry.
     const h = r["out-1"];
     assert.equal(h[0].from, NOW);
-    assert.equal(h[h.length - 1].until, NOW + 24 * 3600_000);
     for (let i = 1; i < h.length; i++) {
       assert.equal(h[i].from, h[i - 1].until, "the horizon has a gap or an overlap");
     }
+    // AT LEAST 24 hours, and snapped to the quantum. The end is an artifact of
+    // how far ahead we compute rather than an instant anything happens at, so it
+    // is pinned to a grid: left moving with the clock it changed on every safety
+    // tick, and every screen was sent the whole plan once a minute forever.
+    const end = h[h.length - 1].until;
+    assert.ok(end >= NOW + 24 * 3600_000, `horizon only reaches ${end - NOW}ms`);
+    assert.equal(end % HORIZON_QUANTUM_MS, 0, "the end is not on the grid, so it will move again");
+    assert.ok(end < NOW + 48 * 3600_000, "the horizon grew unboundedly");
   });
 
   test("splits at the boundary a schedule actually ends", () => {

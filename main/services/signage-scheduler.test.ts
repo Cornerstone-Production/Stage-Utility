@@ -16,6 +16,7 @@ import { describe, test } from "node:test";
 
 import type { SignageHorizon } from "../types/signage.js";
 import type { SignageHorizonEntry } from "../types/signage.js";
+import { resolveSignage } from "./signage-resolve.js";
 import { SAFETY_TICK_MS, carryStartedAt, nextWakeMs, shouldBroadcast } from "./signage-scheduler.js";
 
 const NOW = 1_000_000;
@@ -161,6 +162,42 @@ describe("keeping a playlist where it is", () => {
     const before = { "o1": [entry({ from: 1000, until: 9000, playlistId: "p1" })] };
     const next = { "o1": [entry({ from: 5000, until: 9000, playlistId: "p1" })] };
     assert.equal(shouldBroadcast(before, carryStartedAt(before, next)), false);
+  });
+
+  test("and that holds for the REAL resolver, over two hours of safety ticks", () => {
+    // The version above hand-builds its entries with a fixed `until`, so it was
+    // green while the shipped path broadcast every 60 seconds: the resolver's
+    // horizon ran to `now + 24h` and the trailing default entry to
+    // `end + 24h`, and BOTH moved with the clock. carryStartedAt carries `from`
+    // and `startedAt`, never `until`, so nothing could have caught it.
+    //
+    // Driving the real resolver is the point of this test. Synthetic entries
+    // cannot fail on a bug that lives in how the entries are built.
+    const T0 = Date.parse("2026-08-23T12:00:00Z");
+    const input = {
+      media: [{ id: "m1", file: "a.png", mime: "image/png", name: "a", bytes: 1, addedAt: "" }],
+      playlists: [
+        { id: "p1", name: "P", items: [{ mediaId: "m1" }], defaultForGroupIds: ["g1"],
+          transition: { kind: "cut", ms: 0 } },
+      ],
+      groups: [{ id: "g1", name: "G", outputIds: ["o1"] }],
+      outputs: [{ id: "o1" }],
+      schedules: [],
+      overrides: [],
+      timeZone: "America/Chicago",
+      pcoWindows: [],
+      liveServiceTypeId: null,
+    } as never;
+
+    let prev = resolveSignage({ ...(input as object), now: T0 } as never) as never;
+    let broadcasts = 0;
+    for (let i = 1; i <= 120; i++) {
+      const built = resolveSignage({ ...(input as object), now: T0 + i * 60_000 } as never) as never;
+      const next = carryStartedAt(prev, built) as never;
+      if (shouldBroadcast(prev, next)) broadcasts++;
+      prev = next;
+    }
+    assert.equal(broadcasts, 0, "the safety tick is still pushing the whole plan to every screen");
   });
 
   test("a DIFFERENT playlist starts fresh", () => {

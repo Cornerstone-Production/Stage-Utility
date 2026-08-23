@@ -101,21 +101,6 @@ function intervalOnDay(
   return { from, to };
 }
 
-/** Every candidate interval that could contain `atMs`: the one starting today,
- *  and the one starting yesterday (which may still be running after midnight). */
-function candidateIntervals(
-  atMs: number,
-  days: readonly number[] | undefined,
-  start: string,
-  end: string,
-  tz: TimeZone,
-): { from: number; to: number }[] {
-  const today = startOfLocalDay(atMs, tz);
-  const yesterday = startOfLocalDay(today - 3 * 3600_000, tz);
-  return [intervalOnDay(yesterday, days, start, end, tz), intervalOnDay(today, days, start, end, tz)]
-    .filter((i): i is { from: number; to: number } => i !== null);
-}
-
 /** The PCO window covering `atMs` for this service type, if any. */
 function pcoWindowAt(windows: PcoWindow[], serviceTypeId: string, atMs: number): PcoWindow | null {
   for (const w of windows) {
@@ -137,26 +122,18 @@ export function windowActiveAt(
       return true;
 
     case "weekly":
-      // An empty day list is a half-configured schedule. Treating it as "every
-      // day" would put content on every wall in the building.
-      if (!w.days?.length) return false;
-      return candidateIntervals(atMs, w.days, w.start, w.end, tz).some(
-        (i) => atMs >= i.from && atMs < i.to,
-      );
-
-    case "dates": {
-      const key = dateKey(atMs, tz);
-      // Inclusive at both ends, which is what "from Dec 1 to Dec 25" means to
-      // everyone who is not writing the code.
-      if (key < w.from || key > w.to) return false;
-      return candidateIntervals(atMs, w.days, w.start, w.end, tz).some(
-        (i) => atMs >= i.from && atMs < i.to,
-      );
-    }
-
+    case "dates":
     case "once":
-      if (dateKey(atMs, tz) !== w.date) return false;
-      return candidateIntervals(atMs, undefined, w.start, w.end, tz).some(
+      // Through intervalsOnDay, which is also what the calendar draws from.
+      //
+      // These three used to test the date range against the day being ASKED
+      // ABOUT rather than the day the window STARTED, which is the one rule this
+      // module turns on (see intervalOnDay). For any window that wraps past
+      // midnight the two are different days, so a one-off "Dec 24, 22:00-02:00"
+      // reported shut at midnight while intervalsOnDay - and therefore the
+      // calendar - showed it running to 02:00. The wall went dark and the
+      // picture said it was playing.
+      return intervalsOnDay(w, startOfLocalDay(atMs, tz), tz, ctx).some(
         (i) => atMs >= i.from && atMs < i.to,
       );
 
@@ -207,10 +184,16 @@ export function intervalsOnDay(
       .map((p) => ({ from: p.from, to: p.to }));
   }
 
+  // An empty day list is a half-configured schedule. Treating it as "every day"
+  // would put content on every wall in the building. Here rather than only in
+  // windowActiveAt, so the calendar cannot draw a window the resolver considers
+  // shut.
+  if (w.kind === "weekly" && !w.days?.length) return [];
+
   // Yesterday as well as today, so a window that wrapped past midnight draws its
   // tail on this day — the same rule windowActiveAt follows.
   const yesterday = startOfLocalDay(dayStart - 3 * 3600_000, tz);
-  const days = w.kind === "weekly" ? w.days : w.kind === "dates" ? w.days : undefined;
+  const days = "days" in w ? w.days : undefined;
 
   const out: { from: number; to: number }[] = [];
   for (const start of [yesterday, dayStart]) {
@@ -265,14 +248,14 @@ export function nextBoundaryAfter(
     return best;
   }
 
-  const days = w.kind === "weekly" ? w.days : w.kind === "dates" ? w.days : undefined;
+  const days = "days" in w ? w.days : undefined;
   let best: number | null = null;
 
   // Walk local days rather than adding 24h, so a day that is 23 or 25 hours long
   // is still visited exactly once.
   //
   // Starting YESTERDAY, not today. A window that wraps past midnight belongs to
-  // the day it STARTED — the same rule intervalOnDay and candidateIntervals
+  // the day it STARTED — the same rule intervalOnDay and windowActiveAt
   // follow — so at Friday 01:00, inside a Thursday 22:00-02:00 window, its
   // closing edge lives on Thursday. Beginning at Friday's midnight skipped it
   // and answered with next Thursday's OPENING instead, which put a single
