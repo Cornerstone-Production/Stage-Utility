@@ -7,6 +7,7 @@
 
 import type { SignageGroup } from "../types/signage.js";
 import { DataStore } from "./data-store.js";
+import { errorMessage } from "./errors.js";
 
 export const signageGroupsStore = new DataStore<SignageGroup[]>(
   "signage-groups.json",
@@ -30,7 +31,9 @@ export function listGroups(): Promise<SignageGroup[]> {
  * Never throws: a screen must still be removable when this fails, and the
  * failure is a stale id rather than lost work.
  */
-export async function forgetOutputInSignageGroups(outputId: string): Promise<number> {
+export async function forgetOutputInSignageGroups(
+  outputId: string,
+): Promise<{ changed: number; error?: string }> {
   try {
     let changed = 0;
     await signageGroupsStore.update((all) =>
@@ -41,9 +44,12 @@ export async function forgetOutputInSignageGroups(outputId: string): Promise<num
       }),
     );
     if (changed) console.log(`[signage] removed ${outputId} from ${changed} tag(s)`);
-    return changed;
+    return { changed };
   } catch (err) {
-    console.error(`[signage] could not remove ${outputId} from its tags:`, err);
-    return 0;
+    // Returned, not swallowed. `0` also means "there was nothing to change", so
+    // the caller could not tell a clean no-op from a failure — and the state
+    // this function exists to prevent (a screen gone from settings.outputs and
+    // still named by every tag) would persist silently.
+    return { changed: 0, error: errorMessage(err) };
   }
 }

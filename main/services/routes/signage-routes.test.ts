@@ -443,3 +443,37 @@ describe("playlists, groups and schedules", () => {
     assert.equal(groupIds.filter((id) => playlistIds.includes(id)).length, 0);
   });
 });
+
+describe("a save says whether the walls picked it up", () => {
+  test("every write reports horizonUpdated", async () => {
+    // The scheduler deliberately never throws — it runs from a timer, and an
+    // exception escaping would take it down silently. But six route handlers
+    // awaited it and then answered 200 regardless, so a failed rebuild left the
+    // operator looking at a green Save while the walls stayed on the previous
+    // horizon. The flag is how the UI can tell.
+    const save = await callRoute(signageRoutes, "/api/signage/playlists", {
+      method: "POST",
+      body: {
+        playlist: {
+          id: "p-flag", name: "Flagged", items: [], defaultDurationMs: 8000,
+          fit: "contain", transition: { kind: "cut", ms: 0 }, createdAt: "",
+        },
+      },
+    });
+    assert.equal(save.status, 200);
+    assert.equal((save.json as { horizonUpdated?: boolean }).horizonUpdated, true);
+
+    const del = await callRoute(signageRoutes, "/api/signage/playlists/p-flag", { method: "DELETE" });
+    assert.equal(del.status, 200);
+    assert.equal((del.json as { horizonUpdated?: boolean }).horizonUpdated, true);
+  });
+
+  test("and a reorder does too", async () => {
+    const r = await callRoute(signageRoutes, "/api/signage/schedules/reorder", {
+      method: "POST",
+      body: { ids: [] },
+    });
+    assert.equal(r.status, 200);
+    assert.equal((r.json as { horizonUpdated?: boolean }).horizonUpdated, true);
+  });
+});

@@ -18,6 +18,11 @@ process.env.HOME = path.join(TMP, "home");
 
 const { signageGroupsStore, forgetOutputInSignageGroups } = await import("./signage-groups-store.js");
 
+// It returns `{ changed, error? }` rather than a bare count: 0 also means "there
+// was nothing to change", so a caller could not tell a clean no-op from a failed
+// write — and the state this cleanup prevents (a screen gone from the settings
+// and still named by every tag) would have persisted silently.
+
 after(async () => {
   await fs.rm(TMP, { recursive: true, force: true });
 });
@@ -33,7 +38,7 @@ describe("removing a screen", () => {
       { id: "g2", name: "Hall", outputIds: ["gone"], createdAt: "" },
       { id: "g3", name: "Cafe", outputIds: ["display-2"], createdAt: "" },
     ]);
-    assert.equal(await forgetOutputInSignageGroups("gone"), 2);
+    assert.deepEqual(await forgetOutputInSignageGroups("gone"), { changed: 2 });
     const after = await signageGroupsStore.load();
     assert.deepEqual(
       after.map((g) => g.outputIds),
@@ -45,17 +50,17 @@ describe("removing a screen", () => {
     await signageGroupsStore.save([
       { id: "g1", name: "Foyer", outputIds: ["display-1"], createdAt: "" },
     ]);
-    assert.equal(await forgetOutputInSignageGroups("display-9"), 0);
+    assert.deepEqual(await forgetOutputInSignageGroups("display-9"), { changed: 0 });
     assert.deepEqual((await signageGroupsStore.load())[0].outputIds, ["display-1"]);
   });
 
   test("a tag with no outputIds at all does not stop the removal", async () => {
     // A hand-edited store. A screen must still be deletable.
     await signageGroupsStore.save([{ id: "g1", name: "Broken", createdAt: "" } as never]);
-    assert.equal(await forgetOutputInSignageGroups("display-1"), 0);
+    assert.deepEqual(await forgetOutputInSignageGroups("display-1"), { changed: 0 });
   });
 
   test("an empty tag list is not an error", async () => {
-    assert.equal(await forgetOutputInSignageGroups("display-1"), 0);
+    assert.deepEqual(await forgetOutputInSignageGroups("display-1"), { changed: 0 });
   });
 });

@@ -191,8 +191,13 @@ class SignageScheduler {
    * exception escaping either would take the scheduler down silently. The
    * failure is logged and the previous horizon is left in place, which keeps
    * walls playing rather than blanking them over a transient read error.
+   *
+   * RETURNS whether it succeeded. The timer path ignores it — that is the whole
+   * point of not throwing — but six route handlers await this and then answer
+   * 200, so a failed rebuild left the operator looking at a green Save while the
+   * walls stayed on the previous horizon.
    */
-  async recompute(): Promise<void> {
+  async recompute(): Promise<boolean> {
     try {
       const ctx = this.context?.() ?? { outputs: [], liveServiceTypeId: null, pcoWindows: [] };
       const [groups, schedules, playlists, media, overrides] = await Promise.all([
@@ -246,8 +251,10 @@ class SignageScheduler {
         // never arrives. The hello burst covers them instead.
         this.last = null;
       }
+      return true;
     } catch (err) {
       console.error("[signage] could not recompute the horizon:", errorMessage(err));
+      return false;
     } finally {
       this.arm();
     }

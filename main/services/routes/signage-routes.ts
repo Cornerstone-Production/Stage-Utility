@@ -189,6 +189,9 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
       const affected = mediaUsage(id, await listPlaylists());
       const media = await deleteMedia(id);
       if (!media) return error(c.res, "no such media", 404);
+      // True when nothing needed rebuilding, so the caller cannot read "no
+      // recompute happened" as "the recompute failed".
+      let horizonUpdated = true;
       if (affected.length) {
         await signagePlaylistsStore.update((all) =>
           // Array.isArray, not a bare filter: this is the raw store, and a
@@ -198,9 +201,9 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
             items: Array.isArray(p.items) ? p.items.filter((i) => i.mediaId !== id) : [],
           })),
         );
-        await signageScheduler.recompute();
+        horizonUpdated = await signageScheduler.recompute();
       }
-      return json(c.res, { media, removedFrom: affected });
+      return json(c.res, { media, removedFrom: affected, horizonUpdated });
     }
   }
 
@@ -257,8 +260,8 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
         ...(typeof body?.note === "string" ? { note: cleanName(body.note, "") } : {}),
       };
       await setOverride(record);
-      await signageScheduler.recompute();
-      return json(c.res, { override: record });
+      const horizonUpdated = await signageScheduler.recompute();
+      return json(c.res, { override: record, horizonUpdated });
     }
 
     if (c.method === "DELETE") {
@@ -266,8 +269,8 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
       // "no override on this group", and that is already true. Failing would be
       // noise on a screen someone is trying to fix.
       await clearOverride(groupId);
-      await signageScheduler.recompute();
-      return json(c.res, { released: groupId });
+      const horizonUpdated = await signageScheduler.recompute();
+      return json(c.res, { released: groupId, horizonUpdated });
     }
   }
 
@@ -352,8 +355,8 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
     ]);
     const published = await publishSignage({ playlists, groups, schedules });
     // Straight away, so the walls change on the press rather than on the tick.
-    await signageScheduler.recompute();
-    return json(c.res, { publishedAt: published.publishedAt, pending: signageScheduler.getPending() });
+    const horizonUpdated = await signageScheduler.recompute();
+    return json(c.res, { publishedAt: published.publishedAt, pending: signageScheduler.getPending(), horizonUpdated });
   }
 
   if (c.pathname === "/api/signage/schedules/reorder" && c.method === "POST") {
@@ -363,8 +366,8 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
     }
     const schedules = await reorderSchedules(body.ids as string[]);
     // Reordering IS the priority rule, so this changes what walls show.
-    await signageScheduler.recompute();
-    return json(c.res, { schedules });
+    const horizonUpdated = await signageScheduler.recompute();
+    return json(c.res, { schedules, horizonUpdated });
   }
 }
 
@@ -481,8 +484,8 @@ async function collection<T extends Identified>(
       );
       // Push the new horizon at once rather than waiting for the safety tick:
       // an operator who just edited a schedule expects the wall to follow.
-      await signageScheduler.recompute();
-      json(c.res, { [key]: record, [segment]: saved });
+      const horizonUpdated = await signageScheduler.recompute();
+      json(c.res, { [key]: record, [segment]: saved, horizonUpdated });
 
       // A PCO-driven schedule also needs its windows fetched now rather than up
       // to half an hour later, which would look like the schedule not working.
@@ -528,8 +531,8 @@ async function collection<T extends Identified>(
       error(c.res, `no such ${key}`, 404);
       return true;
     }
-    await signageScheduler.recompute();
-    json(c.res, { [key]: removed, [segment]: remaining });
+    const horizonUpdated = await signageScheduler.recompute();
+    json(c.res, { [key]: removed, [segment]: remaining, horizonUpdated });
     return true;
   }
 

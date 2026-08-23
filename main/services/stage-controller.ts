@@ -2312,7 +2312,16 @@ export class StageController {
     // simply never online — and because a tag's screen count included it, "the
     // foyer (7)" meant six. Cleaned here rather than tolerated at every reader,
     // because it is dead the moment the screen is.
-    await forgetOutputInSignageGroups(id);
+    const forgotten = await forgetOutputInSignageGroups(id);
+    if (forgotten.error) {
+      // The screen is already out of settings.outputs, so the delete stands —
+      // but its tags still name it, which is the exact state that cleanup
+      // exists to prevent. Said out loud rather than left as a return value
+      // nobody read: a tag's screen count will be wrong until it is fixed.
+      console.error(
+        `[signage] ${id} was deleted but could not be removed from its tags: ${forgotten.error}`,
+      );
+    }
     this.recomputeResolved();
     this.broadcast();
     return this.state;
