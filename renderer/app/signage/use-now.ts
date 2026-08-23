@@ -22,3 +22,29 @@ export function useNow(intervalMs: number): number {
   }, [intervalMs]);
   return now;
 }
+
+/**
+ * Milliseconds since `key` last changed — a clock that starts at zero.
+ *
+ * For a preview, and it exists because the wall clock is the wrong clock here.
+ * A preview positioned by `Date.now() % cycleMs` sits at an offset that has no
+ * relation to the same clock modulo a DIFFERENT cycle length, so every press of
+ * the duration stepper threw it onto an unrelated item and holding the stepper
+ * flipped through the whole playlist. Reported as exactly that.
+ *
+ * Counting from zero, a duration edit re-times the cycle instead of scrubbing
+ * it. A wall screen keeps the server's `startedAt`, which is what holds two real
+ * screens in step; nothing in an editor preview needs that.
+ *
+ * The interval callback does the setting, not the effect body — the effect only
+ * captures its own start, which is what keeps this out of a render loop.
+ */
+export function useElapsed(key: string | null, intervalMs: number): number {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const t = setInterval(() => setElapsed(Date.now() - start), intervalMs);
+    return () => clearInterval(t);
+  }, [key, intervalMs]);
+  return elapsed;
+}

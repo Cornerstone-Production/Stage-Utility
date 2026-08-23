@@ -31,6 +31,7 @@ export function ScheduleSection({
   playlists,
   serviceTypes,
   winningIds,
+  winningOn,
   onChange,
 }: {
   schedules: SignageSchedule[];
@@ -39,6 +40,9 @@ export function ScheduleSection({
   serviceTypes: ServiceTypeDTO[];
   /** Schedule ids currently winning somewhere, from the resolver. */
   winningIds: Set<string>;
+  /** The screens a schedule is winning on. Several schedules can be winning at
+   *  once — one per group — so a bare "winning" reads as "the one". */
+  winningOn: (scheduleId: string) => string[];
   onChange: () => Promise<void>;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
@@ -180,7 +184,15 @@ export function ScheduleSection({
                   </button>
 
                   {winning ? (
-                    <span className="shrink-0 text-caption2 font-medium text-live-11">winning</span>
+                    <span
+                      className="shrink-0 text-caption2 font-medium text-live-11"
+                      title={`Playing on ${winningOn(s.id).join(", ")}`}
+                    >
+                      {(() => {
+                        const on = winningOn(s.id);
+                        return on.length === 1 ? `on ${on[0]}` : `on ${on.length} screens`;
+                      })()}
+                    </span>
                   ) : null}
 
                   <Switch

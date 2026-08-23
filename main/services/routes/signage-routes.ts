@@ -171,7 +171,8 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
     if (c.method === "PATCH") {
       const body = (await readBody(c.req)) as { name?: unknown };
       if (typeof body?.name !== "string") return error(c.res, "a name is required", 400);
-      const media = await renameMedia(id, cleanName(body.name, id));
+      // Same rule as every other name: never fall back to the id.
+      const media = await renameMedia(id, cleanName(body.name, "Untitled media"));
       if (!media) return error(c.res, "no such media", 404);
       return json(c.res, { media });
     }
@@ -412,7 +413,10 @@ async function collection<T extends Identified>(
         return true;
       }
       if (typeof record.name === "string") {
-        record.name = cleanName(record.name, record.id);
+        // NOT the id. A cleared name used to come back as "gr-mt4zqllvhkqd9f",
+        // which reads as corruption and is a random string the operator then has
+        // to select and delete before they can type a real one.
+        record.name = cleanName(record.name, `Untitled ${key}`);
       }
       const saved = await store.update((all) =>
         all.some((r) => r.id === record.id)

@@ -4,7 +4,7 @@
 // because they are read together: the schedule list needs playlist and group
 // names, and the Now board needs all four.
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 import type { ServiceTypeDTO } from "@main/types/stage";
@@ -21,6 +21,7 @@ import { NowBoard } from "./now-board";
 import { PlaylistsSection } from "./playlists-section";
 import { ScheduleSection } from "./schedule-section";
 import { SIGNAGE_NOW_KEY, useSignageConfig } from "./use-signage-config";
+import { winningOutputsFor, winningScheduleIds } from "./board-entry";
 
 const SECTIONS = ["Now", "Media", "Playlists", "Groups", "Schedule"] as const;
 type Section = (typeof SECTIONS)[number];
@@ -50,14 +51,18 @@ export function SignageRoute() {
   // Seconds is plenty: this only decides which schedule row is marked.
   const at = useNow(1000);
 
-  const winningIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const horizon of Object.values(nowBoard?.horizons ?? {})) {
-      const entry = horizon.find((e) => at >= e.from && at < e.until);
-      if (entry?.reason === "schedule" && entry.reasonId) ids.add(entry.reasonId);
-    }
-    return ids;
-  }, [nowBoard, at]);
+  // Through boardEntry, which treats a clock a moment behind a freshly rebuilt
+  // horizon as its start. Matching strictly made the marker VANISH for a few
+  // hundred milliseconds after every reorder, which read as it being slow.
+  const horizons = useMemo(() => nowBoard?.horizons ?? {}, [nowBoard]);
+  const winningIds = useMemo(() => winningScheduleIds(horizons, at), [horizons, at]);
+  const winningOn = useCallback(
+    (scheduleId: string) =>
+      winningOutputsFor(horizons, at, scheduleId).map(
+        (id) => state?.outputs?.find((o) => o.id === id)?.name ?? id,
+      ),
+    [horizons, at, state?.outputs],
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -112,6 +117,7 @@ export function SignageRoute() {
           playlists={config.playlists}
           serviceTypes={serviceTypes ?? []}
           winningIds={winningIds}
+          winningOn={winningOn}
           onChange={reload}
         />
       ) : (

@@ -25,7 +25,7 @@ import { SelectField } from "./select-field";
 import { SignagePlayer } from "../../main/signage-player";
 import { invoke } from "../../lib/api";
 import { newSignageId } from "./ids";
-import { useNow } from "./use-now";
+import { useElapsed } from "./use-now";
 import { toHorizonPlaylist } from "./preview-entry";
 
 const KINDS: { value: SignageTransitionKind; label: string }[] = [
@@ -61,9 +61,13 @@ export function PlaylistsSection({
 
   const selected = playlists.find((p) => p.id === selectedId) ?? null;
 
-  // The preview needs a clock, and the player deliberately holds none. A tenth
-  // of a second, because a transition is 600ms by default.
-  const now = useNow(100);
+  // The preview's OWN clock, counting from when this playlist was opened rather
+  // than from the epoch. A tenth of a second, because a transition is 600ms.
+  //
+  // Not the wall clock: positioned by `Date.now() % cycleMs`, every press of the
+  // duration stepper landed on an unrelated item and holding it flipped through
+  // the playlist. See useElapsed.
+  const now = useElapsed(selectedId, 100);
 
   // Editing works on a draft so a half-made change is never pushed to a wall.
   const editing = draft ?? selected;
@@ -115,8 +119,9 @@ export function PlaylistsSection({
   const cycle = resolvedCycleMs(resolved);
   const dropped = editing ? editing.items.length - resolved.length : 0;
 
+  // startedAt 0, because `now` above is already elapsed-since-opened.
   const previewEntry = useMemo(
-    () => (resolved.length ? toHorizonPlaylist(editing as SignagePlaylist, resolved) : null),
+    () => (resolved.length ? toHorizonPlaylist(editing as SignagePlaylist, resolved, 0) : null),
     [editing, resolved],
   );
 

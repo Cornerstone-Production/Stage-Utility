@@ -26,6 +26,7 @@ export function SelectField({
   onChange,
   placeholder,
   className,
+  hideLabel = false,
 }: {
   label: string;
   value: string;
@@ -33,22 +34,36 @@ export function SelectField({
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  /** Drop the visible caption, keeping it as the trigger's aria-label.
+   *
+   *  For a select that sits in a row beside buttons: the caption made the field
+   *  taller than its neighbours, so the control and the button next to it did
+   *  not line up however the row was aligned. */
+  hideLabel?: boolean;
 }) {
+  const field = (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className={className} aria-label={label}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
+  // No <label> wrapper when the caption is hidden: a label with nothing visible
+  // in it is a click target that looks like empty space.
+  if (hideLabel) return field;
+
   return (
     <label className="flex flex-col gap-1">
       <span className="text-caption1 text-fg-muted">{label}</span>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className={className} aria-label={label}>
-          <SelectValue placeholder={placeholder} />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((o) => (
-            <SelectItem key={o.value} value={o.value}>
-              {o.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {field}
     </label>
   );
 }

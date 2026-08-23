@@ -344,6 +344,23 @@ describe("playlists, groups and schedules", () => {
     assert.ok(!/[\r\n]/.test((r.json as { group: { name: string } }).group.name));
   });
 
+  test("clearing a name gives a readable one, never the record id", async () => {
+    // Deleting the text in a name field filled it with "gr-mt4zqllvhkqd9f".
+    // The fallback was the record's own id, which is a random string an
+    // operator has no way to read as anything but corruption — and it is the id
+    // they then have to select and delete before they can type a real name.
+    for (const [segment, key, extra] of [
+      ["playlists", "playlist", { items: [] }],
+      ["groups", "group", { outputIds: [] }],
+      ["schedules", "schedule", { groupIds: [] }],
+    ] as const) {
+      const r = await save(segment, key, { id: `blank-${key}`, name: "   ", ...extra });
+      const name = (r.json as Record<string, { name: string }>)[key].name;
+      assert.ok(!name.includes(`blank-${key}`), `a cleared ${key} name became its id: ${name}`);
+      assert.equal(name, `Untitled ${key}`);
+    }
+  });
+
   test("a record without the list the resolver walks is refused", async () => {
     // The poison pill. `{"playlist":{"id":"x"}}` used to be stored happily, and
     // the moment anything pointed at it the resolver threw inside the

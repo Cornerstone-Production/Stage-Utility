@@ -12,13 +12,21 @@ import { toHorizonItems } from "@main/services/signage-playlist-items";
 /**
  * A preview entry for `playlist`.
  *
- * `startedAt` is 0 so the preview's position follows the wall clock modulo the
- * cycle. That means opening the editor does not restart the loop, and two people
- * looking at the same playlist see the same frame.
+ * `startedAt` is the moment this playlist came up in the editor, NOT zero.
+ *
+ * Anchored at zero, the preview's position is `Date.now() % cycleMs` — and that
+ * has no relation to the same clock modulo a different cycle length. Every press
+ * of the duration stepper changed the cycle and threw the preview onto an
+ * unrelated item; holding the stepper flipped through the whole playlist. See
+ * usePreviewEpoch, which is where the anchor comes from.
+ *
+ * A real screen keeps the server's startedAt, which is what holds two walls in
+ * step. Nothing in an editor preview needs that.
  */
 export function toHorizonPlaylist(
   playlist: SignagePlaylist,
   resolved: ResolvedItem[],
+  startedAt: number,
 ): SignageHorizonEntry {
   return {
     from: 0,
@@ -27,7 +35,7 @@ export function toHorizonPlaylist(
     reasonLabel: playlist.name,
     playlist: {
       id: playlist.id,
-      startedAt: 0,
+      startedAt,
       fit: playlist.fit,
       transition: playlist.transition,
       items: toHorizonItems(resolved),

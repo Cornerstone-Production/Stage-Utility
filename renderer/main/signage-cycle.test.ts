@@ -100,3 +100,4 @@ describe("which horizon entry is current", () => {
     assert.equal(entryAt([], 150), null);
   });
 });
+

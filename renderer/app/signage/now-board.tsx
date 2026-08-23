@@ -21,6 +21,7 @@ import { toast } from "../../components/ui/toast";
 import { SignagePlayer } from "../../main/signage-player";
 import { invoke } from "../../lib/api";
 import { SelectField } from "./select-field";
+import { boardEntry } from "./board-entry";
 import { SIGNAGE_NOW_KEY, SIGNAGE_OVERRIDES_KEY } from "./use-signage-config";
 import { useNow } from "./use-now";
 
@@ -130,11 +131,26 @@ export function NowBoard({
           // stands for the group. A group with no screens has nothing to show.
           const outputId = g.outputIds[0];
           const horizon = outputId ? (data?.horizons[outputId] ?? []) : [];
-          const entry = horizon.find((e) => now >= e.from && now < e.until) ?? null;
-          const overridden = overrides.some((o) => o.groupId === g.id);
+          // boardEntry, not a strict match: after any edit the server rebuilds
+          // the horizon starting at ITS now, and a board clock a moment behind
+          // that would blank every card until its next tick.
+          const entry = boardEntry(horizon, now);
+          const override = overrides.find((o) => o.groupId === g.id) ?? null;
+          const overridden = override !== null;
 
           return (
-            <div key={g.id} className="flex flex-col gap-2.5 rounded-xl border border-line bg-surface-raised p-3">
+            <div
+              key={g.id}
+              // Amber all the way round a taken-over card, not just on its pill.
+              // A wall of these is scanned, not read, and the question being
+              // asked is "which one am I holding?" — a border answers it from
+              // across the room, a chip has to be found first.
+              className={
+                overridden
+                  ? "flex flex-col gap-2.5 rounded-xl border-2 border-amber-6 bg-surface-raised p-3"
+                  : "flex flex-col gap-2.5 rounded-xl border-2 border-line bg-surface-raised p-3"
+              }
+            >
               <div className="flex items-center justify-between gap-2">
                 <h3 className="truncate text-callout font-medium text-fg">{g.name}</h3>
                 <span
@@ -172,9 +188,14 @@ export function NowBoard({
               </div>
 
               <div className="flex items-center gap-1.5">
+                {/* Shows what is ACTUALLY taken over, not a standing invitation.
+                    Reading "Take over with…" while a group is held is the
+                    control disagreeing with the wall, and the operator's next
+                    move is to pick the same playlist again to be sure. */}
                 <SelectField
                   label="Take over"
-                  value={TAKE_OVER}
+                  hideLabel
+                  value={override && !override.blank ? (override.playlistId ?? TAKE_OVER) : TAKE_OVER}
                   placeholder="Take over"
                   onChange={(v) => {
                     if (v === TAKE_OVER) return;
@@ -184,10 +205,13 @@ export function NowBoard({
                     { value: TAKE_OVER, label: "Take over with…" },
                     ...playlists.map((p) => ({ value: p.id, label: p.name })),
                   ]}
-                  className="flex-1"
+                  className="min-w-0 flex-1"
                 />
                 <Button
                   size="small"
+                  // Blank is a take-over too, so it reads as held rather than as
+                  // something still to press.
+                  variant={override?.blank ? "accent" : undefined}
                   disabled={busy}
                   onClick={() => void act(() => invoke("signage:setOverride", { groupId: g.id, blank: true }))}
                 >
