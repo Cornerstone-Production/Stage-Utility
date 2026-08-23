@@ -20,6 +20,14 @@ export interface ContextMenuItem {
   disabled?: boolean;
   danger?: boolean;
   onSelect?: () => void;
+  /**
+   * A checkable item, showing a tick when on.
+   *
+   * The menu STAYS OPEN when one is picked, the way a platform menu of view
+   * options does — turning three things off is three right-clicks otherwise.
+   * `onSelect` must therefore be safe to call repeatedly.
+   */
+  checked?: boolean;
   /** Nested items. A submenu opens on hover, like the platform menus do. */
   items?: ContextMenuItem[];
 }
@@ -80,7 +88,8 @@ function MenuList({
           <button
             key={item.label ?? i}
             type="button"
-            role="menuitem"
+            role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            aria-checked={item.checked}
             disabled={item.disabled}
             className={cn(
               ITEM_CLS,
@@ -93,10 +102,19 @@ function MenuList({
             onClick={() => {
               if (item.disabled) return;
               item.onSelect?.();
-              onClose();
+              // A checkable item leaves the menu open — see `checked`.
+              if (item.checked === undefined) onClose();
             }}
           >
-            {item.icon}
+            {item.checked === undefined ? (
+              item.icon
+            ) : (
+              // A fixed-width gutter rather than a conditional tick, so the
+              // labels in a list of toggles line up whatever is on.
+              <span className="w-3 shrink-0 text-center text-accent" aria-hidden>
+                {item.checked ? "✓" : ""}
+              </span>
+            )}
             <span className="flex-1 truncate">{item.label}</span>
             {item.shortcut && <span className="ml-3 tabular-nums text-fg-subtle">{item.shortcut}</span>}
           </button>

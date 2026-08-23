@@ -294,6 +294,7 @@ export function ScheduleCalendar({
                 key={`${b.schedule.id}-${b.day}-${i}`}
                 block={b}
                 playlistName={playlistName.get(b.schedule.playlistId) ?? "no playlist"}
+                tz={tz}
                 onOpen={() => onOpen(b.schedule)}
               />
             ))}
@@ -314,14 +315,20 @@ const CLICK_SLOP = 0.006;
 function ScheduleBlock({
   block,
   playlistName,
+  tz,
   onOpen,
 }: {
   block: WeekBlock;
   playlistName: string;
+  tz: TimeZone;
   onOpen: () => void;
 }) {
   const hue = hueOf(block.schedule.playlistId);
   const dim = !block.schedule.enabled || block.beatenBy !== null;
+  const height = block.bottom - block.top;
+  /** Below about an hour tall there is only room for the name. */
+  const roomFor = (lines: number) => height * 24 * HOUR_HEIGHT >= lines * 13 + 6;
+  const times = `${shortTime(block.from, tz)} – ${shortTime(block.to, tz)}`;
 
   return (
     <button
@@ -333,8 +340,8 @@ function ScheduleBlock({
       onClick={(e) => e.detail === 0 && onOpen()}
       title={
         block.beatenBy
-          ? `${block.schedule.name} — beaten here by ${block.beatenBy}`
-          : block.schedule.name
+          ? `${block.schedule.name}, ${times} — beaten here by ${block.beatenBy}`
+          : `${block.schedule.name}, ${times} — ${playlistName}`
       }
       // flex-col/items-start rather than relying on the default: a <button>
       // CENTRES its content vertically, so a tall block put its label in the
@@ -363,14 +370,28 @@ function ScheduleBlock({
         {block.continued ? "↑ " : ""}
         {block.schedule.name}
       </span>
-      <span className="block truncate text-caption2 leading-tight opacity-80">{playlistName}</span>
-      {block.beatenBy ? (
+      {roomFor(2) ? (
+        <span className="block truncate text-caption2 leading-tight opacity-80">{times}</span>
+      ) : null}
+      {roomFor(3) ? (
+        <span className="block truncate text-caption2 leading-tight opacity-80">{playlistName}</span>
+      ) : null}
+      {block.beatenBy && roomFor(4) ? (
         <span className="block truncate text-caption2 leading-tight opacity-90">
           beaten by {block.beatenBy}
         </span>
       ) : null}
     </button>
   );
+}
+
+/** "5am" / "1:30pm" — the way a calendar writes a time, with the minutes only
+ *  when there are any. */
+function shortTime(ms: number, tz: TimeZone): string {
+  const p = zonedParts(ms, tz);
+  const h = p.hour % 12 === 0 ? 12 : p.hour % 12;
+  const suffix = p.hour < 12 ? "am" : "pm";
+  return p.minute === 0 ? `${h}${suffix}` : `${h}:${String(p.minute).padStart(2, "0")}${suffix}`;
 }
 
 function rangeLabel(days: number[], tz: TimeZone): string {

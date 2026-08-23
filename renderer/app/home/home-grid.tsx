@@ -8,7 +8,7 @@
 // what makes "add any widget to Home" a real sentence rather than a promise
 // about a second widget set.
 
-import { useCallback, useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { LayoutDTO, LayoutObject } from "@main/types/views";
 
 import { ObjectContent, boxStyle, useLayoutData } from "../../main/layout-renderer";
@@ -196,6 +196,7 @@ export function HomeGrid({
   boxes: boxesOverride,
   animate = false,
   gridRef,
+  onCardContextMenu,
 }: {
   layout: LayoutDTO;
   /** The cards to draw, already filtered and ordered by the caller. */
@@ -209,6 +210,10 @@ export function HomeGrid({
   animate?: boolean;
   /** The grid element itself, for turning a pointer position into a cell. */
   gridRef?: (el: HTMLDivElement | null) => void;
+  /** Right-click on a card. On the WRAPPER, not on the widget: a widget is
+   *  drawn by the shared renderer and some of them are interactive, so putting
+   *  the handler inside would mean each one had to remember to forward it. */
+  onCardContextMenu?: (card: LayoutObject, e: ReactMouseEvent) => void;
 }) {
   const ctx = useHomeCtx(layout);
   const boxes = boxesOverride ?? boxesOf(cards);
@@ -261,6 +266,7 @@ export function HomeGrid({
                 ["--card-h" as string]: String(h),
               }}
               data-card-id={o.id}
+              onContextMenu={onCardContextMenu ? (e) => onCardContextMenu(o, e) : undefined}
             >
               {/* boxStyle is what paints the widget's own frame — background,
                   hairline, radius, padding. On a canvas the object wrapper

@@ -32,7 +32,12 @@ import { HOME_VIEW_ID, defaultHomeLayout } from "@main/services/home-view";
 import type { LayoutObject } from "@main/types/views";
 import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
-import { addCard, removeCard, setSize, setWhen, visibleCards } from "./home-cards";
+import { addCard, removeCard, replaceCard, setSize, setWhen, visibleCards } from "./home-cards";
+import { SIZES, SIZE_ORDER, WHEN_LABELS, sizeOf, whenOf } from "./home-cards";
+import { togglesFor, withToggle } from "./card-toggles";
+import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
+import { LAYOUT_OBJECTS } from "../../main/layout-objects";
+import type { HomeCardSize, HomeVisibility } from "@main/types/views";
 import { ROW_PX, GRID_GAP_PX } from "./home-grid";
 import { COLUMNS } from "./home-cards";
 import {
@@ -51,6 +56,19 @@ export function HomeRoute() {
   /** The cell the drag is currently over, so the page can show what dropping
    *  here would do before the operator commits to it. */
   const [dropCell, setDropCell] = useState<{ col: number; row: number } | null>(null);
+  /**
+   * The right-click menu on a card, if one is open.
+   *
+   * The CARD ID and a position — never the built items. Items built once and
+   * kept in state close over the object list from the render that built them,
+   * and `editRef` is cleared the moment the save comes back: the second click on
+   * a checkable item then computed its new value from a stale card and wrote the
+   * value that was already there. The tick moved and nothing else did.
+   *
+   * Rebuilt from the live list on every render instead, so the ticks and the
+   * writes can never disagree.
+   */
+  const [menu, setMenu] = useState<{ x: number; y: number; cardId: string } | null>(null);
   const gridEl = useRef<HTMLDivElement | null>(null);
   /** The card list as the operator has it, ahead of the server. See `save`. */
   const [pending, setPending] = useState<LayoutObject[] | null>(null);
@@ -195,10 +213,72 @@ export function HomeRoute() {
       });
   }
 
+  /**
+   * The right-click menu for one card.
+   *
+   * Available WITHOUT entering edit mode, which is the point of it: reaching for
+   * seconds on the clock should not mean putting the whole page into an editing
+   * state first. Rebuilt on every open so the ticks show the current values.
+   *
+   * The settings themselves are derived — see card-toggles.
+   */
+  function cardMenu(card: LayoutObject): ContextMenuItem[] {
+    const type = (card.config as { type: string }).type;
+    const label = LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS]?.label ?? type;
+    const toggles = togglesFor(card);
+    const items: ContextMenuItem[] = [];
+
+    for (const t of toggles) {
+      items.push({
+        label: t.label,
+        checked: t.checked,
+        // A checkable item leaves the menu open, so this fires repeatedly. It is
+        // safe to: `card` is the one this render read from the live list, and
+        // the next render rebuilds the whole menu from the saved result.
+        onSelect: () => save((objs) => replaceCard(objs, withToggle(card, t.key, t.next))),
+      });
+    }
+    if (items.length) items.push({ separator: true });
+
+    items.push({
+      label: "Size",
+      items: SIZE_ORDER.map((s) => ({
+        label: SIZES[s].label,
+        checked: sizeOf(card) === s,
+        onSelect: () => {
+          save((objs) => setSize(objs, card.id, s as HomeCardSize));
+          setMenu(null);
+        },
+      })),
+    });
+    items.push({
+      label: "Show",
+      items: (Object.keys(WHEN_LABELS) as HomeVisibility[]).map((w) => ({
+        label: WHEN_LABELS[w],
+        checked: whenOf(card) === w,
+        onSelect: () => {
+          save((objs) => setWhen(objs, card.id, w));
+          setMenu(null);
+        },
+      })),
+    });
+    items.push({ separator: true });
+    items.push({
+      label: `Remove ${label}`,
+      danger: true,
+      onSelect: () => save((objs) => removeCard(objs, card.id)),
+    });
+    return items;
+  }
+
   // Editing shows EVERY card, including ones whose mood is not the current one —
   // you cannot arrange what the page is hiding from you. Off the editor, Home
   // shows only what belongs to right now.
   const cards = editing ? objects : visibleCards(objects, mode);
+
+  // The card the open menu belongs to, read fresh. A card removed from under an
+  // open menu closes it rather than leaving a menu of dead actions.
+  const menuCard = menu ? (objects.find((o) => o.id === menu.cardId) ?? null) : null;
 
   /**
    * The grid cell under a pointer.
@@ -330,6 +410,10 @@ export function HomeRoute() {
           layout={{ ...home.layout, objects: cards }}
           cards={cards}
           gridRef={(el) => { gridEl.current = el; }}
+          onCardContextMenu={(o, e) => {
+            e.preventDefault();
+            setMenu({ x: e.clientX, y: e.clientY, cardId: o.id });
+          }}
           boxes={previewBoxes}
           animate={!!dragId}
           chrome={
@@ -347,6 +431,10 @@ export function HomeRoute() {
               : undefined
           }
         />
+      )}
+
+      {menuCard && (
+        <ContextMenu x={menu!.x} y={menu!.y} items={cardMenu(menuCard)} onClose={() => setMenu(null)} />
       )}
 
       <AddWidgetSheet

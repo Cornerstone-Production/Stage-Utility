@@ -20,6 +20,10 @@ export interface WeekBlock {
   /** Fraction of the day at which it starts and ends, 0-1, clipped to the day. */
   top: number;
   bottom: number;
+  /** The real instants, UNclipped — so a block can print the time it actually
+   *  starts rather than the midnight its drawing was cut off at. */
+  from: number;
+  to: number;
   /** True when the interval began before this day — it wrapped past midnight. */
   continued: boolean;
   /** Side-by-side placement among blocks that overlap it. */
@@ -79,6 +83,8 @@ export function layOutDay(day: DayOccurrences, dayIndex: number): WeekBlock[] {
     // rather than at a negative offset.
     top: clamp01((Math.max(o.from, day.dayStart) - day.dayStart) / span),
     bottom: clamp01((Math.min(o.to, day.dayEnd) - day.dayStart) / span),
+    from: o.from,
+    to: o.to,
     continued: o.from < day.dayStart,
     column: o.column,
     columns: Math.max(1, columnEnds.length),

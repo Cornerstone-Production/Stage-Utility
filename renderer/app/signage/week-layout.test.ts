@@ -41,6 +41,17 @@ describe("placing one block", () => {
     assert.equal(b.continued, false);
   });
 
+  test("carries the UNCLIPPED times, so a wrapped block can print when it really started", () => {
+    // top/bottom are clipped to the column. A block printing its times from
+    // those would say a Thursday-night slot starts at midnight on Friday.
+    const from = MID - 2 * HOUR;
+    const to = MID + 2 * HOUR;
+    const [b] = layOutDay(day([{ schedule: sched("a"), from, to }]), 0);
+    assert.equal(b.from, from);
+    assert.equal(b.to, to);
+    assert.equal(b.top, 0, "the DRAWING is still clipped");
+  });
+
   test("a block that started YESTERDAY draws from the top, and says so", () => {
     // Thursday 22:00 to Friday 02:00, drawn on the Friday column. Left
     // unclipped this is a negative offset, and the block renders off the grid.
