@@ -265,26 +265,58 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
   }
 
   /**
+   * Whether a previous successful poll found Resi reachable and NOT streaming.
+   *
+   * This is what makes an elapsed clock honest. Resi's encoder status carries a
+   * state and no start time (see the header — the published Go Live API cannot
+   * answer this at all), so the only start we can derive is the moment we
+   * watched it change. Having watched it change is precisely what this records.
+   *
+   * In memory on purpose. It is a fact about THIS process's observations, and
+   * persisting it would let yesterday's sighting vouch for today's stream.
+   */
+  private sawOffAir = false;
+
+  /**
    * When the stream started.
    *
-   * Resi's payload has not been observed to carry a start time, so this prefers
-   * one if it appears and otherwise remembers the first moment WE saw the
-   * encoder streaming. That memory is persisted, because the alternative is a
-   * clock that resets to zero when the server restarts mid-service — which is
-   * exactly when somebody is looking at it.
+   * Three answers, in order of how much they can be trusted:
+   *
+   *   1. A start time in the payload. Resi has not been observed to send one,
+   *      but `startedAtFrom` looks, and it wins if it ever appears.
+   *   2. A start we already established for this stream — either from a payload
+   *      or from watching it go live. Persisted, so a server restarted
+   *      mid-service still agrees with the number that was on the wall a minute
+   *      ago, rather than resetting to zero at exactly the moment somebody is
+   *      looking at it.
+   *   3. Nothing. We found it already streaming and never saw it start.
+   *
+   * Case 3 used to return `new Date()`, which is how a stream forty minutes old
+   * came up reading 0:00 the moment the integration was configured — the clock
+   * timed how long the INTEGRATION had been running, not the broadcast. Null
+   * now, and the widgets show LIVE with no number, which is the truth.
    */
   private startedFor(live: ResiEncoder[]): string | null {
     if (!live.length) {
+      // Off air, and we are watching: the next stream to start is one we will
+      // have seen begin.
       streamStartStore.clear("resi");
+      this.sawOffAir = true;
       return null;
     }
+
     const reported = live.map(startedAtFrom).filter((x): x is string => !!x);
     if (reported.length) {
       const earliest = new Date(Math.min(...reported.map((x) => Date.parse(x)))).toISOString();
       streamStartStore.remember("resi", earliest);
       return earliest;
     }
-    return streamStartStore.observe("resi");
+
+    const known = streamStartStore.known("resi");
+    if (known) return known;
+
+    // First sighting of this stream. Only trust a clock we started ourselves.
+    return this.sawOffAir ? streamStartStore.observe("resi") : null;
   }
 
   private emitIfChanged(next: StreamStatusDTO): void {
