@@ -470,8 +470,13 @@ class PcoService {
           out.push(this.mapAttachment(n));
         }
       }
+      // sameOrigin, not a truthiness check. `links.next` arrives in a response
+      // BODY and is handed straight back to request(), which attaches the
+      // operator's PCO credentials — so a redirected or spoofed response could
+      // walk them to another host. The guard was written for exactly this and
+      // was applied at one of three sites; these are the other two.
       const next = json.links?.next;
-      url = typeof next === "string" && next ? next : null;
+      url = sameOrigin(next, PCO_BASE) ? next : null;
     }
 
     this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
@@ -687,8 +692,13 @@ class PcoService {
         });
       }
 
+      // sameOrigin, not a truthiness check. `links.next` arrives in a response
+      // BODY and is handed straight back to request(), which attaches the
+      // operator's PCO credentials — so a redirected or spoofed response could
+      // walk them to another host. The guard was written for exactly this and
+      // was applied at one of three sites; these are the other two.
       const next = json.links?.next;
-      url = typeof next === "string" && next ? next : null;
+      url = sameOrigin(next, PCO_BASE) ? next : null;
     }
 
     out.sort((a, b) => a.sequence - b.sequence);
