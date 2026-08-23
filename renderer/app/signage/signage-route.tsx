@@ -5,11 +5,15 @@
 // names, and the Now board needs all four.
 
 import { useCallback, useMemo, useState } from "react";
+import { UploadCloudIcon } from "lucide-react";
 
 import { useQuery } from "@tanstack/react-query";
 import type { ServiceTypeDTO } from "@main/types/stage";
 import type { SignageHorizon } from "@main/types/signage";
 
+import { errorMessage } from "@main/services/errors";
+import { Button } from "../../components/ui/button";
+import { toast } from "../../components/ui/toast";
 import { invoke } from "../../lib/api";
 import { QUERY_KEYS } from "../queries";
 import { useStageState } from "../../main/use-stage-state";
@@ -28,6 +32,19 @@ import { winningOutputsFor, winningScheduleIds } from "./board-entry";
 // from a right-click on the Now board.
 const SECTIONS = ["Now", "Media", "Playlists", "Schedule"] as const;
 type Section = (typeof SECTIONS)[number];
+
+/** "2 playlists and a schedule", rather than "3 changes" — the kinds are what
+ *  tell an operator whether they are about to change what is on a wall. */
+function describePending(p: { playlists: number; groups: number; schedules: number }): string {
+  const parts = [
+    p.playlists ? `${p.playlists} playlist${p.playlists === 1 ? "" : "s"}` : "",
+    p.groups ? `${p.groups} tag${p.groups === 1 ? "" : "s"}` : "",
+    p.schedules ? `${p.schedules} schedule${p.schedules === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  if (parts.length === 0) return "Nothing";
+  if (parts.length === 1) return `${parts[0]} is`;
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]} are`;
+}
 
 export function SignageRoute() {
   const [section, setSection] = useState<Section>("Now");
@@ -62,9 +79,30 @@ export function SignageRoute() {
   // resolver rather than recomputed in the browser.
   const { data: nowBoard } = useQuery({
     queryKey: SIGNAGE_NOW_KEY,
-    queryFn: () => invoke<{ horizons: Record<string, SignageHorizon> }>("signage:now"),
+    queryFn: () =>
+      invoke<{
+        horizons: Record<string, SignageHorizon>;
+        pending: { playlists: number; groups: number; schedules: number; total: number };
+      }>("signage:now"),
     refetchInterval: 5000,
   });
+  const pending = nowBoard?.pending ?? { playlists: 0, groups: 0, schedules: 0, total: 0 };
+  const [pushing, setPushing] = useState(false);
+
+  const push = useCallback(async () => {
+    setPushing(true);
+    try {
+      await invoke("signage:publish");
+      await reload();
+      toast.success("Pushed to the screens");
+    } catch (err) {
+      // Said out loud. A push that failed silently leaves an operator believing
+      // the walls have their edit.
+      toast.error(errorMessage(err));
+    } finally {
+      setPushing(false);
+    }
+  }, [reload]);
 
   // Seconds is plenty: this only decides which schedule row is marked.
   const at = useNow(1000);
@@ -101,6 +139,30 @@ export function SignageRoute() {
           </button>
         ))}
       </div>
+
+      {/* What the editor holds that the walls do not.
+          Config edits do not reach a screen until this is pressed — building
+          next week's schedule while this week's is on the wall used to change
+          the wall as you typed. Schedules already pushed still fire on their
+          own, and a take-over still applies instantly; see
+          signage-published-store for exactly what is and is not gated. */}
+      {pending.total > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-6 bg-amber-3 px-3 py-2">
+          <span className="text-footnote text-amber-11">
+            {describePending(pending)} not on the screens yet.
+          </span>
+          <Button
+            variant="accent"
+            size="small"
+            className="ml-auto"
+            disabled={pushing}
+            onClick={() => void push()}
+          >
+            <UploadCloudIcon className="size-3.5" />
+            Push to screens
+          </Button>
+        </div>
+      ) : null}
 
       {/* A failed load is stated, never left looking like an empty library. */}
       {error ? (

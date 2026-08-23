@@ -36,6 +36,7 @@ import type {
 
 import { errorMessage } from "@main/services/errors";
 import { Button } from "../../components/ui/button";
+import { ButtonGroup } from "../../components/ui/button-group";
 import { EmptyState } from "../../components/ui/empty-state";
 import { toast } from "../../components/ui/toast";
 import { confirm } from "../../components/ui/confirm-dialog";
@@ -49,6 +50,9 @@ import { useNow } from "./use-now";
 
 interface NowResponse {
   horizons: Record<string, SignageHorizon>;
+  /** What a push would put on the walls. Null when nothing is pending. */
+  draftHorizons: Record<string, SignageHorizon> | null;
+  pending: { total: number };
   staleWindows: boolean;
   pcoError: string | null;
 }
@@ -74,6 +78,8 @@ export function NowBoard({
   const now = useNow(100);
   const [busy, setBusy] = useState(false);
   const [takeOverTag, setTakeOverTag] = useState<string>(PICK);
+  /** Show what a push WOULD do, rather than what is on the walls. */
+  const [previewingDraft, setPreviewingDraft] = useState(false);
 
   /** A screen is signage-capable when the View it is routed to is a signage View. */
   const signageViewIds = useMemo(
@@ -280,11 +286,42 @@ export function NowBoard({
         </div>
       ) : null}
 
+      {/* Look at the pending edits without pushing them. The whole reason the
+          gate exists is that a wall is not a preview surface — so the preview
+          has to be here instead. */}
+      {data?.draftHorizons ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-raised px-3 py-2">
+          <span className="text-footnote text-fg">Showing</span>
+          <ButtonGroup>
+            <Button
+              size="small"
+              variant={previewingDraft ? undefined : "accent"}
+              onClick={() => setPreviewingDraft(false)}
+            >
+              On the screens
+            </Button>
+            <Button
+              size="small"
+              variant={previewingDraft ? "accent" : undefined}
+              onClick={() => setPreviewingDraft(true)}
+            >
+              After a push
+            </Button>
+          </ButtonGroup>
+          {previewingDraft ? (
+            <span className="text-caption2 text-amber-11">
+              This is not what the screens are playing.
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(270px,1fr))]">
         {signageOutputs.map((output) => {
           // THIS screen's own horizon. No stand-in, no first-member — which is
           // what makes the preview true rather than representative.
-          const entry = boardEntry(data?.horizons[output.id] ?? [], now);
+          const source = previewingDraft && data?.draftHorizons ? data.draftHorizons : data?.horizons;
+          const entry = boardEntry(source?.[output.id] ?? [], now);
           const taken = entry?.reason === "override";
           const mine = groups.filter((g) => g.outputIds.includes(output.id)).map((g) => g.id);
 

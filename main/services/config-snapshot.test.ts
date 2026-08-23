@@ -120,6 +120,7 @@ const EXPECTED_CONFIG = [
   // files ride separately under a per-file size cap (see IMAGE_DIRS).
   "signage-media.json",
   "signage-playlists.json",
+  "signage-published.json",
   // Order IS priority in this one, so restoring it restores the conflict rule.
   "signage-schedules.json",
   "slots.json",

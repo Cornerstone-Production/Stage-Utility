@@ -39,6 +39,7 @@ import "./signage-groups-store.js";
 import "./signage-media-store.js";
 import "./signage-overrides-store.js";
 import "./signage-playlists-store.js";
+import "./signage-published-store.js";
 import "./signage-schedules-store.js";
 import "./signal-store.js";
 import "./update-notices-store.js";

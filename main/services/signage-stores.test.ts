@@ -20,6 +20,7 @@ describe("how signage stores are classified", () => {
     for (const f of [
       "signage-media.json",
       "signage-playlists.json",
+      "signage-published.json",
       "signage-groups.json",
       "signage-schedules.json",
     ]) {
@@ -44,6 +45,10 @@ describe("how signage stores are classified", () => {
         "signage-media.json",
         "signage-overrides.json",
         "signage-playlists.json",
+        // What the WALLS are running, as opposed to what the editor holds.
+        // Config, and it has to be: restoring a snapshot and finding every wall
+        // blank until somebody found a second button would be a bad hour.
+        "signage-published.json",
         "signage-schedules.json",
       ],
       "the set of registered signage stores changed",

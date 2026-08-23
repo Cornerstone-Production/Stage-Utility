@@ -130,6 +130,28 @@ Signage screens appear on the **Screens** page too, as compact rows — that pag
 answers the physical questions (online, which machine, what URL, how it is
 mounted) and this one answers what is on it.
 
+## Pushing to the screens
+
+Editing does not change a wall. Playlists, tags and schedules are edited freely
+and the screens keep running what they were given, until **Push to screens** —
+so building next week's schedule during a service does not swap a graphic behind
+whoever is speaking.
+
+A banner says what is waiting, by kind, and the Now board can show either what is
+on the screens or what a push would put there.
+
+Three things are deliberately NOT gated:
+
+- **Schedules that were already pushed keep firing.** Publishing is not a
+  heartbeat; a Sunday window opens whether or not anyone pressed anything.
+- **Taking over is immediate.** It is the control for a wall that is wrong right
+  now.
+- **Uploading media** changes nothing on its own — it only matters once a
+  playlist points at it, and that edit is gated like any other.
+
+Upgrading adopts whatever is already running, so nothing changes on a wall the
+first time.
+
 ## Taking over
 
 **Take over** puts a playlist on a tag immediately, beating every schedule until

@@ -30,6 +30,7 @@ import {
   statMediaFile,
 } from "../signage-media-store.js";
 import { signagePcoWindows } from "../signage-pco-windows.js";
+import { publishSignage } from "../signage-published-store.js";
 import { signageScheduler } from "../signage-scheduler.js";
 import { streamUploadToMedia, UploadTooLargeError } from "../signage-upload.js";
 import { error, json, readBody, type RouteCtx } from "./context.js";
@@ -302,11 +303,28 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
   if (c.pathname === "/api/signage/now" && c.method === "GET") {
     return json(c.res, {
       horizons: signageScheduler.getHorizons(),
+      // What a push WOULD put on the walls, so the board can preview it. Null
+      // when there is nothing waiting.
+      draftHorizons: signageScheduler.getDraftHorizons(),
+      pending: signageScheduler.getPending(),
       // A stale window is USED rather than ignored, so the only way an operator
       // learns PCO is unreachable is by being told here.
       staleWindows: signagePcoWindows.isStale(),
       pcoError: signagePcoWindows.error(),
     });
+  }
+
+  // ── Publishing ────────────────────────────────────────────────────────────
+  if (c.pathname === "/api/signage/publish" && c.method === "POST") {
+    const [playlists, groups, schedules] = await Promise.all([
+      listPlaylists(),
+      signageGroupsStore.load(),
+      signageSchedulesStore.load(),
+    ]);
+    const published = await publishSignage({ playlists, groups, schedules });
+    // Straight away, so the walls change on the press rather than on the tick.
+    await signageScheduler.recompute();
+    return json(c.res, { publishedAt: published.publishedAt, pending: signageScheduler.getPending() });
   }
 
   if (c.pathname === "/api/signage/schedules/reorder" && c.method === "POST") {

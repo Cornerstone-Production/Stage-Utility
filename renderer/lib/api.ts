@@ -165,6 +165,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "signage:reorderSchedules":
       return post<T>("/api/signage/schedules/reorder", { ids: p.ids });
 
+    // Put the edited config on the walls. Nothing an operator types reaches a
+    // screen until this is pressed — see signage-published-store.
+    case "signage:publish":
+      return post<T>("/api/signage/publish", {});
+
     // What every display is showing, and why. The same resolver output the
     // signage:plan channel pushes, so the board cannot disagree with a wall.
     case "signage:now":

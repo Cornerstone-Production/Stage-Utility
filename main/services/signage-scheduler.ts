@@ -21,6 +21,11 @@ import { signageMediaStore } from "./signage-media-store.js";
 import { signageOverridesStore } from "./signage-overrides-store.js";
 import { listPlaylists } from "./signage-playlists-store.js";
 import { signageSchedulesStore } from "./signage-schedules-store.js";
+import {
+  pendingChanges,
+  publishedOrLive,
+  type SignageConfigTriple,
+} from "./signage-published-store.js";
 
 export const SIGNAGE_PLAN_CHANNEL = "signage:plan";
 
@@ -132,6 +137,10 @@ export function nextWakeMs(horizons: HorizonMap, nowMs: number): number {
 
 class SignageScheduler {
   private horizons: HorizonMap = {};
+  /** What the walls WOULD play if the pending edits were pushed. Null when
+   *  there is nothing pending. */
+  private draft: HorizonMap | null = null;
+  private pending = { playlists: 0, groups: 0, schedules: 0, total: 0 };
   private last: HorizonMap | null = null;
   private timer: NodeJS.Timeout | null = null;
   private running = false;
@@ -151,6 +160,16 @@ class SignageScheduler {
   /** The current map, for the hello burst and GET /api/signage/now. */
   getHorizons(): HorizonMap {
     return this.horizons;
+  }
+
+  /** What a push would put on the walls, or null when nothing is pending. */
+  getDraftHorizons(): HorizonMap | null {
+    return this.draft;
+  }
+
+  /** How much is waiting to be pushed, by kind. */
+  getPending(): { playlists: number; groups: number; schedules: number; total: number } {
+    return this.pending;
   }
 
   start(): void {
@@ -184,18 +203,35 @@ class SignageScheduler {
         signageOverridesStore.load(),
       ]);
 
-      const next = resolveSignage({
-        now: Date.now(),
-        tz: appTimeZone(),
-        outputs: ctx.outputs as never,
-        groups,
-        schedules,
-        playlists,
-        media,
-        overrides,
-        pcoWindows: ctx.pcoWindows,
-        liveServiceTypeId: ctx.liveServiceTypeId,
-      });
+      // What the WALLS run is the published snapshot, not what the editor holds.
+      // Nothing an operator types reaches a screen until they push it — see
+      // signage-published-store for what that does and does not gate.
+      const live = { playlists, groups, schedules };
+      const published = await publishedOrLive(live);
+      this.pending = pendingChanges(live, published);
+
+      const resolveWith = (config: SignageConfigTriple) =>
+        resolveSignage({
+          now: Date.now(),
+          tz: appTimeZone(),
+          outputs: ctx.outputs as never,
+          groups: config.groups,
+          schedules: config.schedules,
+          playlists: config.playlists,
+          media,
+          // Overrides are NOT part of the snapshot. A take-over is the control
+          // you reach for when a wall is wrong right now, and it applies to
+          // whichever config is running.
+          overrides,
+          pcoWindows: ctx.pcoWindows,
+          liveServiceTypeId: ctx.liveServiceTypeId,
+        });
+
+      const next = resolveWith(published);
+      // Only worked out when there is something to preview. Resolving twice on
+      // every tick for a board nobody is looking at is exactly the kind of cost
+      // this server does not pay.
+      this.draft = this.pending.total > 0 ? resolveWith(live) : null;
 
       // Content that is still playing keeps the start it already had, so a
       // rebuild does not send every wall back to its first graphic.
