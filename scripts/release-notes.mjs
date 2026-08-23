@@ -72,10 +72,33 @@ function log(range) {
 const range = fromRef ? `${fromRef}..v${version}` : `v${version}`;
 const subjects = log(range);
 
+/** A prerelease has a `-` in it: 1.11.0-beta.27. A stable release does not. */
+const isPrerelease = version.includes("-");
+
+/**
+ * Scopes that existed before this range, from every conventional subject up to
+ * the anchor. Used to tell "a fix to something you already had" apart from "a
+ * fix made while building something you have never seen".
+ */
+function scopesBefore(ref) {
+  if (!ref) return null; // no anchor: nothing is known to be old, so suppress nothing
+  const before = new Set();
+  for (const subject of log(ref)) {
+    const m = CONVENTIONAL.exec(subject);
+    if (m?.[2]) before.add(m[2].toLowerCase());
+  }
+  return before;
+}
+
 const features = [];
 const fixes = [];
 const breaking = [];
+/** Fixes held back as build-out churn, counted so the omission is stated. */
+let buildOutFixes = 0;
 const seen = new Set();
+
+const parsed = [];
+const featScopes = new Set();
 
 for (const subject of subjects) {
   const m = CONVENTIONAL.exec(subject);
@@ -83,7 +106,38 @@ for (const subject of subjects) {
   const [, rawType, scope, bang, text] = m;
   const type = rawType.toLowerCase();
   if (INVISIBLE.has(type) && !bang) continue;
+  const key = scope?.toLowerCase() ?? null;
+  if (!bang && type === "feat" && key) featScopes.add(key);
+  parsed.push({ type, scope, key, bang, text });
+}
 
+/**
+ * A fix nobody outside the beta track could have hit.
+ *
+ * A stable release folds in thirty-odd betas, so "Fixed" filled up with the
+ * polish commits that built the release's own new features — a reader who has
+ * never had digital signage does not need eleven lines about signage bugs, and
+ * they crowded out the fixes to things they DO have.
+ *
+ * Both conditions are required, and the second is the one that keeps this
+ * honest. A scope with a feat in this range is not enough on its own: a release
+ * carrying `feat(ui)` for a new colour picker also carried `fix(ui)` for tinted
+ * icons that scrolled wrong, which is a real fix to long-standing behaviour and
+ * must survive. Only a scope that ALSO never appeared before the anchor is one
+ * the reader is meeting for the first time, fixes and all.
+ *
+ * Prereleases keep everything. Someone on the beta track has been running the
+ * broken version — for them the fix IS the news.
+ */
+function isBuildOutFix(entry, oldScopes) {
+  if (isPrerelease || !oldScopes || !entry.key) return false;
+  return featScopes.has(entry.key) && !oldScopes.has(entry.key);
+}
+
+const oldScopes = scopesBefore(fromRef);
+
+for (const entry of parsed) {
+  const { type, scope, bang, text } = entry;
   // The scope is the most useful part of a subject — it says which surface
   // changed — so keep it as a lead-in rather than dropping it.
   const line = scope ? `**${scope}** — ${text}` : text;
@@ -92,7 +146,10 @@ for (const subject of subjects) {
 
   if (bang) breaking.push(line);
   else if (type === "feat") features.push(line);
-  else if (type === "fix" || type === "perf") fixes.push(line);
+  else if (type === "fix" || type === "perf") {
+    if (isBuildOutFix(entry, oldScopes)) buildOutFixes++;
+    else fixes.push(line);
+  }
 }
 
 /** A capped bullet list, saying plainly how much was left out. */
@@ -124,11 +181,29 @@ Each archive below carries its own Node runtime — nothing else to install. Alr
 running it? Update from **Settings → Advanced → Updates**.
 `;
 
+/**
+ * What was held back, said out loud.
+ *
+ * A silent filter reads as "nothing else changed", which is the failure this
+ * whole file exists to avoid. One line, under the fixes it belongs with.
+ */
+const buildOutNote = buildOutFixes
+  ? `${buildOutFixes} further fix${buildOutFixes === 1 ? "" : "es"} made while building the features above ${buildOutFixes === 1 ? "is" : "are"} not listed — ${buildOutFixes === 1 ? "it was" : "they were"} never in a released version.\n`
+  : "";
+
+// The note needs the heading above it. With every fix held back there is no
+// section to hang it under, so one is written — a floating sentence with no
+// heading reads as a stray line of prose in the middle of a release.
+const fixed =
+  fixes.length ? `${section("Fixed", fixes)}\n${buildOutNote}`
+  : buildOutNote ? `## Fixed\n\n${buildOutNote}`
+  : "";
+
 const parts = [
   upgradeNotice(version),
   breaking.length ? section("Breaking", breaking) : "",
   section("New", features),
-  section("Fixed", fixes),
+  fixed,
   install,
 ];
 
