@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
 import { describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { parseReleaseIntro, parseReleaseSections, SECTION_ORDER } from "./release-notes.js";
 
@@ -193,7 +196,22 @@ curl -fsSL https://example.invalid/install.sh | sudo bash
   test("an essay is truncated rather than filling the dialog", () => {
     const long = `${"word ".repeat(400)}\n\n## New\n\n- x\n`;
     const intro = parseReleaseIntro(long) ?? "";
-    assert.ok(intro.length <= 601, `intro is ${intro.length} characters`);
+    assert.ok(intro.length <= 901, `intro is ${intro.length} characters`);
     assert.match(intro, /…$/, "truncation is not signalled");
+  });
+});
+
+describe("the cap is big enough for the notices actually written", () => {
+  test("a two-paragraph overview survives whole", () => {
+    // The regression this exists for: the first cap was 600 and cut the real
+    // 1.11.0 notice off mid-sentence, losing the last thing it had to say.
+    const real = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "docs", "release-notes", "1.11.0.md"),
+      "utf8",
+    );
+    const intro = parseReleaseIntro(`${real}\n## Install\n\ncurl …\n`) ?? "";
+    assert.ok(intro, "the shipped notice produces no intro at all");
+    assert.doesNotMatch(intro, /…$/, "the shipped notice is being truncated");
+    assert.match(intro, /Resi and\s+YouTube now sit alongside/, "the closing sentence was cut");
   });
 });

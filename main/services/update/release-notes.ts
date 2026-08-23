@@ -59,8 +59,16 @@ function takeInOrder(bySection: Map<SectionName, string[]>, cap: number): Releas
   return out;
 }
 
-/** A lead paragraph longer than this is an essay, not a notice. */
-const INTRO_CAP = 600;
+/**
+ * A lead longer than this is an essay, not an overview.
+ *
+ * ~900 characters is two solid paragraphs — enough to say what a release is and
+ * roughly how it works, which is what an operator opening this actually wants.
+ * The first number here was 600 and it truncated the real 1.11.0 notice
+ * mid-sentence, which is the failure that matters: a cap that cuts the last
+ * thing the writer chose to say is worse than no cap.
+ */
+const INTRO_CAP = 900;
 
 /**
  * The prose a release opens with, above its first heading.
