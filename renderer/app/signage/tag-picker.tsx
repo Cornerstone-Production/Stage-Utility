@@ -14,6 +14,7 @@ import { useState } from "react";
 import { PlusIcon } from "lucide-react";
 import type { SignageGroup } from "@main/types/signage";
 
+import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { Input } from "../../components/ui/input";
 import { MultiSelect } from "../../components/ui/multi-select";
 
@@ -25,6 +26,8 @@ export function TagPicker({
   selected,
   onChange,
   onCreate,
+  onRename,
+  onDelete,
   placeholder = "No tags",
   summary,
   className,
@@ -34,6 +37,15 @@ export function TagPicker({
   onChange: (next: string[]) => void;
   /** Make a tag and return its id. Null when it could not be made. */
   onCreate: (name: string) => Promise<string | null>;
+  /**
+   * Rename and delete a tag, from a right-click on its row.
+   *
+   * Here because the list of options IS the list of tags, and with the Groups
+   * page gone there is nowhere else that lists them. Optional: a picker that
+   * cannot offer these simply does not, rather than showing a menu that fails.
+   */
+  onRename?: (id: string, name: string) => Promise<void>;
+  onDelete?: (group: SignageGroup) => Promise<void>;
   placeholder?: string;
   summary?: string;
   className?: string;
@@ -41,6 +53,9 @@ export function TagPicker({
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  /** The tag being renamed in place, if any. */
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
 
   const create = async () => {
     const trimmed = name.trim();
@@ -58,7 +73,28 @@ export function TagPicker({
     }
   };
 
+  const commitRename = async (id: string, next: string) => {
+    setRenamingId(null);
+    const trimmed = next.trim();
+    const current = groups.find((g) => g.id === id);
+    if (!trimmed || !current || trimmed === current.name || !onRename) return;
+    await onRename(id, trimmed);
+  };
+
+  const menuFor = (id: string): ContextMenuItem[] => {
+    const g = groups.find((x) => x.id === id);
+    if (!g) return [];
+    return [
+      ...(onRename ? [{ label: "Rename…", onSelect: () => setRenamingId(id) }] : []),
+      ...(onRename && onDelete ? [{ separator: true }] : []),
+      ...(onDelete
+        ? [{ label: "Delete tag", danger: true, onSelect: () => void onDelete(g) }]
+        : []),
+    ];
+  };
+
   return (
+    <>
     <MultiSelect
       options={groups.map((g) => ({ value: g.id, label: g.name }))}
       selected={selected}
@@ -67,6 +103,11 @@ export function TagPicker({
       summary={summary}
       className={className}
       searchable={groups.length > SEARCHABLE_FROM}
+      onOptionContextMenu={
+        onRename || onDelete
+          ? (value, e) => setMenu({ x: e.clientX, y: e.clientY, items: menuFor(value) })
+          : undefined
+      }
       footer={
         naming ? (
           <Input
@@ -95,6 +136,25 @@ export function TagPicker({
             onBlur={() => void create()}
             className="h-7 text-footnote"
           />
+        ) : renamingId ? (
+          <Input
+            autoFocus
+            defaultValue={groups.find((g) => g.id === renamingId)?.name ?? ""}
+            aria-label="Rename the tag"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void commitRename(renamingId, e.currentTarget.value);
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                setRenamingId(null);
+              }
+            }}
+            onBlur={(e) => void commitRename(renamingId, e.currentTarget.value)}
+            className="h-7 text-footnote"
+          />
         ) : (
           <button
             type="button"
@@ -107,5 +167,7 @@ export function TagPicker({
         )
       }
     />
+    {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+    </>
   );
 }

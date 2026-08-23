@@ -29,9 +29,13 @@ export function ScreenSignageGroups({
   outputId,
   /** False for a screen that is not routed to a signage View. */
   isSignage,
+  compact = false,
 }: {
   outputId: string;
   isSignage: boolean;
+  /** Inline, for the compact signage row. The bordered strip belongs to a full
+   *  card, and signage screens do not get one — see SignageScreenRow. */
+  compact?: boolean;
 }) {
   const client = useQueryClient();
   // Its own query rather than the Signage tab's config bundle: this renders on
@@ -94,17 +98,25 @@ export function ScreenSignageGroups({
 
   if (!isSignage) return null;
 
+  const picker = (
+    <TagPicker
+      groups={groups}
+      selected={mine}
+      onChange={(next) => void setTags(next)}
+      onCreate={createTag}
+      placeholder="No tags"
+      className={compact ? "min-w-24" : "min-w-32"}
+    />
+  );
+
+  // Just the picker. The row it sits in already carries the screen's name and
+  // the link to Signage, and repeating either would make a compact row wide.
+  if (compact) return picker;
+
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
       <span className="text-caption2 text-fg-subtle">Signage tags</span>
-      <TagPicker
-        groups={groups}
-        selected={mine}
-        onChange={(next) => void setTags(next)}
-        onCreate={createTag}
-        placeholder="None"
-        className="min-w-32"
-      />
+      {picker}
       <AppLink to="/signage" className="ml-auto text-caption2 text-accent hover:underline">
         Open Signage
       </AppLink>

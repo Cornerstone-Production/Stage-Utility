@@ -1,8 +1,23 @@
-// now-board.tsx — what every group is playing, and why.
+// now-board.tsx — what every signage SCREEN is playing, and why.
 //
-// Reads the resolver's own output rather than working it out again, so the board
-// and a wall cannot disagree about which schedule is in charge. The preview uses
-// the same player a display uses, fed the same entry.
+// A card per screen, not per tag. Content is resolved per OUTPUT — that is the
+// whole shape of this feature — so there is no such thing as "what a tag is
+// playing", and a card that claimed to show one had to pick a member and stand
+// it in for the rest. With one screen carrying two tags it was not an
+// approximation, it was wrong: a tag's card showed neither of the things its
+// screens were showing, because the member it read happened to be driven by the
+// OTHER tag's schedule. And when that member was a screen someone had since
+// deleted, the card was simply blank.
+//
+// So the preview is the display, and the picker on it assigns TAGS TO A SCREEN —
+// the same direction as the Screens page, and the same component. Assignment
+// running one way here and the other way there was two mental models for one
+// relationship.
+//
+// Taking over stays per TAG, above the grid. "Put the announcement on the foyer"
+// is a per-tag action by nature, it is per-group in the data model, and burying
+// it on one card among twelve is the wrong place for the control you reach for
+// when something is wrong.
 //
 // It is also where anything wrong gets SAID. A stale PCO window and an empty
 // playlist both degrade quietly by design — the window keeps working, the
@@ -12,21 +27,23 @@ import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MonitorPlayIcon } from "lucide-react";
 import type { Output, View } from "@main/types/stage";
-import type { SignageGroup, SignageHorizon, SignageOverride, SignagePlaylist } from "@main/types/signage";
+import type {
+  SignageGroup,
+  SignageHorizon,
+  SignageOverride,
+  SignagePlaylist,
+} from "@main/types/signage";
 
 import { errorMessage } from "@main/services/errors";
 import { Button } from "../../components/ui/button";
 import { EmptyState } from "../../components/ui/empty-state";
 import { toast } from "../../components/ui/toast";
+import { confirm } from "../../components/ui/confirm-dialog";
 import { SignagePlayer } from "../../main/signage-player";
 import { invoke } from "../../lib/api";
 import { SelectField } from "./select-field";
+import { TagPicker } from "./tag-picker";
 import { boardEntry } from "./board-entry";
-import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
-import { MultiSelect } from "../../components/ui/multi-select";
-import { confirm } from "../../components/ui/confirm-dialog";
-import { Input } from "../../components/ui/input";
-import { MoreHorizontalIcon } from "lucide-react";
 import { SIGNAGE_NOW_KEY, SIGNAGE_OVERRIDES_KEY } from "./use-signage-config";
 import { useNow } from "./use-now";
 
@@ -36,7 +53,7 @@ interface NowResponse {
   pcoError: string | null;
 }
 
-const TAKE_OVER = "__pick__";
+const PICK = "__pick__";
 
 export function NowBoard({
   groups,
@@ -44,18 +61,19 @@ export function NowBoard({
   outputs,
   views,
   onChange,
+  onCreateGroup,
 }: {
   groups: SignageGroup[];
   playlists: SignagePlaylist[];
   outputs: Output[];
   views: View[];
   onChange: () => Promise<void>;
+  onCreateGroup: (name: string) => Promise<string | null>;
 }) {
   // 100ms, because these previews run the real player and a transition is 600ms.
   const now = useNow(100);
   const [busy, setBusy] = useState(false);
-  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
-  const [renaming, setRenaming] = useState<string | null>(null);
+  const [takeOverTag, setTakeOverTag] = useState<string>(PICK);
 
   /** A screen is signage-capable when the View it is routed to is a signage View. */
   const signageViewIds = useMemo(
@@ -74,9 +92,6 @@ export function NowBoard({
     refetchInterval: 5000,
   });
 
-  const outputName = useMemo(() => new Map(outputs.map((o) => [o.id, o.name])), [outputs]);
-  // Only signage screens are offered. Tagging a slots display would make a card
-  // that can never play anything, and the operator would have to work out why.
   const signageOutputs = useMemo(
     () => outputs.filter((o) => o.viewId && signageViewIds.has(o.viewId)),
     [outputs, signageViewIds],
@@ -100,45 +115,79 @@ export function NowBoard({
     [onChange],
   );
 
-  const saveGroup = useCallback(
-    async (group: SignageGroup) => act(() => invoke("signage:saveGroup", { group })),
-    [act],
+  /** Put this screen in exactly these tags, writing only what changed. */
+  const setTags = useCallback(
+    async (outputId: string, next: string[]) => {
+      const want = new Set(next);
+      // Only the tags whose membership actually changed are written. Saving
+      // every one on every edit would rewrite the whole store, and each write
+      // recomputes the horizon for every screen in the building.
+      const changed = groups.filter((g) => g.outputIds.includes(outputId) !== want.has(g.id));
+      await act(async () => {
+        for (const g of changed) {
+          const outputIds = want.has(g.id)
+            ? [...g.outputIds, outputId]
+            : g.outputIds.filter((id) => id !== outputId);
+          await invoke("signage:saveGroup", { group: { ...g, outputIds } });
+        }
+      });
+    },
+    [groups, act],
   );
 
-  /** The menu for a right-click (or the three dots) on a group card.
-   *
-   *  This is where a tag is renamed, re-pointed at different screens, or
-   *  deleted — the three things the Groups page used to exist for. Doing it on
-   *  the card means doing it while looking at what that tag is playing. */
-  const menuFor = useCallback(
-    (g: SignageGroup): ContextMenuItem[] => [
-      { label: "Rename…", onSelect: () => setRenaming(g.id) },
-      { separator: true },
-      {
-        label: "Delete tag",
-        danger: true,
-        onSelect: () =>
-          void (async () => {
-            const ok = await confirm({
-              title: `Delete ${g.name}?`,
-              message:
-                "Screens keep working — they stop carrying this tag. Any schedule targeting it will say so rather than being deleted with it.",
-              confirmLabel: "Delete",
-              destructive: true,
-            });
-            if (ok) await act(() => invoke("signage:deleteGroup", { id: g.id }));
-          })(),
-      },
-    ],
-    [act],
+  /** Make a tag with this screen already in it — see TagPicker. */
+  const createTagFor = useCallback(
+    async (outputId: string, name: string): Promise<string | null> => {
+      const id = await onCreateGroup(name);
+      if (!id) return null;
+      await act(() =>
+        invoke("signage:saveGroup", {
+          group: { id, name, outputIds: [outputId], createdAt: new Date().toISOString() },
+        }),
+      );
+      return id;
+    },
+    [onCreateGroup, act],
   );
 
-  if (groups.length === 0) {
+  const renameTag = useCallback(
+    async (id: string, name: string) => {
+      const g = groups.find((x) => x.id === id);
+      if (!g) return;
+      await act(() => invoke("signage:saveGroup", { group: { ...g, name } }));
+    },
+    [groups, act],
+  );
+
+  /** Delete a tag. Named so the confirmation can say what it costs. */
+  const deleteTag = useCallback(
+    async (g: SignageGroup) => {
+      const usedBy = playlists.filter((p) => (p.defaultForGroupIds ?? []).includes(g.id));
+      const ok = await confirm({
+        title: `Delete ${g.name}?`,
+        message: [
+          g.outputIds.length
+            ? `${g.outputIds.length} ${g.outputIds.length === 1 ? "screen stops" : "screens stop"} carrying it.`
+            : "No screens carry it.",
+          usedBy.length ? `${usedBy.map((p) => p.name).join(", ")} will no longer be a default for anything.` : "",
+          "Any schedule targeting it will say so rather than being deleted with it.",
+        ]
+          .filter(Boolean)
+          .join(" "),
+        confirmLabel: "Delete",
+        destructive: true,
+      });
+      if (ok) await act(() => invoke("signage:deleteGroup", { id: g.id }));
+    },
+    [playlists, act],
+  );
+
+  if (signageOutputs.length === 0) {
     return (
       <EmptyState
         icon={<MonitorPlayIcon />}
-        title="No screen tags yet"
-        hint="Tag a screen on the Screens page, or make a tag from a playlist's Default-for picker. This is where you will see what each one is playing."
+        title="No signage screens yet"
+        hint="Add a screen under Screens and choose Signage. This is where you will see what each one is playing."
       />
     );
   }
@@ -153,6 +202,8 @@ export function NowBoard({
         </p>
       ) : null}
 
+      {/* Every active take-over, named, with the way out of it. A forgotten one
+          is otherwise a wall that mysteriously ignores its schedule. */}
       {overrides.length ? (
         <div className="flex flex-col gap-1.5 rounded-lg border border-amber-6 bg-amber-3 px-3 py-2">
           {overrides.map((o) => {
@@ -161,7 +212,7 @@ export function NowBoard({
             return (
               <div key={o.groupId} className="flex items-center gap-2 text-footnote text-amber-11">
                 <span>
-                  <strong className="text-fg">{g?.name ?? o.groupId}</strong> is overridden —{" "}
+                  <strong className="text-fg">{g?.name ?? o.groupId}</strong> is taken over —{" "}
                   {o.blank ? "blanked" : `playing ${p?.name ?? o.playlistId}`}. It beats every
                   schedule until released.
                 </span>
@@ -179,75 +230,85 @@ export function NowBoard({
         </div>
       ) : null}
 
+      {/* Taking over is per TAG, and it lives here rather than on a card: it is
+          the control you reach for when something is wrong, and it acts on a set
+          of screens, not on the one you happen to be looking at. */}
+      {groups.length ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-raised px-3 py-2">
+          <span className="text-footnote text-fg">Take over</span>
+          <SelectField
+            label="Tag to take over"
+            hideLabel
+            value={takeOverTag}
+            onChange={setTakeOverTag}
+            options={[
+              { value: PICK, label: "Which screens…" },
+              ...groups.map((g) => ({
+                value: g.id,
+                label: `${g.name} (${g.outputIds.length})`,
+              })),
+            ]}
+          />
+          <SelectField
+            label="Playlist to take over with"
+            hideLabel
+            value={PICK}
+            placeholder="with…"
+            onChange={(v) => {
+              if (v === PICK || takeOverTag === PICK) return;
+              void act(() => invoke("signage:setOverride", { groupId: takeOverTag, playlistId: v }));
+            }}
+            options={[
+              { value: PICK, label: "with…" },
+              ...playlists.map((p) => ({ value: p.id, label: p.name })),
+            ]}
+          />
+          <Button
+            size="small"
+            disabled={busy || takeOverTag === PICK}
+            onClick={() =>
+              void act(() => invoke("signage:setOverride", { groupId: takeOverTag, blank: true }))
+            }
+          >
+            Blank them
+          </Button>
+          {takeOverTag === PICK ? (
+            <span className="text-caption2 text-fg-subtle">
+              Beats every schedule on those screens until released.
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(270px,1fr))]">
-        {groups.map((g) => {
-          // Every screen in a group resolves the same way, so the first member
-          // stands for the group. A group with no screens has nothing to show.
-          const outputId = g.outputIds[0];
-          const horizon = outputId ? (data?.horizons[outputId] ?? []) : [];
-          // boardEntry, not a strict match: after any edit the server rebuilds
-          // the horizon starting at ITS now, and a board clock a moment behind
-          // that would blank every card until its next tick.
-          const entry = boardEntry(horizon, now);
-          const override = overrides.find((o) => o.groupId === g.id) ?? null;
-          const overridden = override !== null;
+        {signageOutputs.map((output) => {
+          // THIS screen's own horizon. No stand-in, no first-member — which is
+          // what makes the preview true rather than representative.
+          const entry = boardEntry(data?.horizons[output.id] ?? [], now);
+          const taken = entry?.reason === "override";
+          const mine = groups.filter((g) => g.outputIds.includes(output.id)).map((g) => g.id);
 
           return (
             <div
-              key={g.id}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setMenu({ x: e.clientX, y: e.clientY, items: menuFor(g) });
-              }}
-              // Amber all the way round a taken-over card, not just on its pill.
-              // A wall of these is scanned, not read, and the question being
-              // asked is "which one am I holding?" — a border answers it from
-              // across the room, a chip has to be found first.
+              key={output.id}
+              // Amber all the way round a taken-over screen. A wall of these is
+              // scanned, not read, and the question is "which one am I holding?"
               className={
-                overridden
+                taken
                   ? "flex flex-col gap-2.5 rounded-xl border-2 border-amber-6 bg-surface-raised p-3"
                   : "flex flex-col gap-2.5 rounded-xl border-2 border-line bg-surface-raised p-3"
               }
             >
               <div className="flex items-center justify-between gap-2">
-                {renaming === g.id ? (
-                  <Input
-                    autoFocus
-                    defaultValue={g.name}
-                    onBlur={(e) => {
-                      setRenaming(null);
-                      const name = e.currentTarget.value.trim();
-                      if (name && name !== g.name) void saveGroup({ ...g, name });
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") e.currentTarget.blur();
-                      if (e.key === "Escape") setRenaming(null);
-                    }}
-                  />
-                ) : (
-                  <h3 className="truncate text-callout font-medium text-fg">{g.name}</h3>
-                )}
-                <Button
-                  variant="transparent"
-                  size="small"
-                  iconOnly
-                  tooltip={`Edit ${g.name}`}
-                  className="shrink-0"
-                  onClick={(e) => {
-                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                    setMenu({ x: r.left, y: r.bottom + 4, items: menuFor(g) });
-                  }}
-                >
-                  <MoreHorizontalIcon className="size-3.5" />
-                </Button>
+                <h3 className="truncate text-callout font-medium text-fg">{output.name}</h3>
                 <span
                   className={
-                    overridden
+                    taken
                       ? "shrink-0 rounded-full border border-amber-6 bg-amber-3 px-2 py-0.5 text-caption2 font-medium text-amber-11"
                       : "shrink-0 rounded-full border border-line px-2 py-0.5 text-caption2 text-fg-muted"
                   }
                 >
-                  {overridden ? "Override" : entry ? reasonWord(entry.reason) : "Blank"}
+                  {entry ? reasonWord(entry.reason) : "Blank"}
                 </span>
               </div>
 
@@ -262,72 +323,25 @@ export function NowBoard({
                 ) : null}
               </p>
 
-              {/* The screens carrying this tag, and the control that changes
-                  them. Editable here because this is the card that shows what
-                  the tag is playing — the question "should that screen be in
-                  this?" is asked while looking at it, not on another page. */}
-              <MultiSelect
-                options={signageOutputs.map((o) => ({ value: o.id, label: o.name }))}
-                selected={g.outputIds}
-                onChange={(outputIds) => void saveGroup({ ...g, outputIds })}
-                placeholder="No screens"
-                summary={
-                  g.outputIds.length === 0
-                    ? "No screens"
-                    : g.outputIds.length === 1
-                      ? (outputName.get(g.outputIds[0]) ?? g.outputIds[0])
-                      : `${g.outputIds.length} screens`
-                }
-                searchable={signageOutputs.length > 8}
+              {/* Tags go ON a screen — the same direction, and the same control,
+                  as the Screens page. */}
+              <TagPicker
+                groups={groups}
+                selected={mine}
+                onChange={(next) => void setTags(output.id, next)}
+                onCreate={(name) => createTagFor(output.id, name)}
+                // Renaming and deleting a TAG live on its row in this picker.
+                // With the Groups page gone the option list IS the list of tags,
+                // and there is nowhere else that shows them all.
+                onRename={renameTag}
+                onDelete={deleteTag}
+                placeholder="No tags"
                 className="w-full"
               />
-
-              <div className="flex items-center gap-1.5">
-                {/* Shows what is ACTUALLY taken over, not a standing invitation.
-                    Reading "Take over with…" while a group is held is the
-                    control disagreeing with the wall, and the operator's next
-                    move is to pick the same playlist again to be sure. */}
-                <SelectField
-                  label="Take over"
-                  hideLabel
-                  value={override && !override.blank ? (override.playlistId ?? TAKE_OVER) : TAKE_OVER}
-                  placeholder="Take over"
-                  onChange={(v) => {
-                    if (v === TAKE_OVER) return;
-                    void act(() => invoke("signage:setOverride", { groupId: g.id, playlistId: v }));
-                  }}
-                  options={[
-                    { value: TAKE_OVER, label: "Take over with…" },
-                    ...playlists.map((p) => ({ value: p.id, label: p.name })),
-                  ]}
-                  className="min-w-0 flex-1"
-                />
-                <Button
-                  size="small"
-                  // Blank is a take-over too, so it reads as held rather than as
-                  // something still to press.
-                  variant={override?.blank ? "accent" : undefined}
-                  disabled={busy}
-                  onClick={() => void act(() => invoke("signage:setOverride", { groupId: g.id, blank: true }))}
-                >
-                  Blank
-                </Button>
-                {overridden ? (
-                  <Button
-                    size="small"
-                    disabled={busy}
-                    onClick={() => void act(() => invoke("signage:clearOverride", { groupId: g.id }))}
-                  >
-                    Release
-                  </Button>
-                ) : null}
-              </div>
             </div>
           );
         })}
       </div>
-
-      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
   );
 }
@@ -335,8 +349,8 @@ export function NowBoard({
 function reasonWord(reason: string): string {
   switch (reason) {
     case "schedule": return "Schedule";
-    case "default": return "Group default";
-    case "override": return "Override";
+    case "default": return "Tag default";
+    case "override": return "Taken over";
     default: return "Blank";
   }
 }

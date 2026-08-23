@@ -22,6 +22,7 @@ import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
 import { migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
+import { forgetOutputInSignageGroups } from "./signage-groups-store.js";
 import { slotsStore } from "./slots-store.js";
 import { signagePcoWindows } from "./signage-pco-windows.js";
 import { signageScheduler } from "./signage-scheduler.js";
@@ -2307,6 +2308,11 @@ export class StageController {
     const outputs = this.state.outputs.filter((o) => o.id !== id);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
+    // Signage tags kept naming the screen forever. It read as a member that was
+    // simply never online — and because a tag's screen count included it, "the
+    // foyer (7)" meant six. Cleaned here rather than tolerated at every reader,
+    // because it is dead the moment the screen is.
+    await forgetOutputInSignageGroups(id);
     this.recomputeResolved();
     this.broadcast();
     return this.state;

@@ -84,3 +84,4 @@ describe("reordering schedules", () => {
     assert.deepEqual(applyScheduleOrder(all, ["a", "a", "b"]).map((s) => s.id), ["a", "b"]);
   });
 });
+

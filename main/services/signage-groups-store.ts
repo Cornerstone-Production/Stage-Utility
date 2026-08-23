@@ -23,3 +23,33 @@ export function listGroups(): Promise<SignageGroup[]> {
 export function groupsForOutput(groups: SignageGroup[], outputId: string): SignageGroup[] {
   return groups.filter((g) => g.outputIds.includes(outputId));
 }
+
+/**
+ * Drop a deleted screen from every tag that named it.
+ *
+ * Called when an output is removed. Left behind, the id looks like a member
+ * that is simply never online: a tag's screen count includes it, so "the foyer
+ * (7)" means six — and anything that stood a member in for the tag would be
+ * reading a screen that does not exist.
+ *
+ * Returns how many tags changed, so the caller can say so rather than guess.
+ * Never throws: a screen must still be removable when this fails, and the
+ * failure is a stale id rather than lost work.
+ */
+export async function forgetOutputInSignageGroups(outputId: string): Promise<number> {
+  try {
+    let changed = 0;
+    await signageGroupsStore.update((all) =>
+      all.map((g) => {
+        if (!Array.isArray(g.outputIds) || !g.outputIds.includes(outputId)) return g;
+        changed++;
+        return { ...g, outputIds: g.outputIds.filter((id) => id !== outputId) };
+      }),
+    );
+    if (changed) console.log(`[signage] removed ${outputId} from ${changed} tag(s)`);
+    return changed;
+  } catch (err) {
+    console.error(`[signage] could not remove ${outputId} from its tags:`, err);
+    return 0;
+  }
+}

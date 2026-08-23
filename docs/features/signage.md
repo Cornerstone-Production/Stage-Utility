@@ -74,10 +74,9 @@ A tag is a named set of screens. A screen can carry any number of them.
 There is no page for administering tags, because there is nothing to administer:
 assign them where the work is.
 
-- On a screen's card under **Screens**, to say what that screen is part of.
+- On a screen's row under **Screens**, to say what that screen is part of.
 - On a playlist under **Default for**.
-- On the **Now** board, where each tag's card carries the screens it covers, a
-  rename, and a delete.
+- On the **Now** board, on the card for the screen itself.
 
 Both pickers offer **New tag…**, so naming one never means going somewhere else
 first. Made from a screen's card, the new tag contains that screen.
@@ -119,6 +118,17 @@ does not blank the screens mid-service.
 
 If Planning Center cannot be reached, the last plan times this server fetched
 keep being used, and Signage says so. They keep working; they may be out of date.
+
+## The Now board
+
+A card per SCREEN, showing what that screen is playing and why, with the tags it
+carries. Per screen rather than per tag because content is resolved per screen: a
+screen carrying two tags is playing one thing, and there is no answer to "what is
+this tag playing" when its members disagree.
+
+Signage screens appear on the **Screens** page too, as compact rows — that page
+answers the physical questions (online, which machine, what URL, how it is
+mounted) and this one answers what is on it.
 
 ## Taking over
 

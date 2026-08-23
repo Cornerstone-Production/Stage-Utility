@@ -26,6 +26,7 @@ export function MultiSelect({
   disabled,
   searchable,
   footer,
+  onOptionContextMenu,
 }: {
   options: MultiSelectOption[];
   selected: string[];
@@ -46,6 +47,10 @@ export function MultiSelect({
   searchable?: boolean;
   /** Trailing row, e.g. "New tag…", so a picker can also create. */
   footer?: React.ReactNode;
+  /** Right-click on one option's row. For the things you do to an option itself
+   *  — rename it, delete it — which have no other home once the list of options
+   *  IS the list of the things. */
+  onOptionContextMenu?: (value: string, e: React.MouseEvent) => void;
 }) {
   const [search, setSearch] = useState("");
   const selectedSet = new Set(selected);
@@ -141,6 +146,14 @@ export function MultiSelect({
                 <button
                   key={o.value}
                   onClick={() => toggle(o.value)}
+                  onContextMenu={
+                    onOptionContextMenu
+                      ? (e) => {
+                          e.preventDefault();
+                          onOptionContextMenu(o.value, e);
+                        }
+                      : undefined
+                  }
                   className={cn(
                     "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-footnote text-fg outline-none",
                     // focus-VISIBLE, not focus: a clicked button keeps focus, so

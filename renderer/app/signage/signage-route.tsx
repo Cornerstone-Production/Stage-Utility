@@ -116,6 +116,7 @@ export function SignageRoute() {
           outputs={state?.outputs ?? []}
           views={state?.views ?? []}
           onChange={reload}
+          onCreateGroup={createGroup}
         />
       ) : section === "Media" ? (
         <MediaSection

@@ -1,6 +1,7 @@
 import { ScreenDevice } from "../../app/screens/screen-device";
 import { ScreenSignageGroups } from "../../app/screens/screen-signage-groups";
 import { NewScreenDialog } from "./new-screen-dialog";
+import { SignageScreenRow } from "./signage-screen-row";
 import { AppLink } from "../../app/app-link";
 import { useState, useEffect, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
@@ -738,37 +739,34 @@ export function OutputsSection({
               <div className="flex items-baseline gap-2 pt-5">
                 <h3 className="text-subheadline font-semibold text-fg">Signage</h3>
                 <span className="text-caption1 text-fg-subtle">
-                  {signageOutputs.length} {signageOutputs.length === 1 ? "screen" : "screens"} —
-                  what they play is set under{" "}
+                  {signageOutputs.length} {signageOutputs.length === 1 ? "screen" : "screens"} — what
+                  they play, and their tags, are on{" "}
                   <AppLink to="/signage" className="text-accent hover:underline">
                     Signage
                   </AppLink>
                 </span>
               </div>
-              <div className="grid gap-3 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
+
+              {/* COMPACT rows, not the full card.
+                  These screens appear on the Now board too, and there they get a
+                  live preview and their tags — which is the right home for both,
+                  because that page is about what is playing. Repeating them here
+                  was the same screen twice, and twice the preview iframes: each
+                  one is a real kiosk page holding its own event stream.
+                  What is left is what only Screens can answer — is it online,
+                  which machine, what URL, how is it mounted. */}
+              <div className="flex flex-col gap-1.5">
                 {signageOutputs.map((output) => (
-                  <OutputRow
+                  <SignageScreenRow
                     key={output.id}
                     output={output}
-                    views={views}
                     baseUrl={baseUrl}
                     online={connected.has(output.id)}
-                    canRemove={outputs.length > 1}
-                    iconColor={stageState.iconColors?.[output.id]}
                     onRename={(name) => handlers.handleRenameOutput(output.id, name)}
-                    onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
-                    onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
-                    onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
-                    onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
-                    onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
                     onSetRotation={(rotation) => handlers.handleSetOutputRotation(output.id, rotation)}
                     onOpenWindow={() => handlers.handleOpenOutputWindow(output.id)}
                     onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                     onRemove={() => handlers.handleRemoveOutput(output.id)}
-                    onEditLayout={
-                      onEditLayout && output.viewId ? () => onEditLayout(output.viewId!) : undefined
-                    }
-                    onRequestNewView={() => setCreatingFor(output.id)}
                   />
                 ))}
               </div>
