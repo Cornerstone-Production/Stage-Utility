@@ -19,7 +19,7 @@ import type { SignageGroup } from "@main/types/signage";
 import { errorMessage } from "@main/services/errors";
 import { invoke } from "../../lib/api";
 import { toast } from "../../components/ui/toast";
-import { newSignageId } from "./ids";
+import { uid } from "../../lib/uid";
 
 /** THE key for the tag list. Anything that writes a tag invalidates this. */
 export const SIGNAGE_TAGS_KEY = ["signage:groups"] as const;
@@ -107,7 +107,7 @@ export function useSignageTags(options: { enabled?: boolean } = {}): {
   const createTag = useCallback(
     async (outputId: string, name: string): Promise<string | null> => {
       const group = {
-        id: newSignageId("gr"),
+        id: uid("gr"),
         name,
         outputIds: [outputId],
         createdAt: new Date().toISOString(),

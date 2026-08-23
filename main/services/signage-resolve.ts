@@ -80,15 +80,27 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
   // operator's default with no error anywhere.
   const playlists = migrateGroupDefaults(input.playlists, input.groups);
   const byId = new Map(playlists.map((p) => [p.id, p]));
+  // Built ONCE, and BEFORE `playable` closes over it. resolveItemDurations is
+  // called up to a couple of hundred times per recompute and used to index the
+  // whole library on every call.
+  const mediaById = new Map(input.media.map((m) => [m.id, m]));
 
   /** A playlist that can actually play, or null. Both "does not exist" and
    *  "nothing in it can play" fall through to the next precedence step rather
    *  than putting an unplayable entry on a wall. */
+  // MEMOISED for the life of this resolve. The answer cannot change while a
+  // single recompute runs, and this is asked once per override, once per
+  // matching schedule and once per default claimant, for every output, at every
+  // horizon edge — each ask walking the playlist's items.
+  const playableCache = new Map<string, SignagePlaylist | null>();
   const playable = (id: string | null | undefined): SignagePlaylist | null => {
     if (!id) return null;
+    const cached = playableCache.get(id);
+    if (cached !== undefined) return cached;
     const p = byId.get(id);
-    if (!p) return null;
-    return resolveItemDurations(p, input.media).length > 0 ? p : null;
+    const answer = p && resolveItemDurations(p, mediaById).length > 0 ? p : null;
+    playableCache.set(id, answer);
+    return answer;
   };
 
   const ctx = { pcoWindows: input.pcoWindows, liveServiceTypeId: input.liveServiceTypeId };

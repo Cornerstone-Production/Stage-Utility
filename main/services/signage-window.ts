@@ -11,7 +11,7 @@
 // instant this could change", so the server arms ONE timeout instead of polling.
 
 import type { PcoWindow, SignageWindow, WindowCtx } from "../types/signage.js";
-import { type TimeZone, zonedParts } from "./app-timezone.js";
+import { type TimeZone, zonedDateKey, zonedParts } from "./app-timezone.js";
 
 /** Minutes since local midnight for an "HH:MM" string, or null if unparseable. */
 function minuteOfClock(hhmm: string): number | null {
@@ -21,12 +21,6 @@ function minuteOfClock(hhmm: string): number | null {
   const min = Number(m[2]);
   if (h < 0 || h > 23 || min < 0 || min > 59) return null;
   return h * 60 + min;
-}
-
-/** "YYYY-MM-DD" for the local day containing `ms`. */
-function dateKey(ms: number, tz: TimeZone): string {
-  const p = zonedParts(ms, tz);
-  return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
 }
 
 const DAY_MS = 86_400_000;
@@ -197,7 +191,7 @@ export function intervalsOnDay(
 
   const out: { from: number; to: number }[] = [];
   for (const start of [yesterday, dayStart]) {
-    const key = dateKey(start, tz);
+    const key = zonedDateKey(start, tz);
     const inRange =
       w.kind === "once" ? key === w.date : w.kind === "dates" ? key >= w.from && key <= w.to : true;
     if (!inRange) continue;
@@ -266,7 +260,7 @@ export function nextBoundaryAfter(
   // or before today's midnight, and every edge is filtered on `> afterMs`.
   let day = startOfLocalDay(startOfLocalDay(afterMs, tz) - 3 * 3600_000, tz);
   for (let i = 0; i <= SEARCH_DAYS; i++) {
-    const key = dateKey(day, tz);
+    const key = zonedDateKey(day, tz);
     const inRange =
       w.kind === "once" ? key === w.date : w.kind === "dates" ? key >= w.from && key <= w.to : true;
 

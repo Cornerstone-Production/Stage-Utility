@@ -17,6 +17,7 @@ import { isSignageVideo } from "@main/types/signage";
 import { errorMessage } from "@main/services/errors";
 import { Button } from "../../components/ui/button";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
+import { MediaThumb } from "./media-thumb";
 import { EmptyState } from "../../components/ui/empty-state";
 import { Input } from "../../components/ui/input";
 import { confirm } from "../../components/ui/confirm-dialog";
@@ -43,7 +44,7 @@ import {
   selectAll,
   type Selection,
 } from "./selection";
-import { newSignageId } from "./ids";
+import { uid } from "../../lib/uid";
 import { uploadMedia } from "./use-signage-config";
 
 /** The panel nearly every wall screen is. Not a preference — it is the size a
@@ -202,7 +203,7 @@ export function MediaSection({
   const newPlaylistFrom = useCallback(
     async (ids: string[]) => {
       const playlist = {
-        id: newSignageId("pl"),
+        id: uid("pl"),
         // Named after what is in it, which beats "New playlist" when three of
         // them accumulate.
         name: ids.length === 1 ? (byId.get(ids[0])?.name ?? "New playlist") : `${ids.length} graphics`,
@@ -439,31 +440,15 @@ export function MediaSection({
                       : "relative aspect-video cursor-pointer overflow-hidden rounded-lg border-2 border-line bg-black"
                   }
                 >
-                  {isSignageVideo(m.mime) ? (
-                    <>
-                      {/* No poster frame is generated: it would mean decoding on
-                          the server. The clip's own first frame is enough. */}
-                      <video
-                        // #t=0.1 so a frame is actually painted — metadata
-                        // alone gets the duration and leaves a black rectangle.
-                        src={`/signage-media/${m.file}#t=0.1`}
-                        muted
-                        playsInline
-                        preload="metadata"
-                        className="size-full object-contain"
-                      />
-                      <span className="absolute bottom-1 left-1 flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-caption2 text-white">
-                        <FilmIcon className="size-3" />
-                        {m.durationMs ? duration(m.durationMs) : "video"}
-                      </span>
-                    </>
-                  ) : (
-                    <img
-                      src={`/signage-media/${m.file}`}
-                      alt=""
-                      className="size-full object-contain"
-                      loading="lazy"
-                    />
+                  {/* No poster frame is generated: it would mean decoding on
+                      the server. The clip's own first frame is enough — see
+                      MediaThumb for how it is coaxed out of the element. */}
+                  <MediaThumb media={m} />
+                  {isSignageVideo(m.mime) && (
+                    <span className="absolute bottom-1 left-1 flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-caption2 text-white">
+                      <FilmIcon className="size-3" />
+                      {m.durationMs ? duration(m.durationMs) : "video"}
+                    </span>
                   )}
                   <Button
                     variant="transparent"

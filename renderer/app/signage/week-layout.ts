@@ -12,6 +12,11 @@
 
 import type { SignageSchedule } from "@main/types/signage";
 
+/** Weekday names, Sunday first — the order `window.days` uses. Here rather than
+ *  in either of the two components that show them, which each had their own
+ *  copy. */
+export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
 /** One drawn block: a schedule, on one day, at one position. */
 export interface WeekBlock {
   schedule: SignageSchedule;

@@ -15,7 +15,12 @@ import type {
   SignageTransitionKind,
 } from "@main/types/signage";
 import { DEFAULT_TRANSITION, MAX_TRANSITION_MS, isSignageVideo } from "@main/types/signage";
-import { resolveItemDurations, resolvedCycleMs, trimOf } from "@main/services/signage-playlist-items";
+import { resolveItemDurations, trimOf } from "@main/services/signage-playlist-items";
+// The SAME cycle length the wall computes. It was written out twice - the
+// server-side copy said "mirrors the renderer's cycleMs" in its own doc comment
+// - so the editor's "cycle: 32s" label and a display's position came from two
+// functions with identical bodies.
+import { cycleMs } from "../../main/signage-cycle";
 
 import { Button } from "../../components/ui/button";
 import { EmptyState } from "../../components/ui/empty-state";
@@ -25,12 +30,13 @@ import { confirm } from "../../components/ui/confirm-dialog";
 import { SelectField } from "./select-field";
 import { SignagePlayer } from "../../main/signage-player";
 import { invoke } from "../../lib/api";
-import { newSignageId } from "./ids";
+import { uid } from "../../lib/uid";
 import { useElapsed } from "./use-now";
 import { toHorizonPlaylist } from "./preview-entry";
 import { MediaPicker } from "./media-picker";
 import { useRegisterUnsaved } from "./unsaved-guard";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
+import { MediaThumb } from "./media-thumb";
 import { TagPicker } from "./tag-picker";
 
 const KINDS: { value: SignageTransitionKind; label: string }[] = [
@@ -99,7 +105,7 @@ export function PlaylistsSection({
 
   const create = useCallback(async () => {
     const playlist: SignagePlaylist = {
-      id: newSignageId("pl"),
+      id: uid("pl"),
       name: "New playlist",
       items: [],
       defaultDurationMs: 8000,
@@ -132,7 +138,7 @@ export function PlaylistsSection({
     () => (editing ? resolveItemDurations(editing, media) : []),
     [editing, media],
   );
-  const cycle = resolvedCycleMs(resolved);
+  const cycle = cycleMs(resolved);
   const dropped = editing ? editing.items.length - resolved.length : 0;
 
   // startedAt 0, because `now` above is already elapsed-since-opened.
@@ -219,7 +225,7 @@ export function PlaylistsSection({
         onSelect: () =>
           void save({
             ...p,
-            id: newSignageId("pl"),
+            id: uid("pl"),
             name: `${p.name} copy`,
             createdAt: new Date().toISOString(),
           }),
@@ -337,13 +343,10 @@ export function PlaylistsSection({
                       </button>
                     </div>
                     <div className="relative aspect-video w-14 shrink-0 overflow-hidden rounded bg-black">
-                      {m ? (
-                        video ? (
-                          <video src={`/signage-media/${m.file}`} muted className="size-full object-contain" />
-                        ) : (
-                          <img src={`/signage-media/${m.file}`} alt="" className="size-full object-contain" />
-                        )
-                      ) : null}
+                      {/* The shared thumbnail. This row used to build its own
+                          and omitted the `#t=0.1` the other two carry, so every
+                          clip in a playlist rendered as a black rectangle. */}
+                      {m ? <MediaThumb media={m} /> : null}
                     </div>
                     <span className="min-w-0 flex-1 truncate text-footnote text-fg">
                       {m?.name ?? "Missing file"}

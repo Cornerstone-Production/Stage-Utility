@@ -25,7 +25,7 @@ import { invoke } from "../../lib/api";
 import { useRegisterUnsaved } from "./unsaved-guard";
 import { ScheduleCalendar } from "./schedule-calendar";
 import { ButtonGroup } from "../../components/ui/button-group";
-import { newSignageId } from "./ids";
+import { uid } from "../../lib/uid";
 import { SelectField } from "./select-field";
 import { WindowEditor, describeWindow } from "./window-editor";
 
@@ -93,7 +93,7 @@ export function ScheduleSection({
   const create = useCallback(
     async (window: SignageSchedule["window"]) => {
       const schedule: SignageSchedule = {
-        id: newSignageId("sc"),
+        id: uid("sc"),
         name: "New schedule",
         enabled: true,
         groupIds: [],

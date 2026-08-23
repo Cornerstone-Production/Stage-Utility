@@ -23,6 +23,8 @@ import {
   SIGNAGE_EXTS,
   type SignageMedia,
   isSignageVideo,
+  SIGNAGE_HASH_HEX_LEN,
+  SIGNAGE_MIME_BY_EXT,
 } from "../types/signage.js";
 import { getUserDataPath } from "./app-paths.js";
 import { DataStore } from "./data-store.js";
@@ -49,7 +51,7 @@ function dir(): string {
  * served back. Lower-case hex only, so a name is either exactly what the hasher
  * produces or it is refused.
  */
-const MEDIA_NAME = new RegExp(`^[0-9a-f]{16}\\.(${SIGNAGE_EXTS.join("|")})$`);
+const MEDIA_NAME = new RegExp(`^[0-9a-f]{${SIGNAGE_HASH_HEX_LEN}}\\.(${SIGNAGE_EXTS.join("|")})$`);
 
 export function isMediaFileName(file: string): boolean {
   return MEDIA_NAME.test(file);
@@ -233,17 +235,15 @@ export async function readMediaFile(
 
 function mimeForExt(file: string): string {
   const ext = file.slice(file.lastIndexOf(".") + 1);
-  switch (ext) {
-    case "png": return "image/png";
-    case "jpg": return "image/jpeg";
-    case "webp": return "image/webp";
-    case "gif": return "image/gif";
-    case "mp4": return "video/mp4";
-    case "webm": return "video/webm";
-    // Unreachable while MEDIA_NAME is derived from the allowlist. If that ever
-    // stops being true, refuse rather than guess a type for bytes we serve.
-    default: throw new Error(`no mime for signage media extension: ${ext}`);
-  }
+  // From the DERIVED map. This was a six-arm switch that was
+  // SIGNAGE_EXT_BY_MIME written backwards, which is the exact drift the comment
+  // above SIGNAGE_EXTS warns about: the two disagreeing is how an upload
+  // succeeds and the file it wrote can never be served back.
+  const mime = SIGNAGE_MIME_BY_EXT[ext];
+  // Unreachable while MEDIA_NAME is derived from the allowlist. If that ever
+  // stops being true, refuse rather than guess a type for bytes we serve.
+  if (!mime) throw new Error(`no mime for signage media extension: ${ext}`);
+  return mime;
 }
 
 /**
@@ -258,13 +258,15 @@ function mimeForExt(file: string): string {
  * already here — which is how a shared graphic collapses to one file.
  */
 export async function restoreMediaFile(file: string, bytes: Buffer): Promise<boolean> {
-  const m = /^([0-9a-f]{16})\.([a-z0-9]+)$/.exec(file);
-  if (!m) throw new Error(`not a signage media name: ${file}`);
-  if (!SIGNAGE_EXTS.includes(m[2])) throw new Error(`unsupported signage media type: ${m[2]}`);
+  // isMediaFileName, not a SECOND pattern: this file had two answers to "is
+  // this a media filename", one of which also re-listed the extensions.
+  if (!isMediaFileName(file)) throw new Error(`not a signage media name: ${file}`);
   if (bytes.length === 0) throw new Error("empty media file");
 
-  const hash = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
-  if (hash !== m[1]) throw new Error(`${file} does not match its contents`);
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, SIGNAGE_HASH_HEX_LEN);
+  if (hash !== file.slice(0, SIGNAGE_HASH_HEX_LEN)) {
+    throw new Error(`${file} does not match its contents`);
+  }
 
   const d = dir();
   await fs.mkdir(d, { recursive: true });

@@ -23,6 +23,7 @@ import {
   SIGNAGE_EXT_BY_MIME,
   SIGNAGE_MIME_CAPS,
   isSignageMime,
+  signageMediaFileName,
 } from "../types/signage.js";
 import { getUserDataPath } from "./app-paths.js";
 import { SIGNAGE_MEDIA_DIR } from "./signage-media-store.js";
@@ -78,7 +79,9 @@ export async function streamUploadToMedia(
 
     if (bytes === 0) throw new Error("empty upload");
 
-    const file = `${hash.digest("hex").slice(0, 16)}.${ext}`;
+    // signageMediaFileName, so the length the name is built with and the
+    // length the serving pattern expects cannot drift apart.
+    const file = signageMediaFileName(hash.digest("hex"), ext);
     try {
       // link, not rename: rename would clobber, and an existing file with this
       // name already holds these exact bytes. EEXIST is the success case for a

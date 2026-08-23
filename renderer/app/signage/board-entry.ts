@@ -16,6 +16,8 @@
 
 import type { SignageHorizon, SignageHorizonEntry } from "@main/types/signage";
 
+import { entryAt } from "../../main/signage-cycle";
+
 /**
  * The entry covering `atMs`, treating a clock behind the horizon as its start.
  *
@@ -24,9 +26,9 @@ import type { SignageHorizon, SignageHorizonEntry } from "@main/types/signage";
  */
 export function boardEntry(horizon: SignageHorizon, atMs: number): SignageHorizonEntry | null {
   if (horizon.length === 0) return null;
-  const at = Math.max(atMs, horizon[0].from);
-  for (const e of horizon) if (at >= e.from && at < e.until) return e;
-  return null;
+  // entryAt does the walk — the CLAMP is the whole difference, and writing the
+  // loop out again hid that behind a copy of it.
+  return entryAt(horizon, Math.max(atMs, horizon[0].from));
 }
 
 /** Every schedule winning on at least one screen right now.

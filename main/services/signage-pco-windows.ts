@@ -10,19 +10,13 @@
 // PCO request budget is shared with everything else on this box.
 
 import type { PcoWindow } from "../types/signage.js";
-import { type TimeZone, appTimeZone, zonedParts } from "./app-timezone.js";
+import { type TimeZone, appTimeZone, zonedDateKey } from "./app-timezone.js";
 import { errorMessage } from "./errors.js";
 import { pcoService } from "./pco-service.js";
 import { signageSchedulesStore } from "./signage-schedules-store.js";
 
 /** Plan times change rarely; a shorter poll would only spend request budget. */
 const REFRESH_MS = 30 * 60_000;
-
-/** "YYYY-MM-DD" for the local day containing `ms`. */
-function dateKey(ms: number, tz: TimeZone): string {
-  const p = zonedParts(ms, tz);
-  return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
-}
 
 /**
  * One window from a plan's times, for one local day.
@@ -50,7 +44,7 @@ export function windowFromPlanTimes(
     .filter((ms) => Number.isFinite(ms))
     // Saturday evening and Sunday morning are different local days; merging them
     // would hold one window open all night.
-    .filter((ms) => dateKey(ms, tz) === localDay);
+    .filter((ms) => zonedDateKey(ms, tz) === localDay);
 
   if (starts.length === 0) return null;
 
@@ -165,7 +159,7 @@ class SignagePcoWindows {
 
       const tz = appTimeZone();
       const now = Date.now();
-      const days = [dateKey(now, tz), dateKey(now + 86_400_000, tz)];
+      const days = [zonedDateKey(now, tz), zonedDateKey(now + 86_400_000, tz)];
       const fetched: PcoWindow[] = [];
 
       for (const serviceTypeId of wanted) {

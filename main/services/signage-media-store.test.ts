@@ -14,6 +14,14 @@
 //     library with phantom duplicates in it.
 
 import { strict as assert } from "node:assert";
+
+import {
+  SIGNAGE_EXTS,
+  SIGNAGE_EXT_BY_MIME,
+  SIGNAGE_HASH_HEX_LEN,
+  SIGNAGE_MIME_BY_EXT,
+  signageMediaFileName,
+} from "../types/signage.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -27,7 +35,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-utility-signage-media
 process.env.STAGE_UTILITY_DATA = path.join(TMP, "data");
 process.env.HOME = path.join(TMP, "home");
 
-const { addMedia, listMedia, clampMeasured, deleteMedia, renameMedia, readMediaFile, statMediaFile } =
+const { addMedia, listMedia, clampMeasured, deleteMedia, renameMedia, readMediaFile, statMediaFile, isMediaFileName } =
   await import("./signage-media-store.js");
 
 after(async () => {
@@ -181,5 +189,35 @@ describe("reading a file back", () => {
   test("returns null for a well-formed name with no file behind it", async () => {
     assert.equal(await readMediaFile("aaaaaaaaaaaaaaaa.png"), null);
     assert.equal(await statMediaFile("aaaaaaaaaaaaaaaa.png"), null);
+  });
+});
+
+describe("the extension and mime maps", () => {
+  test("round-trip: every allowed mime maps to an ext that maps back", () => {
+    // They were two hand-written maps, one the reverse of the other. The
+    // comment above SIGNAGE_EXTS says why that matters: the two disagreeing is
+    // how an upload succeeds and the file it wrote can never be served back.
+    for (const [mime, ext] of Object.entries(SIGNAGE_EXT_BY_MIME)) {
+      assert.equal(SIGNAGE_MIME_BY_EXT[ext], mime, `${mime} -> ${ext} did not map back`);
+    }
+  });
+
+  test("and every extension in the serving allowlist has a mime", () => {
+    // The other direction: an ext that can be served but has no mime would be
+    // sent with a guessed type or refused at read time.
+    for (const ext of SIGNAGE_EXTS) {
+      assert.ok(SIGNAGE_MIME_BY_EXT[ext], `${ext} is servable but has no mime`);
+    }
+  });
+
+  test("the file name is built at the length the serving pattern expects", () => {
+    // Four independent 16s once: the upload that writes the name, the pattern
+    // that decides what may be served, a second pattern in restore, and the
+    // hash restore compares against. Raising one would 404 every new upload
+    // with the manifest looking fine.
+    const name = signageMediaFileName("0123456789abcdef0123456789abcdef", "png");
+    assert.equal(name, "0123456789abcdef.png");
+    assert.equal(name.split(".")[0].length, SIGNAGE_HASH_HEX_LEN);
+    assert.equal(isMediaFileName(name), true, "the name we build is not one we would serve");
   });
 });

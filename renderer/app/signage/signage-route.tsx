@@ -24,7 +24,7 @@ import { NowBoard } from "./now-board";
 import { PlaylistsSection } from "./playlists-section";
 import { ScheduleSection } from "./schedule-section";
 import { SIGNAGE_NOW_KEY, useSignageConfig } from "./use-signage-config";
-import { newSignageId } from "./ids";
+import { uid } from "../../lib/uid";
 import { UnsavedGuardProvider, useUnsavedGuard } from "./unsaved-guard";
 import { winningOutputsFor, winningScheduleIds } from "./board-entry";
 
@@ -68,7 +68,7 @@ function SignageSections() {
   /** Make a tag and return its id, so a picker can select it immediately. */
   const createGroup = useCallback(
     async (name: string): Promise<string | null> => {
-      const group = { id: newSignageId("gr"), name, outputIds: [], createdAt: new Date().toISOString() };
+      const group = { id: uid("gr"), name, outputIds: [], createdAt: new Date().toISOString() };
       await invoke("signage:saveGroup", { group });
       await reload();
       return group.id;

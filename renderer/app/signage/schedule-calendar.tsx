@@ -22,11 +22,10 @@ import { zonedParts, type TimeZone } from "@main/services/app-timezone";
 import { Button } from "../../components/ui/button";
 import { displayHourCycle } from "../../lib/clock-format";
 import { useNow } from "./use-now";
-import { layOutDay, dragToTimes, type WeekBlock } from "./week-layout";
+import { DAY_NAMES, layOutDay, dragToTimes, type WeekBlock } from "./week-layout";
 import { weekOf } from "./week-layout";
 
 const DAY_MS = 86_400_000;
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 /** Every third hour gets a label; all 24 is a wall of numbers. */
 const HOUR_MARKS = [0, 3, 6, 9, 12, 15, 18, 21];
 

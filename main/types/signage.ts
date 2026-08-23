@@ -296,6 +296,28 @@ export const SIGNAGE_EXTS: readonly string[] = [
   ...new Set(Object.values(SIGNAGE_EXT_BY_MIME)),
 ];
 
+/** The extension-to-mime direction, DERIVED rather than written out again. The
+ *  store used to carry a six-arm switch that was this map backwards, which is
+ *  the same drift the comment above SIGNAGE_EXTS warns about. */
+export const SIGNAGE_MIME_BY_EXT: Record<string, string> = Object.fromEntries(
+  Object.entries(SIGNAGE_EXT_BY_MIME).map(([mime, ext]) => [ext, mime]),
+);
+
+/**
+ * How many hex characters of the content hash name a media file.
+ *
+ * ONE constant. It was four independent literals — the upload that writes the
+ * name, the pattern that decides what may be served, a second pattern in the
+ * restore path, and the hash the restore compares against — so raising it would
+ * have made every new upload 404 with the manifest looking fine.
+ */
+export const SIGNAGE_HASH_HEX_LEN = 16;
+
+/** The name a media file gets, from its content hash and extension. */
+export function signageMediaFileName(hashHex: string, ext: string): string {
+  return `${hashHex.slice(0, SIGNAGE_HASH_HEX_LEN)}.${ext}`;
+}
+
 export function isSignageMime(m: string): boolean {
   // Object.hasOwn, not `SIGNAGE_MIME_CAPS[m] !== undefined`: "constructor" and
   // "toString" are inherited on a plain object and would both read as accepted.

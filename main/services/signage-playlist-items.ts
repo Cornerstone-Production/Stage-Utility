@@ -78,9 +78,20 @@ const FALLBACK_IMAGE_MS = 8000;
  */
 export function resolveItemDurations(
   playlist: SignagePlaylist,
-  media: SignageMedia[],
+  /**
+   * The library, or an index of it.
+   *
+   * An INDEX where the caller resolves more than one playlist. The resolver
+   * calls this once per output per horizon edge — up to a couple of hundred
+   * times per recompute — and rebuilding a Map over the whole library each time
+   * is, with a 400-file library and 40 edges, on the order of a million map
+   * inserts per recompute, on a Pi, every time anything is saved.
+   */
+  media: SignageMedia[] | ReadonlyMap<string, SignageMedia>,
 ): ResolvedItem[] {
-  const byId = new Map(media.map((m) => [m.id, m]));
+  const byId: ReadonlyMap<string, SignageMedia> = Array.isArray(media)
+    ? new Map(media.map((m) => [m.id, m]))
+    : media;
   const out: ResolvedItem[] = [];
 
   // A playlist whose `items` is missing or not a list has nothing that can play,
@@ -148,10 +159,3 @@ export function toHorizonItems(items: ResolvedItem[]): SignageHorizonItem[] {
   }));
 }
 
-/** How long one revolution of `items` takes. Mirrors the renderer's cycleMs, on
- *  resolved items rather than raw ones. */
-export function resolvedCycleMs(items: ResolvedItem[]): number {
-  let total = 0;
-  for (const i of items) total += Math.max(0, i.durationMs);
-  return total;
-}

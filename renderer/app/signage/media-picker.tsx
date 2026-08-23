@@ -14,7 +14,6 @@
 import { useMemo, useState } from "react";
 import { SearchIcon } from "lucide-react";
 import type { SignageMedia } from "@main/types/signage";
-import { isSignageVideo } from "@main/types/signage";
 
 import { Button } from "../../components/ui/button";
 import {
@@ -26,6 +25,7 @@ import {
 } from "../../components/ui/dialog";
 import { Input } from "../../components/ui/input";
 import { SelectField } from "./select-field";
+import { MediaThumb } from "./media-thumb";
 import { size } from "./format";
 import {
   DEFAULT_VIEW,
@@ -145,27 +145,9 @@ export function MediaPicker({
                   }
                 >
                   <span className="relative block aspect-video overflow-hidden rounded bg-black">
-                    {isSignageVideo(m.mime) ? (
-                      // preload="metadata" so the grid shows a poster frame
-                      // without pulling a hundred megabytes to draw a thumbnail.
-                      <video
-                        // #t=0.1 seeks a tenth of a second in, which is what
-                        // makes a frame appear at all: preload="metadata" gets
-                        // the duration and dimensions but paints nothing, so
-                        // every clip was a black rectangle in the grid.
-                        src={`/signage-media/${m.file}#t=0.1`}
-                        muted
-                        preload="metadata"
-                        className="size-full object-contain"
-                      />
-                    ) : (
-                      <img
-                        src={`/signage-media/${m.file}`}
-                        alt=""
-                        loading="lazy"
-                        className="size-full object-contain"
-                      />
-                    )}
+                    {/* preload="metadata" so the grid shows a poster frame
+                        without pulling a hundred megabytes — see MediaThumb. */}
+                    <MediaThumb media={m} />
                   </span>
                   <span className="truncate text-caption1 text-fg">{m.name}</span>
                   <span className="truncate text-caption2 text-fg-subtle">

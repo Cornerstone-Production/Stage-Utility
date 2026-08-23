@@ -11,11 +11,12 @@ import type { SignageWindow } from "@main/types/signage";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Input } from "../../components/ui/input";
 import { NumberInput } from "../../components/ui/number-input";
+import { DAY_NAMES } from "./week-layout";
 import { Switch } from "../../components/ui/switch";
 import { SelectField } from "./select-field";
 
 /** Sunday first, matching Date.prototype.getDay and the stored day numbers. */
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** "2026-12-24" as "Dec 24". Parsed by hand rather than through Date, which
