@@ -140,6 +140,15 @@ export interface ReadoutProps {
   /** Weight for the value. Defaults to 600; the filled variant goes to 700. */
   weight?: number;
   /**
+   * Size the value as though the composition had all three lines.
+   *
+   * For a GRID of same-height tiles — Home. A tile that carries no caption and
+   * no sub-line otherwise takes the whole budget, which put the clock at 52px in
+   * a row of 35px values. On a wall a widget is placed alone at a size somebody
+   * chose, so filling the box stays right there and this stays off.
+   */
+  uniform?: boolean;
+  /**
    * Uppercase the value.
    *
    * For values that are WORDS naming a state — RECORDING, STANDBY, ONLINE. A
@@ -189,6 +198,7 @@ export function Readout({
   upper = false,
   dim = false,
   align,
+  uniform = false,
 }: ReadoutProps) {
   const side = align ?? DEFAULT_READOUT_ALIGN;
   // One value drives BOTH the flex cross-axis and text-align. The lines are
@@ -198,7 +208,7 @@ export function Readout({
   const [ref, boxH, boxW] = useBoxSize();
   // Lines are dropped rather than clipped when the box cannot hold them — see
   // fitComposition. A caption cut in half is not a caption.
-  const { captionPx, valuePx, subPx } = fitComposition(boxH, !!caption, !!sub);
+  const { captionPx, valuePx, subPx } = fitComposition(boxH, !!caption, !!sub, uniform);
   const { wrapRef, elRef, scale } = useShrinkToWidth([value, valuePx, mono]);
 
   const filled = !!fill;

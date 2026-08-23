@@ -11,6 +11,7 @@
 import type { ConfigField } from "../../types/integrations.js";
 import {
   ShureBaseProvider,
+  batteryMinutesFrom,
   clamp,
   formatFrequency,
   normalisedDb,
@@ -116,15 +117,17 @@ export class ShureAxient extends ShureBaseProvider {
         break;
       }
 
+      // Runtime remaining. TX_BATT_MINS is what an AD4Q actually sends — read off
+      // a live receiver, where it was landing in `unrecognized field` and being
+      // dropped while the case below waited for a name this family never uses.
+      // BATT_RUN_TIME is kept because it is the name in Shure's own AD docs and
+      // costs one line to accept.
+      case "TX_BATT_MINS":
       case "BATT_RUN_TIME": {
-        // 65535 = unknown, 65534 = calculating, 65533 = error → null.
-        // We store nothing additional for v1 (not part of DeviceStatus shape).
-        const minutes = safeInt(value);
-        if (!Number.isNaN(minutes) && minutes < 65533) {
-          console.debug(`[shure:${this.id}] ch${channel} battery runtime: ${minutes} min`);
-        } else {
-          console.debug(`[shure:${this.id}] ch${channel} battery runtime: unknown/calculating`);
-        }
+        state.batteryMinutes = batteryMinutesFrom(value);
+        console.debug(
+          `[shure:${this.id}] ch${channel} ${token}: ${state.batteryMinutes ?? "unknown/calculating"}`,
+        );
         break;
       }
 

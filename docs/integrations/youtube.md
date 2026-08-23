@@ -85,9 +85,13 @@ one of them reads as one design:
 | Live | green, with the elapsed time underneath |
 
 Green, not the red a recorder uses: red is what OBS and REAPER mean by rolling,
-and a wall carrying both wants one of them shouting rather than two. **Fill green
-when live** paints the whole widget instead of the word; **Hide when idle** makes
-it a tally light, drawing nothing at all until something is going out.
+and a wall carrying both should tell them apart by colour rather than by weight.
+
+Live fills the whole widget by default, exactly as OBS status and REAPER status
+fill red while recording — the four sit side by side and are meant to read as one
+set. Turn **Fill green when live** off to colour just the word instead. **Hide
+when idle** makes it a tally light, drawing nothing at all until something is
+going out.
 
 **Streaming status** is the same widget asking about every platform at once, or
 about one you pick.

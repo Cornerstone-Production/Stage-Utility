@@ -29,7 +29,9 @@ export const Radio = React.forwardRef<
       "peer size-4 shrink-0 rounded-full border border-line-strong bg-field",
       "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
       "disabled:cursor-not-allowed disabled:opacity-40",
-      "data-[state=checked]:border-accent data-[state=checked]:bg-accent",
+      // aria-checked, not data-state — a Tooltip wrapper overwrites data-state.
+      // See the note in checkbox.tsx and state-attribute-styling.test.tsx.
+      "aria-checked:border-accent aria-checked:bg-accent",
       className,
     )}
     {...props}

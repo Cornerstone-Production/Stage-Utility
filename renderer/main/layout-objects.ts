@@ -449,7 +449,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     label: "Wireless summary",
     blurb: "How many packs are online, and their batteries",
     group: "Mics & RF",
-    config: () => ({ type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" }),
+    config: () => ({ type: "wireless-summary", showOnline: true, showBattery: true, showRuntime: false, showLabel: false, label: "Mics" }),
     style: () => PILL(),
     homeSize: "s",
     integration: { id: "wireless", label: "wireless" },
@@ -458,7 +458,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     label: "Mic channel",
     blurb: "RF and battery for one wireless pack",
     group: "Mics & RF",
-    config: () => ({ type: "wireless-channel", channelId: null, show: { rf: true, battery: true, frequency: true, audio: false }, showLabel: true }),
+    config: () => ({ type: "wireless-channel", channelId: null, show: { rf: true, battery: true, runtime: false, frequency: true, audio: false }, showLabel: true }),
     style: () => PILL(),
     homeSize: "s",
     integration: { id: "wireless", label: "wireless" },
@@ -687,7 +687,10 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     label: "Streaming status",
     blurb: "Whether anything is going out, and for how long",
     group: "Status",
-    config: () => ({ type: "stream-status", platform: "any", showElapsed: true }),
+    // fillWhenLive stated rather than left to the default, exactly as obs-status
+    // states fillWhenRecording — the two sit beside each other on a wall and the
+    // pair of defaults disagreeing is what made them look like different widgets.
+    config: () => ({ type: "stream-status", platform: "any", showElapsed: true, fillWhenLive: true }),
     // A pill like obs-status: this one goes on a WALL, where a bare number has
     // nothing to say what it is. The three Home ones stay bare, because Home's
     // grid draws their frame.

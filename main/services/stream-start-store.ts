@@ -34,13 +34,26 @@ export const streamStartStore = {
     loaded = true;
   },
 
+  /** A start already established for this platform, or null. Never writes. */
+  known(platform: string): string | null {
+    return cache[platform] ?? null;
+  },
+
   /**
-   * The moment this platform's current stream started, recording now as the
-   * start if this is the first sighting.
+   * Record NOW as the moment this stream started.
+   *
+   * ONLY CALL THIS HAVING WATCHED THE STREAM GO LIVE — the previous poll saw the
+   * platform connected and off air, and this one sees it live. Calling it on any
+   * first sighting is what produced a stream that claimed to have started the
+   * moment the integration was configured: set Resi up mid-service and the wall
+   * read 0:00 on a broadcast forty minutes old.
+   *
+   * "We do not know" is a real answer here and the widgets render it — LIVE with
+   * no number under it. A number is worse than no number when it is wrong,
+   * because nobody can tell.
    *
    * Reads through the cache rather than awaiting a load, because the caller is a
-   * poll tick and must not block on disk. Before init() has run this simply
-   * starts a fresh clock, which is correct: nothing has been observed yet.
+   * poll tick and must not block on disk.
    */
   observe(platform: string): string {
     const existing = cache[platform];

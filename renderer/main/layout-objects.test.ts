@@ -179,6 +179,24 @@ const RECONFIGURED: Record<string, Record<string, unknown>> = {
 };
 
 /**
+ * Types whose default config gained a SETTING since the consolidation.
+ *
+ * Separate from RECONFIGURED, which records the six that gained a caption and
+ * asserts a caption is the only thing that moved. Folding these in there would
+ * have meant loosening that assertion, and it is the assertion that makes the
+ * record mean something.
+ *
+ * Both entries are the wireless widgets gaining runtime remaining — the figure
+ * Wireless Workbench leads with. Off by default in both, so nothing anyone has
+ * already placed changes; they are listed only so the new key is a deliberate,
+ * recorded change rather than drift.
+ */
+const RETUNED: Record<string, Record<string, unknown>> = {
+  "wireless-summary": { type: "wireless-summary", showOnline: true, showBattery: true, showRuntime: false, showLabel: false, label: "Mics" },
+  "wireless-channel": { type: "wireless-channel", channelId: null, show: { rf: true, battery: true, runtime: false, frequency: true, audio: false }, showLabel: true },
+};
+
+/**
  * Types deliberately RESTYLED since the consolidation, and what they became.
  *
  * The originals above stay pinned so an accidental change is still caught; a
@@ -433,7 +451,40 @@ describe("layout-object registry vs. the structures it replaced", () => {
 
   test("default config is the original, or a recorded change", () => {
     for (const t of ALL) {
-      assert.deepEqual(defaultConfig(t as never), RECONFIGURED[t] ?? ORIGINAL_CONFIG[t], `defaultConfig("${t}")`);
+      assert.deepEqual(
+        defaultConfig(t as never),
+        RETUNED[t] ?? RECONFIGURED[t] ?? ORIGINAL_CONFIG[t],
+        `defaultConfig("${t}")`,
+      );
+    }
+  });
+
+  test("every retuned type is real, still matches, and only ADDED settings", () => {
+    for (const t of Object.keys(RETUNED)) {
+      assert.ok(t in LAYOUT_OBJECTS, `RETUNED names "${t}", which is not an object type`);
+      assert.deepEqual(RETUNED[t], defaultConfig(t as never), `RETUNED["${t}"] no longer matches the registry`);
+      assert.notDeepEqual(RETUNED[t], ORIGINAL_CONFIG[t], `RETUNED["${t}"] matches the original`);
+
+      // Every setting the original had must still be there with the SAME value.
+      // A new one is a recorded addition; a CHANGED one would silently alter how
+      // every screen already in the field draws, and belongs in a change that
+      // says so rather than in a list called "retuned".
+      //
+      // Recursive, because `wireless-channel` keeps its toggles in a nested
+      // `show` object and a flat comparison reports the whole object as changed
+      // the moment a key is added to it — which is exactly the addition being
+      // recorded.
+      const survives = (before: unknown, after: unknown, at: string): void => {
+        if (before === null || typeof before !== "object" || Array.isArray(before)) {
+          assert.deepEqual(after, before, `RETUNED["${t}"] changed the existing setting "${at}"`);
+          return;
+        }
+        assert.ok(after && typeof after === "object", `RETUNED["${t}"] dropped the "${at}" group`);
+        for (const [key, value] of Object.entries(before as Record<string, unknown>)) {
+          survives(value, (after as Record<string, unknown>)[key], at ? `${at}.${key}` : key);
+        }
+      };
+      survives(ORIGINAL_CONFIG[t], RETUNED[t], "");
     }
   });
 

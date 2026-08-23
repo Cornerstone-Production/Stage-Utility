@@ -5,6 +5,7 @@
 import type { ConfigField } from "../../types/integrations.js";
 import {
   ShureBaseProvider,
+  batteryMinutesFrom,
   clamp,
   formatFrequency,
   normalisedDb,
@@ -91,6 +92,18 @@ export class ShureUlxd extends ShureBaseProvider {
           state.battery = charge === 255 ? null : clamp(charge, 0, 100);
         }
         console.debug(`[shure:${this.id}] ch${channel} BATT_CHARGE: ${value}`);
+        break;
+      }
+
+      // Runtime remaining. BATT_RUN_TIME is the ULX-D name; TX_BATT_MINS is
+      // accepted too because it is what the AD family sends and a mixed rack is
+      // not the place to discover which of two spellings a receiver uses.
+      case "BATT_RUN_TIME":
+      case "TX_BATT_MINS": {
+        state.batteryMinutes = batteryMinutesFrom(value);
+        console.debug(
+          `[shure:${this.id}] ch${channel} ${token}: ${state.batteryMinutes ?? "unknown/calculating"}`,
+        );
         break;
       }
 

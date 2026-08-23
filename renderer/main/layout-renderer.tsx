@@ -23,7 +23,7 @@ import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
-import { useWirelessChannels } from "./use-wireless-channels";
+import { useWirelessTelemetry } from "./use-wireless-telemetry";
 import { OscButton } from "./osc-button";
 import { ActionButton } from "./action-button";
 import { NotesObject, ChecklistObject } from "./notes-objects";
@@ -428,6 +428,21 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
  * says. An explicit record rather than a prefix test: the prefix would also
  * catch a future home-streaming-* card that has no wall twin.
  */
+/**
+ * Whether a status widget paints its whole box while the thing it watches is
+ * ACTIVE — recording, or live.
+ *
+ * One constant for all three because the bug it fixes was the two defaults
+ * disagreeing: `fillWhenRecording` was `?? true` and `fillWhenLive` was
+ * `?? false`, so OBS and REAPER were bold slabs on a wall and Resi and YouTube
+ * were quiet grey text beside them. Written out at each site, the pair drifted
+ * apart and stayed apart across two attempts to make these widgets match.
+ *
+ * A layout that has explicitly turned one off keeps it off — this is only what
+ * an object that never expressed a preference does.
+ */
+const FILL_WHEN_ACTIVE = true;
+
 const WALL_TWIN = {
   "home-streaming": null,
   "home-streaming-resi": "Resi",
@@ -464,6 +479,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // The object's own alignment, so a custom view can centre one widget
       // without every other readout following it.
       align={o.style?.textAlign}
+      // Home is a grid of same-height tiles, so its values share a size rather
+      // than each one filling whatever its own lines leave.
+      uniform={ctx.home}
       {...opts}
     />
   );
@@ -493,6 +511,17 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // Tally-light mode: nothing on screen unless something is going out.
     if (!live && (opts.hideWhenIdle ?? false)) return null;
 
+    // FILLED BY DEFAULT, the same as obs-status and reaper-status.
+    //
+    // This is the whole of why the streaming widgets did not match the recorders
+    // on a wall. Every other choice was already shared — same composition, same
+    // caption, same word-then-number — but `fillWhenRecording` defaulted ON and
+    // `fillWhenLive` defaulted OFF, so a row of four read as two bold slabs and
+    // two lines of quiet text, and the two that mattered most were the quiet
+    // ones. Set them the same and the four are indistinguishable in weight; only
+    // the colour differs, which is the distinction that was meant to be visible.
+    const filled = opts.fillWhenLive ?? FILL_WHEN_ACTIVE;
+
     // GREEN for live, grey for off air. Not the red a recorder uses: red is
     // what OBS and REAPER mean by "rolling", and a wall carrying both wants
     // one red. Off air takes the muted grey its neighbours wear rather than
@@ -506,8 +535,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       sub: ind.state === "live" ? ind.sub : null,
       upper: true,
       dim: ind.state === "offline",
-      fill: live && opts.fillWhenLive ? "var(--green-9)" : null,
-      valueColor: live && !opts.fillWhenLive ? "var(--green-10)" : ind.state === "idle" ? "var(--color-fg-muted)" : null,
+      fill: live && filled ? "var(--green-9)" : null,
+      valueColor: live && !filled ? "var(--green-10)" : ind.state === "idle" ? "var(--color-fg-muted)" : null,
     });
   };
 
@@ -893,8 +922,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
             // works. What changes is that it now carries the same composition as
             // every other widget, so a filled widget is the same widget wearing
             // a state rather than a second design language.
-            fill={(c.fillWhenRecording ?? true) ? "var(--red-9)" : null}
-            valueColor={(c.fillWhenRecording ?? true) ? null : "var(--red-10)"}
+            fill={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? "var(--red-9)" : null}
+            valueColor={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? null : "var(--red-10)"}
             align={o.style?.textAlign}
           />
         );
@@ -939,8 +968,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
             sub={tc}
             upper
             mono={false}
-            fill={(c.fillWhenRecording ?? true) ? "var(--red-9)" : null}
-            valueColor={(c.fillWhenRecording ?? true) ? null : "var(--red-10)"}
+            fill={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? "var(--red-9)" : null}
+            valueColor={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? null : "var(--red-10)"}
             align={o.style?.textAlign}
           />
         );
@@ -982,8 +1011,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
             value={c.recordingText ?? "Recording"}
             sub={pos}
             upper
-            fill={(c.fillWhenRecording ?? true) ? "var(--red-9)" : null}
-            valueColor={(c.fillWhenRecording ?? true) ? null : "var(--red-10)"}
+            fill={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? "var(--red-9)" : null}
+            valueColor={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? null : "var(--red-10)"}
             align={o.style?.textAlign}
           />
         );
@@ -1072,19 +1101,39 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       const ch = ctx.wireless;
       if (ch.length === 0) return <Readout value="—" dim />;
       const online = ch.filter((d) => d.online).length;
-      const batteries = ch.filter((d) => d.online && d.battery != null).map((d) => d.battery as number);
+      const live = ch.filter((d) => d.online);
+      const batteries = live.filter((d) => d.battery != null).map((d) => d.battery as number);
       const lowest = batteries.length ? Math.min(...batteries) : null;
+      // The pack that runs out FIRST is the one that decides whether anybody has
+      // to move mid-service, so the fleet figure is the minimum, exactly as the
+      // battery figure is.
+      const runtimes = live.filter((d) => d.batteryMinutes != null).map((d) => d.batteryMinutes as number);
+      const soonest = runtimes.length ? Math.min(...runtimes) : null;
       const showOnline = c.showOnline ?? true;
       const showBattery = c.showBattery ?? true;
+      const showRuntime = c.showRuntime ?? false;
       // The count is the value; the lowest battery is what qualifies it. They
       // were two figures side by side in different colours, which reads as two
       // separate readouts sharing a box.
+      const quals = [
+        showBattery && lowest != null ? `${lowest}% lowest` : null,
+        showRuntime && soonest != null ? `${runtimeText(soonest)} left` : null,
+      ].filter(Boolean);
+      // With the count off, the tile is a single figure — battery if it is on,
+      // otherwise runtime, so turning battery off does not leave a blank tile.
+      const headline =
+        showBattery || !showRuntime ? `${lowest ?? "—"}%`
+        : (runtimeText(soonest) ?? "—");
       return (
         <Readout
           caption={(c.showLabel ?? false) && c.label ? c.label : null}
-          value={showOnline ? `${online}/${ch.length}` : `${lowest ?? "—"}%`}
-          sub={showOnline && showBattery && lowest != null ? `${lowest}% lowest` : null}
-          valueColor={!showOnline && lowest != null ? batteryColor(lowest) : null}
+          value={showOnline ? `${online}/${ch.length}` : headline}
+          sub={showOnline ? quals.join("  ") || null : quals.slice(1).join("  ") || null}
+          valueColor={
+            showOnline ? null
+            : showBattery || !showRuntime ? batteryColor(lowest)
+            : runtimeColor(soonest)
+          }
           mono
             align={o.style?.textAlign}
         />
@@ -1098,18 +1147,30 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // figures — hand-rolled at 0.55em. It is the idiom, so it uses the idiom:
       // the mic's name is the caption, its battery the value it is checked for,
       // and RF and frequency the qualifiers under it.
+      const battery = show.battery && d.battery != null ? `${d.battery}%` : null;
+      const runtime = show.runtime ? runtimeText(d.batteryMinutes) : null;
+      // Percentage wins the headline when both are on, because it is the figure
+      // that has always been there and a wall people have learned should not
+      // rearrange itself. With percentage OFF, runtime takes the headline — which
+      // is what asking for "time remaining instead" means.
+      const headline = battery ?? runtime;
       const quals = [
+        // The one that did not get the headline still gets said.
+        battery && runtime ? runtime : null,
         show.rf && d.rfBars != null ? rfBarsGlyph(d.rfBars) : null,
         show.frequency && d.frequencyLabel ? d.frequencyLabel : null,
         show.audio && d.audioLevel != null ? `${Math.round(d.audioLevel * 100)}%` : null,
       ].filter(Boolean);
-      const battery = show.battery && d.battery != null ? `${d.battery}%` : null;
       return (
         <Readout
           caption={(c.showLabel ?? true) ? d.name ?? d.channelId : null}
-          value={battery ?? quals[0] ?? "—"}
-          sub={(battery ? quals : quals.slice(1)).join("  ") || null}
-          valueColor={battery && d.battery != null ? batteryColor(d.battery) : null}
+          value={headline ?? quals[0] ?? "—"}
+          sub={(headline ? quals : quals.slice(1)).join("  ") || null}
+          valueColor={
+            battery && d.battery != null ? batteryColor(d.battery)
+            : runtime ? runtimeColor(d.batteryMinutes)
+            : null
+          }
           mono
           dim={!d.online}
             align={o.style?.textAlign}
@@ -1692,6 +1753,30 @@ function batteryColor(pct: number | null): string {
   return "var(--red-10)";
 }
 
+/** Runtime remaining as `H:MM`, the way Wireless Workbench writes it. Always
+ *  with the hour, so a column of packs stays a column and 0:45 cannot be
+ *  misread as 45 hours. */
+export function runtimeText(minutes: number | null | undefined): string | null {
+  if (minutes == null || !Number.isFinite(minutes) || minutes < 0) return null;
+  const whole = Math.floor(minutes);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Runtime remaining, coloured by whether it survives what is in front of it.
+ *
+ * The thresholds are a service, not a percentage: 90 minutes covers a service
+ * with a margin, an hour covers one that has already started, and under half an
+ * hour is a pack somebody has to go and swap. A percentage cannot say this — the
+ * same 60% is three hours on one pack and forty minutes on another.
+ */
+export function runtimeColor(minutes: number | null): string | null {
+  if (minutes == null) return null;
+  if (minutes >= 90) return "var(--green-10)";
+  if (minutes >= 30) return "var(--yellow-10)";
+  return "var(--red-10)";
+}
+
 // Shure SBC charger bay battery levels. Renders one row per configured bay with
 // only the metrics toggled on; an empty/undocked bay reads "empty".
 function ChargerBattery({
@@ -2244,7 +2329,7 @@ export function useLayoutData(layout?: LayoutDTO) {
   const serviceLow = useLiveServiceLow(peopleWanted);
   const serviceAttendance = useLiveServiceAttendance(peopleWanted);
   const servicePeaks = useLiveServicePeaks(peopleWanted);
-  const wireless = useWirelessChannels(want(["wireless-summary", "wireless-channel"]));
+  const wireless = useWirelessTelemetry(want(["wireless-summary", "wireless-channel"]));
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();

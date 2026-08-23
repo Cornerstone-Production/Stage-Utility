@@ -70,7 +70,8 @@ screens.
 | GET / POST | `/api/wireless/connections` | List / add a device connection |
 | PATCH / DELETE | `/api/wireless/connections/:id` | Update / remove a connection |
 | POST | `/api/wireless/connections/:id/test` | Test a device connection |
-| GET | `/api/integrations/wireless/channels` | Bindable channels |
+| GET | `/api/integrations/wireless/channels` | Bindable channels — `{id, label}` per configured channel, whether or not it has ever reported. For pickers |
+| GET | `/api/integrations/wireless/statuses` | Live telemetry — full `DeviceStatus` per RF channel (RF, battery, runtime, frequency, audio). Chargers excluded. For widgets |
 | GET / POST | `/api/wireless/meter-rate` | Get / set the polling interval |
 
 **ProPresenter & ProdCom**
@@ -137,6 +138,6 @@ Two things to know:
 |--------|------|---------|
 | GET | `/api/branding/source?target=app\|empty` | Original (un-cropped) brand/empty logo source |
 | POST | `/api/branding` | Update app name + logos |
-| GET | `/api/events` | Multiplexed Server-Sent Events stream with per-connection channel filtering. Channels: `stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `spl:metrics`, `spl:history`, `people:count`, `attendance:history`, `service-timeline:history`, `obs:status`, `osc:feedback`, `baptism`, `integrations:state-changed`, `wireless:connections-changed` |
+| GET | `/api/events` | Multiplexed Server-Sent Events stream with per-connection channel filtering. Channels: `stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `spl:metrics`, `spl:history`, `people:count`, `attendance:history`, `service-timeline:history`, `obs:status`, `osc:feedback`, `baptism`, `integrations:state-changed`, `wireless:connections-changed`, `wireless:channels` |
 | POST | `/api/events/subscribe` | Set the channels a connection wants (channel filtering) |
 | GET | `/photos?u=…` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy |

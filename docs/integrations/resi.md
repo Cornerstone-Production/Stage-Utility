@@ -37,10 +37,21 @@ on it.
 | **Off air** | Resi is reachable and no watched encoder is streaming |
 | **—** | Resi is not set up, or cannot be reached |
 
-The elapsed time is measured from when Stage Utility first saw the stream, not
-from a start time Resi reports — it does not send one. That moment is saved, so
-restarting the server mid-service does not reset the clock to zero. If Resi ever
-does start reporting a real start time, the integration prefers it.
+Resi does not report when a stream started, so the elapsed time is measured from
+the moment Stage Utility **watched it go live** — a poll that found Resi
+reachable and off air, followed by one that found it streaming. That moment is
+saved, so restarting the server mid-service does not reset the clock to zero.
+
+A stream that was already running the first time Stage Utility looked shows
+**Live** with no elapsed time. This is the honest answer: the app has no way to
+know how long it has been going, and a clock started at first sight would time
+how long the integration had been running, not the broadcast. It happens when
+the integration is set up during a service, or when Resi is unreachable for the
+part of the service in which the stream began. The clock returns for the next
+stream.
+
+If Resi ever does start reporting a real start time, the integration prefers it
+over both.
 
 ## On a screen
 
@@ -55,9 +66,13 @@ one of them reads as one design:
 | Live | green, with the elapsed time underneath |
 
 Green, not the red a recorder uses: red is what OBS and REAPER mean by rolling,
-and a wall carrying both wants one of them shouting rather than two. **Fill green
-when live** paints the whole widget instead of the word; **Hide when idle** makes
-it a tally light, drawing nothing at all until something is going out.
+and a wall carrying both should tell them apart by colour rather than by weight.
+
+Live fills the whole widget by default, exactly as OBS status and REAPER status
+fill red while recording — the four sit side by side and are meant to read as one
+set. Turn **Fill green when live** off to colour just the word instead. **Hide
+when idle** makes it a tally light, drawing nothing at all until something is
+going out.
 
 **Streaming status** is the same widget asking about every platform at once, or
 about one you pick.

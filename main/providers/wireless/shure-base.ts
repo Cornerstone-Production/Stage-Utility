@@ -353,6 +353,22 @@ export function safeInt(s: string | undefined): number {
   return n;
 }
 
+/**
+ * Battery runtime remaining, in whole minutes, from a Shure runtime field.
+ *
+ * Shure sends whole minutes with three sentinels at the top of the 16-bit range:
+ * 65535 unknown, 65534 calculating, 65533 error. Read naively those become a
+ * battery with forty-five days left on it, which is why this lives in one place
+ * rather than in each driver that reads a runtime field — Axient calls the field
+ * TX_BATT_MINS and ULX-D calls it BATT_RUN_TIME, but the encoding is identical
+ * and the sentinels are the part that is easy to get wrong.
+ */
+export function batteryMinutesFrom(value: string | undefined): number | null {
+  const minutes = safeInt(value);
+  if (Number.isNaN(minutes) || minutes < 0 || minutes >= 65533) return null;
+  return minutes;
+}
+
 // Re-exported, not redefined. There were three copies of clamp in this repo —
 // here, in the renderer's layout-geometry, and written out longhand in thirty
 // other places. The name stays exported here so the four Shure drivers that
