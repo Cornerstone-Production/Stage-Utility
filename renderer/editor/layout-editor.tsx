@@ -84,7 +84,7 @@ import {
   type Handle,
 } from "../settings/sections/layout-geometry.js";
 import { } from "../main/use-spl-state";
-import { } from "../main/use-wireless-channels";
+import { } from "../main/use-wireless-telemetry";
 import { } from "../main/use-people-count-state";
 import { } from "../main/use-obs-state";
 import { } from "../main/use-reaper-state";

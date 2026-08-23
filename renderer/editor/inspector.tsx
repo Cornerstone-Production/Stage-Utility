@@ -60,7 +60,10 @@ import {
 import { loadProcessedAttachment } from "../main/layout-renderer";
 import { MIN, clamp } from "../settings/sections/layout-geometry.js";
 import { useSplState } from "../main/use-spl-state";
-import { useWirelessChannels } from "../main/use-wireless-channels";
+// The PICKER list, not the telemetry one. A channel on a receiver that is
+// unreachable right now reports no telemetry, and binding a widget to it is
+// exactly what somebody is doing while the gear is still in a case.
+import { useWirelessChannels } from "../app/queries";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
@@ -339,7 +342,7 @@ export function Inspector({
   const c = o.config;
   const chargerBays = useStageState().state?.chargerBays ?? [];
   const spl = useSplState();
-  const wirelessChannels = useWirelessChannels();
+  const { data: wirelessChannels = [] } = useWirelessChannels();
   const obs = useObsState();
   const reaper = useReaperState();
   const peopleCount = usePeopleCountState();
@@ -701,7 +704,7 @@ export function Inspector({
               <SelectTrigger><SelectValue placeholder={wirelessChannels.length ? "Auto (first)" : "No channels detected"} /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="">Auto (first)</SelectItem>
-                {wirelessChannels.map((d) => <SelectItem key={d.channelId} value={d.channelId}>{d.name ?? d.channelId}</SelectItem>)}
+                {wirelessChannels.map((d) => <SelectItem key={d.id} value={d.id}>{d.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </Row>

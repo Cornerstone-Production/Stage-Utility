@@ -23,7 +23,7 @@ import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
-import { useWirelessChannels } from "./use-wireless-channels";
+import { useWirelessTelemetry } from "./use-wireless-telemetry";
 import { OscButton } from "./osc-button";
 import { ActionButton } from "./action-button";
 import { NotesObject, ChecklistObject } from "./notes-objects";
@@ -2329,7 +2329,7 @@ export function useLayoutData(layout?: LayoutDTO) {
   const serviceLow = useLiveServiceLow(peopleWanted);
   const serviceAttendance = useLiveServiceAttendance(peopleWanted);
   const servicePeaks = useLiveServicePeaks(peopleWanted);
-  const wireless = useWirelessChannels(want(["wireless-summary", "wireless-channel"]));
+  const wireless = useWirelessTelemetry(want(["wireless-summary", "wireless-channel"]));
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();

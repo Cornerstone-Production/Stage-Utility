@@ -12,14 +12,17 @@ import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "@main/types/devices"
  * answers `{id, label}`. This hook declared that as `DeviceStatus[]` and the
  * type checker had nothing to say, so every field the widgets read was
  * undefined: the summary reported 0 of N online for good, and a channel tile
- * with a channel chosen matched nothing and drew a dash. The lesson is in the
- * function name — one endpoint listing what EXISTS, another reporting what is
- * HAPPENING, and never the two through the same call.
+ * with a channel chosen matched nothing and drew a dash.
+ *
+ * It was called `useWirelessChannels`, which is ALSO the name of the picker hook
+ * in app/queries.ts — two hooks, one name, opposite answers, and the editor
+ * imported whichever one autocomplete offered. Hence `Telemetry`: one hook lists
+ * what EXISTS, this one reports what is HAPPENING, and the names now say which.
  *
  * Chargers are not here; `charger-battery` is their widget. See
  * `wirelessChannelStatuses` for why mixing them poisons both figures.
  */
-export function useWirelessChannels(enabled = true): DeviceStatus[] {
+export function useWirelessTelemetry(enabled = true): DeviceStatus[] {
   const [channels, setChannels] = useState<DeviceStatus[]>([]);
 
   const load = useCallback(() => {
