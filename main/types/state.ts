@@ -244,6 +244,9 @@ export interface UpdateStatus {
   /** The same changes, grouped. Empty on a git checkout, whose changelog is
    *  commit subjects and has no sections to preserve. */
   changelogSections?: ReleaseSection[];
+  /** The prose the newest release opens with, above its first heading — the
+   *  sentence no commit range could produce. Null when there is none. */
+  changelogIntro?: string | null;
   lastCheckedAt: string | null;
   /** "idle" normally; "checking" during a fetch; "updating" while the script runs. */
   phase: "idle" | "checking" | "updating";

@@ -13,7 +13,7 @@
 
 import type { UpdateStatus } from "../../types/stage.js";
 import { compareTags, latestOnTrack, newerThan, parseTag, type ParsedTag } from "../release-tags.js";
-import { parseReleaseSections, mergeReleaseSections, type ReleaseSection } from "./release-notes.js";
+import { parseReleaseIntro, parseReleaseSections, mergeReleaseSections, type ReleaseSection } from "./release-notes.js";
 
 const REPO = "Cornerstone-Production/Stage-Utility";
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
@@ -95,6 +95,7 @@ export type PackagedAvailability = Required<
     | "latestDate"
     | "changelog"
     | "changelogSections"
+    | "changelogIntro"
     | "awaitingPackage"
   >
 >;
@@ -188,6 +189,10 @@ export function packagedUpdateStatus(
   return {
     tagBased: true,
     changelogSections: mergeReleaseSections(sectionLists, NOTES_CAP),
+    // The NEWEST release's opening prose only. Three releases at once would
+    // otherwise stack three "nothing to do to install this" paragraphs, and the
+    // one that matters is the version actually being installed.
+    changelogIntro: parseReleaseIntro(byTag.get(newer[0]?.tag ?? "")?.body ?? null),
     currentTag,
     targetTag: target?.tag ?? null,
     releasesBehind: newer.length,

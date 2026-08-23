@@ -530,6 +530,7 @@ export class Updater {
           // subjects, which have no sections, and a dialog with neither would
           // be a heading over nothing.
           lines: this.status.changelogSections?.length ? [] : (this.status.changelog ?? []),
+          intro: this.status.changelogIntro ?? null,
           at: new Date().toISOString(),
         },
       }));
