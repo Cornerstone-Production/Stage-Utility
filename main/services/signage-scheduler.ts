@@ -5,9 +5,11 @@
 // arms ONE timeout at the next instant any window could change its answer, and
 // otherwise sleeps. A safety tick catches whatever changed outside this module.
 //
-// Nothing here talks unless the map actually differs, and nothing here even
-// computes when no client is subscribed — the efficiency-first rule for anything
-// new on this server.
+// Nothing here talks unless the map actually differs, and with nobody subscribed
+// it never talks at all — the efficiency-first rule for anything new on this
+// server. It does still COMPUTE on its tick regardless, because the map is also
+// what GET /api/signage/now and the hello burst answer with, and both have to be
+// right for a client that has not connected yet.
 
 import type { SignageHorizon } from "../types/signage.js";
 import { appTimeZone } from "./app-timezone.js";
@@ -17,7 +19,7 @@ import { HORIZON_MS, resolveSignage } from "./signage-resolve.js";
 import { signageGroupsStore } from "./signage-groups-store.js";
 import { signageMediaStore } from "./signage-media-store.js";
 import { signageOverridesStore } from "./signage-overrides-store.js";
-import { signagePlaylistsStore } from "./signage-playlists-store.js";
+import { listPlaylists } from "./signage-playlists-store.js";
 import { signageSchedulesStore } from "./signage-schedules-store.js";
 
 export const SIGNAGE_PLAN_CHANNEL = "signage:plan";
@@ -113,7 +115,7 @@ class SignageScheduler {
       const [groups, schedules, playlists, media, overrides] = await Promise.all([
         signageGroupsStore.load(),
         signageSchedulesStore.load(),
-        signagePlaylistsStore.load(),
+        listPlaylists(),
         signageMediaStore.load(),
         signageOverridesStore.load(),
       ]);

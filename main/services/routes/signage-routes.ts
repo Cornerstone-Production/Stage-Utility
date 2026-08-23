@@ -11,21 +11,23 @@
 // checked before any lookup, and every response carries nosniff plus a sandbox
 // CSP so a file opened directly in a tab is inert whatever it turns out to hold.
 
+import { createReadStream } from "node:fs";
+
 import type { DataStore } from "../data-store.js";
 import { errorMessage } from "../errors.js";
 import { andList, groupUsage, mediaUsage, playlistUsage } from "../signage-integrity.js";
 import { signageGroupsStore } from "../signage-groups-store.js";
 import { clearOverride, listOverrides, setOverride } from "../signage-overrides-store.js";
 import { resolveItemDurations } from "../signage-playlist-items.js";
-import { signagePlaylistsStore } from "../signage-playlists-store.js";
+import { listPlaylists, signagePlaylistsStore } from "../signage-playlists-store.js";
 import { reorderSchedules, signageSchedulesStore } from "../signage-schedules-store.js";
 import {
   addMedia,
   clampMeasured,
   deleteMedia,
   listMedia,
-  readMediaFile,
   renameMedia,
+  statMediaFile,
 } from "../signage-media-store.js";
 import { signagePcoWindows } from "../signage-pco-windows.js";
 import { signageScheduler } from "../signage-scheduler.js";
@@ -89,18 +91,31 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
     } catch {
       return error(c.res, "not found", 404);
     }
-    const found = await readMediaFile(file);
+    const found = await statMediaFile(file);
     if (!found) return error(c.res, "not found", 404);
     c.res.writeHead(200, {
       "Content-Type": found.mime,
-      "Content-Length": String(found.data.length),
+      "Content-Length": String(found.bytes),
       // Safe precisely because the name IS the hash: the bytes at a name can
       // never change, so there is nothing to revalidate.
       "Cache-Control": "public, max-age=31536000, immutable",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; sandbox",
     });
-    c.res.end(found.data);
+    // PIPED, never buffered. A wall of displays coming up together after a power
+    // cut asks for the same video at the same moment, and holding one copy per
+    // request is how a 200 MB clip becomes a gigabyte of heap on a Pi.
+    const stream = createReadStream(found.path);
+    stream.on("error", (err) => {
+      // The headers are already out, so there is no status left to send. Destroy
+      // the response rather than end it: a truncated body that looks complete is
+      // a corrupt image cached forever under an immutable URL.
+      console.error(`[signage] could not stream ${file}:`, errorMessage(err));
+      c.res.destroy(err);
+    });
+    // A display that navigates away mid-video leaves the read open otherwise.
+    c.res.on("close", () => stream.destroy());
+    stream.pipe(c.res);
     return;
   }
 
@@ -166,12 +181,17 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
       // must not happen is the operator discovering later which playlists lost
       // an item, so the affected playlists are returned and the item is taken
       // out of them here rather than left dangling.
-      const affected = mediaUsage(id, await signagePlaylistsStore.load());
+      const affected = mediaUsage(id, await listPlaylists());
       const media = await deleteMedia(id);
       if (!media) return error(c.res, "no such media", 404);
       if (affected.length) {
         await signagePlaylistsStore.update((all) =>
-          all.map((p) => ({ ...p, items: p.items.filter((i) => i.mediaId !== id) })),
+          // Array.isArray, not a bare filter: this is the raw store, and a
+          // record without a list is exactly what threw everywhere else.
+          all.map((p) => ({
+            ...p,
+            items: Array.isArray(p.items) ? p.items.filter((i) => i.mediaId !== id) : [],
+          })),
         );
         await signageScheduler.recompute();
       }
@@ -188,7 +208,9 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
   // segment name. route-coverage.test.ts scans source TEXT for the paths the
   // client calls, so a templated `/api/signage/${segment}` is invisible to it and
   // reads as an unhandled route. Spelling them out also means this list greps.
-  if (await collection(c, "/api/signage/playlists", signagePlaylistsStore, "playlist")) return;
+  // Playlists read through listPlaylists, so the editor in the renderer is
+  // handed the same repaired shape the server works from — it walks `items` too.
+  if (await collection(c, "/api/signage/playlists", signagePlaylistsStore, "playlist", listPlaylists)) return;
   if (await collection(c, "/api/signage/groups", signageGroupsStore, "group")) return;
   if (await collection(c, "/api/signage/schedules", signageSchedulesStore, "schedule")) return;
 
@@ -219,7 +241,7 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
       if (!(await signageGroupsStore.load()).some((g) => g.id === groupId)) {
         return error(c.res, "no such group", 404);
       }
-      if (playlistId && !(await signagePlaylistsStore.load()).some((p) => p.id === playlistId)) {
+      if (playlistId && !(await listPlaylists()).some((p) => p.id === playlistId)) {
         return error(c.res, "no such playlist", 400);
       }
 
@@ -260,7 +282,7 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
       return json(c.res, { assets: [], reason: "this group has no default playlist" });
     }
     const [playlists, media] = await Promise.all([
-      signagePlaylistsStore.load(),
+      listPlaylists(),
       listMedia(),
     ]);
     const playlist = playlists.find((p) => p.id === group.defaultPlaylistId);
@@ -330,6 +352,24 @@ interface Identified {
 }
 
 /**
+ * The one field per collection that the resolver walks as a list.
+ *
+ * Checked at the door because a record without it is a poison pill, not a
+ * harmless partial: the resolver reached into it, threw inside the scheduler's
+ * catch, and every screen in the building froze on its last horizon until the
+ * server was restarted — a stale wall and one line in the log. Found by POSTing
+ * `{"playlist":{"id":"x"}}`, which the route used to store happily.
+ *
+ * Deliberately not a whole schema. This is the field whose absence breaks
+ * everything; the rest degrade the way the resolver already handles.
+ */
+const REQUIRED_LIST: Record<string, string> = {
+  playlist: "items",
+  group: "outputIds",
+  schedule: "groupIds",
+};
+
+/**
  * GET / POST / DELETE for one signage collection.
  *
  * Returns true when it responded, so the caller can stop. POST is an upsert
@@ -343,6 +383,10 @@ async function collection<T extends Identified>(
   base: string,
   store: DataStore<T[]>,
   key: string,
+  /** How to READ the list. Defaults to the store; playlists pass a reader that
+   *  repairs a record whose `items` is missing, so what the editor receives
+   *  matches what the resolver works from. Writes always go to the store. */
+  read: () => Promise<T[]> = () => store.load(),
 ): Promise<boolean> {
   // The response wraps the list under its plural name ("playlists"), which is the
   // last path segment.
@@ -350,7 +394,7 @@ async function collection<T extends Identified>(
 
   if (c.pathname === base) {
     if (c.method === "GET") {
-      json(c.res, { [segment]: await store.load() });
+      json(c.res, { [segment]: await read() });
       return true;
     }
     if (c.method === "POST") {
@@ -358,6 +402,13 @@ async function collection<T extends Identified>(
       const record = body?.[key] as T | undefined;
       if (!record || typeof record !== "object" || typeof record.id !== "string" || !record.id) {
         error(c.res, `a ${key} with an id is required`, 400);
+        return true;
+      }
+      const listField = REQUIRED_LIST[key];
+      if (listField && !Array.isArray((record as Record<string, unknown>)[listField])) {
+        // The field is quoted rather than fitted into the sentence, which also
+        // sidesteps "a items"/"an outputIds".
+        error(c.res, `a ${key} needs an "${listField}" array`, 400);
         return true;
       }
       if (typeof record.name === "string") {

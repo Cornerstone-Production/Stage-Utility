@@ -73,9 +73,19 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
 
   const ctx = { pcoWindows: input.pcoWindows, liveServiceTypeId: input.liveServiceTypeId };
 
+  // A stored record whose list is missing or not a list is SKIPPED, here, once.
+  //
+  // Reaching into it instead threw inside the scheduler's catch, and the horizon
+  // then froze at its last good value for every screen in the building until a
+  // restart — a stale wall and one line in the log. The routes refuse such a
+  // record now, but a store can already hold one from a hand edit, an older
+  // build or a restored snapshot, so the resolver cannot assume the shape.
+  const groupsWithOutputs = input.groups.filter((g) => Array.isArray(g.outputIds));
+  const schedulesWithGroups = input.schedules.filter((s) => Array.isArray(s.groupIds));
+
   /** Precedence, for one output at one instant. See the spec's section 3.1. */
   const decide = (outputId: string, at: number): Decision => {
-    const groups = input.groups.filter((g) => g.outputIds.includes(outputId));
+    const groups = groupsWithOutputs.filter((g) => g.outputIds.includes(outputId));
     const groupIds = new Set(groups.map((g) => g.id));
 
     // 1. Override — the most recently started, which is "the last thing you
@@ -92,7 +102,7 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
     }
 
     // 2. Schedules, in list order.
-    for (const s of input.schedules) {
+    for (const s of schedulesWithGroups) {
       if (!s.enabled) continue;
       if (!s.groupIds.some((id) => groupIds.has(id))) continue;
       if (!windowActiveAt(s.window, at, input.tz, ctx)) continue;
@@ -113,7 +123,7 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
   /** Every instant inside the horizon at which any answer could change. */
   const boundaries = (from: number, to: number): number[] => {
     const set = new Set<number>();
-    for (const s of input.schedules) {
+    for (const s of schedulesWithGroups) {
       if (!s.enabled) continue;
       let cursor = from;
       // Bounded by MAX_ENTRIES so a window that reports a boundary it has
@@ -130,7 +140,7 @@ export function resolveSignage(input: ResolveInput): Record<string, SignageHoriz
 
   /** Just the group-default step of the precedence, for the trailing entry. */
   const defaultFor = (outputId: string): Decision => {
-    for (const g of input.groups) {
+    for (const g of groupsWithOutputs) {
       if (!g.outputIds.includes(outputId)) continue;
       const p = playable(g.defaultPlaylistId);
       if (p) return { playlist: p, reason: "default", reasonLabel: p.name, reasonId: g.id };

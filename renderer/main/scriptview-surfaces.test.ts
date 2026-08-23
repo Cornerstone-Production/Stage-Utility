@@ -23,8 +23,22 @@ import { EMBEDDABLE_VIEW_KINDS, isEmbeddableViewKind, isOfferableInEmbedPicker }
 import type { ViewKind } from "../../main/types/stage.js";
 
 /** Every kind a View can be — so "exactly these are embeddable" is checked
- *  against the real set rather than a list that can quietly fall behind. */
-const ALL_VIEW_KINDS: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "custom", "script", "spl-rundown"];
+ *  against the real set rather than a list that can quietly fall behind.
+ *
+ *  Written as a Record so the TYPE CHECKER demands every kind. As a plain
+ *  ViewKind[] a short list still compiles, and this one had already fallen a
+ *  kind behind: `signage` was added and never checked here, which is precisely
+ *  the drift the comment above claims to prevent. */
+const ALL_VIEW_KINDS = Object.keys({
+  slots: true,
+  dashboard: true,
+  stage: true,
+  transcription: true,
+  custom: true,
+  script: true,
+  "spl-rundown": true,
+  signage: true,
+} satisfies Record<ViewKind, true>) as ViewKind[];
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const read = (f: string) => fs.readFileSync(path.join(HERE, f), "utf8");

@@ -178,7 +178,43 @@ export async function deleteMedia(id: string): Promise<SignageMedia | null> {
 }
 
 /**
- * Read a stored file for serving.
+ * Locate a stored file, WITHOUT reading it.
+ *
+ * What the serving route uses, so a video is piped off disk instead of being
+ * held in memory. Buffering it meant a 200 MB clip became 200 MB of heap per
+ * request, and a wall of seven displays coming up together after a power cut
+ * asks for it seven times at once — a gigabyte on a Pi with two, over a file the
+ * kernel would happily have streamed.
+ *
+ * The NAME is the whole check and it runs before any lookup, so traversal is
+ * refused without consulting the manifest at all. Returns null rather than
+ * throwing: every caller is answering an HTTP request and wants a 404.
+ */
+export async function statMediaFile(
+  file: string,
+): Promise<{ path: string; mime: string; bytes: number } | null> {
+  if (!isMediaFileName(file)) return null;
+  const full = path.join(dir(), file);
+  let bytes: number;
+  try {
+    const st = await fs.stat(full);
+    if (!st.isFile()) return null;
+    bytes = st.size;
+  } catch {
+    return null;
+  }
+  const all = await listMedia().catch(() => [] as SignageMedia[]);
+  const rec = all.find((m) => m.file === file);
+  // Trust the manifest's mime over the extension where we have a record: it is
+  // what the uploader declared and what the allowlist was checked against.
+  return { path: full, mime: rec?.mime ?? mimeForExt(file), bytes };
+}
+
+/**
+ * Read a stored file whole.
+ *
+ * For the config snapshot, which needs the bytes to base64 them and only ever
+ * asks for files under its own size cap. Serving goes through statMediaFile.
  *
  * The NAME is the whole check and it runs before any lookup, so traversal is
  * refused without consulting the manifest at all. Returns null rather than
@@ -276,7 +312,7 @@ export async function pruneSignageMedia(): Promise<number> {
       signageMediaStore.load(),
       // Imported lazily: the playlists store does not otherwise need to be in
       // this module's import graph, and a cycle here would be silent.
-      import("./signage-playlists-store.js").then((m) => m.signagePlaylistsStore.load()),
+      import("./signage-playlists-store.js").then((m) => m.listPlaylists()),
     ]);
     const byId = new Map(all.map((m) => [m.id, m.file]));
     referenced = new Set(all.map((m) => m.file));

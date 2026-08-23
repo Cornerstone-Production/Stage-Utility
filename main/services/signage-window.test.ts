@@ -232,6 +232,30 @@ describe("the next moment a window's answer could change", () => {
     );
   });
 
+  test("a window that wrapped past midnight reports its end THIS morning", () => {
+    // The Thursday-night case, and it was wrong. Asked at Friday 01:00 — inside
+    // a window that opened Thursday 22:00 — the search began at Friday's local
+    // midnight, found no interval starting on a Friday, and answered with NEXT
+    // Thursday's opening. The horizon then carried one entry for a week, so a
+    // screen played Thursday night's playlist until the following Thursday.
+    //
+    // A wrapped window's closing edge belongs to the day it STARTED, which is
+    // the day the search skipped.
+    const w = { kind: "weekly", days: [4], start: "22:00", end: "02:00" } as const;
+    assert.equal(
+      nextBoundaryAfter(w, at("2026-08-21T06:00:00Z"), TZ, CTX), // Fri 01:00 CDT
+      at("2026-08-21T07:00:00Z"), // Fri 02:00 CDT — when it shuts
+    );
+  });
+
+  test("the same for a one-off that runs past midnight", () => {
+    const w = { kind: "once", date: "2026-08-20", start: "22:00", end: "02:00" } as const;
+    assert.equal(
+      nextBoundaryAfter(w, at("2026-08-21T06:00:00Z"), TZ, CTX), // Fri 01:00 CDT
+      at("2026-08-21T07:00:00Z"),
+    );
+  });
+
   test("a PCO window reports its SCHEDULED end, not a guess at when live stops", () => {
     // A live extension is not a predictable instant; the scheduler recomputes on
     // the live-state change instead of trying to time it.

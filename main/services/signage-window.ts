@@ -178,8 +178,10 @@ export function windowActiveAt(
   }
 }
 
-/** How far ahead to look for a boundary before giving up. A weekly window's next
- *  edge is at most 7 days out; 8 covers it with room for a DST-shifted day. */
+/** How many local days the boundary search visits. The walk starts YESTERDAY (a
+ *  wrapping window's closing edge belongs to the day it started), so 8 covers
+ *  yesterday, today and seven days ahead — a weekly window's next edge is at
+ *  most seven days out. */
 const SEARCH_DAYS = 8;
 
 /**
@@ -216,7 +218,18 @@ export function nextBoundaryAfter(
 
   // Walk local days rather than adding 24h, so a day that is 23 or 25 hours long
   // is still visited exactly once.
-  let day = startOfLocalDay(afterMs, tz);
+  //
+  // Starting YESTERDAY, not today. A window that wraps past midnight belongs to
+  // the day it STARTED — the same rule intervalOnDay and candidateIntervals
+  // follow — so at Friday 01:00, inside a Thursday 22:00-02:00 window, its
+  // closing edge lives on Thursday. Beginning at Friday's midnight skipped it
+  // and answered with next Thursday's OPENING instead, which put a single
+  // week-long entry in the horizon and left the Thursday-night playlist on the
+  // wall until the following Thursday.
+  //
+  // Costs nothing for a window that does not wrap: yesterday's edges are all at
+  // or before today's midnight, and every edge is filtered on `> afterMs`.
+  let day = startOfLocalDay(startOfLocalDay(afterMs, tz) - 3 * 3600_000, tz);
   for (let i = 0; i <= SEARCH_DAYS; i++) {
     const key = dateKey(day, tz);
     const inRange =

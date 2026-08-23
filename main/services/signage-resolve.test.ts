@@ -364,6 +364,30 @@ describe("the horizon itself", () => {
     assert.equal(now(r).playlist?.items[0].durationMs, 8000);
   });
 
+  test("a record missing the list it is built on does not stop the world", () => {
+    // A playlist with no `items`, a group with no `outputIds`, a schedule with
+    // no `groupIds`. Found by POSTing `{"playlist":{"id":"x"}}` to the live
+    // server: the route stored it, the resolver threw "playlist.items is not
+    // iterable" inside the scheduler's catch, and the horizon FROZE at its last
+    // good value — every wall in the building stuck on stale content, forever,
+    // with one line in the log.
+    //
+    // The route now refuses such a record, but a store can already hold one from
+    // a hand edit or an older build, so the resolver must survive it too. The
+    // right behaviour is the one unplayable playlists already get: fall through.
+    const r = run({
+      groups: [group("g1", ["out-1"], "empty"), { id: "g2", name: "g2", createdAt: "" }],
+      schedules: [
+        { id: "s0", name: "s0", enabled: true, playlistId: "weekend", window: ALL_DAY, createdAt: "" },
+        sched("s1", "empty", ["g1"], ALL_DAY),
+        sched("s2", "house", ["g1"], ALL_DAY),
+      ],
+      playlists: [{ id: "empty", name: "empty", defaultDurationMs: 8000, fit: "contain", transition: { kind: "cut", ms: 0 }, createdAt: "" }, pl("house")],
+    });
+    assert.equal(now(r).playlist?.id, "house", "the malformed records should have been skipped");
+    assert.equal(now(r).reason, "schedule");
+  });
+
   test("does not run away on a pathological schedule set", () => {
     // Twenty schedules whose windows all flip constantly must still produce a
     // bounded horizon rather than looping.

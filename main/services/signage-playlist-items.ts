@@ -43,6 +43,12 @@ export function resolveItemDurations(
   const byId = new Map(media.map((m) => [m.id, m]));
   const out: ResolvedItem[] = [];
 
+  // A playlist whose `items` is missing or not a list has nothing that can play,
+  // which is a case every caller already handles — an unplayable playlist falls
+  // through to the next precedence step. Iterating it instead threw inside the
+  // scheduler's catch and FROZE the horizon for every screen until a restart.
+  if (!Array.isArray(playlist.items)) return out;
+
   for (const item of playlist.items) {
     const m = byId.get(item.mediaId);
     if (!m) continue; // the file was deleted out from under this playlist

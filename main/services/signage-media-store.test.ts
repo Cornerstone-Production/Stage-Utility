@@ -27,7 +27,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-utility-signage-media
 process.env.STAGE_UTILITY_DATA = path.join(TMP, "data");
 process.env.HOME = path.join(TMP, "home");
 
-const { addMedia, listMedia, clampMeasured, deleteMedia, renameMedia, readMediaFile } =
+const { addMedia, listMedia, clampMeasured, deleteMedia, renameMedia, readMediaFile, statMediaFile } =
   await import("./signage-media-store.js");
 
 after(async () => {
@@ -171,10 +171,15 @@ describe("reading a file back", () => {
       "",
     ]) {
       assert.equal(await readMediaFile(bad), null, `${bad} was accepted`);
+      // statMediaFile is what the SERVING route calls. A guard that covered
+      // only the reader would leave the function actually exposed to the LAN
+      // unchecked — which is the half that matters.
+      assert.equal(await statMediaFile(bad), null, `${bad} was accepted by statMediaFile`);
     }
   });
 
   test("returns null for a well-formed name with no file behind it", async () => {
     assert.equal(await readMediaFile("aaaaaaaaaaaaaaaa.png"), null);
+    assert.equal(await statMediaFile("aaaaaaaaaaaaaaaa.png"), null);
   });
 });

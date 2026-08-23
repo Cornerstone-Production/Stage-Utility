@@ -47,7 +47,7 @@ describe("the new-view dialog offers every view kind", () => {
     // Named explicitly: these are the ones that actually went missing, and a
     // set-equality check alone would stay green if BOTH lists lost them.
     const order = orderedKinds(SRC);
-    for (const kind of ["stage", "spl-rundown", "slots", "dashboard", "transcription", "script", "custom"]) {
+    for (const kind of ["stage", "spl-rundown", "slots", "dashboard", "transcription", "script", "custom", "signage"]) {
       assert.ok(order.includes(kind), `"${kind}" is not offered by the new-view dialog`);
     }
   });

@@ -344,6 +344,28 @@ describe("playlists, groups and schedules", () => {
     assert.ok(!/[\r\n]/.test((r.json as { group: { name: string } }).group.name));
   });
 
+  test("a record without the list the resolver walks is refused", async () => {
+    // The poison pill. `{"playlist":{"id":"x"}}` used to be stored happily, and
+    // the moment anything pointed at it the resolver threw inside the
+    // scheduler's catch — freezing the horizon for EVERY screen at its last good
+    // value, until the server was restarted. Found by POSTing it at a live
+    // server and watching /api/signage/now go stale.
+    for (const [segment, key, field] of [
+      ["playlists", "playlist", "items"],
+      ["groups", "group", "outputIds"],
+      ["schedules", "schedule", "groupIds"],
+    ] as const) {
+      const missing = await save(segment, key, { id: `poison-${key}`, name: "poison" });
+      assert.equal(missing.status, 400, `a ${key} with no ${field} was accepted`);
+
+      // Not an array is the same refusal — JSON.parse is happy to hand over a
+      // string, and a string is iterable, so this one would have got through a
+      // truthiness check and produced items of single characters.
+      const wrongType = await save(segment, key, { id: `poison-${key}`, name: "poison", [field]: "nope" });
+      assert.equal(wrongType.status, 400, `a ${key} whose ${field} is a string was accepted`);
+    }
+  });
+
   test("each collection is separate", async () => {
     // Asserted on the ids each collection holds rather than on counts: the
     // helper is generic, and the failure worth catching is one collection's
