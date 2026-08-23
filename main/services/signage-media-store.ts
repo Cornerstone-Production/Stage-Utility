@@ -216,6 +216,39 @@ function mimeForExt(file: string): string {
 }
 
 /**
+ * Write media bytes that arrived in a config snapshot.
+ *
+ * The name is VERIFIED against the bytes rather than trusted: a bundle is a file
+ * off somebody's laptop, and a name disagreeing with its contents would either
+ * overwrite an unrelated file or plant one under a name a playlist already
+ * points at.
+ *
+ * Returns true when a new file was written, false when those exact bytes were
+ * already here — which is how a shared graphic collapses to one file.
+ */
+export async function restoreMediaFile(file: string, bytes: Buffer): Promise<boolean> {
+  const m = /^([0-9a-f]{16})\.([a-z0-9]+)$/.exec(file);
+  if (!m) throw new Error(`not a signage media name: ${file}`);
+  if (!SIGNAGE_EXTS.includes(m[2])) throw new Error(`unsupported signage media type: ${m[2]}`);
+  if (bytes.length === 0) throw new Error("empty media file");
+
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+  if (hash !== m[1]) throw new Error(`${file} does not match its contents`);
+
+  const d = dir();
+  await fs.mkdir(d, { recursive: true });
+  try {
+    // wx: same hash means same bytes, so there is nothing to write and nothing
+    // to overwrite.
+    await fs.writeFile(path.join(d, file), bytes, { flag: "wx" });
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw err;
+  }
+}
+
+/**
  * Don't reap a file newer than this.
  *
  * An upload can exist on disk and be referenced only by an unsaved playlist

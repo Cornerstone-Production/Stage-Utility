@@ -19,6 +19,12 @@ import * as path from "node:path";
 import { APP_ROOT } from "./app-root.js";
 
 import { getUserDataPath } from "./app-paths.js";
+import {
+  SIGNAGE_MEDIA_DIR,
+  readMediaFile,
+  restoreMediaFile,
+  signageMediaStore,
+} from "./signage-media-store.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { listImages, readImage, restoreImage } from "./image-files.js";
 import { configFilenames, storesOfClass } from "./stores.js";
@@ -53,7 +59,29 @@ export function runtimeFiles(): string[] {
 
 /** Image directories carried in a snapshot. Allowlisted for the same reason
  *  CONFIG_FILES is: it bounds what an applied bundle can write. */
+// Signage media is deliberately NOT here: it is enumerated from its own
+// manifest in readImages, because image-files knows only image extensions and a
+// video is invisible to it. It IS allowlisted for restore below.
 const IMAGE_DIRS = [BRANDING_IMAGE_DIR, "layout-images"] as const;
+
+/**
+ * Per-file ceiling for signage media in a snapshot.
+ *
+ * Every graphic rides along; video does not. A media library is the one config
+ * store that can reach gigabytes, and a 4 GB snapshot chokes the download, the
+ * upload and the SD card it is written to. 12 MB is the image upload cap, so the
+ * rule reads as "graphics are backed up" without being a second number to keep
+ * in step.
+ *
+ * The rule is SIZE, not type: an oversized image is skipped too, and whatever is
+ * skipped is named in the snapshot so a restore can say what did not come back.
+ */
+export const SIGNAGE_SNAPSHOT_MAX_FILE_BYTES = 12 * 1024 * 1024;
+
+/** Does this signage file ride along in a snapshot? */
+export function shouldSnapshotMedia(o: { bytes: number }): boolean {
+  return o.bytes <= SIGNAGE_SNAPSHOT_MAX_FILE_BYTES;
+}
 
 const SNAPSHOT_KIND = "stage-utility-config";
 const SNAPSHOT_VERSION = 1;
@@ -76,6 +104,14 @@ export interface ConfigSnapshot {
    *  files would have quietly dropped them from every backup. Layout images were
    *  never captured at all — this fixes that too. Absent on older snapshots. */
   images?: Record<string, string>;
+  /**
+   * Signage media too large to carry, by name and size.
+   *
+   * Present so a restore can SAY what did not come back rather than leaving the
+   * operator to discover it when a screen goes blank. Absent when nothing was
+   * skipped, and on snapshots taken before this existed.
+   */
+  skippedMedia?: { file: string; bytes: number }[];
 }
 
 /** Lightweight metadata for listing saved snapshots (no file contents). */
@@ -144,15 +180,36 @@ class ConfigSnapshotService {
   }
 
   /** Every uploaded image, as `<dir>/<file>` → base64. */
-  private async readImages(): Promise<Record<string, string>> {
-    const out: Record<string, string> = {};
+  private async readImages(): Promise<{
+    images: Record<string, string>;
+    skipped: { file: string; bytes: number }[];
+  }> {
+    const images: Record<string, string> = {};
+    const skipped: { file: string; bytes: number }[] = [];
+
     for (const dir of IMAGE_DIRS) {
       for (const file of await listImages(dir)) {
         const img = await readImage(dir, file);
-        if (img) out[`${dir}/${file}`] = img.data.toString("base64");
+        if (img) images[`${dir}/${file}`] = img.data.toString("base64");
       }
     }
-    return out;
+
+    // Signage media is enumerated from its OWN manifest rather than through
+    // image-files, which knows only image extensions — a .mp4 is invisible to
+    // it. Going through it meant every video was dropped from a backup by an
+    // unrelated filter, before the size rule below could see it, and therefore
+    // never reported. Silently absent from a backup is the failure this project
+    // has been bitten by more than once.
+    for (const m of await signageMediaStore.load()) {
+      if (!shouldSnapshotMedia({ bytes: m.bytes })) {
+        skipped.push({ file: m.name || m.file, bytes: m.bytes });
+        continue;
+      }
+      const found = await readMediaFile(m.file);
+      if (found) images[`${SIGNAGE_MEDIA_DIR}/${m.file}`] = found.data.toString("base64");
+    }
+
+    return { images, skipped };
   }
 
   /** Build a snapshot of the live config (secrets excluded). */
@@ -171,9 +228,12 @@ class ConfigSnapshotService {
       const v = await this.readFile(f);
       if (v !== undefined) files[f] = v;
     }
-    const images = await this.readImages();
+    const { images, skipped } = await this.readImages();
     return {
       ...(Object.keys(images).length ? { images } : {}),
+      // Named rather than silently absent. A backup that quietly leaves out a
+      // 168 MB video is a backup an operator believes is complete.
+      ...(skipped.length ? { skippedMedia: skipped } : {}),
       kind: SNAPSHOT_KIND,
       version: SNAPSHOT_VERSION,
       appVersion: appVersion(),
@@ -239,6 +299,19 @@ class ConfigSnapshotService {
       const slash = ref.indexOf("/");
       const dir = slash > 0 ? ref.slice(0, slash) : "";
       const file = slash > 0 ? ref.slice(slash + 1) : "";
+      // Signage media has its own verified writer: image-files knows only image
+      // extensions, so routing a video through it would drop it silently on the
+      // way back in, exactly as it did on the way out.
+      if (dir === SIGNAGE_MEDIA_DIR) {
+        try {
+          if (await restoreMediaFile(file, Buffer.from(b64, "base64"))) applied.push(ref);
+        } catch (err) {
+          // Reported, not swallowed: a media file that failed to restore leaves
+          // a playlist pointing at nothing, and the operator has to know which.
+          console.error(`[config-snapshot] could not restore ${ref}:`, err);
+        }
+        continue;
+      }
       if (!(IMAGE_DIRS as readonly string[]).includes(dir)) continue;
       if (await restoreImage(dir, file, Buffer.from(b64, "base64"))) applied.push(ref);
     }

@@ -13,6 +13,7 @@
 
 import type { DataStore } from "../data-store.js";
 import { errorMessage } from "../errors.js";
+import { andList, groupUsage, mediaUsage, playlistUsage } from "../signage-integrity.js";
 import { signageGroupsStore } from "../signage-groups-store.js";
 import { clearOverride, listOverrides, setOverride } from "../signage-overrides-store.js";
 import { signagePlaylistsStore } from "../signage-playlists-store.js";
@@ -160,9 +161,20 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (c.method === "DELETE") {
+      // Media does NOT refuse. A file removed from the library should go; what
+      // must not happen is the operator discovering later which playlists lost
+      // an item, so the affected playlists are returned and the item is taken
+      // out of them here rather than left dangling.
+      const affected = mediaUsage(id, await signagePlaylistsStore.load());
       const media = await deleteMedia(id);
       if (!media) return error(c.res, "no such media", 404);
-      return json(c.res, { media });
+      if (affected.length) {
+        await signagePlaylistsStore.update((all) =>
+          all.map((p) => ({ ...p, items: p.items.filter((i) => i.mediaId !== id) })),
+        );
+        await signageScheduler.recompute();
+      }
+      return json(c.res, { media, removedFrom: affected });
     }
   }
 
@@ -256,6 +268,31 @@ export async function signageRoutes(c: RouteCtx): Promise<void> {
   }
 }
 
+/**
+ * Why this record cannot be deleted, in words an operator can act on.
+ *
+ * Empty when it is free to go. Only playlists and groups can be blocked; media
+ * is deleted and reported (see the media DELETE arm above).
+ */
+async function deleteBlockers(key: string, id: string): Promise<string[]> {
+  if (key === "playlist") {
+    const [schedules, groups] = await Promise.all([
+      signageSchedulesStore.load(),
+      signageGroupsStore.load(),
+    ]);
+    const u = playlistUsage(id, schedules, groups);
+    const out: string[] = [];
+    if (u.schedules.length) out.push(`it is scheduled by ${andList(u.schedules)}`);
+    if (u.groups.length) out.push(`it is the default playlist for ${andList(u.groups)}`);
+    return out;
+  }
+  if (key === "group") {
+    const used = groupUsage(id, await signageSchedulesStore.load());
+    return used.length ? [`it is targeted by ${andList(used)}`] : [];
+  }
+  return [];
+}
+
 /** A stored record with an id — everything the collection helper handles. */
 interface Identified {
   id: string;
@@ -315,6 +352,16 @@ async function collection<T extends Identified>(
   const item = new RegExp(`^${base}/([^/]+)$`).exec(c.pathname);
   if (item && c.method === "DELETE") {
     const id = decodeURIComponent(item[1]);
+
+    // Refused, and NAMED. The same rule the app already applies to a view that
+    // screens are showing: "in use by 1 schedule" leaves the operator hunting,
+    // and what they are hunting for is why a wall went blank. 409 rather than
+    // 400 - it is a conflict with the current state, not a malformed request.
+    const blockers = await deleteBlockers(key, id);
+    if (blockers.length) {
+      error(c.res, `${blockers.join("; ")}. Change ${blockers.length > 1 ? "those" : "that"} first.`, 409);
+      return true;
+    }
     let removed: T | null = null;
     const remaining = await store.update((all) =>
       all.filter((r) => {

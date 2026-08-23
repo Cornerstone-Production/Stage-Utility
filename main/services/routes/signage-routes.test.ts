@@ -280,6 +280,58 @@ describe("playlists, groups and schedules", () => {
     assert.equal(r.status, 400);
   });
 
+  test("REFUSES to delete a playlist a schedule uses, and names it", async () => {
+    // The same rule the app applies to a view screens are showing. A count
+    // rather than a name leaves the operator hunting for why a wall went blank.
+    await save("playlists", "playlist", {
+      id: "p-used", name: "Weekend", items: [], defaultDurationMs: 8000,
+      fit: "contain", transition: { kind: "cut", ms: 0 }, createdAt: "",
+    });
+    await save("schedules", "schedule", {
+      id: "s-uses-p", name: "Weekend mornings", enabled: true, groupIds: [],
+      playlistId: "p-used", window: { kind: "always" }, createdAt: "",
+    });
+    const r = await callRoute(signageRoutes, "/api/signage/playlists/p-used", { method: "DELETE" });
+    assert.equal(r.status, 409, "a playlist in use was deleted");
+    assert.match(String((r.json as { error: string }).error), /Weekend mornings/);
+  });
+
+  test("REFUSES to delete a playlist that is only a group's default", async () => {
+    // Nothing in the schedule list points at it, so a check that walked only
+    // schedules would report it free - and deleting it silently blanks that
+    // group, including on a Pi that boots with no server.
+    await save("playlists", "playlist", {
+      id: "p-default", name: "House loop", items: [], defaultDurationMs: 8000,
+      fit: "contain", transition: { kind: "cut", ms: 0 }, createdAt: "",
+    });
+    await save("groups", "group", {
+      id: "g-default", name: "Cafe", outputIds: [], defaultPlaylistId: "p-default", createdAt: "",
+    });
+    const r = await callRoute(signageRoutes, "/api/signage/playlists/p-default", { method: "DELETE" });
+    assert.equal(r.status, 409);
+    assert.match(String((r.json as { error: string }).error), /Cafe/);
+  });
+
+  test("REFUSES to delete a group a schedule targets, and names it", async () => {
+    await save("groups", "group", { id: "g-used", name: "Foyer", outputIds: [], createdAt: "" });
+    await save("schedules", "schedule", {
+      id: "s-uses-g", name: "Office hours", enabled: true, groupIds: ["g-used"],
+      playlistId: "p-used", window: { kind: "always" }, createdAt: "",
+    });
+    const r = await callRoute(signageRoutes, "/api/signage/groups/g-used", { method: "DELETE" });
+    assert.equal(r.status, 409);
+    assert.match(String((r.json as { error: string }).error), /Office hours/);
+  });
+
+  test("allows deleting one nothing uses", async () => {
+    await save("playlists", "playlist", {
+      id: "p-free", name: "Spare", items: [], defaultDurationMs: 8000,
+      fit: "contain", transition: { kind: "cut", ms: 0 }, createdAt: "",
+    });
+    const r = await callRoute(signageRoutes, "/api/signage/playlists/p-free", { method: "DELETE" });
+    assert.equal(r.status, 200);
+  });
+
   test("deleting something that is gone is a 404", async () => {
     const r = await callRoute(signageRoutes, "/api/signage/groups/no-such-id", { method: "DELETE" });
     assert.equal(r.status, 404);
@@ -293,9 +345,15 @@ describe("playlists, groups and schedules", () => {
   });
 
   test("each collection is separate", async () => {
+    // Asserted on the ids each collection holds rather than on counts: the
+    // helper is generic, and the failure worth catching is one collection's
+    // records landing in another's store.
     const groups = await callRoute(signageRoutes, "/api/signage/groups");
     const playlists = await callRoute(signageRoutes, "/api/signage/playlists");
-    assert.equal((groups.json as { groups: unknown[] }).groups.length, 1);
-    assert.equal((playlists.json as { playlists: unknown[] }).playlists.length, 0);
+    const groupIds = (groups.json as { groups: { id: string }[] }).groups.map((g) => g.id);
+    const playlistIds = (playlists.json as { playlists: { id: string }[] }).playlists.map((p) => p.id);
+    assert.ok(groupIds.includes("g1"), "a saved group is missing from the groups store");
+    assert.ok(!playlistIds.includes("g1"), "a group leaked into the playlists store");
+    assert.equal(groupIds.filter((id) => playlistIds.includes(id)).length, 0);
   });
 });
