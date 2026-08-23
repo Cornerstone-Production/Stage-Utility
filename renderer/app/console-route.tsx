@@ -110,7 +110,7 @@ export function ConsoleRoute() {
       onPointerLeave={() => setNearCorner(false)}
     >
       {/* The live console. `shell` context: controls fire, drill-down works.
-          `ground="app"` so the canvas is the same material as the page. */}
+          The canvas brings its own ground — see LayoutRenderer. */}
       <div className="min-h-0 flex-1">
         {view.layout ? (
           <LayoutRenderer
@@ -118,7 +118,6 @@ export function ConsoleRoute() {
             ndiSource={view.ndiSource ?? null}
             interactive={capabilityLive("shell", "control")}
             surface="console"
-            ground="app"
           />
         ) : (
           <EmptyState
