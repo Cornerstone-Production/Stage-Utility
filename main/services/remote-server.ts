@@ -42,6 +42,7 @@ import { attendanceRecorder } from "./attendance-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { stageController } from "./stage-controller.js";
+import { WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
 import { updater } from "./updater.js";
 import { SERVER_VERSION } from "./server-version.js";
 
@@ -885,6 +886,20 @@ export class RemoteServer {
       sseWrite(res, "companion:signals", signalStore.all());
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
+      // Wireless telemetry only broadcasts when a reading changes, and a pack
+      // sitting in a drawer changes nothing for days — so a display opening
+      // mid-week would show dashes until somebody keyed a mic.
+      // The LITERAL, not the constant: hydrated-channels.test.ts reads this file
+      // as text to check the hydrate list against the replay list, and its regex
+      // can only see a quoted channel name — passing the constant failed it,
+      // correctly, because as far as the scan could tell nothing hydrated this
+      // channel at all. `satisfies` keeps the two in step: change the constant
+      // and this line stops compiling.
+      //
+      // Do not write an example of that regex's shape in a comment here. Doing
+      // so once made the scan find a channel named by prose, which is the same
+      // trap from the other side.
+      sseWrite(res, "wireless:channels" satisfies typeof WIRELESS_STATUS_CHANNEL, stageController.wirelessChannelStatuses());
       sseWrite(res, "displays:presence", presenceSnapshot());
       sseClients.add(res);
       // Correlate this stream to its client id so POST /api/events/subscribe can set

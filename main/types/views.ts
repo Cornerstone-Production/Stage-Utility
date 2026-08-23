@@ -437,11 +437,13 @@ export type LayoutObjectConfig =
     }
   // A compact wireless fleet summary computed from all configured connections'
   // channels: `showOnline` → "online/total", `showBattery` → the lowest live
-  // battery % (colored). Optional `label` prefix when `showLabel`.
+  // battery % (colored), `showRuntime` → the shortest runtime remaining across
+  // the fleet. Optional `label` prefix when `showLabel`.
   | {
       type: "wireless-summary";
       showOnline?: boolean;
       showBattery?: boolean;
+      showRuntime?: boolean;
       label?: string;
       showLabel?: boolean;
     }
@@ -451,7 +453,11 @@ export type LayoutObjectConfig =
   | {
       type: "wireless-channel";
       channelId?: string | null;
-      show?: { rf?: boolean; battery?: boolean; frequency?: boolean; audio?: boolean };
+      // `runtime` is the pack's time remaining, the figure Wireless Workbench
+      // leads with. Independent of `battery` on purpose: a 60% pack with 40
+      // minutes left and a 60% pack with three hours left are the same
+      // percentage and a different decision.
+      show?: { rf?: boolean; battery?: boolean; runtime?: boolean; frequency?: boolean; audio?: boolean };
       showLabel?: boolean;
     }
   // A live people count from the SenSource Vea integration ("people:count"

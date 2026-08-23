@@ -687,7 +687,10 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     label: "Streaming status",
     blurb: "Whether anything is going out, and for how long",
     group: "Status",
-    config: () => ({ type: "stream-status", platform: "any", showElapsed: true }),
+    // fillWhenLive stated rather than left to the default, exactly as obs-status
+    // states fillWhenRecording — the two sit beside each other on a wall and the
+    // pair of defaults disagreeing is what made them look like different widgets.
+    config: () => ({ type: "stream-status", platform: "any", showElapsed: true, fillWhenLive: true }),
     // A pill like obs-status: this one goes on a WALL, where a bare number has
     // nothing to say what it is. The three Home ones stay bare, because Home's
     // grid draws their frame.

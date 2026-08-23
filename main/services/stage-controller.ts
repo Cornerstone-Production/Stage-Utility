@@ -15,7 +15,7 @@ import { scrub } from "./scrub.js";
 import { hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
 
 import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
-import type { DeviceStatus } from "../types/devices.js";
+import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
@@ -2417,9 +2417,14 @@ export class StageController {
       // Skip the expensive re-resolve + full-state broadcast when no display is
       // watching (idle). Mark dirty so the next connecting client gets fresh state
       // via ensureResolvedFresh() before hydration.
-      if (channelHasSubscribers("stage:state-changed") || channelHasSubscribers("slots:devices")) {
+      if (
+        channelHasSubscribers("stage:state-changed") ||
+        channelHasSubscribers("slots:devices") ||
+        channelHasSubscribers(WIRELESS_STATUS_CHANNEL)
+      ) {
         this.recomputeResolved();
         this.broadcastDevices();
+        this.broadcastWirelessChannels();
       } else {
         this.deviceStatusDirty = true;
       }
@@ -2434,6 +2439,42 @@ export class StageController {
     this.deviceStatusDirty = false;
     this.recomputeResolved();
   }
+
+  /**
+   * Every wireless RF channel's live telemetry, for the wireless widgets.
+   *
+   * They used to read `/api/integrations/wireless/channels`, which returns
+   * `{id, label}` for a picker — no battery, no RF, no `channelId`. The hook
+   * declared the result as `DeviceStatus[]` and nothing complained, so
+   * `d.online` was undefined on every row: the summary counted zero of N online
+   * for good, and a channel tile that had been given a channel found no match
+   * and drew a dash. Both widgets shipped reading fields the endpoint has never
+   * sent.
+   *
+   * Chargers are excluded. A bay is not a mic: an empty one would drag "lowest
+   * battery" to zero and cry wolf, and a shelf of docked spares would pad the
+   * online count. `charger-battery` is the widget for those.
+   */
+  wirelessChannelStatuses(): DeviceStatus[] {
+    return [...this.deviceStatuses.values()]
+      .filter((d) => d.deviceType !== "charger")
+      .sort((a, b) => a.channelId.localeCompare(b.channelId));
+  }
+
+  /** Push wireless telemetry, on change and only while something is watching. */
+  private broadcastWirelessChannels(): void {
+    if (!channelHasSubscribers(WIRELESS_STATUS_CHANNEL)) return;
+    const channels = this.wirelessChannelStatuses();
+    // `updatedAt` moves on every sample even when nothing an operator can see
+    // did, so it is excluded from the comparison — otherwise "broadcast on
+    // change" would broadcast several times a second, for ever.
+    const sig = JSON.stringify(channels.map(({ updatedAt: _updatedAt, ...rest }) => rest));
+    if (sig === this.lastWirelessSig) return;
+    this.lastWirelessSig = sig;
+    broadcast(WIRELESS_STATUS_CHANNEL, channels);
+  }
+
+  private lastWirelessSig: string | null = null;
 
   /** Cancel any pending coalesced device-status broadcast (used on shutdown). */
   stopDeviceStatusUpdates(): void {

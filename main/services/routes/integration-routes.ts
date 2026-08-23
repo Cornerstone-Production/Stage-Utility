@@ -9,6 +9,7 @@ import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import { integrationManager } from "../integration-manager.js";
 import { deviceManager } from "../device-manager.js";
+import { stageController } from "../stage-controller.js";
 import { wirelessManager } from "../wireless-manager.js";
 import { oscManager } from "../osc-manager.js";
 
@@ -23,9 +24,20 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // The PICKER list: `{id, label}`, one row per configured channel, whether or
+    // not it has ever reported. Settings and the slots editor bind against this.
     if (method === "GET" && pathname === "/api/integrations/wireless/channels") {
       const channels = await deviceManager.listChannels();
       json(res, channels);
+      return;
+    }
+
+    // The TELEMETRY list: full DeviceStatus per RF channel, for the widgets. A
+    // separate route rather than a shape change, because the two answer
+    // different questions — the picker must list a channel that is offline, and
+    // this one can only report what has actually been heard from.
+    if (method === "GET" && pathname === "/api/integrations/wireless/statuses") {
+      json(res, stageController.wirelessChannelStatuses());
       return;
     }
 

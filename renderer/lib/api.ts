@@ -636,8 +636,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>(`/api/wireless/connections/${encodeURIComponent(id)}/test`);
     }
 
+    // The picker list (id + label, including channels that have never reported).
     case "wireless:listChannels":
       return apiFetch<T>("/api/integrations/wireless/channels");
+
+    // Live telemetry per channel. Deliberately NOT the same call as the picker —
+    // see use-wireless-channels.ts for what conflating them cost.
+    case "wireless:channelStatuses":
+      return apiFetch<T>("/api/integrations/wireless/statuses");
 
     case "wireless:getMeterRate":
       return apiFetch<T>("/api/wireless/meter-rate");

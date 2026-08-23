@@ -15,6 +15,15 @@ export interface WirelessConnection {
   config: Record<string, unknown>;
 }
 
+/**
+ * The SSE channel carrying live per-channel wireless telemetry.
+ *
+ * Named here rather than at either end so the server that broadcasts it and the
+ * hook that subscribes cannot drift apart on a string literal — which is how
+ * the wireless widgets ended up pointed at a picker endpoint in the first place.
+ */
+export const WIRELESS_STATUS_CHANNEL = "wireless:channels";
+
 export interface DeviceStatus {
   channelId: string;
   name: string | null;
@@ -23,6 +32,13 @@ export interface DeviceStatus {
   rfBars: number | null;
   rfLevelDbm: number | null;
   battery: number | null;
+  /** Battery runtime remaining, in whole minutes, when the device computes one.
+   *  Percentage answers "how full"; this answers "will it last the service",
+   *  which is the question Wireless Workbench puts on screen and the one an
+   *  operator is actually asking. Null where the gear does not report it — a
+   *  charge percentage is NOT a substitute, because runtime depends on the pack
+   *  and the transmit power. */
+  batteryMinutes: number | null;
   charging: boolean | null;
   frequencyLabel: string | null;
   audioLevel: number | null;

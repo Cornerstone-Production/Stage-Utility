@@ -87,7 +87,11 @@ const SPECS: {
   { key: "showElapsed", label: "Elapsed time", fallback: true },
   { key: "warnStates", label: "Colour on warning", fallback: true },
   { key: "hideWhenIdle", label: "Hide when idle", fallback: false },
-  { key: "fillWhenLive", label: "Fill the card when live", fallback: false },
+  // `true` to agree with the renderer. Home draws these cards as Stats and
+  // ignores the setting, but the SAME object on a wall is filled unless this is
+  // explicitly off — a tick reading "unfilled" for a widget that fills would be
+  // the menu lying about the config it writes.
+  { key: "fillWhenLive", label: "Fill the card when live", fallback: true },
   { key: "fillWhenRecording", label: "Fill the card when recording", fallback: true },
 ];
 

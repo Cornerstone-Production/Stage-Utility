@@ -687,6 +687,7 @@ export function Inspector({
         <>
           <RowSwitch label="Online count" checked={c.showOnline ?? true} onChange={(v) => onConfig({ ...c, showOnline: v })} />
           <RowSwitch label="Lowest battery" checked={c.showBattery ?? true} onChange={(v) => onConfig({ ...c, showBattery: v })} />
+          <RowSwitch label="Time remaining" hint="The shortest runtime left across the fleet — the pack that runs out first. Only gear that reports a runtime counts; a dash means none does." checked={c.showRuntime ?? false} onChange={(v) => onConfig({ ...c, showRuntime: v })} />
           <RowSwitch label="Show label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
           {(c.showLabel ?? false) && (
             <RowText label="Label" value={c.label ?? ""} placeholder="Mics" onChange={(v) => onConfig({ ...c, label: v })} />
@@ -706,6 +707,7 @@ export function Inspector({
           </Row>
           <RowSwitch label="RF signal" checked={c.show?.rf ?? true} onChange={(v) => onConfig({ ...c, show: { ...c.show, rf: v } })} />
           <RowSwitch label="Battery %" checked={c.show?.battery ?? true} onChange={(v) => onConfig({ ...c, show: { ...c.show, battery: v } })} />
+          <RowSwitch label="Time remaining" hint="Runtime left on the pack, the way Wireless Workbench shows it. Turn Battery % off to make it the headline figure. Shure AD and ULX-D report it; a dash means this receiver does not." checked={c.show?.runtime ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, runtime: v } })} />
           <RowSwitch label="Frequency" checked={c.show?.frequency ?? true} onChange={(v) => onConfig({ ...c, show: { ...c.show, frequency: v } })} />
           <RowSwitch label="Audio level" checked={c.show?.audio ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, audio: v } })} />
           <RowSwitch label="Show channel name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
@@ -916,7 +918,7 @@ export function Inspector({
           <RowSwitch
             label="Fill green when live"
             hint="Off colours the word. On paints the whole widget — a signal that carries across a room."
-            checked={c.fillWhenLive ?? false}
+            checked={c.fillWhenLive ?? true}
             onChange={(v) => onConfig({ ...c, fillWhenLive: v })}
           />
           <RowSwitch

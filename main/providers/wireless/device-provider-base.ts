@@ -36,6 +36,8 @@ export interface ChannelState {
   rfBars: number | null;
   rfLevelDbm: number | null;
   battery: number | null;
+  /** Runtime remaining in whole minutes, where the gear computes one. */
+  batteryMinutes: number | null;
   charging: boolean | null;
   frequencyLabel: string | null;
   audioLevel: number | null;
@@ -58,6 +60,7 @@ export function blankChannel(
     rfBars: null,
     rfLevelDbm: null,
     battery: null,
+    batteryMinutes: null,
     charging: null,
     frequencyLabel: null,
     audioLevel: null,

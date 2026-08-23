@@ -1,18 +1,29 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { invoke, onNotification } from "../lib/api";
+import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "@main/types/devices";
 
 /**
- * Flat list of every wireless channel across all configured connections (the
- * same data the slots bind to). Hydrates once and refetches whenever the
- * connection set changes (`wireless:connections-changed`). Backs the "Wireless
- * summary" layout object (mics online / lowest battery).
+ * Live telemetry for every wireless RF channel — RF bars, battery, runtime,
+ * frequency, audio — behind the "Wireless summary" and "Wireless channel"
+ * widgets and the editor's channel picker.
+ *
+ * It used to fetch `wireless:listChannels`, which is the PICKER endpoint and
+ * answers `{id, label}`. This hook declared that as `DeviceStatus[]` and the
+ * type checker had nothing to say, so every field the widgets read was
+ * undefined: the summary reported 0 of N online for good, and a channel tile
+ * with a channel chosen matched nothing and drew a dash. The lesson is in the
+ * function name — one endpoint listing what EXISTS, another reporting what is
+ * HAPPENING, and never the two through the same call.
+ *
+ * Chargers are not here; `charger-battery` is their widget. See
+ * `wirelessChannelStatuses` for why mixing them poisons both figures.
  */
 export function useWirelessChannels(enabled = true): DeviceStatus[] {
   const [channels, setChannels] = useState<DeviceStatus[]>([]);
 
   const load = useCallback(() => {
-    invoke<DeviceStatus[]>("wireless:listChannels")
+    invoke<DeviceStatus[]>("wireless:channelStatuses")
       .then((c) => setChannels(c ?? []))
       .catch(() => {
         /* not configured yet */
@@ -24,6 +35,19 @@ export function useWirelessChannels(enabled = true): DeviceStatus[] {
     load();
   }, [load, enabled]);
 
+  // The live path. Telemetry arrives coalesced and only on change, so this is
+  // cheap on a quiet week and current during a service; the fetch above is only
+  // the first paint before the first broadcast lands.
+  useEffect(() => {
+    if (!enabled) return;
+    return onNotification(WIRELESS_STATUS_CHANNEL, (p) => {
+      if (Array.isArray(p)) setChannels(p as DeviceStatus[]);
+    });
+  }, [enabled]);
+
+  // Adding or removing a connection changes which channels exist at all, which
+  // no telemetry broadcast will report — a removed receiver simply stops
+  // sending.
   useEffect(() => {
     if (!enabled) return;
     return onNotification("wireless:connections-changed", () => load());

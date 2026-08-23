@@ -39,6 +39,10 @@ export const HYDRATED_CHANNELS = [
   "companion:signals",
   "people:count",
   "displays:presence",
+  // Wireless telemetry. A pack in a drawer reports the same numbers for days, so
+  // "broadcast on change" leaves a late subscriber blank indefinitely — exactly
+  // the case this list exists for.
+  "wireless:channels",
 ] as const;
 
 export const HYDRATED_SET: ReadonlySet<string> = new Set<string>(HYDRATED_CHANNELS);
