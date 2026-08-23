@@ -130,6 +130,43 @@ describe("a transition, mid-flight", () => {
     const c = draw(entryWith(items, CROSSFADE), 8300);
     assert.equal(c.querySelectorAll("img").length, 1, "a per-item cut still drew two layers");
   });
+
+  test("hands the fade to the compositor rather than stepping it", () => {
+    // The choppiness, in one assertion. The player is a pure function of a clock
+    // that ticks every 100ms, so a 600ms crossfade interpolated in the render
+    // was six opacity steps — reported from a wall as "choppy and sucks".
+    const c = draw(entryWith(TWO, CROSSFADE), 8300);
+    const layers = [...c.querySelectorAll("img")];
+    const names = layers.map((l) => (l as HTMLElement).style.animationName).sort();
+    assert.deepEqual(names, ["signage-fade-in", "signage-fade-out"]);
+    for (const l of layers) {
+      assert.equal((l as HTMLElement).style.animationDuration, "600ms");
+    }
+  });
+
+  test("and its declaration does not change between ticks", () => {
+    // What keeps that fade smooth once it has started. Mutating an animation
+    // property on a running animation RESTARTS it, so a style that varied with
+    // the clock would trade six steps for a stutter ten times a second.
+    const styleAt = (nowMs: number) =>
+      [...draw(entryWith(TWO, CROSSFADE), nowMs).querySelectorAll("img")]
+        .map((l) => (l as HTMLElement).getAttribute("style"))
+        .sort();
+
+    // Every tick across the 600ms crossfade that starts at 8000.
+    const first = styleAt(8100);
+    for (let t = 8100; t < 8600; t += 100) {
+      assert.deepEqual(styleAt(t), first, `the layer style changed at ${t}ms into the transition`);
+    }
+  });
+
+  test("stops declaring an animation once the transition is over", () => {
+    // An animation left on a layer that is simply sitting there keeps it on its
+    // own compositor surface for the whole eight seconds it is on screen.
+    const c = draw(entryWith(TWO, CROSSFADE), 9000);
+    const layer = c.querySelector("img") as HTMLElement;
+    assert.equal(layer.style.animationName, "", "a still graphic is still animating");
+  });
 });
 
 describe("video", () => {

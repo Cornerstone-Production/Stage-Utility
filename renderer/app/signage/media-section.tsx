@@ -19,6 +19,16 @@ import { invoke } from "../../lib/api";
 import { size } from "./format";
 import { uploadMedia } from "./use-signage-config";
 
+/** The panel nearly every wall screen is. Not a preference — it is the size a
+ *  graphic has to reach before it stops being upscaled on arrival. */
+const PANEL_W = 1920;
+const PANEL_H = 1080;
+
+/** Will this be blown up to fill a normal screen? */
+function belowPanel(m: SignageMedia): boolean {
+  return m.w < PANEL_W || m.h < PANEL_H;
+}
+
 function duration(ms: number): string {
   const total = Math.round(ms / 1000);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
@@ -223,9 +233,23 @@ export function MediaSection({
                   </button>
                 )}
                 <span className="text-caption2 text-fg-subtle">
-                  {m.w} × {m.h} · {size(m.bytes)}
+                  <span className={belowPanel(m) ? "text-amber-11" : undefined}>
+                    {m.w} × {m.h}
+                  </span>
+                  {" · "}
+                  {size(m.bytes)}
                   {usedBy(m, playlists).length ? ` · in ${usedBy(m, playlists).length}` : ""}
                 </span>
+                {belowPanel(m) ? (
+                  // The one place quality is actually lost. Nothing in the
+                  // pipeline resizes a graphic — the server serves the bytes it
+                  // was given — so a soft picture on the wall means the SOURCE
+                  // was smaller than the panel, and there is nothing downstream
+                  // that can fix it. Said here, where it can still be replaced.
+                  <span className="text-caption2 text-amber-11">
+                    Below 1080p — this will be upscaled on a normal screen
+                  </span>
+                ) : null}
               </div>
             ))}
           </div>

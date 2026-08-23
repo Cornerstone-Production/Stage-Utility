@@ -19,7 +19,7 @@ import type { SignageHorizonEntry, SignageTransition } from "@main/types/signage
 import { isSignageVideo } from "@main/types/signage";
 
 import { itemAt } from "./signage-cycle";
-import { layerStyles } from "./signage-transition";
+import { transitionPlan } from "./signage-transition";
 
 const FILL: CSSProperties = { position: "absolute", inset: 0 };
 
@@ -49,23 +49,27 @@ export function SignagePlayer({
   const at = itemAt(playlist.items, nowMs - playlist.startedAt);
   if (!at) return black; // empty playlist, or every item zero-length
 
-  const current = playlist.items[at.index];
-  const transition: SignageTransition = current.transition ?? playlist.transition;
+  const incomingItem = playlist.items[at.index];
+  const transition: SignageTransition = incomingItem.transition ?? playlist.transition;
+  const plan = transitionPlan(transition);
 
   // The outgoing item is simply the previous one in the cycle, which wraps. A
   // one-item playlist has no previous item other than itself, and crossfading an
   // item with itself is a visible flicker every revolution for no reason.
   const hasPrevious = playlist.items.length > 1;
-  const previous = hasPrevious
-    ? playlist.items[(at.index - 1 + playlist.items.length) % playlist.items.length]
-    : null;
+  const previousIndex = (at.index - 1 + playlist.items.length) % playlist.items.length;
+  const previous = hasPrevious ? playlist.items[previousIndex] : null;
 
   // The transition occupies the FIRST `ms` of this item's own slot — which is
   // what keeps the cycle equal to the plain sum of durations, and therefore what
   // keeps two screens in step.
   const during = transition.kind !== "cut" && transition.ms > 0 && at.offsetMs < transition.ms;
-  const progress = during ? at.offsetMs / transition.ms : 1;
-  const styles = layerStyles(transition, progress);
+
+  // Fade through black swaps under the opaque middle, so for the first half of
+  // the transition the layer is still showing the item going out.
+  const showingPrevious = during && plan.swapAtMidpoint && at.offsetMs < transition.ms / 2;
+  const shown = showingPrevious && previous ? previous : incomingItem;
+  const shownIndex = showingPrevious && previous ? previousIndex : at.index;
 
   return (
     <div
@@ -73,12 +77,28 @@ export function SignagePlayer({
       className={className}
       style={{ position: "relative", background: "#000", overflow: "hidden" }}
     >
-      {during && previous ? (
-        <Layer item={previous} fit={playlist.fit} style={{ ...FILL, ...styles.outgoing }} />
+      {during && plan.showOutgoing && previous ? (
+        // Keyed by the item it is leaving, so React mounts a NEW element each
+        // time round — which is what starts its animation. Reusing the element
+        // would leave the last transition's finished animation in place.
+        <Layer
+          key={`out-${previousIndex}`}
+          item={previous}
+          fit={playlist.fit}
+          style={{ ...FILL, ...plan.outgoing }}
+        />
       ) : null}
-      <Layer item={current} fit={playlist.fit} style={{ ...FILL, ...styles.incoming }} />
-      {styles.veilOpacity > 0 ? (
-        <div style={{ ...FILL, background: "#000", opacity: styles.veilOpacity, pointerEvents: "none" }} />
+      <Layer
+        key={`in-${shownIndex}`}
+        item={shown}
+        fit={playlist.fit}
+        // Once the transition is over, plain and static: an animation left
+        // declared on a layer that is simply sitting there keeps it on its own
+        // compositor surface for the whole eight seconds.
+        style={{ ...FILL, ...(during ? plan.incoming : { opacity: 1 }) }}
+      />
+      {during && plan.veil ? (
+        <div key={`veil-${at.index}`} style={{ ...FILL, ...plan.veil, pointerEvents: "none" }} />
       ) : null}
     </div>
   );
@@ -98,7 +118,17 @@ function Layer({
   style: CSSProperties;
 }) {
   const objectFit = (item.fit ?? fit) as CSSProperties["objectFit"];
-  const common: CSSProperties = { ...style, width: "100%", height: "100%", objectFit };
+  const common: CSSProperties = {
+    ...style,
+    width: "100%",
+    height: "100%",
+    objectFit,
+    // No image-rendering hint. `high-quality` was tried and Chromium computed it
+    // straight back to `auto` — so it would have been a line claiming to do
+    // something that did nothing. `auto` already picks the good resampler for a
+    // downscale; the quality that is actually at risk is a source SMALLER than
+    // the panel, and no CSS fixes that. The media library warns about it instead.
+  };
 
   if (isSignageVideo(item.mime)) {
     return (
@@ -118,5 +148,20 @@ function Layer({
     );
   }
 
-  return <img key={item.url} src={item.url} alt="" style={common} />;
+  return (
+    <img
+      key={item.url}
+      src={item.url}
+      alt=""
+      // Decoded BEFORE it is put on screen. The default is async, which lets a
+      // layer mount and begin its fade while the image is still being decoded —
+      // so the first frames of a crossfade are of nothing, and the graphic
+      // appears to snap in part-way through.
+      decoding="sync"
+      // Never lazy on a wall: the whole point of the prefetch is that the next
+      // graphic is ready before its turn.
+      loading="eager"
+      style={common}
+    />
+  );
 }
