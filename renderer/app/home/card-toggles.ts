@@ -124,8 +124,12 @@ export function togglesFor(card: LayoutObject): CardToggle[] {
   // reordering anything above it left `is24h` silently reading a different
   // spec's fallback, and a 24-hour clock would start offering an AM/PM switch
   // that does nothing.
-  const formatSpec = SPECS.find((s) => s.key === "format")!;
-  const is24h = supports("format") && valueOf(formatSpec) === "24h";
+  //
+  // A null check rather than a `!`: SPECS is an array, so nothing at the type
+  // level says a "format" spec is in it. If one is ever removed, a clock reads
+  // as 12-hour instead of throwing.
+  const formatSpec = SPECS.find((s) => s.key === "format");
+  const is24h = supports("format") && formatSpec != null && valueOf(formatSpec) === "24h";
 
   const out: CardToggle[] = [];
   for (const spec of SPECS) {

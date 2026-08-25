@@ -458,8 +458,26 @@ export const FILL_WHEN_ACTIVE = true;
  */
 export const STATUS_TEXT = {
   reaper: { recording: "Recording", idle: "Standby", offline: "Offline" },
-  obs: { offline: "Offline" },
+  obs: {
+    offline: "Offline",
+    // Per mode, because OBS's widget reflects whichever output the operator
+    // picked. Keyed by the same `mode` value both files already compute, so the
+    // inspector can promise the exact string the renderer will draw — the first
+    // pass at this left these two behind on the theory that mode-dependence made
+    // them unpromisable, which was wrong, and the two copies had already drifted
+    // on capitalisation ("Virtual cam" against "Virtual Cam").
+    recording: { active: "Recording", idle: "Standby" },
+    streaming: { active: "Streaming", idle: "Stream off" },
+    virtualcam: { active: "Virtual cam", idle: "Cam off" },
+  },
 } as const;
+
+/** The OBS mode words, falling back to recording for an unknown stored value. */
+export function obsModeText(mode: string): { active: string; idle: string } {
+  return mode === "streaming" ? STATUS_TEXT.obs.streaming
+    : mode === "virtualcam" ? STATUS_TEXT.obs.virtualcam
+    : STATUS_TEXT.obs.recording;
+}
 
 const WALL_TWIN = {
   "home-streaming": null,
@@ -972,8 +990,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // "OBS" is the caption, so the old "OBS: Recording" would have read
       // "OBS / OBS: RECORDING". A label an operator typed themselves is left
       // exactly as they typed it.
-      const activeDefault = mode === "streaming" ? "Streaming" : mode === "virtualcam" ? "Virtual cam" : "Recording";
-      const idleDefault = mode === "streaming" ? "Stream off" : mode === "virtualcam" ? "Cam off" : "Standby";
+      const { active: activeDefault, idle: idleDefault } = obsModeText(mode);
       if (active) {
         // Timecode is the record duration — only meaningful in recording mode.
         // It moves to the SUB-LINE: welded onto the end of the label it made the

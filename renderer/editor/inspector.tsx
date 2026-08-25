@@ -56,7 +56,7 @@ import {
   InfoHint,
   
 } from "../components/ui";
-import { loadProcessedAttachment, FILL_WHEN_ACTIVE, STATUS_TEXT } from "../main/layout-renderer";
+import { loadProcessedAttachment, FILL_WHEN_ACTIVE, STATUS_TEXT, obsModeText } from "../main/layout-renderer";
 import { MIN, clamp } from "../settings/sections/layout-geometry.js";
 import { useSplState } from "../main/use-spl-state";
 // The PICKER list, not the telemetry one. A channel on a receiver that is
@@ -880,8 +880,7 @@ export function Inspector({
           : (mode === "streaming" ? obs.streaming : mode === "virtualcam" ? obs.virtualCam : obs.recording)
             ? "Active now"
             : "Connected · idle";
-        const activePlaceholder = mode === "streaming" ? "OBS: Streaming" : mode === "virtualcam" ? "OBS: Virtual Cam" : "OBS: Recording";
-        const idlePlaceholder = mode === "streaming" ? "OBS: Stream off" : mode === "virtualcam" ? "OBS: Cam off" : "OBS: Standby";
+        const { active: activePlaceholder, idle: idlePlaceholder } = obsModeText(mode);
         return (
           <>
             <Row label="Show">
