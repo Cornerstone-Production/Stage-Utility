@@ -1,4 +1,5 @@
 import { clamp } from "@main/services/clamp";
+import { ChipToggle, ChipToggleRow } from "../../components/ui";
 import { useRef, useState } from "react";
 import { formatClock } from "../../lib/clock-format";
 
@@ -136,32 +137,22 @@ export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendan
  *  mirrors the SPL tab's picker. Persisted per-browser (view preference, not a
  *  live-display setting), grouped so the two kinds read distinctly. */
 function MetricPicker({ visible, onToggle }: { visible: string[]; onToggle: (key: string) => void }) {
-  const Chip = ({ k, label }: { k: string; label: string }) => {
-    const on = visible.includes(k);
-    return (
-      <button
-        onClick={() => onToggle(k)}
-        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${
-          on ? "border-accent/50 bg-accent/12 text-accent" : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"
-        }`}
-      >
-        {label}
-      </button>
-    );
-  };
+  const Chip = ({ k, label }: { k: string; label: string }) => (
+    <ChipToggle label={label} on={visible.includes(k)} onToggle={() => onToggle(k)} />
+  );
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-col gap-1.5">
         <span className="text-caption2 text-gray-9">Chart</span>
-        <div className="flex flex-wrap gap-1.5">
+        <ChipToggleRow>
           {CHART_METRICS.map((m) => <Chip key={m.key} k={m.key} label={m.label} />)}
-        </div>
+        </ChipToggleRow>
       </div>
       <div className="flex flex-col gap-1.5">
         <span className="text-caption2 text-gray-9">Summary</span>
-        <div className="flex flex-wrap gap-1.5">
+        <ChipToggleRow>
           {STAT_METRICS.map((m) => <Chip key={m.key} k={m.key} label={m.label} />)}
-        </div>
+        </ChipToggleRow>
       </div>
     </div>
   );

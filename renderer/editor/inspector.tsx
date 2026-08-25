@@ -36,6 +36,8 @@ import {
   Switch,
   Separator,
   InfoHint,
+  ChipToggle,
+  ChipToggleRow,
 } from "../components/ui";
 import { loadProcessedAttachment, FILL_WHEN_ACTIVE, STATUS_TEXT, obsModeText } from "../main/layout-renderer";
 import { MIN, clamp } from "../settings/sections/layout-geometry.js";
@@ -581,20 +583,11 @@ export function Inspector({
             return (
               <div className="flex flex-col gap-1">
                 <span className="text-caption2 text-fg-muted">Notes shown</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {present.map((k) => {
-                    const on = shown.includes(k);
-                    return (
-                      <button
-                        key={k}
-                        onClick={() => toggle(k)}
-                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-accent/50 bg-accent/12 text-accent" : "border-line-strong bg-fill text-fg-muted hover:bg-fill-hover"}`}
-                      >
-                        {k}
-                      </button>
-                    );
-                  })}
-                </div>
+                <ChipToggleRow>
+                  {present.map((k) => (
+                    <ChipToggle key={k} label={k} on={shown.includes(k)} onToggle={() => toggle(k)} />
+                  ))}
+                </ChipToggleRow>
               </div>
             );
           })()}
@@ -622,20 +615,11 @@ export function Inspector({
             return (
               <div className="flex flex-col gap-1">
                 <span className="text-caption2 text-fg-muted">Channels shown</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {captionChannels.map((ch) => {
-                    const on = !hidden.includes(ch);
-                    return (
-                      <button
-                        key={ch}
-                        onClick={() => toggle(ch)}
-                        className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${on ? "border-accent/50 bg-accent/12 text-accent" : "border-line-strong bg-fill text-fg-muted hover:bg-fill-hover"}`}
-                      >
-                        {ch}
-                      </button>
-                    );
-                  })}
-                </div>
+                <ChipToggleRow>
+                  {captionChannels.map((ch) => (
+                    <ChipToggle key={ch} label={ch} on={!hidden.includes(ch)} onToggle={() => toggle(ch)} />
+                  ))}
+                </ChipToggleRow>
               </div>
             );
           })()}
