@@ -79,7 +79,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await updater.applyUpdate());
       } catch (err) {
-        error(res, String(err instanceof Error ? err.message : err));
+        error(res, errorMessage(err));
       }
       return;
     }
@@ -97,7 +97,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await updater.switchTrack(body.branch));
       } catch (err) {
-        error(res, String(err instanceof Error ? err.message : err));
+        error(res, errorMessage(err));
       }
       return;
     }
@@ -105,7 +105,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, updater.restart());
       } catch (err) {
-        error(res, String(err instanceof Error ? err.message : err));
+        error(res, errorMessage(err));
       }
       return;
     }
@@ -183,7 +183,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
         json(res, { ok: true, applied, restarting: true });
         scheduleRestart();
       } catch (err) {
-        error(res, String(err instanceof Error ? err.message : err));
+        error(res, errorMessage(err));
       }
       return;
     }
@@ -228,7 +228,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
         json(res, { ok: true, applied, restarting: true });
         scheduleRestart();
       } catch (err) {
-        error(res, String(err instanceof Error ? err.message : err));
+        error(res, errorMessage(err));
       }
       return;
     }

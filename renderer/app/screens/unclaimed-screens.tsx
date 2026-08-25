@@ -12,6 +12,7 @@
 // Creation stays an explicit act; this section is where you take it.
 
 import { useEffect, useState } from "react";
+import { errorMessage } from "@main/services/errors";
 
 import { invoke } from "../../lib/api";
 import { Button } from "../../components/ui/button";
@@ -53,7 +54,7 @@ export function UnclaimedScreens({ outputs }: { outputs: Output[] }) {
       const failed = await refreshDevices();
       setActionError(failed && `Set up, but the list did not reload: ${failed.message}`);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
+      setActionError(errorMessage(err));
     } finally {
       setBusy(null);
     }

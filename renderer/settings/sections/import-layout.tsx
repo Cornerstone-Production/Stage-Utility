@@ -8,6 +8,7 @@
 // drift apart.
 
 import { useRef, useState } from "react";
+import { errorMessage } from "@main/services/errors";
 import { useRouter } from "@tanstack/react-router";
 
 import { invoke } from "../../lib/api";
@@ -76,7 +77,7 @@ export function ImportLayout() {
       setPending(review(parsed));
     } catch (err) {
       setPending(null);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     }
   }
 
@@ -88,7 +89,7 @@ export function ImportLayout() {
       setPending(null);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
