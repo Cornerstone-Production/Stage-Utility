@@ -214,3 +214,36 @@ describe("importing a bundle", () => {
     assert.equal((await viewsStore.load()).length, 1);
   });
 });
+
+describe("a bundle carrying two ScriptView presets with one id", () => {
+  // mergeTargets, twenty lines below the code this covers, grows its `have` set
+  // inside the loop and says why in a comment: "two incoming targets sharing an
+  // id would otherwise both be appended, leaving a duplicate id in the store."
+  //
+  // The ScriptView merge is the same shape re-implemented, and it computed the
+  // add-list with a filter BEFORE the loop grew the seen-set — so it dropped the
+  // guard the sibling ten lines away was written to keep. An export cannot
+  // normally produce this, but an import is the one place a hand-edited or
+  // concatenated file arrives, which is exactly when a store must not be
+  // corrupted.
+
+  test("appends the preset once, not twice", async () => {
+    const { scriptViewLayoutsStore } = await import("./scriptview-layouts-store.js");
+    await scriptViewLayoutsStore.save([] as never);
+
+    await applyViewBundle(bundle({
+      sideData: {
+        slots: {}, notes: {},
+        scriptviewLayouts: [
+          { id: "dup", name: "First", columns: [] },
+          { id: "dup", name: "Second", columns: [] },
+        ],
+      },
+    }));
+
+    const saved = await scriptViewLayoutsStore.load();
+    const dupes = saved.filter((l: { id: string }) => l.id === "dup");
+    assert.equal(dupes.length, 1, `"dup" landed ${dupes.length} times: ${JSON.stringify(saved)}`);
+    assert.equal(dupes[0].name, "First", "the first one wins, like a target does");
+  });
+});

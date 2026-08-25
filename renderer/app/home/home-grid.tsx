@@ -16,8 +16,6 @@ import type { LayoutRenderCtx } from "../../main/layout-renderer";
 import { COLUMNS, SIZES, sizeOf } from "./home-cards";
 import { boxesOf, rowsNeeded, type Box } from "./home-placement";
 
-export const GRID_GAP_PX = 12;
-
 /**
  * Slide every card that moved, from where it was to where it now is.
  *
@@ -124,7 +122,17 @@ export function cardFrame(o: LayoutObject, H: number): CSSProperties {
  * sized to the smallest complete widget rather than the widget trimmed to fit.
  */
 export const ROW_PX = 120;
-const GAP_PX = 12;
+
+/**
+ * The gutter between cards, in px.
+ *
+ * ONE constant, exported, because two of them existed: the CSS below read a
+ * file-local `GAP_PX` while home-route's pointer-to-cell hit-testing imported a
+ * separate `GRID_GAP_PX`. They held the same 12 and nothing tied them together,
+ * so changing the gutter in one place would have left dropped cards landing in
+ * the wrong cell with nothing to show for it.
+ */
+export const GRID_GAP_PX = 12;
 
 /**
  * The nominal canvas height a Home card's styling is measured against.
@@ -300,7 +308,7 @@ export function HomeGrid({
           display: grid;
           grid-template-columns: repeat(${COLUMNS}, minmax(0, 1fr));
           grid-auto-rows: ${ROW_PX}px;
-          gap: ${GAP_PX}px;
+          gap: ${GRID_GAP_PX}px;
           /* A Small drops into the gap a Large leaves beside it. Still here for
              a card with no placement of its own — the placements above are
              resolved before this ever sees them. */

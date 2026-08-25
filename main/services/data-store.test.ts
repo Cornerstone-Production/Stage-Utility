@@ -154,3 +154,47 @@ describe("DataStore", () => {
     assert.ok(st.isDirectory(), "the store must create its data dir recursively");
   });
 });
+
+describe("update() skips the write when the mutator changed nothing", () => {
+  // The kiosk device store is built on this contract and says so three times in
+  // prose: recordScreen, touch and pinSecret each return the IDENTICAL array
+  // when nothing changed, and kiosk-devices-store.ts:265 states outright that
+  // "the store skips the write for an unchanged value".
+  //
+  // It did not. update() called writeRaw() unconditionally, so a device probing
+  // every two seconds and heartbeating every twenty was an atomic write plus
+  // fsync each time, per device, onto the SD card a Pi boots from. The comments
+  // described a guard that was never written.
+  //
+  // Every other caller spreads into a fresh object ({...cur}, {...file}) and so
+  // can never hit this path — checked across all thirteen update() call sites in
+  // main/. Only the kiosk mutators return the same reference, deliberately.
+
+  test("an unchanged mutator does not touch the file", async () => {
+    const { store, file } = freshStore();
+    await store.save({ count: 1, items: ["a"] });
+    const before = (await fs.stat(file)).mtimeMs;
+
+    // Long enough that a real write could not land inside the same mtime tick.
+    await new Promise((r) => setTimeout(r, 25));
+    const returned = await store.update((current) => current);
+
+    const after = (await fs.stat(file)).mtimeMs;
+    assert.equal(after, before, "returning the same reference must not rewrite the file");
+    assert.deepEqual(returned, { count: 1, items: ["a"] }, "the current value is still returned");
+  });
+
+  test("a changed mutator still writes", async () => {
+    // The other half: the skip must not swallow a real edit.
+    const { store, file } = freshStore();
+    await store.save({ count: 1, items: ["a"] });
+    const before = (await fs.stat(file)).mtimeMs;
+
+    await new Promise((r) => setTimeout(r, 25));
+    await store.update((current) => ({ ...current, count: 2 }));
+
+    const after = (await fs.stat(file)).mtimeMs;
+    assert.notEqual(after, before, "a real change must reach the disk");
+    assert.equal(JSON.parse(await fs.readFile(file, "utf8")).count, 2);
+  });
+});

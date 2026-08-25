@@ -80,6 +80,16 @@ export class SennheiserEwG4 extends SennheiserSscBase {
         st.battery = gauge;
         touched = true;
       }
+      // Runtime remaining, in minutes, on the SSCv2-shaped reply — the same path
+      // EW-DX answers. G4 hardware may well not send it, and that is fine: with
+      // no value the field stays null and the widgets draw a dash. Reading it
+      // costs nothing and stops a rack that DOES answer from being the one
+      // driver whose runtime is silently blank.
+      const lifetime = numOrNull(readPath(frame, ["mates", `tx${ch}`, "battery", "lifetime"]));
+      if (lifetime != null && lifetime >= 0) {
+        st.batteryMinutes = Math.round(lifetime);
+        touched = true;
+      }
 
       if (touched) this.emit(st);
     }

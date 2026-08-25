@@ -441,7 +441,25 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
  * A layout that has explicitly turned one off keeps it off — this is only what
  * an object that never expressed a preference does.
  */
-const FILL_WHEN_ACTIVE = true;
+export const FILL_WHEN_ACTIVE = true;
+
+/**
+ * What a status widget shows when the operator has typed nothing of their own.
+ *
+ * Exported because the inspector has to promise what the renderer delivers. Its
+ * placeholders read "REAPER: Recording" and "OBS: Offline" while the renderer
+ * drew a bare "Recording" and "Offline" — the caption already says which box it
+ * is, so the prefix came out. An operator who left the field alone got something
+ * other than the greyed-out text the field showed them, in four places.
+ *
+ * OBS's active and idle words are not here: they depend on whether it is
+ * recording, streaming or running a virtual cam, so the inspector has no single
+ * value to promise and its placeholders stay generic.
+ */
+export const STATUS_TEXT = {
+  reaper: { recording: "Recording", idle: "Standby", offline: "Offline" },
+  obs: { offline: "Offline" },
+} as const;
 
 const WALL_TWIN = {
   "home-streaming": null,
@@ -979,7 +997,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       return (
         <Readout
           caption="OBS"
-          value={connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? "Offline")}
+          value={connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? STATUS_TEXT.obs.offline)}
           upper
           dim={!connected}
             align={o.style?.textAlign}
@@ -1008,7 +1026,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         return (
           <Readout
             caption="REAPER"
-            value={c.recordingText ?? "Recording"}
+            value={c.recordingText ?? STATUS_TEXT.reaper.recording}
             sub={pos}
             upper
             fill={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? "var(--red-9)" : null}
@@ -1022,7 +1040,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       return (
         <Readout
           caption="REAPER"
-          value={connected ? (c.idleText ?? "Standby") : (c.offlineText ?? "Offline")}
+          value={connected ? (c.idleText ?? STATUS_TEXT.reaper.idle) : (c.offlineText ?? STATUS_TEXT.reaper.offline)}
           upper
           dim={!connected}
             align={o.style?.textAlign}

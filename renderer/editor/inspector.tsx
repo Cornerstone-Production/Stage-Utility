@@ -56,7 +56,7 @@ import {
   InfoHint,
   
 } from "../components/ui";
-import { loadProcessedAttachment } from "../main/layout-renderer";
+import { loadProcessedAttachment, FILL_WHEN_ACTIVE, STATUS_TEXT } from "../main/layout-renderer";
 import { MIN, clamp } from "../settings/sections/layout-geometry.js";
 import { useSplState } from "../main/use-spl-state";
 // The PICKER list, not the telemetry one. A channel on a receiver that is
@@ -868,7 +868,7 @@ export function Inspector({
           <RowText label="Recording text" value={c.recordingText ?? ""} placeholder="RECORDING" onChange={(v) => onConfig({ ...c, recordingText: v })} />
           <RowText label="Idle text" value={c.idleText ?? ""} placeholder="STANDBY" onChange={(v) => onConfig({ ...c, idleText: v })} />
           <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="NO RECORDER" onChange={(v) => onConfig({ ...c, offlineText: v })} />
-          <RowSwitch label="Fill red while recording" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
+          <RowSwitch label="Fill red while recording" checked={c.fillWhenRecording ?? FILL_WHEN_ACTIVE} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
           <RowSwitch label="Hide when idle" hint="Pure tally light — nothing on screen unless recording" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
         </>
       )}
@@ -897,8 +897,8 @@ export function Inspector({
             <Row label="OBS"><span className="text-caption2 text-fg-muted">{liveLabel}</span></Row>
             <RowText label="Active text" value={c.recordingText ?? ""} placeholder={activePlaceholder} onChange={(v) => onConfig({ ...c, recordingText: v })} />
             <RowText label="Idle text" value={c.idleText ?? ""} placeholder={idlePlaceholder} onChange={(v) => onConfig({ ...c, idleText: v })} />
-            <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="OBS: Offline" onChange={(v) => onConfig({ ...c, offlineText: v })} />
-            <RowSwitch label="Fill red when active" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
+            <RowText label="Offline text" value={c.offlineText ?? ""} placeholder={STATUS_TEXT.obs.offline} onChange={(v) => onConfig({ ...c, offlineText: v })} />
+            <RowSwitch label="Fill red when active" checked={c.fillWhenRecording ?? FILL_WHEN_ACTIVE} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
             {mode === "recording" && (
               <RowSwitch label="Show timecode" checked={c.showTimecode ?? false} onChange={(v) => onConfig({ ...c, showTimecode: v })} />
             )}
@@ -927,7 +927,7 @@ export function Inspector({
           <RowSwitch
             label="Fill green when live"
             hint="Off colours the word. On paints the whole widget — a signal that carries across a room."
-            checked={c.fillWhenLive ?? true}
+            checked={c.fillWhenLive ?? FILL_WHEN_ACTIVE}
             onChange={(v) => onConfig({ ...c, fillWhenLive: v })}
           />
           <RowSwitch
@@ -953,10 +953,10 @@ export function Inspector({
         return (
           <>
             <Row label="REAPER"><span className="text-caption2 text-fg-muted">{liveLabel}</span></Row>
-            <RowText label="Recording text" value={c.recordingText ?? ""} placeholder="REAPER: Recording" onChange={(v) => onConfig({ ...c, recordingText: v })} />
-            <RowText label="Idle text" value={c.idleText ?? ""} placeholder="REAPER: Standby" onChange={(v) => onConfig({ ...c, idleText: v })} />
-            <RowText label="Offline text" value={c.offlineText ?? ""} placeholder="REAPER: Offline" onChange={(v) => onConfig({ ...c, offlineText: v })} />
-            <RowSwitch label="Fill red when recording" checked={c.fillWhenRecording ?? true} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
+            <RowText label="Recording text" value={c.recordingText ?? ""} placeholder={STATUS_TEXT.reaper.recording} onChange={(v) => onConfig({ ...c, recordingText: v })} />
+            <RowText label="Idle text" value={c.idleText ?? ""} placeholder={STATUS_TEXT.reaper.idle} onChange={(v) => onConfig({ ...c, idleText: v })} />
+            <RowText label="Offline text" value={c.offlineText ?? ""} placeholder={STATUS_TEXT.reaper.offline} onChange={(v) => onConfig({ ...c, offlineText: v })} />
+            <RowSwitch label="Fill red when recording" checked={c.fillWhenRecording ?? FILL_WHEN_ACTIVE} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
             <RowSwitch label="Show position" checked={c.showPosition ?? false} onChange={(v) => onConfig({ ...c, showPosition: v })} />
             <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
           </>
