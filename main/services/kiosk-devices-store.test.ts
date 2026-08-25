@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
-  kioskDevicesStore, authorise, claim, release, touch, matchByMac, newClaimToken, withoutTokens, pinSecret, recordScreen,
+  kioskDevicesStore, authorise, claim, release, touch, matchByMac, withoutTokens, pinSecret, recordScreen,
 } from "./kiosk-devices-store.js";
 import { configFilenames } from "./store-registry.js";
 import type { BoundDevice } from "../types/kiosk.js";
@@ -54,13 +54,6 @@ describe("authorising an enrolment", () => {
 
   test("an unknown device is refused", () => {
     assert.equal(authorise(devices, "nobody", "tok-1"), null);
-  });
-
-  test("a generated secret is not guessable", () => {
-    // Still used by the installers to mint the device's own secret.
-    const a = newClaimToken();
-    assert.ok(a.length >= 24, `secret is only ${a.length} chars`);
-    assert.notEqual(a, newClaimToken());
   });
 
   test("an UNPINNED device takes the first secret it presents", () => {

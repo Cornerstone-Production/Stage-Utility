@@ -4,26 +4,6 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import type { useSensors } from "@dnd-kit/core";
 import type { DeviceChannel } from "@main/types/devices";
 
-export type SectionId =
-  | "plan"
-  | "views"
-  | "scriptview"
-  | "displays"
-  | "integrations"
-  | "connect"
-  | "branding"
-  | "service-history"
-  | "baptisms"
-  | "patch"
-  | "automation"
-  | "advanced";
-
-export interface SectionItem {
-  id: SectionId;
-  label: string;
-  icon: React.ReactNode;
-}
-
 /**
  * One bindable wireless channel, as `/api/integrations/wireless/channels`
  * returns it.
@@ -97,7 +77,6 @@ export interface SectionHandlers {
   handleUpdateLayoutTemplate: (id: string, patch: { name?: string; layout?: LayoutDTO }) => Promise<void>;
   handleDeleteLayoutTemplate: (id: string) => Promise<void>;
   handleCopySlots: (targetViewId: string, fromViewId: string) => Promise<void>;
-  handleReorderViews: (ids: string[]) => Promise<void>;
   // Presets (saved slot arrangements — global, recall into any view)
   handleSavePreset: (name: string) => Promise<void>;
   handleApplyPreset: (id: string) => Promise<void>;
@@ -128,8 +107,6 @@ export interface SectionProps {
   wirelessChannels: WirelessChannel[];
   teamPositions: TeamPositionDTO[];
   layoutTemplates: LayoutTemplate[];
-  selectedViewId: string;
-  setSelectedViewId: (id: string) => void;
   localSlots: Slot[];
   slotsDirty: boolean;
   isSavingSlots: boolean;

@@ -13,7 +13,6 @@
 // the store, so the rules that matter — one device per output, a claim moves
 // rather than duplicates — are testable without a filesystem.
 
-import { randomBytes } from "node:crypto";
 
 import { announceDevices } from "./kiosk-presence.js";
 import { mergeScreen, sameScreen, screenFrom } from "./kiosk-screen-size.js";
@@ -21,12 +20,6 @@ import type { BoundDevice, ScreenSize } from "../types/kiosk.js";
 import { DataStore } from "./data-store.js";
 
 export const kioskDevicesStore = new DataStore<BoundDevice[]>("kiosk-devices.json", [], "config");
-
-/** A claim token. Long enough that guessing it is not a strategy; it is the only
- *  thing standing between a claimed display and anything else on the LAN. */
-export function newClaimToken(): string {
-  return randomBytes(24).toString("base64url");
-}
 
 export const findById = (devices: readonly BoundDevice[], id: string): BoundDevice | undefined =>
   devices.find((d) => d.id === id);
@@ -212,17 +205,6 @@ export function withoutTokens(devices: readonly BoundDevice[]): PublicDevice[] {
 }
 
 /**
- * Record what a bound display says its screen is, from its heartbeat.
- *
- * Owns the parse as well as the write so the route does not re-derive what a
- * plausible number is — these arrive in a JSON body off the LAN, exactly like
- * the holding screen's query string, and both go through `screenFrom`.
- *
- * Returns the failure rather than swallowing it. Nothing downstream reads a
- * screen size to decide anything, so the caller is free to discard it — but that
- * is the route's call to make explicitly, not this function's to make silently.
- */
-/**
  * Write to the bound-device store and tell anybody watching.
  *
  * Every mutator here returns the SAME array when nothing changed, which is what
@@ -248,6 +230,17 @@ export async function updateDevices(
   return changed;
 }
 
+/**
+ * Record what a bound display says its screen is, from its heartbeat.
+ *
+ * Owns the parse as well as the write so the route does not re-derive what a
+ * plausible number is — these arrive in a JSON body off the LAN, exactly like
+ * the holding screen's query string, and both go through `screenFrom`.
+ *
+ * Returns the failure rather than swallowing it. Nothing downstream reads a
+ * screen size to decide anything, so the caller is free to discard it — but that
+ * is the route's call to make explicitly, not this function's to make silently.
+ */
 export async function recordDisplayScreen(
   outputId: string,
   deviceId: unknown,

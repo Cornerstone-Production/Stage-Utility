@@ -581,7 +581,10 @@ export function HomeCard({
   pcoLive: PcoLiveDTO | null;
   now: number;
   skewMs: number;
-  /** Live presence inside the shell; `onlineFromState` on a screen. */
+  /** Output ids currently connected, from `onlineFromState` — the single
+   *  supplier, on every path. A `useOutputPresence` hook that subscribed to the
+   *  `displays:presence` SSE channel was written for this and never wired to
+   *  anything; it is gone rather than left looking like a second route in. */
   onlineOutputIds: readonly string[];
   secondsToStart: number | null;
 }) {

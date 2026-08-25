@@ -138,7 +138,6 @@ export interface ReadoutProps {
    *  moves every tick, which is the one thing a wall readout must not do. */
   mono?: boolean;
   /** Weight for the value. Defaults to 600; the filled variant goes to 700. */
-  weight?: number;
   /**
    * Size the value as though the composition had all three lines.
    *
@@ -194,7 +193,6 @@ export function Readout({
   valueColor,
   fill,
   mono = false,
-  weight,
   upper = false,
   dim = false,
   align,
@@ -292,7 +290,7 @@ export function Readout({
           style={{
             display: "inline-block",
             fontSize: `${valuePx * scale}px`,
-            fontWeight: weight ?? (filled ? 700 : 600),
+            fontWeight: filled ? 700 : 600,
             // Explicit, never inherited: an inherited colour resolved to black
             // on black on the kiosk surface once — measured at 1.06:1. The
             // custom property is the object's OWN colour where it set one (see

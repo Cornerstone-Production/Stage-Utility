@@ -85,9 +85,6 @@ export interface LayoutRenderCtx {
   skewMs: number;
   ndiSource: string | null;
   /** Canvas height in design px — basis for fraction→px font/spacing sizing. */
-  /** The canvas's own background colour, so a widget's opaque body matches it
-   *  rather than hardcoding black. */
-  canvasBg?: string | null;
   H: number;
   /** True only on a real display route. Interactive objects (live controls)
    *  only fire their commands when true — never in the editor or preview iframe. */
@@ -121,7 +118,7 @@ function pad(n: number): string {
  * the result looked worse than what it replaced. The fields are honoured again
  * until per-widget variants exist to replace them properly.
  */
-export function boxStyle(o: LayoutObject, H: number, _canvasBg?: string | null): CSSProperties {
+export function boxStyle(o: LayoutObject, H: number): CSSProperties {
   const s = o.style ?? {};
   const css: CSSProperties = {
     display: "flex",
@@ -241,7 +238,7 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
       style={{
         position: "absolute",
         ...geometry,
-        ...boxStyle(o, ctx.H, ctx.canvasBg),
+        ...boxStyle(o, ctx.H),
       }}
     >
       {kids ? kids.map((c) => <RenderObject key={c.id} o={c} ctx={ctx} />) : <ObjectContent o={o} ctx={ctx} />}
@@ -2470,7 +2467,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed, canvasBg: inheritSurface ? null : bg };
+  const ctx: LayoutRenderCtx = { home: false, state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

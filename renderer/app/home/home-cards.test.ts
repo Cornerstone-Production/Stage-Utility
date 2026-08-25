@@ -7,9 +7,7 @@ import {
   SIZE_ORDER,
   addCard,
   defaultSize,
-  moveCard,
   removeCard,
-  rowFill,
   setSize,
   setWhen,
   sizeOf,
@@ -140,41 +138,10 @@ describe("editing", () => {
     assert.equal(sizeOf(next[1]), sizeOf(base[1]));
   });
 
-  test("moving reorders without losing anything", () => {
-    const three = [...base, card("c", "notes")];
-    assert.deepEqual(moveCard(three, 2, 0).map((o) => o.id), ["c", "a", "b"]);
-    assert.equal(moveCard(three, 2, 0).length, 3);
-  });
-
-  test("an out-of-range move changes nothing", () => {
-    // A drag that ends on nothing is a no-op, not an exception that blanks the
-    // page it was dropped on.
-    assert.deepEqual(moveCard(base, 0, 9).map((o) => o.id), ["a", "b"]);
-    assert.deepEqual(moveCard(base, -1, 0).map((o) => o.id), ["a", "b"]);
-  });
-
   test("nothing mutates its input", () => {
     const before = base.map((o) => o.id);
-    addCard(base, "clock", "x"); removeCard(base, "a"); setSize(base, "a", "xl"); moveCard(base, 0, 1);
+    addCard(base, "clock", "x"); removeCard(base, "a"); setSize(base, "a", "xl");
     assert.deepEqual(base.map((o) => o.id), before);
   });
 });
 
-describe("row arithmetic", () => {
-  test("S + M fills one row", () => {
-    assert.deepEqual(rowFill([card("a", "clock", "s"), card("b", "clock", "m")]), [COLUMNS]);
-  });
-
-  test("S + L fills the block", () => {
-    // L is two rows tall, so it counts in both.
-    assert.deepEqual(rowFill([card("a", "clock", "l"), card("b", "clock", "s")]), [COLUMNS, SIZES.l.w]);
-  });
-
-  test("an XL is a row of its own, twice over", () => {
-    assert.deepEqual(rowFill([card("a", "clock", "xl")]), [COLUMNS, COLUMNS]);
-  });
-
-  test("a lone Medium leaves a gap, and says so", () => {
-    assert.deepEqual(rowFill([card("a", "clock", "m")]), [SIZES.m.w]);
-  });
-});

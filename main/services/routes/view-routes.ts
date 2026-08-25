@@ -27,20 +27,6 @@ import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../..
 import { LayoutConflictError, stageController } from "../stage-controller.js";
 
 /**
- * The minimum shape a layout must have to be stored and rendered.
- *
- * This used to be `typeof layout === "object"` followed by a cast, which let any
- * object through. Two consequences, both real: the renderer reads
- * `canvas.width` unguarded, so a layout without one crashed the display it was
- * saved to; and `objects.length` went straight into a log line, so an `objects`
- * of `{ length: "…\n[stage-controller] …" }` forged entries on the LAN-visible
- * /log page. Validating the shape closes both at the door.
- *
- * Deliberately shallow — it checks what the renderer and the log actually
- * require, not every optional field of a LayoutObject.
- */
-
-/**
  * `stage-utility-view-left-mic-display-2026-08-17.json`.
  *
  * The name is operator-supplied text going into a quoted header value, so the
