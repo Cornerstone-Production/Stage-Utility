@@ -46,7 +46,6 @@ const KIND_LABELS: Record<ViewKind, string> = {
 const KIND_ORDER: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "script", "spl-rundown", "custom"];
 
 type StartFrom = "blank" | "dashboard" | "confidence";
-type Surface = "display" | "console";
 
 export function NewViewDialog({
   handlers,
@@ -65,7 +64,7 @@ export function NewViewDialog({
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ViewKind>("slots");
   const [startFrom, setStartFrom] = useState<StartFrom>("blank");
-  const [surface, setSurface] = useState<Surface>("display");
+  const [surface, setSurface] = useState<ViewSurface>("display");
 
   return (
     <Dialog

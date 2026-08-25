@@ -231,3 +231,14 @@ export function computeOverview(
     scopeName: activeTypeName,
   };
 }
+
+/**
+ * The colour a trend's tone reads in.
+ *
+ * Here rather than in either consumer: service-history had it as a function and
+ * Home's TrendArrow had the same mapping as three cn() conditionals, so "what
+ * colour is a bad trend" had two answers in two files.
+ */
+export function trendColor(tone: TrendTone): string {
+  return tone === "good" ? "text-ok-11" : tone === "bad" ? "text-warn-11" : "text-fg-subtle";
+}

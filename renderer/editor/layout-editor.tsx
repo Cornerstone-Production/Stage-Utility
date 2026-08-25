@@ -41,6 +41,8 @@ import {
   DialogDescription,
   DialogFooter,
   UnsavedBanner,
+  MENU_ITEM,
+  menuContent,
 } from "../components/ui";
 import { ObjectContent, boxStyle, useLayoutData, type LayoutRenderCtx } from "../main/layout-renderer";
 import {
@@ -1752,15 +1754,15 @@ export function LayoutEditor({
             </Button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
-            <DropdownMenu.Content align="start" sideOffset={4} className="z-50 min-w-52 rounded-md border border-line-strong bg-popover p-1 shadow-md backdrop-blur-xl">
+            <DropdownMenu.Content align="start" sideOffset={4} className={menuContent("min-w-52")}>
               <DropdownMenu.Label className="px-2 pb-1 pt-1.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Replace with…</DropdownMenu.Label>
-              <DropdownMenu.Item onSelect={startFromBlank} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill">
+              <DropdownMenu.Item onSelect={startFromBlank} className={MENU_ITEM}>
                 <FilePlusIcon className="size-3.5 text-fg-subtle" /> Blank canvas
               </DropdownMenu.Item>
-              <DropdownMenu.Item onSelect={startFromDashboard} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill">
+              <DropdownMenu.Item onSelect={startFromDashboard} className={MENU_ITEM}>
                 <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Dashboard template
               </DropdownMenu.Item>
-              <DropdownMenu.Item onSelect={startFromConfidenceMonitor} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill">
+              <DropdownMenu.Item onSelect={startFromConfidenceMonitor} className={MENU_ITEM}>
                 <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Confidence Monitor template
               </DropdownMenu.Item>
               {templates.length > 0 && (
@@ -1768,7 +1770,7 @@ export function LayoutEditor({
                   <DropdownMenu.Separator className="my-1 h-px bg-line" />
                   <DropdownMenu.Label className="px-2 pb-1 pt-0.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Saved layouts</DropdownMenu.Label>
                   {templates.map((t) => (
-                    <DropdownMenu.Item key={t.id} onSelect={() => loadTemplate(t)} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill">
+                    <DropdownMenu.Item key={t.id} onSelect={() => loadTemplate(t)} className={MENU_ITEM}>
                       {t.name}
                     </DropdownMenu.Item>
                   ))}

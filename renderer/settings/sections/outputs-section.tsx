@@ -8,12 +8,10 @@ import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCw
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
-/** Shared menu-item styling, so the six actions cannot drift apart. */
-const MENU_ITEM =
-  "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-fg outline-none data-[highlighted]:bg-fill";
-const MENU_CONTENT =
-  "z-50 min-w-48 rounded-md border border-line-strong bg-popover p-1 shadow-md backdrop-blur-xl";
 import {
+  MENU_ITEM,
+  MENU_ITEM_DANGER,
+  menuContent,
   Button,
   Input,
   Select,
@@ -215,7 +213,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
             </button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
-            <DropdownMenu.Content align="end" sideOffset={4} className={MENU_CONTENT}>
+            <DropdownMenu.Content align="end" sideOffset={4} className={menuContent()}>
               {/* Opens the SAME address the "Open" link below does. This used
                   to go through a handler that built the URL from
                   window.location.origin, while the link used `baseUrl` —
@@ -308,7 +306,7 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
               <DropdownMenu.Item
                 onSelect={onRemove}
                 disabled={!canRemove}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-footnote text-red-11 outline-none data-[highlighted]:bg-red-3 data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
+                className={MENU_ITEM_DANGER}
               >
                 <TrashIcon className="size-3.5" />
                 Remove display
@@ -487,7 +485,7 @@ function UnassignedViewCard({
             </button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
-            <DropdownMenu.Content className={MENU_CONTENT} align="end" sideOffset={4}>
+            <DropdownMenu.Content className={menuContent()} align="end" sideOffset={4}>
               {/* Only a custom layout can be a console: the built-in kinds have
                   no layout to put a control on. */}
               {view.kind === "custom" && (
@@ -516,7 +514,7 @@ function UnassignedViewCard({
                   });
                   if (ok) onRemove();
                 }}
-                className={cn(MENU_ITEM, "text-red-11 data-[highlighted]:bg-red-3")}
+                className={MENU_ITEM_DANGER}
               >
                 <TrashIcon className="size-3.5" />
                 Delete view

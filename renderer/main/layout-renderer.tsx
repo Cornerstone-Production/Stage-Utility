@@ -1148,19 +1148,18 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       ].filter(Boolean);
       // With the count off, the tile is a single figure — battery if it is on,
       // otherwise runtime, so turning battery off does not leave a blank tile.
-      const headline =
-        showBattery || !showRuntime ? `${lowest ?? "—"}%`
-        : (runtimeText(soonest) ?? "—");
+      //
+      // ONE flag for the figure and its colour. The condition was written out
+      // twice, once for each, and two copies of "which figure is this" is how a
+      // tile ends up showing minutes coloured by battery thresholds.
+      const batteryLeads = showBattery || !showRuntime;
+      const headline = batteryLeads ? `${lowest ?? "—"}%` : (runtimeText(soonest) ?? "—");
       return (
         <Readout
           caption={(c.showLabel ?? false) && c.label ? c.label : null}
           value={showOnline ? `${online}/${ch.length}` : headline}
           sub={showOnline ? quals.join("  ") || null : quals.slice(1).join("  ") || null}
-          valueColor={
-            showOnline ? null
-            : showBattery || !showRuntime ? batteryColor(lowest)
-            : runtimeColor(soonest)
-          }
+          valueColor={showOnline ? null : batteryLeads ? batteryColor(lowest) : runtimeColor(soonest)}
           mono
             align={o.style?.textAlign}
         />

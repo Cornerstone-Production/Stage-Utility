@@ -22,9 +22,9 @@ import {
   fmtTime,
   shortDay,
   isCountedItem,
+  trendColor,
   type OverviewData,
   type Trend,
-  type TrendTone,
 } from "./overview-data";
 
 function fmtDate(iso: string): string {
@@ -41,10 +41,6 @@ function fmtDay(day: string): string {
 
 
 /** Tailwind text color for a trend tone (semantic status tokens). */
-function trendColor(tone: TrendTone): string {
-  return tone === "good" ? "text-ok-11" : tone === "bad" ? "text-warn-11" : "text-fg-subtle";
-}
-
 
 /** ISO → local "HH:MM" for a <input type="time">, or "" if absent/invalid. */
 function toTimeInput(iso: string | null): string {
