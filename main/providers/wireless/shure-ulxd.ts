@@ -5,9 +5,6 @@
 import type { ConfigField } from "../../types/integrations.js";
 import {
   ShureBaseProvider,
-  batteryMinutesFrom,
-  clamp,
-  formatFrequency,
   normalisedDb,
   rfBarsFromDbm,
   safeInt,
@@ -86,33 +83,6 @@ export class ShureUlxd extends ShureBaseProvider {
         break;
       }
 
-      case "BATT_CHARGE": {
-        const charge = safeInt(value);
-        if (!Number.isNaN(charge)) {
-          state.battery = charge === 255 ? null : clamp(charge, 0, 100);
-        }
-        console.debug(`[shure:${this.id}] ch${channel} BATT_CHARGE: ${value}`);
-        break;
-      }
-
-      // Runtime remaining. BATT_RUN_TIME is the ULX-D name; TX_BATT_MINS is
-      // accepted too because it is what the AD family sends and a mixed rack is
-      // not the place to discover which of two spellings a receiver uses.
-      case "BATT_RUN_TIME":
-      case "TX_BATT_MINS": {
-        state.batteryMinutes = batteryMinutesFrom(value);
-        console.debug(
-          `[shure:${this.id}] ch${channel} ${token}: ${state.batteryMinutes ?? "unknown/calculating"}`,
-        );
-        break;
-      }
-
-      case "FREQUENCY": {
-        state.frequencyLabel = formatFrequency(value);
-        console.debug(`[shure:${this.id}] ch${channel} freq: ${state.frequencyLabel ?? value}`);
-        break;
-      }
-
       case "MUTE_STATUS": {
         // Stored for completeness; does not affect online flag.
         console.debug(`[shure:${this.id}] ch${channel} MUTE_STATUS: ${value}`);
@@ -129,7 +99,11 @@ export class ShureUlxd extends ShureBaseProvider {
       }
 
       default:
-        console.debug(`[shure:${this.id}] ch${channel} unrecognized field: ${token}`);
+        // The tokens every family answers the same way live on the base. Only
+        // what neither the switch above nor that handler claims is unrecognised.
+        if (!this.handleCommonReport(channel, token, value, state)) {
+          console.debug(`[shure:${this.id}] ch${channel} unrecognized field: ${token}`);
+        }
         break;
     }
 

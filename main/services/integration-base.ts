@@ -184,6 +184,33 @@ export abstract class StatusIntegration<T extends { connected: boolean }> extend
     return this.last;
   }
 
+  /**
+   * Broadcast only when something actually changed; otherwise keep `last` fresh
+   * silently.
+   *
+   * Both halves matter. Skipping the frame is the house SSE rule -- a poll every
+   * few seconds must not be an SSE frame every few seconds. Keeping `last`
+   * current is what lets a display that connects between changes hydrate with
+   * the truth instead of a stale snapshot.
+   *
+   * Shallow, over every key of the DTO. Resi and YouTube each carried a
+   * hand-written copy comparing the same four fields by name, which is a list to
+   * forget to extend the next time a field is added to the DTO.
+   *
+   * REAPER overrides this: while recording it ticks every poll on purpose, so a
+   * timecode display advances.
+   */
+  protected emitIfChanged(next: T): void {
+    const prev = this.last;
+    const keys = new Set([...Object.keys(prev), ...Object.keys(next)]) as Set<keyof T>;
+    let changed = false;
+    for (const k of keys) {
+      if (prev[k] !== next[k]) { changed = true; break; }
+    }
+    if (changed) this.emit(next);
+    else this.last = next;
+  }
+
   /** Store and broadcast. Overridable for integrations that throttle (Smaart
    *  meters arrive many times a second). */
   protected emit(snapshot: T): void {

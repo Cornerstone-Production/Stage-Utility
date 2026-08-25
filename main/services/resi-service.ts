@@ -164,20 +164,14 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
   }
 
   private async json<T>(url: string, init: RequestInit): Promise<T> {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      const res = await fetch(url, { ...init, signal: ctrl.signal });
-      if (!res.ok) {
-        // 401 is the one worth naming: on an undocumented API it usually means
-        // the credentials are wrong, not that the shape changed.
-        if (res.status === 401) throw new Error("Resi rejected the username or password");
-        throw new Error(`Resi returned HTTP ${res.status}`);
-      }
-      return (await res.json()) as T;
-    } finally {
-      clearTimeout(t);
+    const res = await fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    if (!res.ok) {
+      // 401 is the one worth naming: on an undocumented API it usually means
+      // the credentials are wrong, not that the shape changed.
+      if (res.status === 401) throw new Error("Resi rejected the username or password");
+      throw new Error(`Resi returned HTTP ${res.status}`);
     }
+    return (await res.json()) as T;
   }
 
   /** Sign in. The one place the credentials are sent, so the test button and the
@@ -317,17 +311,6 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
 
     // First sighting of this stream. Only trust a clock we started ourselves.
     return this.sawOffAir ? streamStartStore.observe("resi") : null;
-  }
-
-  private emitIfChanged(next: StreamStatusDTO): void {
-    const p = this.last;
-    const changed =
-      p.connected !== next.connected ||
-      p.live !== next.live ||
-      p.startedAt !== next.startedAt ||
-      p.detail !== next.detail;
-    if (changed) this.emit(next);
-    else this.last = next;
   }
 
   override stop(): void {

@@ -210,58 +210,46 @@ class YouTubeService extends StatusIntegration<StreamStatusDTO> {
   // ── HTTP ──────────────────────────────────────────────────────────────────
 
   private async json<T>(url: string, init?: RequestInit): Promise<T> {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      const res = await fetch(url, { ...init, signal: ctrl.signal });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        if (isQuotaError(res.status, text)) {
-          this.quotaSpent = true;
-          throw new Error("YouTube's daily API quota is spent — it resets at midnight Pacific");
-        }
-        if (res.status === 400 || res.status === 403) {
-          throw new Error(`YouTube rejected the request (HTTP ${res.status}) — check the API key and channel`);
-        }
-        throw new Error(`YouTube returned HTTP ${res.status}`);
+    const res = await fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      if (isQuotaError(res.status, text)) {
+        this.quotaSpent = true;
+        throw new Error("YouTube's daily API quota is spent — it resets at midnight Pacific");
       }
-      const body = (await res.json()) as T;
-      this.quotaSpent = false;
-      return body;
-    } finally {
-      clearTimeout(t);
+      if (res.status === 400 || res.status === 403) {
+        throw new Error(`YouTube rejected the request (HTTP ${res.status}) — check the API key and channel`);
+      }
+      throw new Error(`YouTube returned HTTP ${res.status}`);
     }
+    const body = (await res.json()) as T;
+    this.quotaSpent = false;
+    return body;
   }
 
   private async exchangeRefresh(clientId: string, clientSecret: string, refreshToken: string): Promise<string> {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      const res = await fetch(OAUTH_TOKEN, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id: clientId,
-          client_secret: clientSecret,
-          refresh_token: refreshToken,
-          grant_type: "refresh_token",
-        }),
-        signal: ctrl.signal,
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        access_token?: string;
-        error_description?: string;
-        error?: string;
-      };
-      if (!res.ok || !body.access_token) {
-        // Google's error_description is genuinely useful here — "Token has been
-        // expired or revoked" tells the operator exactly what to redo.
-        throw new Error(body.error_description || body.error || `Google returned HTTP ${res.status}`);
-      }
-      return body.access_token;
-    } finally {
-      clearTimeout(t);
+    const res = await fetch(OAUTH_TOKEN, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token",
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      access_token?: string;
+      error_description?: string;
+      error?: string;
+    };
+    if (!res.ok || !body.access_token) {
+      // Google's error_description is genuinely useful here — "Token has been
+      // expired or revoked" tells the operator exactly what to redo.
+      throw new Error(body.error_description || body.error || `Google returned HTTP ${res.status}`);
     }
+    return body.access_token;
   }
 
   private async ensureAccessToken(cfg: YouTubeConfig): Promise<string> {
@@ -379,17 +367,6 @@ class YouTubeService extends StatusIntegration<StreamStatusDTO> {
       if (this.quotaSpent) this.scheduleIn(QUOTA_BACKOFF_MS);
       else this.scheduleReconnect();
     }
-  }
-
-  private emitIfChanged(next: StreamStatusDTO): void {
-    const p = this.last;
-    const changed =
-      p.connected !== next.connected ||
-      p.live !== next.live ||
-      p.startedAt !== next.startedAt ||
-      p.detail !== next.detail;
-    if (changed) this.emit(next);
-    else this.last = next;
   }
 
   override stop(): void {

@@ -11,9 +11,7 @@
 import type { ConfigField } from "../../types/integrations.js";
 import {
   ShureBaseProvider,
-  batteryMinutesFrom,
   clamp,
-  formatFrequency,
   normalisedDb,
   rfBarsFromDbm,
   safeInt,
@@ -108,35 +106,6 @@ export class ShureAxient extends ShureBaseProvider {
         break;
       }
 
-      case "BATT_CHARGE": {
-        const charge = safeInt(value);
-        if (!Number.isNaN(charge)) {
-          state.battery = charge === 255 ? null : clamp(charge, 0, 100);
-        }
-        console.debug(`[shure:${this.id}] ch${channel} BATT_CHARGE: ${value}`);
-        break;
-      }
-
-      // Runtime remaining. TX_BATT_MINS is what an AD4Q actually sends — read off
-      // a live receiver, where it was landing in `unrecognized field` and being
-      // dropped while the case below waited for a name this family never uses.
-      // BATT_RUN_TIME is kept because it is the name in Shure's own AD docs and
-      // costs one line to accept.
-      case "TX_BATT_MINS":
-      case "BATT_RUN_TIME": {
-        state.batteryMinutes = batteryMinutesFrom(value);
-        console.debug(
-          `[shure:${this.id}] ch${channel} ${token}: ${state.batteryMinutes ?? "unknown/calculating"}`,
-        );
-        break;
-      }
-
-      case "FREQUENCY": {
-        state.frequencyLabel = formatFrequency(value);
-        console.debug(`[shure:${this.id}] ch${channel} freq: ${state.frequencyLabel ?? value}`);
-        break;
-      }
-
       case "MUTE_MODE_STATUS": {
         // "ON" = unmuted, "MUTE" = muted — does not affect online status.
         console.debug(`[shure:${this.id}] ch${channel} MUTE_MODE_STATUS: ${value}`);
@@ -206,7 +175,11 @@ export class ShureAxient extends ShureBaseProvider {
       }
 
       default:
-        console.debug(`[shure:${this.id}] ch${channel} unrecognized field: ${token}`);
+        // The tokens every family answers the same way live on the base. Only
+        // what neither the switch above nor that handler claims is unrecognised.
+        if (!this.handleCommonReport(channel, token, value, state)) {
+          console.debug(`[shure:${this.id}] ch${channel} unrecognized field: ${token}`);
+        }
         break;
     }
 

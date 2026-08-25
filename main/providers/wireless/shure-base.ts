@@ -101,6 +101,60 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
    */
   protected abstract handleSample(channel: number, tokens: string[]): void;
 
+  /**
+   * The report tokens every Shure receiver family answers identically.
+   *
+   * BATT_CHARGE, the runtime pair and FREQUENCY were written out per driver, and
+   * the runtime pair was added to BOTH in the same release -- the shape this repo
+   * gets bitten by, caught the second time rather than the fifth. Call this from
+   * a driver's `default:` before it logs an unrecognised field; anything family
+   * -specific (BATT_BARS thresholds, CHAN_NAME lengths, what a TX_MODEL implies)
+   * stays in the driver, where the difference is visible.
+   *
+   * Both spellings of the runtime token are accepted here rather than in each
+   * driver: TX_BATT_MINS is what an AD4Q sends, BATT_RUN_TIME is the name in
+   * Shure's docs and what ULX-D uses, and a mixed rack is not the place to
+   * discover which spelling a given receiver picked.
+   *
+   * @returns whether the token was handled.
+   */
+  protected handleCommonReport(
+    channel: number,
+    token: string,
+    value: string,
+    state: ChannelState,
+  ): boolean {
+    switch (token) {
+      case "BATT_CHARGE": {
+        const charge = safeInt(value);
+        if (!Number.isNaN(charge)) {
+          state.battery = charge === 255 ? null : clamp(charge, 0, 100);
+        }
+        console.debug(`[shure:${this.id}] ch${channel} BATT_CHARGE: ${value}`);
+        return true;
+      }
+
+      case "TX_BATT_MINS":
+      case "BATT_RUN_TIME": {
+        state.batteryMinutes = batteryMinutesFrom(value);
+        console.debug(
+          `[shure:${this.id}] ch${channel} ${token}: ${state.batteryMinutes ?? "unknown/calculating"}`,
+        );
+        return true;
+      }
+
+      case "FREQUENCY": {
+        state.frequencyLabel = formatFrequency(value);
+        console.debug(`[shure:${this.id}] ch${channel} freq: ${state.frequencyLabel ?? value}`);
+        return true;
+      }
+
+      default:
+        return false;
+    }
+  }
+
+
   // ââ Protected helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
   /** Send a command over the TCP socket. cmd must NOT include the `< >` framing. */
