@@ -31,11 +31,12 @@ import {
   Collapsible,
   NumberInput,
   toast,
+  confirm,
   SkeletonRows,
   InfoHint,
   UnsavedBanner,
 } from "../components/ui";
-import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon, EraserIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { formatClock } from "../lib/clock-format";
 
@@ -261,6 +262,33 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
     }
   }
 
+  const [isClearing, setIsClearing] = useState(false);
+  /**
+   * Empty the transcript on every display at once.
+   *
+   * Here because a line CAN get stuck with nothing an operator can do: a partial
+   * whose channel was renamed mid-service has no final coming to clear it, and
+   * before this the only way out was restarting the server. That case is fixed,
+   * but "the board is showing something I do not want on it, right now" deserves
+   * a control regardless.
+   */
+  async function handleClearTranscript() {
+    if (!(await confirm({
+      title: "Clear the transcript?",
+      message: "Every transcription display goes empty. New lines carry on arriving from ProdCom.",
+      confirmLabel: "Clear",
+    }))) return;
+    setIsClearing(true);
+    try {
+      await invoke("prodcom:clearTranscript");
+      toast.success("Transcript cleared.");
+    } catch (err) {
+      toast.error(`Could not clear the transcript: ${errorMessage(err)}`);
+    } finally {
+      setIsClearing(false);
+    }
+  }
+
   async function handleTest() {
     setIsTesting(true);
     setTestResult(null);
@@ -381,6 +409,14 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
           {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
           Test connection
         </Button>
+        {descriptor.id === "prodcom" && (
+          <Button variant="transparent" size="small" onClick={handleClearTranscript} disabled={isClearing}>
+            {isClearing
+              ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" />
+              : <EraserIcon className="size-3.5 text-gray-9" />}
+            Clear transcript
+          </Button>
+        )}
         {descriptor.id === "planning-center" && (
           <>
             <Button variant="transparent" size="small" onClick={handleRefresh} disabled={isRefreshing}>

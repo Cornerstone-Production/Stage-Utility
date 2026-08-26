@@ -188,4 +188,17 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // Empty the transcript on every display at once.
+    //
+    // Exists because a line CAN get stuck with nothing an operator can do about
+    // it: a partial whose channel was renamed mid-service has no final coming to
+    // clear it. That specific case is fixed, but "the board is showing something
+    // I do not want on it, right now" is worth a button regardless — the
+    // alternative was restarting the server mid-service.
+    if (method === "POST" && pathname === "/api/prodcom/transcript/clear") {
+      prodcomService.clearTranscript();
+      json(res, { ok: true });
+      return;
+    }
+
 }

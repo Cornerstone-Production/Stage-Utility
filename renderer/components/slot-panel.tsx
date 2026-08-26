@@ -109,8 +109,12 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           so the photo never sits behind the name/RF card. [container-type:inline-size]
           makes every cqi/cqw unit inside resolve against THIS card's width, so
           names/avatar/RF bar stay proportional from preview sliver to 4K column. */}
+      {/* [container-type:size] rather than inline-size, so cqb/cqmin resolve and
+          the name can scale to the SHORTER dimension. Safe here because the card's
+          height never comes from its content: the columns path is flex-1 inside a
+          definite-height column, and the phone grid wraps it in aspect-[3/4]. */}
       <div
-        className="relative flex flex-col flex-1 overflow-hidden su-card [container-type:inline-size]"
+        className="relative flex flex-col flex-1 overflow-hidden su-card [container-type:size]"
         style={{ borderRadius: "7cqi" }}
       >
         {/* ── Photo (top) — fills all the space above the info card and stops at
@@ -121,7 +125,12 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
             <img
               src={photoSrc}
               alt={displayName ?? undefined}
-              className="absolute inset-0 w-full h-full object-cover object-top"
+              // object-top framed the very top of the photo, so in a short slot the
+              // visible band was hair and forehead while the face sat behind the name
+              // card. A headshot's face is around the upper third, so the crop window
+              // starts a little way down -- which reads as the photo shifted up.
+              className="absolute inset-0 w-full h-full object-cover"
+              style={{ objectPosition: "center 28%" }}
               draggable={false}
               onError={handleImgError}
             />
@@ -175,7 +184,7 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
           className={
             overlay
               ? "absolute inset-x-0 bottom-0 z-10 flex flex-col justify-end gap-0.5 px-3 pt-10 pb-2"
-              : "relative z-10 flex flex-col justify-start gap-1 px-3 pt-2.5 pb-2"
+              : "relative z-10 flex flex-col justify-start gap-1 px-3 pt-2.5 pb-2 overflow-hidden"
           }
           style={
             overlay
@@ -184,24 +193,36 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
                   background: "linear-gradient(180deg, rgb(26,27,34) 0%, rgb(15,16,21) 100%)",
                   borderTop: "1px solid rgba(255,255,255,0.12)",
                   boxShadow: "inset 0 1px 0 0 rgba(255,255,255,0.14)",
+                  // A CEILING, not a size. However small the text goes, the band
+                  // never takes more than this share of the card, so there is always
+                  // a face to look at -- the complaint that started this.
+                  maxHeight: "45cqb",
                 }
           }
         >
-          <div>
+          <div className="min-h-0">
             <span
               className="font-semibold text-fg leading-tight line-clamp-2 block"
-              // Stacked mode reserves two lines (2 × 1.25 leading-tight) so one- and
-              // two-line names yield the SAME card height, keeping photo bottoms /
-              // position / RF aligned across the row. Overlay mode sits at the bottom
-              // of the photo, so no reservation is needed (and avoids a tall scrim).
-              style={{ fontSize: "clamp(1rem, 14cqi, 3.4rem)", minHeight: overlay ? undefined : "2.5em" }}
+              // cqmin, not cqi. Sized to the card's WIDTH alone, a short wide slot
+              // got large text and a two-line reservation, and between them the name
+              // card ate the photo -- faces were behind it. cqmin takes the smaller
+              // of width and height, so a slot that is short gets smaller text, which
+              // is what "make it fit" means when the constraint is vertical.
+              //
+              // The reservation shrinks with it: two lines keeps one- and two-line
+              // names the same card height so photo bottoms line up across a row, but
+              // on a short card min() gives that up rather than spend the photo on it.
+              style={{
+                fontSize: "clamp(0.75rem, 14cqmin, 3.4rem)",
+                minHeight: overlay ? undefined : "min(2.5em, 16cqb)",
+              }}
             >
               {displayName ?? "—"}
             </span>
             {!isStatic && slot.link.kind === "pco" && slot.link.matchBy === "position" && slot.link.positions.length > 0 && (
               <span
                 className="text-fg-muted block leading-tight truncate mt-0.5"
-                style={{ fontSize: "clamp(0.72rem, 8.5cqi, 1.75rem)" }}
+                style={{ fontSize: "clamp(0.6rem, 8.5cqmin, 1.75rem)" }}
               >
                 {(slot.shownPositions ?? slot.link.positions.map((p) => p.name ?? "Any")).join(" / ")}
               </span>
