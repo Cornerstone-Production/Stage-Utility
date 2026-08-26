@@ -24,6 +24,7 @@
 //     username and password. There is no scoped credential for this API.
 
 import { errorMessage } from "./errors.js";
+import { scrub } from "./scrub.js";
 import type { StreamStatusDTO } from "../types/stage.js";
 import { StatusIntegration } from "./integration-base.js";
 import { streamStartStore } from "./stream-start-store.js";
@@ -32,6 +33,22 @@ const API = "https://central.resi.io/api/v3";
 const API_V2 = "https://central.resi.io/api_v2.svc";
 
 const REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * RESI_DEBUG=1 logs one encoder object, once per connection, in full.
+ *
+ * This integration reads exactly one field -- `status` -- because that is the
+ * only one whose meaning was ever confirmed. The payload carries far more, and
+ * the question that keeps coming up is whether one of those other fields
+ * distinguishes "the encoder is running" from "the stream is live to viewers".
+ * Those are different moments: an encoder started for a soundcheck an hour early
+ * is `started` while nothing is going out.
+ *
+ * Naming a guess in code would be worse than not guessing -- see the header on
+ * why this file only reads what it has seen. So this prints the real shape once,
+ * scrubbed, and the field is chosen afterwards from evidence.
+ */
+const RESI_DEBUG = process.env.RESI_DEBUG === "1";
 /** While something is watching. Resi's own status is ~20s fresh, so faster than
  *  this buys nothing but requests. */
 const POLL_MS = 15_000;
@@ -106,6 +123,9 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
   private tokenExpiresAt = 0;
   private customerId: string | null = null;
 
+  /** RESI_DEBUG: whether the one-off payload dump has already gone out. */
+  private loggedShape = false;
+
   /** Encoder id -> name, for the sub-line. Refreshed with the status poll. */
   private names = new Map<string, string>();
 
@@ -145,6 +165,12 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
       const { token } = await this.fetchToken(username, password);
       const customerId = await this.fetchCustomerId(token);
       const encoders = await this.fetchEncoderStatus(token, customerId);
+      if (RESI_DEBUG && encoders[0] && !this.loggedShape) {
+        this.loggedShape = true;
+        // One encoder, once. The status poll runs every few seconds and this is
+        // for identifying a field, not for watching one.
+        console.log(`[resi] encoder payload shape: ${scrub(JSON.stringify(encoders[0]))}`);
+      }
       const live = encoders.filter(encoderIsLive).length;
       return {
         ok: true,

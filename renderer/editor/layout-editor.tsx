@@ -1088,7 +1088,16 @@ export function LayoutEditor({
     const ro = new ResizeObserver(measure);
     if (el.parentElement) ro.observe(el.parentElement);
     return () => { window.removeEventListener("resize", measure); ro.disconnect(); };
-  }, [isEditing, canvas.width, canvas.height, canvas.fit]);
+    // selectedIds is in here because SELECTING an inline slots-grid changes this
+    // row's layout -- it drops `flex-1` so the row stays preview-tall and the
+    // editor below stays reachable. A layout change with no re-measure leaves
+    // canvasH describing the previous arrangement, and the canvas then paints to
+    // a height the row is not reserving.
+    //
+    // The selection rather than `inlineGrid` itself, which is derived further
+    // down the component. Re-measuring on any selection is cheap: it reads two
+    // layout properties, and setState with an unchanged number does not render.
+  }, [isEditing, selectedIds, canvas.width, canvas.height, canvas.fit]);
 
   const currentLayout = (): LayoutDTO => ({ version: 1, canvas, objects });
 
