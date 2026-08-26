@@ -1,4 +1,4 @@
-import { useState, useRef, type ChangeEvent } from "react";
+import { useState, useRef, useEffect, useCallback, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { UploadIcon, TrashIcon, CropIcon, UserRoundIcon } from "lucide-react";
 import {
@@ -64,6 +64,40 @@ export function BrandingSection({
   const fileRef = useRef<HTMLInputElement>(null);
   const pickTarget = useRef<Target>("app");
   const [accentDraft, setAccentDraft] = useState(stageState.accentColor ?? "#2e6691");
+  // The swatch follows the pointer; the SAVE does not.
+  //
+  // The old <input type="color"> committed on blur — once per edit. ColorField's
+  // panel commits from onPointerMove, unthrottled, and this handler wrote to the
+  // server inline: one drag across the saturation square fired dozens of
+  // stage:setBranding POSTs, each persisting to disk, recomputing and
+  // SSE-broadcasting the whole StageState to every display, and raising a toast.
+  //
+  // Trailing edge only, so the value that lands is where the pointer stopped.
+  // Flushed on unmount, or closing the panel mid-drag would drop the last write.
+  const accentSave = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const accentPending = useRef<string | null>(null);
+  const commitAccent = useCallback(
+    (v: string) => {
+      accentPending.current = v;
+      if (accentSave.current) clearTimeout(accentSave.current);
+      accentSave.current = setTimeout(() => {
+        accentSave.current = null;
+        const next = accentPending.current;
+        accentPending.current = null;
+        if (next != null) handlers.handleSetBranding({ accentColor: next });
+      }, 250);
+    },
+    [handlers],
+  );
+  useEffect(
+    () => () => {
+      if (!accentSave.current) return;
+      clearTimeout(accentSave.current);
+      const next = accentPending.current;
+      if (next != null) handlers.handleSetBranding({ accentColor: next });
+    },
+    [handlers],
+  );
 
   useResyncOn([stageState.accentColor], () => {
     setAccentDraft(stageState.accentColor ?? "#2e6691");
@@ -249,7 +283,7 @@ export function BrandingSection({
                     onChange={(v: string) => {
                       setAccentDraft(v);
                       if (v.toLowerCase() !== (stageState.accentColor ?? "").toLowerCase()) {
-                        handlers.handleSetBranding({ accentColor: v });
+                        commitAccent(v);
                       }
                     }}
                     className="absolute inset-0 [&>button]:size-full [&>button]:rounded-md [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"

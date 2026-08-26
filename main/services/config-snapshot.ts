@@ -55,6 +55,42 @@ export function runtimeFiles(): string[] {
  *  CONFIG_FILES is: it bounds what an applied bundle can write. */
 const IMAGE_DIRS = [BRANDING_IMAGE_DIR, "layout-images"] as const;
 
+/**
+ * Fields stripped from a snapshot, by file.
+ *
+ * A snapshot's own header says "Secrets are DELIBERATELY excluded", and the UI
+ * presents one as safe to keep on a drive or hand to somebody. That held while
+ * every secret lived in secrets.bin -- and then kiosk-devices.json, classified
+ * "config" so bindings survive a rebuild, started carrying each screen's token.
+ * The file that writes it calls that token "the ONLY thing separating a claimed
+ * display from anything else on the LAN", and ships withoutTokens() to keep it
+ * out of HTTP listings; the export copied it verbatim. Anyone holding a bundle
+ * who can reach the LAN could GET /enroll?device=…&token=….
+ *
+ * Emptied rather than deleted, because "" is MEANINGFUL: authorise() treats an
+ * empty token as unpinned and pins the first secret the screen presents. So a
+ * restored binding still works -- the display re-pins on its next enrolment --
+ * while the bundle carries nothing worth stealing.
+ */
+const REDACTED_FIELDS: Record<string, readonly string[]> = {
+  "kiosk-devices.json": ["token"],
+};
+
+/** A store's contents with its secret fields emptied, ready to leave the machine. */
+export function redactForExport(filename: string, value: unknown): unknown {
+  const fields = REDACTED_FIELDS[filename];
+  if (!fields || !Array.isArray(value)) return value;
+  return value.map((row) =>
+    row && typeof row === "object"
+      ? Object.fromEntries(
+          Object.entries(row as Record<string, unknown>).map(([k, v]) =>
+            fields.includes(k) ? [k, ""] : [k, v],
+          ),
+        )
+      : row,
+  );
+}
+
 const SNAPSHOT_KIND = "stage-utility-config";
 const SNAPSHOT_VERSION = 1;
 
@@ -169,7 +205,7 @@ class ConfigSnapshotService {
     const files: Record<string, unknown> = {};
     for (const f of configFiles()) {
       const v = await this.readFile(f);
-      if (v !== undefined) files[f] = v;
+      if (v !== undefined) files[f] = redactForExport(f, v);
     }
     const images = await this.readImages();
     return {
