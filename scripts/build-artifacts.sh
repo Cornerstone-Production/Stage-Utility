@@ -58,6 +58,12 @@ for entry in "${PLATFORMS[@]}"; do
   [ -f build/server.mjs.map ] && cp build/server.mjs.map "$stage/"
   cp -R build/renderer "$stage/build/renderer"
   cp -R public "$stage/public"
+  # The kiosk installers. Served over HTTP by /kiosk/<name>, and the command an
+  # operator is told to paste is printed in the app's own Advanced settings -- so
+  # leaving them out of the artifact made the release's headline feature a 404 on
+  # every install that is not a git checkout.
+  mkdir -p "$stage/scripts"
+  cp -R scripts/kiosk "$stage/scripts/kiosk"
   cp LICENSE "$stage/"
   printf '%s\n' "$VERSION" > "$stage/VERSION"
 

@@ -47,8 +47,16 @@ jobs:
       - name: Fetch pi-gen
         run: |
           git clone --depth 1 --branch arm64 https://github.com/RPi-Distro/pi-gen.git
-          # Lite only: a kiosk needs a browser and X, not a desktop suite.
-          touch pi-gen/stage3/SKIP pi-gen/stage4/SKIP pi-gen/stage5/SKIP
+          # stage3 is KEPT: it is what installs X and lightdm. Skipping it built
+          # Lite, which has no X server and never activates graphical.target --
+          # while the kiosk unit the installer writes is After=/WantedBy=
+          # graphical.target with DISPLAY=:0, and nothing in the kiosk stage
+          # installs X. The flashed image booted to a console and Chromium
+          # restart-looped against a display that did not exist.
+          #
+          # stage4 and stage5 stay skipped: those are the desktop APP suite, which
+          # is what "not a desktop suite" was reaching for.
+          touch pi-gen/stage4/SKIP pi-gen/stage5/SKIP
           touch pi-gen/stage4/SKIP_IMAGES pi-gen/stage5/SKIP_IMAGES
 
       - name: Add the kiosk stage
@@ -69,6 +77,7 @@ jobs:
           install -m 644 files/firstboot.service "${ROOTFS_DIR}/etc/systemd/system/stage-utility-firstboot.service"
           on_chroot << EOF
           systemctl enable stage-utility-firstboot.service
+          systemctl set-default graphical.target
           EOF
           RUN
           chmod +x "$STAGE/00-install/00-run.sh"
@@ -82,6 +91,14 @@ jobs:
 
           [Service]
           Type=oneshot
+          # Autologin BEFORE the installer runs, and resolved here rather than at
+          # build time: Imager creates and names the account at flash time, so the
+          # image cannot know it. By uid, which the rename preserves.
+          ExecStartPre=/bin/sh -c 'u=$(getent passwd 1000 | cut -d: -f1); \
+            [ -n "$u" ] || exit 0; \
+            mkdir -p /etc/lightdm/lightdm.conf.d; \
+            printf "[Seat:*]\\nautologin-user=%s\\nautologin-user-timeout=0\\n" "$u" \
+              > /etc/lightdm/lightdm.conf.d/60-stage-utility-autologin.conf'
           ExecStart=/usr/local/sbin/stage-utility-first-boot
           RemainAfterExit=yes
 
