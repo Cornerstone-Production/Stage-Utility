@@ -109,14 +109,15 @@ function pad(n: number): string {
 }
 
 /**
- * Box-level CSS (position handled by caller): background, border, radius,
- * padding, opacity, and flex alignment derived from text/vertical alignment.
+ * Box-level CSS (position handled by caller): background, border, radius, and
+ * flex alignment derived from text/vertical alignment.
  *
- * Phase 6 briefly replaced this with a fixed frame and culled the fields that
- * feed it. Reverted: the cull was right in principle and wrong in sequence —
- * the knobs came out before the widgets were good enough to not need them, and
- * the result looked worse than what it replaced. The fields are honoured again
- * until per-widget variants exist to replace them properly.
+ * NOT padding or opacity, which this doc claimed until 1.11 and which the
+ * function has not set for some time. The cull was deliberate — the readouts
+ * size themselves from their box now, so a hand-typed pad fights the thing that
+ * replaced it — but an object saved with either still carries the value, and it
+ * simply does nothing. Said plainly here rather than left as a doc describing
+ * code that is not there.
  */
 export function boxStyle(o: LayoutObject, H: number): CSSProperties {
   const s = o.style ?? {};
