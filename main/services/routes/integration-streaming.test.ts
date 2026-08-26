@@ -13,11 +13,17 @@ process.env.STAGE_UTILITY_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "streamin
 const realFetch = globalThis.fetch;
 /** Every request the services attempt, so a test can assert what went on the
  *  wire rather than only what the code meant to send. */
-const sent: { url: string; body: string }[] = [];
+const sent: { url: string; body: string; headers: Record<string, string> }[] = [];
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   sent.push({
     url: typeof input === "string" ? input : String((input as Request)?.url ?? input),
     body: typeof init?.body === "string" ? init.body : "",
+    // Headers too: the YouTube key moved out of the query string into
+    // X-Goog-Api-Key, and the guard below has to follow it there rather than
+    // stop asserting that the real key is what gets sent.
+    headers: Object.fromEntries(
+      Object.entries((init?.headers as Record<string, string> | undefined) ?? {}),
+    ),
   });
   // Enough of a reply for the Resi and YouTube happy paths to walk to the end.
   return new Response(
@@ -156,6 +162,15 @@ test("YouTube is sent the real API key, not the mask", async () => {
 
   const call = sent.find((r) => r.url.includes("/channels?"));
   assert.ok(call, "YouTube was never asked to resolve the channel");
-  assert.ok(call.url.includes("s3cret-key"), `the real key never reached YouTube: ${call.url}`);
-  assert.ok(!call.url.includes(encodeURIComponent(MASK)), "the masked placeholder was sent as the key");
+
+  // In the HEADER now, not the query string. A key in a URL is written to proxy
+  // logs and any intermediary that records paths; the assertion that matters --
+  // that the REAL key is sent and never the mask -- is unchanged.
+  const key = call.headers["X-Goog-Api-Key"];
+  assert.equal(key, "s3cret-key", `the real key never reached YouTube: ${JSON.stringify(call.headers)}`);
+  assert.notEqual(key, MASK, "the masked placeholder was sent as the key");
+
+  // And it must not have leaked back into the URL on the way.
+  assert.ok(!call.url.includes("s3cret-key"), `the key is in the URL again: ${call.url}`);
+  assert.ok(!call.url.includes("key="), "the key must not be a query parameter");
 });

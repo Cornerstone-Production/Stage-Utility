@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { sameOrigin, pcoUrlFrom } from "./pco-service.js";
+import { sameOrigin, pcoUrlFrom, nextOffset, withOffset } from "./pco-service.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -91,21 +91,24 @@ describe("the URL actually handed to fetch()", () => {
     }
   });
 
-  it("is what pco-service calls at every following site", () => {
-    // The wiring. The rebuild is worth nothing if a site still passes the raw
-    // string, and there are three: the Live action link and two pagination loops.
+  it("no URL from a response body is followed at all any more", () => {
+    // The contract is stronger than "rebuilt on our origin": pagination carries
+    // an integer, and the Live action URL is constructed, so there is no string
+    // from a PCO body that reaches fetch(). pcoUrlFrom survives only to compare
+    // against, for a log line.
     const src = fs.readFileSync(path.join(HERE, "pco-service.ts"), "utf8");
-    const follows = [...src.matchAll(/pcoUrlFrom\(/g)];
-    assert.equal(
-      follows.length,
-      4,
-      `expected three call sites plus the definition, found ${follows.length}`,
-    );
-    assert.doesNotMatch(
-      src,
-      /url = sameOrigin\([^)]*\) \? \w+ : null/,
-      "a site is still handing fetch() the string that arrived in the body",
-    );
+    const isComment = (l: string) => /^\s*(\/\/|\*|\/\*)/.test(l);
+    const assignments = src
+      .split("\n")
+      .filter((l) => !isComment(l))
+      .filter((l) => /\burl\s*=\s*/.test(l) && /\blinks\b|\bnext\b/.test(l));
+    for (const line of assignments) {
+      assert.match(
+        line,
+        /withOffset\(/,
+        `a request URL is still built from a response body: ${line.trim()}`,
+      );
+    }
   });
 });
 
@@ -138,32 +141,71 @@ describe("scrub coverage in pco-service.ts", () => {
 // rather than the word — prose cannot satisfy it. Counts are EXACT: a new
 // follow-the-link site fails here until it is guarded, rather than riding along
 // under a floor.
-describe("pcoUrlFrom is applied wherever a body URL is followed", () => {
+describe("the pagination cursor", () => {
+  const PAGE = "https://api.planningcenteronline.com/services/v2/service_types/1/plans?per_page=25";
+
+  it("takes the offset out of a next link", () => {
+    assert.equal(nextOffset(`${PAGE}&offset=50`), 50);
+    assert.equal(nextOffset(`${PAGE}&offset=0`), 0);
+  });
+
+  it("refuses anything that is not a plain non-negative integer", () => {
+    for (const bad of [
+      `${PAGE}&offset=-1`,
+      `${PAGE}&offset=1.5`,
+      `${PAGE}&offset=abc`,
+      `${PAGE}&offset=`,
+      PAGE, // no offset at all — the last page
+      "not a url",
+      "",
+      null,
+      undefined,
+      42,
+    ]) {
+      assert.equal(nextOffset(bad), null, `must refuse ${String(bad)}`);
+    }
+  });
+
+  it("builds the next URL from OUR url, keeping its other parameters", () => {
+    const out = withOffset(`${PAGE}&include=items`, 75);
+    const u = new URL(out);
+    assert.equal(u.origin, "https://api.planningcenteronline.com");
+    assert.equal(u.searchParams.get("offset"), "75");
+    assert.equal(u.searchParams.get("per_page"), "25", "our other parameters survive");
+    assert.equal(u.searchParams.get("include"), "items");
+  });
+
+  it("replaces an existing offset rather than appending a second", () => {
+    const u = new URL(withOffset(`${PAGE}&offset=25`, 50));
+    assert.deepEqual(u.searchParams.getAll("offset"), ["50"]);
+  });
+});
+
+describe("no response-body URL is followed", () => {
   const src = fs.readFileSync(path.join(HERE, "pco-service.ts"), "utf8");
   const lines = src.split("\n");
 
-  it("every URL taken from links.next is guarded", () => {
+  it("pagination carries an integer, not a URL", () => {
+    // An offset cannot carry a host, a path, or a scheme. This is what makes
+    // following a page structurally safe rather than safe-because-checked.
     const offenders: string[] = [];
     lines.forEach((line, i) => {
-      // The assignment that decides what the next request goes to.
       if (!/\burl\s*=\s*/.test(line)) return;
-      if (!/\bnext\b/.test(line)) return;
-      // pcoUrlFrom, not sameOrigin: checking the origin and passing the original
-      // string on left the value that carries the credentials as the one that
-      // came off the wire. The rebuild is what the sites must use now.
-      if (!line.includes("pcoUrlFrom(")) offenders.push(`${i + 1}: ${line.trim()}`);
+      if (!/\bnext\b|\boffset\b/.test(line)) return;
+      if (/^\s*(\/\/|\*)/.test(line)) return;
+      if (!line.includes("withOffset(")) offenders.push(`${i + 1}: ${line.trim()}`);
     });
-    assert.deepEqual(offenders, [], "these follow a response-body URL without checking its origin");
+    assert.deepEqual(offenders, [], "these build a request URL out of a response body");
   });
 
   it("and there are exactly the three sites we know about", () => {
     // One live-action URL plus two pagination follows. A fourth appearing
     // without a guard fails the test above; a fourth appearing WITH one fails
     // this, so it has to be looked at either way.
-    const uses = lines.filter(
-      (l) => l.includes("pcoUrlFrom(") && !l.includes("export function pcoUrlFrom"),
-    );
-    assert.equal(uses.length, 3, `expected 3 guarded sites, found ${uses.length}:\n  ${uses.join("\n  ")}`);
+    // Two pagination loops carrying an offset. The Live action URL is no longer
+    // among them: it is constructed outright.
+    const uses = lines.filter((l) => l.includes("withOffset(") && !l.includes("export function withOffset"));
+    assert.equal(uses.length, 2, `expected 2 pagination sites, found ${uses.length}:\n  ${uses.join("\n  ")}`);
   });
 
   it("no fetch in this file takes a URL that skipped the guard", () => {

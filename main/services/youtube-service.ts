@@ -209,8 +209,24 @@ class YouTubeService extends StatusIntegration<StreamStatusDTO> {
 
   // ── HTTP ──────────────────────────────────────────────────────────────────
 
-  private async json<T>(url: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  /**
+   * @param apiKey Sent as a HEADER, never in the query string.
+   *
+   * It used to be `&key=...` on every URL. Google accepts either, and the header
+   * is the better of the two: a key in a URL is written to proxy logs, browser
+   * history, Referer headers and any intermediary that records paths, none of
+   * which are places a credential should end up. A header is not logged by
+   * default anywhere in that chain.
+   *
+   * It also stops the key -- read from the secrets store, so file data -- being
+   * built into an outbound URL, which CodeQL reports as js/file-access-to-http.
+   */
+  private async json<T>(url: string, init?: RequestInit, apiKey?: string): Promise<T> {
+    const res = await fetch(url, {
+      ...init,
+      headers: { ...(init?.headers ?? {}), ...(apiKey ? { "X-Goog-Api-Key": apiKey } : {}) },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       if (isQuotaError(res.status, text)) {
@@ -279,7 +295,7 @@ class YouTubeService extends StatusIntegration<StreamStatusDTO> {
       : `id=${encodeURIComponent(channel)}`;
     const body = await this.json<{
       items?: { contentDetails?: { relatedPlaylists?: { uploads?: string } } }[];
-    }>(`${API}/channels?part=contentDetails&${by}&key=${encodeURIComponent(cfg.apiKey)}`);
+    }>(`${API}/channels?part=contentDetails&${by}`, undefined, cfg.apiKey);
     const uploads = body.items?.[0]?.contentDetails?.relatedPlaylists?.uploads ?? uploadsPlaylistFrom(channel);
     if (!uploads) throw new Error(`YouTube has no channel matching "${channel}"`);
     this.uploadsPlaylist = uploads;
@@ -289,15 +305,19 @@ class YouTubeService extends StatusIntegration<StreamStatusDTO> {
   /** Public path: recent uploads, then their live details. Two units. */
   private async lookPublic(cfg: YouTubeConfig): Promise<{ live: boolean; startedAt: string | null; detail: string | null }> {
     const uploads = await this.resolveUploads(cfg);
-    const key = encodeURIComponent(cfg.apiKey);
+
     const playlist = await this.json<{ items?: { contentDetails?: { videoId?: string } }[] }>(
-      `${API}/playlistItems?part=contentDetails&playlistId=${encodeURIComponent(uploads)}&maxResults=${RECENT_UPLOADS}&key=${key}`,
+      `${API}/playlistItems?part=contentDetails&playlistId=${encodeURIComponent(uploads)}&maxResults=${RECENT_UPLOADS}`,
+      undefined,
+      cfg.apiKey,
     );
     const ids = (playlist.items ?? []).map((i) => i.contentDetails?.videoId).filter((x): x is string => !!x);
     if (!ids.length) return { live: false, startedAt: null, detail: null };
 
     const videos = await this.json<{ items?: YouTubeVideo[] }>(
-      `${API}/videos?part=snippet%2CliveStreamingDetails&id=${ids.map(encodeURIComponent).join("%2C")}&key=${key}`,
+      `${API}/videos?part=snippet%2CliveStreamingDetails&id=${ids.map(encodeURIComponent).join("%2C")}`,
+      undefined,
+      cfg.apiKey,
     );
     const live = (videos.items ?? []).filter(videoIsLive);
     if (!live.length) return { live: false, startedAt: null, detail: null };

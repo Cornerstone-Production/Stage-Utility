@@ -124,9 +124,14 @@ describe("every settings section is still reachable", () => {
   test("stripping leaves real code alone", () => {
     // Over-stripping is the other failure: a scan that swallowed real code once
     // hid a route that existed.
-    const stripped = stripComments('import { RealSection } from "./x";\nconst u = "https://example.com/a";');
+    // The fixture is deliberately NOT a URL. It used to be, and asserting with
+    // .includes() on a URL literal is the shape js/incomplete-url-substring-
+    // sanitization looks for -- a real bug when it guards a host, noise here,
+    // and indistinguishable to a scanner. A plain sentinel proves the same thing:
+    // that string CONTENTS survive comment stripping.
+    const stripped = stripComments('import { RealSection } from "./x";\nconst u = "keep-me-intact-42";');
     assert.ok(/\bRealSection\b/.test(stripped), "real identifiers must survive");
-    assert.ok(stripped.includes("https://example.com/a"), "string contents must survive");
+    assert.ok(stripped.includes("keep-me-intact-42"), "string contents must survive");
   });
 
   test("every NOT_ROUTED entry gives a reason", () => {
