@@ -109,14 +109,15 @@ function pad(n: number): string {
 }
 
 /**
- * Box-level CSS (position handled by caller): background, border, radius,
- * padding, opacity, and flex alignment derived from text/vertical alignment.
+ * Box-level CSS (position handled by caller): background, border, radius, and
+ * flex alignment derived from text/vertical alignment.
  *
- * Phase 6 briefly replaced this with a fixed frame and culled the fields that
- * feed it. Reverted: the cull was right in principle and wrong in sequence —
- * the knobs came out before the widgets were good enough to not need them, and
- * the result looked worse than what it replaced. The fields are honoured again
- * until per-widget variants exist to replace them properly.
+ * NOT padding or opacity, which this doc claimed until 1.11 and which the
+ * function has not set for some time. The cull was deliberate — the readouts
+ * size themselves from their box now, so a hand-typed pad fights the thing that
+ * replaced it — but an object saved with either still carries the value, and it
+ * simply does nothing. Said plainly here rather than left as a doc describing
+ * code that is not there.
  */
 export function boxStyle(o: LayoutObject, H: number): CSSProperties {
   const s = o.style ?? {};
@@ -206,12 +207,52 @@ function clockText(now: number, showSeconds: boolean, format: "12h" | "24h", sho
   return `${pad(h)}:${m}${showSeconds ? `:${s}` : ""}`;
 }
 
+/**
+ * A placed rect as CSS, relative to the box it is drawn inside.
+ *
+ * resolveLayout returns VIEWPORT-ABSOLUTE pixels -- responsive-layout.ts computes
+ * `left = box.left + o.x * box.w`, and its own test asserts a child of a
+ * container at 960 comes back as 960. But RenderObject draws children inside the
+ * parent's own `position:absolute` div, so applying those pixels there added the
+ * parent's offset a second time. With `overflow:hidden` on the parent, a nested
+ * object did not merely shift -- it disappeared.
+ *
+ * fitFor returns "responsive" by DEFAULT for every console surface, so this hit
+ * the release's new console pages, panels and the editor preview: every layout
+ * with a container in it.
+ *
+ * Subtracting the origin here rather than changing resolveLayout keeps that
+ * module's contract -- and its tests -- intact: absolute is the right answer for
+ * a layout engine that has to reason about anchors and stacking across the whole
+ * canvas. Only the drawing is relative.
+ */
+export function placedGeometry(
+  placed: { left: number; top: number; width: number; height: number },
+  origin: { left: number; top: number } | null,
+): { left: string; top: string; width: string; height: string } {
+  return {
+    left: `${placed.left - (origin?.left ?? 0)}px`,
+    top: `${placed.top - (origin?.top ?? 0)}px`,
+    width: `${placed.width}px`,
+    height: `${placed.height}px`,
+  };
+}
+
 /** Render one object (and, for containers, its children) as a positioned box.
  *  Position/size are PERCENT of the parent — because the wrapper is absolutely
  *  positioned, a child's % resolves against this box, so the same component
  *  renders correctly at any nesting depth. Font/radius/padding stay canvas-
  *  relative (boxStyle uses ctx.H = canvas height) regardless of depth. */
-export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
+export function RenderObject({
+  o,
+  ctx,
+  origin,
+}: {
+  o: LayoutObject;
+  ctx: LayoutRenderCtx;
+  /** The placed rect of the box this is drawn inside, when there is one. */
+  origin?: { left: number; top: number } | null;
+}) {
   const kids = o.children?.length
     ? [...o.children].filter((c) => !c.hidden).sort((a, b) => a.z - b.z)
     : null;
@@ -221,12 +262,7 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
   // default a no-op rather than a re-implementation of it.
   const placed = ctx.placed?.get(o.id);
   const geometry = placed
-    ? {
-        left: `${placed.left}px`,
-        top: `${placed.top}px`,
-        width: `${placed.width}px`,
-        height: `${placed.height}px`,
-      }
+    ? placedGeometry(placed, origin ?? null)
     : {
         left: `${o.x * 100}%`,
         top: `${o.y * 100}%`,
@@ -241,7 +277,10 @@ export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx
         ...boxStyle(o, ctx.H),
       }}
     >
-      {kids ? kids.map((c) => <RenderObject key={c.id} o={c} ctx={ctx} />) : <ObjectContent o={o} ctx={ctx} />}
+      {kids
+        ? // Children are drawn INSIDE this box, so they measure from its origin.
+          kids.map((c) => <RenderObject key={c.id} o={c} ctx={ctx} origin={placed ?? origin} />)
+        : <ObjectContent o={o} ctx={ctx} />}
     </div>
   );
 }

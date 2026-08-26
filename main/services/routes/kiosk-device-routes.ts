@@ -11,7 +11,10 @@ import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
 import { holdingScreen } from "../kiosk-holding-screen.js";
 import { stageController } from "../stage-controller.js";
 import { errorMessage } from "../errors.js";
+import { scrub } from "../scrub.js";
 import { readFile } from "node:fs/promises";
+import * as path from "node:path";
+import { APP_ROOT } from "../app-root.js";
 
 /** Exactly what may be served from scripts/kiosk. An allowlist rather than a
  *  path join, because this reads a file from disk on request. */
@@ -91,7 +94,12 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     try {
-      const body = await readFile(new URL(`../../../scripts/kiosk/${name}`, import.meta.url), "utf8");
+      // APP_ROOT, not a path relative to this module. `import.meta.url` is
+      // main/services/routes/ in a checkout but the bundled server.mjs at the
+      // install root, where "../../../scripts" resolves to file:///scripts and
+      // 404s. app-root.ts exists for exactly this and is used in five other
+      // places; this was the copy that drifted.
+      const body = await readFile(path.join(APP_ROOT, "scripts", "kiosk", name), "utf8");
       res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
       res.end(body);
     } catch {
@@ -193,15 +201,24 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // secret, and a response carrying it would put it in a browser and a log.
       json(res, { ok: true, displaced: displacedId });
     } catch (err) {
+      let orphan: string | null = null;
       if (created) {
-        // Best-effort: if this fails too, say so rather than reporting only the
-        // original error and leaving the operator an empty screen they did not
-        // ask for and no reason for it.
+        // Best-effort, and it SAYS SO when it fails. This used to only log, so a
+        // failed claim whose cleanup also failed left an empty screen the
+        // operator never asked for, with a response that mentioned only the
+        // original error -- exactly what the comment here promised not to do.
         await stageController.removeOutput(created).catch((cleanup: unknown) => {
-          console.warn("[devices] could not remove the screen a failed claim created:", cleanup);
+          orphan = created;
+          console.warn(`[devices] could not remove the screen a failed claim created: ${scrub(String(cleanup))}`);
         });
       }
-      error(res, errorMessage(err));
+      error(
+        res,
+        orphan
+          ? `${errorMessage(err)} — and an empty screen was left behind that could not be removed. ` +
+            `Delete it on the Screens page.`
+          : errorMessage(err),
+      );
     }
     return;
   }

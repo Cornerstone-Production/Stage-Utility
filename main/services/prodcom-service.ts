@@ -15,6 +15,7 @@ import * as http from "http";
 
 import type { TranscriptLineDTO } from "../types/stage.js";
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
+import { scrub } from "./scrub.js";
 import { ConnectionLifecycle } from "./integration-base.js";
 
 const RECONNECT_MS = 4000;
@@ -53,6 +54,24 @@ const MAX_LINES = 100;
 // one full-buffer broadcast per this window; finals still push immediately.
 const TRANSCRIPT_THROTTLE_MS = 250;
 
+/**
+ * How long an un-updated partial may sit in the buffer before it is dropped.
+ *
+ * A partial is removed when a FINAL arrives on the same channel key. That is the
+ * only exit, and it stops being reachable the moment the channel key changes --
+ * which is what renaming or re-routing a channel in ProdCom mid-service does. The
+ * final for the speech already in flight then arrives under a NEW key, the old
+ * entry is never deleted, and because getBuffer() appends partials after finals
+ * it is pinned to the bottom of the display for the life of the process. That is
+ * exactly what happened at a kickoff: one grey line stuck under everything all
+ * night, reappearing at the bottom as real lines scrolled past it.
+ *
+ * Partials update many times a second while somebody is speaking, so an entry
+ * untouched for this long is not slow speech -- it is speech whose final went
+ * somewhere else. Generous enough that a real pause mid-sentence cannot trip it.
+ */
+const PARTIAL_TTL_MS = 30_000;
+
 
 function pick(obj: unknown, ...keys: string[]): unknown {
   let cur: unknown = obj;
@@ -90,7 +109,12 @@ function normalizeColor(raw: string | null): string | null {
   return /^[a-z]+$/i.test(s) ? s : null; // CSS named color, else ignore
 }
 
-class ProdComService extends ConnectionLifecycle {
+export class ProdComService extends ConnectionLifecycle {
+  /** Wall clock, overridable so a test can age a partial without waiting 30s. */
+  protected now(): number {
+    return Date.now();
+  }
+
   private host: string | null = null;
   private port: number | null = null;
   private apiKey: string | null = null;
@@ -101,9 +125,13 @@ class ProdComService extends ConnectionLifecycle {
   private transcriptTimer: ReturnType<typeof setTimeout> | null = null;
   private transcriptDirty = false;
 
-  /** Finalised lines (rolling) + the current partial per channel. */
+  /** Finalised lines (rolling) + the current partial per channel.
+   *
+   *  `seenAt` is OUR receive time, not the payload's -- the timestamp in a
+   *  ProdCom event is whatever that box's clock said, and this is used to decide
+   *  whether an entry has gone stale, which must not depend on a peer's clock. */
   private finals: TranscriptLineDTO[] = [];
-  private partials = new Map<string, TranscriptLineDTO>();
+  private partials = new Map<string, { line: TranscriptLineDTO; seenAt: number }>();
 
   constructor() {
     super("prodcom", "prodcom:transcript");
@@ -131,6 +159,11 @@ class ProdComService extends ConnectionLifecycle {
     this.clearIdleWatchdog();
     this.req?.destroy();
     this.req = null;
+    // In-flight speech does not survive the stream. Whatever was mid-utterance
+    // when the connection went will be re-sent or finalised on the other side; an
+    // orphan kept here would sit under every real line until a restart. Finals are
+    // deliberately kept, so a reconnect does not blank a display mid-service.
+    this.partials.clear();
   }
 
   /** Restart the silence timer. Called on connect and on every chunk. */
@@ -152,9 +185,37 @@ class ProdComService extends ConnectionLifecycle {
   }
 
 
+  /** Drop partials nothing has updated for PARTIAL_TTL_MS. Returns whether any went. */
+  private pruneStalePartials(): boolean {
+    const cutoff = this.now() - PARTIAL_TTL_MS;
+    let dropped = false;
+    for (const [ch, entry] of this.partials) {
+      if (entry.seenAt > cutoff) continue;
+      this.partials.delete(ch);
+      dropped = true;
+      console.log(`[prodcom] dropped a stale partial on channel ${scrub(ch)} — no final arrived`);
+    }
+    return dropped;
+  }
+
+  /**
+   * Empty the transcript.
+   *
+   * Both halves, because the stuck-line case needs the partials gone and an
+   * operator asking for a clear means the screen, which is the finals. Broadcasts
+   * unconditionally: the point is that the display goes empty NOW.
+   */
+  clearTranscript(): void {
+    this.finals = [];
+    this.partials.clear();
+    broadcast("prodcom:transcript", this.getBuffer());
+    console.log("[prodcom] transcript cleared");
+  }
+
   /** Current rolling buffer (finals + active partials), oldest → newest. */
   getBuffer(): TranscriptLineDTO[] {
-    return [...this.finals, ...this.partials.values()];
+    this.pruneStalePartials();
+    return [...this.finals, ...[...this.partials.values()].map((e) => e.line)];
   }
 
   /** One-shot connectivity check for the Integrations "Test connection" button. */
@@ -265,7 +326,7 @@ class ProdComService extends ConnectionLifecycle {
   }
 
   // One SSE event block ("event: x\ndata: {...}"). data may be JSON or plain text.
-  private handleEvent(raw: string): void {
+  protected handleEvent(raw: string): void {
     const dataLines: string[] = [];
     for (const line of raw.split("\n")) {
       if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
@@ -333,7 +394,7 @@ class ProdComService extends ConnectionLifecycle {
       this.addFinal(line);
       this.flushTranscript(); // finals land immediately
     } else {
-      this.partials.set(ch, line);
+      this.partials.set(ch, { line, seenAt: this.now() });
       this.scheduleTranscript(); // interim partials arrive many/sec — coalesce them
     }
   }

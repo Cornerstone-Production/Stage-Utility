@@ -31,6 +31,27 @@ fi
 
 echo "==> Installing the Stage Utility kiosk agent"
 
+# The desktop user, by UID rather than by name.
+#
+# This used to be the shell's SUDO_USER written straight into the unit, which
+# is wrong twice. Under the pi-gen first-boot path the installer runs from
+# systemd, so SUDO_USER is unset and the unit hard-coded `pi` -- while the same
+# image config sets DISABLE_FIRST_BOOT_USER_RENAME=0, so Imager renames that
+# account and the unit then fails permanently with "Failed to determine user
+# credentials." It also caught anyone installing from a root shell instead of
+# sudo.
+#
+# UID 1000 is the desktop account on Raspberry Pi OS and survives the rename,
+# because renaming changes the name and keeps the id. Resolved again at START
+# time by the launcher, so even a rename after install is followed.
+KIOSK_UID="${STAGE_KIOSK_UID:-1000}"
+KIOSK_USER="$(getent passwd "$KIOSK_UID" | cut -d: -f1 || true)"
+if [ -z "$KIOSK_USER" ]; then
+  KIOSK_USER="${SUDO_USER:-pi}"
+  echo "    no user with uid $KIOSK_UID; falling back to $KIOSK_USER"
+fi
+echo "    kiosk user: $KIOSK_USER (uid $KIOSK_UID)"
+
 # ── Identity ────────────────────────────────────────────────────────────────
 # Generated ONCE. Re-running the installer must never mint a new id, or an
 # upgrade would silently orphan this screen's binding and need re-claiming.
@@ -54,8 +75,20 @@ if [ ! -f "$STATE_DIR/token" ]; then
 fi
 [ -n "$SERVER" ] && echo "$SERVER" > "$STATE_DIR/server" || true
 chmod 644 "$STATE_DIR/device-id"
-# Readable only by root and the kiosk user: it is the one thing standing between
-# this screen and anything else on the network.
+# The token is readable ONLY by the kiosk user -- it is the one thing standing
+# between this screen and anything else on the network.
+#
+# Owned by that user, not by root. It was chmod 600 root:root while the unit ran
+# as somebody else, so the launcher's `cat` returned empty, /enroll was called
+# with no token, and authorise() is `if (!device || !secret) return null` --
+# unconditionally null, including after the operator claims the screen. The Pi
+# sat on the holding screen for ever and re-claiming never helped.
+#
+# The whole directory, because the launcher also writes Chromium's profile and
+# the recorded server binding into it, and both were failing silently against a
+# 0755 root-owned dir.
+chown -R "$KIOSK_UID:$KIOSK_UID" "$STATE_DIR"
+chmod 700 "$STATE_DIR"
 chmod 600 "$STATE_DIR/token"
 
 # ── Dependencies ────────────────────────────────────────────────────────────
@@ -171,7 +204,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=${SUDO_USER:-pi}
+User=$KIOSK_USER
 Environment=DISPLAY=:0
 ExecStart=$BIN
 # The browser exiting is not a failure to give up on — it is the cue to

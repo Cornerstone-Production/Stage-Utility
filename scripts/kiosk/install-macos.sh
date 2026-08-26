@@ -38,7 +38,30 @@ mkdir -p "$STATE_DIR"
 [ -f "$STATE_DIR/token" ] || head -c 24 /dev/urandom | xxd -p | tr -d '\n' > "$STATE_DIR/token"
 [ -n "$SERVER" ] && printf '%s' "$SERVER" > "$STATE_DIR/server" || true
 chmod 644 "$STATE_DIR/device-id"
-chmod 600 "$STATE_DIR/token"
+# The token is readable ONLY by the account that runs the kiosk.
+#
+# Owned by that account, not by root. The installer runs under sudo but the
+# LaunchAgent below runs as the LOGGED-IN GUI user, so a 0600 root-owned token
+# meant the launcher's `cat` returned empty, /enroll was called with no token,
+# and authorise() is `if (!device || !secret) return null` -- unconditionally
+# null, including after the operator claims the screen. Same shape as the Linux
+# installer had.
+#
+# The whole directory, because the launcher also records the server binding here.
+CONSOLE_USER="$(stat -f %Su /dev/console 2>/dev/null || true)"
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+  chown -R "$CONSOLE_USER" "$STATE_DIR"
+  chmod 600 "$STATE_DIR/token"
+  echo "    kiosk user: $CONSOLE_USER"
+else
+  # No GUI session yet -- an install over SSH before anyone has logged in. Leave
+  # it group-readable rather than unreadable, and SAY SO: a silent 0600 here is
+  # exactly the failure this block exists to prevent, and it presents as a screen
+  # that enrols for ever.
+  chmod 640 "$STATE_DIR/token"
+  echo "    no console user yet — token left group-readable; re-run this installer"
+  echo "    after logging in if the screen never leaves the holding page."
+fi
 echo "    device id: $(cat "$STATE_DIR/device-id")"
 
 # ── The launcher ────────────────────────────────────────────────────────────
@@ -58,12 +81,35 @@ macs() {
 
 # nc, not socat: it ships with macOS, so this adds no dependency. -w2 gives the
 # server two seconds to answer before we try again.
+#
+# NOT `nc -b`. On macOS -b is the INTERFACE flag, not a broadcast switch, so
+# `nc -u -w2 -b 255.255.255.255` dies with "nc: bad interface name" and never
+# sends anything. `| head -c 2048` then swallowed the failure, discover() always
+# returned empty, and the loop below spun for ever -- a Mac kiosk without
+# STAGE_SERVER preset never displayed anything at all.
+#
+# Each interface's own broadcast address, from ifconfig, with 255.255.255.255 as
+# a last resort. A directed broadcast is what actually crosses a macOS interface
+# without SO_BROADCAST gymnastics, and enumerating them also covers a Mac with
+# more than one network up -- which a booth machine on wired plus wifi is.
+bcast_targets() {
+  ifconfig 2>/dev/null | awk '/broadcast/ { print \$NF }' | sort -u
+  echo 255.255.255.255
+}
+
 discover() {
   bound="\$(cat "\$BOUND_FILE" 2>/dev/null || true)"
   probe="{\"stageUtility\":\"discover\",\"v\":1,\"id\":\"\$ID\",\"macs\":[\$(macs)],\"hostname\":\"\$(hostname -s)\",\"os\":\"macOS\""
   [ -n "\$bound" ] && probe="\$probe,\"boundTo\":\"\$bound\""
   probe="\$probe}"
-  printf '%s' "\$probe" | nc -u -w2 -b 255.255.255.255 \$PORT 2>/dev/null | head -c 2048
+  for target in \$(bcast_targets); do
+    reply="\$(printf '%s' "\$probe" | nc -u -w2 "\$target" \$PORT 2>/dev/null | head -c 2048)"
+    if [ -n "\$reply" ]; then
+      printf '%s' "\$reply"
+      return 0
+    fi
+  done
+  return 0
 }
 
 if [ -r "\$STATE_DIR/server" ]; then

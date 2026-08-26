@@ -103,11 +103,18 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: PlanRoute,
   },
   {
-    path: "/history",
+    // The OPERATOR's history: edit times, merge a split service, delete. This is
+    // what the old Settings → History tab was, and it keeps every control.
+    //
+    // Not at /history, which is a link handed to volunteers — it is tiled on the
+    // display picker and listed under Connect → Tools. When the settings window
+    // was folded into the app, this page took that URL and the read-only page
+    // that used to own it was deleted, so the shared link silently gained Edit
+    // times, Merge and Delete. Two surfaces again, as before.
+    path: "/history/manage",
     label: "History",
     description: "Every service you've run — timing and attendance.",
     icon: <ClockIcon className="size-4" />,
-    // The same component the old settings tab rendered.
     Component: ServiceHistorySection,
   },
   {
@@ -177,7 +184,7 @@ export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // What it talks to. Automation rules act ON integrations.
   { label: "Devices", paths: ["/automation"] },
   // A service you ran — one live, one recorded.
-  { label: "Services", paths: ["/plan", "/history", "/baptism"] },
+  { label: "Services", paths: ["/plan", "/history/manage", "/baptism"] },
 ];
 
 /**
@@ -212,7 +219,21 @@ function ScriptViewPlanRoute() {
  * `/patch/edit` and `/scriptview/presets` are literal segments and cannot
  * collide with `$serviceType/$layout`, which is three deep.
  */
+/**
+ * Service history WITHOUT the destructive controls.
+ *
+ * The link volunteers are given: tiled on the display picker, listed under
+ * Connect → Tools, and documented in docs/display-urls.md. It renders the same
+ * section the operator's page does, so any change to History shows up in both —
+ * just without Edit times, Merge or Delete.
+ */
+function ServiceHistoryShared() {
+  return <ServiceHistorySection readOnly />;
+}
+
 export const NESTED_ROUTES: readonly { path: string; Component: FunctionComponent }[] = [
+  // The shared read-only history. /history/manage is the operator's, in the rail.
+  { path: "/history", Component: ServiceHistoryShared },
   { path: "/scriptview/$serviceType/$layout", Component: ScriptViewPlanRoute },
   { path: "/scriptview/presets", Component: ScriptViewSection },
   { path: "/patch/edit", Component: PatchSection },

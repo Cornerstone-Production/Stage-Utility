@@ -172,15 +172,30 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
           }
         }
 
+        // BEFORE the reply, not in a finally after it. The importer writes to
+        // several stores directly, so the controller's in-memory views are stale
+        // either way — and a stale list is not merely wrong on screen, it is what
+        // the next rename or delete writes back, erasing whatever did land.
+        //
+        // It used to be `finally { await reloadViews() }`, which ran after the
+        // response was already written. A rejection there escaped to the catch
+        // below, which called error() → json() → writeHead() on a finished
+        // response: ERR_HTTP_HEADERS_SENT thrown from inside an async catch, an
+        // unhandled rejection, and the process gone. Doing it here means a
+        // failure is something the operator READS, in the same shape
+        // reloadTargets uses twelve lines above.
+        await stageController.reloadViews().catch((reloadErr: unknown) => {
+          report.skipped.push(
+            `Everything was imported, but the running server did not pick the views up: ` +
+            `${errorMessage(reloadErr)} — restart it before editing them.`,
+          );
+        });
         json(res, report);
       } catch (err) {
+        // Still always, even on the failure path, and still unable to take the
+        // process down: the reply has not been sent yet here.
+        await stageController.reloadViews().catch(() => {});
         error(res, errorMessage(err));
-      } finally {
-        // ALWAYS, including on failure. The importer writes to several stores
-        // directly, so the controller's in-memory views are stale either way —
-        // and a stale list is not merely wrong on screen, it is what the next
-        // rename or delete writes back, erasing whatever did land.
-        await stageController.reloadViews();
       }
       return;
     }

@@ -14,7 +14,7 @@
 // lines as a top-level one.
 
 import type { FracRect } from "../main/layout-tree";
-import type { Handle } from "../settings/sections/layout-geometry";
+import { MIN, type Handle } from "../settings/sections/layout-geometry";
 
 export interface Guide {
   axis: "x" | "y";
@@ -203,11 +203,20 @@ export function alignRect(
     } else if (hit.off === 0) {
       // Dragging the leading edge: the trailing edge is anchored and must not move.
       const trailing = rect[p] + rect[s];
-      rect[p] = hit.at;
-      rect[s] = trailing - hit.at;
+      // Never past the anchored edge. applyResize clamps to MIN and
+      // snapRectToGrid to one grid unit, but BOTH run before this, and this
+      // rebuilds the rect from the anchored edge with raw arithmetic -- so a snap
+      // target beyond the far edge produced w = 0 and, measurably, w = -0.0015625.
+      // Reachable whenever the rendered width is under the 8px tolerance: a
+      // grid-minimum leaf inside a container a third of a ~700px canvas is 7.3px.
+      // `width: -0.15%` is invalid, the box collapses with no grab area left to
+      // undo it with, and the bad geometry is saved into the view.
+      const at = Math.min(hit.at, trailing - MIN);
+      rect[p] = at;
+      rect[s] = trailing - at;
     } else {
       // Dragging the trailing edge: the leading edge is anchored.
-      rect[s] = hit.at - rect[p];
+      rect[s] = Math.max(MIN, hit.at - rect[p]);
     }
 
     guides.push({ axis, at: hit.at, kind: hit.kind, span: spanFor(rect, siblings, axis, hit.at) });

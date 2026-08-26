@@ -8,7 +8,7 @@ Orientation for working in the codebase.
 .
 ├── server.ts                  # Backend entry point
 ├── index.html                 # Kiosk display (Vite entry)
-├── settings-window.html       # Settings UI (Vite entry)
+├── app.html                   # Operator app (Vite entry)
 ├── vite.config.ts             # Multi-page build + dev proxy + React Compiler
 ├── main/                      # Backend
 │   ├── services/              # stage-controller, remote-server, pco-service,

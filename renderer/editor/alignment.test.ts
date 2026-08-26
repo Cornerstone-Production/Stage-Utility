@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { MIN } from "../settings/sections/layout-geometry.js";
 import { test, describe } from "node:test";
 
 import { alignRect } from "./alignment.js";
+import type { FracRect } from "../main/layout-tree";
 
 // Snapping is the kind of code that is right in the demo and wrong in the corner
 // cases: an object that creeps while it grows, a pull that is twice as strong on
@@ -198,4 +200,40 @@ describe("guides", () => {
     assert.ok(Math.abs(g.span.from - 0.1) < 1e-6, `span starts at the sibling's top, got ${g.span.from}`);
     assert.ok(Math.abs(g.span.to - 0.8) < 1e-6, `span ends at the moving object's bottom, got ${g.span.to}`);
   });
+});
+
+describe("a snap can never collapse the object", () => {
+  // applyResize clamps to MIN and snapRectToGrid to one grid unit, but alignRect
+  // runs AFTER both and rebuilds the rect from the anchored edge with raw
+  // arithmetic. Running the shipped function produced w = 0 and w = -0.0015625.
+  //
+  // Reachable whenever the rendered width is under the 8px tolerance: a
+  // grid-minimum leaf inside a container about a third of a ~700px canvas is
+  // 7.3px, and the editor draws exactly that. `width: -0.15%` is invalid, the box
+  // collapses with no grab area left to undo it with, and the bad geometry is
+  // saved into the view.
+
+  const box = { w: 700, h: 400 };
+
+  test("dragging the leading edge past the trailing one stops at MIN", () => {
+    // A sibling edge sitting beyond this object's far edge is the snap target
+    // that inverted it.
+    const moving: FracRect = { x: 0.5, y: 0.1, w: 0.02, h: 0.2 };
+    const siblings: FracRect[] = [{ x: 0.9, y: 0.1, w: 0.05, h: 0.2 }];
+    const { rect } = alignRect(moving, siblings, box, 64, "w");
+    assert.ok(rect.w >= MIN - 1e-9, `width collapsed to ${rect.w}`);
+    assert.ok(rect.w > 0, "width must never be zero or negative");
+  });
+
+  test("dragging the trailing edge back past the leading one stops at MIN", () => {
+    const moving: FracRect = { x: 0.5, y: 0.1, w: 0.02, h: 0.2 };
+    const siblings: FracRect[] = [{ x: 0.1, y: 0.1, w: 0.05, h: 0.2 }];
+    const { rect } = alignRect(moving, siblings, box, 64, "e");
+    assert.ok(rect.w >= MIN - 1e-9, `width collapsed to ${rect.w}`);
+    assert.ok(rect.w > 0, "width must never be zero or negative");
+  });
+
+  // That the clamp has not blunted snapping is covered by the nineteen tests
+  // above, which assert exact snap positions and all still pass. A fourth
+  // hand-made fixture here would only restate them.
 });

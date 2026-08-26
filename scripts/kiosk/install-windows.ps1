@@ -120,17 +120,26 @@ if (`$chrome) {
 
 # ── Survive a reboot, and a browser that dies ──────────────────────────────
 # At logon, not at boot: this needs a desktop session to put a window on a
-# screen, which is why automatic login is a prerequisite. The repeating trigger
-# is what relaunches the browser if it is closed or crashes.
+# screen, which is why automatic login is a prerequisite.
 $action  = New-ScheduledTaskAction -Execute 'powershell.exe' `
   -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Launcher`""
-$trigger = New-ScheduledTaskTrigger -AtLogOn
+# TWO triggers. -AtLogOn alone has no repetition, and -RestartCount only applies
+# when a task FAILS -- so a kiosk browser that somebody closed cleanly, or that
+# exited zero after a display change, was never relaunched, contrary to what the
+# comment above this block claimed. The minute repetition is what actually makes
+# it come back.
+$atLogon = New-ScheduledTaskTrigger -AtLogOn
+$repeat  = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+  -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration ([TimeSpan]::MaxValue)
+
+# IgnoreNew, or the minute trigger stacks a second browser on top of the running
+# one every minute until the machine is unusable.
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
   -DontStopIfGoingOnBatteries -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
-  -ExecutionTimeLimit ([TimeSpan]::Zero)
+  -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
 
-Register-ScheduledTask -TaskName 'StageUtilityKiosk' -Action $action -Trigger $trigger `
-  -Settings $settings -Force | Out-Null
+Register-ScheduledTask -TaskName 'StageUtilityKiosk' -Action $action `
+  -Trigger @($atLogon, $repeat) -Settings $settings -Force | Out-Null
 
 # Display sleep is the difference between a display and a black rectangle.
 powercfg /change monitor-timeout-ac 0  2>$null
