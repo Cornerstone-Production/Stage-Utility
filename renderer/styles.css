@@ -587,3 +587,39 @@ body {
 .context-strip::-webkit-scrollbar {
   display: none;
 }
+
+/* ── Mic slot photo ──────────────────────────────────────────────────────────
+ *
+ * object-cover crops on whichever axis has to give. In a NARROW TALL slot that
+ * takes the sides off a near-square headshot, which is fine -- the face is in
+ * the middle. In a SHORT WIDE one it takes the top and bottom off, and with the
+ * name card below it the visible band was forehead-to-mouth: chins cut off.
+ *
+ * That is geometry, not a bad focal point. A 440x432 photo scaled to cover a
+ * 260x175 box is 265 tall, so barely 66% of it is visible however it is
+ * positioned, and a face needs about 60% starting near the top. Moving the crop
+ * window cannot fix it; only changing the fit can.
+ *
+ * So the box decides. Portrait or square box -- the tall column a slots display
+ * has always been -- keeps cover, which fills the card and looks right. Landscape
+ * box, which is what a slots object dropped into a custom layout is, switches to
+ * contain: the whole head, every time, with the card showing at the sides.
+ * A gutter beside a face beats a face with no chin.
+ */
+.slot-photo {
+  container-type: size;
+}
+
+.slot-photo img {
+  object-fit: cover;
+  /* A headshot's face sits above centre, so the crop window starts a little way
+     down rather than at the very top of the image. */
+  object-position: center 28%;
+}
+
+@container (min-aspect-ratio: 1/1) {
+  .slot-photo img {
+    object-fit: contain;
+    object-position: center;
+  }
+}

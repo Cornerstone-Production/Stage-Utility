@@ -74,12 +74,23 @@ describe("slot card sizing", () => {
     );
   });
 
-  it("frames the photo on the face rather than the top of the image", () => {
+  it("lets the box shape choose the fit", () => {
+    // Cover crops on whichever axis has to give. In a short WIDE slot that is the
+    // top and bottom, and with the name card below it the visible band was
+    // forehead-to-mouth -- chins cut off. That is geometry: a 440x432 photo
+    // covering a 260x175 box leaves ~66% of it visible however it is positioned,
+    // and a face needs about 60% starting near the top. Only changing the fit
+    // helps, so a landscape box switches to contain.
+    const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+    assert.match(css, /\.slot-photo\s*\{[^}]*container-type:\s*size/, "the photo box must be a size container");
     assert.match(
-      SRC,
-      /objectPosition:\s*"center \d+%"/,
-      "object-top showed hair; the face sits lower in a headshot",
+      css,
+      /@container\s*\(min-aspect-ratio:\s*1\/1\)\s*\{[^}]*object-fit:\s*contain/s,
+      "a landscape photo box must use contain, or a face cannot fit in it",
     );
-    assert.doesNotMatch(SRC, /object-cover object-top/, "object-top is what framed the hair");
+    assert.match(css, /\.slot-photo img\s*\{[^}]*object-fit:\s*cover/s, "a tall box keeps cover");
+    assert.match(css, /object-position:\s*center 28%/, "the cover crop starts below the very top");
+    // And the component has to opt in, or none of the above applies.
+    assert.match(SRC, /className="slot-photo /, "the photo wrapper must carry the class");
   });
 });

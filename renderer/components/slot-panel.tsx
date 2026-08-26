@@ -120,17 +120,16 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
         {/* ── Photo (top) — fills all the space above the info card and stops at
             its top edge (object-cover crops the photo, never overlapping the
             card). flex-1 so it grows to meet the card no matter the slot height. ── */}
-        <div className="relative flex-1 min-h-0 overflow-hidden">
+        {/* slot-photo: a size container, so the CSS can ask whether this box is
+            landscape and switch cover -> contain. See styles.css. */}
+        <div className="slot-photo relative flex-1 min-h-0 overflow-hidden">
           {photoSrc ? (
             <img
               src={photoSrc}
               alt={displayName ?? undefined}
-              // object-top framed the very top of the photo, so in a short slot the
-              // visible band was hair and forehead while the face sat behind the name
-              // card. A headshot's face is around the upper third, so the crop window
-              // starts a little way down -- which reads as the photo shifted up.
-              className="absolute inset-0 w-full h-full object-cover"
-              style={{ objectPosition: "center 28%" }}
+              // fit and focal point live in styles.css (.slot-photo img), because
+              // they depend on a container query this cannot express inline.
+              className="absolute inset-0 w-full h-full"
               draggable={false}
               onError={handleImgError}
             />
